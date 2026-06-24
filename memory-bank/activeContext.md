@@ -2,9 +2,9 @@
 
 ## Current Focus
 
-Bright OS is being reset to a public point-zero repository baseline.
+Bright OS now uses the clean public repository baseline as its source of truth.
 
-The target state is a single clean public `main` history containing source code, accepted OpenSpec specs, public-safe docs, and this reset Memory Bank. Runtime data, release artifacts, signing material, server-only env files, local backups, and personal notes stay outside Git.
+`main` is production, `dev` is the shared integration branch, and `codex/*` branches are task branches with preview/deploy checks. Runtime data, release artifacts, signing material, server-only env files, local backups, and personal notes stay outside Git.
 
 ## Next Steps
 
@@ -13,8 +13,8 @@ The target state is a single clean public `main` history containing source code,
 - Keep public-safe project facts in `memory-bank/`.
 - Run `npm run public:guard` before publishing or merging public branches.
 - Use `dev` for shared development and `codex/*` branches for preview work.
+- Keep public release versions aligned with the `build_versions` ledger.
 
 ## Open Questions
 
-- Public branch protection must be configured in GitHub after the clean repository receives its first `main`.
-- Server secrets, Android signing material, and deploy keys must be installed outside the repository.
+- None for the public baseline.

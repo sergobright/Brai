@@ -8,7 +8,17 @@ if [[ -d "$NODE_PREFIX" ]]; then
 fi
 SOURCE="${BRIGHT_OS_MOBILE_SOURCE:-$ROOT/apps/bright_os_app/out}"
 TARGET_ROOT="${BRIGHT_OS_MOBILE_TARGET:-$ROOT/deploy/mobile-update}"
-VERSION="${BRIGHT_OS_APP_VERSION:-0.0.1.1}"
+NODE_BIN="${NODE_BIN:-node}"
+ZIP_BIN="${ZIP_BIN:-zip}"
+VERSION="${BRIGHT_OS_APP_VERSION:-$("$NODE_BIN" -e '
+const fs = require("node:fs");
+const path = require("node:path");
+const root = process.argv[1];
+const parsed = JSON.parse(fs.readFileSync(path.join(root, "apps/bright_os_app/public/version.json"), "utf8"));
+const version = String(parsed.version || "");
+if (!/^\d+\.\d+\.\d+\.\d+$/.test(version)) throw new Error("Unable to resolve Bright OS X.Y.Z.S app version");
+console.log(version);
+' "$ROOT")}"
 BUNDLE_VERSION="${BRIGHT_OS_MOBILE_BUNDLE_VERSION:-$VERSION}"
 UPDATE_BASE_URL="${BRIGHT_OS_UPDATE_BASE_URL:-https://app.brightos.world/mobile-update}"
 MIN_APK_VERSION_CODE="${BRIGHT_OS_MIN_APK_VERSION_CODE:-1}"
@@ -17,8 +27,6 @@ MANDATORY="${BRIGHT_OS_MOBILE_MANDATORY:-false}"
 RETAIN_PREVIOUS="${BRIGHT_OS_MOBILE_RETAIN_PREVIOUS:-3}"
 ENTRYPOINT="${BRIGHT_OS_MOBILE_ENTRYPOINT:-index.html}"
 PUBLISHED_AT="${BRIGHT_OS_PUBLISHED_AT:-$(date -u +"%Y-%m-%dT%H:%M:%SZ")}"
-NODE_BIN="${NODE_BIN:-node}"
-ZIP_BIN="${ZIP_BIN:-zip}"
 
 node -e 'const major = Number(process.versions.node.split(".")[0]); if (major < 22) { console.error(`Bright OS requires Node.js >=22.0.0. Current: ${process.version}.`); process.exit(1); }'
 

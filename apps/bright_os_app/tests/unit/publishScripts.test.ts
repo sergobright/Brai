@@ -130,7 +130,6 @@ describe("mobile OTA publish scripts", () => {
       env: {
         ...process.env,
         BRIGHT_OS_ROOT: root,
-        BRIGHT_OS_APP_VERSION: "9.9.9.99",
         BRIGHT_OS_MIN_APK_VERSION_CODE: "2999",
         BRIGHT_OS_PUBLISHED_AT: "2026-06-15T00:00:00Z",
       },
@@ -154,6 +153,30 @@ describe("mobile OTA publish scripts", () => {
     });
     expect(manifest.sizeBytes).toBe((await stat(archivePath)).size);
     expect(manifest.sha256).toBe(createHash("sha256").update(archive).digest("hex"));
+  });
+
+  it("publishes an APK using app version metadata when env version is unset", async () => {
+    const root = await fixtureRoot("bright-apk-publish-");
+    await writeStaticExport(root, "apk");
+    await mkdir(path.join(root, "deploy"), { recursive: true });
+    await copyFile(
+      path.join(workspaceRoot, "deploy/environments.json"),
+      path.join(root, "deploy/environments.json"),
+    );
+    const apkPath = path.join(root, "app-release.apk");
+    await writeFile(apkPath, "apk");
+
+    await execFileAsync("bash", [path.join(workspaceRoot, "deploy/scripts/publish-capacitor-apk.sh")], {
+      env: {
+        ...process.env,
+        BRIGHT_OS_ROOT: root,
+        BRIGHT_OS_APK_SOURCE: apkPath,
+        BRIGHT_OS_ANDROID_VERSION_CODE: "2999",
+        BRIGHT_OS_PUBLISHED_AT: "2026-06-15T00:00:00Z",
+      },
+    });
+
+    await expect(readFile(path.join(root, "deploy/releases/bright-os-9.9.9.99-capacitor.apk"), "utf8")).resolves.toBe("apk");
   });
 
   it("replaces an existing OTA bundle instead of rewriting it in place", async () => {
@@ -260,7 +283,9 @@ async function fixtureRoot(prefix: string) {
 async function writeStaticExport(root: string, marker: string) {
   const out = path.join(root, "apps/bright_os_app/out");
   await mkdir(path.join(out, "_next"), { recursive: true });
+  await mkdir(path.join(root, "apps/bright_os_app/public"), { recursive: true });
   await writeFile(path.join(out, "index.html"), `<main>${marker}</main>`);
   await writeFile(path.join(out, "_next/app.js"), "console.log('ok')");
   await writeFile(path.join(out, "version.json"), JSON.stringify({ marker }));
+  await writeFile(path.join(root, "apps/bright_os_app/public/version.json"), JSON.stringify({ version: "9.9.9.99" }));
 }

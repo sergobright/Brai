@@ -6,12 +6,15 @@
 - Public guard is part of the baseline design.
 - OpenSpec accepted specs are the durable requirements source.
 - Memory Bank has been reset to public-safe project context.
+- Clean `main` and `dev` were pushed to the public repository.
+- GitHub Actions deploys from `main` and `dev`.
+- Branch protection requires `public-guard` and `checks`.
+- Public baseline version is `0.0.1.1`.
 
-## Remaining Before Public Cutover
+## Current State
 
-- Verify the clean tree and clean history.
-- Reset the local release ledger rows to `0.0.1.1`.
-- Create the one-commit clean baseline.
-- Generate a new deploy SSH key for GitHub Actions to VPS deploy access.
-- Push only the clean `main` and `dev` branches after the GitHub repository is recreated.
-- Configure GitHub branch protection after the first clean `main` push.
+- Future work starts from `origin/dev` on `codex/*` branches.
+- Task branches do not add `build_versions` rows by themselves.
+- Accepted task merges into `dev` add a `build` ledger row and increment `Z`.
+- Promotions from `dev` to `main` add a `build` ledger row and increment `Y`.
+- Shipped APK releases add an `apk` ledger row and increment `S`.

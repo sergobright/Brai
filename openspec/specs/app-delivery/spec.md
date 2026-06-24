@@ -107,11 +107,23 @@ Bright OS SHALL publish a release APK whenever a change crosses the native Andro
 ### Requirement: Release versions use one build ledger
 Bright OS SHALL track public release versions in the server SQLite `build_versions` table with type metadata from `version_types`.
 
-#### Scenario: Ordinary release is prepared
-- **WHEN** the project owner asks to make a release without explicitly changing the versioning rules
+#### Scenario: Task branch is prepared
+- **WHEN** a `codex/*` task branch is created or updated before acceptance
+- **THEN** it does not write a `build_versions` row by itself
+- **AND** defers the version ledger row until the task is accepted into `dev`
+
+#### Scenario: Accepted task lands in dev
+- **WHEN** a `codex/*` task branch is accepted and merged into `dev`
 - **THEN** the workflow increments only `Z` in `X.Y.Z.S`
 - **AND** keeps `X`, `Y`, and `S` unchanged
 - **AND** writes one `build_versions` row with all four numeric fields, the full version string, short changes, detailed changes, release time, reason, and `version_type_id = build`
+
+#### Scenario: Dev is promoted to main
+- **WHEN** `dev` is accepted and merged into `main`
+- **THEN** the workflow increments only `Y` in `X.Y.Z.S`
+- **AND** keeps `X`, `Z`, and `S` unchanged
+- **AND** writes one `build_versions` row with all four numeric fields, the full version string, short changes, detailed changes, release time, reason, and `version_type_id = build`
+- **AND** preserves the accepted task index, for example `0.0.10.1` becomes `0.1.10.1`
 
 #### Scenario: APK release is prepared
 - **WHEN** the project owner asks to make or publish an APK release

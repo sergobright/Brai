@@ -4,7 +4,15 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="${BRIGHT_OS_ROOT:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
 NODE_BIN="${NODE_BIN:-node}"
-VERSION="${BRIGHT_OS_APP_VERSION:-0.0.1.1}"
+VERSION="${BRIGHT_OS_APP_VERSION:-$("$NODE_BIN" -e '
+const fs = require("node:fs");
+const path = require("node:path");
+const root = process.argv[1];
+const parsed = JSON.parse(fs.readFileSync(path.join(root, "apps/bright_os_app/public/version.json"), "utf8"));
+const version = String(parsed.version || "");
+if (!/^\d+\.\d+\.\d+\.\d+$/.test(version)) throw new Error("Unable to resolve Bright OS X.Y.Z.S app version");
+console.log(version);
+' "$ROOT")}"
 RELEASE_ENV="${BRIGHT_OS_RELEASE_ENV:-production}"
 TARGET_DIR="$ROOT/deploy/releases"
 
