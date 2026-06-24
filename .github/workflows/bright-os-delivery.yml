@@ -17,6 +17,11 @@ on:
       - closed
   delete:
   workflow_dispatch:
+    inputs:
+      release_branch:
+        description: 'Optional codex/* branch whose preview slot should be released'
+        required: false
+        type: string
 
 jobs:
   public-guard:
@@ -114,7 +119,8 @@ jobs:
   release-preview-slot:
     if: |
       (github.event_name == 'pull_request' && github.event.action == 'closed' && github.event.pull_request.merged == true && github.base_ref == 'dev' && startsWith(github.head_ref, 'codex/')) ||
-      (github.event_name == 'delete' && github.event.ref_type == 'branch' && startsWith(github.event.ref, 'codex/'))
+      (github.event_name == 'delete' && github.event.ref_type == 'branch' && startsWith(github.event.ref, 'codex/')) ||
+      (github.event_name == 'workflow_dispatch' && startsWith(inputs.release_branch, 'codex/'))
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -138,4 +144,4 @@ jobs:
           BRIGHT_DEPLOY_SSH_PORT: ${{ vars.BRIGHT_DEPLOY_SSH_PORT || '22' }}
           BRIGHT_DEPLOY_REPO: ${{ vars.BRIGHT_DEPLOY_REPO || '/srv/projects/bright-os' }}
           BRIGHT_DEPLOY_SSH_KEY: ${{ secrets.BRIGHT_DEPLOY_SSH_KEY }}
-          BRIGHT_OS_BRANCH: ${{ github.head_ref || github.event.ref }}
+          BRIGHT_OS_BRANCH: ${{ inputs.release_branch || github.head_ref || github.event.ref }}

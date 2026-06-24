@@ -66,15 +66,42 @@ if [[ -d "$NODE_PREFIX" ]]; then
 fi
 
 cd "$REMOTE_UPLOAD"
+allocation_field() {
+  node -e 'let raw = ""; process.stdin.on("data", c => raw += c); process.stdin.on("end", () => { const value = JSON.parse(raw)[process.argv[1]]; console.log(value == null ? "" : value); });' "$1"
+}
 mark_preview_failed() {
   if [[ "$BRIGHT_OS_BRANCH" == codex/* && -n "${BRIGHT_OS_PREVIEW_SLOT:-}" ]]; then
     deploy/scripts/preview-slots.sh failed "$BRIGHT_OS_BRANCH" "$BRIGHT_OS_COMMIT" >/dev/null || true
   fi
 }
+cleanup_preview_queue() {
+  if [[ "${BRIGHT_OS_PREVIEW_QUEUED:-}" == "true" ]]; then
+    deploy/scripts/preview-slots.sh dequeue "$BRIGHT_OS_BRANCH" >/dev/null || true
+  fi
+}
 if [[ "$BRIGHT_OS_BRANCH" == codex/* ]]; then
-  ALLOCATION_JSON="$(deploy/scripts/preview-slots.sh allocate "$BRIGHT_OS_BRANCH" "$BRIGHT_OS_COMMIT")"
-  BRIGHT_OS_PREVIEW_SLOT="$(printf '%s' "$ALLOCATION_JSON" | node -e 'let raw=""; process.stdin.on("data", c => raw += c); process.stdin.on("end", () => console.log(JSON.parse(raw).slot));')"
-  BRIGHT_OS_PREVIEW_ALLOCATED_NEW="$(printf '%s' "$ALLOCATION_JSON" | node -e 'let raw=""; process.stdin.on("data", c => raw += c); process.stdin.on("end", () => console.log(JSON.parse(raw).allocatedNew ? "true" : "false"));')"
+  BRIGHT_OS_PREVIEW_QUEUED="false"
+  trap cleanup_preview_queue EXIT
+  QUEUE_MAX_ATTEMPTS="${BRIGHT_OS_PREVIEW_QUEUE_MAX_ATTEMPTS:-720}"
+  QUEUE_POLL_SECONDS="${BRIGHT_OS_PREVIEW_QUEUE_POLL_SECONDS:-30}"
+  for ((attempt = 1; attempt <= QUEUE_MAX_ATTEMPTS; attempt += 1)); do
+    ALLOCATION_JSON="$(deploy/scripts/preview-slots.sh allocate "$BRIGHT_OS_BRANCH" "$BRIGHT_OS_COMMIT")"
+    BRIGHT_OS_PREVIEW_QUEUED="$(printf '%s' "$ALLOCATION_JSON" | allocation_field queued)"
+    if [[ "$BRIGHT_OS_PREVIEW_QUEUED" != "true" ]]; then
+      break
+    fi
+    QUEUE_POSITION="$(printf '%s' "$ALLOCATION_JSON" | allocation_field position)"
+    echo "All preview slots are occupied; queued at position $QUEUE_POSITION. Waiting ${QUEUE_POLL_SECONDS}s for a released slot."
+    if (( attempt == QUEUE_MAX_ATTEMPTS )); then
+      echo "Timed out waiting for a preview slot after $QUEUE_MAX_ATTEMPTS attempts." >&2
+      exit 1
+    fi
+    sleep "$QUEUE_POLL_SECONDS"
+  done
+  BRIGHT_OS_PREVIEW_QUEUED="false"
+  trap - EXIT
+  BRIGHT_OS_PREVIEW_SLOT="$(printf '%s' "$ALLOCATION_JSON" | allocation_field slot)"
+  BRIGHT_OS_PREVIEW_ALLOCATED_NEW="$(printf '%s' "$ALLOCATION_JSON" | allocation_field allocatedNew)"
   export BRIGHT_OS_PREVIEW_SLOT BRIGHT_OS_PREVIEW_ALLOCATED_NEW
   trap mark_preview_failed ERR
 fi

@@ -31,11 +31,14 @@ try {
     case "release":
       result = release(registry, args[0], now);
       break;
+    case "dequeue":
+      result = dequeue(registry, args[0]);
+      break;
     case "status":
       result = { ok: true, registry };
       break;
     default:
-      throw new Error("usage: preview-slots.sh init|status|allocate <branch> <commit>|ready <branch> <commit>|failed <branch> <commit>|release <branch-or-slot>");
+      throw new Error("usage: preview-slots.sh init|status|allocate <branch> <commit>|ready <branch> <commit>|failed <branch> <commit>|release <branch-or-slot>|dequeue <branch>");
   }
 
   writeRegistry(registry);
@@ -50,16 +53,22 @@ function allocate(registry, branch, commit, now) {
   requireBranch(branch);
   const existing = findByBranch(registry, branch);
   if (existing) {
+    removeQueuedBranch(registry, branch);
     Object.assign(existing.entry, {
       status: "deploying",
       commit: commit ?? null,
       updated_at: now,
     });
-    return { ok: true, allocatedNew: false, slot: existing.slot, entry: existing.entry };
+    return { ok: true, queued: false, allocatedNew: false, slot: existing.slot, entry: existing.entry };
   }
 
   const slot = slots.find((candidate) => registry[candidate].status === "free");
-  if (!slot) throw new Error("no preview slot available");
+  const queued = upsertQueuedBranch(registry, branch, commit, now);
+  if (!slot || registry.queue[0]?.branch !== branch) {
+    return { ok: true, queued: true, position: queued.position, entry: queued.entry };
+  }
+
+  registry.queue.shift();
   const entry = registry[slot];
   Object.assign(entry, {
     status: "deploying",
@@ -68,7 +77,7 @@ function allocate(registry, branch, commit, now) {
     assigned_at: now,
     updated_at: now,
   });
-  return { ok: true, allocatedNew: true, slot, entry };
+  return { ok: true, queued: false, allocatedNew: true, slot, entry };
 }
 
 function updateOwnedSlot(registry, branch, commit, now, status) {
@@ -89,13 +98,21 @@ function release(registry, branchOrSlot, now) {
   const existing = slots.includes(normalizedSlot)
     ? { slot: normalizedSlot, entry: registry[normalizedSlot] }
     : findByBranch(registry, branchOrSlot);
-  if (!existing) return { ok: true, released: false };
+  if (!existing) {
+    const dequeued = !slots.includes(normalizedSlot) && removeQueuedBranch(registry, branchOrSlot);
+    return { ok: true, released: false, dequeued };
+  }
   const base = defaultSlot(existing.slot);
   Object.assign(existing.entry, base, {
     released_at: now,
     updated_at: now,
   });
   return { ok: true, released: true, slot: existing.slot, entry: existing.entry };
+}
+
+function dequeue(registry, branch) {
+  requireBranch(branch);
+  return { ok: true, dequeued: removeQueuedBranch(registry, branch) };
 }
 
 function findByBranch(registry, branch) {
@@ -106,13 +123,16 @@ function findByBranch(registry, branch) {
 }
 
 function readRegistry() {
-  const initial = Object.fromEntries(slots.map((slot) => [slot, defaultSlot(slot)]));
+  const initial = { ...Object.fromEntries(slots.map((slot) => [slot, defaultSlot(slot)])), queue: [] };
   if (!fs.existsSync(registryPath)) return initial;
   const parsed = JSON.parse(fs.readFileSync(registryPath, "utf8"));
   for (const slot of slots) {
     parsed[slot] = { ...defaultSlot(slot), ...(parsed[slot] ?? {}) };
   }
-  return Object.fromEntries(slots.map((slot) => [slot, parsed[slot]]));
+  return {
+    ...Object.fromEntries(slots.map((slot) => [slot, parsed[slot]])),
+    queue: normalizeQueue(parsed.queue),
+  };
 }
 
 function writeRegistry(registry) {
@@ -154,6 +174,14 @@ function renderStatusPage(registry) {
       </section>`;
     })
     .join("\n");
+  const queue = registry.queue.length
+    ? `<ol>${registry.queue
+        .map(
+          (entry) =>
+            `<li><strong>${escapeHtml(entry.branch)}</strong> <span>${escapeHtml(entry.commit?.slice(0, 12) ?? "none")}</span></li>`,
+        )
+        .join("")}</ol>`
+    : "<p>No queued preview branches.</p>";
   fs.writeFileSync(
     path.join(statusDir, "index.html"),
     `<!doctype html>
@@ -170,11 +198,15 @@ function renderStatusPage(registry) {
     .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
     .slot { border: 1px solid #2a3935; border-radius: 8px; padding: 16px; background: #121a18; }
     .slot-free { opacity: .72; }
+    .queue { margin-top: 24px; border-top: 1px solid #2a3935; padding-top: 16px; }
     h2 { margin: 0 0 12px; font-size: 24px; }
     dl { display: grid; gap: 8px; margin: 0; }
     div { min-width: 0; }
     dt { color: #9fb0ab; font-size: 12px; text-transform: uppercase; }
     dd { margin: 2px 0 0; overflow-wrap: anywhere; }
+    ol { margin: 0; padding-left: 22px; }
+    li { margin: 8px 0; overflow-wrap: anywhere; }
+    li span { color: #9fb0ab; }
     a { color: #4cc3ad; }
   </style>
 </head>
@@ -182,6 +214,10 @@ function renderStatusPage(registry) {
   <main>
     <h1>Bright OS Preview Slots</h1>
     <div class="grid">${cards}</div>
+    <section class="queue">
+      <h2>Queue</h2>
+      ${queue}
+    </section>
   </main>
 </body>
 </html>
@@ -192,6 +228,41 @@ function renderStatusPage(registry) {
 function requireBranch(branch) {
   if (!branch) throw new Error("branch is required");
   if (!branch.startsWith("codex/")) throw new Error(`preview branches must start with codex/: ${branch}`);
+}
+
+function upsertQueuedBranch(registry, branch, commit, now) {
+  const existing = registry.queue.find((entry) => entry.branch === branch);
+  if (existing) {
+    Object.assign(existing, { commit: commit ?? null, updated_at: now });
+    return { entry: existing, position: registry.queue.indexOf(existing) + 1 };
+  }
+  const entry = { branch, commit: commit ?? null, queued_at: now, updated_at: now };
+  registry.queue.push(entry);
+  return { entry, position: registry.queue.length };
+}
+
+function removeQueuedBranch(registry, branch) {
+  const before = registry.queue.length;
+  registry.queue = registry.queue.filter((entry) => entry.branch !== branch);
+  return registry.queue.length !== before;
+}
+
+function normalizeQueue(queue) {
+  if (!Array.isArray(queue)) return [];
+  const seen = new Set();
+  return queue
+    .filter((entry) => entry && typeof entry.branch === "string" && entry.branch.startsWith("codex/"))
+    .filter((entry) => {
+      if (seen.has(entry.branch)) return false;
+      seen.add(entry.branch);
+      return true;
+    })
+    .map((entry) => ({
+      branch: entry.branch,
+      commit: entry.commit ?? null,
+      queued_at: entry.queued_at ?? null,
+      updated_at: entry.updated_at ?? entry.queued_at ?? null,
+    }));
 }
 
 function escapeHtml(value) {

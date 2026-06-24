@@ -269,6 +269,40 @@ describe("mobile OTA publish scripts", () => {
     await expect(readFile(path.join(envsRoot, "preview-status/index.html"), "utf8")).resolves.toContain("Bright OS Preview Slots");
   });
 
+  it("queues preview branches when every slot is occupied", async () => {
+    const root = await fixtureRoot("bright-slots-queue-");
+    const envsRoot = path.join(root, "envs");
+    const env = {
+      ...process.env,
+      BRIGHT_OS_ROOT: workspaceRoot,
+      BRIGHT_OS_ENVS_ROOT: envsRoot,
+    };
+    const slotScript = path.join(workspaceRoot, "deploy/scripts/preview-slots.mjs");
+
+    for (const branch of ["codex/one", "codex/two", "codex/three", "codex/four", "codex/five"]) {
+      await execFileAsync("node", [slotScript, "allocate", branch, branch.split("/")[1]], { env });
+    }
+
+    await execFileAsync("node", [slotScript, "allocate", "codex/six", "006"], { env });
+    let registry = JSON.parse(await readFile(path.join(envsRoot, "preview-slots.json"), "utf8"));
+    expect(registry.queue.map((entry: { branch: string }) => entry.branch)).toEqual(["codex/six"]);
+
+    await execFileAsync("node", [slotScript, "release", "codex/one"], { env });
+    await execFileAsync("node", [slotScript, "allocate", "codex/seven", "007"], { env });
+    registry = JSON.parse(await readFile(path.join(envsRoot, "preview-slots.json"), "utf8"));
+    expect(registry.queue.map((entry: { branch: string }) => entry.branch)).toEqual(["codex/six", "codex/seven"]);
+
+    await execFileAsync("node", [slotScript, "allocate", "codex/six", "006"], { env });
+
+    registry = JSON.parse(await readFile(path.join(envsRoot, "preview-slots.json"), "utf8"));
+    expect(registry.A.branch).toBe("codex/six");
+    expect(registry.queue.map((entry: { branch: string }) => entry.branch)).toEqual(["codex/seven"]);
+
+    await execFileAsync("node", [slotScript, "dequeue", "codex/seven"], { env });
+    registry = JSON.parse(await readFile(path.join(envsRoot, "preview-slots.json"), "utf8"));
+    expect(registry.queue).toEqual([]);
+  });
+
   it("renders exactly seven APK release sections without stale missing links", async () => {
     const root = await fixtureRoot("bright-release-page-");
     const releaseDir = path.join(root, "deploy/releases");
