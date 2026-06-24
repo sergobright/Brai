@@ -15,6 +15,7 @@ Version ledger rules:
 - The baseline contains two `build_versions` rows: `build` and `apk`, both at `0.0.1.1`.
 - A task branch does not create a version ledger row by itself.
 - An accepted task merge into `dev` increments `Z` and writes one `build` row.
+- On `dev`, `Z` must match the accepted GitHub PR number and the count of `build_versions` rows with `version_type_id = 'build'`.
 - A promotion from `dev` to `main` increments `Y` and writes one `build` row.
 - A task that requires a shipped APK release increments `S` and writes one `apk` row.
 - Do not reuse `0.0.1.1` after the public baseline.

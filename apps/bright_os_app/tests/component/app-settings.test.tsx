@@ -19,18 +19,18 @@ describe("BrightOsApp settings", () => {
     expect(screen.queryByRole("heading", { name: "Архив" })).not.toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Сессия" })).not.toBeInTheDocument();
     expect(screen.getByText("APK")).toBeInTheDocument();
-    expect(screen.getByText("0.0.9.1")).toBeInTheDocument();
+    expect(screen.getByText("0.0.8.1")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Выйти" })).not.toBeInTheDocument();
   });
 
   it("shows when an Android OTA update is ready for restart", async () => {
     stubAndroidCapacitor();
     otaPlugin.getState.mockResolvedValue({
-      activeBundleVersion: "0.0.9.1",
-      nativeVersionName: "0.0.9.1",
+      activeBundleVersion: "0.0.8.1",
+      nativeVersionName: "0.0.8.1",
       nativeBuild: "1",
       nativeVersionCode: 1,
-      candidateBundleVersion: "0.0.10.1",
+      candidateBundleVersion: "0.0.9.1",
       lastCheckStatus: "candidate_ready_for_next_start",
     });
 
@@ -38,20 +38,20 @@ describe("BrightOsApp settings", () => {
     await openSettingsFromProfile();
 
     await waitFor(() => expect(screen.getByText("Обновление скачано. Закрой и открой приложение.")).toBeInTheDocument());
-    expect(screen.getByText("0.0.10.1")).toBeInTheDocument();
-    expect(screen.getByText("0.0.9.1 (1)")).toBeInTheDocument();
+    expect(screen.getByText("0.0.9.1")).toBeInTheDocument();
+    expect(screen.getByText("0.0.8.1 (1)")).toBeInTheDocument();
   });
 
   it.each([
     ["Software caused connection abort", "Обновление не установилось. Связь оборвалась во время скачивания. Проверь интернет и попробуй еще раз."],
     [
-      "/data/user/0/world.brightos.bright_os_client/cache/bright-ota-downloads/0.0.10.1.zip: open failed: ENOENT (No such file or directory)",
+      "/data/user/0/world.brightos.bright_os_client/cache/bright-ota-downloads/0.0.9.1.zip: open failed: ENOENT (No such file or directory)",
       "Обновление не установилось. Скачанный файл обновления пропал из памяти телефона. Запусти проверку еще раз.",
     ],
   ])("shows a readable Android OTA error for %s", async (lastUpdateError, message) => {
     stubAndroidCapacitor();
     otaPlugin.getState.mockResolvedValue({
-      activeBundleVersion: "0.0.9.1",
+      activeBundleVersion: "0.0.8.1",
       lastCheckStatus: "check_failed",
       lastUpdateError,
     });
@@ -72,7 +72,7 @@ describe("BrightOsApp settings", () => {
 
     await waitFor(() => expect(otaPlugin.checkForUpdates).toHaveBeenCalledTimes(1));
     expect(await screen.findByText("Обновление скачано. Закрой и открой приложение.")).toBeInTheDocument();
-    expect(screen.getByText("0.0.10.1")).toBeInTheDocument();
+    expect(screen.getByText("0.0.9.1")).toBeInTheDocument();
   });
 
   it("returns from Settings through the Android back bridge", async () => {

@@ -1,6 +1,6 @@
 import { isNativeShell } from "@/shared/platform/platform";
 
-export const APP_VERSION = process.env.NEXT_PUBLIC_BRIGHT_OS_APP_VERSION || "0.0.9.1";
+export const APP_VERSION = process.env.NEXT_PUBLIC_BRIGHT_OS_APP_VERSION || "0.0.8.1";
 export const APP_BUILD = "1";
 export const DEFAULT_WEB_API_BASE = process.env.NEXT_PUBLIC_BRIGHT_TIMER_API || "/api";
 export const DEFAULT_ANDROID_API_BASE =

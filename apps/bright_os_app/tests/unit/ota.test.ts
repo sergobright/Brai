@@ -38,15 +38,15 @@ describe("Android OTA readiness bridge", () => {
       isNativePlatform: () => true,
       getPlatform: () => "android",
     });
-    plugin.getState.mockResolvedValue({ activeBundleVersion: "0.0.9.1" });
-    plugin.markReady.mockResolvedValue({ activeBundleVersion: "0.0.9.1" });
+    plugin.getState.mockResolvedValue({ activeBundleVersion: "0.0.8.1" });
+    plugin.markReady.mockResolvedValue({ activeBundleVersion: "0.0.8.1" });
     const { notifyAndroidOtaReady } = await import("@/shared/platform/ota");
 
     await notifyAndroidOtaReady();
     await notifyAndroidOtaReady();
 
     expect(plugin.getState).toHaveBeenCalledTimes(1);
-    expect(plugin.markReady).toHaveBeenCalledWith({ bundleVersion: "0.0.9.1" });
+    expect(plugin.markReady).toHaveBeenCalledWith({ bundleVersion: "0.0.8.1" });
   });
 
   it("keeps startup alive when the native bridge is unavailable", async () => {
@@ -66,7 +66,7 @@ describe("Android OTA readiness bridge", () => {
       getPlatform: () => "android",
     });
     plugin.checkForUpdates.mockResolvedValue({
-      activeBundleVersion: "0.0.9.1",
+      activeBundleVersion: "0.0.8.1",
       lastCheckStatus: "checking",
     });
     const { checkAndroidOtaUpdates } = await import("@/shared/platform/ota");

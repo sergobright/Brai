@@ -116,6 +116,11 @@ export const migrationMethods = {
       this.seedGithubCliSandboxAuthBuildVersion();
       this.recordMigration(18, 'record GitHub CLI sandbox auth guidance');
     }
+
+    if (!this.hasMigration(19)) {
+      this.realignBuildVersionLedger();
+      this.recordMigration(19, 'realign build version ledger with pull request number');
+    }
   }
 ,
 
@@ -856,6 +861,48 @@ export const migrationMethods = {
       '2026-06-24T21:17:09Z',
       now
     );
+  }
+,
+
+  realignBuildVersionLedger() {
+    const now = new Date().toISOString();
+    this.db.prepare(`
+        INSERT INTO build_versions (
+          version_type_id,
+          major_version,
+          release_version,
+          build_version,
+          apk_version,
+          version,
+          short_changes,
+          detailed_changes,
+          reason,
+          released_at_utc,
+          created_at_utc
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(version_type_id, version) DO UPDATE SET
+          short_changes = excluded.short_changes,
+          detailed_changes = excluded.detailed_changes,
+          reason = excluded.reason,
+          released_at_utc = excluded.released_at_utc
+      `).run(
+      'build',
+      0,
+      0,
+      8,
+      1,
+      '0.0.8.1',
+      'Aligned dev build ledger with PR numbering.',
+      'Recorded the eighth accepted public task: dev build Z now matches the accepted GitHub PR number, the build ledger has exactly Z build rows, and the current dev source keeps the accepted menu and GitHub CLI sandbox-auth fixes.',
+      'Accepted PR/version ledger alignment into dev.',
+      '2026-06-24T21:40:47Z',
+      now
+    );
+
+    this.db
+      .prepare("DELETE FROM build_versions WHERE version_type_id = 'build' AND version = '0.0.9.1'")
+      .run();
   }
 ,
 
