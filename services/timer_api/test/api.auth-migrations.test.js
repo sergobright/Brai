@@ -119,30 +119,45 @@ test('migration seeds unified build version ledger', async () => {
     assert.deepEqual(versionTypes, ['apk', 'build']);
 
     const versions = fixture.store.db
-      .prepare('SELECT * FROM build_versions ORDER BY version_type_id')
+      .prepare('SELECT * FROM build_versions ORDER BY version_type_id, version')
       .all();
-    assert.equal(versions.length, 2);
-    for (const version of versions) {
-      assert.equal(version.major_version, 0);
-      assert.equal(version.release_version, 0);
-      assert.equal(version.build_version, 1);
-      assert.equal(version.apk_version, 1);
-      assert.equal(version.version, '0.0.1.1');
-    }
-    assert.equal(versions[0].version_type_id, 'apk');
-    assert.equal(versions[0].released_at_utc, '2026-06-23T09:13:50Z');
-    assert.match(versions[0].short_changes, /APK/);
-    assert.match(versions[0].detailed_changes, /versionCode 1/);
-    assert.match(versions[0].detailed_changes, /Release signing material/);
-    assert.equal(versions[0].reason, 'Initial public baseline.');
-    assert.equal(versions[1].version_type_id, 'build');
-    assert.equal(versions[1].released_at_utc, '2026-06-23T09:12:45Z');
-    assert.match(versions[1].short_changes, /web\/OTA/);
-    assert.match(versions[1].detailed_changes, /min APK versionCode 1/);
-    assert.equal(versions[1].reason, 'Initial public baseline.');
+    assert.equal(versions.length, 3);
+
+    const baselineApk = versions.find((version) => version.version_type_id === 'apk' && version.version === '0.0.1.1');
+    assert.ok(baselineApk);
+    assert.equal(baselineApk.major_version, 0);
+    assert.equal(baselineApk.release_version, 0);
+    assert.equal(baselineApk.build_version, 1);
+    assert.equal(baselineApk.apk_version, 1);
+    assert.equal(baselineApk.released_at_utc, '2026-06-23T09:13:50Z');
+    assert.match(baselineApk.short_changes, /APK/);
+    assert.match(baselineApk.detailed_changes, /versionCode 1/);
+    assert.match(baselineApk.detailed_changes, /Release signing material/);
+    assert.equal(baselineApk.reason, 'Initial public baseline.');
+
+    const baselineBuild = versions.find((version) => version.version_type_id === 'build' && version.version === '0.0.1.1');
+    assert.ok(baselineBuild);
+    assert.equal(baselineBuild.major_version, 0);
+    assert.equal(baselineBuild.release_version, 0);
+    assert.equal(baselineBuild.build_version, 1);
+    assert.equal(baselineBuild.apk_version, 1);
+    assert.equal(baselineBuild.released_at_utc, '2026-06-23T09:12:45Z');
+    assert.match(baselineBuild.short_changes, /web\/OTA/);
+    assert.match(baselineBuild.detailed_changes, /min APK versionCode 1/);
+    assert.equal(baselineBuild.reason, 'Initial public baseline.');
+
+    const firstTaskBuild = versions.find((version) => version.version_type_id === 'build' && version.version === '0.0.2.1');
+    assert.ok(firstTaskBuild);
+    assert.equal(firstTaskBuild.major_version, 0);
+    assert.equal(firstTaskBuild.release_version, 0);
+    assert.equal(firstTaskBuild.build_version, 2);
+    assert.equal(firstTaskBuild.apk_version, 1);
+    assert.equal(firstTaskBuild.released_at_utc, '2026-06-24T13:45:00Z');
+    assert.match(firstTaskBuild.detailed_changes, /dev promotions to main increment Y/);
+    assert.equal(firstTaskBuild.reason, 'Accepted first public task into dev.');
 
     fixture.store.migrate();
-    assert.equal(fixture.store.db.prepare('SELECT COUNT(*) AS count FROM build_versions').get().count, 2);
+    assert.equal(fixture.store.db.prepare('SELECT COUNT(*) AS count FROM build_versions').get().count, 3);
   } finally {
     await fixture.close();
   }

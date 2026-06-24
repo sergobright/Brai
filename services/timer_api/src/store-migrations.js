@@ -76,6 +76,11 @@ export const migrationMethods = {
     if (!this.hasMigration(10)) {
       this.recordMigration(10, 'add environment deployment ledger');
     }
+
+    if (!this.hasMigration(11)) {
+      this.seedPublicVersionRulesBuildVersion();
+      this.recordMigration(11, 'record public version rules task');
+    }
   }
 ,
 
@@ -542,6 +547,40 @@ export const migrationMethods = {
       'APK uses public version 0.0.1.1 with S=1 and Android versionCode 1. Release signing material is supplied outside the repository.',
       'Initial public baseline.',
       apkReleasedAt,
+      now
+    );
+  }
+,
+
+  seedPublicVersionRulesBuildVersion() {
+    const now = new Date().toISOString();
+    this.db.prepare(`
+        INSERT INTO build_versions (
+          version_type_id,
+          major_version,
+          release_version,
+          build_version,
+          apk_version,
+          version,
+          short_changes,
+          detailed_changes,
+          reason,
+          released_at_utc,
+          created_at_utc
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(version_type_id, version) DO NOTHING
+      `).run(
+      'build',
+      0,
+      0,
+      2,
+      1,
+      '0.0.2.1',
+      'Accepted public version baseline rules.',
+      'Recorded the first accepted public task: task merges into dev increment Z, dev promotions to main increment Y, and APK releases increment S. Browser web and Android OTA use version 0.0.2.1 with Android versionCode 1.',
+      'Accepted first public task into dev.',
+      '2026-06-24T13:45:00Z',
       now
     );
   }

@@ -10,6 +10,7 @@
 - GitHub Actions deploys from `main` and `dev`.
 - Branch protection requires `public-guard` and `checks`.
 - Public baseline version is `0.0.1.1`.
+- First accepted `dev` task version is `0.0.2.1`.
 
 ## Current State
 

@@ -30,25 +30,25 @@ export function setupBrightOsAppTest() {
     otaPlugin.checkForUpdates.mockReset();
     otaPlugin.markReady.mockReset();
     otaPlugin.getState.mockResolvedValue({
-      activeBundleVersion: "0.0.1.1",
-      nativeVersionName: "0.0.1.1",
+      activeBundleVersion: "0.0.2.1",
+      nativeVersionName: "0.0.2.1",
       nativeBuild: "1",
       nativeVersionCode: 1,
       lastCheckStatus: "up_to_date",
     });
     otaPlugin.markReady.mockResolvedValue({
-      activeBundleVersion: "0.0.1.1",
-      nativeVersionName: "0.0.1.1",
+      activeBundleVersion: "0.0.2.1",
+      nativeVersionName: "0.0.2.1",
       nativeBuild: "1",
       nativeVersionCode: 1,
       lastCheckStatus: "ready",
     });
     otaPlugin.checkForUpdates.mockResolvedValue({
-      activeBundleVersion: "0.0.1.1",
-      nativeVersionName: "0.0.1.1",
+      activeBundleVersion: "0.0.2.1",
+      nativeVersionName: "0.0.2.1",
       nativeBuild: "1",
       nativeVersionCode: 1,
-      candidateBundleVersion: "0.0.1.2",
+      candidateBundleVersion: "0.0.3.1",
       lastCheckStatus: "candidate_ready_for_next_start",
     });
     vi.stubGlobal("fetch", vi.fn(async () => Promise.reject(new Error("offline"))));
