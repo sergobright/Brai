@@ -91,6 +91,11 @@ export const migrationMethods = {
       this.seedPreviewCleanupBuildVersion();
       this.recordMigration(13, 'record preview cleanup workflow task');
     }
+
+    if (!this.hasMigration(14)) {
+      this.seedEnvironmentFaviconBuildVersion();
+      this.recordMigration(14, 'record environment favicon task');
+    }
   }
 ,
 
@@ -659,6 +664,40 @@ export const migrationMethods = {
       'Recorded the third accepted public task: preview metadata promotion skips cleanly when the preview slot has already been released by a delete event.',
       'Accepted preview cleanup workflow into dev.',
       '2026-06-24T14:25:00Z',
+      now
+    );
+  }
+,
+
+  seedEnvironmentFaviconBuildVersion() {
+    const now = new Date().toISOString();
+    this.db.prepare(`
+        INSERT INTO build_versions (
+          version_type_id,
+          major_version,
+          release_version,
+          build_version,
+          apk_version,
+          version,
+          short_changes,
+          detailed_changes,
+          reason,
+          released_at_utc,
+          created_at_utc
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(version_type_id, version) DO NOTHING
+      `).run(
+      'build',
+      0,
+      0,
+      5,
+      1,
+      '0.0.5.1',
+      'Accepted environment-specific favicons.',
+      'Recorded the fourth accepted public task: dev and preview web/PWA builds use environment-specific favicon and manifest icon assets while production keeps the canonical Bright OS icons.',
+      'Accepted dev and preview favicon separation into dev.',
+      '2026-06-24T14:40:00Z',
       now
     );
   }

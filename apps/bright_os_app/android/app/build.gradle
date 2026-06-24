@@ -5,8 +5,8 @@ def androidStorePassword = System.getenv('BRIGHT_OS_ANDROID_STORE_PASSWORD')
 def androidKeyAlias = System.getenv('BRIGHT_OS_ANDROID_KEY_ALIAS')
 def androidKeyPassword = System.getenv('BRIGHT_OS_ANDROID_KEY_PASSWORD') ?: androidStorePassword
 def androidReleaseKeystore = file(androidKeystorePath ?: 'missing-release-keystore.jks')
-def brightOsWebVersion = System.getenv('BRIGHT_OS_APP_VERSION') ?: '0.0.4.1'
-def brightOsProductionFallbackBundleVersion = System.getenv('BRIGHT_OS_PROD_FALLBACK_BUNDLE_VERSION') ?: '0.0.4.1'
+def brightOsWebVersion = System.getenv('BRIGHT_OS_APP_VERSION') ?: '0.0.5.1'
+def brightOsProductionFallbackBundleVersion = System.getenv('BRIGHT_OS_PROD_FALLBACK_BUNDLE_VERSION') ?: '0.0.5.1'
 def brightOsNonProductionFallbackBundleVersion = System.getenv('BRIGHT_OS_NON_PROD_FALLBACK_BUNDLE_VERSION') ?: "${brightOsWebVersion}.0"
 
 android {
@@ -17,7 +17,7 @@ android {
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1
-        versionName "0.0.4.1"
+        versionName "0.0.5.1"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         manifestPlaceholders = [brightAppLabel: 'Bright OS']
         aaptOptions {

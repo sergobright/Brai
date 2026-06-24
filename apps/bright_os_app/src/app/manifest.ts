@@ -1,8 +1,11 @@
 import type { MetadataRoute } from "next";
+import { resolveBrightOsIconAssets } from "@/shared/config/appIcons";
 
 export const dynamic = "force-static";
 
 export default function manifest(): MetadataRoute.Manifest {
+  const iconAssets = resolveBrightOsIconAssets();
+
   return {
     name: "Bright OS",
     short_name: "Bright OS",
@@ -14,23 +17,23 @@ export default function manifest(): MetadataRoute.Manifest {
     theme_color: "#e6e6e6",
     icons: [
       {
-        src: "/icons/Icon-192.png",
+        src: iconAssets.icon192,
         sizes: "192x192",
         type: "image/png",
       },
       {
-        src: "/icons/Icon-512.png",
+        src: iconAssets.icon512,
         sizes: "512x512",
         type: "image/png",
       },
       {
-        src: "/icons/Icon-maskable-192.png",
+        src: iconAssets.maskable192,
         sizes: "192x192",
         type: "image/png",
         purpose: "maskable",
       },
       {
-        src: "/icons/Icon-maskable-512.png",
+        src: iconAssets.maskable512,
         sizes: "512x512",
         type: "image/png",
         purpose: "maskable",

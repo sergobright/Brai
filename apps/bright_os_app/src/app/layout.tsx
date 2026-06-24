@@ -1,9 +1,11 @@
 import type { Metadata, Viewport } from "next";
 import { GeistMono } from "geist/font/mono";
 import { GeistSans } from "geist/font/sans";
+import { resolveBrightOsIconAssets } from "@/shared/config/appIcons";
 import "./globals.css";
 
 const appInitScript = `(function(){try{var root=document.documentElement;var theme=window.localStorage.getItem("bright_os_theme_mode");var systemDark=window.matchMedia&&window.matchMedia("(prefers-color-scheme: dark)").matches;root.dataset.theme=theme==="dark"||theme==="light"?theme:(systemDark?"dark":"light");root.dataset.sidebarState=/(^|; )sidebar_state=false(;|$)/.test(document.cookie)?"collapsed":"expanded";}catch(error){}})();`;
+const iconAssets = resolveBrightOsIconAssets();
 
 export const metadata: Metadata = {
   title: "Bright OS",
@@ -16,10 +18,10 @@ export const metadata: Metadata = {
   },
   icons: {
     icon: [
-      { url: "/favicon.png", sizes: "64x64", type: "image/png", media: "(prefers-color-scheme: light)" },
-      { url: "/favicon-dark.png", sizes: "64x64", type: "image/png", media: "(prefers-color-scheme: dark)" },
+      { url: iconAssets.favicon, sizes: "64x64", type: "image/png", media: "(prefers-color-scheme: light)" },
+      { url: iconAssets.faviconDark, sizes: "64x64", type: "image/png", media: "(prefers-color-scheme: dark)" },
     ],
-    apple: [{ url: "/icons/Icon-192.png", sizes: "192x192", type: "image/png" }],
+    apple: [{ url: iconAssets.icon192, sizes: "192x192", type: "image/png" }],
   },
   manifest: "/manifest.webmanifest",
 };
