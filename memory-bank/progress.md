@@ -12,6 +12,7 @@
 - Public baseline version is `0.0.1.1`.
 - First accepted `dev` task version is `0.0.2.1`.
 - Second accepted `dev` task version is `0.0.3.1`.
+- Third accepted `dev` task version is `0.0.4.1`.
 
 ## Current State
 

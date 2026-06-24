@@ -121,7 +121,7 @@ test('migration seeds unified build version ledger', async () => {
     const versions = fixture.store.db
       .prepare('SELECT * FROM build_versions ORDER BY version_type_id, version')
       .all();
-    assert.equal(versions.length, 4);
+    assert.equal(versions.length, 5);
 
     const baselineApk = versions.find((version) => version.version_type_id === 'apk' && version.version === '0.0.1.1');
     assert.ok(baselineApk);
@@ -166,8 +166,18 @@ test('migration seeds unified build version ledger', async () => {
     assert.match(secondTaskBuild.detailed_changes, /codex task branches deploy to isolated preview slots/);
     assert.equal(secondTaskBuild.reason, 'Accepted clean task finish workflow into dev.');
 
+    const thirdTaskBuild = versions.find((version) => version.version_type_id === 'build' && version.version === '0.0.4.1');
+    assert.ok(thirdTaskBuild);
+    assert.equal(thirdTaskBuild.major_version, 0);
+    assert.equal(thirdTaskBuild.release_version, 0);
+    assert.equal(thirdTaskBuild.build_version, 4);
+    assert.equal(thirdTaskBuild.apk_version, 1);
+    assert.equal(thirdTaskBuild.released_at_utc, '2026-06-24T14:25:00Z');
+    assert.match(thirdTaskBuild.detailed_changes, /preview slot has already been released/);
+    assert.equal(thirdTaskBuild.reason, 'Accepted preview cleanup workflow into dev.');
+
     fixture.store.migrate();
-    assert.equal(fixture.store.db.prepare('SELECT COUNT(*) AS count FROM build_versions').get().count, 4);
+    assert.equal(fixture.store.db.prepare('SELECT COUNT(*) AS count FROM build_versions').get().count, 5);
   } finally {
     await fixture.close();
   }
