@@ -22,7 +22,7 @@ npm --prefix services/timer_api test
 
 Public version baseline:
 
-- App/web/OTA version: `0.0.3.1`
+- App/web/OTA version: `0.0.4.1`
 - Baseline version: `0.0.1.1`
 - Android `versionCode`: `1`
 - Release ledger table: `build_versions`

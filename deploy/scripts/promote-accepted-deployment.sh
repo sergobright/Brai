@@ -11,14 +11,17 @@ TARGET_BRANCH="${BRIGHT_OS_TARGET_BRANCH:?BRIGHT_OS_TARGET_BRANCH is required}"
 TARGET_COMMIT="${BRIGHT_OS_TARGET_COMMIT:?BRIGHT_OS_TARGET_COMMIT is required}"
 
 if [[ "$TARGET_ENVIRONMENT" == "dev" ]]; then
-  SLOT="$("$NODE_BIN" -e '
+  if ! SLOT="$("$NODE_BIN" -e '
 const fs = require("node:fs");
 const path = process.env.BRIGHT_OS_PREVIEW_REGISTRY || `${process.env.BRIGHT_OS_ENVS_ROOT || "/srv/projects/bright-os-envs"}/preview-slots.json`;
 const branch = process.argv[1];
 const registry = JSON.parse(fs.readFileSync(path, "utf8"));
 for (const slot of ["A", "B", "C", "D", "E"]) if (registry[slot]?.branch === branch) { console.log(slot); process.exit(0); }
 process.exit(1);
-' "$SOURCE_BRANCH")"
+' "$SOURCE_BRANCH")"; then
+    echo "No preview slot found for $SOURCE_BRANCH; skipping metadata promotion."
+    exit 0
+  fi
   SOURCE_DB="$ENVS_ROOT/preview-${SLOT,,}/data/timer.sqlite"
   TARGET_DB="$ENVS_ROOT/dev/data/timer.sqlite"
   TARGET_DOMAIN="dev.brightos.world"
