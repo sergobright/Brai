@@ -101,6 +101,11 @@ export const migrationMethods = {
       this.seedPreviewVersionSemanticsBuildVersion();
       this.recordMigration(15, 'record preview version semantics task');
     }
+
+    if (!this.hasMigration(16)) {
+      this.seedProductionAndroidOtaApiBuildVersion();
+      this.recordMigration(16, 'record production Android OTA API endpoint fix');
+    }
   }
 ,
 
@@ -737,6 +742,40 @@ export const migrationMethods = {
       'Recorded the fifth accepted public task: preview deployments keep the current accepted dev app version and record preview deployment metadata, while the next public build version becomes visible only after deploy-dev succeeds.',
       'Accepted preview/dev version separation into dev.',
       '2026-06-24T15:10:00Z',
+      now
+    );
+  }
+,
+
+  seedProductionAndroidOtaApiBuildVersion() {
+    const now = new Date().toISOString();
+    this.db.prepare(`
+        INSERT INTO build_versions (
+          version_type_id,
+          major_version,
+          release_version,
+          build_version,
+          apk_version,
+          version,
+          short_changes,
+          detailed_changes,
+          reason,
+          released_at_utc,
+          created_at_utc
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(version_type_id, version) DO NOTHING
+      `).run(
+      'build',
+      0,
+      0,
+      7,
+      1,
+      '0.0.7.1',
+      'Accepted production Android OTA API endpoint fix.',
+      'Recorded the sixth accepted public task: production Android web/OTA bundles use the public API endpoint while browser web keeps same-origin /api, and OTA manifests are prepared for cache-safe publication.',
+      'Accepted production Android OTA API endpoint fix into dev.',
+      '2026-06-24T18:20:00Z',
       now
     );
   }

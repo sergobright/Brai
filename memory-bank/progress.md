@@ -15,6 +15,7 @@
 - Third accepted `dev` task version is `0.0.4.1`.
 - Fourth accepted `dev` task version is `0.0.5.1`.
 - Fifth accepted `dev` task version is `0.0.6.1`.
+- Sixth accepted `dev` task version is `0.0.7.1`.
 
 ## Current State
 
