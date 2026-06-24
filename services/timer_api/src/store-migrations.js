@@ -96,6 +96,11 @@ export const migrationMethods = {
       this.seedEnvironmentFaviconBuildVersion();
       this.recordMigration(14, 'record environment favicon task');
     }
+
+    if (!this.hasMigration(15)) {
+      this.seedPreviewVersionSemanticsBuildVersion();
+      this.recordMigration(15, 'record preview version semantics task');
+    }
   }
 ,
 
@@ -698,6 +703,40 @@ export const migrationMethods = {
       'Recorded the fourth accepted public task: dev and preview web/PWA builds use environment-specific favicon and manifest icon assets while production keeps the canonical Bright OS icons.',
       'Accepted dev and preview favicon separation into dev.',
       '2026-06-24T14:40:00Z',
+      now
+    );
+  }
+,
+
+  seedPreviewVersionSemanticsBuildVersion() {
+    const now = new Date().toISOString();
+    this.db.prepare(`
+        INSERT INTO build_versions (
+          version_type_id,
+          major_version,
+          release_version,
+          build_version,
+          apk_version,
+          version,
+          short_changes,
+          detailed_changes,
+          reason,
+          released_at_utc,
+          created_at_utc
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(version_type_id, version) DO NOTHING
+      `).run(
+      'build',
+      0,
+      0,
+      6,
+      1,
+      '0.0.6.1',
+      'Accepted preview version semantics.',
+      'Recorded the fifth accepted public task: preview deployments keep the current accepted dev app version and record preview deployment metadata, while the next public build version becomes visible only after deploy-dev succeeds.',
+      'Accepted preview/dev version separation into dev.',
+      '2026-06-24T15:10:00Z',
       now
     );
   }

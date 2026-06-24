@@ -42,6 +42,22 @@ else
   echo "Skipping client build because BRIGHT_OS_BUILD_CLIENT=$BUILD_CLIENT"
 fi
 
+"$NODE_BIN" -e '
+const fs = require("node:fs");
+const path = require("node:path");
+const [root, version] = process.argv.slice(1);
+const outVersionFile = path.join(root, "apps/bright_os_app/out/version.json");
+const publicVersionFile = path.join(root, "apps/bright_os_app/public/version.json");
+const sourceFile = fs.existsSync(outVersionFile) ? outVersionFile : publicVersionFile;
+const parsed = fs.existsSync(sourceFile) ? JSON.parse(fs.readFileSync(sourceFile, "utf8")) : {};
+const [major, release, build, apk] = version.split(".").map(Number);
+Object.assign(parsed, {
+  version,
+  versionParts: { major, release, build, apk },
+});
+fs.writeFileSync(outVersionFile, `${JSON.stringify(parsed, null, 2)}\n`);
+' "$ROOT" "$VERSION"
+
 echo "Publishing browser web assets..."
 "$SCRIPT_DIR/publish-web.sh"
 

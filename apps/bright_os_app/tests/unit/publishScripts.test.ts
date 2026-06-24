@@ -45,6 +45,11 @@ describe("mobile OTA publish scripts", () => {
     await expect(
       readFile(path.join(root, "deploy/mobile-update/bundles", bundleVersion, "bundle.zip")),
     ).resolves.toBeInstanceOf(Buffer);
+    const webVersion = JSON.parse(await readFile(path.join(root, "deploy/web/version.json"), "utf8"));
+    expect(webVersion).toMatchObject({
+      version: "9.9.9.99",
+      versionParts: { major: 9, release: 9, build: 9, apk: 99 },
+    });
     expect(manifest.bundleVersion).toBe(bundleVersion);
   });
 

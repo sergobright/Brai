@@ -8,6 +8,8 @@
 
 `codex/*` pushes deploy to an allocated preview slot (`a.test` through `e.test`) with that slot's web shell, API service, SQLite data path, and mobile OTA endpoint. Production apps and `dev.brightos.world` are not updated until the branch is accepted into `dev` or promoted to `main`.
 
+Preview deployments are review environments, not accepted build versions. They record deployment metadata in `deployment_records`, but their visible app/web version must stay on the current accepted `dev` version with a preview OTA bundle suffix. A new public build version becomes real only after the change is accepted into `dev` and `deploy-dev` succeeds.
+
 Before the first project-file change for a task, branch from the latest accepted base. Ordinary future task work starts from `origin/dev` unless another base is explicitly requested.
 
 Read-only questions, planning, and investigation without project-file changes do not need a branch or preview slot.
