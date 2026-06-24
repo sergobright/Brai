@@ -6,6 +6,7 @@ import type { SectionId } from "../appModel";
 import { navItems } from "../appModel";
 
 type SectionSwipeStart = { identifier: number; x: number; y: number; lastX: number; lastTime: number; width: number; axis?: "horizontal" | "vertical"; };
+type LeftEdgeMenuSwipeStart = { identifier: number; x: number; y: number; axis?: "horizontal" | "vertical"; };
 type SectionSwipeVisual = { phase: "dragging" | "settling"; from: SectionId; to: SectionId | null; deltaX: number; width: number; };
 const SECTION_SWIPE_MIN_DISTANCE = 72;
 const SECTION_SWIPE_MAX_VERTICAL_DRIFT = 58;
@@ -16,6 +17,7 @@ const SECTION_SWIPE_FAST_VELOCITY = 0.55;
 const SECTION_SWIPE_EDGE_RESISTANCE = 0.28;
 const SECTION_SWIPE_SETTLE_MS = 220;
 const SECTION_SWIPE_EASING = "cubic-bezier(0.22, 1, 0.36, 1)";
+const LEFT_EDGE_MENU_SWIPE_START_PX = 24;
 const NAV_SWIPE_EXCLUSION_SELECTOR = "[data-nav-swipe-exclusion], input, textarea, select, button, a, [role='button'], [role='slider']";
 
 /**
@@ -145,6 +147,76 @@ export function useSectionSwipeNavigation(
   }
 
   return { handlers: { onTouchStart, onTouchMove, onTouchEnd, onTouchCancel }, visual };
+}
+
+/**
+ * Opens the mobile left menu from a left-edge swipe outside the bottom dock zone.
+ */
+export function useLeftEdgeMenuSwipe(onOpen: () => void, enabled: boolean) {
+  const swipeStartRef = useRef<LeftEdgeMenuSwipeStart | null>(null);
+
+  function onTouchStart(event: TouchEvent<HTMLElement>) {
+    const touch = event.changedTouches[0];
+    if (
+      !enabled ||
+      !touch ||
+      !isMobileNavigationViewport() ||
+      touch.clientX > LEFT_EDGE_MENU_SWIPE_START_PX ||
+      isNavSwipeExcludedTarget(event.target, event.currentTarget)
+    ) {
+      swipeStartRef.current = null;
+      return;
+    }
+
+    swipeStartRef.current = {
+      identifier: touch.identifier,
+      x: touch.clientX,
+      y: touch.clientY,
+    };
+  }
+
+  function onTouchMove(event: TouchEvent<HTMLElement>) {
+    const start = swipeStartRef.current;
+    if (!start) return;
+
+    const touch = Array.from(event.changedTouches).find((item) => item.identifier === start.identifier);
+    if (!touch) return;
+
+    const deltaX = touch.clientX - start.x;
+    const deltaY = touch.clientY - start.y;
+    const horizontal = Math.abs(deltaX);
+    const vertical = Math.abs(deltaY);
+
+    if (!start.axis && (horizontal >= SECTION_SWIPE_AXIS_LOCK_DISTANCE || vertical >= SECTION_SWIPE_AXIS_LOCK_DISTANCE)) {
+      if (deltaX > 0 && horizontal > vertical && vertical / horizontal <= SECTION_SWIPE_VERTICAL_RATIO) {
+        start.axis = "horizontal";
+      } else if (vertical > horizontal || deltaX < 0) {
+        start.axis = "vertical";
+        return;
+      }
+    }
+
+    if (start.axis === "horizontal" && event.cancelable) event.preventDefault();
+  }
+
+  function onTouchEnd(event: TouchEvent<HTMLElement>) {
+    const start = swipeStartRef.current;
+    if (!start) return;
+    swipeStartRef.current = null;
+
+    const touch = Array.from(event.changedTouches).find((item) => item.identifier === start.identifier);
+    if (!touch || start.axis === "vertical") return;
+
+    const deltaX = touch.clientX - start.x;
+    const deltaY = touch.clientY - start.y;
+    if (deltaX >= SECTION_SWIPE_MIN_DISTANCE && isSwipeAxisAllowed(deltaX, deltaY)) onOpen();
+  }
+
+  function onTouchCancel() {
+    swipeStartRef.current = null;
+  }
+
+  return { handlers: { onTouchStart, onTouchMove, onTouchEnd, onTouchCancel } };
 }
 
 function isSectionSwipe(deltaX: number, deltaY: number): boolean {

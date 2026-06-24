@@ -1,14 +1,18 @@
 import { expect, test, type Page } from "@playwright/test";
 import { swipeTouch } from "./shell-helpers";
 
-test("tracks mobile tab swipes with page transforms", async ({ page }, testInfo) => {
+test("tracks mobile tab swipes with page transforms from the bottom dock", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "mobile", "mobile touch gesture only");
 
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "Действия" })).toBeVisible();
 
-  await dispatchTouch(page, "touchstart", { x: 320, y: 220 });
-  await dispatchTouch(page, "touchmove", { x: 240, y: 224 });
+  const dockBox = await page.locator(".main-dock").boundingBox();
+  if (!dockBox) throw new Error("Missing bottom menu geometry");
+  const y = Math.round(dockBox.y + dockBox.height / 2);
+
+  await dispatchTouch(page, "touchstart", { x: 320, y }, ".main-dock");
+  await dispatchTouch(page, "touchmove", { x: 240, y: y + 4 }, ".main-dock");
 
   await expect(page.locator('[data-section-page="actions"]')).toHaveAttribute(
     "style",
@@ -16,7 +20,7 @@ test("tracks mobile tab swipes with page transforms", async ({ page }, testInfo)
   );
   await expect(page.locator('[data-section-page="focus"]')).toHaveCount(1);
 
-  await dispatchTouch(page, "touchend", { x: 180, y: 224 });
+  await dispatchTouch(page, "touchend", { x: 180, y: y + 4 }, ".main-dock");
   await expect(page.getByRole("heading", { name: "Фокус" })).toBeVisible();
 });
 
@@ -26,8 +30,12 @@ test("keeps current and adjacent screen gutters aligned during mobile swipes", a
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "Действия" })).toBeVisible();
 
-  await dispatchTouch(page, "touchstart", { x: 320, y: 220 });
-  await dispatchTouch(page, "touchmove", { x: 240, y: 224 });
+  const dockBox = await page.locator(".main-dock").boundingBox();
+  if (!dockBox) throw new Error("Missing bottom menu geometry");
+  const y = Math.round(dockBox.y + dockBox.height / 2);
+
+  await dispatchTouch(page, "touchstart", { x: 320, y }, ".main-dock");
+  await dispatchTouch(page, "touchmove", { x: 240, y: y + 4 }, ".main-dock");
 
   const geometry = await page.evaluate(() => {
     function read(selector: string) {
@@ -88,6 +96,24 @@ test("tracks mobile tab swipes from the full-width bottom menu zone", async ({ p
 
   await dispatchTouch(page, "touchend", { x: startX - 140, y: y + 4 }, ".main-dock");
   await expect(page.getByRole("heading", { name: "Фокус" })).toBeVisible();
+});
+
+test("opens the mobile menu from the left edge outside the bottom dock", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "mobile", "mobile touch gesture only");
+
+  await page.goto("/");
+  await expect(page.getByRole("heading", { name: "Действия" })).toBeVisible();
+
+  await dispatchTouch(page, "touchstart", { x: 2, y: 220 });
+  await dispatchTouch(page, "touchmove", { x: 88, y: 224 });
+  await dispatchTouch(page, "touchend", { x: 116, y: 224 });
+
+  const drawer = page.locator(".mobile-profile-drawer");
+  await expect(drawer).toBeVisible();
+  const viewport = page.viewportSize();
+  const box = await drawer.boundingBox();
+  if (!viewport || !box) throw new Error("Missing mobile menu geometry");
+  expect(Math.round(box.width)).toBe(Math.round(viewport.width * 0.8));
 });
 
 test("keeps horizontal page swipes from moving the vertical scroll", async ({ page }, testInfo) => {

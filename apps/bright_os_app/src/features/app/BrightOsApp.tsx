@@ -11,7 +11,7 @@ import { cx } from "./appUtils";
 import { AuthPanel, IconButton, MobileContextSheet, ScreenHeader, ThemeButton } from "./chrome/AppChrome";
 import { useBrightOsAppState } from "./hooks/useBrightOsAppState";
 import { DesktopRail, MainDock, MobileMenuButton, MobileProfileDrawer } from "./navigation/AppNavigation";
-import { sectionSwipePageStyle } from "./navigation/useSectionSwipeNavigation";
+import { sectionSwipePageStyle, useLeftEdgeMenuSwipe } from "./navigation/useSectionSwipeNavigation";
 import { ActionsInfoPanel } from "./sections/actions/ActionsInfoPanel";
 import { ActionsSection } from "./sections/actions/ActionsSection";
 import { ArchiveSection } from "./sections/actions/ArchiveSection";
@@ -26,6 +26,10 @@ export function BrightOsApp({ initialSection = "actions" }: { initialSection?: S
   const sectionRef = useRef(app.section);
   const selectSectionRef = useRef(app.selectSection);
   const adjacentSection = app.swipeNavigation.visual?.to;
+  const mobileMenuSwipe = useLeftEdgeMenuSwipe(
+    () => app.setMobileMenuOpen(true),
+    isPrimarySection(app.section) && !app.mobileMenuOpen && !app.mobileContextPanel && !app.actionOverlayOpen,
+  );
 
   useEffect(() => {
     sectionRef.current = app.section;
@@ -134,7 +138,7 @@ export function BrightOsApp({ initialSection = "actions" }: { initialSection?: S
         onArchive={() => app.selectSection("archive")}
         onLogout={app.onLogout}
       />
-      <SidebarInset className={cx("main-view m-0 h-full min-h-0 w-full min-w-0 overflow-hidden max-[860px]:overscroll-contain max-[860px]:[touch-action:pan-y]", app.swipeNavigation.visual && "is-section-swiping")} {...app.swipeNavigation.handlers}>
+      <SidebarInset className={cx("main-view m-0 h-full min-h-0 w-full min-w-0 overflow-hidden max-[860px]:overscroll-contain max-[860px]:[touch-action:pan-y]", app.swipeNavigation.visual && "is-section-swiping")} {...mobileMenuSwipe.handlers}>
         {app.section === "focus" ? <FocusBackground active={app.active} mode={app.focusBackground} /> : null}
         <ScrollArea scrollbar={false} className="main-scroll relative z-[1] h-full [&>[data-slot=scroll-area-viewport]>div]:h-full max-[860px]:[&>[data-slot=scroll-area-viewport]]:overscroll-contain max-[860px]:[&>[data-slot=scroll-area-viewport]]:[touch-action:pan-y]">
           <div className="section-swipe-stage relative m-0 h-full min-h-0 w-full overflow-x-hidden overflow-y-visible">

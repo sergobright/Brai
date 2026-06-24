@@ -129,7 +129,7 @@ export function MobileProfileDrawer({
       <div ref={backdropRef} className="absolute inset-0 bg-foreground/15 dark:bg-background/80" style={backdropStyle} aria-hidden="true" />
       <aside
         ref={sheetRef}
-        className="mobile-profile-drawer grid h-full w-[70vw] min-w-[250px] max-w-[340px] content-start border-r border-border bg-card px-2 pb-4 pt-[calc(12px+env(safe-area-inset-top))] shadow-xl animate-[mobile-drawer-in_180ms_ease-out] [touch-action:pan-y] will-change-transform"
+        className="mobile-profile-drawer grid h-full w-4/5 content-start border-r border-border bg-card px-2 pb-4 pt-[calc(12px+env(safe-area-inset-top))] shadow-xl animate-[mobile-drawer-in_180ms_ease-out] [touch-action:pan-y] will-change-transform"
         style={sheetStyle}
         aria-label="Профиль"
         {...sheetDragHandlers}

@@ -25,7 +25,7 @@ describe("BrightOsApp gestures", () => {
     cleanupBase();
   });
 
-  it("moves the current and adjacent screens with the finger during horizontal drags", () => {
+  it("does not move screens from horizontal page-body drags", () => {
     render(<BrightOsApp />);
     const main = screen.getByRole("main");
 
@@ -37,24 +37,32 @@ describe("BrightOsApp gestures", () => {
     });
 
     const current = document.querySelector('[data-section-page="actions"]');
-    const adjacent = document.querySelector('[data-section-page="focus"]');
 
     expect(current).toBeInstanceOf(HTMLElement);
-    expect(adjacent).toBeInstanceOf(HTMLElement);
-    expect((current as HTMLElement).style.transform).toBe("translate3d(-80px, 0, 0)");
-    expect((current as HTMLElement).style.transition).toBe("none");
-    expect((adjacent as HTMLElement).style.transform).toBe("translate3d(280px, 0, 0)");
+    expect((current as HTMLElement).style.transform).toBe("");
+    expect(document.querySelector('[data-section-page="focus"]')).not.toBeInTheDocument();
   });
 
-  it("switches adjacent mobile tabs by horizontal swipes", async () => {
+  it("opens the mobile profile drawer from a left-edge page swipe", async () => {
     render(<BrightOsApp />);
     const main = screen.getByRole("main");
 
-    swipe(main, { fromX: 320, toX: 180 });
-    await waitFor(() => expect(screen.getByRole("heading", { name: "Фокус" })).toBeInTheDocument());
+    fireEvent.touchStart(main, {
+      changedTouches: [{ identifier: 1, clientX: 2, clientY: 220 }],
+    });
+    fireEvent.touchMove(main, {
+      changedTouches: [{ identifier: 1, clientX: 88, clientY: 224 }],
+    });
+    fireEvent.touchEnd(main, {
+      changedTouches: [{ identifier: 1, clientX: 116, clientY: 224 }],
+    });
 
-    swipe(main, { fromX: 180, toX: 320 });
-    await waitFor(() => expect(screen.getByRole("heading", { name: "Действия" })).toBeInTheDocument());
+    const drawer = await waitFor(() => {
+      const current = document.querySelector(".mobile-profile-drawer");
+      expect(current).toBeInstanceOf(HTMLElement);
+      return current as HTMLElement;
+    });
+    expect(drawer).toHaveClass("w-4/5");
   });
 
   it("switches adjacent mobile tabs by swiping anywhere across the bottom menu zone", async () => {
@@ -83,10 +91,11 @@ describe("BrightOsApp gestures", () => {
 
   it("does not switch mobile tabs while the profile drawer is open", () => {
     render(<BrightOsApp />);
-    const main = screen.getByRole("main");
+    const dock = document.querySelector(".main-dock");
+    expect(dock).toBeInstanceOf(HTMLElement);
 
     fireEvent.click(screen.getByRole("button", { name: "Открыть меню" }));
-    swipe(main, { fromX: 320, toX: 180 });
+    swipe(dock as HTMLElement, { fromX: 320, toX: 180 });
 
     expect(screen.getByRole("heading", { name: "Действия" })).toBeInTheDocument();
   });
