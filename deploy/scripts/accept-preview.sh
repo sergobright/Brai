@@ -40,7 +40,12 @@ fi
 git fetch origin "$BASE_BRANCH:refs/remotes/origin/$BASE_BRANCH" "$BRANCH:refs/remotes/origin/$BRANCH"
 HEAD_SHA="$(git rev-parse "origin/$BRANCH")"
 
-PR_NUMBER="$(gh pr view "$BRANCH" --json number --jq ".number" 2>/dev/null || true)"
+if git merge-base --is-ancestor "$HEAD_SHA" "origin/$BASE_BRANCH"; then
+  echo "Preview branch already accepted: $HEAD_SHA is included in origin/$BASE_BRANCH"
+  exit 0
+fi
+
+PR_NUMBER="$(gh pr list --base "$BASE_BRANCH" --head "$BRANCH" --state open --json number --jq ".[0].number // \"\"")"
 if [[ -z "$PR_NUMBER" ]]; then
   PR_TITLE="Accept ${BRANCH#codex/}"
   PR_BODY="$(cat <<BODY
