@@ -30,7 +30,7 @@ Acceptance trigger:
 
 - If the project owner says `Принято`, `принимаю`, `accepted`, or an equivalent acceptance phrase after a preview handoff, run `deploy/scripts/accept-preview.sh <codex-branch>` immediately. Negated phrases such as `пока не принято` or `не принято` are not acceptance triggers.
 - The script is the single local acceptance entrypoint. It creates or reuses a GitHub PR into `dev` and calls `gh pr merge --merge --auto --match-head-commit <sha>` so branch protection, checks, merge queue, `deploy-dev`, metadata promotion, and preview-slot release stay in GitHub Actions.
-- After starting acceptance, monitor GitHub Actions until `dev` deploy and preview-slot release finish, or report the exact PR/check/merge-queue/deploy blocker.
+- After starting acceptance, monitor GitHub Actions until `dev` deploy and preview-slot release finish, or report the exact PR/check/merge-queue/deploy/release blocker. Accepted preview slots are released only by the successful `deploy-dev` post-step, after metadata promotion; that step requires a real slot release and fails if the accepted branch did not release one.
 
 The development repository default branch should be `dev` once `dev` exists. If `dev` is missing during the first accepted preview, bootstrap it from the latest accepted workflow/source commit, set GitHub default branch to `dev`, then merge the accepted `codex/*` branch into `dev` through a PR so the normal promotion and slot-release jobs run.
 

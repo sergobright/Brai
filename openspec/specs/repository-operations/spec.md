@@ -72,6 +72,8 @@ Ordinary `codex/*` task branch pushes to `origin` and their preview deploys SHAL
 - **THEN** the agent runs `deploy/scripts/accept-preview.sh <codex-branch>` instead of replying with a text-only acknowledgement
 - **AND** the script creates or reuses a GitHub pull request from the preview branch into `dev`
 - **AND** the script enables merge or auto-merge for the exact pushed preview head commit
+- **AND** the successful `deploy-dev` workflow promotes accepted preview metadata before releasing the preview slot
+- **AND** preview-slot release is a required acceptance completion step and fails the workflow if the accepted branch did not release a slot
 - **AND** the agent monitors the GitHub PR, merge queue, `deploy-dev`, metadata promotion, and preview-slot release until completion or an explicit blocker is known
 - **AND** the work is merged into `dev` before production
 - **AND** `dev` is promoted to `main` only after an explicit production release or merge request

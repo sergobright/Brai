@@ -87,6 +87,17 @@ jobs:
           BRIGHT_DEPLOY_SSH_KEY: ${{ secrets.BRIGHT_DEPLOY_SSH_KEY }}
           BRIGHT_OS_BRANCH: dev
           BRIGHT_OS_COMMIT: ${{ github.sha }}
+      - run: deploy/scripts/ci-ssh-complete-accepted-previews.sh
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          BRIGHT_DEPLOY_HOST: ${{ vars.BRIGHT_DEPLOY_HOST }}
+          BRIGHT_DEPLOY_USER: ${{ vars.BRIGHT_DEPLOY_USER }}
+          BRIGHT_DEPLOY_SSH_PORT: ${{ vars.BRIGHT_DEPLOY_SSH_PORT || '22' }}
+          BRIGHT_DEPLOY_REPO: ${{ vars.BRIGHT_DEPLOY_REPO || '/srv/projects/bright-os' }}
+          BRIGHT_DEPLOY_SSH_KEY: ${{ secrets.BRIGHT_DEPLOY_SSH_KEY }}
+          BRIGHT_OS_TARGET_BRANCH: dev
+          BRIGHT_OS_TARGET_COMMIT: ${{ github.sha }}
 
   deploy-prod:
     needs: checks
@@ -106,25 +117,11 @@ jobs:
 
   release-preview-slot:
     if: |
-      (github.event_name == 'pull_request' && github.event.action == 'closed' && github.event.pull_request.merged == true && github.base_ref == 'dev' && startsWith(github.head_ref, 'codex/')) ||
       (github.event_name == 'delete' && github.event.ref_type == 'branch' && startsWith(github.event.ref, 'codex/')) ||
       (github.event_name == 'workflow_dispatch' && startsWith(inputs.release_branch, 'codex/'))
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Promote accepted preview metadata into dev
-        if: github.event_name == 'pull_request'
-        run: deploy/scripts/ci-ssh-promote-deployment.sh
-        env:
-          BRIGHT_DEPLOY_HOST: ${{ vars.BRIGHT_DEPLOY_HOST }}
-          BRIGHT_DEPLOY_USER: ${{ vars.BRIGHT_DEPLOY_USER }}
-          BRIGHT_DEPLOY_SSH_PORT: ${{ vars.BRIGHT_DEPLOY_SSH_PORT || '22' }}
-          BRIGHT_DEPLOY_REPO: ${{ vars.BRIGHT_DEPLOY_REPO || '/srv/projects/bright-os' }}
-          BRIGHT_DEPLOY_SSH_KEY: ${{ secrets.BRIGHT_DEPLOY_SSH_KEY }}
-          BRIGHT_OS_SOURCE_BRANCH: ${{ github.head_ref }}
-          BRIGHT_OS_TARGET_ENVIRONMENT: dev
-          BRIGHT_OS_TARGET_BRANCH: dev
-          BRIGHT_OS_TARGET_COMMIT: ${{ github.event.pull_request.merge_commit_sha }}
       - run: deploy/scripts/ci-ssh-release-slot.sh
         env:
           BRIGHT_DEPLOY_HOST: ${{ vars.BRIGHT_DEPLOY_HOST }}
