@@ -10,6 +10,7 @@ DEPLOY_REPO="${BRIGHT_DEPLOY_REPO:-/srv/projects/bright-os}"
 SSH_PORT="${BRIGHT_DEPLOY_SSH_PORT:-22}"
 ENVS_ROOT="${BRIGHT_OS_ENVS_ROOT:-/srv/projects/bright-os-envs}"
 REQUIRE_RELEASE="${BRIGHT_OS_REQUIRE_PREVIEW_SLOT_RELEASE:-false}"
+NODE_BIN="${NODE_BIN:-node}"
 KEY_FILE="$(mktemp "${TMPDIR:-/tmp}/bright-deploy-key.XXXXXX")"
 cleanup() {
   rm -f "$KEY_FILE"
@@ -19,7 +20,7 @@ trap cleanup EXIT
 printf '%s\n' "$BRIGHT_DEPLOY_SSH_KEY" >"$KEY_FILE"
 chmod 600 "$KEY_FILE"
 
-ssh -i "$KEY_FILE" -p "$SSH_PORT" -o StrictHostKeyChecking=accept-new "$BRIGHT_DEPLOY_USER@$BRIGHT_DEPLOY_HOST" \
+RELEASE_JSON="$(ssh -i "$KEY_FILE" -p "$SSH_PORT" -o StrictHostKeyChecking=accept-new "$BRIGHT_DEPLOY_USER@$BRIGHT_DEPLOY_HOST" \
   bash -s -- "$DEPLOY_REPO" "$ENVS_ROOT" "$BRIGHT_OS_BRANCH" "$REQUIRE_RELEASE" <<'REMOTE'
 set -euo pipefail
 DEPLOY_REPO="$1"
@@ -62,11 +63,14 @@ fi
 cd "$RELEASE_ROOT"
 RELEASE_JSON="$(bash deploy/scripts/preview-slots.sh release "$BRIGHT_OS_BRANCH")"
 printf '%s\n' "$RELEASE_JSON"
-if [[ "$REQUIRE_RELEASE" == "true" ]]; then
-  RELEASED="$(printf '%s' "$RELEASE_JSON" | node -e 'let raw = ""; process.stdin.on("data", c => raw += c); process.stdin.on("end", () => console.log(JSON.parse(raw).released === true ? "true" : "false"));')"
-  if [[ "$RELEASED" != "true" ]]; then
-    echo "Required preview slot release did not release a slot for $BRIGHT_OS_BRANCH." >&2
-    exit 1
-  fi
-fi
 REMOTE
+)"
+printf '%s\n' "$RELEASE_JSON"
+RELEASED="$(printf '%s' "$RELEASE_JSON" | "$NODE_BIN" -e 'let raw = ""; process.stdin.on("data", c => raw += c); process.stdin.on("end", () => console.log(JSON.parse(raw).released === true ? "true" : "false"));')"
+if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
+  printf 'released=%s\n' "$RELEASED" >>"$GITHUB_OUTPUT"
+fi
+if [[ "$REQUIRE_RELEASE" == "true" && "$RELEASED" != "true" ]]; then
+  echo "Required preview slot release did not release a slot for $BRIGHT_OS_BRANCH." >&2
+  exit 1
+fi

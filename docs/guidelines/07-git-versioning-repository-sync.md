@@ -12,11 +12,13 @@ Preview deployments are review environments, not accepted build versions. They r
 
 GitHub PRs are review and merge records, not version numbers. Version numbers come from the `build_versions` ledger: accepted working-branch merges into `dev` create `Z`, and `dev` to `main` production promotions create `Y`.
 
+Temporal is the required CI/CD control ledger. If a delivery/versioning process changes, update the Temporal workflow state, signals, tests, and `docs/operations/temporal-ci-cd.md` in the same branch. Required delivery work must not live only in GitHub Actions or shell scripts.
+
 Before the first project-file change for a task, branch from the latest accepted base. Ordinary future task work starts from `origin/dev` unless another base is explicitly requested.
 
 Read-only questions, planning, and investigation without project-file changes do not need a branch or preview slot.
 
-Implementation work that changes project files is not complete until the task branch is pushed, CI/deploy has assigned or reused a preview slot, and the user-facing handoff names the preview letter and URL. If all five preview slots are occupied, the branch is queued for the next released slot; report the queued status and position/source if available, but do not describe the task as complete until a slot letter and URL exist.
+Implementation work that changes project files is not complete until the task branch is pushed, CI/deploy has assigned or reused a preview slot, and the user-facing handoff names the preview letter and URL. When the current branch/commit is actually deployed to a preview slot, the single final handoff response must start with the slot emoji plus `Preview`, for example `🅰️ Preview` (`🅰️`, `🅱️`, `🅲`, `🅳`, or `🅴`); skip the emoji line for intermediary updates, status replies, questions, acceptance monitoring, and any reply where the slot or deployed commit is unverified. If all five preview slots are occupied, the branch is queued for the next released slot; report the queued status and position/source if available, but do not describe the task as complete until a slot letter and URL exist.
 
 After a preview handoff, the project owner saying `Принято`, `принимаю`, `accepted`, or an equivalent acceptance phrase is an acceptance trigger, not a conversational acknowledgement. Negated phrases such as `пока не принято` or `не принято` are not acceptance triggers. Run `deploy/scripts/accept-preview.sh <codex-branch>` immediately, then monitor the GitHub PR/merge queue, `deploy-dev`, and preview-slot release until completion or an explicit blocker/queue state is known. Do not answer with only "принято".
 

@@ -16,6 +16,7 @@
 - `apps/bright_os_app/android/app/src/main/` - Android native boundary, ресурсы, icons, generated assets.
 - `apps/bright_os_app/android/app/src/main/java/world/brightos/bright_os_client/` - native Android код приложения; `ota/` и `timer/` - частые точки входа.
 - `services/bright_os_api/` - Node API, WebSocket/HTTP server и SQLite store.
+- `services/bright_os_temporal/` - Temporal worker/client для required CI/CD control ledger preview и promotion flows.
 - `admin/` - техническая admin-панель для protected admin subdomain.
 - `deploy/scripts/` - publish scripts; `deploy/systemd/` - service units; `deploy/web/` и `deploy/mobile-update/bundles/` - опубликованные артефакты.
 - `deploy/ansible/` и `deploy/environments.json` - one-VPS prod/dev/preview environment setup and routing source.
@@ -44,6 +45,8 @@
 - `deploy/scripts/accept-preview.sh <codex-branch>` - deterministic acceptance entrypoint when the project owner accepts a preview; creates/reuses PR into `dev` and enables merge/auto-merge.
 - `npm --prefix services/bright_os_api test` - тесты Bright OS API.
 - `npm --prefix services/bright_os_api start` - запуск Bright OS API.
+- `npm --prefix services/bright_os_temporal test` - state tests для Temporal CI/CD workflow package.
+- `npm --prefix services/bright_os_temporal start` - запуск Temporal worker against `127.0.0.1:7233`.
 
 ## Первые чтения по типу задачи
 

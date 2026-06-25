@@ -17,7 +17,7 @@ A pushed `codex/*` branch allocates or reuses a preview slot through `deploy/scr
 
 Local dev server URLs are agent-only verification aids. The user-facing handoff for project changes is the preview slot URL after `deploy-preview` succeeds; if CI/deploy is not complete, report that blocker instead of asking the project owner to open `localhost` or `127.0.0.1`.
 
-For implementation tasks, the final response must include the preview letter (`A` through `E`), preview URL, branch, and commit. If the preview letter or URL is missing because every slot is occupied, the response must say the branch is queued and include queue position/source when available. If it is missing for any other reason, the response must say exactly which push, CI, or deploy step blocked it. Ordinary `codex/*` branch push/deploy is standing Bright OS CI/CD automation and must not be treated as an optional manual confirmation step.
+For implementation tasks, the final handoff response must include the preview letter (`A` through `E`), preview URL, branch, and commit. When the current branch/commit is actually deployed to a preview slot, that single final handoff response must start with the slot emoji plus `Preview`, for example `🅰️ Preview` (`🅰️`, `🅱️`, `🅲`, `🅳`, or `🅴`). Do not print a preview emoji in intermediary updates, status replies, questions, acceptance monitoring, or any reply where the slot or deployed commit is unverified. If the preview letter or URL is missing because every slot is occupied, the response must say the branch is queued and include queue position/source when available. If it is missing for any other reason, the response must say exactly which push, CI, or deploy step blocked it. Ordinary `codex/*` branch push/deploy is standing Bright OS CI/CD automation and must not be treated as an optional manual confirmation step.
 
 Preview acceptance flow:
 
@@ -25,6 +25,10 @@ Preview acceptance flow:
 codex/* accepted -> accept-preview.sh -> PR/merge queue into dev -> deploy dev -> release preview slot
 dev accepted     -> merge into main -> production release/deploy
 ```
+
+Temporal is the required CI/CD control ledger for this flow. See
+[Temporal CI/CD Orchestration](temporal-ci-cd.md). GitHub Actions still runs the existing checks and deploy scripts, but strict Temporal signals gate the critical transitions. Failed Temporal recording is a blocker, not a reason to bypass checks, deploy jobs, slot registry, or branch protection.
+If this flow changes, update the Temporal workflow state, signals, tests, and the Temporal CI/CD document in the same branch; required delivery work must not live only in GitHub Actions or shell scripts.
 
 Acceptance trigger:
 

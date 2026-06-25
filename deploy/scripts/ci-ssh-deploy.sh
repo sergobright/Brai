@@ -52,7 +52,8 @@ tar \
   -czf - . | ssh -i "$KEY_FILE" -p "$SSH_PORT" -o StrictHostKeyChecking=accept-new "$BRIGHT_DEPLOY_USER@$BRIGHT_DEPLOY_HOST" \
     tar -xzf - -C "$REMOTE_UPLOAD"
 
-ssh -i "$KEY_FILE" -p "$SSH_PORT" -o StrictHostKeyChecking=accept-new "$BRIGHT_DEPLOY_USER@$BRIGHT_DEPLOY_HOST" \
+DEPLOY_OUTPUT=""
+if ! DEPLOY_OUTPUT="$(ssh -i "$KEY_FILE" -p "$SSH_PORT" -o StrictHostKeyChecking=accept-new "$BRIGHT_DEPLOY_USER@$BRIGHT_DEPLOY_HOST" \
   bash -s -- "$DEPLOY_REPO" "$REMOTE_UPLOAD" "$BRIGHT_OS_BRANCH" "$BRIGHT_OS_COMMIT" <<'REMOTE'
 set -euo pipefail
 DEPLOY_REPO="$1"
@@ -103,6 +104,7 @@ if [[ "$BRIGHT_OS_BRANCH" == codex/* ]]; then
   BRIGHT_OS_PREVIEW_SLOT="$(printf '%s' "$ALLOCATION_JSON" | allocation_field slot)"
   BRIGHT_OS_PREVIEW_ALLOCATED_NEW="$(printf '%s' "$ALLOCATION_JSON" | allocation_field allocatedNew)"
   export BRIGHT_OS_PREVIEW_SLOT BRIGHT_OS_PREVIEW_ALLOCATED_NEW
+  printf 'BRIGHT_OS_PREVIEW_SLOT_OUTPUT=%s\n' "$BRIGHT_OS_PREVIEW_SLOT"
   trap mark_preview_failed ERR
 fi
 
@@ -136,3 +138,16 @@ export BRIGHT_OS_BRANCH BRIGHT_OS_COMMIT
 export BRIGHT_OS_ROOT="$SOURCE_ROOT"
 deploy/scripts/deploy-branch.sh
 REMOTE
+)"; then
+  printf '%s\n' "$DEPLOY_OUTPUT"
+  PREVIEW_SLOT="$(printf '%s\n' "$DEPLOY_OUTPUT" | sed -n 's/^BRIGHT_OS_PREVIEW_SLOT_OUTPUT=//p' | tail -n 1)"
+  if [[ -n "${GITHUB_OUTPUT:-}" && -n "$PREVIEW_SLOT" ]]; then
+    printf 'preview_slot=%s\n' "$PREVIEW_SLOT" >>"$GITHUB_OUTPUT"
+  fi
+  exit 1
+fi
+printf '%s\n' "$DEPLOY_OUTPUT"
+PREVIEW_SLOT="$(printf '%s\n' "$DEPLOY_OUTPUT" | sed -n 's/^BRIGHT_OS_PREVIEW_SLOT_OUTPUT=//p' | tail -n 1)"
+if [[ -n "${GITHUB_OUTPUT:-}" && -n "$PREVIEW_SLOT" ]]; then
+  printf 'preview_slot=%s\n' "$PREVIEW_SLOT" >>"$GITHUB_OUTPUT"
+fi

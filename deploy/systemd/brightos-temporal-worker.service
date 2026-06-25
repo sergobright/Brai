@@ -1,0 +1,23 @@
+[Unit]
+Description=Bright OS Temporal CI/CD worker
+Wants=brightos-temporal.service
+After=network-online.target brightos-temporal.service
+
+[Service]
+Type=simple
+User=bright-os
+Group=bright-os
+SupplementaryGroups=bright-deploy
+WorkingDirectory=/srv/projects/bright-os/services/bright_os_temporal
+Environment=TEMPORAL_ADDRESS=127.0.0.1:7233
+Environment=TEMPORAL_NAMESPACE=default
+Environment=BRIGHT_OS_ROOT=/srv/projects/bright-os
+Environment=BRIGHT_OS_ENVS_ROOT=/srv/projects/bright-os-envs
+ExecStart=/srv/opt/node-v22.16.0/bin/node src/worker.mjs
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
