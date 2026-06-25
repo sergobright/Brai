@@ -5,7 +5,25 @@ import type { PendingTimerEvent } from "@/shared/types/timer";
 
 describe("BrightOsApi", () => {
   afterEach(() => {
+    vi.useRealTimers();
     vi.restoreAllMocks();
+  });
+
+  it("aborts hung API requests", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(globalThis, "fetch").mockImplementation((_input, init) => new Promise<Response>((_resolve, reject) => {
+      init?.signal?.addEventListener("abort", () => {
+        const error = new Error("aborted");
+        error.name = "AbortError";
+        reject(error);
+      });
+    }));
+
+    const request = new BrightOsApi("https://api.example.test").state();
+    const expectation = expect(request).rejects.toMatchObject({ name: "AbortError" });
+    await vi.advanceTimersByTimeAsync(8000);
+
+    await expectation;
   });
 
   it("sends global stop metadata with synced timer events", async () => {
