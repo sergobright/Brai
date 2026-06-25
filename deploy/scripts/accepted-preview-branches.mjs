@@ -3,11 +3,14 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 if (path.resolve(process.argv[1] ?? "") === fileURLToPath(import.meta.url)) {
-  const commit = process.argv[2] || process.env.BRIGHT_OS_TARGET_COMMIT || process.env.GITHUB_SHA;
+  const recentMerged = process.argv[2] === "--recent-merged";
+  const commit = recentMerged ? null : process.argv[2] || process.env.BRIGHT_OS_TARGET_COMMIT || process.env.GITHUB_SHA;
   const targetBranch = process.env.BRIGHT_OS_TARGET_BRANCH || "dev";
   const pulls = process.env.BRIGHT_OS_ACCEPTED_PREVIEW_PRS_JSON
     ? JSON.parse(process.env.BRIGHT_OS_ACCEPTED_PREVIEW_PRS_JSON)
-    : await fetchAssociatedPulls(commit);
+    : recentMerged
+      ? await fetchRecentMergedPulls(targetBranch)
+      : await fetchAssociatedPulls(commit);
 
   for (const branch of acceptedPreviewBranches(pulls, targetBranch)) console.log(branch);
 }
@@ -46,5 +49,28 @@ async function fetchAssociatedPulls(commitSha) {
   });
   const body = await response.text();
   if (!response.ok) throw new Error(`GitHub commit PR lookup failed: ${response.status} ${body.slice(0, 300)}`);
+  return JSON.parse(body);
+}
+
+async function fetchRecentMergedPulls(targetBranch) {
+  const repository = process.env.GITHUB_REPOSITORY;
+  if (!repository) throw new Error("GITHUB_REPOSITORY is required");
+  const token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
+  if (!token) throw new Error("GITHUB_TOKEN or GH_TOKEN is required");
+
+  const api = (process.env.GITHUB_API_URL || "https://api.github.com").replace(/\/$/, "");
+  const response = await fetch(
+    `${api}/repos/${repository}/pulls?state=closed&base=${encodeURIComponent(targetBranch)}&sort=updated&direction=desc&per_page=100`,
+    {
+      headers: {
+        Accept: "application/vnd.github+json",
+        Authorization: `Bearer ${token}`,
+        "User-Agent": "bright-os-delivery",
+        "X-GitHub-Api-Version": "2022-11-28",
+      },
+    },
+  );
+  const body = await response.text();
+  if (!response.ok) throw new Error(`GitHub merged PR lookup failed: ${response.status} ${body.slice(0, 300)}`);
   return JSON.parse(body);
 }
