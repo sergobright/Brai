@@ -57,7 +57,7 @@ process.exit(1);
   RUN_ROOT="$ENVS_ROOT/preview-$SLOT/source"
 elif [[ "$BRIGHT_OS_TARGET_ENVIRONMENT" == "prod" ]]; then
   RUN_ROOT="$ENVS_ROOT/dev/source"
-  export BRIGHT_TIMER_DB="$DEPLOY_REPO/data/bright_timer.sqlite"
+  export BRIGHT_OS_DB="$DEPLOY_REPO/data/bright_os.sqlite"
 fi
 
 cd "$RUN_ROOT"

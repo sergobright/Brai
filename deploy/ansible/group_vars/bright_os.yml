@@ -7,42 +7,42 @@ bright_os_deploy_user: bright-deploy
 bright_os_deploy_writers: []
 bright_os_service_user: bright-os
 bright_os_service_group: bright-os
-bright_os_timer_api_env_source: /etc/bright-os/timer-api.env
+bright_os_api_env_source: /etc/bright-os/bright-os-api.env
 bright_os_basic_auth_directive: "import brightos_unified_basic_auth"
 bright_os_envs:
   prod:
     domain: app.brightos.world
     path: prod
     api_port: 3020
-    service: brightos-timer-api.service
+    service: brightos-api.service
   dev:
     domain: dev.brightos.world
     path: dev
     api_port: 3030
-    service: brightos-timer-api-dev.service
+    service: brightos-api-dev.service
   preview-a:
     domain: a.test.brightos.world
     path: preview-a
     api_port: 3031
-    service: brightos-timer-api-preview-a.service
+    service: brightos-api-preview-a.service
   preview-b:
     domain: b.test.brightos.world
     path: preview-b
     api_port: 3032
-    service: brightos-timer-api-preview-b.service
+    service: brightos-api-preview-b.service
   preview-c:
     domain: c.test.brightos.world
     path: preview-c
     api_port: 3033
-    service: brightos-timer-api-preview-c.service
+    service: brightos-api-preview-c.service
   preview-d:
     domain: d.test.brightos.world
     path: preview-d
     api_port: 3034
-    service: brightos-timer-api-preview-d.service
+    service: brightos-api-preview-d.service
   preview-e:
     domain: e.test.brightos.world
     path: preview-e
     api_port: 3035
-    service: brightos-timer-api-preview-e.service
+    service: brightos-api-preview-e.service
 bright_os_preview_status_domain: previews.brightos.world

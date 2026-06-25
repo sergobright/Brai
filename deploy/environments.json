@@ -11,7 +11,7 @@
       "androidFlavor": "production",
       "applicationId": "world.brightos.bright_os_client",
       "apiPort": 3020,
-      "serviceName": "brightos-timer-api.service",
+      "serviceName": "brightos-api.service",
       "path": "prod",
       "releaseKey": "production"
     },
@@ -24,7 +24,7 @@
       "androidFlavor": "dev",
       "applicationId": "world.brightos.bright_os_client.dev",
       "apiPort": 3030,
-      "serviceName": "brightos-timer-api-dev.service",
+      "serviceName": "brightos-api-dev.service",
       "path": "dev",
       "releaseKey": "dev"
     },
@@ -37,7 +37,7 @@
       "androidFlavor": "previewA",
       "applicationId": "world.brightos.bright_os_client.preview.a",
       "apiPort": 3031,
-      "serviceName": "brightos-timer-api-preview-a.service",
+      "serviceName": "brightos-api-preview-a.service",
       "path": "preview-a",
       "releaseKey": "a"
     },
@@ -50,7 +50,7 @@
       "androidFlavor": "previewB",
       "applicationId": "world.brightos.bright_os_client.preview.b",
       "apiPort": 3032,
-      "serviceName": "brightos-timer-api-preview-b.service",
+      "serviceName": "brightos-api-preview-b.service",
       "path": "preview-b",
       "releaseKey": "b"
     },
@@ -63,7 +63,7 @@
       "androidFlavor": "previewC",
       "applicationId": "world.brightos.bright_os_client.preview.c",
       "apiPort": 3033,
-      "serviceName": "brightos-timer-api-preview-c.service",
+      "serviceName": "brightos-api-preview-c.service",
       "path": "preview-c",
       "releaseKey": "c"
     },
@@ -76,7 +76,7 @@
       "androidFlavor": "previewD",
       "applicationId": "world.brightos.bright_os_client.preview.d",
       "apiPort": 3034,
-      "serviceName": "brightos-timer-api-preview-d.service",
+      "serviceName": "brightos-api-preview-d.service",
       "path": "preview-d",
       "releaseKey": "d"
     },
@@ -89,7 +89,7 @@
       "androidFlavor": "previewE",
       "applicationId": "world.brightos.bright_os_client.preview.e",
       "apiPort": 3035,
-      "serviceName": "brightos-timer-api-preview-e.service",
+      "serviceName": "brightos-api-preview-e.service",
       "path": "preview-e",
       "releaseKey": "e"
     }

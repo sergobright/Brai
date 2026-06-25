@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { openProfileMenuItem, setupBrightOsAppTest, stubAndroidCapacitor } from "./app-test-support";
 import { BrightOsApp } from "@/features/app/BrightOsApp";
 import { FocusSection } from "@/features/app/sections/focus/FocusSection";
-import { saveGoalCache, saveHistoryCache } from "@/shared/storage/syncStore";
+import { pendingEvents, saveGoalCache, saveHistoryCache } from "@/shared/storage/syncStore";
 import { emptyGoal, emptyHistory } from "@/shared/types/timer";
 import { shouldSnapSlidingNumber } from "@/shared/ui/sliding-number";
 
@@ -85,6 +85,18 @@ describe("BrightOsApp shell", () => {
     await waitFor(() => expect(document.querySelector(".timer-scroll-hint")).not.toBeInTheDocument());
     expect(document.querySelector(".timer-border-trail")).toBeInTheDocument();
     expect(document.querySelector(".timer-evil-eye-background")).toHaveClass("invert", "dark:invert-0", "opacity-100");
+  });
+
+  it("keeps Focus timer controls local-first while network requests hang", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Promise<Response>(() => undefined)));
+
+    render(<BrightOsApp initialSection="focus" />);
+
+    await waitFor(() => expect(screen.getByRole("button", { name: "Запустить" })).not.toBeDisabled());
+    fireEvent.click(screen.getByRole("button", { name: "Запустить" }));
+
+    await waitFor(() => expect(screen.getByRole("button", { name: /Завершить/ })).not.toBeDisabled());
+    expect(await pendingEvents()).toHaveLength(1);
   });
 
   it("uses SlidingNumber for timer digits", async () => {

@@ -11,10 +11,12 @@ interface RequestOptions extends RequestInit {
   json?: unknown;
 }
 
+const REQUEST_TIMEOUT_MS = 8_000;
+
 /**
- * Wraps the Bright OS timer and activity HTTP API with typed client methods.
+ * Wraps the Bright OS HTTP API with typed client methods.
  */
-export class TimerApi {
+export class BrightOsApi {
   constructor(private readonly baseUrl: string) {}
 
   async session(): Promise<{ authenticated: boolean }> {
@@ -116,16 +118,29 @@ export class TimerApi {
   private async request<T>(path: string, options: RequestOptions = {}): Promise<T> {
     const headers = new Headers(options.headers);
     if (options.json !== undefined) headers.set("content-type", "application/json");
-    const response = await fetch(resolvePath(this.baseUrl, path), {
-      ...options,
-      headers,
-      credentials: "include",
-      body: options.json === undefined ? options.body : JSON.stringify(options.json),
-    });
+    const controller = new AbortController();
+    const abortRequest = () => controller.abort();
+    if (options.signal?.aborted) abortRequest();
+    options.signal?.addEventListener("abort", abortRequest, { once: true });
+    const timeoutId = setTimeout(abortRequest, REQUEST_TIMEOUT_MS);
+    let response: Response;
+
+    try {
+      response = await fetch(resolvePath(this.baseUrl, path), {
+        ...options,
+        headers,
+        credentials: "include",
+        signal: controller.signal,
+        body: options.json === undefined ? options.body : JSON.stringify(options.json),
+      });
+    } finally {
+      clearTimeout(timeoutId);
+      options.signal?.removeEventListener("abort", abortRequest);
+    }
 
     if (!response.ok) {
-      const error = new Error(`timer_api_${response.status}`);
-      error.name = response.status === 401 ? "UnauthorizedError" : "TimerApiError";
+      const error = new Error(`bright_os_api_${response.status}`);
+      error.name = response.status === 401 ? "UnauthorizedError" : "BrightOsApiError";
       throw error;
     }
 

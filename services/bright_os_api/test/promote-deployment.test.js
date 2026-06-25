@@ -3,12 +3,12 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { TimerStore } from '../src/store.js';
+import { BrightOsStore } from '../src/store.js';
 
 test('accepted preview promotion records a PR-matched build version once', () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bright-promote-ledger-'));
   const targetDb = path.join(tmp, 'target.sqlite');
-  const store = new TimerStore(targetDb);
+  const store = new BrightOsStore(targetDb);
 
   try {
     const accepted = {

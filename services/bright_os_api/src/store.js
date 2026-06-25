@@ -6,7 +6,7 @@ import { readModelMethods } from './store-read-models.js';
 import { timerEventMethods } from './store-timer-events.js';
 export { formatActivity, formatSession, groupSessionsByDateHour } from './store-helpers.js';
 
-export class TimerStore {
+export class BrightOsStore {
   constructor(dbPath) {
     this.db = new Database(dbPath);
     this.db.pragma('journal_mode = WAL');
@@ -16,7 +16,7 @@ export class TimerStore {
 }
 
 Object.assign(
-  TimerStore.prototype,
+  BrightOsStore.prototype,
   migrationMethods,
   deploymentMethods,
   timerEventMethods,

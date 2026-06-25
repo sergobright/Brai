@@ -1,7 +1,7 @@
 schema: spec-driven
 context: |
   Bright OS is a public-baseline Next.js/Capacitor productivity app with a
-  Node.js Timer API and self-hosted deployment automation. Durable project
+  Node.js Bright OS API and self-hosted deployment automation. Durable project
   context lives in memory-bank/, and accepted project requirements live in
   openspec/specs/. Planned requirement changes must be proposed under
   openspec/changes/ before implementation unless an emergency direct edit is

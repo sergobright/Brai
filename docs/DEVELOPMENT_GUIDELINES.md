@@ -33,6 +33,6 @@ This document is the index for project rules. `AGENTS.md` routes here; detailed 
 - Public hygiene: `npm run public:guard`
 - OpenSpec: `npm run openspec:validate`
 - Client: `npm run app:lint`, `npm run app:test`
-- API: `npm --prefix services/timer_api test`
+- API: `npm --prefix services/bright_os_api test`
 
 Before commit or push, use [CHECKLIST_REPOSITORY_SYNC.md](checklists/CHECKLIST_REPOSITORY_SYNC.md).

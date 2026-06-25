@@ -146,29 +146,29 @@
         - "{{ bright_os_repo }}/deploy/web"
         - "{{ bright_os_repo }}/deploy/mobile-update"
 
-    - name: Allow deploy user to update production Timer database ledger
+    - name: Allow deploy user to update production Bright OS database ledger
       ansible.builtin.file:
         path: "{{ bright_os_repo }}/data"
         state: directory
         group: "{{ bright_os_deploy_user }}"
         mode: "2775"
 
-    - name: Allow deploy user to update production Timer database file
+    - name: Allow deploy user to update production Bright OS database file
       ansible.builtin.file:
-        path: "{{ bright_os_repo }}/data/bright_timer.sqlite"
+        path: "{{ bright_os_repo }}/data/bright_os.sqlite"
         state: file
         group: "{{ bright_os_deploy_user }}"
         mode: "0664"
 
-    - name: Check production Timer database sidecar files
+    - name: Check production Bright OS database sidecar files
       ansible.builtin.stat:
         path: "{{ item }}"
       loop:
-        - "{{ bright_os_repo }}/data/bright_timer.sqlite-wal"
-        - "{{ bright_os_repo }}/data/bright_timer.sqlite-shm"
+        - "{{ bright_os_repo }}/data/bright_os.sqlite-wal"
+        - "{{ bright_os_repo }}/data/bright_os.sqlite-shm"
       register: bright_os_prod_db_sidecars
 
-    - name: Allow deploy user to update existing production Timer database sidecars
+    - name: Allow deploy user to update existing production Bright OS database sidecars
       ansible.builtin.file:
         path: "{{ item.stat.path }}"
         state: file
@@ -202,10 +202,10 @@
         recurse: true
       when: not ansible_check_mode
 
-    - name: Seed per-environment Timer API env files from current production env
+    - name: Seed per-environment Bright OS API env files from current production env
       ansible.builtin.copy:
-        src: "{{ bright_os_timer_api_env_source }}"
-        dest: "{{ bright_os_env_root }}/{{ item.value.path }}/timer-api.env"
+        src: "{{ bright_os_api_env_source }}"
+        dest: "{{ bright_os_env_root }}/{{ item.value.path }}/bright-os-api.env"
         remote_src: true
         force: false
         owner: root
@@ -216,9 +216,9 @@
         label: "{{ item.key }}"
       when: not ansible_check_mode
 
-    - name: Install Timer API systemd units
+    - name: Install Bright OS API systemd units
       ansible.builtin.template:
-        src: templates/brightos-timer-api.service.j2
+        src: templates/brightos-api.service.j2
         dest: "/etc/systemd/system/{{ item.value.service }}"
         owner: root
         group: root

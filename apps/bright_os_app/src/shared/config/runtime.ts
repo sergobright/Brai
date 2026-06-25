@@ -2,9 +2,9 @@ import { isNativeShell } from "@/shared/platform/platform";
 
 export const APP_VERSION = process.env.NEXT_PUBLIC_BRIGHT_OS_APP_VERSION || "0.0.10.1";
 export const APP_BUILD = "1";
-export const DEFAULT_WEB_API_BASE = process.env.NEXT_PUBLIC_BRIGHT_TIMER_API || "/api";
+export const DEFAULT_WEB_API_BASE = process.env.NEXT_PUBLIC_BRIGHT_OS_API || "/api";
 export const DEFAULT_ANDROID_API_BASE =
-  process.env.NEXT_PUBLIC_BRIGHT_TIMER_ANDROID_API || "https://api.brightos.world";
+  process.env.NEXT_PUBLIC_BRIGHT_OS_ANDROID_API || "https://api.brightos.world";
 export const APP_ENVIRONMENT = process.env.NEXT_PUBLIC_BRIGHT_OS_ENVIRONMENT || "prod";
 export const APP_PREVIEW_SLOT = process.env.NEXT_PUBLIC_BRIGHT_OS_PREVIEW_SLOT || "";
 export const APP_BRANCH = process.env.NEXT_PUBLIC_BRIGHT_OS_BRANCH || "";

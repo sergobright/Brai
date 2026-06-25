@@ -10,5 +10,5 @@
 - [ ] No secrets added to docs/source/build output.
 - [ ] Client cache/projection compatibility проверена.
 - [ ] Timer/Activities replay semantics сохранены или обновлены в OpenSpec.
-- [ ] `npm --prefix services/timer_api test` выполнен или есть объяснение.
+- [ ] `npm --prefix services/bright_os_api test` выполнен или есть объяснение.
 - [ ] Relevant client tests выполнены, если менялся contract.

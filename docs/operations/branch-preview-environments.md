@@ -52,14 +52,14 @@ Repository secret:
 The deploy user needs write access to `/srv/projects/bright-os-envs/` for CI uploads,
 prod/dev/preview source checkouts, dev/preview web/OTA outputs, SQLite deployment metadata, and preview slot state.
 For production deploys it also needs write access to the existing production web/OTA targets and
-Timer SQLite file:
+Bright OS SQLite file:
 
 ```text
 /srv/projects/bright-os/deploy/web
 /srv/projects/bright-os/deploy/mobile-update
-/srv/projects/bright-os/data/bright_timer.sqlite
-/srv/projects/bright-os/data/bright_timer.sqlite-wal when present
-/srv/projects/bright-os/data/bright_timer.sqlite-shm when present
+/srv/projects/bright-os/data/bright_os.sqlite
+/srv/projects/bright-os/data/bright_os.sqlite-wal when present
+/srv/projects/bright-os/data/bright_os.sqlite-shm when present
 ```
 
 The deploy user must not need read or write access to `/srv/projects/bright-os/.git`. Sudo should be limited to:
@@ -67,13 +67,13 @@ The deploy user must not need read or write access to `/srv/projects/bright-os/.
 ```text
 caddy validate --config /etc/caddy/Caddyfile
 systemctl reload caddy
-systemctl restart brightos-timer-api.service
-systemctl restart brightos-timer-api-dev.service
-systemctl restart brightos-timer-api-preview-a.service
-systemctl restart brightos-timer-api-preview-b.service
-systemctl restart brightos-timer-api-preview-c.service
-systemctl restart brightos-timer-api-preview-d.service
-systemctl restart brightos-timer-api-preview-e.service
+systemctl restart brightos-api.service
+systemctl restart brightos-api-dev.service
+systemctl restart brightos-api-preview-a.service
+systemctl restart brightos-api-preview-b.service
+systemctl restart brightos-api-preview-c.service
+systemctl restart brightos-api-preview-d.service
+systemctl restart brightos-api-preview-e.service
 ```
 
 The Ansible sudoers template is `deploy/ansible/templates/brightos-deploy-sudoers.j2`.
@@ -94,15 +94,15 @@ Apply after check mode passes and secrets/env files exist on the VPS:
 ansible-playbook -i deploy/ansible/inventory.example.ini deploy/ansible/bright-os.yml
 ```
 
-The current local VPS setup keeps the existing production service name `brightos-timer-api.service`.
+The current local VPS setup keeps the existing production service name `brightos-api.service`.
 Prod, dev, and preview services run from the source checkout uploaded into
-`/srv/projects/bright-os-envs/<environment>/source/services/timer_api` as the configured service user/group.
+`/srv/projects/bright-os-envs/<environment>/source/services/bright_os_api` as the configured service user/group.
 The limited `bright-deploy` user owns `/srv/projects/bright-os-envs`, publishes only the deployment
-artifacts above, and uses sudo only for Caddy validation, Caddy reload, and matching Timer API service restarts.
+artifacts above, and uses sudo only for Caddy validation, Caddy reload, and matching Bright OS API service restarts.
 
 Non-production Caddy routes keep the app shell protected with the unified Caddy Basic Auth login, but
-`/mobile-update/*` stays public for Android OTA and `/api/*` is proxied to the matching Timer API without
-Caddy Basic Auth or injected bearer headers. Timer API auth remains responsible for `/v1/*` data access,
+`/mobile-update/*` stays public for Android OTA and `/api/*` is proxied to the matching Bright OS API without
+Caddy Basic Auth or injected bearer headers. Bright OS API auth remains responsible for `/v1/*` data access,
 so newly installed Dev/A-E apps may need their own in-app login session before sync turns green.
 
 If an environment exists before its first CI deploy, publish a baseline web/OTA layer without changing APK
@@ -112,10 +112,10 @@ versions:
 BRIGHT_OS_MIN_APK_VERSION_CODE=1 deploy/scripts/publish-environment-web-layer.sh dev preview-b preview-c preview-d preview-e
 ```
 
-Ansible templates do not store passwords, Caddy auth hashes, deploy keys, Android signing secrets, or Timer API secrets. Per-environment Timer API secret env files live outside source under:
+Ansible templates do not store passwords, Caddy auth hashes, deploy keys, Android signing secrets, or Bright OS API secrets. Per-environment Bright OS API secret env files live outside source under:
 
 ```text
-/srv/projects/bright-os-envs/<environment>/timer-api.env
+/srv/projects/bright-os-envs/<environment>/bright-os-api.env
 ```
 
 ## Public Branch Protection

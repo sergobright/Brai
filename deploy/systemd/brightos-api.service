@@ -1,13 +1,13 @@
 [Unit]
-Description=Bright OS Timer API
+Description=Bright OS API
 After=network.target
 
 [Service]
 Type=simple
 User=bright-os
 Group=bright-os
-WorkingDirectory=/srv/projects/bright-os/services/timer_api
-EnvironmentFile=/etc/bright-os/timer-api.env
+WorkingDirectory=/srv/projects/bright-os/services/bright_os_api
+EnvironmentFile=/etc/bright-os/bright-os-api.env
 ExecStart=/srv/opt/node-v22.16.0/bin/node src/index.js
 Restart=always
 RestartSec=3

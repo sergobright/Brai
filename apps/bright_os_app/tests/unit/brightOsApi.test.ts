@@ -1,11 +1,29 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { TimerApi } from "@/shared/api/timerApi";
+import { BrightOsApi } from "@/shared/api/brightOsApi";
 import type { PendingActionEvent } from "@/shared/types/activities";
 import type { PendingTimerEvent } from "@/shared/types/timer";
 
-describe("TimerApi", () => {
+describe("BrightOsApi", () => {
   afterEach(() => {
+    vi.useRealTimers();
     vi.restoreAllMocks();
+  });
+
+  it("aborts hung API requests", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(globalThis, "fetch").mockImplementation((_input, init) => new Promise<Response>((_resolve, reject) => {
+      init?.signal?.addEventListener("abort", () => {
+        const error = new Error("aborted");
+        error.name = "AbortError";
+        reject(error);
+      });
+    }));
+
+    const request = new BrightOsApi("https://api.example.test").state();
+    const expectation = expect(request).rejects.toMatchObject({ name: "AbortError" });
+    await vi.advanceTimersByTimeAsync(8000);
+
+    await expectation;
   });
 
   it("sends global stop metadata with synced timer events", async () => {
@@ -27,7 +45,7 @@ describe("TimerApi", () => {
       ),
     );
 
-    await new TimerApi("https://api.example.test").syncEvents({
+    await new BrightOsApi("https://api.example.test").syncEvents({
       deviceId: "device",
       platform: "android",
       events: [
@@ -73,7 +91,7 @@ describe("TimerApi", () => {
       ),
     );
 
-    await new TimerApi("https://api.example.test").syncActionEvents({
+    await new BrightOsApi("https://api.example.test").syncActionEvents({
       deviceId: "device",
       platform: "web",
       events: [
@@ -125,7 +143,7 @@ describe("TimerApi", () => {
       ),
     );
 
-    await new TimerApi("https://api.example.test").syncActionEvents({
+    await new BrightOsApi("https://api.example.test").syncActionEvents({
       deviceId: "device",
       platform: "web",
       events: [
@@ -178,7 +196,7 @@ describe("TimerApi", () => {
       ),
     );
 
-    await new TimerApi("https://api.example.test").syncActionEvents({
+    await new BrightOsApi("https://api.example.test").syncActionEvents({
       deviceId: "device",
       platform: "web",
       events: [
@@ -230,7 +248,7 @@ describe("TimerApi", () => {
       ),
     );
 
-    await new TimerApi("https://api.example.test").syncActionEvents({
+    await new BrightOsApi("https://api.example.test").syncActionEvents({
       deviceId: "device",
       platform: "web",
       events: [
@@ -279,7 +297,7 @@ describe("TimerApi", () => {
       ),
     );
 
-    await new TimerApi("https://api.example.test").syncActionEvents({
+    await new BrightOsApi("https://api.example.test").syncActionEvents({
       deviceId: "device",
       platform: "web",
       events: [

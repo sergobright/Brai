@@ -6,7 +6,7 @@ The product ships through:
 
 - a Next.js/React web client;
 - a Capacitor Android shell;
-- a Node.js Timer API backed by SQLite;
+- a Node.js Bright OS API backed by SQLite;
 - self-hosted web, Android OTA, and APK delivery.
 
 The public repository starts from this point-zero baseline. Earlier private development history is intentionally not part of the public project record.

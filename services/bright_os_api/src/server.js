@@ -4,7 +4,7 @@ import http from 'node:http';
 import path from 'node:path';
 import { WebSocketServer } from 'ws';
 import { sendReleaseLoginPage, serveRelease } from './release-routes.js';
-import { TimerStore, formatSession } from './store.js';
+import { BrightOsStore, formatSession } from './store.js';
 
 const BASE_JSON_HEADERS = {
   'content-type': 'application/json; charset=utf-8',
@@ -12,10 +12,10 @@ const BASE_JSON_HEADERS = {
   'access-control-allow-headers': 'authorization,content-type',
   'access-control-allow-credentials': 'true'
 };
-const SESSION_COOKIE = 'bright_timer_session';
+const SESSION_COOKIE = 'bright_os_session';
 const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 30;
 
-export function createTimerServer({
+export function createBrightOsServer({
   dbPath,
   token,
   webPassword = null,
@@ -26,7 +26,7 @@ export function createTimerServer({
   logger = console
 }) {
   fs.mkdirSync(path.dirname(dbPath), { recursive: true });
-  const store = new TimerStore(dbPath);
+  const store = new BrightOsStore(dbPath);
   const sockets = new Set();
 
   const server = http.createServer(async (req, res) => {

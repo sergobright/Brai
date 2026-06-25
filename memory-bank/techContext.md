@@ -17,7 +17,7 @@ npm run public:guard
 npm run openspec:validate
 npm run app:lint
 npm run app:test
-npm --prefix services/timer_api test
+npm --prefix services/bright_os_api test
 ```
 
 Public version baseline:

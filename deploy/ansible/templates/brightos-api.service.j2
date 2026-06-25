@@ -1,0 +1,24 @@
+[Unit]
+Description=Bright OS API {{ item.key }}
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory={{ bright_os_env_root }}/{{ item.value.path }}/source/services/bright_os_api
+{% if item.key == 'prod' %}
+EnvironmentFile={{ bright_os_api_env_source }}
+ExecStart=/usr/bin/env PORT={{ item.value.api_port }} BRIGHT_OS_DB={{ bright_os_repo }}/data/bright_os.sqlite BRIGHT_OS_RELEASE_DIR={{ bright_os_repo }}/deploy/releases {{ bright_os_node_bin }} src/index.js
+{% else %}
+EnvironmentFile=-{{ bright_os_env_root }}/{{ item.value.path }}/bright-os-api.env
+ExecStart=/usr/bin/env PORT={{ item.value.api_port }} BRIGHT_OS_DB={{ bright_os_env_root }}/{{ item.value.path }}/data/bright_os.sqlite BRIGHT_OS_RELEASE_DIR={{ bright_os_repo }}/deploy/releases {{ bright_os_node_bin }} src/index.js
+{% endif %}
+Restart=always
+RestartSec=3
+User={{ bright_os_service_user }}
+Group={{ bright_os_service_group }}
+UMask=0002
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

@@ -35,19 +35,19 @@ SERVICE_NAME="${DEPLOY_META[4]}"
 if [[ "$ENVIRONMENT" == "prod" ]]; then
   WEB_TARGET="${BRIGHT_OS_WEB_TARGET:-$ROOT/deploy/web}"
   MOBILE_TARGET="${BRIGHT_OS_MOBILE_TARGET:-$ROOT/deploy/mobile-update}"
-  DB_PATH="${BRIGHT_TIMER_DB:-$ROOT/data/bright_timer.sqlite}"
+  DB_PATH="${BRIGHT_OS_DB:-$ROOT/data/bright_os.sqlite}"
 else
   TARGET_ROOT="${BRIGHT_OS_ENV_ROOT:-$ENVS_ROOT/$ENV_PATH}"
   WEB_TARGET="$TARGET_ROOT/web"
   MOBILE_TARGET="$TARGET_ROOT/mobile-update"
-  DB_PATH="$TARGET_ROOT/data/timer.sqlite"
+  DB_PATH="$TARGET_ROOT/data/bright_os.sqlite"
   mkdir -p "$WEB_TARGET" "$MOBILE_TARGET" "$(dirname "$DB_PATH")"
 fi
 
 if [[ "$ENVIRONMENT" == preview-* && "$ALLOCATED_NEW" == "true" && "${BRIGHT_OS_RESET_NEW_PREVIEW_DB:-true}" != "false" ]]; then
   case "$TARGET_ROOT" in
     "$ENVS_ROOT"/preview-*)
-      rm -f "$TARGET_ROOT/data/timer.sqlite" "$TARGET_ROOT/data/timer.sqlite-shm" "$TARGET_ROOT/data/timer.sqlite-wal"
+      rm -f "$TARGET_ROOT/data/bright_os.sqlite" "$TARGET_ROOT/data/bright_os.sqlite-shm" "$TARGET_ROOT/data/bright_os.sqlite-wal"
       ;;
     *)
       echo "Refusing to reset preview DB outside $ENVS_ROOT/preview-* path: $TARGET_ROOT" >&2
@@ -78,8 +78,8 @@ console.log(parsed.version);
 LEDGER_VERSION=""
 if [[ "$ENVIRONMENT" == "dev" && -z "${BRIGHT_OS_APP_VERSION:-}" ]]; then
   LEDGER_VERSION="$("$NODE_BIN" -e '
-import { TimerStore } from "./services/timer_api/src/store.js";
-const store = new TimerStore(process.argv[1]);
+import { BrightOsStore } from "./services/bright_os_api/src/store.js";
+const store = new BrightOsStore(process.argv[1]);
 try {
   const row = store.db
     .prepare("SELECT version FROM build_versions WHERE version_type_id = ? ORDER BY build_version DESC LIMIT 1")
@@ -123,8 +123,8 @@ export NEXT_PUBLIC_BRIGHT_OS_PREVIEW_SLOT="$SLOT"
 export NEXT_PUBLIC_BRIGHT_OS_BRANCH="$BRANCH"
 export NEXT_PUBLIC_BRIGHT_OS_COMMIT="$COMMIT"
 export NEXT_PUBLIC_BRIGHT_OS_OTA_CHANNEL="$DOMAIN/mobile-update"
-export NEXT_PUBLIC_BRIGHT_TIMER_API="/api"
-export NEXT_PUBLIC_BRIGHT_TIMER_ANDROID_API="$ANDROID_API"
+export NEXT_PUBLIC_BRIGHT_OS_API="/api"
+export NEXT_PUBLIC_BRIGHT_OS_ANDROID_API="$ANDROID_API"
 
 "$SCRIPT_DIR/publish-client-web-layer.sh"
 

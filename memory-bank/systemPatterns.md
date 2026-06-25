@@ -1,7 +1,7 @@
 # System Patterns
 
 - Next.js client source lives in `apps/bright_os_app/`.
-- Timer API source lives in `services/timer_api/`.
+- Bright OS API source lives in `services/bright_os_api/`.
 - Accepted requirements live in `openspec/specs/`.
 - Development rules live in `docs/guidelines/`.
 - Deployment source automation lives in `deploy/`; generated deploy output does not.

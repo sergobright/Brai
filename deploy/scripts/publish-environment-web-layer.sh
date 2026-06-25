@@ -49,7 +49,7 @@ console.log(key.startsWith("preview-") ? env.displayLabel : "");
   NEXT_PUBLIC_BRIGHT_OS_BRANCH="${BRIGHT_OS_BRANCH:-}" \
   NEXT_PUBLIC_BRIGHT_OS_COMMIT="${BRIGHT_OS_COMMIT:-}" \
   NEXT_PUBLIC_BRIGHT_OS_OTA_CHANNEL="$DOMAIN/mobile-update" \
-  NEXT_PUBLIC_BRIGHT_TIMER_API="/api" \
-  NEXT_PUBLIC_BRIGHT_TIMER_ANDROID_API="https://$DOMAIN/api" \
+  NEXT_PUBLIC_BRIGHT_OS_API="/api" \
+  NEXT_PUBLIC_BRIGHT_OS_ANDROID_API="https://$DOMAIN/api" \
   "$SCRIPT_DIR/publish-client-web-layer.sh"
 done

@@ -1,5 +1,5 @@
 {
-  "name": "@bright-os/timer-api",
+  "name": "@bright-os/bright-os-api",
   "version": "0.1.0",
   "private": true,
   "type": "module",

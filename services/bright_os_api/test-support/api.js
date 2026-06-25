@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import Database from 'better-sqlite3';
-import { createTimerServer } from '../src/server.js';
+import { createBrightOsServer } from '../src/server.js';
 
 export const TOKEN = 'test-token';
 export const WEB_PASSWORD = 'test-password';
@@ -11,7 +11,7 @@ export const RELEASE_PASSWORD = 'release-password';
 export const SESSION_SECRET = 'test-session-secret';
 
 export async function createFixture(times, options = {}) {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bright-timer-api-'));
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bright-os-api-'));
   const releaseDir = path.join(tmp, 'releases');
   if (options.releaseFiles) {
     fs.mkdirSync(releaseDir);
@@ -20,8 +20,8 @@ export async function createFixture(times, options = {}) {
     }
   }
   let index = 0;
-  const runtime = createTimerServer({
-    dbPath: path.join(tmp, 'timer.sqlite'),
+  const runtime = createBrightOsServer({
+    dbPath: path.join(tmp, 'bright_os.sqlite'),
     token: TOKEN,
     webPassword: options.webPassword,
     releasePassword: options.releasePassword,

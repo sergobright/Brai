@@ -1,8 +1,8 @@
 import process from "node:process";
-import { TimerStore } from "../../services/timer_api/src/store.js";
+import { BrightOsStore } from "../../services/bright_os_api/src/store.js";
 
 const args = parseArgs(process.argv.slice(2));
-const store = new TimerStore(required(args, "db"));
+const store = new BrightOsStore(required(args, "db"));
 
 try {
   store.recordDeployment({

@@ -25,22 +25,22 @@ Diagram rendering tasks SHALL prefer SVG output unless the user asks for another
 - **WHEN** a diagram or visualization export is requested without an explicit format
 - **THEN** SVG is selected as the default output format
 
-### Requirement: Timer API service uses the supported Bright OS Node runtime
-The live Bright OS Timer API service SHALL run with the supported Bright OS Node.js runtime installed under `/srv/opt/`.
+### Requirement: Bright OS API service uses the supported Bright OS Node runtime
+The live Bright OS API service SHALL run with the supported Bright OS Node.js runtime installed under `/srv/opt/`.
 
-#### Scenario: Timer API service starts
-- **WHEN** `brightos-timer-api.service` starts
+#### Scenario: Bright OS API service starts
+- **WHEN** `brightos-api.service` starts
 - **THEN** its Node.js executable is `/srv/opt/node-v22.16.0/bin/node` or an explicitly approved successor runtime
 - **AND** it does not rely on `/usr/bin/node` when that binary is an unsupported Node version
 
-#### Scenario: Timer API tests are run
-- **WHEN** maintainers run `npm --prefix services/timer_api test`
+#### Scenario: Bright OS API tests are run
+- **WHEN** maintainers run `npm --prefix services/bright_os_api test`
 - **THEN** the tests execute under the supported Bright OS Node runtime
 - **AND** native SQLite dependencies are installed or rebuilt for that runtime
 - **AND** the test suite passes without a native `SIGSEGV`
 
 ### Requirement: One VPS hosts prod, dev, and preview services behind Caddy
-Bright OS SHALL host production, dev, and preview Timer API services on localhost-only ports behind Caddy.
+Bright OS SHALL host production, dev, and preview Bright OS API services on localhost-only ports behind Caddy.
 
 #### Scenario: Environment services are installed
 - **WHEN** server automation is applied

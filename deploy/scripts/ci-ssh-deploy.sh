@@ -129,7 +129,7 @@ esac
 if [[ "$ENVIRONMENT" == "prod" ]]; then
   export BRIGHT_OS_WEB_TARGET="$DEPLOY_REPO/deploy/web"
   export BRIGHT_OS_MOBILE_TARGET="$DEPLOY_REPO/deploy/mobile-update"
-  export BRIGHT_TIMER_DB="$DEPLOY_REPO/data/bright_timer.sqlite"
+  export BRIGHT_OS_DB="$DEPLOY_REPO/data/bright_os.sqlite"
 fi
 rm -rf "$SOURCE_ROOT"
 mkdir -p "$(dirname "$SOURCE_ROOT")"
@@ -139,7 +139,7 @@ cd "$SOURCE_ROOT"
 umask 0002
 npm ci
 npm --prefix apps/bright_os_app ci
-npm --prefix services/timer_api ci
+npm --prefix services/bright_os_api ci
 export BRIGHT_OS_BRANCH BRIGHT_OS_COMMIT
 export BRIGHT_OS_ACCEPTED_PR_NUMBER
 export BRIGHT_OS_ROOT="$SOURCE_ROOT"

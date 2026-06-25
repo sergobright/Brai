@@ -129,14 +129,14 @@ describe("mobile OTA publish scripts", () => {
     const buildApk = await readFile(path.join(workspaceRoot, "deploy/scripts/build-android-env-apk.sh"), "utf8");
 
     expect(deployBranch).toContain('ANDROID_API="https://api.brightos.world"');
-    expect(deployBranch).toContain('export NEXT_PUBLIC_BRIGHT_TIMER_ANDROID_API="$ANDROID_API"');
+    expect(deployBranch).toContain('export NEXT_PUBLIC_BRIGHT_OS_ANDROID_API="$ANDROID_API"');
     expect(buildApk).toContain('ANDROID_API="https://api.brightos.world"');
-    expect(buildApk).toContain('export NEXT_PUBLIC_BRIGHT_TIMER_ANDROID_API="$ANDROID_API"');
+    expect(buildApk).toContain('export NEXT_PUBLIC_BRIGHT_OS_ANDROID_API="$ANDROID_API"');
   });
 
   it("promotes production deployment metadata into the production database path", async () => {
     const script = await readFile(path.join(workspaceRoot, "deploy/scripts/ci-ssh-promote-deployment.sh"), "utf8");
-    expect(script).toContain('export BRIGHT_TIMER_DB="$DEPLOY_REPO/data/bright_timer.sqlite"');
+    expect(script).toContain('export BRIGHT_OS_DB="$DEPLOY_REPO/data/bright_os.sqlite"');
   });
 
   it("publishes a versioned bundle and atomic manifest from a static export", async () => {

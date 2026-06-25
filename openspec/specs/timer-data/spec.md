@@ -5,7 +5,7 @@
 Define how Bright OS records timer actions durably across clients, synchronizes pending offline work, derives canonical timer sessions from server-side events, and keeps history and goal totals consistent without manual conflict resolution.
 ## Requirements
 ### Requirement: Clients support offline timer events
-Bright OS clients SHALL allow timer start and stop actions to be recorded while the client is disconnected from the Timer API.
+Bright OS clients SHALL allow timer start and stop actions to be recorded while the client is disconnected from the Bright OS API.
 
 #### Scenario: Client starts timer offline
 - **WHEN** a client has no API connectivity and the user starts the timer
@@ -29,7 +29,7 @@ Bright OS clients SHALL allow timer start and stop actions to be recorded while 
 - **AND** each event has a stable event id and per-device sequence number
 
 ### Requirement: Server stores timer event log
-The Timer API SHALL store timer start and stop events in a durable server-side event log with stable device identity and idempotent event identity.
+The Bright OS API SHALL store timer start and stop events in a durable server-side event log with stable device identity and idempotent event identity.
 
 #### Scenario: New device syncs events
 - **WHEN** a client syncs events with a stable `device_id`
@@ -47,7 +47,7 @@ The Timer API SHALL store timer start and stop events in a durable server-side e
 - **AND** the migrated canonical history does not double-count previous sessions
 
 ### Requirement: Event sync is idempotent
-The Timer API SHALL expose an idempotent event batch sync endpoint for pending client timer events.
+The Bright OS API SHALL expose an idempotent event batch sync endpoint for pending client timer events.
 
 #### Scenario: Client uploads pending events
 - **WHEN** a client calls `POST /v1/timer/events/sync` with pending events
@@ -68,7 +68,7 @@ The Timer API SHALL expose an idempotent event batch sync endpoint for pending c
 - **AND** excludes it from canonical sessions
 
 #### Scenario: Unauthorized sync is rejected
-- **WHEN** a sync request omits valid timer API authorization
+- **WHEN** a sync request omits valid Bright OS API authorization
 - **THEN** the server rejects the request
 - **AND** no device or event rows are stored
 
@@ -91,7 +91,7 @@ Bright OS SHALL derive the active timer state and completed timer sessions from 
 - **AND** recomputes canonical completed sessions from events
 
 #### Scenario: Server restarts during active timer
-- **WHEN** the Timer API restarts while canonical event history contains an open interval
+- **WHEN** the Bright OS API restarts while canonical event history contains an open interval
 - **THEN** the server reconstructs the active timer state from persisted events
 - **AND** clients recover the same active timer after reconnect
 

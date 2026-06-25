@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { TimerApi } from "@/shared/api/timerApi";
+import { BrightOsApi } from "@/shared/api/brightOsApi";
 import { defaultApiBase } from "@/shared/config/runtime";
 import { consumeAndroidTimerStopRequest, startAndroidTimerNotification, stopAndroidTimerNotification } from "@/shared/platform/androidTimerNotification";
 import { acknowledgeActionEvents, loadActionsState, markActionAttempt, markActionFailure, pendingActionEvents, projectActionsState, saveActionsState } from "@/shared/storage/activityStore";
@@ -32,9 +32,9 @@ export function useBrightOsAppState(initialSection: SectionId) {
     useBrightOsOta();
   const [todayKey] = useState(() => moscowTodayKey());
   const [apiBase, setApiBase] = useState(defaultApiBase());
-  const api = useMemo(() => new TimerApi(apiBase), [apiBase]);
+  const api = useMemo(() => new BrightOsApi(apiBase), [apiBase]);
   const apiRef = useRef(api);
-  const refreshAllRef = useRef<(sourceApi?: TimerApi) => Promise<void>>(async () => undefined);
+  const refreshAllRef = useRef<(sourceApi?: BrightOsApi) => Promise<void>>(async () => undefined);
   const refreshStateAndFlushRef = useRef<() => Promise<void>>(async () => undefined);
   const applyServerStateRef = useRef<(state: TimerState) => Promise<void>>(async () => undefined);
   const applyActionsStateRef = useRef<(state: ActionsState) => Promise<void>>(async () => undefined);
@@ -53,6 +53,7 @@ export function useBrightOsAppState(initialSection: SectionId) {
   const [pendingCount, setPendingCount] = useState(0);
   const [actionPendingCount, setActionPendingCount] = useState(0);
   const [busy, setBusy] = useState(false);
+  const [timerBusy, setTimerBusy] = useState(false);
   const [actionOverlayOpen, setActionOverlayOpen] = useState(false);
   const [actionsInfoOpen, setActionsInfoOpen] = useState(false);
   const [focusContextPanel, setFocusContextPanel] = useState<FocusContextPanel>(loadFocusContextPanelPreference);
@@ -272,22 +273,22 @@ export function useBrightOsAppState(initialSection: SectionId) {
 
   async function onStart() {
     if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
-    setBusy(true);
+    setTimerBusy(true);
     try {
       await enqueueTimerEvent({ type: "start", baseServerRevision: timer.server_revision });
       const queued = await pendingEvents();
       setTimerSnapshot(projectTimerState(timer, queued));
       setPendingCount(queued.length);
       setSyncStatus("pending_sync");
-      await flushPending();
     } finally {
-      setBusy(false);
+      setTimerBusy(false);
     }
+    void flushPending().catch(handleError);
   }
 
   async function onStop() {
     if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
-    setBusy(true);
+    setTimerBusy(true);
     try {
       await enqueueTimerEvent({
         type: "stop",
@@ -298,10 +299,10 @@ export function useBrightOsAppState(initialSection: SectionId) {
       setTimerSnapshot(projectTimerState(timer, queued));
       setPendingCount(queued.length);
       setSyncStatus("pending_sync");
-      await flushPending();
     } finally {
-      setBusy(false);
+      setTimerBusy(false);
     }
+    void flushPending().catch(handleError);
   }
 
   async function onLogin(password: string) {
@@ -378,7 +379,7 @@ export function useBrightOsAppState(initialSection: SectionId) {
       if (cachedActions) actionsRevisionRef.current = cachedActions.server_revision;
       setActionsSnapshot(projectActionsState(cachedActions, queuedActions));
       setLocalSnapshotReady(true);
-      await refreshAllRef.current(new TimerApi(resolvedApiBase));
+      await refreshAllRef.current(new BrightOsApi(resolvedApiBase));
     }
 
     void boot();
@@ -532,7 +533,7 @@ export function useBrightOsAppState(initialSection: SectionId) {
     setSyncStatus,
   });
 
-  return { actionOverlayOpen, actions, actionsInfoActive, actionsInfoOpen, active, bundlePublishedAt, busy, desktopRailExpanded, displaySyncStatus, focusBackground, focusContextPanel, focusGoalActive, focusHistoryActive, goal, history, localSnapshotReady, markMobileContextPanelClosing, mobileContextPanel, mobileMenuOpen, ...actionCommands, onLogin, onLogout, onStart, onStop, openSettingsPage, otaCheckedAt, otaRefreshing, otaState, refreshOtaStateOnce, section, selectSection, setActionOverlayOpen, setActionsInfoOpen, setDesktopRailExpanded, setFocusBackground, setMobileContextPanel: setMobileContextPanelState, setMobileMenuOpen, setTheme, swipeNavigation, theme, timer, todayKey, toggleActionsInfoPanel, toggleFocusContextPanel, totalPendingCount };
+  return { actionOverlayOpen, actions, actionsInfoActive, actionsInfoOpen, active, bundlePublishedAt, busy, desktopRailExpanded, displaySyncStatus, focusBackground, focusContextPanel, focusGoalActive, focusHistoryActive, goal, history, localSnapshotReady, markMobileContextPanelClosing, mobileContextPanel, mobileMenuOpen, ...actionCommands, onLogin, onLogout, onStart, onStop, openSettingsPage, otaCheckedAt, otaRefreshing, otaState, refreshOtaStateOnce, section, selectSection, setActionOverlayOpen, setActionsInfoOpen, setDesktopRailExpanded, setFocusBackground, setMobileContextPanel: setMobileContextPanelState, setMobileMenuOpen, setTheme, swipeNavigation, theme, timer, timerBusy, todayKey, toggleActionsInfoPanel, toggleFocusContextPanel, totalPendingCount };
 }
 
 function loadFocusContextPanelPreference(): FocusContextPanel {

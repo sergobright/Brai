@@ -22,12 +22,12 @@ process.exit(1);
     echo "No preview slot found for $SOURCE_BRANCH; skipping metadata promotion."
     exit 0
   fi
-  SOURCE_DB="$ENVS_ROOT/preview-${SLOT,,}/data/timer.sqlite"
-  TARGET_DB="$ENVS_ROOT/dev/data/timer.sqlite"
+  SOURCE_DB="$ENVS_ROOT/preview-${SLOT,,}/data/bright_os.sqlite"
+  TARGET_DB="$ENVS_ROOT/dev/data/bright_os.sqlite"
   TARGET_DOMAIN="dev.brightos.world"
 elif [[ "$TARGET_ENVIRONMENT" == "prod" ]]; then
-  SOURCE_DB="$ENVS_ROOT/dev/data/timer.sqlite"
-  TARGET_DB="${BRIGHT_TIMER_DB:-$ROOT/data/bright_timer.sqlite}"
+  SOURCE_DB="$ENVS_ROOT/dev/data/bright_os.sqlite"
+  TARGET_DB="${BRIGHT_OS_DB:-$ROOT/data/bright_os.sqlite}"
   TARGET_DOMAIN="app.brightos.world"
 else
   echo "Unsupported target environment: $TARGET_ENVIRONMENT" >&2

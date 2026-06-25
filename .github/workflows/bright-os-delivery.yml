@@ -50,11 +50,11 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm --prefix apps/bright_os_app ci
-      - run: npm --prefix services/timer_api ci
+      - run: npm --prefix services/bright_os_api ci
       - run: npm --prefix apps/bright_os_app run lint
       - run: npm --prefix apps/bright_os_app run test -- --fileParallelism=false
       - run: node --test
-        working-directory: services/timer_api
+        working-directory: services/bright_os_api
 
   deploy-preview:
     needs: checks

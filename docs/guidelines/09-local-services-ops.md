@@ -15,4 +15,4 @@
 ## Local Services
 
 - Kroki may be available at `http://127.0.0.1:8000` for diagram rendering.
-- Timer API services use Node.js 22+ and localhost-only ports behind Caddy.
+- Bright OS API services use Node.js 22+ and localhost-only ports behind Caddy.

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { createTimerServer } from '../src/server.js';
+import { createBrightOsServer } from '../src/server.js';
 import {
   RELEASE_PASSWORD,
   SESSION_SECRET,
@@ -18,12 +18,12 @@ import {
 } from '../test-support/api.js';
 
 test('migration seeds legacy sessions and survives close and reopen', async () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bright-timer-api-migrate-'));
-  const dbPath = path.join(tmp, 'timer.sqlite');
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bright-os-api-migrate-'));
+  const dbPath = path.join(tmp, 'bright_os.sqlite');
   seedLegacyDatabase(dbPath);
   let index = 0;
   const times = ['2026-06-14T12:00:00.000Z', '2026-06-14T12:00:01.000Z'];
-  let runtime = createTimerServer({
+  let runtime = createBrightOsServer({
     dbPath,
     token: TOKEN,
     now: () => new Date(times[Math.min(index++, times.length - 1)]),
@@ -43,7 +43,7 @@ test('migration seeds legacy sessions and survives close and reopen', async () =
     assert.equal(runtime.store.db.prepare('SELECT COUNT(*) AS count FROM timer_events').get().count, 3);
 
     await runtime.close();
-    runtime = createTimerServer({
+    runtime = createBrightOsServer({
       dbPath,
       token: TOKEN,
       now: () => new Date('2026-06-14T12:00:02.000Z'),
@@ -65,10 +65,10 @@ test('migration seeds legacy sessions and survives close and reopen', async () =
 });
 
 test('migration renames actions tables to activities and seeds items', async () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bright-timer-api-actions-migrate-'));
-  const dbPath = path.join(tmp, 'timer.sqlite');
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bright-os-api-actions-migrate-'));
+  const dbPath = path.join(tmp, 'bright_os.sqlite');
   seedActionsDatabase(dbPath);
-  const runtime = createTimerServer({
+  const runtime = createBrightOsServer({
     dbPath,
     token: TOKEN,
     now: () => new Date('2026-06-17T12:00:00.000Z'),
@@ -290,7 +290,7 @@ test('password login creates cookie session for API requests', async () => {
     });
     assert.equal(login.status, 200);
     const cookie = login.headers.get('set-cookie');
-    assert.match(cookie, /bright_timer_session=/);
+    assert.match(cookie, /bright_os_session=/);
 
     const session = await jsonRequest(fixture.url, '/auth/session', {
       headers: { cookie }
@@ -420,7 +420,7 @@ test('release files require cookie session', async () => {
     });
     assert.equal(login.status, 303);
     const cookie = login.headers.get('set-cookie');
-    assert.match(cookie, /bright_timer_session=/);
+    assert.match(cookie, /bright_os_session=/);
 
     const page = await textRequest(fixture.url, '/releases/', { headers: { cookie } });
     assert.equal(page.status, 200);

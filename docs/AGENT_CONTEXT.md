@@ -15,7 +15,7 @@
 - `assets/brand/` - исходные бренд-ассеты: `bright-os-logo-source.png` - мастер логотипа от Сергея; `bright-os-logo-black.png` - версия с чёрным фоном.
 - `apps/bright_os_app/android/app/src/main/` - Android native boundary, ресурсы, icons, generated assets.
 - `apps/bright_os_app/android/app/src/main/java/world/brightos/bright_os_client/` - native Android код приложения; `ota/` и `timer/` - частые точки входа.
-- `services/timer_api/` - Node API, WebSocket/HTTP server и SQLite store.
+- `services/bright_os_api/` - Node API, WebSocket/HTTP server и SQLite store.
 - `admin/` - техническая admin-панель для protected admin subdomain.
 - `deploy/scripts/` - publish scripts; `deploy/systemd/` - service units; `deploy/web/` и `deploy/mobile-update/bundles/` - опубликованные артефакты.
 - `deploy/ansible/` и `deploy/environments.json` - one-VPS prod/dev/preview environment setup and routing source.
@@ -42,8 +42,8 @@
 - `npm run android:build:env-apk -- <flavor>` - сборка и публикация non-production Android APK flavor (`dev`, `previewA`-`previewE`) with matching web fallback.
 - `deploy/scripts/preview-slots.sh` - lock-protected preview slot registry commands.
 - `deploy/scripts/accept-preview.sh <codex-branch>` - deterministic acceptance entrypoint when the project owner accepts a preview; creates/reuses PR into `dev` and enables merge/auto-merge.
-- `npm --prefix services/timer_api test` - тесты timer API.
-- `npm --prefix services/timer_api start` - запуск timer API.
+- `npm --prefix services/bright_os_api test` - тесты Bright OS API.
+- `npm --prefix services/bright_os_api start` - запуск Bright OS API.
 
 ## Первые чтения по типу задачи
 
@@ -51,8 +51,8 @@
 | --- | --- |
 | UI/client | `apps/bright_os_app/src/app/`, `apps/bright_os_app/src/features/`, guidelines `02`, `03`, `12` |
 | Android/Capacitor | `apps/bright_os_app/AGENTS.md`, `apps/bright_os_app/capacitor.config.ts`, Android paths выше, guideline `05` |
-| API/data/sync | `services/timer_api/src/`, `apps/bright_os_app/src/shared/api/`, `apps/bright_os_app/src/shared/storage/`, guideline `04` |
-| Tests/QA | `apps/bright_os_app/tests/`, `services/timer_api/test/`, guideline `06` |
+| API/data/sync | `services/bright_os_api/src/`, `apps/bright_os_app/src/shared/api/`, `apps/bright_os_app/src/shared/storage/`, guideline `04` |
+| Tests/QA | `apps/bright_os_app/tests/`, `services/bright_os_api/test/`, guideline `06` |
 | Publish/release | `deploy/scripts/`, `deploy/systemd/`, guidelines `05`, `07` |
 | Rules/docs | `docs/DEVELOPMENT_GUIDELINES.md`, `docs/guidelines/01-sources-of-truth.md` |
 

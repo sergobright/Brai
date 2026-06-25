@@ -66,9 +66,11 @@ export function settingsSectionView({
 }): SettingsSectionView {
   const nativeApk = nativeApkLabel(otaState) ?? appBuild;
   const activeWebVersion = otaState?.activeBundleVersion ?? `из APK (${appBuild})`;
-  const isChecking = otaRefreshing || Boolean(otaState?.checkInProgress) || otaState?.lastCheckStatus === "checking";
+  const isChecking = otaRefreshing || Boolean(otaState?.checkInProgress);
+  const visibleState =
+    !isChecking && otaState?.lastCheckStatus === "checking" ? { ...otaState, lastCheckStatus: "unknown" } : otaState;
   const updateStatus = updateStatusView(
-    isChecking ? { activeBundleVersion: activeWebVersion, lastCheckStatus: "checking" } : otaState,
+    isChecking ? { activeBundleVersion: activeWebVersion, lastCheckStatus: "checking" } : visibleState,
   );
   return { activeWebVersion, appBuild, isChecking, nativeApk, updateStatus };
 }

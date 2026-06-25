@@ -1,13 +1,13 @@
 "use client";
 
 import { useEffect, type Dispatch, type MutableRefObject, type SetStateAction } from "react";
-import { TimerApi } from "@/shared/api/timerApi";
+import { BrightOsApi } from "@/shared/api/brightOsApi";
 import { tickTimerState } from "@/shared/time/format";
 import type { ActionsState } from "@/shared/types/activities";
 import type { SyncStatus, TimerState } from "@/shared/types/timer";
 
 type LiveUpdateOptions = {
-  api: TimerApi;
+  api: BrightOsApi;
   syncStatus: SyncStatus;
   setTimer: Dispatch<SetStateAction<TimerState>>;
   refreshStateAndFlushRef: MutableRefObject<() => Promise<void>>;

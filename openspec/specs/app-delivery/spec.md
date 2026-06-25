@@ -11,17 +11,17 @@ Bright OS SHALL publish the built Next.js web output to the existing `deploy/web
 - **THEN** `deploy/scripts/publish-web.sh` copies or synchronizes from the Next.js static output
 - **AND** removed files are not left behind in `deploy/web`
 
-#### Scenario: Web app calls the Timer API
-- **WHEN** the deployed web app calls Timer API endpoints
+#### Scenario: Web app calls the Bright OS API
+- **WHEN** the deployed web app calls Bright OS API endpoints
 - **THEN** it uses same-origin `/api/*` URLs
-- **AND** the browser bundle does not include the Timer API Bearer token
+- **AND** the browser bundle does not include the Bright OS API Bearer token
 
 ### Requirement: Caddy route boundaries are preserved
 Bright OS SHALL preserve the existing Caddy route boundaries for web, API proxy, direct API access, and protected releases.
 
 #### Scenario: Web app is deployed
 - **WHEN** `app.brightos.world` serves the migrated web app
-- **THEN** `/api/*` remains routed to the Timer API before the web catch-all
+- **THEN** `/api/*` remains routed to the Bright OS API before the web catch-all
 - **AND** `/releases*` remains routed to the release/auth flow before the web catch-all
 - **AND** application service ports remain localhost-only
 

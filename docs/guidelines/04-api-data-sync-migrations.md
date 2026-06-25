@@ -2,7 +2,7 @@
 
 ## Назначение
 
-Этот guideline нужен перед изменением `services/timer_api`, SQLite schema, sync endpoints, canonical replay, migrations или client data contracts.
+Этот guideline нужен перед изменением `services/bright_os_api`, SQLite schema, sync endpoints, canonical replay, migrations или client data contracts.
 
 ## Источники данных
 
@@ -41,7 +41,7 @@
 
 ## Проверка
 
-- API tests: `npm --prefix services/timer_api test`.
+- API tests: `npm --prefix services/bright_os_api test`.
 - Relevant client tests после contract changes.
 - `npm run openspec:validate`, если менялись OpenSpec files.
 - Проверка live service/restart нужна только если изменение реально должно примениться на сервере.
