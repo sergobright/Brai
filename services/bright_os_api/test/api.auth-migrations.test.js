@@ -121,18 +121,18 @@ test('migration seeds unified build version ledger', async () => {
     const versions = fixture.store.db
       .prepare('SELECT * FROM build_versions ORDER BY version_type_id, version')
       .all();
-    assert.equal(versions.length, 11);
+    assert.equal(versions.length, 12);
 
     const buildVersions = versions
       .filter((version) => version.version_type_id === 'build')
       .sort((left, right) => left.build_version - right.build_version);
-    assert.equal(buildVersions.length, 10);
+    assert.equal(buildVersions.length, 11);
     assert.deepEqual(
       buildVersions.map((version) => version.build_version),
-      [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+      [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
     );
     assert.equal(buildVersions.at(-1).build_version, buildVersions.length);
-    assert.equal(buildVersions.at(-1).version, '0.0.10.1');
+    assert.equal(buildVersions.at(-1).version, '0.0.11.1');
 
     const baselineApk = versions.find((version) => version.version_type_id === 'apk' && version.version === '0.0.1.1');
     assert.ok(baselineApk);
@@ -237,8 +237,24 @@ test('migration seeds unified build version ledger', async () => {
     assert.equal(tenthTaskBuild.build_version, 10);
     assert.equal(tenthTaskBuild.reason, 'Accepted PR #10 into dev.');
 
+    const eleventhTaskBuild = versions.find((version) => version.version_type_id === 'build' && version.version === '0.0.11.1');
+    assert.ok(eleventhTaskBuild);
+    assert.equal(eleventhTaskBuild.build_version, 11);
+    assert.equal(eleventhTaskBuild.reason, 'Accepted PR #11 into dev.');
+
     fixture.store.migrate();
-    assert.equal(fixture.store.db.prepare('SELECT COUNT(*) AS count FROM build_versions').get().count, 11);
+    assert.equal(fixture.store.db.prepare('SELECT COUNT(*) AS count FROM build_versions').get().count, 12);
+
+    fixture.store.db
+      .prepare("DELETE FROM build_versions WHERE version_type_id = 'build' AND version = '0.0.11.1'")
+      .run();
+    fixture.store.db.prepare('DELETE FROM schema_migrations WHERE version = 21').run();
+    fixture.store.migrate();
+    assert.ok(
+      fixture.store.db
+        .prepare("SELECT 1 FROM build_versions WHERE version_type_id = 'build' AND version = '0.0.11.1'")
+        .get()
+    );
   } finally {
     await fixture.close();
   }

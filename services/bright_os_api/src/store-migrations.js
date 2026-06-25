@@ -126,6 +126,11 @@ export const migrationMethods = {
       this.seedAcceptedPrLedgerBackfill();
       this.recordMigration(20, 'record accepted PR 9 and 10 build versions');
     }
+
+    if (!this.hasMigration(21)) {
+      this.seedAcceptedPr11LedgerBackfill();
+      this.recordMigration(21, 'record accepted PR 11 build version');
+    }
   }
 ,
 
@@ -958,6 +963,44 @@ export const migrationMethods = {
       'Recorded accepted PR #10: preview slot release now uses a deploy-readable checkout, full preview pools queue FIFO, and acceptance release frees the slot automatically.',
       'Accepted PR #10 into dev.',
       '2026-06-24T23:10:19.023Z',
+      now
+    );
+  }
+,
+
+  seedAcceptedPr11LedgerBackfill() {
+    const now = new Date().toISOString();
+    this.db.prepare(`
+        INSERT INTO build_versions (
+          version_type_id,
+          major_version,
+          release_version,
+          build_version,
+          apk_version,
+          version,
+          short_changes,
+          detailed_changes,
+          reason,
+          released_at_utc,
+          created_at_utc
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(version_type_id, version) DO UPDATE SET
+          short_changes = excluded.short_changes,
+          detailed_changes = excluded.detailed_changes,
+          reason = excluded.reason,
+          released_at_utc = excluded.released_at_utc
+      `).run(
+      'build',
+      0,
+      0,
+      11,
+      1,
+      '0.0.11.1',
+      'Accepted PR #11 into dev.',
+      'Recorded accepted PR #11: build ledger acceptance flow records PR-matched dev build versions idempotently before future dev deployments.',
+      'Accepted PR #11 into dev.',
+      '2026-06-25T00:08:24Z',
       now
     );
   }
