@@ -5,7 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ChevronDown, Plus } from "lucide-react";
 import { installAndroidBackHandler } from "@/shared/platform/platform";
 import { cleanTitle } from "@/shared/activities/text";
-import type { ActionItem, ActionsState, ActionStatus } from "@/shared/types/activities";
+import type { ActivityItem, ActivitiesState, ActivityStatus } from "@/shared/types/activities";
 import { Button } from "@/shared/ui/button";
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/shared/ui/input-group";
 import { ScrollArea } from "@/shared/ui/scroll-area";
@@ -31,15 +31,15 @@ export function ActionsSection({
   onInfoOpenChange,
   autoFocusAddInput,
 }: {
-  state: ActionsState;
+  state: ActivitiesState;
   localSnapshotReady: boolean;
   autoFocusAddInput: boolean;
   onCreate: (title: string) => Promise<void>;
-  onUpdateTitle: (action: ActionItem, title: string) => Promise<void>;
-  onAutosaveDetails: (action: ActionItem, title: string, descriptionMd: string) => Promise<void>;
-  onSetStatus: (action: ActionItem, status: ActionStatus) => Promise<void>;
-  onDelete: (action: ActionItem) => Promise<void>;
-  onReorder: (orderedIds: string[], movedAction: ActionItem) => Promise<void>;
+  onUpdateTitle: (action: ActivityItem, title: string) => Promise<void>;
+  onAutosaveDetails: (action: ActivityItem, title: string, descriptionMd: string) => Promise<void>;
+  onSetStatus: (action: ActivityItem, status: ActivityStatus) => Promise<void>;
+  onDelete: (action: ActivityItem) => Promise<void>;
+  onReorder: (orderedIds: string[], movedAction: ActivityItem) => Promise<void>;
   onMobileOverlayChange: (open: boolean) => void;
   infoOpen: boolean;
   onInfoOpenChange: (open: boolean) => void;
@@ -133,7 +133,7 @@ export function ActionsSection({
     setMobileCreateOpen(false);
   }, []);
 
-  function openMobileEdit(action: ActionItem) {
+  function openMobileEdit(action: ActivityItem) {
     setOpenDeleteActionId(null);
     setSplitPercent(ACTIONS_SPLIT_DEFAULT_PERCENT);
     setSelectedActionId(action.id);

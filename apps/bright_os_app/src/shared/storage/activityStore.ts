@@ -1,13 +1,13 @@
 import { clientDb, ensureClientMeta, getMeta, randomId, setMeta } from "./db";
 import type {
-  ActionEventPayload,
-  ActionEventType,
-  ActionItem,
-  ActionsState,
-  ActionStatus,
-  PendingActionEvent,
+  ActivitiesState,
+  ActivityEventPayload,
+  ActivityEventType,
+  ActivityItem,
+  ActivityStatus,
+  PendingActivityEvent,
 } from "@/shared/types/activities";
-import { emptyActionsState } from "@/shared/types/activities";
+import { emptyActivitiesState } from "@/shared/types/activities";
 import { cleanTitle, normalizeDescription } from "@/shared/activities/text";
 
 export { cleanTitle, markdownPreviewSource, normalizeDescription, visibleDescriptionPreview } from "@/shared/activities/text";
@@ -15,18 +15,18 @@ export { cleanTitle, markdownPreviewSource, normalizeDescription, visibleDescrip
 /**
  * Adds an activity mutation to the durable local outbox.
  */
-export async function enqueueActionEvent(params: {
-  type: ActionEventType;
+export async function enqueueActivityEvent(params: {
+  type: ActivityEventType;
   actionId?: string;
-  payload: ActionEventPayload;
+  payload: ActivityEventPayload;
   baseServerRevision: number;
-}): Promise<PendingActionEvent> {
+}): Promise<PendingActivityEvent> {
   const db = clientDb();
   return db.transaction("rw", db.meta, db.action_outbox_events, async () => {
     const meta = await ensureClientMeta();
     const sequence = meta.nextClientSequence;
     const now = new Date().toISOString();
-    const actionId = params.actionId ?? `${meta.deviceId}:action:${sequence}`;
+    const actionId = params.actionId ?? `${meta.deviceId}:activity:${sequence}`;
     if (
       (params.type === "update_title" || params.type === "update_description" || params.type === "reorder") &&
       (params.actionId || params.type === "reorder")
@@ -39,8 +39,8 @@ export async function enqueueActionEvent(params: {
         await db.action_outbox_events.bulkDelete(staleEvents.map((event) => event.eventId));
       }
     }
-    const event: PendingActionEvent = {
-      eventId: `${meta.deviceId}:action:${sequence}:${randomId()}`,
+    const event: PendingActivityEvent = {
+      eventId: `${meta.deviceId}:activity:${sequence}:${randomId()}`,
       deviceId: meta.deviceId,
       clientSequence: sequence,
       type: params.type,
@@ -61,11 +61,11 @@ export async function enqueueActionEvent(params: {
   });
 }
 
-export async function pendingActionEvents(): Promise<PendingActionEvent[]> {
+export async function pendingActivityEvents(): Promise<PendingActivityEvent[]> {
   return clientDb().action_outbox_events.orderBy("clientSequence").toArray();
 }
 
-export async function markActionAttempt(events: PendingActionEvent[]): Promise<void> {
+export async function markActivityAttempt(events: PendingActivityEvent[]): Promise<void> {
   const now = new Date().toISOString();
   await clientDb().transaction("rw", clientDb().action_outbox_events, async () => {
     await Promise.all(
@@ -81,7 +81,7 @@ export async function markActionAttempt(events: PendingActionEvent[]): Promise<v
   });
 }
 
-export async function markActionFailure(events: PendingActionEvent[], message: string): Promise<void> {
+export async function markActivityFailure(events: PendingActivityEvent[], message: string): Promise<void> {
   await clientDb().transaction("rw", clientDb().action_outbox_events, async () => {
     await Promise.all(
       events.map((event) =>
@@ -94,18 +94,18 @@ export async function markActionFailure(events: PendingActionEvent[], message: s
   });
 }
 
-export async function acknowledgeActionEvents(ids: string[]): Promise<void> {
+export async function acknowledgeActivityEvents(ids: string[]): Promise<void> {
   await clientDb().action_outbox_events.bulkDelete(ids);
 }
 
-export async function saveActionsState(state: ActionsState): Promise<boolean> {
-  const currentRevision = await lastActionServerRevision();
+export async function saveActivitiesState(state: ActivitiesState): Promise<boolean> {
+  const currentRevision = await lastActivityServerRevision();
   if (state.server_revision < currentRevision) return false;
 
   await clientDb().transaction("rw", clientDb().actions_cache, clientDb().meta, async () => {
     await clientDb().actions_cache.clear();
-    const allActions = [...state.actions, ...state.archived_actions].map(normalizeActionItem);
-    if (allActions.length > 0) await clientDb().actions_cache.bulkPut(allActions);
+    const allActivities = [...state.actions, ...state.archived_actions].map(normalizeActivityItem);
+    if (allActivities.length > 0) await clientDb().actions_cache.bulkPut(allActivities);
     await setMeta("lastActionServerRevision", state.server_revision);
     await setMeta("lastActionServerTimeUtc", state.server_time_utc);
     await setMeta("lastSuccessfulActionsSyncAtUtc", new Date().toISOString());
@@ -114,9 +114,9 @@ export async function saveActionsState(state: ActionsState): Promise<boolean> {
 }
 
 /**
- * Loads the actions snapshot and its revision from one IndexedDB read transaction.
+ * Loads the activities snapshot and its revision from one IndexedDB read transaction.
  */
-export async function loadActionsState(): Promise<ActionsState | null> {
+export async function loadActivitiesState(): Promise<ActivitiesState | null> {
   const db = clientDb();
   const { actions, revision, serverTimeUtc } = await db.transaction("r", db.actions_cache, db.meta, async () => {
     const [cachedActions, revisionRow, serverTimeRow] = await Promise.all([
@@ -134,32 +134,32 @@ export async function loadActionsState(): Promise<ActionsState | null> {
   return {
     server_time_utc: serverTimeUtc ?? new Date().toISOString(),
     server_revision: revision ?? 0,
-    actions: sortActions(actions.map(normalizeActionItem).filter((action) => !action.deleted_at_utc)),
-    archived_actions: sortArchivedActions(actions.map(normalizeActionItem).filter((action) => action.deleted_at_utc)),
+    actions: sortActivities(actions.map(normalizeActivityItem).filter((action) => !action.deleted_at_utc)),
+    archived_actions: sortArchivedActivities(actions.map(normalizeActivityItem).filter((action) => action.deleted_at_utc)),
   };
 }
 
-export async function lastActionServerRevision(): Promise<number> {
+export async function lastActivityServerRevision(): Promise<number> {
   return (await getMeta<number>("lastActionServerRevision")) ?? 0;
 }
 
 /**
  * Applies pending activity events over the last accepted server snapshot.
  */
-export function projectActionsState(
-  canonical: ActionsState | null,
-  pending: PendingActionEvent[],
+export function projectActivitiesState(
+  canonical: ActivitiesState | null,
+  pending: PendingActivityEvent[],
   now = new Date(),
-): ActionsState {
-  const base = canonical ?? emptyActionsState(now);
-  const actions = new Map<string, ActionItem>(
-    base.actions.map((action) => [action.id, { ...normalizeActionItem(action), pending: false }]),
+): ActivitiesState {
+  const base = canonical ?? emptyActivitiesState(now);
+  const actions = new Map<string, ActivityItem>(
+    base.actions.map((action) => [action.id, { ...normalizeActivityItem(action), pending: false }]),
   );
   for (const action of base.archived_actions) {
-    actions.set(action.id, { ...normalizeActionItem(action), pending: false });
+    actions.set(action.id, { ...normalizeActivityItem(action), pending: false });
   }
 
-  for (const event of [...pending].sort(compareActionEvents)) {
+  for (const event of [...pending].sort(compareActivityEvents)) {
     const existing = actions.get(event.actionId);
     const occurredAtUtc = event.occurredAtUtc;
     if (event.type === "create") {
@@ -194,7 +194,7 @@ export function projectActionsState(
         updated_at_utc: occurredAtUtc,
         pending: true,
       });
-    } else if (event.type === "set_status" && existing && isActionStatus(event.payload.status)) {
+    } else if (event.type === "set_status" && existing && isActivityStatus(event.payload.status)) {
       actions.set(event.actionId, {
         ...existing,
         status: event.payload.status,
@@ -204,7 +204,7 @@ export function projectActionsState(
         pending: true,
       });
     } else if (event.type === "reorder") {
-      applyActionOrder(actions, normalizeOrderedIds(event.payload.ordered_ids), occurredAtUtc);
+      applyActivityOrder(actions, normalizeOrderedIds(event.payload.ordered_ids), occurredAtUtc);
     } else if (event.type === "delete") {
       if (!existing) continue;
       actions.set(event.actionId, {
@@ -229,18 +229,18 @@ export function projectActionsState(
     }
   }
 
-  const allActions = [...actions.values()];
+  const allActivities = [...actions.values()];
   return {
     ...base,
-    actions: sortActions(allActions.filter((action) => !action.deleted_at_utc)),
-    archived_actions: sortArchivedActions(allActions.filter((action) => action.deleted_at_utc)),
+    actions: sortActivities(allActivities.filter((action) => !action.deleted_at_utc)),
+    archived_actions: sortArchivedActivities(allActivities.filter((action) => action.deleted_at_utc)),
   };
 }
 
 /**
- * Orders active actions for the product list, preserving manual order when present.
+ * Orders active activities for the product list, preserving manual order when present.
  */
-export function sortActions(actions: ActionItem[]): ActionItem[] {
+export function sortActivities(actions: ActivityItem[]): ActivityItem[] {
   return [...actions].sort((left, right) => {
     if (left.status !== right.status) return left.status === "New" ? -1 : 1;
     if (left.status === "New") {
@@ -263,7 +263,7 @@ export function sortActions(actions: ActionItem[]): ActionItem[] {
   });
 }
 
-export function sortArchivedActions(actions: ActionItem[]): ActionItem[] {
+export function sortArchivedActivities(actions: ActivityItem[]): ActivityItem[] {
   return [...actions].sort((left, right) => {
     const leftTime = left.deleted_at_utc ?? left.updated_at_utc;
     const rightTime = right.deleted_at_utc ?? right.updated_at_utc;
@@ -272,7 +272,7 @@ export function sortArchivedActions(actions: ActionItem[]): ActionItem[] {
   });
 }
 
-export function saveActionEditDraft(actionId: string, title: string, descriptionMd: string): void {
+export function saveActivityEditDraft(actionId: string, title: string, descriptionMd: string): void {
   if (typeof window === "undefined") return;
   try {
     window.localStorage.setItem(
@@ -289,7 +289,7 @@ export function saveActionEditDraft(actionId: string, title: string, description
   }
 }
 
-export function clearActionEditDraft(actionId: string): void {
+export function clearActivityEditDraft(actionId: string): void {
   if (typeof window === "undefined") return;
   try {
     window.localStorage.removeItem(actionDraftKey(actionId));
@@ -299,9 +299,9 @@ export function clearActionEditDraft(actionId: string): void {
 }
 
 /**
- * Loads locally saved action detail drafts after reload or app restart.
+ * Loads locally saved activity detail drafts after reload or app restart.
  */
-export function loadActionEditDrafts(): Array<{ actionId: string; title: string; descriptionMd: string }> {
+export function loadActivityEditDrafts(): Array<{ actionId: string; title: string; descriptionMd: string }> {
   if (typeof window === "undefined") return [];
   const drafts: Array<{ actionId: string; title: string; descriptionMd: string }> = [];
   try {
@@ -328,7 +328,7 @@ export function loadActionEditDrafts(): Array<{ actionId: string; title: string;
   return drafts;
 }
 
-function normalizedPayload(payload: ActionEventPayload): ActionEventPayload {
+function normalizedPayload(payload: ActivityEventPayload): ActivityEventPayload {
   return {
     title: payload.title == null ? undefined : cleanTitle(payload.title),
     description_md: payload.description_md == null ? undefined : normalizeDescription(payload.description_md),
@@ -337,7 +337,7 @@ function normalizedPayload(payload: ActionEventPayload): ActionEventPayload {
   };
 }
 
-function normalizeActionItem(action: ActionItem): ActionItem {
+function normalizeActivityItem(action: ActivityItem): ActivityItem {
   return {
     ...action,
     description_md: normalizeDescription(action.description_md),
@@ -347,16 +347,16 @@ function normalizeActionItem(action: ActionItem): ActionItem {
   };
 }
 
-function isActionStatus(value: unknown): value is ActionStatus {
+function isActivityStatus(value: unknown): value is ActivityStatus {
   return value === "New" || value === "Done";
 }
 
-function compareActionEvents(left: PendingActionEvent, right: PendingActionEvent): number {
+function compareActivityEvents(left: PendingActivityEvent, right: PendingActivityEvent): number {
   const byTime = left.occurredAtUtc.localeCompare(right.occurredAtUtc);
   return byTime || left.clientSequence - right.clientSequence;
 }
 
-function applyActionOrder(actions: Map<string, ActionItem>, orderedIds: string[], occurredAtUtc: string): void {
+function applyActivityOrder(actions: Map<string, ActivityItem>, orderedIds: string[], occurredAtUtc: string): void {
   const ordered = new Set(orderedIds);
   for (const action of actions.values()) {
     if (!action.deleted_at_utc && action.status === "New" && ordered.has(action.id)) {
@@ -393,3 +393,18 @@ const ACTION_DRAFT_PREFIX = "bright_os_activity_draft:";
 function actionDraftKey(actionId: string): string {
   return `${ACTION_DRAFT_PREFIX}${actionId}`;
 }
+
+export const enqueueActionEvent = enqueueActivityEvent;
+export const pendingActionEvents = pendingActivityEvents;
+export const markActionAttempt = markActivityAttempt;
+export const markActionFailure = markActivityFailure;
+export const acknowledgeActionEvents = acknowledgeActivityEvents;
+export const saveActionsState = saveActivitiesState;
+export const loadActionsState = loadActivitiesState;
+export const lastActionServerRevision = lastActivityServerRevision;
+export const projectActionsState = projectActivitiesState;
+export const sortActions = sortActivities;
+export const sortArchivedActions = sortArchivedActivities;
+export const saveActionEditDraft = saveActivityEditDraft;
+export const clearActionEditDraft = clearActivityEditDraft;
+export const loadActionEditDrafts = loadActivityEditDrafts;

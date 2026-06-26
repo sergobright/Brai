@@ -1,7 +1,7 @@
 import type { Dispatch, SetStateAction } from "react";
 import { cleanTitle, normalizeDescription } from "@/shared/activities/text";
-import { clearActionEditDraft, enqueueActionEvent, pendingActionEvents, projectActionsState } from "@/shared/storage/activityStore";
-import type { ActionItem, ActionsState, ActionStatus } from "@/shared/types/activities";
+import { clearActivityEditDraft, enqueueActivityEvent, pendingActivityEvents, projectActivitiesState } from "@/shared/storage/activityStore";
+import type { ActivityItem, ActivitiesState, ActivityStatus } from "@/shared/types/activities";
 import type { SyncStatus } from "@/shared/types/timer";
 import { ACTION_DELETE_COLLAPSE_MS } from "../sections/actions/constants";
 
@@ -15,16 +15,16 @@ export function createBrightOsActionCommands({
   setActions,
   setSyncStatus,
 }: {
-  actions: ActionsState;
+  actions: ActivitiesState;
   flushActionPending: () => Promise<void>;
   setActionPendingCount: Dispatch<SetStateAction<number>>;
-  setActions: Dispatch<SetStateAction<ActionsState>>;
+  setActions: Dispatch<SetStateAction<ActivitiesState>>;
   setSyncStatus: Dispatch<SetStateAction<SyncStatus>>;
 }) {
-  async function queueActionEvent(event: Parameters<typeof enqueueActionEvent>[0]) {
-    await enqueueActionEvent(event);
-    const queued = await pendingActionEvents();
-    setActions(projectActionsState(actions, queued));
+  async function queueActionEvent(event: Parameters<typeof enqueueActivityEvent>[0]) {
+    await enqueueActivityEvent(event);
+    const queued = await pendingActivityEvents();
+    setActions(projectActivitiesState(actions, queued));
     setActionPendingCount(queued.length);
     setSyncStatus("pending_sync");
     await flushActionPending();
@@ -40,7 +40,7 @@ export function createBrightOsActionCommands({
     });
   }
 
-  async function onUpdateActionTitle(action: ActionItem, title: string) {
+  async function onUpdateActionTitle(action: ActivityItem, title: string) {
     const trimmed = cleanTitle(title);
     if (!trimmed || trimmed === action.title) return;
     await queueActionEvent({
@@ -51,14 +51,14 @@ export function createBrightOsActionCommands({
     });
   }
 
-  async function onAutosaveActionDetails(action: ActionItem, title: string, descriptionMd: string) {
+  async function onAutosaveActionDetails(action: ActivityItem, title: string, descriptionMd: string) {
     const trimmed = cleanTitle(title);
     const current = actions.actions.find((item) => item.id === action.id) ?? action;
     const nextDescription = normalizeDescription(descriptionMd);
     let changed = false;
 
     if (trimmed && trimmed !== current.title) {
-      await enqueueActionEvent({
+      await enqueueActivityEvent({
         type: "update_title",
         actionId: action.id,
         payload: { title: trimmed },
@@ -67,7 +67,7 @@ export function createBrightOsActionCommands({
       changed = true;
     }
     if (nextDescription !== normalizeDescription(current.description_md)) {
-      await enqueueActionEvent({
+      await enqueueActivityEvent({
         type: "update_description",
         actionId: action.id,
         payload: { description_md: nextDescription },
@@ -76,17 +76,17 @@ export function createBrightOsActionCommands({
       changed = true;
     }
 
-    clearActionEditDraft(action.id);
+    clearActivityEditDraft(action.id);
     if (!changed) return;
 
-    const queued = await pendingActionEvents();
-    setActions(projectActionsState(actions, queued));
+    const queued = await pendingActivityEvents();
+    setActions(projectActivitiesState(actions, queued));
     setActionPendingCount(queued.length);
     setSyncStatus("pending_sync");
     await flushActionPending();
   }
 
-  async function onSetActionStatus(action: ActionItem, status: ActionStatus) {
+  async function onSetActionStatus(action: ActivityItem, status: ActivityStatus) {
     if (action.status === status) return;
     await queueActionEvent({
       type: "set_status",
@@ -96,8 +96,8 @@ export function createBrightOsActionCommands({
     });
   }
 
-  async function onDeleteAction(action: ActionItem) {
-    await enqueueActionEvent({
+  async function onDeleteAction(action: ActivityItem) {
+    await enqueueActivityEvent({
       type: "delete",
       actionId: action.id,
       payload: {},
@@ -106,8 +106,8 @@ export function createBrightOsActionCommands({
     await delayActionProjection();
   }
 
-  async function onRestoreAction(action: ActionItem) {
-    await enqueueActionEvent({
+  async function onRestoreAction(action: ActivityItem) {
+    await enqueueActivityEvent({
       type: "restore",
       actionId: action.id,
       payload: {},
@@ -117,16 +117,16 @@ export function createBrightOsActionCommands({
   }
 
   async function delayActionProjection() {
-    const queued = await pendingActionEvents();
+    const queued = await pendingActivityEvents();
     setActionPendingCount(queued.length);
     setSyncStatus("pending_sync");
     window.setTimeout(() => {
-      setActions((current) => projectActionsState(current, queued));
+      setActions((current) => projectActivitiesState(current, queued));
       void flushActionPending();
     }, ACTION_DELETE_COLLAPSE_MS);
   }
 
-  async function onReorderActions(orderedIds: string[], movedAction: ActionItem) {
+  async function onReorderActions(orderedIds: string[], movedAction: ActivityItem) {
     const currentIds = actions.actions.filter((action) => action.status === "New").map((action) => action.id);
     if (orderedIds.join("\n") === currentIds.join("\n")) return;
     await queueActionEvent({

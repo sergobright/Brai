@@ -136,6 +136,10 @@ export const migrationMethods = {
       this.removePrVersionCouplingFromBuildLedger();
       this.recordMigration(22, 'remove pull request coupling from version ledger');
     }
+
+    if (!this.hasMigration(23)) {
+      this.recordMigration(23, 'add incremental activity projection indexes');
+    }
   }
 ,
 
@@ -295,6 +299,13 @@ export const migrationMethods = {
 
       CREATE INDEX IF NOT EXISTS idx_activity_events_device_occurred
       ON activity_events (device_id, occurred_at_utc);
+
+      CREATE INDEX IF NOT EXISTS idx_activity_events_activity_occurred
+      ON activity_events (activity_id, occurred_at_utc, server_sequence);
+
+      CREATE INDEX IF NOT EXISTS idx_activity_events_type_occurred
+      ON activity_events (type, occurred_at_utc, server_sequence);
+
     `);
     this.db
       .prepare('INSERT INTO items (id, created_at_utc) VALUES (?, ?) ON CONFLICT(id) DO NOTHING')
@@ -312,6 +323,11 @@ export const migrationMethods = {
     if (this.tableExists('activities') && !this.columnExists('activities', 'restored_at_utc')) {
       this.db.exec('ALTER TABLE activities ADD COLUMN restored_at_utc TEXT;');
     }
+    this.db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_activities_new_sort_order
+      ON activities (status, sort_order)
+      WHERE deleted_at_utc IS NULL AND sort_order IS NOT NULL;
+    `);
   }
 ,
 

@@ -139,7 +139,7 @@ export function swipe(
   });
 }
 
-export function cachedActionsState(id: string, title: string, descriptionMd = "") {
+export function cachedActivitiesState(id: string, title: string, descriptionMd = "") {
   return {
     server_time_utc: "2026-06-16T12:00:00.000Z",
     server_revision: 8,

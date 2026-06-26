@@ -5,7 +5,7 @@ import type {
   TimerState,
   TimerSyncResponse,
 } from "@/shared/types/timer";
-import type { ActionsState, ActionsSyncResponse, PendingActionEvent } from "@/shared/types/activities";
+import type { ActivitiesState, ActivitiesSyncResponse, PendingActivityEvent } from "@/shared/types/activities";
 
 interface RequestOptions extends RequestInit {
   json?: unknown;
@@ -46,8 +46,12 @@ export class BrightOsApi {
     return this.request("/v1/goals/challenge");
   }
 
-  async actions(): Promise<ActionsState> {
+  async activities(): Promise<ActivitiesState> {
     return fromActivitiesState(await this.request<ActivitiesApiState>("/v1/activities"));
+  }
+
+  async actions(): Promise<ActivitiesState> {
+    return this.activities();
   }
 
   async syncEvents(params: {
@@ -79,12 +83,12 @@ export class BrightOsApi {
     });
   }
 
-  async syncActionEvents(params: {
+  async syncActivityEvents(params: {
     deviceId: string;
     platform: string;
-    events: PendingActionEvent[];
+    events: PendingActivityEvent[];
     lastKnownServerTimeUtc?: string | null;
-  }): Promise<ActionsSyncResponse> {
+  }): Promise<ActivitiesSyncResponse> {
     const response = await this.request<ActivitiesApiSyncResponse>("/v1/activities/events/sync", {
       method: "POST",
       json: {
@@ -107,6 +111,15 @@ export class BrightOsApi {
       },
     });
     return { ...response, state: fromActivitiesState(response.state) };
+  }
+
+  async syncActionEvents(params: {
+    deviceId: string;
+    platform: string;
+    events: PendingActivityEvent[];
+    lastKnownServerTimeUtc?: string | null;
+  }): Promise<ActivitiesSyncResponse> {
+    return this.syncActivityEvents(params);
   }
 
   liveUrl(): string {
@@ -151,8 +164,8 @@ export class BrightOsApi {
 interface ActivitiesApiState {
   server_time_utc: string;
   server_revision: number;
-  activities: ActionsState["actions"];
-  archived_activities?: ActionsState["archived_actions"];
+  activities: ActivitiesState["actions"];
+  archived_activities?: ActivitiesState["archived_actions"];
 }
 
 interface ActivitiesApiSyncResponse {
@@ -163,7 +176,7 @@ interface ActivitiesApiSyncResponse {
   state: ActivitiesApiState;
 }
 
-function fromActivitiesState(state: ActivitiesApiState): ActionsState {
+function fromActivitiesState(state: ActivitiesApiState): ActivitiesState {
   return {
     server_time_utc: state.server_time_utc,
     server_revision: state.server_revision,

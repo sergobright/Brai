@@ -5,7 +5,7 @@ import { closestCenter, DndContext, KeyboardSensor, MouseSensor, TouchSensor, us
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { GripVertical } from "lucide-react";
-import type { ActionItem, ActionStatus } from "@/shared/types/activities";
+import type { ActivityItem, ActivityStatus } from "@/shared/types/activities";
 import { useMobileNavigationViewport } from "../../navigation/useSectionSwipeNavigation";
 import { ActionRow, type DetailTitleFocus } from "./ActionRow";
 
@@ -24,17 +24,17 @@ export function SortableActionList({
   titleDrafts = {},
   onTitleDraftChange = () => undefined,
 }: {
-  actions: ActionItem[];
+  actions: ActivityItem[];
   selectedActionId: string | null;
   openDeleteActionId: string | null;
   onSelect: (actionId: string, focusDetailTitle?: DetailTitleFocus) => void;
-  onEditMobile: (action: ActionItem) => void;
-  onUpdateTitle: (action: ActionItem, title: string) => Promise<void>;
-  onSetStatus: (action: ActionItem, status: ActionStatus) => Promise<void>;
-  onDelete: (action: ActionItem) => Promise<void>;
+  onEditMobile: (action: ActivityItem) => void;
+  onUpdateTitle: (action: ActivityItem, title: string) => Promise<void>;
+  onSetStatus: (action: ActivityItem, status: ActivityStatus) => Promise<void>;
+  onDelete: (action: ActivityItem) => Promise<void>;
   onOpenDelete: (actionId: string) => void;
   onCloseDelete: () => void;
-  onReorder: (orderedIds: string[], movedAction: ActionItem) => Promise<void>;
+  onReorder: (orderedIds: string[], movedAction: ActivityItem) => Promise<void>;
   titleDrafts?: Record<string, string>;
   onTitleDraftChange?: (actionId: string, title: string | null) => void;
 }) {
@@ -84,13 +84,13 @@ export function SortableActionList({
 }
 
 function SortableActionRow(props: {
-  action: ActionItem;
+  action: ActivityItem;
   selected: boolean;
   onSelect: (focusDetailTitle?: DetailTitleFocus) => void;
-  onEditMobile: (action: ActionItem) => void;
-  onUpdateTitle: (action: ActionItem, title: string) => Promise<void>;
-  onSetStatus: (action: ActionItem, status: ActionStatus) => Promise<void>;
-  onDelete: (action: ActionItem) => Promise<void>;
+  onEditMobile: (action: ActivityItem) => void;
+  onUpdateTitle: (action: ActivityItem, title: string) => Promise<void>;
+  onSetStatus: (action: ActivityItem, status: ActivityStatus) => Promise<void>;
+  onDelete: (action: ActivityItem) => Promise<void>;
   deleteOpen: boolean;
   onOpenDelete: () => void;
   onCloseDelete: () => void;
@@ -137,7 +137,7 @@ function ActionDragHandle({
   listeners,
   setActivatorNodeRef,
 }: {
-  action: ActionItem;
+  action: ActivityItem;
   attributes: DraggableAttributes;
   listeners?: DraggableSyntheticListeners;
   setActivatorNodeRef: (node: HTMLElement | null) => void;

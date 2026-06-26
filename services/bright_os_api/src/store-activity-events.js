@@ -71,6 +71,7 @@ export const activityEventMethods = {
       : null;
     const acknowledged = [];
     const ignored = [];
+    const acceptedEvents = [];
 
     const run = this.db.transaction(() => {
       this.upsertDevice(
@@ -87,9 +88,10 @@ export const activityEventMethods = {
         const result = this.ingestActivityEvent(deviceId, rawEvent, receivedAt);
         if (result.event_id) acknowledged.push(result.event_id);
         if (result.ignored) ignored.push(result.ignored);
+        if (result.accepted_event) acceptedEvents.push(result.accepted_event);
       }
 
-      this.recomputeActivities(receivedAt);
+      this.projectAcceptedActivityEvents(acceptedEvents, receivedAt);
     });
     run();
 
@@ -199,7 +201,7 @@ export const activityEventMethods = {
       }
     }
 
-    this.insertActivityEvent({
+    const serverSequence = this.insertActivityEvent({
       event_id: eventId,
       device_id: deviceId,
       client_sequence: clientSequence,
@@ -215,7 +217,18 @@ export const activityEventMethods = {
 
     return {
       event_id: eventId,
-      ignored: ignoreReason ? { event_id: eventId, reason: ignoreReason } : null
+      ignored: ignoreReason ? { event_id: eventId, reason: ignoreReason } : null,
+      accepted_event:
+        status === 'accepted' && serverSequence
+          ? {
+              event_id: eventId,
+              activity_id: activityId,
+              type,
+              occurred_at_utc: occurredAt,
+              server_sequence: serverSequence,
+              payload_json: JSON.stringify(payload)
+            }
+          : null
     };
   }
 ,
@@ -238,7 +251,8 @@ export const activityEventMethods = {
 ,
 
   insertActivityEvent(event) {
-    this.db
+    const serverSequence = this.nextActivityServerSequence();
+    const result = this.db
       .prepare(
         `
           INSERT INTO activity_events (
@@ -253,7 +267,7 @@ export const activityEventMethods = {
         event.event_id,
         event.device_id,
         event.client_sequence,
-        this.nextActivityServerSequence(),
+        serverSequence,
         event.activity_id ?? null,
         event.type,
         event.occurred_at_utc,
@@ -263,6 +277,7 @@ export const activityEventMethods = {
         event.ignore_reason ?? null,
         event.payload_version
       );
+    return result.changes > 0 ? serverSequence : null;
   }
 ,
 
@@ -271,6 +286,216 @@ export const activityEventMethods = {
       .prepare('SELECT COALESCE(MAX(server_sequence), 0) + 1 AS next FROM activity_events')
       .get();
     return row.next;
+  }
+,
+
+  projectAcceptedActivityEvents(events, nowIso) {
+    if (events.length === 0) return;
+
+    const activityIds = new Set();
+    const insertedReorderIds = new Set();
+
+    for (const event of events) {
+      if (event.type === 'reorder') {
+        insertedReorderIds.add(event.event_id);
+      } else if (event.activity_id) {
+        activityIds.add(event.activity_id);
+      }
+    }
+
+    const latestReorder = insertedReorderIds.size > 0 ? this.latestActivityReorderEvent() : null;
+    if (latestReorder && insertedReorderIds.has(latestReorder.event_id)) {
+      for (const id of this.applyLatestActivityReorder(latestReorder)) {
+        activityIds.add(id);
+      }
+    }
+
+    for (const activityId of activityIds) {
+      this.projectActivity(activityId, nowIso);
+    }
+  }
+,
+
+  projectActivity(activityId, nowIso) {
+    const events = this.db
+      .prepare(
+        `
+          SELECT * FROM activity_events
+          WHERE status = 'accepted'
+            AND activity_id = ?
+            AND type != 'reorder'
+          ORDER BY occurred_at_utc ASC, server_sequence ASC
+        `
+      )
+      .all(activityId);
+
+    let activity = null;
+    let sortResetEvent = null;
+    let lastOwnEvent = null;
+
+    for (const event of events) {
+      const payload = parseJsonObject(event.payload_json);
+
+      if (event.type === 'create') {
+        const title = sanitizeText(payload.title);
+        if (!title) continue;
+        if (!activity) sortResetEvent = event;
+        activity = {
+          id: activityId,
+          title,
+          description_md: activity?.description_md ?? '',
+          status: activity?.status ?? 'New',
+          created_at_utc: activity?.created_at_utc ?? event.occurred_at_utc,
+          updated_at_utc: event.occurred_at_utc,
+          completed_at_utc: activity?.completed_at_utc ?? null,
+          sort_order: activity?.sort_order ?? null,
+          deleted_at_utc: null,
+          restored_at_utc: activity?.restored_at_utc ?? null,
+          last_event_id: event.event_id
+        };
+        lastOwnEvent = event;
+      } else if (event.type === 'update_title' && activity) {
+        const title = sanitizeText(payload.title);
+        if (!title) continue;
+        activity.title = title;
+        activity.updated_at_utc = event.occurred_at_utc;
+        activity.last_event_id = event.event_id;
+        lastOwnEvent = event;
+      } else if (event.type === 'update_description' && activity) {
+        activity.description_md = normalizeMarkdownSource(payload.description_md ?? '');
+        activity.updated_at_utc = event.occurred_at_utc;
+        activity.last_event_id = event.event_id;
+        lastOwnEvent = event;
+      } else if (event.type === 'set_status' && activity && ACTIVITY_STATUSES.has(payload.status)) {
+        activity.status = payload.status;
+        activity.updated_at_utc = event.occurred_at_utc;
+        activity.completed_at_utc = payload.status === 'Done' ? event.occurred_at_utc : null;
+        activity.sort_order = null;
+        activity.last_event_id = event.event_id;
+        sortResetEvent = event;
+        lastOwnEvent = event;
+      } else if (event.type === 'delete' && activity) {
+        activity.deleted_at_utc = event.occurred_at_utc;
+        activity.updated_at_utc = event.occurred_at_utc;
+        activity.sort_order = null;
+        activity.last_event_id = event.event_id;
+        sortResetEvent = event;
+        lastOwnEvent = event;
+      } else if (event.type === 'restore' && activity) {
+        activity.deleted_at_utc = null;
+        activity.restored_at_utc = event.occurred_at_utc;
+        activity.status = 'New';
+        activity.completed_at_utc = null;
+        activity.sort_order = null;
+        activity.updated_at_utc = event.occurred_at_utc;
+        activity.last_event_id = event.event_id;
+        sortResetEvent = event;
+        lastOwnEvent = event;
+      }
+    }
+
+    if (!activity) {
+      this.db.prepare('DELETE FROM activities WHERE id = ?').run(activityId);
+      return;
+    }
+
+    if (activity.status === 'New' && !activity.deleted_at_utc && sortResetEvent) {
+      const reorder = this.latestActivityReorderAfter(sortResetEvent);
+      if (reorder) {
+        const orderedIds = normalizeOrderedIds(parseJsonObject(reorder.payload_json).ordered_ids);
+        const sortOrder = orderedIds.indexOf(activityId);
+        activity.sort_order = sortOrder === -1 ? null : sortOrder;
+        if (sortOrder !== -1 && isEventAfter(reorder, lastOwnEvent)) {
+          activity.updated_at_utc = reorder.occurred_at_utc;
+          activity.last_event_id = reorder.event_id;
+        }
+      }
+    }
+
+    this.db
+      .prepare(
+        `
+          INSERT INTO activities (
+            id, title, description_md, status, created_at_utc, updated_at_utc, completed_at_utc,
+            sort_order, deleted_at_utc, restored_at_utc, last_event_id
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT(id) DO UPDATE SET
+            title = excluded.title,
+            description_md = excluded.description_md,
+            status = excluded.status,
+            created_at_utc = excluded.created_at_utc,
+            updated_at_utc = excluded.updated_at_utc,
+            completed_at_utc = excluded.completed_at_utc,
+            sort_order = excluded.sort_order,
+            deleted_at_utc = excluded.deleted_at_utc,
+            restored_at_utc = excluded.restored_at_utc,
+            last_event_id = excluded.last_event_id
+        `
+      )
+      .run(
+        activity.id,
+        activity.title,
+        activity.description_md ?? '',
+        activity.status,
+        activity.created_at_utc,
+        activity.updated_at_utc ?? nowIso,
+        activity.completed_at_utc ?? null,
+        Number.isInteger(activity.sort_order) ? activity.sort_order : null,
+        activity.deleted_at_utc ?? null,
+        activity.restored_at_utc ?? null,
+        activity.last_event_id ?? null
+      );
+  }
+,
+
+  latestActivityReorderEvent() {
+    return this.db
+      .prepare(
+        `
+          SELECT * FROM activity_events
+          WHERE status = 'accepted' AND type = 'reorder'
+          ORDER BY occurred_at_utc DESC, server_sequence DESC
+          LIMIT 1
+        `
+      )
+      .get();
+  }
+,
+
+  latestActivityReorderAfter(event) {
+    return this.db
+      .prepare(
+        `
+          SELECT * FROM activity_events
+          WHERE status = 'accepted'
+            AND type = 'reorder'
+            AND (
+              occurred_at_utc > ?
+              OR (occurred_at_utc = ? AND server_sequence > ?)
+            )
+          ORDER BY occurred_at_utc DESC, server_sequence DESC
+          LIMIT 1
+        `
+      )
+      .get(event.occurred_at_utc, event.occurred_at_utc, event.server_sequence);
+  }
+,
+
+  applyLatestActivityReorder(reorderEvent) {
+    const orderedIds = normalizeOrderedIds(parseJsonObject(reorderEvent.payload_json).ordered_ids);
+    this.db
+      .prepare(
+        `
+          UPDATE activities
+          SET sort_order = NULL
+          WHERE deleted_at_utc IS NULL
+            AND status = 'New'
+            AND sort_order IS NOT NULL
+            AND id NOT IN (SELECT value FROM json_each(?))
+        `
+      )
+      .run(JSON.stringify(orderedIds));
+    return orderedIds;
   }
 ,
 
@@ -380,3 +605,11 @@ export const activityEventMethods = {
   }
 
 };
+
+function isEventAfter(left, right) {
+  if (!right) return true;
+  return (
+    left.occurred_at_utc > right.occurred_at_utc ||
+    (left.occurred_at_utc === right.occurred_at_utc && left.server_sequence > right.server_sequence)
+  );
+}

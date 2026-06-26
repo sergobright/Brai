@@ -2,7 +2,7 @@
 
 import type { MouseEvent } from "react";
 import { useState } from "react";
-import type { ActionItem, ActionsState } from "@/shared/types/activities";
+import type { ActivityItem, ActivitiesState } from "@/shared/types/activities";
 import { ActionRow } from "./ActionRow";
 
 export function ArchiveSection({
@@ -10,9 +10,9 @@ export function ArchiveSection({
   localSnapshotReady,
   onRestore,
 }: {
-  state: ActionsState;
+  state: ActivitiesState;
   localSnapshotReady: boolean;
-  onRestore: (action: ActionItem) => Promise<void>;
+  onRestore: (action: ActivityItem) => Promise<void>;
 }) {
   const [openRestoreActionId, setOpenRestoreActionId] = useState<string | null>(null);
   const archivedActions = state.archived_actions;

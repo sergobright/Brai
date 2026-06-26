@@ -164,6 +164,97 @@ test('actions sync updates title and status from accepted events', async () => {
   }
 });
 
+test('actions sync applies late events to only the affected activity', async () => {
+  const fixture = await createFixture([
+    '2026-06-16T10:00:00.000Z',
+    '2026-06-16T10:00:01.000Z'
+  ]);
+
+  try {
+    await request(fixture.url, '/v1/activities/events/sync', {
+      method: 'POST',
+      body: JSON.stringify({
+        device: { device_id: 'web-device', platform: 'web' },
+        events: [
+          actionEvent('create-1', 1, 'create', 'action-1', '2026-06-16T09:00:00.000Z', { title: 'Первое' }),
+          actionEvent('done-1', 2, 'set_status', 'action-1', '2026-06-16T09:20:00.000Z', { status: 'Done' }),
+          actionEvent('create-2', 3, 'create', 'action-2', '2026-06-16T09:00:00.000Z', { title: 'Второе' })
+        ]
+      })
+    });
+
+    fixture.store.db.exec(`
+      CREATE TRIGGER fail_activity_delete
+      BEFORE DELETE ON activities
+      WHEN old.id = 'action-2'
+      BEGIN
+        SELECT RAISE(ABORT, 'unrelated activity was rebuilt');
+      END;
+    `);
+
+    const response = await request(fixture.url, '/v1/activities/events/sync', {
+      method: 'POST',
+      body: JSON.stringify({
+        device: { device_id: 'web-device', platform: 'web' },
+        events: [
+          actionEvent('rename-late', 4, 'update_title', 'action-1', '2026-06-16T09:10:00.000Z', {
+            title: 'Переименовано'
+          })
+        ]
+      })
+    });
+
+    assert.equal(response.status, 200);
+    const action1 = response.body.state.activities.find((activity) => activity.id === 'action-1');
+    const action2 = response.body.state.activities.find((activity) => activity.id === 'action-2');
+    assert.equal(action1.title, 'Переименовано');
+    assert.equal(action1.status, 'Done');
+    assert.equal(action2.title, 'Второе');
+  } finally {
+    await fixture.close();
+  }
+});
+
+test('actions sync replays previously orphaned updates after a late create', async () => {
+  const fixture = await createFixture([
+    '2026-06-16T10:00:00.000Z',
+    '2026-06-16T10:00:01.000Z'
+  ]);
+
+  try {
+    await request(fixture.url, '/v1/activities/events/sync', {
+      method: 'POST',
+      body: JSON.stringify({
+        device: { device_id: 'web-device', platform: 'web' },
+        events: [
+          actionEvent('rename-first', 1, 'update_title', 'action-late', '2026-06-16T09:01:00.000Z', {
+            title: 'После создания'
+          })
+        ]
+      })
+    });
+    assert.equal(tableCount(fixture, 'activities'), 0);
+
+    const response = await request(fixture.url, '/v1/activities/events/sync', {
+      method: 'POST',
+      body: JSON.stringify({
+        device: { device_id: 'web-device', platform: 'web' },
+        events: [
+          actionEvent('create-late', 2, 'create', 'action-late', '2026-06-16T09:00:00.000Z', {
+            title: 'До переименования'
+          })
+        ]
+      })
+    });
+
+    assert.equal(response.status, 200);
+    assert.equal(response.body.state.activities[0].id, 'action-late');
+    assert.equal(response.body.state.activities[0].title, 'После создания');
+  } finally {
+    await fixture.close();
+  }
+});
+
 test('actions sync manually reorders new activities', async () => {
   const fixture = await createFixture(['2026-06-16T10:00:00.000Z']);
 
@@ -206,6 +297,86 @@ test('actions sync manually reorders new activities', async () => {
     });
     assert.equal(duplicate.body.server_revision, 5);
     assert.equal(tableCount(fixture, 'activity_events'), 5);
+  } finally {
+    await fixture.close();
+  }
+});
+
+test('actions sync replaces manual order without rebuilding all activities', async () => {
+  const fixture = await createFixture([
+    '2026-06-16T10:00:00.000Z',
+    '2026-06-16T10:00:01.000Z'
+  ]);
+
+  try {
+    const response = await request(fixture.url, '/v1/activities/events/sync', {
+      method: 'POST',
+      body: JSON.stringify({
+        device: { device_id: 'web-device', platform: 'web' },
+        events: [
+          actionEvent('create-a', 1, 'create', 'action-a', '2026-06-16T09:00:00.000Z', { title: 'A' }),
+          actionEvent('create-b', 2, 'create', 'action-b', '2026-06-16T09:00:00.000Z', { title: 'B' }),
+          actionEvent('order-ab', 3, 'reorder', 'action-a', '2026-06-16T09:01:00.000Z', {
+            ordered_ids: ['action-a', 'action-b']
+          }),
+          actionEvent('order-b', 4, 'reorder', 'action-b', '2026-06-16T09:02:00.000Z', {
+            ordered_ids: ['action-b']
+          })
+        ]
+      })
+    });
+
+    assert.equal(response.status, 200);
+    const byId = new Map(response.body.state.activities.map((activity) => [activity.id, activity]));
+    assert.equal(byId.get('action-a').sort_order, null);
+    assert.equal(byId.get('action-b').sort_order, 0);
+  } finally {
+    await fixture.close();
+  }
+});
+
+test('actions sync applies existing reorder to a late-created activity', async () => {
+  const fixture = await createFixture([
+    '2026-06-16T10:00:00.000Z',
+    '2026-06-16T10:00:01.000Z'
+  ]);
+
+  try {
+    await request(fixture.url, '/v1/activities/events/sync', {
+      method: 'POST',
+      body: JSON.stringify({
+        device: { device_id: 'web-device', platform: 'web' },
+        events: [
+          actionEvent('create-existing', 1, 'create', 'action-existing', '2026-06-16T09:00:00.000Z', {
+            title: 'Существующая'
+          }),
+          actionEvent('reorder', 2, 'reorder', 'action-existing', '2026-06-16T09:02:00.000Z', {
+            ordered_ids: ['action-late', 'action-existing']
+          })
+        ]
+      })
+    });
+
+    const response = await request(fixture.url, '/v1/activities/events/sync', {
+      method: 'POST',
+      body: JSON.stringify({
+        device: { device_id: 'web-device', platform: 'web' },
+        events: [
+          actionEvent('create-late', 3, 'create', 'action-late', '2026-06-16T09:01:00.000Z', {
+            title: 'Опоздавшая'
+          })
+        ]
+      })
+    });
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(
+      response.body.state.activities.map((activity) => [activity.id, activity.sort_order]),
+      [
+        ['action-late', 0],
+        ['action-existing', 1]
+      ]
+    );
   } finally {
     await fixture.close();
   }

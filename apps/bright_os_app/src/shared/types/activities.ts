@@ -1,11 +1,11 @@
-export type ActionStatus = "New" | "Done";
-export type ActionEventType = "create" | "update_title" | "update_description" | "set_status" | "reorder" | "delete" | "restore";
+export type ActivityStatus = "New" | "Done";
+export type ActivityEventType = "create" | "update_title" | "update_description" | "set_status" | "reorder" | "delete" | "restore";
 
-export interface ActionItem {
+export interface ActivityItem {
   id: string;
   title: string;
   description_md: string;
-  status: ActionStatus;
+  status: ActivityStatus;
   created_at_utc: string;
   updated_at_utc: string;
   completed_at_utc: string | null;
@@ -15,21 +15,22 @@ export interface ActionItem {
   pending?: boolean;
 }
 
-export interface ActionEventPayload {
+export interface ActivityEventPayload {
   title?: string;
   description_md?: string;
-  status?: ActionStatus;
+  status?: ActivityStatus;
   ordered_ids?: string[];
 }
 
-export interface PendingActionEvent {
+export interface PendingActivityEvent {
   eventId: string;
   deviceId: string;
   clientSequence: number;
-  type: ActionEventType;
+  type: ActivityEventType;
   occurredAtUtc: string;
+  // Persisted IndexedDB field from the old Actions naming; treat as an opaque activity id.
   actionId: string;
-  payload: ActionEventPayload;
+  payload: ActivityEventPayload;
   baseServerRevision: number;
   payloadVersion: 1;
   status: "pending" | "syncing" | "failed";
@@ -39,22 +40,22 @@ export interface PendingActionEvent {
   lastSyncAttemptAtUtc?: string | null;
 }
 
-export interface ActionsState {
+export interface ActivitiesState {
   server_time_utc: string;
   server_revision: number;
-  actions: ActionItem[];
-  archived_actions: ActionItem[];
+  actions: ActivityItem[];
+  archived_actions: ActivityItem[];
 }
 
-export interface ActionsSyncResponse {
+export interface ActivitiesSyncResponse {
   acknowledged_event_ids: string[];
   ignored_events: Array<{ event_id: string; reason: string }>;
   server_revision: number;
   server_time_utc: string;
-  state: ActionsState;
+  state: ActivitiesState;
 }
 
-export function emptyActionsState(now = new Date()): ActionsState {
+export function emptyActivitiesState(now = new Date()): ActivitiesState {
   return {
     server_time_utc: now.toISOString(),
     server_revision: 0,
@@ -62,3 +63,12 @@ export function emptyActionsState(now = new Date()): ActionsState {
     archived_actions: [],
   };
 }
+
+export type ActionStatus = ActivityStatus;
+export type ActionEventType = ActivityEventType;
+export type ActionItem = ActivityItem;
+export type ActionEventPayload = ActivityEventPayload;
+export type PendingActionEvent = PendingActivityEvent;
+export type ActionsState = ActivitiesState;
+export type ActionsSyncResponse = ActivitiesSyncResponse;
+export const emptyActionsState = emptyActivitiesState;

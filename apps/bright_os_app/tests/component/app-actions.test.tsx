@@ -1,8 +1,8 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { cachedActionsState, openProfileMenuItem, setupBrightOsAppTest } from "./app-test-support";
+import { cachedActivitiesState, openProfileMenuItem, setupBrightOsAppTest } from "./app-test-support";
 import { BrightOsApp } from "@/features/app/BrightOsApp";
-import { pendingActionEvents, saveActionsState } from "@/shared/storage/activityStore";
+import { pendingActivityEvents, saveActivitiesState } from "@/shared/storage/activityStore";
 
 describe("BrightOsApp actions", () => {
   setupBrightOsAppTest();
@@ -73,7 +73,7 @@ describe("BrightOsApp actions", () => {
   });
 
   it("shows the cached Actions snapshot before the network refresh finishes", async () => {
-    await saveActionsState({
+    await saveActivitiesState({
       server_time_utc: "2026-06-16T12:00:00.000Z",
       server_revision: 3,
       actions: [
@@ -114,7 +114,7 @@ describe("BrightOsApp actions", () => {
       })),
     );
     Object.defineProperty(window, "innerWidth", { configurable: true, writable: true, value: 1200 });
-    await saveActionsState(cachedActionsState("action-detail", "Детальное действие"));
+    await saveActivitiesState(cachedActivitiesState("action-detail", "Детальное действие"));
 
     render(<BrightOsApp />);
 
@@ -154,7 +154,7 @@ describe("BrightOsApp actions", () => {
     fireEvent.click(screen.getByRole("button", { name: "Закрыть редактор" }));
 
     await waitFor(async () => {
-      expect(await pendingActionEvents()).toEqual(
+      expect(await pendingActivityEvents()).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
             actionId: "action-detail",
@@ -181,7 +181,7 @@ describe("BrightOsApp actions", () => {
       })),
     );
     Object.defineProperty(window, "innerWidth", { configurable: true, writable: true, value: 1200 });
-    await saveActionsState({
+    await saveActivitiesState({
       server_time_utc: "2026-06-20T12:00:00.000Z",
       server_revision: 9,
       actions: [
@@ -255,7 +255,7 @@ describe("BrightOsApp actions", () => {
       })),
     );
     Object.defineProperty(window, "innerWidth", { configurable: true, writable: true, value: 1200 });
-    await saveActionsState(cachedActionsState("action-title-draft", "Черновик"));
+    await saveActivitiesState(cachedActivitiesState("action-title-draft", "Черновик"));
 
     render(<BrightOsApp />);
 
@@ -275,7 +275,7 @@ describe("BrightOsApp actions", () => {
 
     fireEvent.blur(mirroredListTitle);
     await waitFor(async () => {
-      expect(await pendingActionEvents()).toEqual(
+      expect(await pendingActivityEvents()).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
             actionId: "action-title-draft",
@@ -302,7 +302,7 @@ describe("BrightOsApp actions", () => {
       })),
     );
     Object.defineProperty(window, "innerWidth", { configurable: true, writable: true, value: 1200 });
-    await saveActionsState(cachedActionsState("action-info-replace", "Информационная замена"));
+    await saveActivitiesState(cachedActivitiesState("action-info-replace", "Информационная замена"));
 
     render(<BrightOsApp />);
 
@@ -328,7 +328,7 @@ describe("BrightOsApp actions", () => {
   });
 
   it("opens the mobile full-screen detail editor and flushes through the Android back bridge", async () => {
-    await saveActionsState(cachedActionsState("action-mobile-detail", "Мобильное действие"));
+    await saveActivitiesState(cachedActivitiesState("action-mobile-detail", "Мобильное действие"));
 
     render(<BrightOsApp />);
 
@@ -353,7 +353,7 @@ describe("BrightOsApp actions", () => {
 
     await waitFor(async () => {
       expect(screen.queryByRole("button", { name: "Сохранить и закрыть" })).not.toBeInTheDocument();
-      expect(await pendingActionEvents()).toEqual(
+      expect(await pendingActivityEvents()).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
             actionId: "action-mobile-detail",
@@ -367,7 +367,7 @@ describe("BrightOsApp actions", () => {
 
   it("restores the global activity Markdown preview preference", async () => {
     window.localStorage.setItem("bright_os_activity_md_preview", "true");
-    await saveActionsState(cachedActionsState("action-preview-preference", "Сохраненный режим", "## Цель"));
+    await saveActivitiesState(cachedActivitiesState("action-preview-preference", "Сохраненный режим", "## Цель"));
 
     render(<BrightOsApp />);
 

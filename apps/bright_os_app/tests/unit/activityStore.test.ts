@@ -1,17 +1,17 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import {
-  enqueueActionEvent,
-  loadActionEditDrafts,
-  loadActionsState,
+  enqueueActivityEvent,
+  loadActivityEditDrafts,
+  loadActivitiesState,
   markdownPreviewSource,
-  pendingActionEvents,
-  projectActionsState,
-  saveActionEditDraft,
-  saveActionsState,
+  pendingActivityEvents,
+  projectActivitiesState,
+  saveActivityEditDraft,
+  saveActivitiesState,
   visibleDescriptionPreview,
 } from "@/shared/storage/activityStore";
 import { clientDb, getMeta } from "@/shared/storage/db";
-import type { ActionsState } from "@/shared/types/activities";
+import type { ActivitiesState } from "@/shared/types/activities";
 
 describe("action store", () => {
   beforeEach(async () => {
@@ -21,20 +21,22 @@ describe("action store", () => {
   });
 
   it("stores local action events and projects visible state", async () => {
-    const created = await enqueueActionEvent({
+    const created = await enqueueActivityEvent({
       type: "create",
       payload: { title: " Фокус " },
       baseServerRevision: 0,
     });
-    await enqueueActionEvent({
+    await enqueueActivityEvent({
       type: "set_status",
       actionId: created.actionId,
       payload: { status: "Done" },
       baseServerRevision: 0,
     });
 
-    const projected = projectActionsState(null, await pendingActionEvents());
+    const projected = projectActivitiesState(null, await pendingActivityEvents());
 
+    expect(created.actionId).toContain(":activity:");
+    expect(created.eventId).toContain(":activity:");
     expect(projected.actions).toHaveLength(1);
     expect(projected.actions[0]).toMatchObject({
       id: created.actionId,
@@ -47,19 +49,19 @@ describe("action store", () => {
   });
 
   it("projects pending deletes by moving the action to archive", async () => {
-    const created = await enqueueActionEvent({
+    const created = await enqueueActivityEvent({
       type: "create",
       payload: { title: "Фокус" },
       baseServerRevision: 0,
     });
-    await enqueueActionEvent({
+    await enqueueActivityEvent({
       type: "delete",
       actionId: created.actionId,
       payload: {},
       baseServerRevision: 0,
     });
 
-    const projected = projectActionsState(null, await pendingActionEvents());
+    const projected = projectActivitiesState(null, await pendingActivityEvents());
 
     expect(projected.actions).toHaveLength(0);
     expect(projected.archived_actions).toHaveLength(1);
@@ -72,7 +74,7 @@ describe("action store", () => {
   });
 
   it("projects pending restore by returning the action to the top", async () => {
-    await saveActionsState({
+    await saveActivitiesState({
       server_time_utc: "2026-06-16T12:00:00.000Z",
       server_revision: 5,
       actions: [action("action-active", "Активное", "2026-06-16T10:00:00.000Z")],
@@ -85,14 +87,14 @@ describe("action store", () => {
         },
       ],
     });
-    await enqueueActionEvent({
+    await enqueueActivityEvent({
       type: "restore",
       actionId: "action-archived",
       payload: {},
       baseServerRevision: 5,
     });
 
-    const projected = projectActionsState(await loadActionsState(), await pendingActionEvents());
+    const projected = projectActivitiesState(await loadActivitiesState(), await pendingActivityEvents());
 
     expect(projected.archived_actions).toHaveLength(0);
     expect(projected.actions.map((item) => [item.id, item.status, item.pending])).toEqual([
@@ -102,22 +104,22 @@ describe("action store", () => {
   });
 
   it("projects pending descriptions and coalesces repeated description edits", async () => {
-    await saveActionsState(state(5, "Фокус", ""));
-    await enqueueActionEvent({
+    await saveActivitiesState(state(5, "Фокус", ""));
+    await enqueueActivityEvent({
       type: "update_description",
       actionId: "action-1",
       payload: { description_md: "первая" },
       baseServerRevision: 5,
     });
-    await enqueueActionEvent({
+    await enqueueActivityEvent({
       type: "update_description",
       actionId: "action-1",
       payload: { description_md: "**вторая**\r\nстрока" },
       baseServerRevision: 5,
     });
 
-    const pending = await pendingActionEvents();
-    const projected = projectActionsState(await loadActionsState(), pending);
+    const pending = await pendingActivityEvents();
+    const projected = projectActivitiesState(await loadActivitiesState(), pending);
 
     expect(pending.filter((event) => event.type === "update_description")).toHaveLength(1);
     expect(projected.actions[0]).toMatchObject({
@@ -127,7 +129,7 @@ describe("action store", () => {
   });
 
   it("projects pending manual reorder and coalesces repeated reorder events", async () => {
-    await saveActionsState({
+    await saveActivitiesState({
       server_time_utc: "2026-06-16T12:00:00.000Z",
       server_revision: 5,
       actions: [
@@ -137,21 +139,21 @@ describe("action store", () => {
       ],
       archived_actions: [],
     });
-    await enqueueActionEvent({
+    await enqueueActivityEvent({
       type: "reorder",
       actionId: "action-1",
       payload: { ordered_ids: ["action-1", "action-2", "action-3"] },
       baseServerRevision: 5,
     });
-    await enqueueActionEvent({
+    await enqueueActivityEvent({
       type: "reorder",
       actionId: "action-3",
       payload: { ordered_ids: ["action-3", "action-1", "action-2"] },
       baseServerRevision: 5,
     });
 
-    const pending = await pendingActionEvents();
-    const projected = projectActionsState(await loadActionsState(), pending);
+    const pending = await pendingActivityEvents();
+    const projected = projectActivitiesState(await loadActivitiesState(), pending);
 
     expect(pending.filter((event) => event.type === "reorder")).toHaveLength(1);
     expect(projected.actions.map((item) => [item.id, item.sort_order, item.pending])).toEqual([
@@ -162,9 +164,9 @@ describe("action store", () => {
   });
 
   it("stores local action edit drafts for recovery", () => {
-    saveActionEditDraft("action-1", "Фокус", "строка 1\r\nстрока 2");
+    saveActivityEditDraft("action-1", "Фокус", "строка 1\r\nстрока 2");
 
-    expect(loadActionEditDrafts()).toContainEqual({
+    expect(loadActivityEditDrafts()).toContainEqual({
       actionId: "action-1",
       title: "Фокус",
       descriptionMd: "строка 1\nстрока 2",
@@ -180,15 +182,15 @@ describe("action store", () => {
   });
 
   it("does not overwrite cached actions with older server revisions", async () => {
-    expect(await saveActionsState(state(5, "Фокус"))).toBe(true);
-    expect(await saveActionsState(state(4, "Старое"))).toBe(false);
+    expect(await saveActivitiesState(state(5, "Фокус"))).toBe(true);
+    expect(await saveActivitiesState(state(4, "Старое"))).toBe(false);
 
-    expect((await loadActionsState())?.actions[0].title).toBe("Фокус");
+    expect((await loadActivitiesState())?.actions[0].title).toBe("Фокус");
     expect(await getMeta<number>("lastActionServerRevision")).toBe(5);
   });
 });
 
-function state(serverRevision: number, title: string, descriptionMd = ""): ActionsState {
+function state(serverRevision: number, title: string, descriptionMd = ""): ActivitiesState {
   return {
     server_time_utc: `2026-06-16T12:00:0${serverRevision}.000Z`,
     server_revision: serverRevision,

@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
 import { normalizeDescription } from "@/shared/activities/text";
-import { loadActionEditDrafts, saveActionEditDraft } from "@/shared/storage/activityStore";
-import type { ActionItem } from "@/shared/types/activities";
+import { loadActivityEditDrafts, saveActivityEditDraft } from "@/shared/storage/activityStore";
+import type { ActivityItem } from "@/shared/types/activities";
 
-export function activityDraftValues(action: ActionItem): { title: string; descriptionMd: string } {
-  const draft = loadActionEditDrafts().find((item) => item.actionId === action.id);
+export function activityDraftValues(action: ActivityItem): { title: string; descriptionMd: string } {
+  const draft = loadActivityEditDrafts().find((item) => item.actionId === action.id);
   return {
     title: draft?.title || action.title,
     descriptionMd: draft?.descriptionMd ?? normalizeDescription(action.description_md),
@@ -12,8 +12,8 @@ export function activityDraftValues(action: ActionItem): { title: string; descri
 }
 
 export function useActivityDraftAutosave(
-  action: ActionItem,
-  onAutosaveDetails: (action: ActionItem, title: string, descriptionMd: string) => Promise<void>,
+  action: ActivityItem,
+  onAutosaveDetails: (action: ActivityItem, title: string, descriptionMd: string) => Promise<void>,
 ) {
   const [autosave] = useState(() => createActivityDraftAutosave());
 
@@ -25,14 +25,14 @@ export function useActivityDraftAutosave(
 }
 
 export function scheduleActivityDraftEdit(
-  action: ActionItem,
+  action: ActivityItem,
   title: string,
   descriptionMd: string,
   onTitleDraftChange: (actionId: string, title: string | null) => void,
   autosave: ActivityDraftAutosave,
 ) {
   onTitleDraftChange(action.id, title === action.title ? null : title);
-  saveActionEditDraft(action.id, title, descriptionMd);
+  saveActivityEditDraft(action.id, title, descriptionMd);
   autosave.schedule(title, descriptionMd);
 }
 
@@ -42,8 +42,8 @@ function createActivityDraftAutosave() {
   let latest: { title: string; descriptionMd: string } | null = null;
   let timer: number | null = null;
   let maxTimer: number | null = null;
-  let action: ActionItem | null = null;
-  let callback: ((action: ActionItem, title: string, descriptionMd: string) => Promise<void>) | null = null;
+  let action: ActivityItem | null = null;
+  let callback: ((action: ActivityItem, title: string, descriptionMd: string) => Promise<void>) | null = null;
 
   function clearTimers() {
     if (timer != null) window.clearTimeout(timer);
@@ -62,8 +62,8 @@ function createActivityDraftAutosave() {
 
   return {
     setTarget(
-      nextAction: ActionItem,
-      nextCallback: (action: ActionItem, title: string, descriptionMd: string) => Promise<void>,
+      nextAction: ActivityItem,
+      nextCallback: (action: ActivityItem, title: string, descriptionMd: string) => Promise<void>,
     ) {
       action = nextAction;
       callback = nextCallback;

@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { BookOpen, Pencil } from "lucide-react";
 import { installAndroidBackHandler } from "@/shared/platform/platform";
 import { markdownPreviewSource, visibleDescriptionPreview } from "@/shared/activities/text";
-import type { ActionItem } from "@/shared/types/activities";
+import type { ActivityItem } from "@/shared/types/activities";
 import { Button } from "@/shared/ui/button";
 import { hasMarkdownSyntax, MarkdownContent } from "@/shared/ui/markdown-content";
 import { ScrollArea } from "@/shared/ui/scroll-area";
@@ -23,13 +23,13 @@ export function ActivityDetailEditor({
   onTitleDraftChange = () => undefined,
   onAutosaveDetails,
 }: {
-  action: ActionItem;
+  action: ActivityItem;
   titleDraft?: string;
   mode: "desktop" | "mobile";
   focusTitleRequest?: number;
   onClose: () => void;
   onTitleDraftChange?: (actionId: string, title: string | null) => void;
-  onAutosaveDetails: (action: ActionItem, title: string, descriptionMd: string) => Promise<void>;
+  onAutosaveDetails: (action: ActivityItem, title: string, descriptionMd: string) => Promise<void>;
 }) {
   const initial = activityDraftValues(action);
   const title = titleDraft ?? initial.title;

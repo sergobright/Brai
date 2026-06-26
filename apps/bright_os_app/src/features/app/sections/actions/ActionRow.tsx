@@ -5,7 +5,7 @@ import { useId, useLayoutEffect, useRef, useState } from "react";
 import { Trash2, Undo2 } from "lucide-react";
 import { useSwipeable } from "react-swipeable";
 import { cleanTitle, visibleDescriptionPreview } from "@/shared/activities/text";
-import type { ActionItem, ActionStatus } from "@/shared/types/activities";
+import type { ActivityItem, ActivityStatus } from "@/shared/types/activities";
 import { Checkbox } from "@/shared/ui/checkbox";
 import { cx } from "../../appUtils";
 import { isMobileNavigationViewport } from "../../navigation/useSectionSwipeNavigation";
@@ -35,16 +35,16 @@ export function ActionRow({
   sortableStyle,
   sortableDragging = false,
 }: {
-  action: ActionItem;
+  action: ActivityItem;
   selected: boolean;
   readonly?: boolean;
   control?: "delete" | "restore";
   onSelect: (detailTitleFocus?: DetailTitleFocus) => void;
-  onEditMobile: (action: ActionItem) => void;
-  onUpdateTitle: (action: ActionItem, title: string) => Promise<void>;
-  onSetStatus: (action: ActionItem, status: ActionStatus) => Promise<void>;
-  onDelete: (action: ActionItem) => Promise<void>;
-  onRestore?: (action: ActionItem) => Promise<void>;
+  onEditMobile: (action: ActivityItem) => void;
+  onUpdateTitle: (action: ActivityItem, title: string) => Promise<void>;
+  onSetStatus: (action: ActivityItem, status: ActivityStatus) => Promise<void>;
+  onDelete: (action: ActivityItem) => Promise<void>;
+  onRestore?: (action: ActivityItem) => Promise<void>;
   titleDraft?: string;
   onTitleDraftChange?: (actionId: string, title: string | null) => void;
   deleteOpen: boolean;
@@ -243,12 +243,12 @@ function ActionTitleEditor({
   onUpdateTitle,
   onTitleDraftChange,
 }: {
-  action: ActionItem;
+  action: ActivityItem;
   title: string;
   readonly?: boolean;
   onSelect: (detailTitleFocus?: DetailTitleFocus) => void;
-  onEditMobile: (action: ActionItem) => void;
-  onUpdateTitle: (action: ActionItem, title: string) => Promise<void>;
+  onEditMobile: (action: ActivityItem) => void;
+  onUpdateTitle: (action: ActivityItem, title: string) => Promise<void>;
   onTitleDraftChange: (actionId: string, title: string | null) => void;
 }) {
   const titleRef = useRef<HTMLSpanElement | null>(null);

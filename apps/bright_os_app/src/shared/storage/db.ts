@@ -5,7 +5,7 @@ import type {
   TimerSession,
   TimerState,
 } from "@/shared/types/timer";
-import type { ActionItem, PendingActionEvent } from "@/shared/types/activities";
+import type { ActivityItem, PendingActivityEvent } from "@/shared/types/activities";
 import { platformName } from "@/shared/platform/platform";
 
 export interface MetaRow {
@@ -41,10 +41,10 @@ export interface IgnoredEventRow {
 export class BrightOsClientDb extends Dexie {
   meta!: Table<MetaRow, string>;
   outbox_events!: Table<PendingTimerEvent, string>;
-  action_outbox_events!: Table<PendingActionEvent, string>;
+  action_outbox_events!: Table<PendingActivityEvent, string>;
   canonical_state!: Table<CanonicalStateRow, string>;
   sessions_cache!: Table<TimerSession, string>;
-  actions_cache!: Table<ActionItem, string>;
+  actions_cache!: Table<ActivityItem, string>;
   goal_cache!: Table<GoalCacheRow, string>;
   ignored_events!: Table<IgnoredEventRow, string>;
 

@@ -1,15 +1,15 @@
 import { useEffect, useRef } from "react";
-import { loadActionEditDrafts } from "@/shared/storage/activityStore";
-import type { ActionItem } from "@/shared/types/activities";
+import { loadActivityEditDrafts } from "@/shared/storage/activityStore";
+import type { ActivityItem } from "@/shared/types/activities";
 
 export function useRestoreActionEditDrafts(
-  actions: ActionItem[],
-  onAutosaveDetails: (action: ActionItem, title: string, descriptionMd: string) => Promise<void>,
+  actions: ActivityItem[],
+  onAutosaveDetails: (action: ActivityItem, title: string, descriptionMd: string) => Promise<void>,
 ) {
   const restoredDraftsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
-    for (const draftItem of loadActionEditDrafts()) {
+    for (const draftItem of loadActivityEditDrafts()) {
       if (restoredDraftsRef.current.has(draftItem.actionId)) continue;
       const action = actions.find((item) => item.id === draftItem.actionId);
       if (!action) continue;
