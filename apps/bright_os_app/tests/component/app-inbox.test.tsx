@@ -40,7 +40,8 @@ describe("BrightOsApp inbox", () => {
 
     fireEvent.click(title);
     await waitFor(() => expect(screen.getByRole("button", { name: "Закрыть редактор" })).toBeInTheDocument());
-    expect(inboxRow).toHaveClass("-mt-px", "rounded-lg", "border-b-transparent");
+    expect(inboxRow).toHaveClass("rounded-lg", "border-b-transparent");
+    expect(inboxRow).toHaveClass("[&:has(+_.action-row.selected)]:border-b-transparent");
     expect(screen.getByLabelText("Редактирование входящего")).toHaveClass("pr-7");
     const splitSlider = screen.getByRole("slider", { name: "Изменить ширину панелей" });
     expect(splitSlider).toHaveAttribute("aria-valuenow", "50");

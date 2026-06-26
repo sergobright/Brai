@@ -147,13 +147,13 @@ export function ActionRow({
     <div
       ref={setActionRowRef}
       className={cx(
-        "action-row group relative grid min-h-[54px] max-h-[220px] grid-cols-[minmax(0,1fr)_44px] items-stretch overflow-hidden border-b border-border transition-[max-height,opacity,border-color,box-shadow] duration-150 max-[860px]:grid-cols-[minmax(0,1fr)_46px] max-[860px]:[touch-action:pan-y]",
+        "action-row group relative grid min-h-[54px] max-h-[220px] grid-cols-[minmax(0,1fr)_44px] items-stretch overflow-hidden border-b border-border transition-[max-height,opacity,border-color,box-shadow] duration-150 [&:has(+_.action-row.selected)]:border-b-transparent max-[860px]:grid-cols-[minmax(0,1fr)_46px] max-[860px]:[touch-action:pan-y]",
         done && "done",
         action.pending && "pending opacity-80",
         deleteOpen && "delete-open",
         dragging && "dragging",
         removing && "removing pointer-events-none max-h-0 border-b-transparent opacity-0",
-        selected && "selected -mt-px rounded-lg border-b-transparent bg-primary/10",
+        selected && "selected rounded-lg border-b-transparent bg-primary/10",
         sortableDragging && "sorting overflow-visible shadow-lg",
       )}
       data-nav-swipe-exclusion
