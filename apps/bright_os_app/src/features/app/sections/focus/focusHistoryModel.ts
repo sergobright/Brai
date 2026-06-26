@@ -7,6 +7,9 @@ export type FocusHistoryRow = {
   departureTime: string;
   arrivalTime: string;
   duration: string;
+  startedAtUtc: string;
+  endedAtUtc: string | null;
+  pending: boolean;
 };
 
 export function focusHistoryRows(sessions: TimerSession[]): FocusHistoryRow[] {
@@ -15,7 +18,10 @@ export function focusHistoryRows(sessions: TimerSession[]): FocusHistoryRow[] {
     departureTime: moscowTime(session.started_at_utc),
     destination: "В фокусе",
     duration: formatCompactSessionDuration(sessionDuration(session)),
+    endedAtUtc: session.ended_at_utc,
     id: session.id,
+    pending: session.pending === true,
+    startedAtUtc: session.started_at_utc,
   }));
 }
 

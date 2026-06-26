@@ -6,6 +6,7 @@ import {
 
 export const migrationMethods = {
   migrate() {
+    const now = new Date().toISOString();
     this.ensureBaseSchema();
     this.ensureSettings();
     this.db.exec(`
@@ -21,9 +22,11 @@ export const migrationMethods = {
     }
 
     this.ensureEventSchema();
+    this.allowTimerEditSessionEvents();
+    this.ensureFocusSessionSchema();
     if (!this.hasMigration(2)) {
       this.seedLegacyEvents();
-      this.recomputeCanonicalSessions(new Date().toISOString());
+      this.recomputeCanonicalSessions(now);
       this.recordMigration(2, 'offline-first timer event log and canonical sessions');
     }
 
@@ -140,30 +143,20 @@ export const migrationMethods = {
     if (!this.hasMigration(23)) {
       this.recordMigration(23, 'add incremental activity projection indexes');
     }
+
+    if (!this.hasMigration(24)) {
+      this.ensureFocusSessionSchema();
+      this.recomputeCanonicalSessions(now);
+      this.dropLegacyTimerSessionTables();
+      this.recordMigration(24, 'rename timer sessions to versioned focus sessions');
+    }
+
+    this.ensureTableDescriptions();
   }
 ,
 
   ensureBaseSchema() {
     this.db.exec(`
-      CREATE TABLE IF NOT EXISTS timer_sessions (
-        id TEXT PRIMARY KEY,
-        started_at_utc TEXT NOT NULL,
-        ended_at_utc TEXT,
-        duration_seconds INTEGER,
-        created_at_utc TEXT NOT NULL,
-        updated_at_utc TEXT NOT NULL
-      );
-
-      CREATE UNIQUE INDEX IF NOT EXISTS idx_timer_sessions_one_active
-      ON timer_sessions ((ended_at_utc IS NULL))
-      WHERE ended_at_utc IS NULL;
-
-      CREATE INDEX IF NOT EXISTS idx_timer_sessions_started
-      ON timer_sessions (started_at_utc);
-
-      CREATE INDEX IF NOT EXISTS idx_timer_sessions_ended
-      ON timer_sessions (ended_at_utc);
-
       CREATE TABLE IF NOT EXISTS app_settings (
         key TEXT PRIMARY KEY,
         value TEXT NOT NULL,
@@ -204,7 +197,7 @@ export const migrationMethods = {
         device_id TEXT NOT NULL,
         client_sequence INTEGER NOT NULL,
         server_sequence INTEGER NOT NULL UNIQUE,
-        type TEXT NOT NULL CHECK (type IN ('start', 'stop', 'invalid')),
+        type TEXT NOT NULL CHECK (type IN ('start', 'stop', 'edit_session', 'invalid')),
         occurred_at_utc TEXT NOT NULL,
         received_at_utc TEXT NOT NULL,
         local_timer_id TEXT,
@@ -230,17 +223,171 @@ export const migrationMethods = {
 
       CREATE INDEX IF NOT EXISTS idx_timer_events_received
       ON timer_events (received_at_utc);
+    `);
+  }
+,
 
-      CREATE TABLE IF NOT EXISTS timer_session_sources (
+  ensureFocusSessionSchema() {
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS focus_sessions (
+        id TEXT PRIMARY KEY,
+        created_at_utc TEXT NOT NULL,
+        updated_at_utc TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS focus_session_versions (
+        id TEXT PRIMARY KEY,
+        focus_session_id TEXT NOT NULL,
+        started_at_utc TEXT NOT NULL,
+        ended_at_utc TEXT,
+        duration_seconds INTEGER,
+        is_current INTEGER NOT NULL CHECK (is_current IN (0, 1)),
+        created_at_utc TEXT NOT NULL,
+        created_event_id TEXT,
+        created_by_device_id TEXT,
+        FOREIGN KEY (focus_session_id) REFERENCES focus_sessions(id) ON DELETE CASCADE,
+        FOREIGN KEY (created_event_id) REFERENCES timer_events(event_id),
+        FOREIGN KEY (created_by_device_id) REFERENCES timer_devices(device_id)
+      );
+
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_focus_session_versions_one_current
+      ON focus_session_versions (focus_session_id)
+      WHERE is_current = 1;
+
+      CREATE INDEX IF NOT EXISTS idx_focus_session_versions_started
+      ON focus_session_versions (started_at_utc);
+
+      CREATE INDEX IF NOT EXISTS idx_focus_session_versions_ended
+      ON focus_session_versions (ended_at_utc);
+
+      CREATE INDEX IF NOT EXISTS idx_focus_session_versions_current_ended
+      ON focus_session_versions (is_current, ended_at_utc);
+
+      CREATE TABLE IF NOT EXISTS focus_session_sources (
         session_id TEXT NOT NULL,
         event_id TEXT NOT NULL,
         device_id TEXT NOT NULL,
         role TEXT NOT NULL,
         PRIMARY KEY (session_id, event_id, role),
-        FOREIGN KEY (session_id) REFERENCES timer_sessions(id) ON DELETE CASCADE,
+        FOREIGN KEY (session_id) REFERENCES focus_sessions(id) ON DELETE CASCADE,
         FOREIGN KEY (event_id) REFERENCES timer_events(event_id)
       );
     `);
+  }
+,
+
+  allowTimerEditSessionEvents() {
+    if (!this.tableExists('timer_events')) return;
+    const row = this.db
+      .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'timer_events'")
+      .get();
+    if (row?.sql?.includes("'edit_session'")) return;
+
+    this.db.pragma('foreign_keys = OFF');
+    try {
+      this.db.exec(`
+        CREATE TABLE timer_events_next (
+          event_id TEXT PRIMARY KEY,
+          device_id TEXT NOT NULL,
+          client_sequence INTEGER NOT NULL,
+          server_sequence INTEGER NOT NULL UNIQUE,
+          type TEXT NOT NULL CHECK (type IN ('start', 'stop', 'edit_session', 'invalid')),
+          occurred_at_utc TEXT NOT NULL,
+          received_at_utc TEXT NOT NULL,
+          local_timer_id TEXT,
+          base_server_revision INTEGER,
+          status TEXT NOT NULL CHECK (status IN ('accepted', 'ignored')),
+          ignore_reason TEXT,
+          payload_version INTEGER NOT NULL,
+          metadata_json TEXT,
+          FOREIGN KEY (device_id) REFERENCES timer_devices(device_id)
+        );
+
+        INSERT INTO timer_events_next (
+          event_id, device_id, client_sequence, server_sequence, type,
+          occurred_at_utc, received_at_utc, local_timer_id, base_server_revision,
+          status, ignore_reason, payload_version, metadata_json
+        )
+        SELECT
+          event_id, device_id, client_sequence, server_sequence, type,
+          occurred_at_utc, received_at_utc, local_timer_id, base_server_revision,
+          status, ignore_reason, payload_version, metadata_json
+        FROM timer_events;
+
+        DROP TABLE timer_events;
+        ALTER TABLE timer_events_next RENAME TO timer_events;
+      `);
+    } finally {
+      this.db.pragma('foreign_keys = ON');
+    }
+    this.ensureEventSchema();
+  }
+,
+
+  dropLegacyTimerSessionTables() {
+    this.db.exec(`
+      DROP TABLE IF EXISTS timer_session_sources;
+      DROP INDEX IF EXISTS idx_timer_sessions_one_active;
+      DROP INDEX IF EXISTS idx_timer_sessions_started;
+      DROP INDEX IF EXISTS idx_timer_sessions_ended;
+      DROP TABLE IF EXISTS timer_sessions;
+    `);
+  }
+,
+
+  ensureTableDescriptions() {
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS table_descriptions (
+        table_name TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        short_description TEXT NOT NULL,
+        long_description TEXT NOT NULL,
+        updated_at_utc TEXT NOT NULL
+      );
+    `);
+
+    const now = new Date().toISOString();
+    const descriptions = [
+      ['activities', 'Действия', 'Текущий список действий.', 'Хранит рабочее состояние действий Bright OS: название, статус, описание, сортировку, удаление и восстановление.'],
+      ['activity_events', 'События действий', 'Журнал изменений действий.', 'Хранит каждое клиентское событие по действиям для синхронизации, аудита и восстановления текущей таблицы activities.'],
+      ['app_settings', 'Настройки', 'Глобальные настройки приложения.', 'Хранит runtime-настройки в формате ключ-значение: дату старта цели, длительность цели, дневную норму фокуса и похожие параметры.'],
+      ['build_versions', 'Версии', 'Журнал публичных версий.', 'Хранит принятые web/OTA сборки и APK-релизы с описанием изменений, причиной выпуска и временем релиза.'],
+      ['deployment_records', 'Деплои', 'Журнал выкладок.', 'Хранит факты деплоя: окружение, ветку, commit, домен, web/OTA версию, APK версию и описание доставки.'],
+      ['focus_sessions', 'Сессии фокуса', 'Стабильные Focus-сессии.', 'Хранит стабильные идентификаторы Focus-сессий. Редактируемые время старта, финиша и длительность лежат в focus_session_versions.'],
+      ['focus_session_sources', 'Источники Focus-сессий', 'Связи Focus-сессий и событий.', 'Связывает итоговые Focus-сессии с timer_events, из которых они получились при deterministic replay.'],
+      ['focus_session_versions', 'Версии Focus-сессий', 'История значений Focus-сессий.', 'Хранит версии старта, финиша и длительности Focus-сессий. Только одна версия на сессию может быть текущей.'],
+      ['items', 'Сущности', 'Реестр рабочих сущностей.', 'Хранит главные рабочие сущности Bright OS как стабильные id для схемы, API и технических решений.'],
+      ['schema_migrations', 'Миграции', 'Журнал изменений схемы.', 'Хранит версии уже примененных миграций SQLite, время применения и краткое описание.'],
+      ['sqlite_sequence', 'Счётчики', 'Служебные счетчики SQLite.', 'Внутренняя таблица SQLite для AUTOINCREMENT-счетчиков. Это не бизнес-данные Bright OS.'],
+      ['table_descriptions', 'Описания таблиц', 'Справочник описаний таблиц.', 'Хранит читаемый русский заголовок и описание для каждой SQLite-таблицы, которые показывает admin-панель.'],
+      ['timer_devices', 'Устройства', 'Устройства синхронизации.', 'Хранит устройства, которые отправляют события фокуса и действий: stable device_id, платформу, имя и параметры синхронизации.'],
+      ['timer_events', 'События фокуса', 'Журнал событий фокуса.', 'Хранит start, stop и edit_session события фокуса с устройством, клиентской и серверной последовательностью.'],
+      ['version_types', 'Типы версий', 'Справочник типов версий.', 'Хранит типы записей для build_versions: обычную сборочную версию build и APK-версию apk.']
+    ];
+    const actualTables = new Set(
+      this.db
+        .prepare("SELECT name FROM sqlite_master WHERE type IN ('table', 'view')")
+        .all()
+        .map((row) => row.name)
+    );
+    const upsert = this.db.prepare(`
+      INSERT INTO table_descriptions (
+        table_name, title, short_description, long_description, updated_at_utc
+      ) VALUES (?, ?, ?, ?, ?)
+      ON CONFLICT(table_name) DO UPDATE SET
+        title = excluded.title,
+        short_description = excluded.short_description,
+        long_description = excluded.long_description,
+        updated_at_utc = excluded.updated_at_utc
+    `);
+    for (const [tableName, title, shortDescription, longDescription] of descriptions) {
+      if (actualTables.has(tableName)) {
+        upsert.run(tableName, title, shortDescription, longDescription, now);
+      }
+    }
+    this.db
+      .prepare("DELETE FROM table_descriptions WHERE table_name IN ('timer_sessions', 'timer_session_sources')")
+      .run();
   }
 ,
 

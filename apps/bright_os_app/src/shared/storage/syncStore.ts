@@ -45,6 +45,23 @@ export async function enqueueTimerEvent(params: {
   });
 }
 
+export async function enqueueFocusSessionEdit(params: {
+  sessionId: string;
+  startedAtUtc: string;
+  endedAtUtc: string;
+  baseServerRevision: number;
+}): Promise<PendingTimerEvent> {
+  return enqueueTimerEvent({
+    type: "edit_session",
+    baseServerRevision: params.baseServerRevision,
+    metadata: {
+      focus_session_id: params.sessionId,
+      started_at_utc: params.startedAtUtc,
+      ended_at_utc: params.endedAtUtc,
+    },
+  });
+}
+
 export async function pendingEvents(): Promise<PendingTimerEvent[]> {
   return clientDb().outbox_events.orderBy("clientSequence").toArray();
 }

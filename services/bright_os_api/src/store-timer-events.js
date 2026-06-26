@@ -5,12 +5,16 @@ import {
   FUTURE_EVENT_TOLERANCE_MS,
   LEGACY_DEVICE_ID,
   normalizeMetadata,
+  parseJsonObject,
   sanitizeText,
   toNullableInteger
 } from './store-helpers.js';
 
+const TIMER_EVENT_TYPES = new Set(['start', 'stop', 'edit_session']);
+
 export const timerEventMethods = {
   seedLegacyEvents() {
+    if (!this.tableExists('timer_sessions')) return;
     const existingEvents = this.db.prepare('SELECT COUNT(*) AS count FROM timer_events').get();
     if (existingEvents.count > 0) return;
 
@@ -73,13 +77,30 @@ export const timerEventMethods = {
 
   getActiveSession() {
     return this.db
-      .prepare('SELECT * FROM timer_sessions WHERE ended_at_utc IS NULL LIMIT 1')
+      .prepare(`
+        SELECT s.id, v.started_at_utc, v.ended_at_utc, v.duration_seconds,
+          s.created_at_utc, s.updated_at_utc
+        FROM focus_sessions s
+        JOIN focus_session_versions v
+          ON v.focus_session_id = s.id AND v.is_current = 1
+        WHERE v.ended_at_utc IS NULL
+        LIMIT 1
+      `)
       .get();
   }
 ,
 
   getSession(id) {
-    return this.db.prepare('SELECT * FROM timer_sessions WHERE id = ?').get(id);
+    return this.db
+      .prepare(`
+        SELECT s.id, v.started_at_utc, v.ended_at_utc, v.duration_seconds,
+          s.created_at_utc, s.updated_at_utc
+        FROM focus_sessions s
+        JOIN focus_session_versions v
+          ON v.focus_session_id = s.id AND v.is_current = 1
+        WHERE s.id = ?
+      `)
+      .get(id);
   }
 ,
 
@@ -87,9 +108,13 @@ export const timerEventMethods = {
     return this.db
       .prepare(
         `
-          SELECT * FROM timer_sessions
-          WHERE ended_at_utc IS NOT NULL
-          ORDER BY ended_at_utc DESC, started_at_utc DESC
+          SELECT s.id, v.started_at_utc, v.ended_at_utc, v.duration_seconds,
+            s.created_at_utc, s.updated_at_utc
+          FROM focus_sessions s
+          JOIN focus_session_versions v
+            ON v.focus_session_id = s.id AND v.is_current = 1
+          WHERE v.ended_at_utc IS NOT NULL
+          ORDER BY v.ended_at_utc DESC, v.started_at_utc DESC
           LIMIT 1
         `
       )
@@ -276,7 +301,7 @@ export const timerEventMethods = {
     let occurredAt = rawEvent?.occurred_at_utc;
     const metadata = normalizeMetadata(rawEvent?.metadata);
 
-    if (rawType !== 'start' && rawType !== 'stop') {
+    if (!TIMER_EVENT_TYPES.has(rawType)) {
       type = 'invalid';
       status = 'ignored';
       ignoreReason = 'invalid_type';
@@ -291,6 +316,14 @@ export const timerEventMethods = {
       status = 'ignored';
       ignoreReason = 'future_timestamp';
       occurredAt = new Date(occurredMs).toISOString();
+    } else if (rawType === 'edit_session') {
+      occurredAt = new Date(occurredMs).toISOString();
+      const edit = this.normalizeSessionEditMetadata(metadata, receivedAt);
+      if (edit.reason) {
+        status = 'ignored';
+        ignoreReason = edit.reason;
+      }
+      Object.assign(metadata, edit.metadata);
     } else {
       occurredAt = new Date(occurredMs).toISOString();
     }
@@ -426,16 +459,22 @@ export const timerEventMethods = {
       .all();
     const sessions = buildCanonicalSessions(events);
 
-    this.db.prepare('DELETE FROM timer_session_sources').run();
-    this.db.prepare('DELETE FROM timer_sessions').run();
+    this.db.prepare('DELETE FROM focus_session_sources').run();
+    this.db.prepare('DELETE FROM focus_session_versions').run();
+    this.db.prepare('DELETE FROM focus_sessions').run();
 
     const insertSession = this.db.prepare(`
-      INSERT INTO timer_sessions (
-        id, started_at_utc, ended_at_utc, duration_seconds, created_at_utc, updated_at_utc
-      ) VALUES (?, ?, ?, ?, ?, ?)
+      INSERT INTO focus_sessions (id, created_at_utc, updated_at_utc)
+      VALUES (?, ?, ?)
+    `);
+    const insertVersion = this.db.prepare(`
+      INSERT INTO focus_session_versions (
+        id, focus_session_id, started_at_utc, ended_at_utc, duration_seconds,
+        is_current, created_at_utc, created_event_id, created_by_device_id
+      ) VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?)
     `);
     const insertSource = this.db.prepare(`
-      INSERT OR IGNORE INTO timer_session_sources (session_id, event_id, device_id, role)
+      INSERT OR IGNORE INTO focus_session_sources (session_id, event_id, device_id, role)
       VALUES (?, ?, ?, ?)
     `);
 
@@ -443,15 +482,102 @@ export const timerEventMethods = {
       insertSession.run(
         session.id,
         session.started_at_utc,
+        session.ended_at_utc ?? nowIso
+      );
+      insertVersion.run(
+        `${session.id}:canonical`,
+        session.id,
+        session.started_at_utc,
         session.ended_at_utc,
         session.duration_seconds,
         session.started_at_utc,
-        session.ended_at_utc ?? nowIso
+        null,
+        null
       );
       for (const source of session.sourceEvents) {
         insertSource.run(session.id, source.event_id, source.device_id, source.role);
       }
     }
+
+    for (const event of events
+      .filter((item) => item.type === 'edit_session')
+      .sort((a, b) => Number(a.server_sequence) - Number(b.server_sequence))) {
+      this.applyFocusSessionEdit(event);
+    }
+  }
+,
+
+  normalizeSessionEditMetadata(metadata, receivedAt) {
+    const focusSessionId = sanitizeText(metadata.focus_session_id) ?? sanitizeText(metadata.session_id);
+    const startedMs = Date.parse(metadata.started_at_utc);
+    const endedMs = Date.parse(metadata.ended_at_utc);
+    const normalized = { focus_session_id: focusSessionId ?? null };
+
+    if (!focusSessionId) return { reason: 'focus_session_id_required', metadata: normalized };
+
+    const session = this.getSession(focusSessionId);
+    if (!session) return { reason: 'focus_session_not_found', metadata: normalized };
+    if (!session.ended_at_utc) return { reason: 'active_session_not_editable', metadata: normalized };
+
+    if (!Number.isFinite(startedMs) || !Number.isFinite(endedMs)) {
+      return { reason: 'invalid_session_timestamp', metadata: normalized };
+    }
+    if (endedMs <= startedMs) {
+      return { reason: 'invalid_session_range', metadata: normalized };
+    }
+    if (Math.max(startedMs, endedMs) - Date.parse(receivedAt) > FUTURE_EVENT_TOLERANCE_MS) {
+      return { reason: 'future_timestamp', metadata: normalized };
+    }
+
+    return {
+      reason: null,
+      metadata: {
+        focus_session_id: focusSessionId,
+        started_at_utc: new Date(startedMs).toISOString(),
+        ended_at_utc: new Date(endedMs).toISOString(),
+        duration_seconds: Math.max(0, Math.floor((endedMs - startedMs) / 1000))
+      }
+    };
+  }
+,
+
+  applyFocusSessionEdit(event) {
+    const metadata = parseJsonObject(event.metadata_json);
+    const focusSessionId = sanitizeText(metadata.focus_session_id) ?? sanitizeText(metadata.session_id);
+    const startedMs = Date.parse(metadata.started_at_utc);
+    const endedMs = Date.parse(metadata.ended_at_utc);
+    if (!focusSessionId || !Number.isFinite(startedMs) || !Number.isFinite(endedMs) || endedMs <= startedMs) {
+      return;
+    }
+
+    const session = this.getSession(focusSessionId);
+    if (!session || !session.ended_at_utc) return;
+
+    this.db
+      .prepare('UPDATE focus_session_versions SET is_current = 0 WHERE focus_session_id = ? AND is_current = 1')
+      .run(focusSessionId);
+    this.db
+      .prepare(
+        `
+          INSERT INTO focus_session_versions (
+            id, focus_session_id, started_at_utc, ended_at_utc, duration_seconds,
+            is_current, created_at_utc, created_event_id, created_by_device_id
+          ) VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?)
+        `
+      )
+      .run(
+        `${focusSessionId}:edit:${event.event_id}`,
+        focusSessionId,
+        new Date(startedMs).toISOString(),
+        new Date(endedMs).toISOString(),
+        Math.max(0, Math.floor((endedMs - startedMs) / 1000)),
+        event.received_at_utc,
+        event.event_id,
+        event.device_id
+      );
+    this.db
+      .prepare('UPDATE focus_sessions SET updated_at_utc = ? WHERE id = ?')
+      .run(event.received_at_utc, focusSessionId);
   }
 
 };

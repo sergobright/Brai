@@ -12,7 +12,7 @@ type LiveUpdateOptions = {
   setTimer: Dispatch<SetStateAction<TimerState>>;
   refreshStateAndFlushRef: MutableRefObject<() => Promise<void>>;
   applyServerStateRef: MutableRefObject<(state: TimerState) => Promise<void>>;
-  applyActionsStateRef: MutableRefObject<(state: ActionsState) => Promise<void>>;
+  applyActivitiesStateRef: MutableRefObject<(state: ActionsState) => Promise<void>>;
 };
 
 /**
@@ -24,7 +24,7 @@ export function useBrightOsLiveUpdates({
   setTimer,
   refreshStateAndFlushRef,
   applyServerStateRef,
-  applyActionsStateRef,
+  applyActivitiesStateRef,
 }: LiveUpdateOptions) {
   useEffect(() => {
     const interval = window.setInterval(() => {
@@ -74,7 +74,7 @@ export function useBrightOsLiveUpdates({
         };
         if (payload.state) void applyServerStateRef.current(payload.state);
         if (payload.activities_state) {
-          void applyActionsStateRef.current({
+          void applyActivitiesStateRef.current({
             server_time_utc: payload.activities_state.server_time_utc,
             server_revision: payload.activities_state.server_revision,
             actions: payload.activities_state.activities,
@@ -94,5 +94,5 @@ export function useBrightOsLiveUpdates({
       connected = false;
       websocket?.close();
     };
-  }, [api, syncStatus, refreshStateAndFlushRef, applyServerStateRef, applyActionsStateRef]);
+  }, [api, syncStatus, refreshStateAndFlushRef, applyServerStateRef, applyActivitiesStateRef]);
 }
