@@ -17,6 +17,40 @@ A pushed `codex/*` branch allocates or reuses a preview slot through `deploy/scr
 
 Local dev server URLs are agent-only verification aids. The user-facing handoff for project changes is the preview slot URL after `deploy-preview` succeeds; if CI/deploy is not complete, report that blocker instead of asking the project owner to open `localhost` or `127.0.0.1`.
 
+## Mechanical Guard Rails
+
+Use the checked-in task starter before the first project-file change:
+
+```bash
+scripts/bright-task-start.sh <task-slug>
+```
+
+The starter fetches `origin/dev`, refuses to reuse an existing remote `codex/<task-slug>`, creates a separate worktree under `../bright-os-worktrees/<task-slug>`, creates `codex/<task-slug>` with `--no-track`, and writes ignored local task state under `.bright-task/`.
+
+Repository Codex hooks are defined in `.codex/hooks.json`:
+
+- `PreToolUse` blocks write-like `exec_command`/`Bash` commands and `apply_patch` unless the checkout is a valid `codex/*` task branch based on `origin/dev`.
+- A pushed existing `codex/*` branch also needs local `.bright-task/` task state, so a new task cannot silently reuse an old preview branch. If the project owner explicitly asks for a direct follow-up on the current branch, run `node scripts/bright-task.mjs follow-up` first.
+- `Stop` blocks handoff when the working tree is dirty or when project-file writes were made without a verified preview receipt.
+
+Codex requires new or changed repo hooks to be reviewed and trusted through `/hooks`; that trust is local Codex security state and is not committed to Git.
+
+Git hooks live in `.githooks/`. Enable them in each local clone/worktree:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+`pre-commit` blocks commits outside valid `codex/*` task branches and rejects staged generated/runtime/secret-like files. `pre-push` blocks direct `main`/`dev` pushes, ref mismatches, branches not based on `origin/dev`, and pushes that fail the public guard. CI/CD-sensitive pushes also run the Temporal test suite before leaving the machine.
+
+Before a final implementation handoff, run:
+
+```bash
+scripts/bright-preview-handoff.sh
+```
+
+The verifier requires a clean tree, pushed `origin/<codex-branch>` at `HEAD`, successful `Bright OS delivery` jobs including `deploy-preview`, and a ready preview slot from the slot registry or Temporal. It writes an ignored `.bright-task/preview-handoff.json` receipt that the Codex `Stop` hook checks.
+
 For implementation tasks, the final handoff response must include the preview letter (`A` through `E`), preview URL, branch, and commit. When the current branch/commit is actually deployed to a preview slot, that single final handoff response must start with the slot emoji plus `Preview`, for example `🅰️ Preview` (`🅰️`, `🅱️`, `🅲`, `🅳`, or `🅴`). Do not print a preview emoji in intermediary updates, status replies, questions, acceptance monitoring, or any reply where the slot or deployed commit is unverified. If the preview letter or URL is missing because every slot is occupied, the response must say the branch is queued and include queue position/source when available. If it is missing for any other reason, the response must say exactly which push, CI, or deploy step blocked it. Ordinary `codex/*` branch push/deploy is standing Bright OS CI/CD automation and must not be treated as an optional manual confirmation step.
 
 Preview acceptance flow:

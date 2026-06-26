@@ -1,0 +1,29 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "apply_patch|exec_command|Bash|Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/srv/opt/node-v22.16.0/bin/node \"$(git rev-parse --show-toplevel)/scripts/bright-task.mjs\" pre-tool-use",
+            "timeout": 10,
+            "statusMessage": "Checking Bright OS branch guard"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/srv/opt/node-v22.16.0/bin/node \"$(git rev-parse --show-toplevel)/scripts/bright-task.mjs\" stop",
+            "timeout": 10,
+            "statusMessage": "Checking Bright OS handoff guard"
+          }
+        ]
+      }
+    ]
+  }
+}
