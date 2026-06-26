@@ -747,3 +747,66 @@ test('generic accepted build notes description is repaired', () => {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
+
+test('accepted git notes build description is repaired', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bright-git-notes-ledger-repair-'));
+  const db = path.join(tmp, 'target.sqlite');
+  const store = new BrightOsStore(db);
+
+  try {
+    store.db.prepare(`
+      INSERT INTO build_versions (
+        version_type_id,
+        major_version,
+        release_version,
+        build_version,
+        apk_version,
+        version,
+        short_changes,
+        detailed_changes,
+        reason,
+        released_at_utc,
+        created_at_utc
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      'build',
+      0,
+      0,
+      28,
+      1,
+      '0.0.28.1',
+      'Accepted preview changes without authored release notes.',
+      'No authored preview release notes were available; audit metadata is stored separately.',
+      'Needed because no authored preview release notes were available; audit metadata is stored separately.',
+      '2026-06-26T16:21:00.000Z',
+      '2026-06-26T16:21:00.000Z'
+    );
+
+    store.repairAcceptedGitNotesBuildVersionDescription();
+
+    const repaired = store.db
+      .prepare("SELECT short_changes, detailed_changes, reason FROM build_versions WHERE version_type_id = 'build' AND version = '0.0.28.1'")
+      .get();
+    assert.equal(repaired.short_changes, 'Read accepted build notes from git history.');
+    assert.match(repaired.detailed_changes, /tar-copied preview\/dev sources/);
+    assert.match(repaired.reason, /authored source commit notes/);
+    assert.doesNotMatch(
+      `${repaired.short_changes} ${repaired.detailed_changes} ${repaired.reason}`,
+      /Accepted preview changes without authored release notes|codex\/|@[0-9a-f]|->/
+    );
+
+    const ref = store.db
+      .prepare("SELECT source_branch, source_commit, target_branch, target_commit FROM build_version_refs WHERE version = '0.0.28.1'")
+      .get();
+    assert.deepEqual(ref, {
+      source_branch: 'codex/repair-late-build-version-descriptions',
+      source_commit: '53866e6800be4c5789a60ef049911d26a5693b0a',
+      target_branch: 'dev',
+      target_commit: '1dc4f8af7eb719aa8632b40a3f8b569f2a47884d'
+    });
+  } finally {
+    store.close();
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
