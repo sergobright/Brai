@@ -157,6 +157,11 @@ export const migrationMethods = {
       this.repairTechnicalBuildVersionDescriptions();
       this.recordMigration(25, 'repair technical build version descriptions');
     }
+
+    if (!this.hasMigration(26)) {
+      this.repairLateTechnicalBuildVersionDescriptions();
+      this.recordMigration(26, 'repair late technical build version descriptions');
+    }
   }
 ,
 
@@ -1311,6 +1316,33 @@ export const migrationMethods = {
         'Enforced branch preview guard rails.',
         'Task-start, handoff, git hook, and Codex hook guards now keep implementation work on codex/* branches, require clean committed pushes, and prevent preview handoff without a verified slot.',
         'Accepted dev build 0.0.22.1: codex/enforce-branch-preview-guards@5b9c621be5dd33c3c4bd3588f702fa69f53fca78 -> dev@f0c71767234ab38b80e5999a0f9fa6cea4877d58.',
+      ],
+    ];
+    const update = this.db.prepare(`
+      UPDATE build_versions
+      SET short_changes = ?, detailed_changes = ?, reason = ?
+      WHERE version_type_id = 'build'
+        AND version = ?
+    `);
+    for (const [version, shortChanges, detailedChanges, reason] of updates) {
+      update.run(shortChanges, detailedChanges, reason, version);
+    }
+  }
+,
+
+  repairLateTechnicalBuildVersionDescriptions() {
+    const updates = [
+      [
+        '0.0.23.1',
+        'Required runtime DB fact verification.',
+        'Project rules now require direct runtime verification before claiming database, service, or deployment facts; document SQLite WAL read-only checks; and add handoff/checklist requirements for non-visual runtime facts.',
+        'Accepted dev build 0.0.23.1: codex/require-runtime-db-verification@9846d4db644824b20c8f050aff99ea9fef8a3d38 -> dev@82be3ab928dca8444594f808b3f6fe2a3cb21a55.',
+      ],
+      [
+        '0.0.24.1',
+        'Fixed build version release notes.',
+        'Accepted build version rows now keep human-readable release notes in short_changes and detailed_changes, move deployment audit metadata into reason, preserve source changelog text during promotion, and repair historical technical descriptions.',
+        'Accepted dev build 0.0.24.1: codex/fix-build-version-descriptions@5c16c8450e77273d95d327f4792f502b0dfceee8 -> dev@d778efdcadfa06af938c91fe1247ab1309ebebf8.',
       ],
     ];
     const update = this.db.prepare(`

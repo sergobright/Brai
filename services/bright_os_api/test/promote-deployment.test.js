@@ -199,8 +199,10 @@ test('accepted preview promotion falls back when source database cannot be opene
     'codex/unreadable-preview-db',
     '--source-commit',
     'abc-unreadable',
+    '--source-short-changes',
+    'Recover unreadable preview metadata.',
     '--source-details',
-    'Accepted preview branch codex/unreadable-preview-db@abc-unreadable.',
+    'Recover unreadable preview metadata from commit fallback.',
     '--target-environment',
     'dev',
     '--target-branch',
@@ -220,9 +222,75 @@ test('accepted preview promotion falls back when source database cannot be opene
       .get();
     assert.equal(version.build_version, 12);
     assert.equal(version.version, '0.0.12.1');
-    assert.equal(version.short_changes, 'Accepted codex/unreadable-preview-db.');
-    assert.equal(version.detailed_changes, 'Accepted codex/unreadable-preview-db.');
+    assert.equal(version.short_changes, 'Recover unreadable preview metadata.');
+    assert.equal(version.detailed_changes, 'Recover unreadable preview metadata from commit fallback.');
     assert.match(version.reason, /codex\/unreadable-preview-db@abc-unreadable/);
+  } finally {
+    promoted.close();
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('accepted preview promotion ignores branch deployment metadata when commit fallback is useful', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bright-promote-branch-deployment-source-'));
+  const sourceDb = path.join(tmp, 'source.sqlite');
+  const targetDb = path.join(tmp, 'target.sqlite');
+  const source = new BrightOsStore(sourceDb);
+  const target = new BrightOsStore(targetDb);
+
+  try {
+    source.recordDeployment({
+      environment: 'preview-b',
+      slot: 'B',
+      branch: 'codex/branch-deployment-source',
+      commit: 'source-branch-deployment',
+      domain: 'b.test.brightos.world',
+      shortChanges: 'Branch deployment',
+      detailedChanges: 'Branch deployment',
+      reason: 'Automated branch delivery',
+      deployedAtUtc: '2026-06-26T15:00:00.000Z'
+    });
+  } finally {
+    source.close();
+    target.close();
+  }
+
+  const repoRoot = path.resolve(import.meta.dirname, '../../..');
+  execFileSync(process.execPath, [
+    path.join(repoRoot, 'deploy/scripts/promote-deployment.mjs'),
+    '--source-db',
+    sourceDb,
+    '--target-db',
+    targetDb,
+    '--source-branch',
+    'codex/branch-deployment-source',
+    '--source-commit',
+    'source-branch-deployment',
+    '--source-short-changes',
+    'Repair accepted build descriptions.',
+    '--source-details',
+    'Accepted build descriptions now use release notes instead of deployment metadata.',
+    '--target-environment',
+    'dev',
+    '--target-branch',
+    'dev',
+    '--target-commit',
+    'merge-branch-deployment',
+    '--target-domain',
+    'dev.brightos.world',
+    '--reason',
+    'Promote preview with technical source metadata'
+  ], { cwd: repoRoot });
+
+  const promoted = new BrightOsStore(targetDb);
+  try {
+    const version = promoted.db
+      .prepare("SELECT version, short_changes, detailed_changes, reason FROM build_versions WHERE version_type_id = 'build' ORDER BY build_version DESC LIMIT 1")
+      .get();
+    assert.equal(version.version, '0.0.12.1');
+    assert.equal(version.short_changes, 'Repair accepted build descriptions.');
+    assert.equal(version.detailed_changes, 'Accepted build descriptions now use release notes instead of deployment metadata.');
+    assert.match(version.reason, /codex\/branch-deployment-source@source-branch-deployment/);
   } finally {
     promoted.close();
     fs.rmSync(tmp, { recursive: true, force: true });
@@ -313,6 +381,73 @@ test('technical build version descriptions are repaired', () => {
     assert.match(repaired.find((row) => row.version === '0.0.17.1').detailed_changes, /falls back to branch and commit metadata/);
     assert.match(repaired.find((row) => row.version === '0.0.18.1').detailed_changes, /Temporal/);
     assert.match(repaired.find((row) => row.version === '0.0.22.1').reason, /codex\/enforce-branch-preview-guards@5b9c621/);
+  } finally {
+    store.close();
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('late technical build version descriptions are repaired', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bright-late-ledger-repair-'));
+  const db = path.join(tmp, 'target.sqlite');
+  const store = new BrightOsStore(db);
+
+  try {
+    const insertBroken = store.db.prepare(`
+      INSERT INTO build_versions (
+        version_type_id,
+        major_version,
+        release_version,
+        build_version,
+        apk_version,
+        version,
+        short_changes,
+        detailed_changes,
+        reason,
+        released_at_utc,
+        created_at_utc
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    insertBroken.run(
+      'build',
+      0,
+      0,
+      23,
+      1,
+      '0.0.23.1',
+      'Accepted dev build 0.0.23.1.',
+      'Accepted dev build 0.0.23.1: source codex/require-runtime-db-verification@source; target dev@target. Automated deployment from codex/require-runtime-db-verification@source to a.test.brightos.world.',
+      'Accepted dev build 0.0.23.1.',
+      '2026-06-26T14:48:00.000Z',
+      '2026-06-26T14:48:00.000Z'
+    );
+    insertBroken.run(
+      'build',
+      0,
+      0,
+      24,
+      1,
+      '0.0.24.1',
+      'Accepted codex/fix-build-version-descriptions.',
+      'Accepted codex/fix-build-version-descriptions.',
+      'Accepted dev build 0.0.24.1: codex/fix-build-version-descriptions@5c16c8450e77273d95d327f4792f502b0dfceee8 -> dev@d778efdcadfa06af938c91fe1247ab1309ebebf8.',
+      '2026-06-26T15:18:00.000Z',
+      '2026-06-26T15:18:00.000Z'
+    );
+
+    store.repairLateTechnicalBuildVersionDescriptions();
+
+    const repaired = store.db
+      .prepare("SELECT version, short_changes, detailed_changes FROM build_versions WHERE version_type_id = 'build' AND build_version BETWEEN 23 AND 24 ORDER BY build_version")
+      .all();
+    assert.deepEqual(repaired.map((row) => row.short_changes), [
+      'Required runtime DB fact verification.',
+      'Fixed build version release notes.',
+    ]);
+    for (const row of repaired) {
+      assert.doesNotMatch(row.detailed_changes, /Accepted codex\/|Automated deployment|source codex\//);
+    }
   } finally {
     store.close();
     fs.rmSync(tmp, { recursive: true, force: true });

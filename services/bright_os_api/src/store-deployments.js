@@ -228,6 +228,7 @@ function usefulChanges(value) {
   if (/^Automated dev deployment from \S+@\S+\.?$/i.test(oneLine)) return '';
   if (/^Accepted preview branch \S+@\S+\.?$/i.test(oneLine)) return '';
   if (/^Accepted dev build (?:\d|0\.)/i.test(oneLine)) return '';
+  if (/^Accepted codex\/\S+\.?$/i.test(oneLine)) return '';
   if (/^Accepted \S+@\S+ without preview deployment metadata\.?$/i.test(oneLine)) return '';
   return text;
 }

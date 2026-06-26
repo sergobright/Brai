@@ -13,8 +13,11 @@ let source = null;
 
 try {
   source = openSourceStore(args, targetEnvironment);
-  const sourceRecord = source?.listDeploymentRecords().find((record) => record.branch === sourceBranch)
-    ?? fallbackSourceRecord(args, sourceBranch, targetEnvironment);
+  const fallbackRecord = fallbackSourceRecord(args, sourceBranch, targetEnvironment);
+  const sourceRecord = normalizeSourceRecord(
+    source?.listDeploymentRecords().find((record) => record.branch === sourceBranch) ?? fallbackRecord,
+    fallbackRecord,
+  );
   if (!sourceRecord) throw new Error(`no deployment metadata for ${sourceBranch}`);
 
   if (targetEnvironment === "prod") {
@@ -88,6 +91,33 @@ function fallbackSourceRecord(values, sourceBranch, targetEnvironment) {
     detailed_changes:
       values["source-details"] || `Accepted ${sourceBranch}@${values["source-commit"]} without preview deployment metadata.`,
   };
+}
+
+function normalizeSourceRecord(record, fallbackRecord) {
+  if (!record) return null;
+  const shortChanges = usefulChanges(record.short_changes) || usefulChanges(fallbackRecord?.short_changes);
+  const detailedChanges = usefulChanges(record.detailed_changes) || usefulChanges(fallbackRecord?.detailed_changes) || shortChanges;
+  return {
+    ...record,
+    short_changes: shortChanges || record.short_changes,
+    detailed_changes: detailedChanges || record.detailed_changes,
+  };
+}
+
+function usefulChanges(value) {
+  const text = String(value ?? '').trim();
+  if (!text) return '';
+  const oneLine = text.replace(/\s+/g, ' ');
+  if (oneLine === 'Branch deployment') return '';
+  if (/^Merge branch .+ into codex\/\S+$/i.test(oneLine)) return '';
+  if (/^Merge remote-tracking branch .+ into codex\/\S+$/i.test(oneLine)) return '';
+  if (/^Automated deployment from \S+@\S+ to \S+\.?$/i.test(oneLine)) return '';
+  if (/^Automated dev deployment from \S+@\S+\.?$/i.test(oneLine)) return '';
+  if (/^Accepted preview branch \S+@\S+\.?$/i.test(oneLine)) return '';
+  if (/^Accepted dev build (?:\d|0\.)/i.test(oneLine)) return '';
+  if (/^Accepted codex\/\S+\.?$/i.test(oneLine)) return '';
+  if (/^Accepted \S+@\S+ without preview deployment metadata\.?$/i.test(oneLine)) return '';
+  return text;
 }
 
 function promoteBuildVersions(source, target) {

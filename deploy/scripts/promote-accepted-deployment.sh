@@ -45,8 +45,19 @@ fi
 SOURCE_SHORT_CHANGES=""
 SOURCE_DETAILS=""
 if [[ -n "$SOURCE_COMMIT" ]]; then
-  SOURCE_SHORT_CHANGES="$(git -C "$ROOT" log -1 --format=%s "$SOURCE_COMMIT" 2>/dev/null || true)"
-  SOURCE_BODY="$(git -C "$ROOT" log -1 --format=%b "$SOURCE_COMMIT" 2>/dev/null || true)"
+  NOTES_COMMIT="$SOURCE_COMMIT"
+  for _ in 1 2 3 4 5; do
+    SOURCE_SHORT_CHANGES="$(git -C "$ROOT" log -1 --format=%s "$NOTES_COMMIT" 2>/dev/null || true)"
+    if [[ "$SOURCE_SHORT_CHANGES" == Merge\ branch\ *\ into\ codex/* || "$SOURCE_SHORT_CHANGES" == Merge\ remote-tracking\ branch\ *\ into\ codex/* ]]; then
+      PARENT_COMMIT="$(git -C "$ROOT" rev-parse "$NOTES_COMMIT^1" 2>/dev/null || true)"
+      if [[ -n "$PARENT_COMMIT" ]]; then
+        NOTES_COMMIT="$PARENT_COMMIT"
+        continue
+      fi
+    fi
+    break
+  done
+  SOURCE_BODY="$(git -C "$ROOT" log -1 --format=%b "$NOTES_COMMIT" 2>/dev/null || true)"
   if [[ "$SOURCE_SHORT_CHANGES" == Merge\ pull\ request* && -n "$SOURCE_BODY" ]]; then
     while IFS= read -r line; do
       if [[ -n "${line//[[:space:]]/}" ]]; then
