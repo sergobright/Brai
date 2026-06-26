@@ -152,6 +152,11 @@ export const migrationMethods = {
     }
 
     this.ensureTableDescriptions();
+
+    if (!this.hasMigration(25)) {
+      this.repairTechnicalBuildVersionDescriptions();
+      this.recordMigration(25, 'repair technical build version descriptions');
+    }
   }
 ,
 
@@ -1208,6 +1213,46 @@ export const migrationMethods = {
       UPDATE build_versions
       SET short_changes = ?, detailed_changes = ?, reason = ?
       WHERE version_type_id = 'build' AND version = ?
+    `);
+    for (const [version, shortChanges, detailedChanges, reason] of updates) {
+      update.run(shortChanges, detailedChanges, reason, version);
+    }
+  }
+,
+
+  repairTechnicalBuildVersionDescriptions() {
+    const updates = [
+      [
+        '0.0.17.1',
+        'Require preview slot release after dev deploy.',
+        'Preview acceptance now keeps the slot reserved until deploy-dev completes metadata promotion, then releases it after the dev deployment succeeds.',
+        'Accepted dev build 0.0.17.1: codex/require-preview-slot-release@c811cf9c584fa06b58e416118957b68f2066f59b -> dev@6ae3a7b2c23c561194375d42b49bccdebb49ac77.',
+      ],
+      [
+        '0.0.18.1',
+        'Fix accepting updated preview branches.',
+        'Preview acceptance now follows the latest pushed branch head when creating or reusing the acceptance PR.',
+        'Accepted dev build 0.0.18.1: codex/fix-preview-promotion-fallback@3329474d5da1b09d5b6930287dbe231a516b1845 -> dev@4c1b5cbd5a26d9bb576ca8a2a3e1a83266dd1758.',
+      ],
+      [
+        '0.0.19.1',
+        'Document table_descriptions schema metadata rule.',
+        'Project rules now require table_descriptions updates for server SQLite schema metadata changes, while content-only row changes are exempt.',
+        'Accepted dev build 0.0.19.1: codex/table-descriptions-metadata-rules@683f8f7f0f77e5e85e3527b2ee2cb955ea309e69 -> dev@1546e6062f1b6a743e18a7c45d78b4298177d9cb.',
+      ],
+      [
+        '0.0.20.1',
+        'Optimize activity projection sync.',
+        'Activity sync now applies incremental projection updates for activity events and client command method names instead of relying on full recompute paths.',
+        'Accepted dev build 0.0.20.1: codex/incremental-activity-projection@7cd4ee2bccfb34842dab52c1ca8d3012bbaab95a -> dev@e8a58dd2e1df97131189878651808e967a50eaa8.',
+      ],
+    ];
+    const update = this.db.prepare(`
+      UPDATE build_versions
+      SET short_changes = ?, detailed_changes = ?, reason = ?
+      WHERE version_type_id = 'build'
+        AND version = ?
+        AND detailed_changes LIKE 'Accepted dev build%source %target %'
     `);
     for (const [version, shortChanges, detailedChanges, reason] of updates) {
       update.run(shortChanges, detailedChanges, reason, version);

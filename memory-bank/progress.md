@@ -24,6 +24,7 @@
 - Future work starts from `origin/dev` on `codex/*` branches.
 - Task branches do not add `build_versions` rows by themselves.
 - Accepted working-branch merges into `dev` add a detailed `build` ledger row with `release_version = 0` and increment `Z`.
+- Build ledger `short_changes` and `detailed_changes` are human-readable release notes; branch/commit/deploy audit metadata belongs in `reason` or `deployment_records`.
 - Promotions from `dev` to `main` add a detailed production `build` ledger row, increment `Y`, keep the latest included `Z`, and reference the accepted dev build rows included in the release.
 - Shipped APK releases add an `apk` ledger row and increment `S`.
 - Implementation tasks must finish with clean tracked status, committed, pushed, and deployed to a preview slot with the preview letter and URL reported, unless explicitly local-only. If all preview slots are occupied, the pushed branch is queued and remains incomplete until a slot is assigned.

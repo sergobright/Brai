@@ -40,6 +40,7 @@ try {
   recordAcceptedBuildVersion(target, {
     sourceBranch,
     sourceCommit: sourceRecord.commit_sha,
+    sourceShortChanges: sourceRecord.short_changes,
     sourceDetails: sourceRecord.detailed_changes,
     targetBranch,
     targetCommit,
@@ -49,6 +50,7 @@ try {
   recordProductionReleaseVersion(target, {
     sourceBranch,
     sourceCommit: sourceRecord.commit_sha,
+    sourceShortChanges: sourceRecord.short_changes,
     sourceDetails: sourceRecord.detailed_changes,
     targetBranch,
     targetCommit,
@@ -135,12 +137,13 @@ function promoteBuildVersions(source, target) {
 
 function recordAcceptedBuildVersion(
   target,
-  { sourceBranch, sourceCommit, sourceDetails, targetBranch, targetCommit, targetEnvironment, releasedAtUtc },
+  { sourceBranch, sourceCommit, sourceShortChanges, sourceDetails, targetBranch, targetCommit, targetEnvironment, releasedAtUtc },
 ) {
   if (targetEnvironment !== "dev") return;
   target.recordAcceptedBuildVersion({
     sourceBranch,
     sourceCommit,
+    sourceShortChanges,
     sourceDetails,
     targetBranch,
     targetCommit,
@@ -150,12 +153,13 @@ function recordAcceptedBuildVersion(
 
 function recordProductionReleaseVersion(
   target,
-  { sourceBranch, sourceCommit, sourceDetails, targetBranch, targetCommit, targetEnvironment, releasedAtUtc },
+  { sourceBranch, sourceCommit, sourceShortChanges, sourceDetails, targetBranch, targetCommit, targetEnvironment, releasedAtUtc },
 ) {
   if (targetEnvironment !== "prod") return;
   target.recordProductionReleaseVersion({
     sourceBranch,
     sourceCommit,
+    sourceShortChanges,
     sourceDetails,
     targetBranch,
     targetCommit,

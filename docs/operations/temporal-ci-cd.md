@@ -68,7 +68,7 @@ The `state` query exposes `tasks`, `missing`, `blocker`, and `blockers`. A new `
 - Dev signals: `dev_deploy_started`, `dev_version_recorded`, `accepted_previews_started`, `accepted_previews_passed`, `accepted_previews_failed`, `dev_deploy_passed`, `dev_deploy_failed`.
 - Prod signals: `prod_deploy_started`, `prod_version_recorded`, `prod_deploy_passed`, `prod_deploy_failed`.
 
-The dev promotion checklist requires deployment, version/ledger recording, and accepted-preview metadata/slot cleanup. The production checklist requires deployment and production version/ledger recording. `dev_deploy_passed` and `prod_deploy_passed` complete their promotion workflows only after prior required steps have succeeded in GitHub Actions.
+The dev promotion checklist requires deployment, version/ledger recording, and accepted-preview metadata/slot cleanup. The production checklist requires deployment and production version/ledger recording. `dev_deploy_passed` and `prod_deploy_passed` complete their promotion workflows only after prior required steps have succeeded in GitHub Actions. Human-readable `build_versions` release notes are part of the existing version/ledger recording step; changing their text source does not add a new Temporal gate.
 
 Deploy logic still lives in the existing scripts. Temporal is the required control ledger around those scripts; GitHub branch protection, merge queue, preview slot locking, and SQLite ledger writes remain the underlying authorities for their own data.
 

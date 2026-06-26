@@ -42,6 +42,26 @@ else
   exit 1
 fi
 
+SOURCE_SHORT_CHANGES=""
+SOURCE_DETAILS=""
+if [[ -n "$SOURCE_COMMIT" ]]; then
+  SOURCE_SHORT_CHANGES="$(git -C "$ROOT" log -1 --format=%s "$SOURCE_COMMIT" 2>/dev/null || true)"
+  SOURCE_BODY="$(git -C "$ROOT" log -1 --format=%b "$SOURCE_COMMIT" 2>/dev/null || true)"
+  if [[ "$SOURCE_SHORT_CHANGES" == Merge\ pull\ request* && -n "$SOURCE_BODY" ]]; then
+    while IFS= read -r line; do
+      if [[ -n "${line//[[:space:]]/}" ]]; then
+        SOURCE_SHORT_CHANGES="$line"
+      fi
+    done <<<"$SOURCE_BODY"
+    SOURCE_BODY=""
+  fi
+  if [[ -n "$SOURCE_BODY" ]]; then
+    SOURCE_DETAILS="$SOURCE_SHORT_CHANGES"$'\n\n'"$SOURCE_BODY"
+  else
+    SOURCE_DETAILS="$SOURCE_SHORT_CHANGES"
+  fi
+fi
+
 "$NODE_BIN" "$SCRIPT_DIR/promote-deployment.mjs" \
   --source-db "$SOURCE_DB" \
   --target-db "$TARGET_DB" \
@@ -51,5 +71,6 @@ fi
   --target-commit "$TARGET_COMMIT" \
   --target-domain "$TARGET_DOMAIN" \
   --source-commit "$SOURCE_COMMIT" \
-  --source-details "Accepted preview branch $SOURCE_BRANCH@$SOURCE_COMMIT." \
+  --source-short-changes "${SOURCE_SHORT_CHANGES:-Accepted $SOURCE_BRANCH.}" \
+  --source-details "${SOURCE_DETAILS:-Accepted preview branch $SOURCE_BRANCH@$SOURCE_COMMIT.}" \
   --reason "${BRIGHT_OS_PROMOTE_REASON:-Accepted branch promotion}"

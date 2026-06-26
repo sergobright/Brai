@@ -32,6 +32,25 @@ DOMAIN="${DEPLOY_META[2]}"
 ENV_PATH="${DEPLOY_META[3]}"
 SERVICE_NAME="${DEPLOY_META[4]}"
 
+GIT_SUBJECT="$(git -C "$ROOT" log -1 --format=%s "$COMMIT" 2>/dev/null || true)"
+GIT_BODY="$(git -C "$ROOT" log -1 --format=%b "$COMMIT" 2>/dev/null || true)"
+if [[ "$GIT_SUBJECT" == Merge\ pull\ request* && -n "$GIT_BODY" ]]; then
+  while IFS= read -r line; do
+    if [[ -n "${line//[[:space:]]/}" ]]; then
+      GIT_SUBJECT="$line"
+    fi
+  done <<<"$GIT_BODY"
+  GIT_BODY=""
+fi
+DEPLOY_SHORT_CHANGES="${BRIGHT_OS_DEPLOY_SHORT_CHANGES:-${GIT_SUBJECT:-Branch deployment}}"
+if [[ -n "${BRIGHT_OS_DEPLOY_DETAILED_CHANGES:-}" ]]; then
+  DEPLOY_DETAILED_CHANGES="$BRIGHT_OS_DEPLOY_DETAILED_CHANGES"
+elif [[ -n "$GIT_BODY" ]]; then
+  DEPLOY_DETAILED_CHANGES="$GIT_SUBJECT"$'\n\n'"$GIT_BODY"
+else
+  DEPLOY_DETAILED_CHANGES="${GIT_SUBJECT:-Branch deployment}"
+fi
+
 if [[ "$ENVIRONMENT" == "prod" ]]; then
   WEB_TARGET="${BRIGHT_OS_WEB_TARGET:-$ROOT/deploy/web}"
   MOBILE_TARGET="${BRIGHT_OS_MOBILE_TARGET:-$ROOT/deploy/mobile-update}"
@@ -62,9 +81,10 @@ if [[ "$ENVIRONMENT" == "dev" ]]; then
     --db "$DB_PATH" \
     --source-branch "$BRANCH" \
     --source-commit "$COMMIT" \
+    --source-short-changes "$DEPLOY_SHORT_CHANGES" \
     --target-branch "$BRANCH" \
     --target-commit "$COMMIT" \
-    --source-details "Automated dev deployment from $BRANCH@$COMMIT." \
+    --source-details "$DEPLOY_DETAILED_CHANGES" \
     --released-at "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 fi
 
@@ -181,8 +201,8 @@ if ! "$NODE_BIN" "$SCRIPT_DIR/record-deployment.mjs" \
   --commit "$COMMIT" \
   --domain "$DOMAIN" \
   --web-ota-version "$BUNDLE_VERSION" \
-  --short-changes "${BRIGHT_OS_DEPLOY_SHORT_CHANGES:-Branch deployment}" \
-  --detailed-changes "${BRIGHT_OS_DEPLOY_DETAILED_CHANGES:-Automated deployment from $BRANCH@$COMMIT to $DOMAIN.}" \
+  --short-changes "$DEPLOY_SHORT_CHANGES" \
+  --detailed-changes "$DEPLOY_DETAILED_CHANGES" \
   --reason "${BRIGHT_OS_DEPLOY_REASON:-Automated branch delivery}"; then
   if [[ "$ENVIRONMENT" != preview-* ]]; then
     exit 1

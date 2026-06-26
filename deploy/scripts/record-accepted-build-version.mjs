@@ -8,6 +8,7 @@ try {
   store.recordAcceptedBuildVersion({
     sourceBranch: required(args, "source-branch"),
     sourceCommit: required(args, "source-commit"),
+    sourceShortChanges: args["source-short-changes"] || null,
     sourceDetails: args["source-details"] || "Accepted dev deployment.",
     targetBranch: required(args, "target-branch"),
     targetCommit: required(args, "target-commit"),

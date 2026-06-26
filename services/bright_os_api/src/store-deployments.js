@@ -58,6 +58,7 @@ export const deploymentMethods = {
   recordAcceptedBuildVersion({
     sourceBranch,
     sourceCommit,
+    sourceShortChanges = null,
     sourceDetails,
     targetBranch,
     targetCommit,
@@ -66,15 +67,17 @@ export const deploymentMethods = {
     const existing = this.findBuildVersionByTargetCommit({ targetCommit, releaseOnly: false });
     const buildVersion = existing?.build_version ?? this.nextAcceptedBuildVersion();
     const version = `0.0.${buildVersion}.1`;
+    const shortChanges = usefulChanges(sourceShortChanges) || `Accepted ${sourceBranch}.`;
+    const detailedChanges = usefulChanges(sourceDetails) || shortChanges;
     this.upsertBuildVersion({
       majorVersion: 0,
       releaseVersion: 0,
       buildVersion,
       apkVersion: 1,
       version,
-      shortChanges: `Accepted dev build ${version}.`,
-      detailedChanges: `Accepted dev build ${version}: source ${sourceBranch}@${sourceCommit}; target ${targetBranch}@${targetCommit}. ${sourceDetails}`,
-      reason: `Accepted dev build ${version}.`,
+      shortChanges,
+      detailedChanges,
+      reason: `Accepted dev build ${version}: ${sourceBranch}@${sourceCommit} -> ${targetBranch}@${targetCommit}.`,
       releasedAtUtc,
     });
     return { buildVersion, version };
@@ -83,6 +86,7 @@ export const deploymentMethods = {
   recordProductionReleaseVersion({
     sourceBranch,
     sourceCommit,
+    sourceShortChanges = null,
     sourceDetails,
     targetBranch,
     targetCommit,
@@ -120,6 +124,7 @@ export const deploymentMethods = {
     const includedBuilds = acceptedBuilds.filter((row) => row.build_version > previousRelease.build_version);
     const referencedBuilds = includedBuilds.length > 0 ? includedBuilds : [latest];
     const version = `0.${releaseVersion}.${latest.build_version}.${latest.apk_version}`;
+    const sourceChanges = usefulChanges(sourceDetails);
 
     this.upsertBuildVersion({
       majorVersion: 0,
@@ -127,13 +132,12 @@ export const deploymentMethods = {
       buildVersion: latest.build_version,
       apkVersion: latest.apk_version,
       version,
-      shortChanges: `Production release ${version}.`,
+      shortChanges: usefulChanges(sourceShortChanges) || `Production release ${version}.`,
       detailedChanges: [
-        `Production release ${version}: source ${sourceBranch}@${sourceCommit}; target ${targetBranch}@${targetCommit}.`,
-        `Included accepted dev builds: ${referencedBuilds.map((row) => `${row.version} - ${row.short_changes}`).join('; ')}.`,
-        sourceDetails,
+        `Included accepted dev builds: ${referencedBuilds.map((row) => `${row.version}: ${row.short_changes}`).join('; ')}.`,
+        sourceChanges,
       ].filter(Boolean).join(' '),
-      reason: `Promoted dev to production release ${version}.`,
+      reason: `Promoted dev to production release ${version}: ${sourceBranch}@${sourceCommit || 'unknown'} -> ${targetBranch}@${targetCommit}.`,
       releasedAtUtc,
     });
     return { releaseVersion, buildVersion: latest.build_version, version };
@@ -147,12 +151,12 @@ export const deploymentMethods = {
         SELECT *
         FROM build_versions
         WHERE version_type_id = 'build'
-          AND instr(detailed_changes, ?) > 0
+          AND (instr(detailed_changes, ?) > 0 OR instr(reason, ?) > 0)
           AND ${releaseFilter}
         ORDER BY release_version DESC, build_version DESC
         LIMIT 1
       `)
-      .get(`@${targetCommit}`);
+      .get(`@${targetCommit}`, `@${targetCommit}`);
   },
 
   nextAcceptedBuildVersion() {
@@ -214,3 +218,16 @@ export const deploymentMethods = {
       );
   },
 };
+
+function usefulChanges(value) {
+  const text = String(value ?? '').trim();
+  if (!text) return '';
+  const oneLine = text.replace(/\s+/g, ' ');
+  if (oneLine === 'Branch deployment') return '';
+  if (/^Automated deployment from \S+@\S+ to \S+\.?$/i.test(oneLine)) return '';
+  if (/^Automated dev deployment from \S+@\S+\.?$/i.test(oneLine)) return '';
+  if (/^Accepted preview branch \S+@\S+\.?$/i.test(oneLine)) return '';
+  if (/^Accepted dev build (?:\d|0\.)/i.test(oneLine)) return '';
+  if (/^Accepted \S+@\S+ without preview deployment metadata\.?$/i.test(oneLine)) return '';
+  return text;
+}
