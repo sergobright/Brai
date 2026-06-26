@@ -10,6 +10,12 @@ const PROTECTED_PATH_RE =
   /(^|\/)(\.env(\.|$)|.*\.(sqlite|sqlite3|db|jks|keystore|pem|key|p12|pfx|apk|aab|zip)$|google-services\.json|.*(service-account|credentials|secrets).*\.json$)|^(data\/|deploy\/(web|mobile-update|releases)\/)/;
 const WRITE_COMMAND_RE =
   /(^|[;&|]\s*)(apply_patch|git\s+(add|branch|checkout|cherry-pick|clean|commit|merge|mv|push|rebase|reset|restore|stash|switch|tag|worktree)|npm\s+(ci|install|i|run\s+(android:|app:cap|publish:))|pnpm\s+(install|i)|yarn\s+(install|add)|rm\s|mv\s|cp\s|mkdir\s|touch\s|chmod\s|chown\s|ln\s|tee\s|sed\s+-i|perl\s+-pi|python3?\s+.*(write|open\(|Path\().*['"]w|node\s+.*(writeFile|appendFile|rmSync|mkdirSync)|cat\s+[^|]*>|printf\s+[^|]*>|>\s*[^&]|>>\s*)/s;
+const DEPENDENCY_DIRS = [
+  "node_modules",
+  "apps/bright_os_app/node_modules",
+  "services/bright_os_api/node_modules",
+  "services/bright_os_temporal/node_modules",
+];
 
 const ZERO_SHA = "0000000000000000000000000000000000000000";
 const PREVIEW_SLOT_EMOJI = { A: "🅰️", B: "🅱️", C: "🅲", D: "🅳", E: "🅴" };
@@ -20,11 +26,16 @@ if (isMainModule()) {
 
 export {
   CODEX_BRANCH_RE,
+  DEPENDENCY_DIRS,
   PROTECTED_PATH_RE,
   WRITE_COMMAND_RE,
+  dependencySourceRoot,
   isSensitivePath,
   isWriteLikeCommand,
+  linkDependencyDirs,
   parseHookInput,
+  taskStartGuidance,
+  taskWorktreeParent,
   validateTaskMarker,
   validateTaskThread,
   validatePushUpdate,
@@ -77,19 +88,37 @@ function startTask(slug) {
   }
 
   const root = git("rev-parse", "--show-toplevel");
-  const parent = process.env.BRIGHT_OS_WORKTREE_ROOT ?? path.resolve(root, "..", "bright-os-worktrees");
+  const parent = process.env.BRIGHT_OS_WORKTREE_ROOT ?? taskWorktreeParent(root);
   const branch = `codex/${slug}`;
   const target = path.join(parent, slug);
 
   if (fs.existsSync(target)) throw new Error(`Worktree target already exists: ${target}`);
+  try {
+    ensureTaskWorktreeWritable(parent, target);
+  } catch (error) {
+    if (isWritePermissionError(error)) {
+      throw new Error(`Cannot create Bright OS task worktree at ${target} from this sandbox.\n\n${taskStartGuidance(parent)}`);
+    }
+    throw error;
+  }
+
   fetchDev();
   if (remoteBranchExists(branch)) {
     throw new Error(`Remote branch already exists: ${branch}. Use a new slug unless the project owner explicitly said this is a follow-up.`);
   }
 
-  fs.mkdirSync(parent, { recursive: true });
-  git("worktree", "add", "--no-track", "-b", branch, target, "origin/dev");
-  writeTaskMarker(target, withThreadId({ branch, mode: "new", base: git("rev-parse", "origin/dev"), createdAt: new Date().toISOString() }));
+  try {
+    fs.mkdirSync(parent, { recursive: true });
+    git("worktree", "add", "--no-track", "-b", branch, target, "origin/dev");
+    writeTaskMarker(target, withThreadId({ branch, mode: "new", base: git("rev-parse", "origin/dev"), createdAt: new Date().toISOString() }));
+    const linked = linkDependencyDirs(dependencySourceRoot(root), target);
+    if (linked.length) console.log(`Linked dependency dirs: ${linked.join(", ")}`);
+  } catch (error) {
+    if (isWritePermissionError(error)) {
+      throw new Error(`Cannot create Bright OS task worktree at ${target} from this sandbox.\n\n${taskStartGuidance(parent)}`);
+    }
+    throw error;
+  }
   console.log(`Created ${branch} at ${target}`);
 }
 
@@ -102,11 +131,11 @@ function markFollowUp(branchArg) {
   const marker = readTaskMarker();
   const markerValidation = validateTaskMarker(marker, branch);
   if (!markerValidation.ok) {
-    throw new Error(`${markerValidation.message}\n\nNew Codex threads must start a new task branch with: scripts/bright-task-start.sh <task-slug>`);
+    throw new Error(`${markerValidation.message}\n\n${taskStartGuidance()}`);
   }
   const threadValidation = validateTaskThread(marker, currentThreadId());
   if (!threadValidation.ok) {
-    throw new Error(`${threadValidation.message}\n\nNew Codex threads must start a new task branch with: scripts/bright-task-start.sh <task-slug>`);
+    throw new Error(`${threadValidation.message}\n\n${taskStartGuidance()}`);
   }
   writeTaskMarker(git("rev-parse", "--show-toplevel"), withThreadId({
     branch,
@@ -132,7 +161,7 @@ function preToolUse() {
   fetchDev();
   const validation = validateTaskBranch({ requireExpectedUpstream: false });
   if (!validation.ok) {
-    return blockHook(`Bright OS blocks project-file writes before a valid task branch exists.\n\n${validation.message}\n\nRun: scripts/bright-task-start.sh <task-slug>`);
+    return blockHook(`Bright OS blocks project-file writes before a valid task branch exists.\n\n${validation.message}\n\n${taskStartGuidance()}`);
   }
 
   const reuse = validateBranchReuse();
@@ -286,7 +315,7 @@ function validateBranchReuse() {
       ok: false,
       message:
         `${markerValidation.message}\n\n` +
-        `For new work run: scripts/bright-task-start.sh <task-slug>\n` +
+        `${taskStartGuidance()}\n` +
         `Only for a same-thread follow-up run: node scripts/bright-task.mjs follow-up`,
     };
   }
@@ -296,8 +325,7 @@ function validateBranchReuse() {
       ok: false,
       message:
         `${threadValidation.message}\n\n` +
-        `New Codex threads must start a new task branch before changing project files:\n` +
-        `scripts/bright-task-start.sh <task-slug>`,
+        taskStartGuidance(),
     };
   }
   const currentDev = git("rev-parse", "origin/dev");
@@ -312,7 +340,7 @@ function validateBranchReuse() {
       ok: false,
       message:
         `Bright OS refuses to continue ${branch} because it is already included in origin/dev.\n\n` +
-        `Start a new task branch with: scripts/bright-task-start.sh <task-slug>`,
+        taskStartGuidance(),
     };
   }
   if (upstream === `origin/${branch}` && marker?.branch !== branch) {
@@ -320,7 +348,7 @@ function validateBranchReuse() {
       ok: false,
       message:
         `Bright OS refuses to reuse an existing pushed task branch without an explicit local marker.\n\n` +
-        `For new work run: scripts/bright-task-start.sh <task-slug>\n` +
+        `${taskStartGuidance()}\n` +
         `Only for a same-thread follow-up run: node scripts/bright-task.mjs follow-up`,
     };
   }
@@ -367,6 +395,51 @@ function validatePushUpdate(line, currentBranchName = "", { isAcceptedRemote = (
   if (remoteSha && remoteSha !== ZERO_SHA && isAcceptedRemote(remoteSha)) {
     throw new Error(`${remoteRef} is already included in origin/dev. Start a new task branch instead of reusing an accepted branch.`);
   }
+}
+
+function taskStartGuidance(parent = "../bright-os-worktrees") {
+  return (
+    `Run the official starter with escalation: scripts/bright-task-start.sh <task-slug>\n` +
+    `In Codex Desktop, request sandbox_permissions=require_escalated because the starter creates a sibling worktree under ${parent}.\n` +
+    `Do not create or switch to a manual fallback branch in the current checkout.`
+  );
+}
+
+function taskWorktreeParent(root) {
+  const parent = path.dirname(root);
+  return path.basename(parent) === "bright-os-worktrees" ? parent : path.resolve(root, "..", "bright-os-worktrees");
+}
+
+function dependencySourceRoot(root) {
+  const parent = path.dirname(root);
+  if (path.basename(parent) === "bright-os-worktrees") {
+    const canonical = path.join(path.dirname(parent), "bright-os");
+    if (fs.existsSync(path.join(canonical, "package.json"))) return canonical;
+  }
+  return root;
+}
+
+function linkDependencyDirs(sourceRoot, targetRoot, dependencyDirs = DEPENDENCY_DIRS) {
+  const linked = [];
+  for (const relativePath of dependencyDirs) {
+    const source = path.join(sourceRoot, relativePath);
+    const target = path.join(targetRoot, relativePath);
+    if (!fs.existsSync(source) || fs.existsSync(target)) continue;
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.symlinkSync(source, target, "dir");
+    linked.push(relativePath);
+  }
+  return linked;
+}
+
+function ensureTaskWorktreeWritable(parent, target) {
+  const probe = fs.existsSync(parent) ? parent : path.dirname(parent);
+  fs.accessSync(probe, fs.constants.W_OK);
+  if (fs.existsSync(target)) throw new Error(`Worktree target already exists: ${target}`);
+}
+
+function isWritePermissionError(error) {
+  return ["EACCES", "EPERM", "EROFS"].includes(error?.code);
 }
 
 function parseHookInput(text) {

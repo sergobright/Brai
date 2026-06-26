@@ -3,7 +3,9 @@
 - [ ] Read `docs/guidelines/07-git-versioning-repository-sync.md`.
 - [ ] Check current branch.
 - [ ] Inspect `git status --short`.
-- [ ] For new project-file work in a new Codex thread, always start with `scripts/bright-task-start.sh <task-slug>` no matter which branch Codex Desktop selected.
+- [ ] For new project-file work in a new Codex thread, always start with escalated `scripts/bright-task-start.sh <task-slug>` no matter which branch Codex Desktop selected.
+- [ ] If the starter cannot create the sibling worktree, stop without project-file changes; do not create or switch to a manual fallback branch in the current checkout.
+- [ ] Do not run `npm ci` in every fresh task worktree just because ignored `node_modules` are missing; the starter links existing dependency dirs from the main checkout when available.
 - [ ] Continue an existing `codex/*` branch only inside the same Codex thread before acceptance, and run `node scripts/bright-task.mjs follow-up` before new project-file writes.
 - [ ] Do not continue project-file work on a `codex/*` branch that is already included in `origin/dev`; create a new task branch even if the UI selected the old branch.
 - [ ] Confirm local Git hooks are enabled with `git config core.hooksPath .githooks`.

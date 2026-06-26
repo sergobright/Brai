@@ -1,11 +1,18 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
 import {
   CODEX_BRANCH_RE,
+  dependencySourceRoot,
   isSensitivePath,
   isWriteLikeCommand,
+  linkDependencyDirs,
   parseHookInput,
+  taskStartGuidance,
+  taskWorktreeParent,
   validateTaskMarker,
   validateTaskThread,
   validatePushUpdate,
@@ -83,6 +90,30 @@ test("task marker is bound to the current Codex thread when one exists", () => {
   assert.deepEqual(validateTaskThread({ threadId: "thread-a" }, "thread-a"), { ok: true });
   assert.match(validateTaskThread({}, "thread-a").message, /no Codex thread id/);
   assert.match(validateTaskThread({ threadId: "thread-b" }, "thread-a").message, /thread-b/);
+});
+
+test("task start guidance requires escalation and forbids manual branch fallback", () => {
+  const message = taskStartGuidance("/srv/projects/bright-os-worktrees");
+  assert.match(message, /sandbox_permissions=require_escalated/);
+  assert.match(message, /scripts\/bright-task-start\.sh <task-slug>/);
+  assert.match(message, /Do not create or switch to a manual fallback branch/);
+});
+
+test("task starter creates sibling worktrees from repo and task worktree roots", () => {
+  assert.equal(taskWorktreeParent("/srv/projects/bright-os"), "/srv/projects/bright-os-worktrees");
+  assert.equal(taskWorktreeParent("/srv/projects/bright-os-worktrees/existing-task"), "/srv/projects/bright-os-worktrees");
+  assert.equal(dependencySourceRoot("/srv/projects/bright-os-worktrees/existing-task"), "/srv/projects/bright-os");
+});
+
+test("task starter links existing dependency dirs into new worktrees", () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "bright-task-"));
+  const source = path.join(tmp, "source");
+  const target = path.join(tmp, "target");
+  fs.mkdirSync(path.join(source, "services/bright_os_api/node_modules"), { recursive: true });
+  fs.mkdirSync(target);
+
+  assert.deepEqual(linkDependencyDirs(source, target, ["services/bright_os_api/node_modules"]), ["services/bright_os_api/node_modules"]);
+  assert.equal(fs.lstatSync(path.join(target, "services/bright_os_api/node_modules")).isSymbolicLink(), true);
 });
 
 test("hook input parser is tolerant", () => {

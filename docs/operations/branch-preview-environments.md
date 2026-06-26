@@ -25,7 +25,7 @@ Use the checked-in task starter before the first project-file change:
 scripts/bright-task-start.sh <task-slug>
 ```
 
-The starter fetches `origin/dev`, refuses to reuse an existing remote `codex/<task-slug>`, creates a separate worktree under `../bright-os-worktrees/<task-slug>`, creates `codex/<task-slug>` with `--no-track`, and writes ignored local task state under `.bright-task/` including the current Codex thread id.
+The starter fetches `origin/dev`, refuses to reuse an existing remote `codex/<task-slug>`, creates a separate worktree under `../bright-os-worktrees/<task-slug>`, creates `codex/<task-slug>` with `--no-track`, writes ignored local task state under `.bright-task/` including the current Codex thread id, and links existing ignored `node_modules` directories from the main checkout when present. In Codex Desktop this sibling worktree is outside the normal repository sandbox, so run the starter with `sandbox_permissions=require_escalated` immediately. If that is unavailable, stop without project-file changes; do not create or switch to a manual fallback branch in the current checkout.
 
 Repository Codex hooks are defined in `.codex/hooks.json`:
 
