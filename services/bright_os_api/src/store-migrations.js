@@ -179,6 +179,11 @@ export const migrationMethods = {
       this.repairGenericAcceptedBuildNotesDescription();
       this.recordMigration(29, 'repair generic accepted build notes description');
     }
+
+    if (!this.hasMigration(30)) {
+      this.repairAcceptedGitNotesBuildVersionDescription();
+      this.recordMigration(30, 'repair accepted git notes build description');
+    }
   }
 ,
 
@@ -1657,6 +1662,37 @@ export const migrationMethods = {
         sourceCommit: '2804346377fbb3f2cb81ff703d79ae20cd0ef735',
         targetBranch: 'dev',
         targetCommit: '449bb5a9a908243dd0a2685b2e56519b86a92393',
+      });
+    }
+  }
+,
+
+  repairAcceptedGitNotesBuildVersionDescription() {
+    this.db
+      .prepare(`
+        UPDATE build_versions
+        SET short_changes = ?,
+            detailed_changes = ?,
+            reason = ?
+        WHERE version_type_id = 'build'
+          AND version = '0.0.28.1'
+      `)
+      .run(
+        'Read accepted build notes from git history.',
+        'Accepted preview promotion now reads authored commit notes from the deploy repo git history when tar-copied preview/dev sources have no .git directory, ignores generic no-release-notes placeholders when better fallback notes exist, and repairs the 0.0.27.1 build ledger row with migration 29.',
+        'Needed because accepted preview promotion still wrote generic no-release-notes text instead of the authored source commit notes.',
+      );
+    const exists = this.db
+      .prepare("SELECT 1 FROM build_versions WHERE version_type_id = 'build' AND version = '0.0.28.1'")
+      .get();
+    if (exists) {
+      this.upsertBuildVersionRef({
+        versionTypeId: 'build',
+        version: '0.0.28.1',
+        sourceBranch: 'codex/repair-late-build-version-descriptions',
+        sourceCommit: '53866e6800be4c5789a60ef049911d26a5693b0a',
+        targetBranch: 'dev',
+        targetCommit: '1dc4f8af7eb719aa8632b40a3f8b569f2a47884d',
       });
     }
   }
