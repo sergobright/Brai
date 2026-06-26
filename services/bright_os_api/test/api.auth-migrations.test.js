@@ -117,6 +117,64 @@ test('migration renames actions tables to activities and seeds items', async () 
   }
 });
 
+test('migration adds inbox entity schema and metadata', async () => {
+  const fixture = await createFixture(['2026-06-26T12:00:00.000Z']);
+
+  try {
+    const columns = new Set(
+      fixture.store.db.prepare('PRAGMA table_info(inbox)').all().map((row) => row.name)
+    );
+    assert.deepEqual(
+      [
+        'id',
+        'title',
+        'description_text',
+        'source',
+        'item_date',
+        'author',
+        'preliminary_section',
+        'urgency',
+        'attachment_links_json',
+        'explanation_text',
+        'normalization_text',
+        'is_normalized',
+        'created_at_utc',
+        'updated_at_utc'
+      ].filter((column) => !columns.has(column)),
+      []
+    );
+
+    const indexes = fixture.store.db
+      .prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'inbox'")
+      .all()
+      .map((row) => row.name);
+    assert.ok(indexes.includes('idx_inbox_item_date'));
+    assert.ok(indexes.includes('idx_inbox_normalized_updated'));
+
+    const items = fixture.store.db
+      .prepare("SELECT id FROM items WHERE id IN ('activities', 'inbox') ORDER BY id")
+      .all()
+      .map((row) => row.id);
+    assert.deepEqual(items, ['activities', 'inbox']);
+
+    const description = fixture.store.db
+      .prepare("SELECT title, short_description FROM table_descriptions WHERE table_name = 'inbox'")
+      .get();
+    assert.equal(description.title, 'Входящие');
+    assert.equal(description.short_description, 'Список входящих материалов.');
+
+    assert.equal(
+      fixture.store.db.prepare('SELECT description FROM schema_migrations WHERE version = 32').get().description,
+      'add inbox work entity schema'
+    );
+
+    fixture.store.migrate();
+    assert.equal(fixture.store.db.prepare("SELECT COUNT(*) AS count FROM items WHERE id = 'inbox'").get().count, 1);
+  } finally {
+    await fixture.close();
+  }
+});
+
 test('migration seeds unified build version ledger', async () => {
   const fixture = await createFixture(['2026-06-22T00:00:00.000Z']);
 

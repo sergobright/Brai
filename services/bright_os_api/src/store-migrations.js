@@ -152,6 +152,7 @@ export const migrationMethods = {
     }
 
     this.ensureBuildVersionRefs();
+    this.ensureInboxSchema();
     this.ensureTableDescriptions();
 
     if (!this.hasMigration(25)) {
@@ -188,6 +189,10 @@ export const migrationMethods = {
     if (!this.hasMigration(31)) {
       this.repairAcceptedSshNotesBuildVersionDescription();
       this.recordMigration(31, 'repair accepted ssh notes build description');
+    }
+
+    if (!this.hasMigration(32)) {
+      this.recordMigration(32, 'add inbox work entity schema');
     }
   }
 ,
@@ -394,6 +399,7 @@ export const migrationMethods = {
       ['focus_sessions', 'Сессии фокуса', 'Стабильные Focus-сессии.', 'Хранит стабильные идентификаторы Focus-сессий. Редактируемые время старта, финиша и длительность лежат в focus_session_versions.'],
       ['focus_session_sources', 'Источники Focus-сессий', 'Связи Focus-сессий и событий.', 'Связывает итоговые Focus-сессии с timer_events, из которых они получились при deterministic replay.'],
       ['focus_session_versions', 'Версии Focus-сессий', 'История значений Focus-сессий.', 'Хранит версии старта, финиша и длительности Focus-сессий. Только одна версия на сессию может быть текущей.'],
+      ['inbox', 'Входящие', 'Список входящих материалов.', 'Хранит входящие материалы Bright OS до нормализации: заголовок, описание, источник, дату, автора, предварительный раздел, срочность, ссылки на вложения, пояснение, текст нормализации и признак нормализации.'],
       ['items', 'Сущности', 'Реестр рабочих сущностей.', 'Хранит главные рабочие сущности Bright OS как стабильные id для схемы, API и технических решений.'],
       ['schema_migrations', 'Миграции', 'Журнал изменений схемы.', 'Хранит версии уже примененных миграций SQLite, время применения и краткое описание.'],
       ['sqlite_sequence', 'Счётчики', 'Служебные счетчики SQLite.', 'Внутренняя таблица SQLite для AUTOINCREMENT-счетчиков. Это не бизнес-данные Bright OS.'],
@@ -426,6 +432,38 @@ export const migrationMethods = {
     this.db
       .prepare("DELETE FROM table_descriptions WHERE table_name IN ('timer_sessions', 'timer_session_sources')")
       .run();
+  }
+,
+
+  ensureInboxSchema() {
+    const now = new Date().toISOString();
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS inbox (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        description_text TEXT NOT NULL DEFAULT '',
+        source TEXT NOT NULL DEFAULT '',
+        item_date TEXT,
+        author TEXT NOT NULL DEFAULT '',
+        preliminary_section TEXT NOT NULL DEFAULT '',
+        urgency TEXT NOT NULL DEFAULT '',
+        attachment_links_json TEXT NOT NULL DEFAULT '[]',
+        explanation_text TEXT NOT NULL DEFAULT '',
+        normalization_text TEXT NOT NULL DEFAULT '',
+        is_normalized INTEGER NOT NULL DEFAULT 0 CHECK (is_normalized IN (0, 1)),
+        created_at_utc TEXT NOT NULL,
+        updated_at_utc TEXT NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_inbox_item_date
+      ON inbox (item_date);
+
+      CREATE INDEX IF NOT EXISTS idx_inbox_normalized_updated
+      ON inbox (is_normalized, updated_at_utc);
+    `);
+    this.db
+      .prepare('INSERT INTO items (id, created_at_utc) VALUES (?, ?) ON CONFLICT(id) DO NOTHING')
+      .run('inbox', now);
   }
 ,
 

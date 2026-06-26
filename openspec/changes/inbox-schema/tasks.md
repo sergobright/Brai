@@ -1,0 +1,4 @@
+- [x] 1.1 Add the `inbox` SQLite table, entity registry row, schema metadata, and migration marker.
+- [x] 1.2 Cover the migration with an API schema test.
+- [x] 1.3 Run API and OpenSpec validation.
+- [ ] 1.4 Archive the OpenSpec change after review/merge.
