@@ -17,17 +17,24 @@ export const readModelMethods = {
     const fromUtc = from ? new Date(moscowDateStartUtcMs(from)).toISOString() : null;
     const toUtc = to ? new Date(moscowDateStartUtcMs(addDays(to, 1))).toISOString() : null;
 
-    let sql = 'SELECT * FROM timer_sessions WHERE ended_at_utc IS NOT NULL';
+    let sql = `
+      SELECT s.id, v.started_at_utc, v.ended_at_utc, v.duration_seconds,
+        s.created_at_utc, s.updated_at_utc
+      FROM focus_sessions s
+      JOIN focus_session_versions v
+        ON v.focus_session_id = s.id AND v.is_current = 1
+      WHERE v.ended_at_utc IS NOT NULL
+    `;
     const params = [];
     if (fromUtc) {
-      sql += ' AND ended_at_utc >= ?';
+      sql += ' AND v.ended_at_utc >= ?';
       params.push(fromUtc);
     }
     if (toUtc) {
-      sql += ' AND started_at_utc < ?';
+      sql += ' AND v.started_at_utc < ?';
       params.push(toUtc);
     }
-    sql += ' ORDER BY started_at_utc DESC';
+    sql += ' ORDER BY v.started_at_utc DESC';
 
     const sessions = this.db.prepare(sql).all(...params).map(formatSession);
     return { sessions, groups: groupSessionsByDateHour(sessions, { from, to }) };
@@ -39,11 +46,15 @@ export const readModelMethods = {
     const endUtc = new Date(challengeEndExclusiveUtcMs()).toISOString();
     const rows = this.db
       .prepare(`
-        SELECT * FROM timer_sessions
-        WHERE ended_at_utc IS NOT NULL
-          AND ended_at_utc > ?
-          AND started_at_utc < ?
-        ORDER BY started_at_utc ASC
+        SELECT s.id, v.started_at_utc, v.ended_at_utc, v.duration_seconds,
+          s.created_at_utc, s.updated_at_utc
+        FROM focus_sessions s
+        JOIN focus_session_versions v
+          ON v.focus_session_id = s.id AND v.is_current = 1
+        WHERE v.ended_at_utc IS NOT NULL
+          AND v.ended_at_utc > ?
+          AND v.started_at_utc < ?
+        ORDER BY v.started_at_utc ASC
       `)
       .all(startUtc, endUtc);
 

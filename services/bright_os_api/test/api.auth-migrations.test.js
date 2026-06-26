@@ -41,6 +41,14 @@ test('migration seeds legacy sessions and survives close and reopen', async () =
     let state = await request(baseUrl, '/v1/timer/state');
     assert.ok(state.body.active_session);
     assert.equal(runtime.store.db.prepare('SELECT COUNT(*) AS count FROM timer_events').get().count, 3);
+    assert.equal(runtime.store.db.prepare('SELECT COUNT(*) AS count FROM focus_sessions').get().count, 2);
+    assert.equal(runtime.store.db.prepare('SELECT COUNT(*) AS count FROM focus_session_versions WHERE is_current = 1').get().count, 2);
+    assert.equal(
+      runtime.store.db
+        .prepare("SELECT COUNT(*) AS count FROM sqlite_master WHERE type = 'table' AND name = 'timer_sessions'")
+        .get().count,
+      0
+    );
 
     await runtime.close();
     runtime = createBrightOsServer({
@@ -58,6 +66,7 @@ test('migration seeds legacy sessions and survives close and reopen', async () =
     state = await request(baseUrl, '/v1/timer/state');
     assert.ok(state.body.active_session);
     assert.equal(state.body.server_revision, 3);
+    assert.equal(runtime.store.db.prepare('SELECT COUNT(*) AS count FROM focus_session_versions WHERE is_current = 1').get().count, 2);
   } finally {
     await runtime.close();
     fs.rmSync(tmp, { recursive: true, force: true });

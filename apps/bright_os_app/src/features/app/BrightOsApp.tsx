@@ -102,6 +102,7 @@ export function BrightOsApp({ initialSection = "actions" }: { initialSection?: S
             background={app.focusBackground}
             onStart={app.onStart}
             onStop={app.onStop}
+            onEditSession={app.onEditFocusSession}
             onBackground={app.setFocusBackground}
           />
         ) : screenSection === "evil-eye" ? (
@@ -178,10 +179,10 @@ export function BrightOsApp({ initialSection = "actions" }: { initialSection?: S
         />
       ) : null}
       {app.mobileContextPanel === "focus-goal" && app.section === "focus" ? (
-        <FocusContextPanelSheet panel="goal" history={app.history} goal={app.goal} todayKey={app.todayKey} onClose={() => app.setMobileContextPanel(null)} onCloseStart={app.markMobileContextPanelClosing} />
+        <FocusContextPanelSheet panel="goal" history={app.history} goal={app.goal} todayKey={app.todayKey} onClose={() => app.setMobileContextPanel(null)} onCloseStart={app.markMobileContextPanelClosing} onEditSession={app.onEditFocusSession} />
       ) : null}
       {app.mobileContextPanel === "focus-history" && app.section === "focus" ? (
-        <FocusContextPanelSheet panel="history" history={app.history} goal={app.goal} todayKey={app.todayKey} onClose={() => app.setMobileContextPanel(null)} onCloseStart={app.markMobileContextPanelClosing} />
+        <FocusContextPanelSheet panel="history" history={app.history} goal={app.goal} todayKey={app.todayKey} onClose={() => app.setMobileContextPanel(null)} onCloseStart={app.markMobileContextPanelClosing} onEditSession={app.onEditFocusSession} />
       ) : null}
       {app.mobileContextPanel === "actions-info" && app.section === "actions" ? (
         <MobileContextSheet label="Информация о действиях" onClose={() => app.setMobileContextPanel(null)} onCloseStart={app.markMobileContextPanelClosing}>

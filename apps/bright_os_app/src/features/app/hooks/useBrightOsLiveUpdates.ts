@@ -3,7 +3,7 @@
 import { useEffect, type Dispatch, type MutableRefObject, type SetStateAction } from "react";
 import { BrightOsApi } from "@/shared/api/brightOsApi";
 import { tickTimerState } from "@/shared/time/format";
-import type { ActionsState } from "@/shared/types/activities";
+import type { ActivitiesState } from "@/shared/types/activities";
 import type { SyncStatus, TimerState } from "@/shared/types/timer";
 
 type LiveUpdateOptions = {
@@ -12,7 +12,7 @@ type LiveUpdateOptions = {
   setTimer: Dispatch<SetStateAction<TimerState>>;
   refreshStateAndFlushRef: MutableRefObject<() => Promise<void>>;
   applyServerStateRef: MutableRefObject<(state: TimerState) => Promise<void>>;
-  applyActionsStateRef: MutableRefObject<(state: ActionsState) => Promise<void>>;
+  applyActivitiesStateRef: MutableRefObject<(state: ActivitiesState) => Promise<void>>;
 };
 
 /**
@@ -24,7 +24,7 @@ export function useBrightOsLiveUpdates({
   setTimer,
   refreshStateAndFlushRef,
   applyServerStateRef,
-  applyActionsStateRef,
+  applyActivitiesStateRef,
 }: LiveUpdateOptions) {
   useEffect(() => {
     const interval = window.setInterval(() => {
@@ -68,13 +68,13 @@ export function useBrightOsLiveUpdates({
           activities_state?: {
             server_time_utc: string;
             server_revision: number;
-            activities: ActionsState["actions"];
-            archived_activities?: ActionsState["archived_actions"];
+            activities: ActivitiesState["actions"];
+            archived_activities?: ActivitiesState["archived_actions"];
           };
         };
         if (payload.state) void applyServerStateRef.current(payload.state);
         if (payload.activities_state) {
-          void applyActionsStateRef.current({
+          void applyActivitiesStateRef.current({
             server_time_utc: payload.activities_state.server_time_utc,
             server_revision: payload.activities_state.server_revision,
             actions: payload.activities_state.activities,
@@ -94,5 +94,5 @@ export function useBrightOsLiveUpdates({
       connected = false;
       websocket?.close();
     };
-  }, [api, syncStatus, refreshStateAndFlushRef, applyServerStateRef, applyActionsStateRef]);
+  }, [api, syncStatus, refreshStateAndFlushRef, applyServerStateRef, applyActivitiesStateRef]);
 }

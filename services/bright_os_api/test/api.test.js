@@ -149,6 +149,161 @@ test('event sync is idempotent and returns canonical state', async () => {
   }
 });
 
+test('event sync edits completed focus session versions idempotently', async () => {
+  const fixture = await createFixture([
+    '2026-06-14T12:00:03.000Z',
+    '2026-06-14T12:00:04.000Z',
+    '2026-06-14T12:00:05.000Z',
+    '2026-06-14T12:00:06.000Z'
+  ]);
+
+  try {
+    await request(fixture.url, '/v1/timer/events/sync', {
+      method: 'POST',
+      body: JSON.stringify({
+        device: { device_id: 'web-device', platform: 'web' },
+        events: [
+          syncEvent('web-start', 1, 'start', '2026-06-14T10:00:00.000Z'),
+          syncEvent('web-stop', 2, 'stop', '2026-06-14T11:00:00.000Z')
+        ]
+      })
+    });
+    const before = await request(fixture.url, '/v1/sessions');
+    const sessionId = before.body.sessions[0].id;
+    const editBody = {
+      device: { device_id: 'web-device', platform: 'web' },
+      events: [
+        {
+          ...syncEvent('edit-session', 3, 'edit_session', '2026-06-14T12:00:00.000Z'),
+          metadata: {
+            focus_session_id: sessionId,
+            started_at_utc: '2026-06-14T10:15:00.000Z',
+            ended_at_utc: '2026-06-14T11:45:00.000Z'
+          }
+        }
+      ]
+    };
+
+    const edited = await request(fixture.url, '/v1/timer/events/sync', {
+      method: 'POST',
+      body: JSON.stringify(editBody)
+    });
+    assert.equal(edited.status, 200);
+    assert.deepEqual(edited.body.ignored_events, []);
+
+    const history = await request(fixture.url, '/v1/sessions');
+    assert.equal(history.body.sessions[0].id, sessionId);
+    assert.equal(history.body.sessions[0].started_at_utc, '2026-06-14T10:15:00.000Z');
+    assert.equal(history.body.sessions[0].ended_at_utc, '2026-06-14T11:45:00.000Z');
+    assert.equal(history.body.sessions[0].duration_seconds, 5400);
+
+    const goal = await request(
+      fixture.url,
+      '/v1/goals/challenge?now=2026-06-14T12:30:00.000Z'
+    );
+    assert.equal(goal.body.days.find((item) => item.date === '2026-06-14').completed_seconds, 5400);
+
+    assert.equal(
+      fixture.store.db
+        .prepare('SELECT COUNT(*) AS count FROM focus_session_versions WHERE focus_session_id = ?')
+        .get(sessionId).count,
+      2
+    );
+    assert.equal(
+      fixture.store.db
+        .prepare('SELECT COUNT(*) AS count FROM focus_session_versions WHERE focus_session_id = ? AND is_current = 1')
+        .get(sessionId).count,
+      1
+    );
+
+    await request(fixture.url, '/v1/timer/events/sync', {
+      method: 'POST',
+      body: JSON.stringify(editBody)
+    });
+    assert.equal(
+      fixture.store.db
+        .prepare('SELECT COUNT(*) AS count FROM focus_session_versions WHERE focus_session_id = ?')
+        .get(sessionId).count,
+      2
+    );
+
+    assert.throws(() => {
+      fixture.store.db
+        .prepare(
+          `
+            INSERT INTO focus_session_versions (
+              id, focus_session_id, started_at_utc, ended_at_utc, duration_seconds,
+              is_current, created_at_utc
+            ) VALUES (?, ?, ?, ?, ?, 1, ?)
+          `
+        )
+        .run(
+          'bad-current',
+          sessionId,
+          '2026-06-14T10:00:00.000Z',
+          '2026-06-14T10:30:00.000Z',
+          1800,
+          '2026-06-14T12:00:06.000Z'
+        );
+    }, /UNIQUE/);
+  } finally {
+    await fixture.close();
+  }
+});
+
+test('event sync ignores invalid focus session edits', async () => {
+  const fixture = await createFixture([
+    '2026-06-14T12:00:03.000Z',
+    '2026-06-14T12:00:04.000Z'
+  ]);
+
+  try {
+    await request(fixture.url, '/v1/timer/events/sync', {
+      method: 'POST',
+      body: JSON.stringify({
+        device: { device_id: 'web-device', platform: 'web' },
+        events: [
+          syncEvent('web-start', 1, 'start', '2026-06-14T10:00:00.000Z'),
+          syncEvent('web-stop', 2, 'stop', '2026-06-14T11:00:00.000Z')
+        ]
+      })
+    });
+    const before = await request(fixture.url, '/v1/sessions');
+    const sessionId = before.body.sessions[0].id;
+
+    const response = await request(fixture.url, '/v1/timer/events/sync', {
+      method: 'POST',
+      body: JSON.stringify({
+        device: { device_id: 'web-device', platform: 'web' },
+        events: [
+          {
+            ...syncEvent('bad-edit', 3, 'edit_session', '2026-06-14T12:00:00.000Z'),
+            metadata: {
+              focus_session_id: sessionId,
+              started_at_utc: '2026-06-14T11:45:00.000Z',
+              ended_at_utc: '2026-06-14T10:15:00.000Z'
+            }
+          }
+        ]
+      })
+    });
+
+    assert.deepEqual(response.body.ignored_events, [
+      { event_id: 'bad-edit', reason: 'invalid_session_range' }
+    ]);
+    const history = await request(fixture.url, '/v1/sessions');
+    assert.equal(history.body.sessions[0].duration_seconds, 3600);
+    assert.equal(
+      fixture.store.db
+        .prepare('SELECT COUNT(*) AS count FROM focus_session_versions WHERE focus_session_id = ?')
+        .get(sessionId).count,
+      1
+    );
+  } finally {
+    await fixture.close();
+  }
+});
+
 test('event sync merges overlapping devices without double-counting goals', async () => {
   const fixture = await createFixture([
     '2026-06-14T12:00:03.000Z',

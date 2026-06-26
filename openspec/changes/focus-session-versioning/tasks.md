@@ -1,0 +1,7 @@
+- [x] 1.1 Add Focus session schema migration, table descriptions, and legacy migration coverage.
+- [x] 1.2 Extend timer event ingestion with `edit_session` validation and projection.
+- [x] 1.3 Update history, goal, timer state, and compatibility routes to read current Focus versions.
+- [x] 1.4 Update client timer types, IndexedDB outbox, API payload, and optimistic history projection for offline edits.
+- [x] 1.5 Add focused UI controls for editing completed Focus session start/end.
+- [x] 1.6 Verify with API, client, OpenSpec, and public guard checks.
+- [ ] 1.7 Archive the OpenSpec change after review/merge.

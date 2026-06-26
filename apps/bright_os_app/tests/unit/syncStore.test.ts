@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { clientDb, getMeta } from "@/shared/storage/db";
 import {
   enqueueTimerEvent,
+  enqueueFocusSessionEdit,
   loadCanonicalState,
   loadHistoryCache,
   pendingEvents,
@@ -32,6 +33,23 @@ describe("sync store guards", () => {
     });
 
     expect((await pendingEvents())[0].metadata).toEqual({ global_stop: true });
+  });
+
+  it("queues completed focus session edits as timer events", async () => {
+    await enqueueFocusSessionEdit({
+      sessionId: "session-1",
+      startedAtUtc: "2026-06-14T10:15:00.000Z",
+      endedAtUtc: "2026-06-14T11:45:00.000Z",
+      baseServerRevision: 7,
+    });
+
+    const [event] = await pendingEvents();
+    expect(event.type).toBe("edit_session");
+    expect(event.metadata).toMatchObject({
+      focus_session_id: "session-1",
+      started_at_utc: "2026-06-14T10:15:00.000Z",
+      ended_at_utc: "2026-06-14T11:45:00.000Z",
+    });
   });
 
   it("splits cached history across Moscow midnight", async () => {

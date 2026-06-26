@@ -1,4 +1,4 @@
-export type TimerEventType = "start" | "stop";
+export type TimerEventType = "start" | "stop" | "edit_session";
 
 export type SyncStatus =
   | "connecting"
