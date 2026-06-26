@@ -79,6 +79,14 @@ Bright OS SHALL treat the server SQLite `items` table as the registry of main wo
 - **WHEN** the server database schema is initialized or migrated to the main entity registry
 - **THEN** the `items` table contains the `activities` entity
 
+### Requirement: Server schema metadata is registered in table_descriptions
+Bright OS SHALL treat the server SQLite `table_descriptions` table as the registry for schema metadata.
+
+#### Scenario: Server schema metadata changes
+- **WHEN** a server SQLite change adds or changes a table, column, index, relationship, dependency, or schema purpose
+- **THEN** the same change updates `table_descriptions`
+- **AND** content-only row changes do not require `table_descriptions` updates
+
 ### Requirement: SocratiCode is used for semantic code search
 Agents and maintainers MUST use SocratiCode for semantic code search after confirming the project codebase index is complete.
 

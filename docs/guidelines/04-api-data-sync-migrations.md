@@ -10,6 +10,7 @@
 - Timer sync основан на event log и deterministic replay.
 - Activities sync использует отдельный event log: `activities` и `activity_events`.
 - Main work entities регистрируются в таблице `items`; сейчас основной entity - `activities`.
+- Server SQLite schema metadata регистрируется в таблице `table_descriptions`.
 
 ## Main entities
 
@@ -20,6 +21,7 @@
 ## Миграции
 
 - Каждое server-side schema изменение получает migration marker в `schema_migrations`.
+- Любое server-side schema metadata изменение обновляет `table_descriptions` в том же change: новые/изменённые таблицы, столбцы, индексы, связи, зависимости и назначение. Content-only изменения строк этого не требуют.
 - Перед live migration или destructive-risk изменением делай SQLite backup.
 - Migration должна быть idempotent для повторного запуска.
 - Не меняй canonical data shape без проверки API consumers и client cache projection.

@@ -4,6 +4,7 @@
 
 - [ ] Прочитан `docs/guidelines/04-api-data-sync-migrations.md`.
 - [ ] Есть migration marker в `schema_migrations`, если меняется schema.
+- [ ] `table_descriptions` обновлена для schema metadata changes: таблицы, столбцы, индексы, связи, зависимости, назначение. Пропуск допустим только для content-only изменений строк.
 - [ ] Migration idempotent.
 - [ ] Backup нужен и сделан перед live-risk change.
 - [ ] Auth boundary не ослаблен.

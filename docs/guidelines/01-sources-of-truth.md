@@ -17,6 +17,7 @@
 - Stable requirements: `openspec/specs/`.
 - Planned requirements: `openspec/changes/<change-id>/`.
 - Public project context and decisions: `memory-bank/`.
+- Server SQLite schema metadata: `table_descriptions`, updated with every schema metadata change.
 - Runtime or service registry: outside the repository.
 
 ## Public Safety
