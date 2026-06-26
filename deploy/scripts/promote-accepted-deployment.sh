@@ -42,10 +42,28 @@ else
   exit 1
 fi
 
-SOURCE_SHORT_CHANGES=""
-SOURCE_DETAILS=""
-NOTES_ROOT="$ROOT"
-if [[ -n "$SOURCE_COMMIT" ]]; then
+SOURCE_SHORT_CHANGES="${BRIGHT_OS_SOURCE_SHORT_CHANGES:-}"
+SOURCE_DETAILS="${BRIGHT_OS_SOURCE_DETAILED_CHANGES:-}"
+NOTES_ROOT="${BRIGHT_OS_GIT_NOTES_ROOT:-}"
+if [[ ! -d "$NOTES_ROOT/.git" ]]; then
+  NOTES_ROOT=""
+fi
+if [[ -z "$NOTES_ROOT" && "$TARGET_ENVIRONMENT" == "dev" && -n "${SLOT:-}" ]]; then
+  PREVIEW_SOURCE_ROOT="$ENVS_ROOT/preview-${SLOT,,}/source"
+  if [[ -d "$PREVIEW_SOURCE_ROOT/.git" ]]; then
+    NOTES_ROOT="$PREVIEW_SOURCE_ROOT"
+  fi
+fi
+if [[ -z "$NOTES_ROOT" && -d "$ROOT/.git" ]]; then
+  NOTES_ROOT="$ROOT"
+fi
+
+if [[ -n "$SOURCE_COMMIT" && -n "$NOTES_ROOT" && ( -z "$SOURCE_SHORT_CHANGES" || -z "$SOURCE_DETAILS" ) ]]; then
+  if ! git -C "$NOTES_ROOT" cat-file -e "$SOURCE_COMMIT^{commit}" 2>/dev/null; then
+    git -C "$NOTES_ROOT" fetch --depth=1 origin "$SOURCE_BRANCH" >/dev/null 2>&1 \
+      || git -C "$NOTES_ROOT" fetch --depth=1 origin "$SOURCE_COMMIT" >/dev/null 2>&1 \
+      || true
+  fi
   if [[ "$TARGET_ENVIRONMENT" == "dev" && -n "${SLOT:-}" ]]; then
     PREVIEW_SOURCE_ROOT="$ENVS_ROOT/preview-${SLOT,,}/source"
     if [[ -d "$PREVIEW_SOURCE_ROOT/.git" ]]; then
@@ -54,11 +72,16 @@ if [[ -n "$SOURCE_COMMIT" ]]; then
   fi
   NOTES_COMMIT="$SOURCE_COMMIT"
   for _ in 1 2 3 4 5; do
-    SOURCE_SHORT_CHANGES="$(git -C "$NOTES_ROOT" log -1 --format=%s "$NOTES_COMMIT" 2>/dev/null || true)"
+    GIT_SHORT_CHANGES="$(git -C "$NOTES_ROOT" log -1 --format=%s "$NOTES_COMMIT" 2>/dev/null || true)"
+    if [[ -z "$GIT_SHORT_CHANGES" ]]; then
+      break
+    fi
+    SOURCE_SHORT_CHANGES="${SOURCE_SHORT_CHANGES:-$GIT_SHORT_CHANGES}"
     if [[ "$SOURCE_SHORT_CHANGES" == Merge\ branch\ *\ into\ codex/* || "$SOURCE_SHORT_CHANGES" == Merge\ remote-tracking\ branch\ *\ into\ codex/* ]]; then
       PARENT_COMMIT="$(git -C "$NOTES_ROOT" rev-parse "$NOTES_COMMIT^1" 2>/dev/null || true)"
       if [[ -n "$PARENT_COMMIT" ]]; then
         NOTES_COMMIT="$PARENT_COMMIT"
+        SOURCE_SHORT_CHANGES=""
         continue
       fi
     fi
@@ -73,10 +96,12 @@ if [[ -n "$SOURCE_COMMIT" ]]; then
     done <<<"$SOURCE_BODY"
     SOURCE_BODY=""
   fi
-  if [[ -n "$SOURCE_BODY" ]]; then
-    SOURCE_DETAILS="$SOURCE_SHORT_CHANGES"$'\n\n'"$SOURCE_BODY"
-  else
-    SOURCE_DETAILS="$SOURCE_SHORT_CHANGES"
+  if [[ -z "$SOURCE_DETAILS" ]]; then
+    if [[ -n "$SOURCE_BODY" ]]; then
+      SOURCE_DETAILS="$SOURCE_SHORT_CHANGES"$'\n\n'"$SOURCE_BODY"
+    else
+      SOURCE_DETAILS="$SOURCE_SHORT_CHANGES"
+    fi
   fi
 fi
 
