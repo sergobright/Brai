@@ -1,0 +1,10 @@
+- [ ] 1.1 Harden Codex hook matching and recursive hook input parsing.
+- [ ] 1.2 Replace pre-task shell write deny-list with read-only allow-list.
+- [ ] 1.3 Block manual codex branch creation and require the task starter/follow-up marker.
+- [ ] 1.4 Make task starter enable local Git hooks for created worktrees.
+- [ ] 1.5 Mark write intent from pre-commit and derive implementation work in stop guard from git state.
+- [ ] 1.6 Add strict doctor/finalization checks with nonzero shell mode.
+- [ ] 1.7 Gate preview acceptance on verified preview state for the exact branch head.
+- [ ] 1.8 Add regression tests for namespaced/custom/nested tools, unknown commands, stale markers, dirty tree, clean local commit without preview, and acceptance without preview.
+- [ ] 1.9 Update repository operation docs/checklists and Temporal delivery docs if implementation changes delivery signals.
+- [ ] 1.10 Validate OpenSpec and guard behavior before implementation handoff.
