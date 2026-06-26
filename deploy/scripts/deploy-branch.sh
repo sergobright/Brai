@@ -82,6 +82,7 @@ if [[ "$ENVIRONMENT" == "dev" ]]; then
     --source-branch "$BRANCH" \
     --source-commit "$COMMIT" \
     --source-short-changes "$DEPLOY_SHORT_CHANGES" \
+    --source-reason "${BRIGHT_OS_CHANGE_REASON:-${BRIGHT_OS_DEPLOY_REASON:-}}" \
     --target-branch "$BRANCH" \
     --target-commit "$COMMIT" \
     --source-details "$DEPLOY_DETAILED_CHANGES" \

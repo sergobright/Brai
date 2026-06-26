@@ -44,6 +44,7 @@ try {
     sourceBranch,
     sourceCommit: sourceRecord.commit_sha,
     sourceShortChanges: sourceRecord.short_changes,
+    sourceReason: sourceRecord.reason || args["source-reason"] || args.reason,
     sourceDetails: sourceRecord.detailed_changes,
     targetBranch,
     targetCommit,
@@ -54,6 +55,7 @@ try {
     sourceBranch,
     sourceCommit: sourceRecord.commit_sha,
     sourceShortChanges: sourceRecord.short_changes,
+    sourceReason: sourceRecord.reason || args["source-reason"] || args.reason,
     sourceDetails: sourceRecord.detailed_changes,
     targetBranch,
     targetCommit,
@@ -87,9 +89,10 @@ function fallbackSourceRecord(values, sourceBranch, targetEnvironment) {
     commit_sha: values["source-commit"],
     web_ota_version: values["web-ota-version"] || null,
     apk_version: values["apk-version"] || null,
-    short_changes: values["source-short-changes"] || `Accepted ${sourceBranch}.`,
+    short_changes: values["source-short-changes"] || 'Accepted preview changes without authored release notes.',
+    reason: values["source-reason"] || values.reason || '',
     detailed_changes:
-      values["source-details"] || `Accepted ${sourceBranch}@${values["source-commit"]} without preview deployment metadata.`,
+      values["source-details"] || 'No authored preview release notes were available; audit metadata is stored separately.',
   };
 }
 
@@ -99,8 +102,8 @@ function normalizeSourceRecord(record, fallbackRecord) {
   const detailedChanges = usefulChanges(record.detailed_changes) || usefulChanges(fallbackRecord?.detailed_changes) || shortChanges;
   return {
     ...record,
-    short_changes: shortChanges || record.short_changes,
-    detailed_changes: detailedChanges || record.detailed_changes,
+    short_changes: shortChanges || 'Accepted preview changes without authored release notes.',
+    detailed_changes: detailedChanges || shortChanges || 'No authored preview release notes were available; audit metadata is stored separately.',
   };
 }
 
@@ -167,13 +170,14 @@ function promoteBuildVersions(source, target) {
 
 function recordAcceptedBuildVersion(
   target,
-  { sourceBranch, sourceCommit, sourceShortChanges, sourceDetails, targetBranch, targetCommit, targetEnvironment, releasedAtUtc },
+  { sourceBranch, sourceCommit, sourceShortChanges, sourceReason, sourceDetails, targetBranch, targetCommit, targetEnvironment, releasedAtUtc },
 ) {
   if (targetEnvironment !== "dev") return;
   target.recordAcceptedBuildVersion({
     sourceBranch,
     sourceCommit,
     sourceShortChanges,
+    sourceReason,
     sourceDetails,
     targetBranch,
     targetCommit,
@@ -183,13 +187,14 @@ function recordAcceptedBuildVersion(
 
 function recordProductionReleaseVersion(
   target,
-  { sourceBranch, sourceCommit, sourceShortChanges, sourceDetails, targetBranch, targetCommit, targetEnvironment, releasedAtUtc },
+  { sourceBranch, sourceCommit, sourceShortChanges, sourceReason, sourceDetails, targetBranch, targetCommit, targetEnvironment, releasedAtUtc },
 ) {
   if (targetEnvironment !== "prod") return;
   target.recordProductionReleaseVersion({
     sourceBranch,
     sourceCommit,
     sourceShortChanges,
+    sourceReason,
     sourceDetails,
     targetBranch,
     targetCommit,

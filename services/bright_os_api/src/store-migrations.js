@@ -151,6 +151,7 @@ export const migrationMethods = {
       this.recordMigration(24, 'rename timer sessions to versioned focus sessions');
     }
 
+    this.ensureBuildVersionRefs();
     this.ensureTableDescriptions();
 
     if (!this.hasMigration(25)) {
@@ -161,6 +162,12 @@ export const migrationMethods = {
     if (!this.hasMigration(26)) {
       this.repairLateTechnicalBuildVersionDescriptions();
       this.recordMigration(26, 'repair late technical build version descriptions');
+    }
+
+    if (!this.hasMigration(27)) {
+      this.repairBuildVersionReasonText();
+      this.backfillBuildVersionRefs();
+      this.recordMigration(27, 'separate build version audit refs from reasons');
     }
   }
 ,
@@ -361,6 +368,7 @@ export const migrationMethods = {
       ['activities', 'Действия', 'Текущий список действий.', 'Хранит рабочее состояние действий Bright OS: название, статус, описание, сортировку, удаление и восстановление.'],
       ['activity_events', 'События действий', 'Журнал изменений действий.', 'Хранит каждое клиентское событие по действиям для синхронизации, аудита и восстановления текущей таблицы activities.'],
       ['app_settings', 'Настройки', 'Глобальные настройки приложения.', 'Хранит runtime-настройки в формате ключ-значение: дату старта цели, длительность цели, дневную норму фокуса и похожие параметры.'],
+      ['build_version_refs', 'Связи версий', 'Технические связи версий.', 'Хранит source/target branch и commit для build_versions, чтобы audit-метаданные не подменяли короткое изменение, детальные изменения и причину выпуска.'],
       ['build_versions', 'Версии', 'Журнал публичных версий.', 'Хранит принятые web/OTA сборки и APK-релизы с описанием изменений, причиной выпуска и временем релиза.'],
       ['deployment_records', 'Деплои', 'Журнал выкладок.', 'Хранит факты деплоя: окружение, ветку, commit, домен, web/OTA версию, APK версию и описание доставки.'],
       ['focus_sessions', 'Сессии фокуса', 'Стабильные Focus-сессии.', 'Хранит стабильные идентификаторы Focus-сессий. Редактируемые время старта, финиша и длительность лежат в focus_session_versions.'],
@@ -727,6 +735,27 @@ export const migrationMethods = {
       'APK релиз Bright OS: увеличивает только S в версии X.Y.Z.S.',
       now
     );
+  }
+,
+
+  ensureBuildVersionRefs() {
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS build_version_refs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        version_type_id TEXT NOT NULL,
+        version TEXT NOT NULL,
+        source_branch TEXT,
+        source_commit TEXT,
+        target_branch TEXT NOT NULL,
+        target_commit TEXT NOT NULL,
+        created_at_utc TEXT NOT NULL,
+        FOREIGN KEY (version_type_id, version) REFERENCES build_versions(version_type_id, version) ON DELETE CASCADE,
+        UNIQUE (version_type_id, target_branch, target_commit)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_build_version_refs_version
+      ON build_version_refs (version_type_id, version);
+    `);
   }
 ,
 
@@ -1353,6 +1382,210 @@ export const migrationMethods = {
     `);
     for (const [version, shortChanges, detailedChanges, reason] of updates) {
       update.run(shortChanges, detailedChanges, reason, version);
+    }
+  }
+,
+
+  repairBuildVersionReasonText() {
+    const updates = [
+      [
+        '0.0.1.1',
+        'Initial public web/OTA baseline.',
+        'Published browser web and Android OTA bundle 0.0.1.1 with X=0, Y=0, Z=1, S=1 and min APK versionCode 1. Browser web and Android OTA use the same public version.',
+        'Needed to establish the first clean public web/OTA version after the repository baseline was reset.',
+      ],
+      [
+        '0.0.2.1',
+        'Accepted public version baseline rules.',
+        'Recorded the first accepted public task: task merges into dev increment Z, dev promotions to main increment Y, and APK releases increment S. Browser web and Android OTA use version 0.0.2.1 with Android versionCode 1.',
+        'Needed explicit X.Y.Z.S rules so public builds, production promotions, and APK releases were not tracked ad hoc.',
+      ],
+      [
+        '0.0.3.1',
+        'Accepted clean task finish rules.',
+        'Recorded the second accepted public task: implementation work must finish with committed and pushed tracked changes unless explicitly local-only, and codex task branches deploy to isolated preview slots before dev acceptance.',
+        'Needed to prevent unfinished local work or unreviewed task branches from being treated as accepted dev work.',
+      ],
+      [
+        '0.0.4.1',
+        'Accepted idempotent preview cleanup.',
+        'Recorded the third accepted public task: preview metadata promotion skips cleanly when the preview slot has already been released by a delete event.',
+        'Needed because preview cleanup could fail when an accepted slot had already been released.',
+      ],
+      [
+        '0.0.5.1',
+        'Accepted environment-specific favicons.',
+        'Recorded the fourth accepted public task: dev and preview web/PWA builds use environment-specific favicon and manifest icon assets while production keeps the canonical Bright OS icons.',
+        'Needed so dev and preview builds were visually distinguishable while production kept the canonical brand assets.',
+      ],
+      [
+        '0.0.6.1',
+        'Accepted preview version semantics.',
+        'Recorded the fifth accepted public task: preview deployments keep the current accepted dev app version and record preview deployment metadata, while the next public build version becomes visible only after deploy-dev succeeds.',
+        'Needed because preview deployments were exposing unaccepted version numbers before dev acceptance.',
+      ],
+      [
+        '0.0.7.1',
+        'Accepted production Android OTA API endpoint fix.',
+        'Recorded the sixth accepted public task: production Android web/OTA bundles use the public API endpoint while browser web keeps same-origin /api, and OTA manifests are prepared for cache-safe publication.',
+        'Needed because production Android OTA bundles had to call the public API endpoint instead of browser-only same-origin /api.',
+      ],
+      [
+        '0.0.8.1',
+        'Aligned dev build ledger sequence.',
+        'Dev build Z follows the accepted dev build sequence, and the current dev source keeps the accepted menu and GitHub CLI sandbox-auth fixes.',
+        'Needed to make accepted dev build numbering and ledger rows consistent after earlier backfills and workflow fixes.',
+      ],
+      [
+        '0.0.9.1',
+        'Added mobile edge menu swipe.',
+        'Mobile navigation now opens the left menu from an edge swipe, keeps horizontal page swipes on the bottom dock only, and uses an 80 percent mobile left menu width.',
+        'Needed because mobile navigation lacked a reliable edge gesture and page swipes conflicted with menu access.',
+      ],
+      [
+        '0.0.10.1',
+        'Fixed preview slot release and queueing.',
+        'Preview slot release now uses a deploy-readable checkout, full preview pools queue FIFO, and acceptance release frees the slot automatically.',
+        'Needed because preview slots could remain occupied or unavailable, blocking queued task branches.',
+      ],
+      [
+        '0.0.11.1',
+        'Recorded accepted build ledger idempotently.',
+        'The acceptance flow records dev build versions idempotently before future dev deployments.',
+        'Needed because repeated acceptance or deploy steps could duplicate or miss accepted build ledger rows.',
+      ],
+      [
+        '0.0.12.1',
+        'Renamed Bright OS API infrastructure.',
+        'Renamed Bright OS API infrastructure, fixed local-first timer controls during sync, avoided stale OTA checking state, and rewrote the public README.',
+        'Needed to remove stale API naming, keep timer controls responsive during sync, and stop OTA checks from showing stale state.',
+      ],
+      [
+        '0.0.13.1',
+        'Backfilled accepted build 0.0.11.1.',
+        'Backfilled the accepted 0.0.11.1 build ledger row and migration tests so existing dev history is represented in build_versions.',
+        'Needed because existing dev history was missing the accepted 0.0.11.1 build ledger row.',
+      ],
+      [
+        '0.0.14.1',
+        'Promoted dev build ledger to production.',
+        'Production promotion now copies accepted dev build ledger rows and creates production release rows that reference the included dev builds.',
+        'Needed because production releases did not preserve the accepted dev build history they included.',
+      ],
+      [
+        '0.0.15.1',
+        'Fixed version ledger semantics.',
+        'Versioning no longer couples dev build numbers to GitHub PR numbers; accepted branches create Z versions and production promotion creates Y releases with included build references.',
+        'Needed because build versions were coupled to GitHub PR numbers instead of accepted dev and production release sequence.',
+      ],
+      [
+        '0.0.16.1',
+        'Required preview slot release after dev deploy.',
+        'Accepted preview cleanup now waits for deploy-dev metadata promotion and releases preview slots only after the dev deployment succeeds.',
+        'Needed because preview slots could be released before dev deployment metadata was safely promoted.',
+      ],
+      [
+        '0.0.17.1',
+        'Fixed preview promotion metadata fallback.',
+        'Accepted preview promotion now falls back to branch and commit metadata when the preview database is unavailable and cleans up previously accepted preview slots.',
+        'Needed because acceptance could fail or leave slots occupied when preview deployment metadata was unavailable.',
+      ],
+      [
+        '0.0.18.1',
+        'Connected Temporal CI/CD delivery gates.',
+        'Delivery now records checks, preview deploys, accepted-preview promotion, slot release, dev deploy, and production deploy in Temporal with strict blocking signals and documented recovery rules.',
+        'Needed because delivery checks, deploys, promotions, failures, and recovery did not have one strict control ledger.',
+      ],
+      [
+        '0.0.19.1',
+        'Document table_descriptions schema metadata rule.',
+        'Project rules now require table_descriptions updates for server SQLite schema metadata changes, while content-only row changes are exempt.',
+        'Needed because SQLite schema metadata could change without the admin panel descriptions staying current.',
+      ],
+      [
+        '0.0.20.1',
+        'Optimize activity projection sync.',
+        'Activity sync now applies incremental projection updates for activity events and client command method names instead of relying on full recompute paths.',
+        'Needed because activity sync relied on heavier full recompute paths and stale client command method names.',
+      ],
+      [
+        '0.0.21.1',
+        'Implemented focus session versioning.',
+        'Focus history now uses versioned completed focus sessions, completed session start/end edits sync through timer events, and legacy timer sessions migrate into the new versioned model.',
+        'Needed because completed focus-session edits required versioned history and syncable edit events instead of mutating legacy timer rows.',
+      ],
+      [
+        '0.0.22.1',
+        'Enforced branch preview guard rails.',
+        'Task-start, handoff, git hook, and Codex hook guards now keep implementation work on codex/* branches, require clean committed pushes, and prevent preview handoff without a verified slot.',
+        'Needed because implementation work could happen on unsafe branches or be handed off without a clean pushed preview slot.',
+      ],
+      [
+        '0.0.23.1',
+        'Required runtime DB fact verification.',
+        'Project rules now require direct runtime verification before claiming database, service, or deployment facts; document SQLite WAL read-only checks; and add handoff/checklist requirements for non-visual runtime facts.',
+        'Needed because agents were making database and deployment claims from code, screenshots, or assumptions instead of checking the real runtime target.',
+      ],
+      [
+        '0.0.24.1',
+        'Fixed build version release notes.',
+        'Accepted build version rows now keep human-readable release notes in short_changes and detailed_changes, preserve source changelog text during promotion, repair historical technical descriptions, and keep audit metadata out of the visible change text.',
+        'Needed because version rows showed branch, commit, and deploy metadata instead of readable release notes and real change reasons.',
+      ],
+      [
+        '0.0.25.1',
+        'Repaired late build version descriptions.',
+        'Late accepted build rows now restore readable release notes for runtime verification and release-note fixes, ignore technical preview metadata during promotion, and keep branch/commit audit data out of visible change fields.',
+        'Needed because a newly accepted build row still showed branch metadata instead of readable release notes.',
+      ],
+    ];
+    const update = this.db.prepare(`
+      UPDATE build_versions
+      SET short_changes = ?, detailed_changes = ?, reason = ?
+      WHERE version_type_id = 'build'
+        AND version = ?
+    `);
+    for (const [version, shortChanges, detailedChanges, reason] of updates) {
+      update.run(shortChanges, detailedChanges, reason, version);
+    }
+    this.db
+      .prepare("UPDATE build_versions SET reason = ? WHERE version_type_id = 'apk' AND version = '0.0.1.1'")
+      .run('Needed to establish the first installable public Android APK baseline with signing kept outside the repository.');
+  }
+,
+
+  backfillBuildVersionRefs() {
+    const refs = [
+      ['0.0.8.1', 'codex/align-pr-version-ledger', '20c96fa', 'dev', '17976ea'],
+      ['0.0.9.1', 'codex/mobile-menu-edge-swipe', 'a2b9cce', 'dev', '3fbef43'],
+      ['0.0.10.1', 'codex/fix-preview-slot-release', '1a3eb10', 'dev', '266f7b0'],
+      ['0.0.11.1', 'codex/fix-accepted-build-ledger', '2169878', 'dev', 'df4b717'],
+      ['0.0.12.1', 'codex/rename-bright-os-api', '4eafe83852f9ff3723dd23d3401019a7b6dde233', 'dev', '0c57b8f74f4dd8ad2c500bac08714392c932cc1d'],
+      ['0.0.13.1', 'codex/backfill-pr11-build-ledger', '0ae30248632de2c92668d7ad649f71c86cf09008', 'dev', '4ba274fed068106057521c319b7b385ce0b0ed45'],
+      ['0.0.14.1', 'codex/promote-dev-ledger-to-prod', '72035952b3cfd243322ea6c4b1d1a28be7e293b3', 'dev', '5cbde5ca771201924e72a13d418fa832d266abb3'],
+      ['0.0.15.1', 'codex/fix-version-ledger-semantics', 'b743abaaa3e344bd511c959f9963ab9ece096a10', 'dev', 'a2a8d0cfb8d5f72cbb398de31d60a3a8678eb17c'],
+      ['0.0.16.1', 'codex/require-preview-slot-release', 'c811cf9c584fa06b58e416118957b68f2066f59b', 'dev', '1c50f30328f3aaf2b6f8254909dcd37bbda80738'],
+      ['0.0.17.1', 'codex/fix-preview-promotion-fallback', '9a00d6312ef0f963ac81847fae106b2c170a7979', 'dev', '6ae3a7b2c23c561194375d42b49bccdebb49ac77'],
+      ['0.0.18.1', 'codex/fix-preview-promotion-fallback', '3329474d5da1b09d5b6930287dbe231a516b1845', 'dev', '4c1b5cbd5a26d9bb576ca8a2a3e1a83266dd1758'],
+      ['0.0.19.1', 'codex/table-descriptions-metadata-rules', '683f8f7f0f77e5e85e3527b2ee2cb955ea309e69', 'dev', '1546e6062f1b6a743e18a7c45d78b4298177d9cb'],
+      ['0.0.20.1', 'codex/incremental-activity-projection', '7cd4ee2bccfb34842dab52c1ca8d3012bbaab95a', 'dev', 'e8a58dd2e1df97131189878651808e967a50eaa8'],
+      ['0.0.21.1', 'codex/focus-session-versioning', 'f80e1bc64f9e3b84ec01088d91e5684901b7f0a8', 'dev', 'ee0c387eea1b0786c70926058bc257ab25828135'],
+      ['0.0.22.1', 'codex/enforce-branch-preview-guards', '5b9c621be5dd33c3c4bd3588f702fa69f53fca78', 'dev', 'f0c71767234ab38b80e5999a0f9fa6cea4877d58'],
+      ['0.0.23.1', 'codex/require-runtime-db-verification', '9846d4db644824b20c8f050aff99ea9fef8a3d38', 'dev', '82be3ab928dca8444594f808b3f6fe2a3cb21a55'],
+      ['0.0.24.1', 'codex/fix-build-version-descriptions', '5c16c8450e77273d95d327f4792f502b0dfceee8', 'dev', 'd778efdcadfa06af938c91fe1247ab1309ebebf8'],
+      ['0.0.25.1', 'codex/repair-late-build-version-descriptions', '50caeb4c844d0487d04a28de64ced4161c1eaa00', 'dev', 'a1887a755689967b2a892ebc6a8b50ca31072958'],
+    ];
+    const exists = this.db.prepare("SELECT 1 FROM build_versions WHERE version_type_id = 'build' AND version = ?");
+    for (const [version, sourceBranch, sourceCommit, targetBranch, targetCommit] of refs) {
+      if (!exists.get(version)) continue;
+      this.upsertBuildVersionRef({
+        versionTypeId: 'build',
+        version,
+        sourceBranch,
+        sourceCommit,
+        targetBranch,
+        targetCommit,
+      });
     }
   }
 ,

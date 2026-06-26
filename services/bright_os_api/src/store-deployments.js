@@ -59,15 +59,16 @@ export const deploymentMethods = {
     sourceBranch,
     sourceCommit,
     sourceShortChanges = null,
+    sourceReason = null,
     sourceDetails,
     targetBranch,
     targetCommit,
     releasedAtUtc,
   }) {
-    const existing = this.findBuildVersionByTargetCommit({ targetCommit, releaseOnly: false });
+    const existing = this.findBuildVersionByTargetCommit({ targetBranch, targetCommit, releaseOnly: false });
     const buildVersion = existing?.build_version ?? this.nextAcceptedBuildVersion();
     const version = `0.0.${buildVersion}.1`;
-    const shortChanges = usefulChanges(sourceShortChanges) || `Accepted ${sourceBranch}.`;
+    const shortChanges = usefulChanges(sourceShortChanges) || 'Accepted preview changes without authored release notes.';
     const detailedChanges = usefulChanges(sourceDetails) || shortChanges;
     this.upsertBuildVersion({
       majorVersion: 0,
@@ -77,8 +78,14 @@ export const deploymentMethods = {
       version,
       shortChanges,
       detailedChanges,
-      reason: `Accepted dev build ${version}: ${sourceBranch}@${sourceCommit} -> ${targetBranch}@${targetCommit}.`,
+      reason: usefulReason(sourceReason)
+        || reasonFromChanges(detailedChanges, shortChanges)
+        || `Needed to accept ${sourceBranch} into ${targetBranch}.`,
       releasedAtUtc,
+      sourceBranch,
+      sourceCommit,
+      targetBranch,
+      targetCommit,
     });
     return { buildVersion, version };
   },
@@ -87,12 +94,13 @@ export const deploymentMethods = {
     sourceBranch,
     sourceCommit,
     sourceShortChanges = null,
+    sourceReason = null,
     sourceDetails,
     targetBranch,
     targetCommit,
     releasedAtUtc,
   }) {
-    const existing = this.findBuildVersionByTargetCommit({ targetCommit, releaseOnly: true });
+    const existing = this.findBuildVersionByTargetCommit({ targetBranch, targetCommit, releaseOnly: true });
     if (existing) {
       return {
         releaseVersion: existing.release_version,
@@ -137,15 +145,36 @@ export const deploymentMethods = {
         `Included accepted dev builds: ${referencedBuilds.map((row) => `${row.version}: ${row.short_changes}`).join('; ')}.`,
         sourceChanges,
       ].filter(Boolean).join(' '),
-      reason: `Promoted dev to production release ${version}: ${sourceBranch}@${sourceCommit || 'unknown'} -> ${targetBranch}@${targetCommit}.`,
+      reason: usefulReason(sourceReason) || 'Needed to publish accepted dev changes to production after validation.',
       releasedAtUtc,
+      sourceBranch,
+      sourceCommit,
+      targetBranch,
+      targetCommit,
     });
     return { releaseVersion, buildVersion: latest.build_version, version };
   },
 
-  findBuildVersionByTargetCommit({ targetCommit, releaseOnly }) {
+  findBuildVersionByTargetCommit({ targetBranch, targetCommit, releaseOnly }) {
     if (!targetCommit) return null;
     const releaseFilter = releaseOnly ? 'release_version > 0' : 'release_version = 0';
+    const fromRef = this.db
+      .prepare(`
+        SELECT build_versions.*
+        FROM build_version_refs
+        JOIN build_versions
+          ON build_versions.version_type_id = build_version_refs.version_type_id
+         AND build_versions.version = build_version_refs.version
+        WHERE build_version_refs.version_type_id = 'build'
+          AND build_version_refs.target_branch = ?
+          AND build_version_refs.target_commit = ?
+          AND ${releaseFilter}
+        ORDER BY build_versions.release_version DESC, build_versions.build_version DESC
+        LIMIT 1
+      `)
+      .get(targetBranch || '', targetCommit);
+    if (fromRef) return fromRef;
+
     return this.db
       .prepare(`
         SELECT *
@@ -180,6 +209,10 @@ export const deploymentMethods = {
     detailedChanges,
     reason,
     releasedAtUtc,
+    sourceBranch = null,
+    sourceCommit = null,
+    targetBranch = null,
+    targetCommit = null,
   }) {
     this.db
       .prepare(`
@@ -216,6 +249,52 @@ export const deploymentMethods = {
         releasedAtUtc,
         new Date().toISOString(),
       );
+    if (targetBranch && targetCommit) {
+      this.upsertBuildVersionRef({
+        versionTypeId: 'build',
+        version,
+        sourceBranch,
+        sourceCommit,
+        targetBranch,
+        targetCommit,
+      });
+    }
+  },
+
+  upsertBuildVersionRef({
+    versionTypeId,
+    version,
+    sourceBranch,
+    sourceCommit,
+    targetBranch,
+    targetCommit,
+  }) {
+    this.db
+      .prepare(`
+        INSERT INTO build_version_refs (
+          version_type_id,
+          version,
+          source_branch,
+          source_commit,
+          target_branch,
+          target_commit,
+          created_at_utc
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(version_type_id, target_branch, target_commit) DO UPDATE SET
+          version = excluded.version,
+          source_branch = excluded.source_branch,
+          source_commit = excluded.source_commit
+      `)
+      .run(
+        versionTypeId,
+        version,
+        sourceBranch,
+        sourceCommit,
+        targetBranch,
+        targetCommit,
+        new Date().toISOString(),
+      );
   },
 };
 
@@ -231,4 +310,22 @@ function usefulChanges(value) {
   if (/^Accepted codex\/\S+\.?$/i.test(oneLine)) return '';
   if (/^Accepted \S+@\S+ without preview deployment metadata\.?$/i.test(oneLine)) return '';
   return text;
+}
+
+function usefulReason(value) {
+  const text = usefulChanges(value);
+  if (!text) return '';
+  const oneLine = text.replace(/\s+/g, ' ');
+  if (/^Accepted branch promotion\.?$/i.test(oneLine)) return '';
+  if (/^Promote preview\b/i.test(oneLine)) return '';
+  if (/^Promote dev to production/i.test(oneLine)) return '';
+  if (/^Automated branch delivery\.?$/i.test(oneLine)) return '';
+  if (/^Automated dev deployment\.?$/i.test(oneLine)) return '';
+  return text;
+}
+
+function reasonFromChanges(detailedChanges, shortChanges) {
+  const text = usefulChanges(detailedChanges) || usefulChanges(shortChanges);
+  if (!text) return '';
+  return `Needed because ${text.replace(/\.$/, '').replace(/^./, (letter) => letter.toLowerCase())}.`;
 }

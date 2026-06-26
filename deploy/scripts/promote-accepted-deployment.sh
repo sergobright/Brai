@@ -82,6 +82,6 @@ fi
   --target-commit "$TARGET_COMMIT" \
   --target-domain "$TARGET_DOMAIN" \
   --source-commit "$SOURCE_COMMIT" \
-  --source-short-changes "${SOURCE_SHORT_CHANGES:-Accepted $SOURCE_BRANCH.}" \
-  --source-details "${SOURCE_DETAILS:-Accepted preview branch $SOURCE_BRANCH@$SOURCE_COMMIT.}" \
+  --source-short-changes "${SOURCE_SHORT_CHANGES:-Accepted preview changes without authored release notes.}" \
+  --source-details "${SOURCE_DETAILS:-No authored preview release notes were available; audit metadata is stored separately.}" \
   --reason "${BRIGHT_OS_PROMOTE_REASON:-Accepted branch promotion}"

@@ -107,7 +107,9 @@ Bright OS SHALL publish a release APK whenever a change crosses the native Andro
 ### Requirement: Release versions use one build ledger
 Bright OS SHALL track public release versions in the server SQLite `build_versions` table with type metadata from `version_types`.
 
-`short_changes` and `detailed_changes` SHALL contain human-readable release notes about what changed in the product or delivery workflow. Branch names, commit SHAs, target commits, domains, and similar audit metadata MAY be stored in `reason` or deployment records, but MUST NOT replace the change descriptions.
+`short_changes` and `detailed_changes` SHALL contain human-readable release notes about what changed in the product or delivery workflow.
+
+`reason` SHALL describe the human reason for the change: the problem, risk, or product/workflow need that made the change necessary. Branch names, commit SHAs, target commits, domains, and similar audit metadata SHALL NOT be stored in `reason`; it belongs in `build_version_refs` or deployment records.
 
 #### Scenario: Task branch is prepared
 - **WHEN** a `codex/*` task branch is created or updated before acceptance

@@ -153,7 +153,7 @@ test('migration seeds unified build version ledger', async () => {
     assert.match(baselineApk.short_changes, /APK/);
     assert.match(baselineApk.detailed_changes, /versionCode 1/);
     assert.match(baselineApk.detailed_changes, /Release signing material/);
-    assert.equal(baselineApk.reason, 'Initial public baseline.');
+    assert.match(baselineApk.reason, /first installable public Android APK baseline/);
 
     const baselineBuild = versions.find((version) => version.version_type_id === 'build' && version.version === '0.0.1.1');
     assert.ok(baselineBuild);
@@ -164,7 +164,7 @@ test('migration seeds unified build version ledger', async () => {
     assert.equal(baselineBuild.released_at_utc, '2026-06-23T09:12:45Z');
     assert.match(baselineBuild.short_changes, /web\/OTA/);
     assert.match(baselineBuild.detailed_changes, /min APK versionCode 1/);
-    assert.equal(baselineBuild.reason, 'Initial public baseline.');
+    assert.match(baselineBuild.reason, /first clean public web\/OTA version/);
 
     const firstTaskBuild = versions.find((version) => version.version_type_id === 'build' && version.version === '0.0.2.1');
     assert.ok(firstTaskBuild);
@@ -174,7 +174,7 @@ test('migration seeds unified build version ledger', async () => {
     assert.equal(firstTaskBuild.apk_version, 1);
     assert.equal(firstTaskBuild.released_at_utc, '2026-06-24T13:45:00Z');
     assert.match(firstTaskBuild.detailed_changes, /dev promotions to main increment Y/);
-    assert.equal(firstTaskBuild.reason, 'Accepted first public task into dev.');
+    assert.match(firstTaskBuild.reason, /explicit X\.Y\.Z\.S rules/);
 
     const secondTaskBuild = versions.find((version) => version.version_type_id === 'build' && version.version === '0.0.3.1');
     assert.ok(secondTaskBuild);
@@ -184,7 +184,7 @@ test('migration seeds unified build version ledger', async () => {
     assert.equal(secondTaskBuild.apk_version, 1);
     assert.equal(secondTaskBuild.released_at_utc, '2026-06-24T14:05:00Z');
     assert.match(secondTaskBuild.detailed_changes, /codex task branches deploy to isolated preview slots/);
-    assert.equal(secondTaskBuild.reason, 'Accepted clean task finish workflow into dev.');
+    assert.match(secondTaskBuild.reason, /unfinished local work/);
 
     const thirdTaskBuild = versions.find((version) => version.version_type_id === 'build' && version.version === '0.0.4.1');
     assert.ok(thirdTaskBuild);
@@ -194,7 +194,7 @@ test('migration seeds unified build version ledger', async () => {
     assert.equal(thirdTaskBuild.apk_version, 1);
     assert.equal(thirdTaskBuild.released_at_utc, '2026-06-24T14:25:00Z');
     assert.match(thirdTaskBuild.detailed_changes, /preview slot has already been released/);
-    assert.equal(thirdTaskBuild.reason, 'Accepted preview cleanup workflow into dev.');
+    assert.match(thirdTaskBuild.reason, /preview cleanup could fail/);
 
     const fourthTaskBuild = versions.find((version) => version.version_type_id === 'build' && version.version === '0.0.5.1');
     assert.ok(fourthTaskBuild);
@@ -204,7 +204,7 @@ test('migration seeds unified build version ledger', async () => {
     assert.equal(fourthTaskBuild.apk_version, 1);
     assert.equal(fourthTaskBuild.released_at_utc, '2026-06-24T14:40:00Z');
     assert.match(fourthTaskBuild.detailed_changes, /environment-specific favicon/);
-    assert.equal(fourthTaskBuild.reason, 'Accepted dev and preview favicon separation into dev.');
+    assert.match(fourthTaskBuild.reason, /visually distinguishable/);
 
     const fifthTaskBuild = versions.find((version) => version.version_type_id === 'build' && version.version === '0.0.6.1');
     assert.ok(fifthTaskBuild);
@@ -214,7 +214,7 @@ test('migration seeds unified build version ledger', async () => {
     assert.equal(fifthTaskBuild.apk_version, 1);
     assert.equal(fifthTaskBuild.released_at_utc, '2026-06-24T15:10:00Z');
     assert.match(fifthTaskBuild.detailed_changes, /preview deployments keep the current accepted dev app version/);
-    assert.equal(fifthTaskBuild.reason, 'Accepted preview/dev version separation into dev.');
+    assert.match(fifthTaskBuild.reason, /unaccepted version numbers/);
 
     const sixthTaskBuild = versions.find((version) => version.version_type_id === 'build' && version.version === '0.0.7.1');
     assert.ok(sixthTaskBuild);
@@ -224,7 +224,7 @@ test('migration seeds unified build version ledger', async () => {
     assert.equal(sixthTaskBuild.apk_version, 1);
     assert.equal(sixthTaskBuild.released_at_utc, '2026-06-24T18:20:00Z');
     assert.match(sixthTaskBuild.detailed_changes, /production Android web\/OTA bundles use the public API endpoint/);
-    assert.equal(sixthTaskBuild.reason, 'Accepted production Android OTA API endpoint fix into dev.');
+    assert.match(sixthTaskBuild.reason, /public API endpoint/);
 
     const eighthTaskBuild = versions.find((version) => version.version_type_id === 'build' && version.version === '0.0.8.1');
     assert.ok(eighthTaskBuild);
@@ -234,22 +234,22 @@ test('migration seeds unified build version ledger', async () => {
     assert.equal(eighthTaskBuild.apk_version, 1);
     assert.equal(eighthTaskBuild.released_at_utc, '2026-06-24T21:40:47Z');
     assert.match(eighthTaskBuild.detailed_changes, /Z follows the accepted dev build sequence/);
-    assert.equal(eighthTaskBuild.reason, 'Accepted dev build ledger alignment into dev.');
+    assert.match(eighthTaskBuild.reason, /accepted dev build numbering/);
 
     const ninthTaskBuild = versions.find((version) => version.version_type_id === 'build' && version.version === '0.0.9.1');
     assert.ok(ninthTaskBuild);
     assert.equal(ninthTaskBuild.build_version, 9);
-    assert.equal(ninthTaskBuild.reason, 'Accepted dev build 0.0.9.1 into dev.');
+    assert.match(ninthTaskBuild.reason, /mobile navigation lacked/);
 
     const tenthTaskBuild = versions.find((version) => version.version_type_id === 'build' && version.version === '0.0.10.1');
     assert.ok(tenthTaskBuild);
     assert.equal(tenthTaskBuild.build_version, 10);
-    assert.equal(tenthTaskBuild.reason, 'Accepted dev build 0.0.10.1 into dev.');
+    assert.match(tenthTaskBuild.reason, /preview slots could remain occupied/);
 
     const eleventhTaskBuild = versions.find((version) => version.version_type_id === 'build' && version.version === '0.0.11.1');
     assert.ok(eleventhTaskBuild);
     assert.equal(eleventhTaskBuild.build_version, 11);
-    assert.equal(eleventhTaskBuild.reason, 'Accepted dev build 0.0.11.1 into dev.');
+    assert.match(eleventhTaskBuild.reason, /duplicate or miss accepted build ledger rows/);
 
     fixture.store.migrate();
     assert.equal(fixture.store.db.prepare('SELECT COUNT(*) AS count FROM build_versions').get().count, 12);
