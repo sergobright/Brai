@@ -184,6 +184,11 @@ export const migrationMethods = {
       this.repairAcceptedGitNotesBuildVersionDescription();
       this.recordMigration(30, 'repair accepted git notes build description');
     }
+
+    if (!this.hasMigration(31)) {
+      this.repairAcceptedSshNotesBuildVersionDescription();
+      this.recordMigration(31, 'repair accepted ssh notes build description');
+    }
   }
 ,
 
@@ -1693,6 +1698,37 @@ export const migrationMethods = {
         sourceCommit: '53866e6800be4c5789a60ef049911d26a5693b0a',
         targetBranch: 'dev',
         targetCommit: '1dc4f8af7eb719aa8632b40a3f8b569f2a47884d',
+      });
+    }
+  }
+,
+
+  repairAcceptedSshNotesBuildVersionDescription() {
+    this.db
+      .prepare(`
+        UPDATE build_versions
+        SET short_changes = ?,
+            detailed_changes = ?,
+            reason = ?
+        WHERE version_type_id = 'build'
+          AND version = '0.0.29.1'
+      `)
+      .run(
+        'Passed accepted build notes before SSH.',
+        'Acceptance now resolves authored source-branch commit notes in the GitHub runner and passes them to server-side promotion before SSH, so accepted build_versions rows no longer depend on tar-copied deploy sources or server git checkout state. Migration 30 repaired the 0.0.28.1 row that still received the generic no-release-notes fallback.',
+        'Needed because accepted build notes were still unavailable on the server during preview promotion.',
+      );
+    const exists = this.db
+      .prepare("SELECT 1 FROM build_versions WHERE version_type_id = 'build' AND version = '0.0.29.1'")
+      .get();
+    if (exists) {
+      this.upsertBuildVersionRef({
+        versionTypeId: 'build',
+        version: '0.0.29.1',
+        sourceBranch: 'codex/repair-late-build-version-descriptions',
+        sourceCommit: 'bdb660b18b0e20363967c15a8018548be32550df',
+        targetBranch: 'dev',
+        targetCommit: 'e68cf2685dfce4903f7d28dc8e38ef7c7ab25d8f',
       });
     }
   }

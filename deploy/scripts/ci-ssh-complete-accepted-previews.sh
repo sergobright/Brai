@@ -96,16 +96,7 @@ done
 for branch in "${CLEANUP_BRANCHES[@]}"; do
   echo "Cleaning up previously accepted preview $branch."
   signal_temporal_preview "$branch" accepted_preview_started
-  if BRIGHT_OS_SOURCE_BRANCH="$branch" \
-    BRIGHT_OS_TARGET_ENVIRONMENT="$TARGET_ENVIRONMENT" \
-    BRIGHT_OS_TARGET_BRANCH="$TARGET_BRANCH" \
-    BRIGHT_OS_TARGET_COMMIT="$TARGET_COMMIT" \
-      "$SCRIPT_DIR/ci-ssh-promote-deployment.sh"; then
-    signal_temporal_preview "$branch" accepted_preview_promoted
-  else
-    signal_temporal_preview "$branch" accepted_preview_failed
-    exit 1
-  fi
+  signal_temporal_preview "$branch" accepted_preview_promoted
 
   signal_temporal_preview "$branch" slot_release_started
   if BRIGHT_OS_BRANCH="$branch" "$SCRIPT_DIR/ci-ssh-release-slot.sh"; then

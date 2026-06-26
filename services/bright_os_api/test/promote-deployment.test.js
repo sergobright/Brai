@@ -810,3 +810,66 @@ test('accepted git notes build description is repaired', () => {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
+
+test('accepted ssh notes build description is repaired', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bright-ssh-notes-ledger-repair-'));
+  const db = path.join(tmp, 'target.sqlite');
+  const store = new BrightOsStore(db);
+
+  try {
+    store.db.prepare(`
+      INSERT INTO build_versions (
+        version_type_id,
+        major_version,
+        release_version,
+        build_version,
+        apk_version,
+        version,
+        short_changes,
+        detailed_changes,
+        reason,
+        released_at_utc,
+        created_at_utc
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      'build',
+      0,
+      0,
+      29,
+      1,
+      '0.0.29.1',
+      'Pass',
+      'accepted',
+      'Needed because accepted.',
+      '2026-06-26T16:35:00.000Z',
+      '2026-06-26T16:35:00.000Z'
+    );
+
+    store.repairAcceptedSshNotesBuildVersionDescription();
+
+    const repaired = store.db
+      .prepare("SELECT short_changes, detailed_changes, reason FROM build_versions WHERE version_type_id = 'build' AND version = '0.0.29.1'")
+      .get();
+    assert.equal(repaired.short_changes, 'Passed accepted build notes before SSH.');
+    assert.match(repaired.detailed_changes, /GitHub runner/);
+    assert.match(repaired.reason, /server during preview promotion/);
+    assert.doesNotMatch(
+      `${repaired.short_changes} ${repaired.detailed_changes} ${repaired.reason}`,
+      /^Pass accepted Needed because accepted\.$/
+    );
+
+    const ref = store.db
+      .prepare("SELECT source_branch, source_commit, target_branch, target_commit FROM build_version_refs WHERE version = '0.0.29.1'")
+      .get();
+    assert.deepEqual(ref, {
+      source_branch: 'codex/repair-late-build-version-descriptions',
+      source_commit: 'bdb660b18b0e20363967c15a8018548be32550df',
+      target_branch: 'dev',
+      target_commit: 'e68cf2685dfce4903f7d28dc8e38ef7c7ab25d8f'
+    });
+  } finally {
+    store.close();
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
