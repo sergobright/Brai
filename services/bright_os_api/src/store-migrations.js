@@ -174,6 +174,11 @@ export const migrationMethods = {
       this.repairAcceptedAuditMetadataBuildVersionDescription();
       this.recordMigration(28, 'repair accepted audit metadata build description');
     }
+
+    if (!this.hasMigration(29)) {
+      this.repairGenericAcceptedBuildNotesDescription();
+      this.recordMigration(29, 'repair generic accepted build notes description');
+    }
   }
 ,
 
@@ -1621,6 +1626,37 @@ export const migrationMethods = {
         sourceCommit: 'ca6b2e282d6bbc5f8fd2b2f11817e89c6791fac1',
         targetBranch: 'dev',
         targetCommit: 'f3592f7c9adfc492e5920623aefda087532d6015',
+      });
+    }
+  }
+,
+
+  repairGenericAcceptedBuildNotesDescription() {
+    this.db
+      .prepare(`
+        UPDATE build_versions
+        SET short_changes = ?,
+            detailed_changes = ?,
+            reason = ?
+        WHERE version_type_id = 'build'
+          AND version = '0.0.27.1'
+      `)
+      .run(
+        'Used preview source for accepted build notes.',
+        'Accepted preview promotion now attempts to read release notes from the preview checkout instead of the dev deploy source and repairs the generic 0.0.26.1 build description through migration 28.',
+        'Needed because accepted build metadata could not be read from the dev deploy source and fell back to generic no-release-notes text.',
+      );
+    const exists = this.db
+      .prepare("SELECT 1 FROM build_versions WHERE version_type_id = 'build' AND version = '0.0.27.1'")
+      .get();
+    if (exists) {
+      this.upsertBuildVersionRef({
+        versionTypeId: 'build',
+        version: '0.0.27.1',
+        sourceBranch: 'codex/repair-late-build-version-descriptions',
+        sourceCommit: '2804346377fbb3f2cb81ff703d79ae20cd0ef735',
+        targetBranch: 'dev',
+        targetCommit: '449bb5a9a908243dd0a2685b2e56519b86a92393',
       });
     }
   }

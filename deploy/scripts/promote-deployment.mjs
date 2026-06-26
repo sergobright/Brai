@@ -120,6 +120,8 @@ function usefulChanges(value) {
   if (/^Accepted dev build (?:\d|0\.)/i.test(oneLine)) return '';
   if (/^Accepted codex\/\S+\.?$/i.test(oneLine)) return '';
   if (/^Accepted \S+@\S+ without preview deployment metadata\.?$/i.test(oneLine)) return '';
+  if (/^Accepted preview changes without authored release notes\.?$/i.test(oneLine)) return '';
+  if (/^No authored preview release notes were available; audit metadata is stored separately\.?$/i.test(oneLine)) return '';
   return text;
 }
 

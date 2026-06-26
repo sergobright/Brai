@@ -309,6 +309,72 @@ test('accepted preview promotion ignores branch deployment metadata when commit 
   }
 });
 
+test('accepted preview promotion ignores generic source metadata when commit fallback is useful', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bright-promote-generic-source-'));
+  const sourceDb = path.join(tmp, 'source.sqlite');
+  const targetDb = path.join(tmp, 'target.sqlite');
+  const source = new BrightOsStore(sourceDb);
+  const target = new BrightOsStore(targetDb);
+
+  try {
+    source.recordDeployment({
+      environment: 'preview-a',
+      slot: 'A',
+      branch: 'codex/generic-source',
+      commit: 'source-generic',
+      domain: 'a.test.brightos.world',
+      shortChanges: 'Accepted preview changes without authored release notes.',
+      detailedChanges: 'No authored preview release notes were available; audit metadata is stored separately.',
+      reason: 'Automated branch delivery',
+      deployedAtUtc: '2026-06-26T15:45:00.000Z'
+    });
+  } finally {
+    source.close();
+    target.close();
+  }
+
+  const repoRoot = path.resolve(import.meta.dirname, '../../..');
+  execFileSync(process.execPath, [
+    path.join(repoRoot, 'deploy/scripts/promote-deployment.mjs'),
+    '--source-db',
+    sourceDb,
+    '--target-db',
+    targetDb,
+    '--source-branch',
+    'codex/generic-source',
+    '--source-commit',
+    'source-generic',
+    '--source-short-changes',
+    'Read accepted notes from git history.',
+    '--source-details',
+    'Accepted preview promotion now reads commit summaries when preview deployment metadata is generic.',
+    '--target-environment',
+    'dev',
+    '--target-branch',
+    'dev',
+    '--target-commit',
+    'merge-generic-source',
+    '--target-domain',
+    'dev.brightos.world',
+    '--reason',
+    'Promote preview with generic source metadata'
+  ], { cwd: repoRoot });
+
+  const promoted = new BrightOsStore(targetDb);
+  try {
+    const version = promoted.db
+      .prepare("SELECT version, short_changes, detailed_changes, reason FROM build_versions WHERE version_type_id = 'build' ORDER BY build_version DESC LIMIT 1")
+      .get();
+    assert.equal(version.version, '0.0.12.1');
+    assert.equal(version.short_changes, 'Read accepted notes from git history.');
+    assert.equal(version.detailed_changes, 'Accepted preview promotion now reads commit summaries when preview deployment metadata is generic.');
+    assert.equal(version.reason, 'Needed because accepted preview promotion now reads commit summaries when preview deployment metadata is generic.');
+  } finally {
+    promoted.close();
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test('accepted preview promotion does not write branch names when all source notes are technical', () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bright-promote-technical-only-source-'));
   const sourceDb = path.join(tmp, 'source.sqlite');
@@ -612,6 +678,69 @@ test('accepted audit metadata fallback build description is repaired', () => {
       source_commit: 'ca6b2e282d6bbc5f8fd2b2f11817e89c6791fac1',
       target_branch: 'dev',
       target_commit: 'f3592f7c9adfc492e5920623aefda087532d6015'
+    });
+  } finally {
+    store.close();
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('generic accepted build notes description is repaired', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bright-generic-notes-ledger-repair-'));
+  const db = path.join(tmp, 'target.sqlite');
+  const store = new BrightOsStore(db);
+
+  try {
+    store.db.prepare(`
+      INSERT INTO build_versions (
+        version_type_id,
+        major_version,
+        release_version,
+        build_version,
+        apk_version,
+        version,
+        short_changes,
+        detailed_changes,
+        reason,
+        released_at_utc,
+        created_at_utc
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      'build',
+      0,
+      0,
+      27,
+      1,
+      '0.0.27.1',
+      'Accepted preview changes without authored release notes.',
+      'No authored preview release notes were available; audit metadata is stored separately.',
+      'Needed because no authored preview release notes were available; audit metadata is stored separately.',
+      '2026-06-26T16:02:00.000Z',
+      '2026-06-26T16:02:00.000Z'
+    );
+
+    store.repairGenericAcceptedBuildNotesDescription();
+
+    const repaired = store.db
+      .prepare("SELECT short_changes, detailed_changes, reason FROM build_versions WHERE version_type_id = 'build' AND version = '0.0.27.1'")
+      .get();
+    assert.equal(repaired.short_changes, 'Used preview source for accepted build notes.');
+    assert.match(repaired.detailed_changes, /preview checkout/);
+    assert.match(repaired.reason, /generic no-release-notes text/);
+    assert.doesNotMatch(
+      `${repaired.short_changes} ${repaired.detailed_changes} ${repaired.reason}`,
+      /Accepted preview changes without authored release notes|codex\/|@[0-9a-f]|->/
+    );
+
+    const ref = store.db
+      .prepare("SELECT source_branch, source_commit, target_branch, target_commit FROM build_version_refs WHERE version = '0.0.27.1'")
+      .get();
+    assert.deepEqual(ref, {
+      source_branch: 'codex/repair-late-build-version-descriptions',
+      source_commit: '2804346377fbb3f2cb81ff703d79ae20cd0ef735',
+      target_branch: 'dev',
+      target_commit: '449bb5a9a908243dd0a2685b2e56519b86a92393'
     });
   } finally {
     store.close();

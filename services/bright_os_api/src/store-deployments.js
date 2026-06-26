@@ -68,8 +68,11 @@ export const deploymentMethods = {
     const existing = this.findBuildVersionByTargetCommit({ targetBranch, targetCommit, releaseOnly: false });
     const buildVersion = existing?.build_version ?? this.nextAcceptedBuildVersion();
     const version = `0.0.${buildVersion}.1`;
-    const shortChanges = usefulChanges(sourceShortChanges) || 'Accepted preview changes without authored release notes.';
-    const detailedChanges = usefulChanges(sourceDetails) || shortChanges;
+    const fallbackShortChanges = 'Accepted preview changes without authored release notes.';
+    const fallbackDetailedChanges = 'No authored preview release notes were available; audit metadata is stored separately.';
+    const fallbackReason = 'Needed because no authored preview release notes were available; audit metadata is stored separately.';
+    const shortChanges = usefulChanges(sourceShortChanges) || fallbackShortChanges;
+    const detailedChanges = usefulChanges(sourceDetails) || (shortChanges === fallbackShortChanges ? fallbackDetailedChanges : shortChanges);
     this.upsertBuildVersion({
       majorVersion: 0,
       releaseVersion: 0,
@@ -79,6 +82,7 @@ export const deploymentMethods = {
       shortChanges,
       detailedChanges,
       reason: usefulReason(sourceReason)
+        || (shortChanges === fallbackShortChanges ? fallbackReason : '')
         || reasonFromChanges(detailedChanges, shortChanges)
         || `Needed to accept ${sourceBranch} into ${targetBranch}.`,
       releasedAtUtc,
@@ -309,6 +313,8 @@ function usefulChanges(value) {
   if (/^Accepted dev build (?:\d|0\.)/i.test(oneLine)) return '';
   if (/^Accepted codex\/\S+\.?$/i.test(oneLine)) return '';
   if (/^Accepted \S+@\S+ without preview deployment metadata\.?$/i.test(oneLine)) return '';
+  if (/^Accepted preview changes without authored release notes\.?$/i.test(oneLine)) return '';
+  if (/^No authored preview release notes were available; audit metadata is stored separately\.?$/i.test(oneLine)) return '';
   return text;
 }
 
