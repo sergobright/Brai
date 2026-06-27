@@ -143,6 +143,7 @@ npm --prefix services/bright_os_api ci
 export BRIGHT_OS_BRANCH BRIGHT_OS_COMMIT
 export BRIGHT_OS_ROOT="$SOURCE_ROOT"
 export BRIGHT_OS_RELEASE_TARGET="$DEPLOY_REPO/deploy/releases"
+export BRIGHT_OS_PROD_WEB_VERSION_JSON="$DEPLOY_REPO/deploy/web/version.json"
 if [[ "$BRIGHT_OS_NATIVE_APK_CHANGE" == "true" ]]; then
   if [[ "$ENVIRONMENT" == preview-* ]]; then
     FLAVOR="preview$BRIGHT_OS_PREVIEW_SLOT"

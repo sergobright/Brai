@@ -4,12 +4,10 @@ on:
   push:
     branches:
       - main
-      - dev
       - 'codex/**'
   pull_request:
     branches:
       - main
-      - dev
     types:
       - opened
       - synchronize
@@ -46,7 +44,6 @@ jobs:
     outputs:
       delivery_class: ${{ steps.classify.outputs.delivery_class }}
       requires_preview: ${{ steps.classify.outputs.requires_preview }}
-      requires_dev_deploy: ${{ steps.classify.outputs.requires_dev_deploy }}
       auto_merge: ${{ steps.classify.outputs.auto_merge }}
     steps:
       - uses: actions/checkout@v4
@@ -55,7 +52,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - run: git fetch origin +refs/heads/dev:refs/remotes/origin/dev +refs/heads/main:refs/remotes/origin/main
+      - run: git fetch origin +refs/heads/main:refs/remotes/origin/main
       - id: classify
         run: node deploy/scripts/classify-delivery.mjs --github-output "$GITHUB_OUTPUT"
       - name: Temporal delivery classified
@@ -298,104 +295,6 @@ jobs:
           BRIGHT_OS_BRANCH: ${{ github.ref_name }}
           BRIGHT_OS_COMMIT: ${{ github.sha }}
 
-  deploy-dev:
-    needs:
-      - classify-delivery
-      - checks
-      - temporal-worker-check
-    if: github.event_name == 'push' && github.ref == 'refs/heads/dev' && needs['classify-delivery'].outputs.requires_dev_deploy == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: npm
-          cache-dependency-path: services/bright_os_temporal/package-lock.json
-      - name: Temporal dev deploy started
-        run: deploy/scripts/ci-temporal-signal.sh promotion --target dev --sha "$BRIGHT_OS_COMMIT" --event dev_deploy_started --source deploy-dev
-        env:
-          BRIGHT_DEPLOY_HOST: ${{ vars.BRIGHT_DEPLOY_HOST }}
-          BRIGHT_DEPLOY_USER: ${{ vars.BRIGHT_DEPLOY_USER }}
-          BRIGHT_DEPLOY_SSH_PORT: ${{ vars.BRIGHT_DEPLOY_SSH_PORT || '22' }}
-          BRIGHT_DEPLOY_SSH_KEY: ${{ secrets.BRIGHT_DEPLOY_SSH_KEY }}
-          BRIGHT_OS_COMMIT: ${{ github.sha }}
-      - run: deploy/scripts/ci-ssh-deploy.sh
-        env:
-          BRIGHT_DEPLOY_HOST: ${{ vars.BRIGHT_DEPLOY_HOST }}
-          BRIGHT_DEPLOY_USER: ${{ vars.BRIGHT_DEPLOY_USER }}
-          BRIGHT_DEPLOY_SSH_PORT: ${{ vars.BRIGHT_DEPLOY_SSH_PORT || '22' }}
-          BRIGHT_DEPLOY_REPO: ${{ vars.BRIGHT_DEPLOY_REPO || '/srv/projects/bright-os' }}
-          BRIGHT_DEPLOY_SSH_KEY: ${{ secrets.BRIGHT_DEPLOY_SSH_KEY }}
-          BRIGHT_OS_BRANCH: dev
-          BRIGHT_OS_COMMIT: ${{ github.sha }}
-          BRIGHT_OS_BASE_COMMIT: ${{ github.event.before }}
-      - name: Temporal dev version recorded
-        run: deploy/scripts/ci-temporal-signal.sh promotion --target dev --sha "$BRIGHT_OS_COMMIT" --event dev_version_recorded --source deploy-dev
-        env:
-          BRIGHT_DEPLOY_HOST: ${{ vars.BRIGHT_DEPLOY_HOST }}
-          BRIGHT_DEPLOY_USER: ${{ vars.BRIGHT_DEPLOY_USER }}
-          BRIGHT_DEPLOY_SSH_PORT: ${{ vars.BRIGHT_DEPLOY_SSH_PORT || '22' }}
-          BRIGHT_DEPLOY_SSH_KEY: ${{ secrets.BRIGHT_DEPLOY_SSH_KEY }}
-          BRIGHT_OS_COMMIT: ${{ github.sha }}
-      - name: Temporal accepted previews started
-        run: deploy/scripts/ci-temporal-signal.sh promotion --target dev --sha "$BRIGHT_OS_COMMIT" --event accepted_previews_started --source deploy-dev
-        env:
-          BRIGHT_DEPLOY_HOST: ${{ vars.BRIGHT_DEPLOY_HOST }}
-          BRIGHT_DEPLOY_USER: ${{ vars.BRIGHT_DEPLOY_USER }}
-          BRIGHT_DEPLOY_SSH_PORT: ${{ vars.BRIGHT_DEPLOY_SSH_PORT || '22' }}
-          BRIGHT_DEPLOY_SSH_KEY: ${{ secrets.BRIGHT_DEPLOY_SSH_KEY }}
-          BRIGHT_OS_COMMIT: ${{ github.sha }}
-      - id: complete_accepted_previews
-        run: deploy/scripts/ci-ssh-complete-accepted-previews.sh
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
-          BRIGHT_DEPLOY_HOST: ${{ vars.BRIGHT_DEPLOY_HOST }}
-          BRIGHT_DEPLOY_USER: ${{ vars.BRIGHT_DEPLOY_USER }}
-          BRIGHT_DEPLOY_SSH_PORT: ${{ vars.BRIGHT_DEPLOY_SSH_PORT || '22' }}
-          BRIGHT_DEPLOY_REPO: ${{ vars.BRIGHT_DEPLOY_REPO || '/srv/projects/bright-os' }}
-          BRIGHT_DEPLOY_SSH_KEY: ${{ secrets.BRIGHT_DEPLOY_SSH_KEY }}
-          BRIGHT_OS_TARGET_BRANCH: dev
-          BRIGHT_OS_TARGET_COMMIT: ${{ github.sha }}
-      - name: Temporal accepted previews passed
-        run: deploy/scripts/ci-temporal-signal.sh promotion --target dev --sha "$BRIGHT_OS_COMMIT" --event accepted_previews_passed --source deploy-dev
-        env:
-          BRIGHT_DEPLOY_HOST: ${{ vars.BRIGHT_DEPLOY_HOST }}
-          BRIGHT_DEPLOY_USER: ${{ vars.BRIGHT_DEPLOY_USER }}
-          BRIGHT_DEPLOY_SSH_PORT: ${{ vars.BRIGHT_DEPLOY_SSH_PORT || '22' }}
-          BRIGHT_DEPLOY_SSH_KEY: ${{ secrets.BRIGHT_DEPLOY_SSH_KEY }}
-          BRIGHT_OS_COMMIT: ${{ github.sha }}
-      - name: Temporal accepted previews failed
-        if: failure() && steps.complete_accepted_previews.outcome == 'failure'
-        run: deploy/scripts/ci-temporal-signal.sh promotion --target dev --sha "$BRIGHT_OS_COMMIT" --event accepted_previews_failed --source deploy-dev
-        env:
-          BRIGHT_DEPLOY_HOST: ${{ vars.BRIGHT_DEPLOY_HOST }}
-          BRIGHT_DEPLOY_USER: ${{ vars.BRIGHT_DEPLOY_USER }}
-          BRIGHT_DEPLOY_SSH_PORT: ${{ vars.BRIGHT_DEPLOY_SSH_PORT || '22' }}
-          BRIGHT_DEPLOY_SSH_KEY: ${{ secrets.BRIGHT_DEPLOY_SSH_KEY }}
-          BRIGHT_OS_COMMIT: ${{ github.sha }}
-      - name: Temporal dev deploy passed
-        if: success()
-        run: deploy/scripts/ci-temporal-signal.sh promotion --target dev --sha "$BRIGHT_OS_COMMIT" --event dev_deploy_passed --source deploy-dev
-        env:
-          BRIGHT_DEPLOY_HOST: ${{ vars.BRIGHT_DEPLOY_HOST }}
-          BRIGHT_DEPLOY_USER: ${{ vars.BRIGHT_DEPLOY_USER }}
-          BRIGHT_DEPLOY_SSH_PORT: ${{ vars.BRIGHT_DEPLOY_SSH_PORT || '22' }}
-          BRIGHT_DEPLOY_SSH_KEY: ${{ secrets.BRIGHT_DEPLOY_SSH_KEY }}
-          BRIGHT_OS_COMMIT: ${{ github.sha }}
-      - name: Temporal dev deploy failed
-        if: failure()
-        run: deploy/scripts/ci-temporal-signal.sh promotion --target dev --sha "$BRIGHT_OS_COMMIT" --event dev_deploy_failed --source deploy-dev
-        env:
-          BRIGHT_DEPLOY_HOST: ${{ vars.BRIGHT_DEPLOY_HOST }}
-          BRIGHT_DEPLOY_USER: ${{ vars.BRIGHT_DEPLOY_USER }}
-          BRIGHT_DEPLOY_SSH_PORT: ${{ vars.BRIGHT_DEPLOY_SSH_PORT || '22' }}
-          BRIGHT_DEPLOY_SSH_KEY: ${{ secrets.BRIGHT_DEPLOY_SSH_KEY }}
-          BRIGHT_OS_COMMIT: ${{ github.sha }}
-
   deploy-prod:
     needs:
       - checks
@@ -419,6 +318,45 @@ jobs:
           BRIGHT_DEPLOY_SSH_PORT: ${{ vars.BRIGHT_DEPLOY_SSH_PORT || '22' }}
           BRIGHT_DEPLOY_SSH_KEY: ${{ secrets.BRIGHT_DEPLOY_SSH_KEY }}
           BRIGHT_OS_COMMIT: ${{ github.sha }}
+      - name: Temporal accepted previews started
+        run: deploy/scripts/ci-temporal-signal.sh promotion --target prod --sha "$BRIGHT_OS_COMMIT" --event accepted_previews_started --source deploy-prod
+        env:
+          BRIGHT_DEPLOY_HOST: ${{ vars.BRIGHT_DEPLOY_HOST }}
+          BRIGHT_DEPLOY_USER: ${{ vars.BRIGHT_DEPLOY_USER }}
+          BRIGHT_DEPLOY_SSH_PORT: ${{ vars.BRIGHT_DEPLOY_SSH_PORT || '22' }}
+          BRIGHT_DEPLOY_SSH_KEY: ${{ secrets.BRIGHT_DEPLOY_SSH_KEY }}
+          BRIGHT_OS_COMMIT: ${{ github.sha }}
+      - id: promote_accepted_previews
+        run: deploy/scripts/ci-ssh-complete-accepted-previews.sh
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          BRIGHT_DEPLOY_HOST: ${{ vars.BRIGHT_DEPLOY_HOST }}
+          BRIGHT_DEPLOY_USER: ${{ vars.BRIGHT_DEPLOY_USER }}
+          BRIGHT_DEPLOY_SSH_PORT: ${{ vars.BRIGHT_DEPLOY_SSH_PORT || '22' }}
+          BRIGHT_DEPLOY_REPO: ${{ vars.BRIGHT_DEPLOY_REPO || '/srv/projects/bright-os' }}
+          BRIGHT_DEPLOY_SSH_KEY: ${{ secrets.BRIGHT_DEPLOY_SSH_KEY }}
+          BRIGHT_OS_TARGET_BRANCH: main
+          BRIGHT_OS_TARGET_ENVIRONMENT: prod
+          BRIGHT_OS_TARGET_COMMIT: ${{ github.sha }}
+          BRIGHT_OS_ACCEPTED_PREVIEWS_MODE: promote
+      - name: Temporal prod version recorded
+        run: deploy/scripts/ci-temporal-signal.sh promotion --target prod --sha "$BRIGHT_OS_COMMIT" --event prod_version_recorded --source deploy-prod
+        env:
+          BRIGHT_DEPLOY_HOST: ${{ vars.BRIGHT_DEPLOY_HOST }}
+          BRIGHT_DEPLOY_USER: ${{ vars.BRIGHT_DEPLOY_USER }}
+          BRIGHT_DEPLOY_SSH_PORT: ${{ vars.BRIGHT_DEPLOY_SSH_PORT || '22' }}
+          BRIGHT_DEPLOY_SSH_KEY: ${{ secrets.BRIGHT_DEPLOY_SSH_KEY }}
+          BRIGHT_OS_COMMIT: ${{ github.sha }}
+      - name: Temporal accepted previews promotion failed
+        if: failure() && steps.promote_accepted_previews.outcome == 'failure'
+        run: deploy/scripts/ci-temporal-signal.sh promotion --target prod --sha "$BRIGHT_OS_COMMIT" --event accepted_previews_failed --source deploy-prod
+        env:
+          BRIGHT_DEPLOY_HOST: ${{ vars.BRIGHT_DEPLOY_HOST }}
+          BRIGHT_DEPLOY_USER: ${{ vars.BRIGHT_DEPLOY_USER }}
+          BRIGHT_DEPLOY_SSH_PORT: ${{ vars.BRIGHT_DEPLOY_SSH_PORT || '22' }}
+          BRIGHT_DEPLOY_SSH_KEY: ${{ secrets.BRIGHT_DEPLOY_SSH_KEY }}
+          BRIGHT_OS_COMMIT: ${{ github.sha }}
       - run: deploy/scripts/ci-ssh-deploy.sh
         env:
           BRIGHT_DEPLOY_HOST: ${{ vars.BRIGHT_DEPLOY_HOST }}
@@ -429,8 +367,31 @@ jobs:
           BRIGHT_OS_BRANCH: main
           BRIGHT_OS_COMMIT: ${{ github.sha }}
           BRIGHT_OS_BASE_COMMIT: ${{ github.event.before }}
-      - name: Temporal prod version recorded
-        run: deploy/scripts/ci-temporal-signal.sh promotion --target prod --sha "$BRIGHT_OS_COMMIT" --event prod_version_recorded --source deploy-prod
+      - id: release_accepted_previews
+        run: deploy/scripts/ci-ssh-complete-accepted-previews.sh
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          BRIGHT_DEPLOY_HOST: ${{ vars.BRIGHT_DEPLOY_HOST }}
+          BRIGHT_DEPLOY_USER: ${{ vars.BRIGHT_DEPLOY_USER }}
+          BRIGHT_DEPLOY_SSH_PORT: ${{ vars.BRIGHT_DEPLOY_SSH_PORT || '22' }}
+          BRIGHT_DEPLOY_REPO: ${{ vars.BRIGHT_DEPLOY_REPO || '/srv/projects/bright-os' }}
+          BRIGHT_DEPLOY_SSH_KEY: ${{ secrets.BRIGHT_DEPLOY_SSH_KEY }}
+          BRIGHT_OS_TARGET_BRANCH: main
+          BRIGHT_OS_TARGET_ENVIRONMENT: prod
+          BRIGHT_OS_TARGET_COMMIT: ${{ github.sha }}
+          BRIGHT_OS_ACCEPTED_PREVIEWS_MODE: release
+      - name: Temporal accepted previews passed
+        run: deploy/scripts/ci-temporal-signal.sh promotion --target prod --sha "$BRIGHT_OS_COMMIT" --event accepted_previews_passed --source deploy-prod
+        env:
+          BRIGHT_DEPLOY_HOST: ${{ vars.BRIGHT_DEPLOY_HOST }}
+          BRIGHT_DEPLOY_USER: ${{ vars.BRIGHT_DEPLOY_USER }}
+          BRIGHT_DEPLOY_SSH_PORT: ${{ vars.BRIGHT_DEPLOY_SSH_PORT || '22' }}
+          BRIGHT_DEPLOY_SSH_KEY: ${{ secrets.BRIGHT_DEPLOY_SSH_KEY }}
+          BRIGHT_OS_COMMIT: ${{ github.sha }}
+      - name: Temporal accepted previews release failed
+        if: failure() && steps.release_accepted_previews.outcome == 'failure'
+        run: deploy/scripts/ci-temporal-signal.sh promotion --target prod --sha "$BRIGHT_OS_COMMIT" --event accepted_previews_failed --source deploy-prod
         env:
           BRIGHT_DEPLOY_HOST: ${{ vars.BRIGHT_DEPLOY_HOST }}
           BRIGHT_DEPLOY_USER: ${{ vars.BRIGHT_DEPLOY_USER }}

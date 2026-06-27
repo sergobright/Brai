@@ -89,19 +89,6 @@ if [[ "$ENVIRONMENT" == "dev" ]]; then
     --released-at "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 fi
 
-if [[ "$ENVIRONMENT" == "prod" ]]; then
-  "$NODE_BIN" "$SCRIPT_DIR/promote-deployment.mjs" \
-    --source-db "$ENVS_ROOT/dev/data/bright_os.sqlite" \
-    --target-db "$DB_PATH" \
-    --source-branch dev \
-    --target-environment prod \
-    --target-branch "$BRANCH" \
-    --target-commit "$COMMIT" \
-    --target-domain "$DOMAIN" \
-    --ledger-only true \
-    --reason "Promote dev to production release"
-fi
-
 SOURCE_VERSION="$("$NODE_BIN" -e '
 const fs = require("node:fs");
 const path = require("node:path");
@@ -138,28 +125,14 @@ try {
 }
 ' "$DB_PATH")"
 fi
-if [[ "$ENVIRONMENT" == "prod" && -z "${BRIGHT_OS_APP_VERSION:-}" && -z "$LEDGER_VERSION" && -f "$ENVS_ROOT/dev/data/bright_os.sqlite" ]]; then
-  LEDGER_VERSION="$("$NODE_BIN" -e '
-import { BrightOsStore } from "./services/bright_os_api/src/store.js";
-const store = new BrightOsStore(process.argv[1]);
-try {
-  const row = store.db
-    .prepare("SELECT version FROM build_versions WHERE version_type_id = ? AND release_version = 0 ORDER BY build_version DESC LIMIT 1")
-    .get("build");
-  if (row?.version) console.log(row.version);
-} finally {
-  store.close();
-}
-' "$ENVS_ROOT/dev/data/bright_os.sqlite")"
-fi
 VERSION="${BRIGHT_OS_APP_VERSION:-${LEDGER_VERSION:-$SOURCE_VERSION}}"
 
-if [[ "$ENVIRONMENT" == preview-* && -z "${BRIGHT_OS_APP_VERSION:-}" && -f "$ENVS_ROOT/dev/web/version.json" ]]; then
+if [[ "$ENVIRONMENT" == preview-* && -z "${BRIGHT_OS_APP_VERSION:-}" && -f "${BRIGHT_OS_PROD_WEB_VERSION_JSON:-}" ]]; then
   VERSION="$("$NODE_BIN" -e '
 const fs = require("node:fs");
 const parsed = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
 console.log(parsed.version);
-' "$ENVS_ROOT/dev/web/version.json")"
+' "$BRIGHT_OS_PROD_WEB_VERSION_JSON")"
 fi
 
 if [[ "$ENVIRONMENT" == "prod" ]]; then

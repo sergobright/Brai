@@ -128,16 +128,16 @@ Bright OS SHALL track public release versions in the server SQLite `build_versio
 #### Scenario: Task branch is prepared
 - **WHEN** a `codex/*` task branch is created or updated before acceptance
 - **THEN** it does not write a `build_versions` row by itself
-- **AND** defers the version ledger row until the task is accepted into `dev`
+- **AND** defers the version ledger row until the task is accepted into `main`
 
-#### Scenario: Accepted task lands in dev
-- **WHEN** a `codex/*` task branch is accepted and merged into `dev`
+#### Scenario: Accepted task lands in main
+- **WHEN** a `codex/*` task branch is accepted and merged into `main`
 - **THEN** the workflow increments only `Z` in `X.Y.Z.S`
 - **AND** keeps `X`, `Y`, and `S` unchanged
 - **AND** writes one `build_versions` row with all four numeric fields, the full version string, short changes, detailed changes, release time, reason, and `version_type_id = build`
 
-#### Scenario: Dev is promoted to main
-- **WHEN** `dev` is accepted and merged into `main`
+#### Scenario: Main is deployed to production
+- **WHEN** accepted `main` is deployed to production
 - **THEN** the workflow increments only `Y` in `X.Y.Z.S`
 - **AND** keeps `X`, `Z`, and `S` unchanged
 - **AND** writes one `build_versions` row with all four numeric fields, the full version string, short changes, detailed changes, release time, reason, and `version_type_id = build`
@@ -206,14 +206,14 @@ Bright OS SHALL keep Dev and Preview APK artifacts aligned with their OTA manife
 - **THEN** the allocated preview slot APK is built with a new Android `versionCode`
 - **AND** the preview release metadata records that APK file and `versionCode`
 
-#### Scenario: Accepted native work reaches dev
-- **WHEN** native-boundary work is accepted into `dev`
-- **THEN** Dev and Preview A-E APKs are rebuilt from the accepted `dev` source
+#### Scenario: Accepted native work reaches production
+- **WHEN** native-boundary work is accepted into `main`
+- **THEN** Preview A-E APKs are rebuilt from production source during slot release
 
 ### Requirement: Deployment metadata is recorded per environment
-Bright OS SHALL record deployment metadata for production, dev, and preview environments.
+Bright OS SHALL record deployment metadata for production, dev, and preview environments. Dev metadata is retained for re-enabling dev but is not part of the active acceptance loop while dev is disabled.
 
 #### Scenario: Branch deployment completes
 - **WHEN** a branch deploy succeeds
 - **THEN** the target environment database records environment, slot when applicable, branch, commit, domain, web/OTA version, APK version when applicable, deployment time, and reason
-- **AND** preview metadata can be promoted into dev, then production, through accepted branch flow
+- **AND** preview metadata can be promoted directly into production through accepted branch flow

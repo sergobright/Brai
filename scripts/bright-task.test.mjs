@@ -50,10 +50,10 @@ test("write-like shell commands are detected", () => {
 });
 
 test("manual codex branch commands are hard blocked", () => {
-  assert.equal(isManualCodexBranchCommand("git switch -c codex/foo origin/dev"), true);
-  assert.equal(isManualCodexBranchCommand("git checkout -b codex/foo origin/dev"), true);
+  assert.equal(isManualCodexBranchCommand("git switch -c codex/foo origin/main"), true);
+  assert.equal(isManualCodexBranchCommand("git checkout -b codex/foo origin/main"), true);
   assert.equal(isManualCodexBranchCommand("git branch codex/foo"), true);
-  assert.equal(isManualCodexBranchCommand("git worktree add ../foo -b codex/foo origin/dev"), true);
+  assert.equal(isManualCodexBranchCommand("git worktree add ../foo -b codex/foo origin/main"), true);
   assert.equal(isManualCodexBranchCommand("git branch --show-current"), false);
 });
 
@@ -93,7 +93,7 @@ test("hook analysis allows read-only shell and official task starter", () => {
   assert.equal(starter.write, false);
   assert.equal(starter.officialTaskStarter, true);
 
-  const manual = analyzeHookInput(JSON.stringify({ tool_name: "functions.exec_command", tool_input: { cmd: "git switch -c codex/foo origin/dev" } }));
+  const manual = analyzeHookInput(JSON.stringify({ tool_name: "functions.exec_command", tool_input: { cmd: "git switch -c codex/foo origin/main" } }));
   assert.equal(manual.manualCodexBranch, true);
 });
 
@@ -157,7 +157,7 @@ test("pre-push ref updates must stay on matching codex ref", () => {
         "codex/foo",
         { isAcceptedRemote: (sha) => sha.startsWith("1111") },
       ),
-    /already included in origin\/dev/,
+    /already included in origin\/main/,
   );
 });
 
@@ -298,7 +298,7 @@ test("task state blocks local implementation work without exact preview receipt"
     git(["commit", "-m", "base"], repo);
     git(["checkout", "-b", "codex/foo"], repo);
     const base = git(["rev-parse", "HEAD"], repo).stdout.trim();
-    git(["update-ref", "refs/remotes/origin/dev", base], repo);
+    git(["update-ref", "refs/remotes/origin/main", base], repo);
     fs.mkdirSync(path.join(repo, ".bright-task"));
     fs.writeFileSync(
       path.join(repo, ".bright-task", "task.json"),
@@ -352,7 +352,7 @@ test("task state allows infra-docs work with exact delivery receipt", () => {
     git(["commit", "-m", "base"], repo);
     git(["checkout", "-b", "codex/foo"], repo);
     const base = git(["rev-parse", "HEAD"], repo).stdout.trim();
-    git(["update-ref", "refs/remotes/origin/dev", base], repo);
+    git(["update-ref", "refs/remotes/origin/main", base], repo);
     fs.mkdirSync(path.join(repo, ".bright-task"));
     fs.writeFileSync(
       path.join(repo, ".bright-task", "task.json"),
@@ -405,7 +405,7 @@ test("task state allows exact delivery receipt after infra-docs branch was squas
     git(["commit", "-m", "base"], repo);
     git(["checkout", "-b", "codex/foo"], repo);
     const base = git(["rev-parse", "HEAD"], repo).stdout.trim();
-    git(["update-ref", "refs/remotes/origin/dev", base], repo);
+    git(["update-ref", "refs/remotes/origin/main", base], repo);
     fs.mkdirSync(path.join(repo, ".bright-task"));
     fs.writeFileSync(
       path.join(repo, ".bright-task", "task.json"),
@@ -422,15 +422,15 @@ test("task state allows exact delivery receipt after infra-docs branch was squas
     git(["add", "docs/change.md"], repo);
     git(["commit", "-m", "docs change"], repo);
     const head = git(["rev-parse", "HEAD"], repo).stdout.trim();
-    git(["checkout", "-b", "dev", base], repo);
+    git(["checkout", "-b", "main", base], repo);
     fs.mkdirSync(path.join(repo, "docs"), { recursive: true });
     fs.writeFileSync(path.join(repo, "docs", "change.md"), "change\n");
     git(["add", "docs/change.md"], repo);
     git(["commit", "-m", "squash infra docs"], repo);
-    git(["update-ref", "refs/remotes/origin/dev", "HEAD"], repo);
+    git(["update-ref", "refs/remotes/origin/main", "HEAD"], repo);
     git(["update-ref", "refs/remotes/origin/codex/foo", head], repo);
     git(["checkout", "codex/foo"], repo);
-    assert.notEqual(gitStatus(["merge-base", "--is-ancestor", head, "origin/dev"], repo), 0);
+    assert.notEqual(gitStatus(["merge-base", "--is-ancestor", head, "origin/main"], repo), 0);
     fs.writeFileSync(
       path.join(repo, ".bright-task", "delivery-handoff.json"),
       `${JSON.stringify({
@@ -462,13 +462,13 @@ test("accept preview checks verified preview before PR actions", () => {
 test("accepted preview branch lookup skips infra docs delivery PRs", () => {
   assert.deepEqual(acceptedPreviewBranches([
     {
-      base: { ref: "dev" },
+      base: { ref: "main" },
       head: { ref: "codex/infra-docs" },
       merged_at: "2026-06-25T10:00:00Z",
       labels: [{ name: "bright-delivery:infra-docs" }],
     },
     {
-      base: { ref: "dev" },
+      base: { ref: "main" },
       head: { ref: "codex/runtime" },
       merged_at: "2026-06-25T10:00:00Z",
       labels: [],

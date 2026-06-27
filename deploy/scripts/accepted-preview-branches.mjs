@@ -7,7 +7,7 @@ export const INFRA_DOCS_LABEL = "bright-delivery:infra-docs";
 if (path.resolve(process.argv[1] ?? "") === fileURLToPath(import.meta.url)) {
   const recentMerged = process.argv[2] === "--recent-merged";
   const commit = recentMerged ? null : process.argv[2] || process.env.BRIGHT_OS_TARGET_COMMIT || process.env.GITHUB_SHA;
-  const targetBranch = process.env.BRIGHT_OS_TARGET_BRANCH || "dev";
+  const targetBranch = process.env.BRIGHT_OS_TARGET_BRANCH || "main";
   const pulls = process.env.BRIGHT_OS_ACCEPTED_PREVIEW_PRS_JSON
     ? JSON.parse(process.env.BRIGHT_OS_ACCEPTED_PREVIEW_PRS_JSON)
     : recentMerged
@@ -17,7 +17,7 @@ if (path.resolve(process.argv[1] ?? "") === fileURLToPath(import.meta.url)) {
   for (const branch of acceptedPreviewBranches(pulls, targetBranch)) console.log(branch);
 }
 
-export function acceptedPreviewBranches(pulls, targetBranch = "dev") {
+export function acceptedPreviewBranches(pulls, targetBranch = "main") {
   if (!Array.isArray(pulls)) throw new Error("GitHub pull request lookup did not return an array");
 
   const seen = new Set();

@@ -138,6 +138,104 @@ test('production promotion copies accepted dev build ledger', () => {
   }
 });
 
+test('production promotion can record accepted preview directly from preview metadata', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bright-promote-direct-prod-'));
+  const sourceDb = path.join(tmp, 'source.sqlite');
+  const targetDb = path.join(tmp, 'target.sqlite');
+  const source = new BrightOsStore(sourceDb);
+  const target = new BrightOsStore(targetDb);
+
+  try {
+    source.recordDeployment({
+      environment: 'preview-a',
+      slot: 'A',
+      branch: 'codex/direct-prod',
+      commit: 'source-direct',
+      domain: 'a.preview.brightos.world',
+      webOtaVersion: '0.0.11.1.20260627000000',
+      shortChanges: 'Ship direct production acceptance.',
+      detailedChanges: 'Accepted preview metadata is promoted straight into production ledger.',
+      reason: 'Prototype delivery skips dev.',
+      deployedAtUtc: '2026-06-27T00:00:00.000Z'
+    });
+  } finally {
+    source.close();
+    target.close();
+  }
+
+  const repoRoot = path.resolve(import.meta.dirname, '../../..');
+  execFileSync(process.execPath, [
+    path.join(repoRoot, 'deploy/scripts/promote-deployment.mjs'),
+    '--source-db',
+    sourceDb,
+    '--target-db',
+    targetDb,
+    '--source-branch',
+    'codex/direct-prod',
+    '--target-environment',
+    'prod',
+    '--target-branch',
+    'main',
+    '--target-commit',
+    'mainsha-direct',
+    '--target-domain',
+    'app.brightos.world',
+    '--ledger-only',
+    'true',
+    '--reason',
+    'Promote accepted preview directly to production'
+  ], { cwd: repoRoot });
+
+  const promoted = new BrightOsStore(targetDb);
+  try {
+    const accepted = promoted.db
+      .prepare("SELECT version, short_changes, detailed_changes, reason FROM build_versions WHERE version_type_id = 'build' AND release_version = 0 ORDER BY build_version DESC LIMIT 1")
+      .get();
+    assert.deepEqual(accepted, {
+      version: '0.0.12.1',
+      short_changes: 'Ship direct production acceptance.',
+      detailed_changes: 'Accepted preview metadata is promoted straight into production ledger.',
+      reason: 'Prototype delivery skips dev.'
+    });
+
+    const release = promoted.db
+      .prepare("SELECT release_version, build_version, version, detailed_changes FROM build_versions WHERE version_type_id = 'build' AND release_version > 0 ORDER BY release_version DESC LIMIT 1")
+      .get();
+    assert.equal(release.release_version, 1);
+    assert.equal(release.build_version, 12);
+    assert.equal(release.version, '0.1.12.1');
+    assert.match(release.detailed_changes, /0\.0\.12\.1/);
+
+    const refs = promoted.db
+      .prepare("SELECT version, source_branch, source_commit, target_branch, target_commit FROM build_version_refs WHERE version IN ('0.0.12.1', '0.1.12.1') ORDER BY version")
+      .all();
+    assert.deepEqual(refs, [
+      {
+        version: '0.0.12.1',
+        source_branch: 'codex/direct-prod',
+        source_commit: 'source-direct',
+        target_branch: 'codex/direct-prod',
+        target_commit: 'source-direct'
+      },
+      {
+        version: '0.1.12.1',
+        source_branch: 'codex/direct-prod',
+        source_commit: 'source-direct',
+        target_branch: 'main',
+        target_commit: 'mainsha-direct'
+      }
+    ]);
+
+    const prodRecord = promoted.db
+      .prepare("SELECT environment FROM deployment_records WHERE environment = 'prod' ORDER BY id DESC LIMIT 1")
+      .get();
+    assert.equal(prodRecord, undefined);
+  } finally {
+    promoted.close();
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test('accepted preview promotion falls back to branch commit metadata', () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bright-promote-fallback-'));
   const sourceDb = path.join(tmp, 'source.sqlite');

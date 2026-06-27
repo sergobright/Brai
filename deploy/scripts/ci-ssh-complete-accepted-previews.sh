@@ -4,11 +4,20 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="${BRIGHT_OS_ROOT:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
 NODE_BIN="${NODE_BIN:-node}"
-TARGET_BRANCH="${BRIGHT_OS_TARGET_BRANCH:-dev}"
-TARGET_ENVIRONMENT="${BRIGHT_OS_TARGET_ENVIRONMENT:-dev}"
+TARGET_BRANCH="${BRIGHT_OS_TARGET_BRANCH:-main}"
+TARGET_ENVIRONMENT="${BRIGHT_OS_TARGET_ENVIRONMENT:-prod}"
 TARGET_COMMIT="${BRIGHT_OS_TARGET_COMMIT:-${GITHUB_SHA:-}}"
+MODE="${BRIGHT_OS_ACCEPTED_PREVIEWS_MODE:-all}"
 
 : "${TARGET_COMMIT:?BRIGHT_OS_TARGET_COMMIT or GITHUB_SHA is required}"
+
+case "$MODE" in
+  all | promote | release) ;;
+  *)
+    echo "Unsupported BRIGHT_OS_ACCEPTED_PREVIEWS_MODE: $MODE" >&2
+    exit 1
+    ;;
+esac
 
 signal_temporal_preview() {
   local branch="$1"
@@ -67,37 +76,53 @@ if [[ "${#REQUIRED_BRANCHES[@]}" -eq 0 && "${#CLEANUP_BRANCHES[@]}" -eq 0 ]]; th
   exit 0
 fi
 
-for branch in "${REQUIRED_BRANCHES[@]}"; do
+for index in "${!REQUIRED_BRANCHES[@]}"; do
+  branch="${REQUIRED_BRANCHES[$index]}"
   echo "Completing accepted preview $branch -> $TARGET_BRANCH@$TARGET_COMMIT."
-  signal_temporal_preview "$branch" pr_merged
-  signal_temporal_preview "$branch" accepted_preview_started
-  if BRIGHT_OS_SOURCE_BRANCH="$branch" \
-    BRIGHT_OS_TARGET_ENVIRONMENT="$TARGET_ENVIRONMENT" \
-    BRIGHT_OS_TARGET_BRANCH="$TARGET_BRANCH" \
-    BRIGHT_OS_TARGET_COMMIT="$TARGET_COMMIT" \
-      "$SCRIPT_DIR/ci-ssh-promote-deployment.sh"; then
-    signal_temporal_preview "$branch" accepted_preview_promoted
-  else
-    signal_temporal_preview "$branch" accepted_preview_failed
-    exit 1
+  if [[ "$MODE" == "all" || "$MODE" == "promote" ]]; then
+    RECORD_PRODUCTION_RELEASE=true
+    if [[ "$TARGET_ENVIRONMENT" == "prod" && "$index" -lt "$((${#REQUIRED_BRANCHES[@]} - 1))" ]]; then
+      RECORD_PRODUCTION_RELEASE=false
+    fi
+    signal_temporal_preview "$branch" pr_merged
+    signal_temporal_preview "$branch" accepted_preview_started
+    if BRIGHT_OS_SOURCE_BRANCH="$branch" \
+      BRIGHT_OS_TARGET_ENVIRONMENT="$TARGET_ENVIRONMENT" \
+      BRIGHT_OS_TARGET_BRANCH="$TARGET_BRANCH" \
+      BRIGHT_OS_TARGET_COMMIT="$TARGET_COMMIT" \
+      BRIGHT_OS_RECORD_PRODUCTION_RELEASE="$RECORD_PRODUCTION_RELEASE" \
+        "$SCRIPT_DIR/ci-ssh-promote-deployment.sh"; then
+      signal_temporal_preview "$branch" accepted_preview_promoted
+    else
+      signal_temporal_preview "$branch" accepted_preview_failed
+      exit 1
+    fi
   fi
 
-  signal_temporal_preview "$branch" slot_release_started
-  if BRIGHT_OS_BRANCH="$branch" \
-    BRIGHT_OS_ACCEPTED_PREVIEW=true \
-    BRIGHT_OS_REQUIRE_PREVIEW_SLOT_RELEASE=true \
-      "$SCRIPT_DIR/ci-ssh-release-slot.sh"; then
-    signal_temporal_preview "$branch" slot_released
-  else
-    signal_temporal_preview "$branch" slot_release_failed
-    exit 1
+  if [[ "$MODE" == "all" || "$MODE" == "release" ]]; then
+    signal_temporal_preview "$branch" slot_release_started
+    if BRIGHT_OS_BRANCH="$branch" \
+      BRIGHT_OS_ACCEPTED_PREVIEW=true \
+      BRIGHT_OS_REQUIRE_PREVIEW_SLOT_RELEASE=true \
+        "$SCRIPT_DIR/ci-ssh-release-slot.sh"; then
+      signal_temporal_preview "$branch" slot_released
+    else
+      signal_temporal_preview "$branch" slot_release_failed
+      exit 1
+    fi
   fi
 done
 
+if [[ "$MODE" == "promote" ]]; then
+  exit 0
+fi
+
 for branch in "${CLEANUP_BRANCHES[@]}"; do
   echo "Cleaning up previously accepted preview $branch."
-  signal_temporal_preview "$branch" accepted_preview_started
-  signal_temporal_preview "$branch" accepted_preview_promoted
+  if [[ "$MODE" == "all" ]]; then
+    signal_temporal_preview "$branch" accepted_preview_started
+    signal_temporal_preview "$branch" accepted_preview_promoted
+  fi
 
   signal_temporal_preview "$branch" slot_release_started
   if BRIGHT_OS_BRANCH="$branch" BRIGHT_OS_ACCEPTED_PREVIEW=true "$SCRIPT_DIR/ci-ssh-release-slot.sh"; then

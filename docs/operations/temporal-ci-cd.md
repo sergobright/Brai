@@ -46,7 +46,7 @@ Preview slots are still allocated and released by the existing slot scripts:
 
 The preview slot registry remains `/srv/projects/bright-os-envs/preview-slots.json`; Temporal does not replace that lock or registry.
 
-Native-boundary preview deploys may build a slot-specific APK inside the existing `preview_deploy_started` to `preview_deploy_passed` gate. Accepted native work may rebuild the Dev and Preview A-E APK baseline inside the existing `dev_deploy_started` to `dev_deploy_passed` gate. These APK builds are required deploy substeps, not separate Temporal state transitions; failure still reports through `preview_deploy_failed` or `dev_deploy_failed`.
+Native-boundary preview deploys may build a slot-specific APK inside the existing `preview_deploy_started` to `preview_deploy_passed` gate. Accepted native work rebuilds the Preview A-E APK baseline during preview slot release after production deploy. These APK builds are required deploy/release substeps, not separate Temporal state transitions; failure still reports through `preview_deploy_failed`, `prod_deploy_failed`, or `slot_release_failed`.
 
 ## Infra Docs No-preview Path
 
@@ -64,9 +64,9 @@ handoff, or auto-merge events set `status=waiting_for_fix` and populate `blocker
 The agent-side `bright-task handoff` may pre-create the infra/docs PR with the agent's GitHub
 identity so CI can reuse it even when the repository keeps the default `GITHUB_TOKEN` unable to
 create pull requests. GitHub Actions still owns the `auto_merge_*` Temporal signals and must not
-push directly to `dev`.
+push directly to `main`.
 
-For `infra-docs`, `pr_merged` marks `accepted_for_dev` as passed and completes the preview
+For `infra-docs`, `pr_merged` marks the compatibility task key `accepted_for_dev` (`Accepted for target`) as passed and completes the preview
 lifecycle without requiring an accepted-preview metadata promotion or preview slot release.
 
 ## BranchPreviewWorkflow
@@ -89,14 +89,14 @@ The `state` query exposes `deliveryClass`, `handoff`, `autoMerge`, `tasks`, `mis
 
 ## PromotionWorkflow
 
-`PromotionWorkflow` tracks accepted preview to `dev`, and `dev` to production:
+`PromotionWorkflow` tracks accepted preview promotion, target deploy, and preview slot release:
 
-- Workflow ID for dev deploy: `bright-os:promotion:dev:<sha>`.
+- Workflow ID for disabled dev deploy, if temporarily re-enabled: `bright-os:promotion:dev:<sha>`.
 - Workflow ID for production deploy: `bright-os:promotion:prod:<sha>`.
 - Dev signals: `dev_deploy_started`, `dev_version_recorded`, `accepted_previews_started`, `accepted_previews_passed`, `accepted_previews_failed`, `dev_deploy_passed`, `dev_deploy_failed`.
-- Prod signals: `prod_deploy_started`, `prod_version_recorded`, `prod_deploy_passed`, `prod_deploy_failed`.
+- Prod signals: `prod_deploy_started`, `prod_version_recorded`, `accepted_previews_started`, `accepted_previews_passed`, `accepted_previews_failed`, `prod_deploy_passed`, `prod_deploy_failed`.
 
-The dev promotion checklist requires deployment, version/ledger recording, and accepted-preview metadata/slot cleanup. The production checklist requires deployment and production version/ledger recording. `dev_deploy_passed` and `prod_deploy_passed` complete their promotion workflows only after prior required steps have succeeded in GitHub Actions. Human-readable `build_versions` release notes are part of the existing version/ledger recording step; changing their text source does not add a new Temporal gate.
+The production checklist requires accepted-preview metadata promotion, version/ledger recording, deployment, and preview-slot cleanup. `prod_deploy_passed` completes the promotion workflow only after prior required steps have succeeded in GitHub Actions. Human-readable `build_versions` release notes are part of the existing version/ledger recording step; changing their text source does not add a new Temporal gate.
 
 Deploy logic still lives in the existing scripts. Temporal is the required control ledger around those scripts; GitHub branch protection, merge queue, preview slot locking, and SQLite ledger writes remain the underlying authorities for their own data.
 
@@ -158,7 +158,7 @@ Then open `https://temporal.brightos.world` with the unified Caddy basic auth an
 - Temporal unavailable: the strict CI/CD job fails. Restart or repair `brightos-temporal.service` / `brightos-temporal-worker.service`, then rerun the failed GitHub Actions job.
 - Worker stopped: workflows remain in Temporal; restart `brightos-temporal-worker.service`.
 - Failed preview deploy: query the workflow state and inspect `status`, `blocker`, `blockers`, and `tasks`, then fix and push the same `codex/*` branch.
-- Failed dev acceptance cleanup: query both `bright-os:promotion:dev:<sha>` and the affected `bright-os:preview:<branch>` workflow. Fix metadata promotion or slot release, then rerun the failed `deploy-dev` job.
+- Failed accepted-preview cleanup: query both `bright-os:promotion:prod:<sha>` and the affected `bright-os:preview:<branch>` workflow. Fix metadata promotion or slot release, then rerun the failed `deploy-prod` job.
 - Failed production deploy: query `bright-os:promotion:prod:<sha>`, fix the deploy or ledger issue, then rerun the failed production job.
 - Stuck slot release: use `deploy/scripts/preview-slots.sh status` on the VPS source checkout, then rerun the existing release workflow or `deploy/scripts/ci-ssh-release-slot.sh`.
 - Wrong or sensitive event data: do not mutate Temporal history. Start a new corrected workflow only if the old history contains no secrets; if a secret was signaled, rotate it and treat the Temporal DB as exposed for that secret.

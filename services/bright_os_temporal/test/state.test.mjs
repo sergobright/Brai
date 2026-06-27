@@ -129,16 +129,31 @@ test("dev promotion tracks accepted preview release blocker", () => {
   assert.equal(state.terminal, false);
 });
 
-test("prod promotion completes after version record and deploy pass", () => {
+test("prod promotion completes after accepted previews, version record, and deploy pass", () => {
   const state = createPromotionState({ target: "prod", sha: "c1" });
   applyPromotionEvent(state, { type: "prod_deploy_started", sha: "c1" });
+  applyPromotionEvent(state, { type: "accepted_previews_started", sha: "c1" });
   applyPromotionEvent(state, { type: "prod_version_recorded", sha: "c1" });
+  applyPromotionEvent(state, { type: "accepted_previews_passed", sha: "c1" });
   applyPromotionEvent(state, { type: "prod_deploy_passed", sha: "c1" });
 
   assert.equal(state.status, "prod_deploy_passed");
   assert.equal(state.tasks.deploy.status, "passed");
   assert.equal(state.tasks.version_recorded.status, "passed");
-  assert.equal(state.tasks.accepted_previews.status, "not_applicable");
+  assert.equal(state.tasks.accepted_previews.status, "passed");
   assert.equal(state.terminal, true);
   assert.equal(state.gates.complete, true);
+});
+
+test("prod promotion tracks accepted preview release blocker", () => {
+  const state = createPromotionState({ target: "prod", sha: "c2" });
+  applyPromotionEvent(state, { type: "prod_deploy_started", sha: "c2" });
+  applyPromotionEvent(state, { type: "prod_version_recorded", sha: "c2" });
+  applyPromotionEvent(state, { type: "accepted_previews_started", sha: "c2" });
+  applyPromotionEvent(state, { type: "accepted_previews_failed", sha: "c2" });
+
+  assert.equal(state.status, "waiting_for_fix");
+  assert.equal(state.tasks.version_recorded.status, "passed");
+  assert.equal(state.tasks.accepted_previews.status, "failed");
+  assert.equal(state.terminal, false);
 });

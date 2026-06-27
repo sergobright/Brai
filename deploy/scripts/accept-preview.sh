@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-BASE_BRANCH="${BRIGHT_OS_ACCEPT_BASE:-dev}"
+BASE_BRANCH="${BRIGHT_OS_ACCEPT_BASE:-main}"
 BRANCH="${1:-}"
 INFRA_DOCS_LABEL="bright-delivery:infra-docs"
 MERGE_METHOD="${BRIGHT_OS_ACCEPT_MERGE_METHOD:-squash}"
@@ -10,7 +10,7 @@ usage() {
   cat <<'USAGE'
 usage: deploy/scripts/accept-preview.sh [codex/<task-branch>]
 
-Creates or reuses a GitHub PR from a Bright OS preview branch into dev, then
+Creates or reuses a GitHub PR from a Bright OS preview branch into the accepted base, then
 enables GitHub merge/auto-merge for the exact pushed head commit.
 USAGE
 }

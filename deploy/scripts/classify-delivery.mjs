@@ -18,11 +18,10 @@ if (path.resolve(process.argv[1] ?? "") === fileURLToPath(import.meta.url)) {
 export function classifyDeployDelivery(files, context = {}) {
   const result = classifyBrightDelivery(files, context);
   const isCodexPush = context.eventName === "push" && context.ref?.startsWith("refs/heads/codex/");
-  const isDevPush = context.eventName === "push" && context.ref === "refs/heads/dev";
   return {
     delivery_class: result.deliveryClass,
     requires_preview: result.deliveryClass === "runtime-preview" && isCodexPush,
-    requires_dev_deploy: result.deliveryClass === "runtime-preview" && isDevPush,
+    requires_dev_deploy: false,
     auto_merge: result.deliveryClass === "infra-docs" && isCodexPush,
   };
 }
@@ -85,8 +84,8 @@ function changedFiles(options) {
   if (options.baseRef) return gitDiffNames(`${options.baseRef}...${options.headRef}`);
 
   const context = deliveryContext(options);
-  if (context.eventName === "push" && context.ref.startsWith("refs/heads/codex/") && refExists("origin/dev")) {
-    return gitDiffNames(`origin/dev...${options.headRef}`);
+  if (context.eventName === "push" && context.ref.startsWith("refs/heads/codex/") && refExists(acceptedBaseRef())) {
+    return gitDiffNames(`${acceptedBaseRef()}...${options.headRef}`);
   }
 
   if (context.eventName === "push" && context.before && !/^0+$/.test(context.before)) {
@@ -94,6 +93,10 @@ function changedFiles(options) {
   }
 
   return git(["diff-tree", "--no-commit-id", "--name-only", "-r", context.sha || options.headRef]);
+}
+
+function acceptedBaseRef() {
+  return `origin/${process.env.BRIGHT_OS_ACCEPT_BASE || "main"}`;
 }
 
 function gitDiffNames(range) {

@@ -46,6 +46,7 @@ output/
 
 # Generated local state
 .bright-task/
+.codex-worktrees/
 **/.idea/
 **/.gradle/
 **/test-results/

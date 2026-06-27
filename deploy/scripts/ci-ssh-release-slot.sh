@@ -63,8 +63,7 @@ if [[ ! -r "$RELEASE_ROOT/deploy/scripts/preview-slots.mjs" ]]; then
 fi
 
 cd "$RELEASE_ROOT"
-if [[ "$BRIGHT_OS_ACCEPTED_PREVIEW" != "true" ]]; then
-  mapfile -t SLOT_META < <(bash deploy/scripts/preview-slots.sh status | node -e '
+mapfile -t SLOT_META < <(bash deploy/scripts/preview-slots.sh status | node -e '
 let raw = "";
 process.stdin.on("data", (chunk) => raw += chunk);
 process.stdin.on("end", () => {
@@ -79,21 +78,27 @@ process.stdin.on("end", () => {
   }
 });
 ' "$BRIGHT_OS_BRANCH")
-  if [[ -n "${SLOT_META[0]:-}" ]]; then
-    DEV_SOURCE="$ENVS_ROOT/dev/source"
-    if [[ ! -d "$DEV_SOURCE" ]]; then
-      echo "Cannot rebuild baseline preview APK without dev source: $DEV_SOURCE" >&2
-      exit 1
-    fi
-    cd "$DEV_SOURCE"
-    export BRIGHT_OS_BRANCH=""
-    export BRIGHT_OS_COMMIT=""
-    export BRIGHT_OS_ROOT="$DEV_SOURCE"
-    export BRIGHT_OS_RELEASE_TARGET="$DEPLOY_REPO/deploy/releases"
-    export BRIGHT_OS_ANDROID_VERSION_CODE="$(deploy/scripts/apk-version-code.sh next "released $RELEASE_BRANCH baseline preview ${SLOT_META[0]}")"
-    deploy/scripts/build-android-env-apk.sh "preview${SLOT_META[0]}"
-    cd "$RELEASE_ROOT"
+if [[ -n "${SLOT_META[0]:-}" ]]; then
+  BASELINE_SOURCE="$ENVS_ROOT/prod/source"
+  if [[ -d "$ENVS_ROOT/prod/source" ]]; then
+    BASELINE_SOURCE="$ENVS_ROOT/prod/source"
+  elif [[ -d "$DEPLOY_REPO/.git" ]]; then
+    BASELINE_SOURCE="$DEPLOY_REPO"
+  elif [[ -d "$ENVS_ROOT/dev/source" ]]; then
+    BASELINE_SOURCE="$ENVS_ROOT/dev/source"
   fi
+  if [[ ! -d "$BASELINE_SOURCE" ]]; then
+    echo "Cannot rebuild baseline preview APK without source: $BASELINE_SOURCE" >&2
+    exit 1
+  fi
+  cd "$BASELINE_SOURCE"
+  export BRIGHT_OS_BRANCH=""
+  export BRIGHT_OS_COMMIT=""
+  export BRIGHT_OS_ROOT="$BASELINE_SOURCE"
+  export BRIGHT_OS_RELEASE_TARGET="$DEPLOY_REPO/deploy/releases"
+  export BRIGHT_OS_ANDROID_VERSION_CODE="$(deploy/scripts/apk-version-code.sh next "released $RELEASE_BRANCH baseline preview ${SLOT_META[0]}")"
+  deploy/scripts/build-android-env-apk.sh "preview${SLOT_META[0]}"
+  cd "$RELEASE_ROOT"
 fi
 RELEASE_JSON="$(bash deploy/scripts/preview-slots.sh release "$RELEASE_BRANCH")"
 printf '%s\n' "$RELEASE_JSON"

@@ -44,13 +44,13 @@ Bright OS SHALL run the public branch guard before accepting source into `main`,
 - **AND** the workflow fails on forbidden paths, signing files, credential-like files, high-confidence secrets, local workspace paths, or personal markers
 
 ### Requirement: Task branches deploy through preview slots
-Agents working on ordinary Bright OS feature, fix, refactor, or infrastructure implementation tasks SHALL start from the latest `origin/dev` branch unless the project owner explicitly requests another base.
+Agents working on ordinary Bright OS feature, fix, refactor, or infrastructure implementation tasks SHALL start from the latest `origin/main` branch unless the project owner explicitly requests another base.
 
 Ordinary `codex/*` task branch pushes to `origin` and their preview deploys SHALL be treated as standing Bright OS CI/CD automation approved by the project owner, not as optional per-task manual confirmations.
 
 Infrastructure/documentation-only task branches MAY skip preview slot allocation only when Temporal classifies the branch as `deliveryClass=infra-docs` and records `no_preview_required`.
 
-Native-boundary preview branches SHALL publish a slot-specific APK before handoff, and accepted native work SHALL rebuild the shared Dev and Preview A-E APK baseline from `dev`.
+Native-boundary preview branches SHALL publish a slot-specific APK before handoff, and accepted native work SHALL rebuild the shared Preview A-E APK baseline from production source during slot release.
 
 #### Scenario: Preview-class project-file change begins
 - **WHEN** preview-class work changes repository files
@@ -76,8 +76,8 @@ Native-boundary preview branches SHALL publish a slot-specific APK before handof
 - **THEN** the handoff includes the preview APK link and Android `versionCode`
 
 #### Scenario: Native preview branch is accepted
-- **WHEN** a native preview branch is merged into `dev`
-- **THEN** the shared non-production APK baseline is rebuilt from `dev`
+- **WHEN** a native preview branch is merged into `main`
+- **THEN** the shared preview APK baseline is rebuilt from production source during slot release
 
 #### Scenario: Infrastructure docs work does not need a preview slot
 - **WHEN** work changes only infrastructure or documentation files that do not need a runnable preview
@@ -90,13 +90,12 @@ Native-boundary preview branches SHALL publish a slot-specific APK before handof
 #### Scenario: Preview work is accepted
 - **WHEN** the project owner accepts preview work
 - **THEN** the agent runs `deploy/scripts/accept-preview.sh <codex-branch>` instead of replying with a text-only acknowledgement
-- **AND** the script creates or reuses a GitHub pull request from the preview branch into `dev`
+- **AND** the script creates or reuses a GitHub pull request from the preview branch into `main`
 - **AND** the script enables merge or auto-merge for the exact pushed preview head commit
-- **AND** the successful `deploy-dev` workflow promotes accepted preview metadata before releasing the preview slot
+- **AND** the successful `deploy-prod` workflow promotes accepted preview metadata before releasing the preview slot
 - **AND** preview-slot release is a required acceptance completion step and fails the workflow if the accepted branch did not release a slot
-- **AND** the agent monitors the GitHub PR, merge queue, `deploy-dev`, metadata promotion, and preview-slot release until completion or an explicit blocker is known
-- **AND** the work is merged into `dev` before production
-- **AND** `dev` is promoted to `main` only after an explicit production release or merge request
+- **AND** the agent monitors the GitHub PR, merge queue, `deploy-prod`, metadata promotion, and preview-slot release until completion or an explicit blocker is known
+- **AND** the work is merged into `main` before production deploy
 
 #### Scenario: Preview work is not accepted yet
 - **WHEN** the project owner uses a negated acceptance phrase such as "пока не принято" or "не принято"

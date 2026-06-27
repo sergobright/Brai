@@ -12,7 +12,7 @@ const PREVIEW_TASKS = {
   preview_deploy: "Preview deploy",
   delivery_handoff: "Infra/docs delivery handoff",
   auto_merge: "Infra/docs auto-merge",
-  accepted_for_dev: "Accepted for dev",
+  accepted_for_dev: "Accepted for target",
   accepted_preview_promotion: "Accepted preview metadata promotion",
   slot_release: "Preview slot release"
 };
@@ -275,7 +275,7 @@ export function createPromotionState(input) {
     tasks: createTasks(PROMOTION_TASKS),
     events: []
   };
-  if (input.target !== "dev") state.tasks.accepted_previews.status = "not_applicable";
+  if (input.target !== "dev" && input.target !== "prod") state.tasks.accepted_previews.status = "not_applicable";
   return applyPromotionEvent(state, {
     type: "promotion_started",
     sha: input.sha,
@@ -297,7 +297,7 @@ export function applyPromotionEvent(state, rawEvent) {
       state.deploy = "running";
       state.status = event.type;
       setTask(state, "deploy", "running", event);
-      if (state.target === "dev") resetTask(state, "accepted_previews", event);
+      if (state.target === "dev" || state.target === "prod") resetTask(state, "accepted_previews", event);
       resetTask(state, "version_recorded", event);
       break;
     case "dev_version_recorded":
@@ -322,7 +322,6 @@ export function applyPromotionEvent(state, rawEvent) {
       state.deploy = "passed";
       state.status = event.type;
       setTask(state, "deploy", "passed", event);
-      state.terminal = true;
       break;
     case "dev_deploy_failed":
     case "prod_deploy_failed":
@@ -340,6 +339,7 @@ export function applyPromotionEvent(state, rawEvent) {
   }
 
   refreshGates(state, PROMOTION_TASKS);
+  if (state.deploy === "passed" && state.gates.complete) state.terminal = true;
   return state;
 }
 

@@ -32,14 +32,14 @@ Bright OS Android SHALL discover mobile web-layer updates from a self-hosted upd
 - **AND** `bundleVersion` uses the same `X.Y.Z.S` version as the browser web release, without a separate OTA suffix
 
 #### Scenario: Non-production manifest is published
-- **WHEN** a Dev or Preview mobile OTA manifest is published
+- **WHEN** a Preview mobile OTA manifest is published
 - **THEN** its `bundleVersion` starts with the accepted public `X.Y.Z.S` version
 - **AND** it may include a non-production suffix for deploy identity
 
 ### Requirement: Android applies only compatible OTA bundles
 Bright OS Android SHALL apply only OTA bundles compatible with the installed APK.
 
-Dev and Preview OTA manifests SHALL require exact Android `versionCode` compatibility by setting both `minApkVersionCode` and `maxApkVersionCode` to the required technical APK code.
+Preview OTA manifests SHALL require exact Android `versionCode` compatibility by setting both `minApkVersionCode` and `maxApkVersionCode` to the required technical APK code.
 
 #### Scenario: Bundle requires newer APK
 - **WHEN** the manifest `minApkVersionCode` is greater than the installed Android `versionCode`
@@ -52,11 +52,11 @@ Dev and Preview OTA manifests SHALL require exact Android `versionCode` compatib
 - **THEN** the app skips the bundle
 - **AND** records the update as incompatible for diagnostics
 
-#### Scenario: Dev or Preview APK does not match
-- **WHEN** a Dev or Preview Android app checks an OTA manifest
+#### Scenario: Preview APK does not match
+- **WHEN** a Preview Android app checks an OTA manifest
 - **AND** the installed Android `versionCode` is lower or higher than the manifest requirement
 - **THEN** the bundle is skipped as incompatible
-- **AND** the app blocks normal Dev/Preview use with an APK update screen
+- **AND** the app blocks normal Preview use with an APK update screen
 
 ### Requirement: Android verifies OTA bundle integrity before activation
 Bright OS Android SHALL verify downloaded OTA bundles before extracting or activating them.

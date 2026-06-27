@@ -30,10 +30,10 @@ Public version baseline:
 - Release ledger table: `build_versions`
 - Runtime `build_versions` is the source of truth for current app/web/OTA versions.
 - Initial ledger rows: `build` = `0.0.1.1`, `apk` = `0.0.1.1`
-- Accepted working-branch merge into `dev`: increment `Z`, with `release_version = 0`
-- Promotion from `dev` to `main`: increment `Y`, keep latest included `Z`, and reference included accepted dev build rows
+- Accepted working-branch merge into `main`: increment `Z`, with `release_version = 0`
+- Production deploy from `main`: increment `Y`, keep latest included `Z`, and reference included accepted build rows
 - Next shipped APK release: increment `S`
 - GitHub PR numbers are review metadata and do not define version numbers.
-- Example: accepted dev build `0.0.10.1` promotes to production release `0.1.10.1`.
+- Example: accepted build `0.0.10.1` promotes to production release `0.1.10.1`.
 
 Do not commit SQLite files, APKs, OTA bundles, keystores, `.env` files, private keys, or generated deploy output such as `deploy/site`, `deploy/web`, and `deploy/mobile-update`.

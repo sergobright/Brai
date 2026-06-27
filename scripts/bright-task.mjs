@@ -24,6 +24,7 @@ const DELIVERY_CLASS = {
   NONE: "none",
   RUNTIME_PREVIEW: "runtime-preview",
 };
+const DEFAULT_ACCEPT_BASE_BRANCH = "main";
 
 if (isMainModule()) {
   runCli(process.argv.slice(2));
@@ -128,12 +129,12 @@ function startTask(slug) {
     throw error;
   }
 
-  fetchDev();
+  fetchAcceptedBase();
   const openTask = findOpenTaskForThread(parent, currentThreadId(), branch);
   if (openTask) {
     throw new Error(
       `This Codex thread already has open task branch ${openTask.branch} at ${openTask.path}.\n\n` +
-        `Continue that worktree instead of starting ${branch}. A new task branch is allowed only after the existing branch is accepted into origin/dev.`,
+        `Continue that worktree instead of starting ${branch}. A new task branch is allowed only after the existing branch is accepted into ${acceptedBaseRef()}.`,
     );
   }
   if (remoteBranchExists(branch)) {
@@ -142,9 +143,9 @@ function startTask(slug) {
 
   try {
     fs.mkdirSync(parent, { recursive: true });
-    git("worktree", "add", "--no-track", "-b", branch, target, "origin/dev");
+    git("worktree", "add", "--no-track", "-b", branch, target, acceptedBaseRef());
     enableGitHooks(target);
-    writeTaskMarker(target, withThreadId({ branch, mode: "new", base: git("rev-parse", "origin/dev"), createdAt: new Date().toISOString() }));
+    writeTaskMarker(target, withThreadId({ branch, mode: "new", base: git("rev-parse", acceptedBaseRef()), createdAt: new Date().toISOString() }));
     const linked = linkDependencyDirs(dependencySourceRoot(root), target);
     if (linked.length) console.log(`Linked dependency dirs: ${linked.join(", ")}`);
   } catch (error) {
@@ -174,7 +175,7 @@ function markFollowUp(branchArg) {
   writeTaskMarker(git("rev-parse", "--show-toplevel"), withThreadId({
     branch,
     mode: "follow-up",
-    base: git("rev-parse", "origin/dev"),
+    base: git("rev-parse", acceptedBaseRef()),
     createdAt: new Date().toISOString(),
   }));
   console.log(`Marked explicit follow-up for ${branch}`);
@@ -189,7 +190,7 @@ function preToolUse() {
   if (analysis.officialTaskStarter) return allowHook();
   if (!analysis.write) return allowHook();
 
-  fetchDev();
+  fetchAcceptedBase();
   const validation = validateTaskBranch({ requireExpectedUpstream: false });
   if (!validation.ok) {
     return blockHook(`Bright OS blocks project-file writes before a valid task branch exists.\n\n${validation.message}\n\n${taskStartGuidance()}`);
@@ -203,7 +204,7 @@ function preToolUse() {
 }
 
 function preCommit() {
-  fetchDev();
+  fetchAcceptedBase();
   const validation = validateTaskBranch({ requireExpectedUpstream: true });
   if (!validation.ok) throw new Error(validation.message);
   const reuse = validateBranchReuse();
@@ -224,7 +225,7 @@ function preCommit() {
 function prePush(remoteName) {
   if (remoteName !== "origin") throw new Error(`Bright OS task branches must push to origin, got: ${remoteName || "(empty)"}`);
 
-  fetchDev();
+  fetchAcceptedBase();
   const validation = validateTaskBranch({ requireExpectedUpstream: true });
   if (!validation.ok) throw new Error(validation.message);
   const reuse = validateBranchReuse();
@@ -235,17 +236,17 @@ function prePush(remoteName) {
     .split("\n")
     .map((line) => line.trim())
     .filter(Boolean);
-  for (const line of updates) validatePushUpdate(line, branch, { isAcceptedRemote: (sha) => isAncestor(sha, "origin/dev") });
+  for (const line of updates) validatePushUpdate(line, branch, { isAcceptedRemote: (sha) => isAncestor(sha, acceptedBaseRef()) });
 
   const upstream = gitMaybe("rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}");
   if (upstream && upstream !== `origin/${branch}`) {
     throw new Error(`Wrong upstream: ${upstream}. Expected origin/${branch}. Fix with: git push -u origin HEAD`);
   }
-  if (!isAncestor("origin/dev", "HEAD")) {
-    throw new Error("origin/dev is not an ancestor of HEAD. Start from current origin/dev or rebase intentionally before pushing.");
+  if (!isAncestor(acceptedBaseRef(), "HEAD")) {
+    throw new Error(`${acceptedBaseRef()} is not an ancestor of HEAD. Start from current ${acceptedBaseRef()} or rebase intentionally before pushing.`);
   }
 
-  const changed = diffFromDev();
+  const changed = diffFromAcceptedBase();
   if (changed.some((file) => file.startsWith("scripts/bright-") || file.startsWith(".codex/") || file.startsWith(".githooks/"))) {
     runRequired(["npm", "run", "task:test"], "Bright OS task guard changes require passing npm run task:test before push.");
   }
@@ -279,11 +280,11 @@ function previewHandoff(branchArg) {
   if (branch !== currentBranch()) throw new Error(`Current branch is ${currentBranch()}, not ${branch}`);
   const head = git("rev-parse", "HEAD");
 
-  fetchDevAndBranch(branch);
+  fetchAcceptedBaseAndBranch(branch);
   const remoteSha = git("rev-parse", `origin/${branch}`);
   if (remoteSha !== head) throw new Error(`HEAD ${head} is not pushed to origin/${branch} (${remoteSha}). Push before handoff.`);
   if (git("status", "--porcelain").trim()) throw new Error("Working tree is not clean. Commit or remove local changes before handoff.");
-  if (!isAncestor("origin/dev", head)) throw new Error(`origin/dev is not an ancestor of ${head}.`);
+  if (!isAncestor(acceptedBaseRef(), head)) throw new Error(`${acceptedBaseRef()} is not an ancestor of ${head}.`);
 
   const run = findSuccessfulDeliveryRun(branch, head, ["public-guard", "checks", "temporal-worker-check", "deploy-preview"]);
   const slot = readPreviewSlot(branch, head);
@@ -317,13 +318,13 @@ function deliveryHandoff(branchArg) {
   if (branch !== currentBranch()) throw new Error(`Current branch is ${currentBranch()}, not ${branch}`);
   const head = git("rev-parse", "HEAD");
 
-  fetchDevAndBranch(branch);
+  fetchAcceptedBaseAndBranch(branch);
   const remoteSha = git("rev-parse", `origin/${branch}`);
   if (remoteSha !== head) throw new Error(`HEAD ${head} is not pushed to origin/${branch} (${remoteSha}). Push before handoff.`);
   if (git("status", "--porcelain").trim()) throw new Error("Working tree is not clean. Commit or remove local changes before handoff.");
   const marker = readTaskMarker();
   if (marker?.base && !isAncestor(marker.base, head)) {
-    throw new Error(`Task base ${marker.base} is not an ancestor of ${head}. Start a fresh task branch from origin/dev.`);
+    throw new Error(`Task base ${marker.base} is not an ancestor of ${head}. Start a fresh task branch from ${acceptedBaseRef()}.`);
   }
 
   let pr = findInfraDocsPr(branch, head);
@@ -355,7 +356,7 @@ function deliveryHandoff(branchArg) {
 }
 
 function classifyCli(args) {
-  let base = "origin/dev";
+  let base = acceptedBaseRef();
   let head = "HEAD";
   let githubOutput = false;
   for (let index = 0; index < args.length; index += 1) {
@@ -405,7 +406,7 @@ function deriveTaskState() {
   const previewReceipt = readPreviewReceipt();
   const deliveryReceipt = readDeliveryReceipt();
   const changedFiles = diffFromTaskBase();
-  const commitsAhead = Number(gitMaybe("rev-list", "--count", "origin/dev..HEAD") ?? 0);
+  const commitsAhead = Number(gitMaybe("rev-list", "--count", `${acceptedBaseRef()}..HEAD`) ?? 0);
   const validation = CODEX_BRANCH_RE.test(branch)
     ? validateTaskBranch({ requireExpectedUpstream: false })
     : { ok: false, message: `Implementation work must run on codex/<task-slug>, got: ${branch || "(none)"}` };
@@ -514,19 +515,19 @@ function validateTaskBranch({ requireExpectedUpstream }) {
   if (!CODEX_BRANCH_RE.test(branch)) {
     return { ok: false, message: `Implementation work must run on codex/<task-slug>, got: ${branch}` };
   }
-  if (!gitMaybe("rev-parse", "--verify", "origin/dev")) {
-    return { ok: false, message: "origin/dev is missing locally. Run: git fetch origin dev" };
+  if (!gitMaybe("rev-parse", "--verify", acceptedBaseRef())) {
+    return { ok: false, message: `${acceptedBaseRef()} is missing locally. Run: git fetch origin ${acceptedBaseBranch()}` };
   }
 
   const upstream = gitMaybe("rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}");
-  if (upstream === "origin/dev") {
-    return { ok: false, message: `${branch} tracks origin/dev. Recreate it with --no-track and push with: git push -u origin HEAD` };
+  if (upstream === acceptedBaseRef()) {
+    return { ok: false, message: `${branch} tracks ${acceptedBaseRef()}. Recreate it with --no-track and push with: git push -u origin HEAD` };
   }
   if (requireExpectedUpstream && upstream && upstream !== `origin/${branch}`) {
     return { ok: false, message: `${branch} tracks ${upstream}. Expected origin/${branch} or no upstream before first push.` };
   }
-  if (!isAncestor("origin/dev", "HEAD")) {
-    return { ok: false, message: "origin/dev is not an ancestor of HEAD. Start the task from origin/dev." };
+  if (!isAncestor(acceptedBaseRef(), "HEAD")) {
+    return { ok: false, message: `${acceptedBaseRef()} is not an ancestor of HEAD. Start the task from ${acceptedBaseRef()}.` };
   }
 
   return { ok: true };
@@ -555,18 +556,18 @@ function validateBranchReuse() {
         taskStartGuidance(),
     };
   }
-  const currentDev = git("rev-parse", "origin/dev");
+  const currentAcceptedBase = git("rev-parse", acceptedBaseRef());
   const freshStartedBranch =
     marker?.mode === "new" &&
     marker?.base &&
-    isAncestor(marker.base, currentDev) &&
+    isAncestor(marker.base, currentAcceptedBase) &&
     !upstream &&
     !remoteBranchKnown(branch);
-  if (remoteBranchAccepted(branch) || (isAncestor("HEAD", "origin/dev") && !freshStartedBranch)) {
+  if (remoteBranchAccepted(branch) || (isAncestor("HEAD", acceptedBaseRef()) && !freshStartedBranch)) {
     return {
       ok: false,
       message:
-        `Bright OS refuses to continue ${branch} because it is already included in origin/dev.\n\n` +
+        `Bright OS refuses to continue ${branch} because it is already included in ${acceptedBaseRef()}.\n\n` +
         taskStartGuidance(),
     };
   }
@@ -589,7 +590,7 @@ function validateTaskMarker(marker, branch) {
     return { ok: false, message: `Bright OS task marker mode ${marker.mode || "(missing)"} is not valid for project-file writes.` };
   }
   if (!/^[0-9a-f]{40}$/.test(marker.base ?? "")) {
-    return { ok: false, message: "Bright OS task marker has no valid origin/dev base; use the official task starter or follow-up command." };
+    return { ok: false, message: `Bright OS task marker has no valid ${acceptedBaseRef()} base; use the official task starter or follow-up command.` };
   }
   if (!marker.createdAt || Number.isNaN(Date.parse(marker.createdAt))) {
     return { ok: false, message: "Bright OS task marker has no valid creation timestamp; use the official task starter or follow-up command." };
@@ -626,7 +627,7 @@ function validatePushUpdate(line, currentBranchName = "", { isAcceptedRemote = (
     throw new Error(`Push ref mismatch: ${localRef} must push to the same remote ref, got ${remoteRef}`);
   }
   if (remoteSha && remoteSha !== ZERO_SHA && isAcceptedRemote(remoteSha)) {
-    throw new Error(`${remoteRef} is already included in origin/dev. Start a new task branch instead of reusing an accepted branch.`);
+    throw new Error(`${remoteRef} is already included in ${acceptedBaseRef()}. Start a new task branch instead of reusing an accepted branch.`);
   }
 }
 
@@ -643,6 +644,19 @@ function taskWorktreeParent(root) {
   return path.basename(parent) === "bright-os-worktrees" ? parent : path.resolve(root, "..", "bright-os-worktrees");
 }
 
+function acceptedBaseBranch() {
+  return process.env.BRIGHT_OS_ACCEPT_BASE || DEFAULT_ACCEPT_BASE_BRANCH;
+}
+
+function acceptedBaseRef() {
+  return `origin/${acceptedBaseBranch()}`;
+}
+
+function acceptedBaseFetchRefspec() {
+  const branch = acceptedBaseBranch();
+  return `+refs/heads/${branch}:refs/remotes/origin/${branch}`;
+}
+
 function dependencySourceRoot(root) {
   const parent = path.dirname(root);
   if (path.basename(parent) === "bright-os-worktrees") {
@@ -654,7 +668,7 @@ function dependencySourceRoot(root) {
 
 function findOpenTaskForThread(parent, threadId, branchToCreate, isAccepted = taskPath => {
   const head = gitMaybeIn(taskPath, "rev-parse", "HEAD");
-  return head ? isAncestor(head, "origin/dev") : true;
+  return head ? isAncestor(head, acceptedBaseRef()) : true;
 }) {
   if (!threadId || !fs.existsSync(parent)) return null;
   for (const entry of fs.readdirSync(parent, { withFileTypes: true })) {
@@ -837,7 +851,7 @@ function isSensitivePath(file) {
   return PROTECTED_PATH_RE.test(file);
 }
 
-function classifyDelivery(files, { base = "origin/dev", head = "HEAD", branch = currentBranch() } = {}) {
+function classifyDelivery(files, { base = acceptedBaseRef(), head = "HEAD", branch = currentBranch() } = {}) {
   const paths = { blocked: [], docs: [], infra: [], runtime: [], unknown: [] };
   for (const file of files) paths[deliveryClassForFile(file)].push(file);
 
@@ -849,7 +863,7 @@ function classifyDelivery(files, { base = "origin/dev", head = "HEAD", branch = 
         ? DELIVERY_CLASS.RUNTIME_PREVIEW
         : DELIVERY_CLASS.INFRA_DOCS;
   const requiresPreview = deliveryClass === DELIVERY_CLASS.RUNTIME_PREVIEW;
-  const requiresDevDeploy = requiresPreview;
+  const requiresDevDeploy = false;
   const autoMerge = deliveryClass === DELIVERY_CLASS.INFRA_DOCS;
 
   return {
@@ -893,6 +907,13 @@ function deliveryClassForFile(file) {
       "deploy/scripts/accept-preview.sh",
       "deploy/scripts/accepted-preview-branches.mjs",
       "deploy/scripts/ci-ssh-complete-accepted-previews.sh",
+      "deploy/scripts/ci-ssh-deploy.sh",
+      "deploy/scripts/ci-ssh-promote-deployment.sh",
+      "deploy/scripts/ci-ssh-release-slot.sh",
+      "deploy/scripts/deploy-branch.sh",
+      "deploy/scripts/detect-native-apk-change.mjs",
+      "deploy/scripts/promote-accepted-deployment.sh",
+      "deploy/scripts/promote-deployment.mjs",
     ].includes(file)
   ) {
     return "infra";
@@ -984,8 +1005,8 @@ function previewUrlForSlot(slot) {
   return `https://${env.domain}`;
 }
 
-function diffFromDev() {
-  return git("diff", "--name-only", "origin/dev...HEAD")
+function diffFromAcceptedBase() {
+  return git("diff", "--name-only", `${acceptedBaseRef()}...HEAD`)
     .split("\n")
     .map((line) => line.trim())
     .filter(Boolean);
@@ -993,19 +1014,19 @@ function diffFromDev() {
 
 function diffFromTaskBase() {
   const marker = readTaskMarker();
-  const base = marker?.base && gitMaybe("rev-parse", "--verify", `${marker.base}^{commit}`) ? marker.base : "origin/dev";
+  const base = marker?.base && gitMaybe("rev-parse", "--verify", `${marker.base}^{commit}`) ? marker.base : acceptedBaseRef();
   return (gitMaybe("diff", "--name-only", `${base}...HEAD`) ?? "")
     .split("\n")
     .map((line) => line.trim())
     .filter(Boolean);
 }
 
-function fetchDev() {
-  git("fetch", "origin", "+refs/heads/dev:refs/remotes/origin/dev");
+function fetchAcceptedBase() {
+  git("fetch", "origin", acceptedBaseFetchRefspec());
 }
 
-function fetchDevAndBranch(branch) {
-  git("fetch", "origin", "+refs/heads/dev:refs/remotes/origin/dev", `+refs/heads/${branch}:refs/remotes/origin/${branch}`);
+function fetchAcceptedBaseAndBranch(branch) {
+  git("fetch", "origin", acceptedBaseFetchRefspec(), `+refs/heads/${branch}:refs/remotes/origin/${branch}`);
 }
 
 function remoteBranchExists(branch) {
@@ -1015,7 +1036,7 @@ function remoteBranchExists(branch) {
 function remoteBranchAccepted(branch) {
   const remote = `origin/${branch}`;
   if (!remoteBranchKnown(branch)) return false;
-  return isAncestor(remote, "origin/dev");
+  return isAncestor(remote, acceptedBaseRef());
 }
 
 function remoteBranchKnown(branch) {
@@ -1089,13 +1110,13 @@ function ensureInfraDocsPr(branch) {
   const result = spawnSync("deploy/scripts/accept-preview.sh", [branch], {
     cwd: git("rev-parse", "--show-toplevel"),
     stdio: "inherit",
-    env: { ...process.env, BRIGHT_OS_ACCEPT_INFRA_DOCS_ONLY: "true" },
+    env: { ...process.env, BRIGHT_OS_ACCEPT_BASE: acceptedBaseBranch(), BRIGHT_OS_ACCEPT_INFRA_DOCS_ONLY: "true" },
   });
   if (result.status !== 0) throw new Error(`Failed to create or enable infra/docs PR for ${branch}.`);
 }
 
 function findInfraDocsPr(branch, head) {
-  const prs = runJson(["gh", "pr", "list", "--base", "dev", "--head", branch, "--state", "all", "--json", "number,url,state,headRefOid,labels,mergedAt"]);
+  const prs = runJson(["gh", "pr", "list", "--base", acceptedBaseBranch(), "--head", branch, "--state", "all", "--json", "number,url,state,headRefOid,labels,mergedAt"]);
   return prs.find((pr) =>
     pr.headRefOid === head &&
     Array.isArray(pr.labels) &&

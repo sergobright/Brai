@@ -8,6 +8,7 @@ const targetBranch = required(args, "target-branch");
 const targetCommit = required(args, "target-commit");
 const deployedAtUtc = args["deployed-at"] || new Date().toISOString();
 const ledgerOnly = args["ledger-only"] === "true";
+const recordProductionRelease = args["record-production-release"] !== "false";
 const target = new BrightOsStore(required(args, "target-db"));
 let source = null;
 
@@ -20,8 +21,7 @@ try {
   );
   if (!sourceRecord) throw new Error(`no deployment metadata for ${sourceBranch}`);
 
-  if (targetEnvironment === "prod") {
-    if (!source) throw new Error("production promotion requires readable source deployment metadata");
+  if (targetEnvironment === "prod" && source) {
     promoteBuildVersions(source, target);
   }
 
@@ -51,7 +51,7 @@ try {
     targetEnvironment,
     releasedAtUtc: deployedAtUtc,
   });
-  recordProductionReleaseVersion(target, {
+  if (recordProductionRelease) recordProductionReleaseVersion(target, {
     sourceBranch,
     sourceCommit: sourceRecord.commit_sha,
     sourceShortChanges: sourceRecord.short_changes,
@@ -72,7 +72,7 @@ function openSourceStore(values, targetEnvironment) {
   try {
     return new BrightOsStore(sourceDb);
   } catch (error) {
-    if (targetEnvironment === "dev" && values["source-commit"]) {
+    if (canUseSourceFallback(values, targetEnvironment)) {
       console.error(`Warning: preview deployment metadata is unavailable; using branch and commit fallback. ${error.message}`);
       return null;
     }
@@ -81,7 +81,7 @@ function openSourceStore(values, targetEnvironment) {
 }
 
 function fallbackSourceRecord(values, sourceBranch, targetEnvironment) {
-  if (targetEnvironment !== "dev" || !values["source-commit"]) return null;
+  if (!canUseSourceFallback(values, targetEnvironment)) return null;
   return {
     environment: "preview",
     slot: values["source-slot"] || null,
@@ -174,17 +174,23 @@ function recordAcceptedBuildVersion(
   target,
   { sourceBranch, sourceCommit, sourceShortChanges, sourceReason, sourceDetails, targetBranch, targetCommit, targetEnvironment, releasedAtUtc },
 ) {
-  if (targetEnvironment !== "dev") return;
+  if (targetEnvironment !== "dev" && !(targetEnvironment === "prod" && sourceBranch.startsWith("codex/"))) return;
+  const acceptedTargetBranch = targetEnvironment === "prod" ? sourceBranch : targetBranch;
+  const acceptedTargetCommit = targetEnvironment === "prod" ? sourceCommit : targetCommit;
   target.recordAcceptedBuildVersion({
     sourceBranch,
     sourceCommit,
     sourceShortChanges,
     sourceReason,
     sourceDetails,
-    targetBranch,
-    targetCommit,
+    targetBranch: acceptedTargetBranch,
+    targetCommit: acceptedTargetCommit,
     releasedAtUtc,
   });
+}
+
+function canUseSourceFallback(values, targetEnvironment) {
+  return Boolean(values["source-commit"] && (targetEnvironment === "dev" || (targetEnvironment === "prod" && values["source-branch"]?.startsWith("codex/"))));
 }
 
 function recordProductionReleaseVersion(

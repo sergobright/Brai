@@ -36,9 +36,13 @@ console.log(changed ? "true" : "false");
 
 function diffRange(branchName, base) {
   if (base && !/^0{40}$/.test(base)) return `${base}..HEAD`;
-  if (branchName.startsWith("codex/") && refExists("origin/dev")) return "origin/dev...HEAD";
+  if (branchName.startsWith("codex/") && refExists(acceptedBaseRef())) return `${acceptedBaseRef()}...HEAD`;
   if (branchName === "dev" || branchName === "main") return "HEAD^..HEAD";
   return refExists("HEAD^") ? "HEAD^..HEAD" : null;
+}
+
+function acceptedBaseRef() {
+  return `origin/${process.env.BRIGHT_OS_ACCEPT_BASE || "main"}`;
 }
 
 function refExists(ref) {

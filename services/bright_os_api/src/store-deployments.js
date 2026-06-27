@@ -121,7 +121,7 @@ export const deploymentMethods = {
       `)
       .all();
     const latest = acceptedBuilds.at(-1);
-    if (!latest) throw new Error('cannot create production release without accepted dev builds');
+    if (!latest) throw new Error('cannot create production release without accepted builds');
 
     const previousRelease = this.db
       .prepare(`
@@ -146,10 +146,10 @@ export const deploymentMethods = {
       version,
       shortChanges: usefulChanges(sourceShortChanges) || `Production release ${version}.`,
       detailedChanges: [
-        `Included accepted dev builds: ${referencedBuilds.map((row) => `${row.version}: ${row.short_changes}`).join('; ')}.`,
+        `Included accepted builds: ${referencedBuilds.map((row) => `${row.version}: ${row.short_changes}`).join('; ')}.`,
         sourceChanges,
       ].filter(Boolean).join(' '),
-      reason: usefulReason(sourceReason) || 'Needed to publish accepted dev changes to production after validation.',
+      reason: usefulReason(sourceReason) || 'Needed to publish accepted changes to production after validation.',
       releasedAtUtc,
       sourceBranch,
       sourceCommit,
