@@ -13,15 +13,27 @@ target path segment selects the connector handler.
 - **THEN** the API returns `404`
 - **AND** no inbox data is mutated
 
-### Requirement: Inbound Inbox receives text and image
+### Requirement: Inbound Inbox receives text and attachments
 Bright OS SHALL support `POST /v1/in/inbox` for the first inbound connector.
 
 #### Scenario: Inbox payload is received
-- **WHEN** an external app sends text and a base64 image with the inbound Bearer token
+- **WHEN** an external app sends text with the inbound Bearer token
 - **THEN** the text is stored in the Inbox explanation field
-- **AND** the image is saved as an attachment
-- **AND** the attachment path is stored in the Inbox attachment links
+- **AND** optional description content is stored in the Inbox description field
+- **AND** optional legacy `image_base64`/`image_mime` or `attachments[]` files are saved as attachments
+- **AND** each attachment path is stored in the Inbox attachment links
 - **AND** the Inbox title is generated through the local Codex CLI or local fallback
+
+#### Scenario: Inbox payload includes inbound metadata
+- **WHEN** an external app sends optional `source`, `source_key`, `response_required`, `record_type_id`, or `idempotency_key`
+- **THEN** supported metadata is stored on the Inbox record
+- **AND** repeated requests with the same `idempotency_key` do not create duplicate Inbox records
+- **AND** inbound API accepts record type `1` for human API inbound and `2` for agent API inbound
+
+#### Scenario: Inbox payload asks to attach to the previous message
+- **WHEN** an external app sends text that asks to attach the data to the previous message
+- **THEN** the API still creates a new Inbox record
+- **AND** the new record stores a reference to the previous Inbox record from the same source key or source
 
 #### Scenario: Inbound request is unauthorized
 - **WHEN** an inbound request omits the valid inbound Bearer token

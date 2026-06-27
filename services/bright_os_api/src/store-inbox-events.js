@@ -41,7 +41,64 @@ export const inboxEventMethods = {
   }
 ,
 
-  createInboundInboxItem({ eventId, inboxId, title, explanationText, attachmentLinks, source, nowIso }) {
+  latestInboxIdForInbound({ source, sourceKey }) {
+    const cleanSourceKey = sanitizeText(sourceKey);
+    if (cleanSourceKey) {
+      return this.db
+        .prepare(
+          `
+            SELECT id FROM inbox
+            WHERE deleted_at_utc IS NULL
+              AND source_key = ?
+            ORDER BY created_at_utc DESC, updated_at_utc DESC
+            LIMIT 1
+          `
+        )
+        .get(cleanSourceKey)?.id ?? null;
+    }
+
+    const cleanSource = sanitizeText(source);
+    if (cleanSource) {
+      return this.db
+        .prepare(
+          `
+            SELECT id FROM inbox
+            WHERE deleted_at_utc IS NULL
+              AND source = ?
+            ORDER BY created_at_utc DESC, updated_at_utc DESC
+            LIMIT 1
+          `
+        )
+        .get(cleanSource)?.id ?? null;
+    }
+
+    return this.db
+      .prepare(
+        `
+          SELECT id FROM inbox
+          WHERE deleted_at_utc IS NULL
+          ORDER BY created_at_utc DESC, updated_at_utc DESC
+          LIMIT 1
+        `
+      )
+      .get()?.id ?? null;
+  }
+,
+
+  createInboundInboxItem({
+    eventId,
+    inboxId,
+    title,
+    descriptionText,
+    explanationText,
+    attachmentLinks,
+    source,
+    sourceKey,
+    responseRequired,
+    relatedInboxId,
+    recordTypeId,
+    nowIso
+  }) {
     const receivedAt = nowIso ?? new Date().toISOString();
     const deviceId = 'inbound-api';
 
@@ -64,9 +121,14 @@ export const inboxEventMethods = {
         occurred_at_utc: receivedAt,
         payload: {
           title,
+          description_md: descriptionText,
           explanation_text: explanationText,
           attachment_links: attachmentLinks,
-          source
+          source,
+          source_key: sourceKey,
+          response_required: responseRequired === true,
+          related_inbox_id: relatedInboxId,
+          record_type_id: recordTypeId
         }
       }, receivedAt);
 
@@ -337,6 +399,10 @@ export const inboxEventMethods = {
           title,
           description_text: normalizeMarkdownSource(payload.description_md ?? item?.description_text ?? ''),
           source: sanitizeText(payload.source) ?? item?.source ?? '',
+          source_key: sanitizeText(payload.source_key) ?? item?.source_key ?? '',
+          response_required: normalizeBoolean(payload.response_required) ? 1 : 0,
+          related_inbox_id: sanitizeText(payload.related_inbox_id) ?? item?.related_inbox_id ?? null,
+          record_type_id: normalizeInboxRecordTypeId(payload.record_type_id, item?.record_type_id ?? 4),
           item_date: item?.item_date ?? null,
           author: item?.author ?? '',
           preliminary_section: item?.preliminary_section ?? '',
@@ -381,14 +447,19 @@ export const inboxEventMethods = {
       .prepare(
         `
           INSERT INTO inbox (
-            id, title, description_text, source, item_date, author, preliminary_section,
+            id, title, description_text, source, source_key, response_required,
+            related_inbox_id, record_type_id, item_date, author, preliminary_section,
             urgency, attachment_links_json, explanation_text, normalization_text,
             is_normalized, created_at_utc, updated_at_utc, deleted_at_utc, last_event_id
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT(id) DO UPDATE SET
             title = excluded.title,
             description_text = excluded.description_text,
             source = excluded.source,
+            source_key = excluded.source_key,
+            response_required = excluded.response_required,
+            related_inbox_id = excluded.related_inbox_id,
+            record_type_id = excluded.record_type_id,
             item_date = excluded.item_date,
             author = excluded.author,
             preliminary_section = excluded.preliminary_section,
@@ -408,6 +479,10 @@ export const inboxEventMethods = {
         item.title,
         item.description_text ?? '',
         item.source ?? '',
+        item.source_key ?? '',
+        item.response_required === 1 ? 1 : 0,
+        item.related_inbox_id ?? null,
+        item.record_type_id ?? 4,
         item.item_date ?? null,
         item.author ?? '',
         item.preliminary_section ?? '',
@@ -441,4 +516,13 @@ function normalizeStringList(value, fallbackJson = '[]') {
     result.push(text);
   }
   return result;
+}
+
+function normalizeBoolean(value) {
+  return value === true || value === 1 || value === 'true';
+}
+
+function normalizeInboxRecordTypeId(value, fallback = 4) {
+  const number = Number(value);
+  return Number.isInteger(number) && number >= 1 && number <= 4 ? number : fallback;
 }

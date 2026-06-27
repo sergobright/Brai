@@ -22,6 +22,8 @@ const PNG_BYTES = Buffer.from([
   0x42, 0x60, 0x82
 ]);
 const IMAGE_BASE64 = PNG_BYTES.toString('base64');
+const PDF_BYTES = Buffer.from('%PDF-1.4\n1 0 obj\n<<>>\nendobj\n%%EOF\n');
+const TEXT_BYTES = Buffer.from('hello inbound file\n', 'utf8');
 
 test('inbound inbox endpoint returns a bearer-protected handshake', async () => {
   const fixture = await createFixture(['2026-06-27T10:00:00.000Z']);
@@ -62,6 +64,10 @@ test('inbound inbox POST creates an inbox row with explanation and attachment li
     assert.equal(response.body.state.inbox[0].title, 'Снимок идеи');
     assert.equal(response.body.state.inbox[0].explanation_text, 'Положить это во входящие');
     assert.equal(response.body.state.inbox[0].source, 'telegram');
+    assert.equal(response.body.state.inbox[0].source_key, '');
+    assert.equal(response.body.state.inbox[0].response_required, false);
+    assert.equal(response.body.state.inbox[0].related_inbox_id, null);
+    assert.equal(response.body.state.inbox[0].record_type_id, 1);
     assert.equal(response.body.state.inbox[0].attachment_links.length, 1);
     assert.match(response.body.state.inbox[0].attachment_links[0], /^\/v1\/inbox\/attachments\/.+\.png$/);
     assert.ok(fs.existsSync(path.join(storageRoot, path.basename(response.body.state.inbox[0].attachment_links[0]))));
@@ -87,6 +93,107 @@ test('inbound inbox POST creates an inbox row with explanation and attachment li
   } finally {
     await fixture.close();
     fs.rmSync(storageRoot, { recursive: true, force: true });
+  }
+});
+
+test('inbound inbox accepts multiple attachments, description content, and metadata', async () => {
+  const storageRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'bright-inbound-files-'));
+  const fixture = await createFixture(['2026-06-27T10:00:00.000Z'], {
+    inboundStorageRoot: storageRoot,
+    inboundTitleGenerator: async () => 'Пакет файлов'
+  });
+
+  try {
+    const response = await inboundRequest(fixture.url, '/v1/in/inbox', {
+      method: 'POST',
+      body: JSON.stringify({
+        text: 'Принять пачку вложений',
+        description: { kind: 'payload', count: 2 },
+        attachments: [
+          { base64: PDF_BYTES.toString('base64'), mime: 'application/pdf', name: 'brief.pdf' },
+          { base64: TEXT_BYTES.toString('base64'), mime: 'text/plain', name: 'note.txt' }
+        ],
+        source: 'agent-api',
+        source_key: 'agent-42',
+        response_required: true,
+        record_type_id: 2
+      })
+    });
+
+    const item = response.body.state.inbox[0];
+    assert.equal(response.status, 201);
+    assert.equal(item.title, 'Пакет файлов');
+    assert.equal(item.description_md, '{\n  "kind": "payload",\n  "count": 2\n}');
+    assert.equal(item.source, 'agent-api');
+    assert.equal(item.source_key, 'agent-42');
+    assert.equal(item.response_required, true);
+    assert.equal(item.record_type_id, 2);
+    assert.equal(item.attachment_links.length, 2);
+    assert.match(item.attachment_links[0], /\.pdf$/);
+    assert.match(item.attachment_links[1], /\.txt$/);
+
+    const pdf = await fetch(`${fixture.url}${item.attachment_links[0]}`, {
+      headers: { authorization: `Bearer ${TOKEN}` }
+    });
+    assert.equal(pdf.headers.get('content-type'), 'application/pdf');
+    assert.deepEqual(Buffer.from(await pdf.arrayBuffer()), PDF_BYTES);
+  } finally {
+    await fixture.close();
+    fs.rmSync(storageRoot, { recursive: true, force: true });
+  }
+});
+
+test('inbound inbox links attach-to-previous messages to the previous inbox item', async () => {
+  const fixture = await createFixture([
+    '2026-06-27T10:00:00.000Z',
+    '2026-06-27T10:01:00.000Z'
+  ], {
+    inboundTitleGenerator: async (text) => text.includes('первую') ? 'Первая запись' : 'Дополнение'
+  });
+
+  try {
+    const first = await inboundRequest(fixture.url, '/v1/in/inbox', {
+      method: 'POST',
+      body: JSON.stringify({
+        text: 'создай первую запись',
+        source: 'telegram',
+        source_key: 'chat-1'
+      })
+    });
+    const second = await inboundRequest(fixture.url, '/v1/in/inbox', {
+      method: 'POST',
+      body: JSON.stringify({
+        text: 'прикрепи эти данные к предыдущему сообщению',
+        source: 'telegram',
+        source_key: 'chat-1'
+      })
+    });
+
+    assert.equal(first.status, 201);
+    assert.equal(second.status, 201);
+    assert.equal(second.body.state.inbox[0].related_inbox_id, first.body.inbox_id);
+  } finally {
+    await fixture.close();
+  }
+});
+
+test('inbound inbox rejects unsupported API record types', async () => {
+  const fixture = await createFixture(['2026-06-27T10:00:00.000Z']);
+
+  try {
+    const response = await inboundRequest(fixture.url, '/v1/in/inbox', {
+      method: 'POST',
+      body: JSON.stringify({
+        text: 'Не принимать неверный тип',
+        record_type_id: 4
+      })
+    });
+
+    assert.equal(response.status, 400);
+    assert.equal(response.body.error, 'invalid_record_type');
+    assert.equal(tableCount(fixture, 'inbox'), 0);
+  } finally {
+    await fixture.close();
   }
 });
 

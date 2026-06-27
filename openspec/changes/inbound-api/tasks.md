@@ -1,4 +1,5 @@
 - [x] 1.1 Add the universal `/v1/in/:target` API route and inbound Bearer auth.
 - [x] 1.2 Implement the first `inbox` target.
 - [x] 1.3 Cover handshake, receive, auth, target, image, and title fallback cases with API tests.
-- [ ] 1.4 Archive the OpenSpec change after review/merge.
+- [x] 1.4 Expand inbound Inbox payloads to multiple whitelisted attachments, description content, source metadata, response-required flag, previous-record references, and record types.
+- [ ] 1.5 Archive the OpenSpec change after review/merge.

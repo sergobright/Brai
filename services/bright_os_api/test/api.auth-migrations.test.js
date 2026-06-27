@@ -130,6 +130,10 @@ test('migration adds inbox entity schema and metadata', async () => {
         'title',
         'description_text',
         'source',
+        'source_key',
+        'response_required',
+        'related_inbox_id',
+        'record_type_id',
         'item_date',
         'author',
         'preliminary_section',
@@ -152,6 +156,9 @@ test('migration adds inbox entity schema and metadata', async () => {
       .map((row) => row.name);
     assert.ok(indexes.includes('idx_inbox_item_date'));
     assert.ok(indexes.includes('idx_inbox_normalized_updated'));
+    assert.ok(indexes.includes('idx_inbox_source_key_created'));
+    assert.ok(indexes.includes('idx_inbox_record_type_created'));
+    assert.ok(indexes.includes('idx_inbox_related'));
 
     const items = fixture.store.db
       .prepare("SELECT id FROM items WHERE id IN ('activities', 'inbox') ORDER BY id")
@@ -173,7 +180,16 @@ test('migration adds inbox entity schema and metadata', async () => {
       fixture.store.db.prepare('SELECT description FROM schema_migrations WHERE version = 33').get().description,
       'add inbox offline event log'
     );
+    assert.equal(
+      fixture.store.db.prepare('SELECT description FROM schema_migrations WHERE version = 34').get().description,
+      'add inbox inbound metadata and record types'
+    );
     assert.ok(fixture.store.db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'inbox_events'").get());
+    assert.ok(fixture.store.db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'inbox_record_types'").get());
+    assert.deepEqual(
+      fixture.store.db.prepare('SELECT id FROM inbox_record_types ORDER BY id').all().map((row) => row.id),
+      [1, 2, 3, 4]
+    );
     assert.equal(
       fixture.store.db.prepare("SELECT title FROM table_descriptions WHERE table_name = 'inbox_events'").get().title,
       'События входящих'
