@@ -31,6 +31,13 @@ for (const [mime, type] of ATTACHMENT_TYPES) type.mime = mime;
 const CONTENT_TYPES_BY_EXTENSION = new Map(
   [...ATTACHMENT_TYPES.values()].map((type) => [type.extension, type.mime]).filter(([extension]) => extension)
 );
+const INBOX_TITLE_HANDLER_ID = 'inbound.inbox.title_generator';
+const DEFAULT_TITLE_PROMPT_TEMPLATE = [
+  'Сгенерируй короткий русский заголовок для входящего сообщения.',
+  'Верни только заголовок, без Markdown, кавычек и пояснений.',
+  '',
+  '{{text}}'
+].join('\n');
 
 export function inboundPathTarget(pathname) {
   const prefix = '/v1/in/';
@@ -94,7 +101,13 @@ export async function receiveInboxInbound({
       }
       attachmentLinks.push(`/v1/inbox/attachments/${fileName}`);
     });
-    const title = await generateTitle(text, { codexBin, codexModel, codexTimeoutMs, titleGenerator });
+    const title = await generateTitle(text, {
+      handler: store.getHandler(INBOX_TITLE_HANDLER_ID),
+      codexBin,
+      codexModel,
+      codexTimeoutMs,
+      titleGenerator
+    });
     store.createInboundInboxItem({
       eventId,
       inboxId,
@@ -262,12 +275,17 @@ function throwStatus(message, status) {
   throw error;
 }
 
-async function generateTitle(text, { codexBin, codexModel, codexTimeoutMs, titleGenerator }) {
+async function generateTitle(text, { handler, codexBin, codexModel, codexTimeoutMs, titleGenerator }) {
   const fallback = fallbackTitle(text);
   try {
     const title = titleGenerator
       ? await titleGenerator(text)
-      : await codexTitle(text, codexBin, codexModel, codexTimeoutMs);
+      : await codexTitle(text, {
+        codexBin,
+        codexModel: codexModel ?? optionalText(handler?.llm_model),
+        promptTemplate: optionalBodyText(handler?.llm_prompt_template) ?? DEFAULT_TITLE_PROMPT_TEMPLATE,
+        timeoutMs: Number.isFinite(codexTimeoutMs) ? codexTimeoutMs : handler?.llm_timeout_ms
+      });
     return cleanTitle(title) || fallback;
   } catch {
     return fallback;
@@ -289,15 +307,11 @@ function cleanTitle(value) {
     .trim() ?? '';
 }
 
-function codexTitle(text, codexBin = 'codex', codexModel = null, timeoutMs = 3000) {
+function codexTitle(text, { codexBin = 'codex', codexModel = null, promptTemplate, timeoutMs = 3000 } = {}) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bright-inbound-title-'));
   const outputPath = path.join(tmp, 'title.txt');
-  const prompt = [
-    'Сгенерируй короткий русский заголовок для входящего сообщения.',
-    'Верни только заголовок, без Markdown, кавычек и пояснений.',
-    '',
-    text
-  ].join('\n');
+  const prompt = renderPrompt(promptTemplate ?? DEFAULT_TITLE_PROMPT_TEMPLATE, text);
+  const timeout = Number.isFinite(timeoutMs) ? timeoutMs : 3000;
 
   return new Promise((resolve, reject) => {
     let settled = false;
@@ -320,7 +334,7 @@ function codexTitle(text, codexBin = 'codex', codexModel = null, timeoutMs = 300
     const timer = setTimeout(() => {
       child.kill('SIGKILL');
       finish(reject, new Error('codex_title_timeout'));
-    }, timeoutMs);
+    }, timeout);
 
     child.once('error', (error) => finish(reject, error));
     child.once('close', (code) => {
@@ -340,6 +354,10 @@ function codexTitle(text, codexBin = 'codex', codexModel = null, timeoutMs = 300
       callback(value);
     }
   });
+}
+
+function renderPrompt(template, text) {
+  return template.includes('{{text}}') ? template.replaceAll('{{text}}', text) : `${template.trim()}\n\n${text}`;
 }
 
 function compactTimestamp(date) {

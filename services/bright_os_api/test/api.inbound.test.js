@@ -271,8 +271,14 @@ for (let i = 0; i < expected.length; i += 1) {
 }
 const outputIndex = args.indexOf('--output-last-message');
 if (outputIndex < 0 || !args[outputIndex + 1]) process.exit(3);
-process.stdin.resume();
-process.stdin.on('end', () => fs.writeFileSync(args[outputIndex + 1], 'Codex title'));
+let prompt = '';
+process.stdin.setEncoding('utf8');
+process.stdin.on('data', (chunk) => { prompt += chunk; });
+process.stdin.on('end', () => {
+  if (!prompt.includes('CUSTOM DB PROMPT')) process.exit(4);
+  if (!prompt.includes('Проверить генерацию заголовка через Codex CLI')) process.exit(5);
+  fs.writeFileSync(args[outputIndex + 1], 'Codex title');
+});
 `);
   fs.chmodSync(fakeCodex, 0o700);
   const fixture = await createFixture(['2026-06-27T10:00:00.000Z'], {
@@ -282,6 +288,14 @@ process.stdin.on('end', () => fs.writeFileSync(args[outputIndex + 1], 'Codex tit
   });
 
   try {
+    fixture.store.db
+      .prepare(`
+        UPDATE handlers
+        SET llm_prompt_template = ?
+        WHERE id = 'inbound.inbox.title_generator'
+      `)
+      .run('CUSTOM DB PROMPT\n\n{{text}}');
+
     const response = await inboundRequest(fixture.url, '/v1/in/inbox', {
       method: 'POST',
       body: JSON.stringify({

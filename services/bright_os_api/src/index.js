@@ -15,8 +15,8 @@ const inboundStorageRoot =
   process.env.BRIGHT_OS_INBOUND_STORAGE_ROOT ?? path.join(path.dirname(dbPath), 'inbox-attachments');
 const codexBin = process.env.BRIGHT_OS_CODEX_BIN ?? 'codex';
 const codexModel = process.env.BRIGHT_OS_CODEX_MODEL?.trim() || null;
-const parsedCodexTimeoutMs = Number(process.env.BRIGHT_OS_CODEX_TIMEOUT_MS ?? 3000);
-const codexTimeoutMs = Number.isFinite(parsedCodexTimeoutMs) ? parsedCodexTimeoutMs : 3000;
+const parsedCodexTimeoutMs = Number(process.env.BRIGHT_OS_CODEX_TIMEOUT_MS);
+const codexTimeoutMs = Number.isFinite(parsedCodexTimeoutMs) ? parsedCodexTimeoutMs : null;
 const releaseDir =
   process.env.BRIGHT_OS_RELEASE_DIR ?? path.resolve(serviceRoot, '..', '..', 'deploy', 'releases');
 

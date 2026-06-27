@@ -242,15 +242,29 @@ description просит прикрепить или добавить данны
 
 Handler генерирует `inbox.title` из `text`.
 
+Текущий LLM-обработчик зарегистрирован в SQLite `handlers`:
+
+| Поле | Значение |
+| --- | --- |
+| `id` | `inbound.inbox.title_generator` |
+| `target` | `inbox` |
+| `kind` | `inbound_llm_title_generator` |
+| `source_module` | `services/bright_os_api/src/inbound.js` |
+
+В этой строке хранятся описание, условия срабатывания/пропуска,
+взаимодействия, side effects, `llm_provider`, `llm_model`,
+`llm_prompt_template`, `llm_timeout_ms` и fallback behavior.
+
 Runtime-настройки:
 
 | Env | Назначение |
 | --- | --- |
 | `BRIGHT_OS_CODEX_BIN` | Путь к Codex CLI. |
-| `BRIGHT_OS_CODEX_MODEL` | Модель Codex CLI. |
-| `BRIGHT_OS_CODEX_TIMEOUT_MS` | Timeout генерации заголовка. |
+| `BRIGHT_OS_CODEX_MODEL` | Runtime override модели Codex CLI; если не задан, используется `handlers.llm_model`. |
+| `BRIGHT_OS_CODEX_TIMEOUT_MS` | Runtime override timeout генерации заголовка; если не задан, используется `handlers.llm_timeout_ms`. |
 
-Prompt:
+Prompt хранится в `handlers.llm_prompt_template`; `{{text}}` заменяется на
+входной `text`. Текущий template:
 
 ```text
 Сгенерируй короткий русский заголовок для входящего сообщения.
@@ -285,6 +299,9 @@ Prompt:
 ## Правила изменения
 
 При изменении этого API contract обновляй эту страницу в том же commit.
+
+При создании или изменении inbound/runtime handler обязательно обновляй
+соответствующую строку SQLite `handlers` в миграции/seed-коде.
 
 Обновляй релевантный раздел, если меняется что-то из этого:
 
