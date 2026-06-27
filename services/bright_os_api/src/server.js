@@ -33,7 +33,7 @@ export function createBrightOsServer({
   inboundStorageRoot = path.join(path.dirname(dbPath), 'inbox-attachments'),
   codexBin = 'codex',
   codexModel = null,
-  codexTimeoutMs = 3000,
+  codexTimeoutMs = null,
   inboundTitleGenerator = null,
   now = () => new Date(),
   logger = console

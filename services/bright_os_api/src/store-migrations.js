@@ -153,6 +153,7 @@ export const migrationMethods = {
 
     this.ensureBuildVersionRefs();
     this.ensureInboxSchema();
+    this.ensureHandlerSchema();
     this.ensureTableDescriptions();
 
     if (!this.hasMigration(25)) {
@@ -201,6 +202,10 @@ export const migrationMethods = {
 
     if (!this.hasMigration(34)) {
       this.recordMigration(34, 'add inbox inbound metadata and record types');
+    }
+
+    if (!this.hasMigration(35)) {
+      this.recordMigration(35, 'add handler registry');
     }
   }
 ,
@@ -410,6 +415,7 @@ export const migrationMethods = {
       ['inbox', 'Входящие', 'Список входящих материалов.', 'Хранит входящие материалы Bright OS до нормализации: заголовок, описание, источник, ключ источника, требование ответа, связь с предыдущим входящим, тип записи, дату, автора, предварительный раздел, срочность, ссылки на вложения, пояснение, текст нормализации и признак нормализации.'],
       ['inbox_events', 'События входящих', 'Журнал изменений входящих.', 'Хранит клиентские события по входящим для offline-first синхронизации, аудита и восстановления текущей таблицы inbox.'],
       ['inbox_record_types', 'Типы входящих', 'Справочник типов входящих.', 'Хранит разрешённые типы записей Inbox: входящее от человека по API, входящее от агента по API, внутреннее входящее от агента и добавленное человеком из интерфейса.'],
+      ['handlers', 'Обработчики', 'Реестр runtime-обработчиков.', 'Хранит полный реестр обработчиков Bright OS: stable id, target, тип, статус, подробное описание, условия срабатывания, входы, выходы, взаимодействия, side effects, используемый LLM provider/model, prompt template, timeout, fallback и source module. Каждое добавление или изменение обработчика должно обновлять соответствующую строку.'],
       ['items', 'Сущности', 'Реестр рабочих сущностей.', 'Хранит главные рабочие сущности Bright OS как стабильные id для схемы, API и технических решений.'],
       ['schema_migrations', 'Миграции', 'Журнал изменений схемы.', 'Хранит версии уже примененных миграций SQLite, время применения и краткое описание.'],
       ['sqlite_sequence', 'Счётчики', 'Служебные счетчики SQLite.', 'Внутренняя таблица SQLite для AUTOINCREMENT-счетчиков. Это не бизнес-данные Bright OS.'],
@@ -570,6 +576,89 @@ export const migrationMethods = {
     this.db
       .prepare('INSERT INTO items (id, created_at_utc) VALUES (?, ?) ON CONFLICT(id) DO NOTHING')
       .run('inbox', now);
+  }
+,
+
+  ensureHandlerSchema() {
+    const now = new Date().toISOString();
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS handlers (
+        id TEXT PRIMARY KEY,
+        target TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        status TEXT NOT NULL,
+        title TEXT NOT NULL,
+        summary TEXT NOT NULL,
+        trigger_description TEXT NOT NULL,
+        conditions_description TEXT NOT NULL,
+        input_description TEXT NOT NULL,
+        output_description TEXT NOT NULL,
+        interactions_description TEXT NOT NULL,
+        side_effects_description TEXT NOT NULL,
+        llm_provider TEXT NOT NULL DEFAULT '',
+        llm_model TEXT NOT NULL DEFAULT '',
+        llm_prompt_template TEXT NOT NULL DEFAULT '',
+        llm_timeout_ms INTEGER,
+        fallback_description TEXT NOT NULL DEFAULT '',
+        source_module TEXT NOT NULL,
+        updated_at_utc TEXT NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_handlers_target_status
+      ON handlers (target, status);
+    `);
+
+    this.db.prepare(`
+      INSERT INTO handlers (
+        id, target, kind, status, title, summary, trigger_description,
+        conditions_description, input_description, output_description,
+        interactions_description, side_effects_description, llm_provider,
+        llm_model, llm_prompt_template, llm_timeout_ms, fallback_description,
+        source_module, updated_at_utc
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        target = excluded.target,
+        kind = excluded.kind,
+        status = excluded.status,
+        title = excluded.title,
+        summary = excluded.summary,
+        trigger_description = excluded.trigger_description,
+        conditions_description = excluded.conditions_description,
+        input_description = excluded.input_description,
+        output_description = excluded.output_description,
+        interactions_description = excluded.interactions_description,
+        side_effects_description = excluded.side_effects_description,
+        llm_provider = excluded.llm_provider,
+        llm_prompt_template = excluded.llm_prompt_template,
+        fallback_description = excluded.fallback_description,
+        source_module = excluded.source_module,
+        updated_at_utc = excluded.updated_at_utc
+    `).run(
+      'inbound.inbox.title_generator',
+      'inbox',
+      'inbound_llm_title_generator',
+      'active',
+      'Генератор заголовка входящего сообщения',
+      'Создает короткий русский заголовок для новой Inbox-записи из обязательного inbound text.',
+      'Срабатывает внутри POST /v1/in/inbox после проверки inbound Bearer token, JSON payload, обязательного text, record_type_id, вложений, idempotency key и связи с предыдущим сообщением, но до записи create-события inbox.',
+      'Запускается только для поддержанного target inbox и только при создании новой записи. Не запускается для duplicate idempotency_key, неавторизованных запросов, invalid payload, неподдержанных вложений или ошибок validation.',
+      'Получает trimmed body.text. Остальные поля inbound payload участвуют в создании Inbox-записи, но не передаются в LLM prompt.',
+      'Возвращает строку inbox.title: первая непустая строка ответа модели очищается от внешних кавычек, обрезается до 80 символов и сохраняется через inbox_events create payload.',
+      'Читает собственную строку из handlers, использует Codex CLI из BRIGHT_OS_CODEX_BIN, модель из runtime-настройки BRIGHT_OS_CODEX_MODEL при наличии, иначе llm_model из handlers, timeout из runtime BRIGHT_OS_CODEX_TIMEOUT_MS при наличии, иначе llm_timeout_ms из handlers. Результат сохраняется через store.createInboundInboxItem в inbox_events/inbox.',
+      'Создает временную директорию для output-last-message и удаляет ее после завершения. При успехе меняет только title будущей Inbox-записи; запись Inbox и файлы вложений выполняются внешним inbound handler flow.',
+      'codex-cli',
+      '',
+      [
+        'Сгенерируй короткий русский заголовок для входящего сообщения.',
+        'Верни только заголовок, без Markdown, кавычек и пояснений.',
+        '',
+        '{{text}}'
+      ].join('\n'),
+      3000,
+      'Если Codex CLI падает, возвращает пустой ответ или превышает timeout, используется локальный fallback: первые семь слов text, очищенные и обрезанные до 80 символов; если они пустые, заголовок Входящее.',
+      'services/bright_os_api/src/inbound.js',
+      now
+    );
   }
 ,
 

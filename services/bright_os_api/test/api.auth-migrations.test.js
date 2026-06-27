@@ -185,8 +185,13 @@ test('migration adds inbox entity schema and metadata', async () => {
       fixture.store.db.prepare('SELECT description FROM schema_migrations WHERE version = 34').get().description,
       'add inbox inbound metadata and record types'
     );
+    assert.equal(
+      fixture.store.db.prepare('SELECT description FROM schema_migrations WHERE version = 35').get().description,
+      'add handler registry'
+    );
     assert.ok(fixture.store.db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'inbox_events'").get());
     assert.ok(fixture.store.db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'inbox_record_types'").get());
+    assert.ok(fixture.store.db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'handlers'").get());
     assert.deepEqual(
       fixture.store.db.prepare('SELECT id FROM inbox_record_types ORDER BY id').all().map((row) => row.id),
       [1, 2, 3, 4]
@@ -195,9 +200,35 @@ test('migration adds inbox entity schema and metadata', async () => {
       fixture.store.db.prepare("SELECT title FROM table_descriptions WHERE table_name = 'inbox_events'").get().title,
       'События входящих'
     );
+    assert.equal(
+      fixture.store.db.prepare("SELECT title FROM table_descriptions WHERE table_name = 'handlers'").get().title,
+      'Обработчики'
+    );
+    const handler = fixture.store.db
+      .prepare(`
+        SELECT target, kind, trigger_description, conditions_description, llm_provider,
+          llm_prompt_template, llm_timeout_ms, source_module
+        FROM handlers
+        WHERE id = 'inbound.inbox.title_generator'
+      `)
+      .get();
+    assert.equal(handler.target, 'inbox');
+    assert.equal(handler.kind, 'inbound_llm_title_generator');
+    assert.match(handler.trigger_description, /POST \/v1\/in\/inbox/);
+    assert.match(handler.conditions_description, /duplicate idempotency_key/);
+    assert.equal(handler.llm_provider, 'codex-cli');
+    assert.match(handler.llm_prompt_template, /{{text}}/);
+    assert.equal(handler.llm_timeout_ms, 3000);
+    assert.equal(handler.source_module, 'services/bright_os_api/src/inbound.js');
 
     fixture.store.migrate();
     assert.equal(fixture.store.db.prepare("SELECT COUNT(*) AS count FROM items WHERE id = 'inbox'").get().count, 1);
+    assert.equal(
+      fixture.store.db
+        .prepare("SELECT COUNT(*) AS count FROM handlers WHERE id = 'inbound.inbox.title_generator'")
+        .get().count,
+      1
+    );
   } finally {
     await fixture.close();
   }
