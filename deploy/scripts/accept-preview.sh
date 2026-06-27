@@ -89,6 +89,13 @@ if [[ "$REQUIRES_PREVIEW" == "true" ]]; then
   run_bright_node "$ROOT/scripts/bright-task.mjs" require-preview "$BRANCH" "$HEAD_SHA"
 fi
 
+MERGED_PR_NUMBER="$(gh pr list --base "$BASE_BRANCH" --head "$BRANCH" --state merged --json number,headRefOid --jq "map(select(.headRefOid == \"$HEAD_SHA\"))[0].number // \"\"")"
+if [[ -n "$MERGED_PR_NUMBER" ]]; then
+  MERGED_PR_URL="$(gh pr view "$MERGED_PR_NUMBER" --json url --jq ".url")"
+  echo "Preview branch already accepted: $MERGED_PR_URL"
+  exit 0
+fi
+
 PR_NUMBER="$(gh pr list --base "$BASE_BRANCH" --head "$BRANCH" --state open --json number --jq ".[0].number // \"\"")"
 if [[ -z "$PR_NUMBER" ]]; then
   if [[ "$DELIVERY_CLASS" == "infra-docs" ]]; then

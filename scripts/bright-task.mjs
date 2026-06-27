@@ -321,11 +321,16 @@ function deliveryHandoff(branchArg) {
   const remoteSha = git("rev-parse", `origin/${branch}`);
   if (remoteSha !== head) throw new Error(`HEAD ${head} is not pushed to origin/${branch} (${remoteSha}). Push before handoff.`);
   if (git("status", "--porcelain").trim()) throw new Error("Working tree is not clean. Commit or remove local changes before handoff.");
-  if (!isAncestor("origin/dev", head) && !isAncestor(head, "origin/dev")) {
-    throw new Error(`origin/dev is not related to ${head} as an ancestor or accepted descendant.`);
+  const marker = readTaskMarker();
+  if (marker?.base && !isAncestor(marker.base, head)) {
+    throw new Error(`Task base ${marker.base} is not an ancestor of ${head}. Start a fresh task branch from origin/dev.`);
   }
 
-  ensureInfraDocsPr(branch);
+  let pr = findInfraDocsPr(branch, head);
+  if (pr?.state !== "MERGED") {
+    ensureInfraDocsPr(branch);
+    pr = findInfraDocsPr(branch, head) ?? pr;
+  }
   const run = findSuccessfulDeliveryRun(branch, head, ["public-guard", "checks", "temporal-worker-check", "auto-merge-infra-docs"]);
   const receipt = {
     receiptType: DELIVERY_RECEIPT_VERSION,
@@ -333,6 +338,9 @@ function deliveryHandoff(branchArg) {
     commit: head,
     deliveryClass: classification.deliveryClass,
     classification,
+    prNumber: pr?.number,
+    prUrl: pr?.url,
+    prState: pr?.state,
     runId: run.databaseId,
     runUrl: run.url ?? `https://github.com/sergobright/Bright-OS/actions/runs/${run.databaseId}`,
     verifiedAt: new Date().toISOString(),
@@ -409,8 +417,7 @@ function deriveTaskState() {
     head &&
       markerValid &&
       receiptValidation.ok &&
-      CODEX_BRANCH_RE.test(branch) &&
-      isAncestor(head, "origin/dev"),
+      CODEX_BRANCH_RE.test(branch),
   );
   const hasImplementationWork = Boolean(status.trim() || marker?.writeIntentAt || changedFiles.length || commitsAhead > 0);
   const remoteSha = CODEX_BRANCH_RE.test(branch) ? gitMaybe("rev-parse", `origin/${branch}`) : "";
@@ -1085,6 +1092,15 @@ function ensureInfraDocsPr(branch) {
     env: { ...process.env, BRIGHT_OS_ACCEPT_INFRA_DOCS_ONLY: "true" },
   });
   if (result.status !== 0) throw new Error(`Failed to create or enable infra/docs PR for ${branch}.`);
+}
+
+function findInfraDocsPr(branch, head) {
+  const prs = runJson(["gh", "pr", "list", "--base", "dev", "--head", branch, "--state", "all", "--json", "number,url,state,headRefOid,labels,mergedAt"]);
+  return prs.find((pr) =>
+    pr.headRefOid === head &&
+    Array.isArray(pr.labels) &&
+    pr.labels.some((label) => label?.name === "bright-delivery:infra-docs"),
+  ) ?? null;
 }
 
 function runJson(args) {

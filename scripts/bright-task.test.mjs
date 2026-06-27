@@ -392,7 +392,7 @@ test("task state allows infra-docs work with exact delivery receipt", () => {
   }
 });
 
-test("task state allows exact delivery receipt after infra-docs branch is already in dev", () => {
+test("task state allows exact delivery receipt after infra-docs branch was squash-merged", () => {
   const repo = fs.mkdtempSync(path.join(os.tmpdir(), "bright-task-docs-accepted-"));
   const previous = process.cwd();
   try {
@@ -423,10 +423,14 @@ test("task state allows exact delivery receipt after infra-docs branch is alread
     git(["commit", "-m", "docs change"], repo);
     const head = git(["rev-parse", "HEAD"], repo).stdout.trim();
     git(["checkout", "-b", "dev", base], repo);
-    git(["merge", "--no-ff", "codex/foo", "-m", "merge infra docs"], repo);
+    fs.mkdirSync(path.join(repo, "docs"), { recursive: true });
+    fs.writeFileSync(path.join(repo, "docs", "change.md"), "change\n");
+    git(["add", "docs/change.md"], repo);
+    git(["commit", "-m", "squash infra docs"], repo);
     git(["update-ref", "refs/remotes/origin/dev", "HEAD"], repo);
     git(["update-ref", "refs/remotes/origin/codex/foo", head], repo);
     git(["checkout", "codex/foo"], repo);
+    assert.notEqual(gitStatus(["merge-base", "--is-ancestor", head, "origin/dev"], repo), 0);
     fs.writeFileSync(
       path.join(repo, ".bright-task", "delivery-handoff.json"),
       `${JSON.stringify({
@@ -479,4 +483,9 @@ function git(args, cwd) {
     throw new Error(`git ${args.join(" ")} failed:\n${result.stderr || result.stdout || "(no output)"}`);
   }
   return result;
+}
+
+function gitStatus(args, cwd) {
+  const { GIT_DIR, GIT_WORK_TREE, GIT_INDEX_FILE, ...env } = process.env;
+  return spawnSync("git", args, { cwd, encoding: "utf8", env }).status;
 }
