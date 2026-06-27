@@ -12,6 +12,7 @@
 - [ ] Backup нужен и сделан перед live-risk change.
 - [ ] Auth boundary не ослаблен.
 - [ ] No secrets added to docs/source/build output.
+- [ ] Если менялся inbound API contract, обновлена `docs/api/inbound-api.md` в том же commit.
 - [ ] Client cache/projection compatibility проверена.
 - [ ] Timer/Activities replay semantics сохранены или обновлены в OpenSpec.
 - [ ] `npm --prefix services/bright_os_api test` выполнен или есть объяснение.

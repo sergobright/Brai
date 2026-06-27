@@ -8,6 +8,12 @@ User=bright-os
 Group=bright-os
 WorkingDirectory=/srv/projects/bright-os/services/bright_os_api
 EnvironmentFile=/etc/bright-os/bright-os-api.env
+Environment=BRIGHT_OS_INBOUND_STORAGE_ROOT=/srv/projects/bright-os/data/inbox-attachments
+Environment=BRIGHT_OS_CODEX_BIN=/srv/opt/codex-cli/bin/codex
+Environment=BRIGHT_OS_CODEX_MODEL=gpt-5.4-mini
+Environment=BRIGHT_OS_CODEX_TIMEOUT_MS=20000
+Environment=CODEX_HOME=/srv/opt/codex-runtime/bright-os
+Environment=HOME=/srv/opt/codex-runtime/bright-os
 ExecStart=/srv/opt/node-v22.16.0/bin/node src/index.js
 Restart=always
 RestartSec=3

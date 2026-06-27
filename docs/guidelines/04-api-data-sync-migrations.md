@@ -48,6 +48,8 @@
 - Browser web `/api/*` идёт через Caddy upstream Bearer injection.
 - Direct Capacitor Android uses password-auth session cookies against `https://api.brightos.world`.
 - Не embed private Bearer token в web bundle, OTA bundle или docs.
+- External inbound API contract is documented in `docs/api/inbound-api.md`.
+- Any inbound API route, payload, response, auth, MIME, limit, storage, DB mapping, title-generation, or error-code change must update `docs/api/inbound-api.md` in the same commit.
 
 ## Проверка
 

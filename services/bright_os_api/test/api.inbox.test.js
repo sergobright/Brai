@@ -36,6 +36,7 @@ test('inbox sync is idempotent and returns canonical state', async () => {
     assert.equal(first.body.state.inbox.length, 1);
     assert.equal(first.body.state.inbox[0].title, 'Идея');
     assert.equal(first.body.state.inbox[0].description_md, '**важно**\nвторая');
+    assert.equal(first.body.state.inbox[0].record_type_id, 4);
 
     const second = await request(fixture.url, '/v1/inbox/events/sync', {
       method: 'POST',

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import Database from 'better-sqlite3';
 import { createBrightOsServer } from '../src/server.js';
 import {
   RELEASE_PASSWORD,
@@ -130,6 +131,10 @@ test('migration adds inbox entity schema and metadata', async () => {
         'title',
         'description_text',
         'source',
+        'source_key',
+        'response_required',
+        'related_inbox_id',
+        'record_type_id',
         'item_date',
         'author',
         'preliminary_section',
@@ -152,6 +157,9 @@ test('migration adds inbox entity schema and metadata', async () => {
       .map((row) => row.name);
     assert.ok(indexes.includes('idx_inbox_item_date'));
     assert.ok(indexes.includes('idx_inbox_normalized_updated'));
+    assert.ok(indexes.includes('idx_inbox_source_key_created'));
+    assert.ok(indexes.includes('idx_inbox_record_type_created'));
+    assert.ok(indexes.includes('idx_inbox_related'));
 
     const items = fixture.store.db
       .prepare("SELECT id FROM items WHERE id IN ('activities', 'inbox') ORDER BY id")
@@ -173,7 +181,16 @@ test('migration adds inbox entity schema and metadata', async () => {
       fixture.store.db.prepare('SELECT description FROM schema_migrations WHERE version = 33').get().description,
       'add inbox offline event log'
     );
+    assert.equal(
+      fixture.store.db.prepare('SELECT description FROM schema_migrations WHERE version = 34').get().description,
+      'add inbox inbound metadata and record types'
+    );
     assert.ok(fixture.store.db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'inbox_events'").get());
+    assert.ok(fixture.store.db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'inbox_record_types'").get());
+    assert.deepEqual(
+      fixture.store.db.prepare('SELECT id FROM inbox_record_types ORDER BY id').all().map((row) => row.id),
+      [1, 2, 3, 4]
+    );
     assert.equal(
       fixture.store.db.prepare("SELECT title FROM table_descriptions WHERE table_name = 'inbox_events'").get().title,
       'События входящих'
@@ -183,6 +200,94 @@ test('migration adds inbox entity schema and metadata', async () => {
     assert.equal(fixture.store.db.prepare("SELECT COUNT(*) AS count FROM items WHERE id = 'inbox'").get().count, 1);
   } finally {
     await fixture.close();
+  }
+});
+
+test('migration upgrades legacy inbox table before metadata indexes', async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bright-os-api-inbox-migrate-'));
+  const dbPath = path.join(tmp, 'bright_os.sqlite');
+  const db = new Database(dbPath);
+  db.exec(`
+    CREATE TABLE inbox (
+      id TEXT PRIMARY KEY,
+      title TEXT NOT NULL,
+      description_text TEXT NOT NULL DEFAULT '',
+      source TEXT NOT NULL DEFAULT '',
+      item_date TEXT,
+      author TEXT NOT NULL DEFAULT '',
+      preliminary_section TEXT NOT NULL DEFAULT '',
+      urgency TEXT NOT NULL DEFAULT '',
+      attachment_links_json TEXT NOT NULL DEFAULT '[]',
+      explanation_text TEXT NOT NULL DEFAULT '',
+      normalization_text TEXT NOT NULL DEFAULT '',
+      is_normalized INTEGER NOT NULL DEFAULT 0 CHECK (is_normalized IN (0, 1)),
+      created_at_utc TEXT NOT NULL,
+      updated_at_utc TEXT NOT NULL,
+      deleted_at_utc TEXT,
+      last_event_id TEXT
+    );
+
+    INSERT INTO inbox (
+      id,
+      title,
+      description_text,
+      source,
+      item_date,
+      attachment_links_json,
+      explanation_text,
+      is_normalized,
+      created_at_utc,
+      updated_at_utc,
+      last_event_id
+    )
+    VALUES (
+      'inbound:inbox:legacy',
+      'Legacy inbound',
+      '',
+      'legacy-source',
+      '2026-06-26',
+      '[]',
+      'legacy explanation',
+      0,
+      '2026-06-26T12:00:00.000Z',
+      '2026-06-26T12:00:00.000Z',
+      'inbound:inbox:legacy'
+    );
+  `);
+  db.close();
+
+  const runtime = createBrightOsServer({
+    dbPath,
+    token: TOKEN,
+    now: () => new Date('2026-06-27T10:30:00.000Z'),
+    logger: { error: () => {} }
+  });
+
+  try {
+    await new Promise((resolve) => runtime.server.listen(0, '127.0.0.1', resolve));
+    const columns = new Set(
+      runtime.store.db.prepare('PRAGMA table_info(inbox)').all().map((row) => row.name)
+    );
+    assert.ok(columns.has('source_key'));
+    assert.ok(columns.has('response_required'));
+    assert.ok(columns.has('related_inbox_id'));
+    assert.ok(columns.has('record_type_id'));
+    assert.equal(
+      runtime.store.db.prepare("SELECT record_type_id FROM inbox WHERE id = 'inbound:inbox:legacy'").get()
+        .record_type_id,
+      1
+    );
+
+    const indexes = runtime.store.db
+      .prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'inbox'")
+      .all()
+      .map((row) => row.name);
+    assert.ok(indexes.includes('idx_inbox_source_key_created'));
+    assert.ok(indexes.includes('idx_inbox_record_type_created'));
+    assert.ok(indexes.includes('idx_inbox_related'));
+  } finally {
+    await runtime.close();
+    fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
 

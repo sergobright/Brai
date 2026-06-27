@@ -7,10 +7,10 @@ Type=simple
 WorkingDirectory={{ bright_os_env_root }}/{{ item.value.path }}/source/services/bright_os_api
 {% if item.key == 'prod' %}
 EnvironmentFile={{ bright_os_api_env_source }}
-ExecStart=/usr/bin/env PORT={{ item.value.api_port }} BRIGHT_OS_DB={{ bright_os_repo }}/data/bright_os.sqlite BRIGHT_OS_RELEASE_DIR={{ bright_os_repo }}/deploy/releases {{ bright_os_node_bin }} src/index.js
+ExecStart=/usr/bin/env PORT={{ item.value.api_port }} BRIGHT_OS_DB={{ bright_os_repo }}/data/bright_os.sqlite BRIGHT_OS_RELEASE_DIR={{ bright_os_repo }}/deploy/releases BRIGHT_OS_INBOUND_STORAGE_ROOT={{ bright_os_repo }}/data/inbox-attachments BRIGHT_OS_CODEX_BIN=/srv/opt/codex-cli/bin/codex BRIGHT_OS_CODEX_MODEL=gpt-5.4-mini BRIGHT_OS_CODEX_TIMEOUT_MS=20000 CODEX_HOME=/srv/opt/codex-runtime/bright-os HOME=/srv/opt/codex-runtime/bright-os {{ bright_os_node_bin }} src/index.js
 {% else %}
 EnvironmentFile=-{{ bright_os_env_root }}/{{ item.value.path }}/bright-os-api.env
-ExecStart=/usr/bin/env PORT={{ item.value.api_port }} BRIGHT_OS_DB={{ bright_os_env_root }}/{{ item.value.path }}/data/bright_os.sqlite BRIGHT_OS_RELEASE_DIR={{ bright_os_repo }}/deploy/releases {{ bright_os_node_bin }} src/index.js
+ExecStart=/usr/bin/env PORT={{ item.value.api_port }} BRIGHT_OS_DB={{ bright_os_env_root }}/{{ item.value.path }}/data/bright_os.sqlite BRIGHT_OS_RELEASE_DIR={{ bright_os_repo }}/deploy/releases BRIGHT_OS_INBOUND_STORAGE_ROOT={{ bright_os_env_root }}/{{ item.value.path }}/data/inbox-attachments BRIGHT_OS_CODEX_BIN=/srv/opt/codex-cli/bin/codex BRIGHT_OS_CODEX_MODEL=gpt-5.4-mini BRIGHT_OS_CODEX_TIMEOUT_MS=20000 CODEX_HOME=/srv/opt/codex-runtime/bright-os HOME=/srv/opt/codex-runtime/bright-os {{ bright_os_node_bin }} src/index.js
 {% endif %}
 Restart=always
 RestartSec=3

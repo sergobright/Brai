@@ -5,6 +5,10 @@ export interface InboxItem {
   title: string;
   description_md: string;
   source: string;
+  source_key: string;
+  response_required: boolean;
+  related_inbox_id: string | null;
+  record_type_id: number;
   item_date: string | null;
   author: string;
   preliminary_section: string;

@@ -198,6 +198,10 @@ export const migrationMethods = {
     if (!this.hasMigration(33)) {
       this.recordMigration(33, 'add inbox offline event log');
     }
+
+    if (!this.hasMigration(34)) {
+      this.recordMigration(34, 'add inbox inbound metadata and record types');
+    }
   }
 ,
 
@@ -403,8 +407,9 @@ export const migrationMethods = {
       ['focus_sessions', 'Сессии фокуса', 'Стабильные Focus-сессии.', 'Хранит стабильные идентификаторы Focus-сессий. Редактируемые время старта, финиша и длительность лежат в focus_session_versions.'],
       ['focus_session_sources', 'Источники Focus-сессий', 'Связи Focus-сессий и событий.', 'Связывает итоговые Focus-сессии с timer_events, из которых они получились при deterministic replay.'],
       ['focus_session_versions', 'Версии Focus-сессий', 'История значений Focus-сессий.', 'Хранит версии старта, финиша и длительности Focus-сессий. Только одна версия на сессию может быть текущей.'],
-      ['inbox', 'Входящие', 'Список входящих материалов.', 'Хранит входящие материалы Bright OS до нормализации: заголовок, описание, источник, дату, автора, предварительный раздел, срочность, ссылки на вложения, пояснение, текст нормализации и признак нормализации.'],
+      ['inbox', 'Входящие', 'Список входящих материалов.', 'Хранит входящие материалы Bright OS до нормализации: заголовок, описание, источник, ключ источника, требование ответа, связь с предыдущим входящим, тип записи, дату, автора, предварительный раздел, срочность, ссылки на вложения, пояснение, текст нормализации и признак нормализации.'],
       ['inbox_events', 'События входящих', 'Журнал изменений входящих.', 'Хранит клиентские события по входящим для offline-first синхронизации, аудита и восстановления текущей таблицы inbox.'],
+      ['inbox_record_types', 'Типы входящих', 'Справочник типов входящих.', 'Хранит разрешённые типы записей Inbox: входящее от человека по API, входящее от агента по API, внутреннее входящее от агента и добавленное человеком из интерфейса.'],
       ['items', 'Сущности', 'Реестр рабочих сущностей.', 'Хранит главные рабочие сущности Bright OS как стабильные id для схемы, API и технических решений.'],
       ['schema_migrations', 'Миграции', 'Журнал изменений схемы.', 'Хранит версии уже примененных миграций SQLite, время применения и краткое описание.'],
       ['sqlite_sequence', 'Счётчики', 'Служебные счетчики SQLite.', 'Внутренняя таблица SQLite для AUTOINCREMENT-счетчиков. Это не бизнес-данные Bright OS.'],
@@ -443,11 +448,23 @@ export const migrationMethods = {
   ensureInboxSchema() {
     const now = new Date().toISOString();
     this.db.exec(`
+      CREATE TABLE IF NOT EXISTS inbox_record_types (
+        id INTEGER PRIMARY KEY,
+        key TEXT NOT NULL UNIQUE,
+        title TEXT NOT NULL,
+        description TEXT NOT NULL,
+        created_at_utc TEXT NOT NULL
+      );
+
       CREATE TABLE IF NOT EXISTS inbox (
         id TEXT PRIMARY KEY,
         title TEXT NOT NULL,
         description_text TEXT NOT NULL DEFAULT '',
         source TEXT NOT NULL DEFAULT '',
+        source_key TEXT NOT NULL DEFAULT '',
+        response_required INTEGER NOT NULL DEFAULT 0 CHECK (response_required IN (0, 1)),
+        related_inbox_id TEXT,
+        record_type_id INTEGER NOT NULL DEFAULT 4,
         item_date TEXT,
         author TEXT NOT NULL DEFAULT '',
         preliminary_section TEXT NOT NULL DEFAULT '',
@@ -502,6 +519,54 @@ export const migrationMethods = {
     if (this.tableExists('inbox') && !this.columnExists('inbox', 'last_event_id')) {
       this.db.exec('ALTER TABLE inbox ADD COLUMN last_event_id TEXT;');
     }
+    if (this.tableExists('inbox') && !this.columnExists('inbox', 'source_key')) {
+      this.db.exec("ALTER TABLE inbox ADD COLUMN source_key TEXT NOT NULL DEFAULT '';");
+    }
+    if (this.tableExists('inbox') && !this.columnExists('inbox', 'response_required')) {
+      this.db.exec('ALTER TABLE inbox ADD COLUMN response_required INTEGER NOT NULL DEFAULT 0;');
+    }
+    if (this.tableExists('inbox') && !this.columnExists('inbox', 'related_inbox_id')) {
+      this.db.exec('ALTER TABLE inbox ADD COLUMN related_inbox_id TEXT;');
+    }
+    if (this.tableExists('inbox') && !this.columnExists('inbox', 'record_type_id')) {
+      this.db.exec('ALTER TABLE inbox ADD COLUMN record_type_id INTEGER NOT NULL DEFAULT 4;');
+    }
+    this.db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_inbox_source_key_created
+      ON inbox (source_key, created_at_utc);
+
+      CREATE INDEX IF NOT EXISTS idx_inbox_record_type_created
+      ON inbox (record_type_id, created_at_utc);
+
+      CREATE INDEX IF NOT EXISTS idx_inbox_related
+      ON inbox (related_inbox_id);
+    `);
+    const upsertType = this.db.prepare(`
+      INSERT INTO inbox_record_types (id, key, title, description, created_at_utc)
+      VALUES (?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        key = excluded.key,
+        title = excluded.title,
+        description = excluded.description
+    `);
+    for (const type of [
+      [1, 'api_human_inbound', 'Входящее от человека по API', 'Внешний API запрос, инициированный человеком.'],
+      [2, 'api_agent_inbound', 'Входящее от агента по API', 'Внешний API запрос, инициированный агентом.'],
+      [3, 'internal_agent_inbound', 'Внутреннее входящее от агента', 'Внутренний агент Bright OS создал входящую запись.'],
+      [4, 'interface_human_created', 'Человек добавил из интерфейса', 'Пользователь создал входящую запись в интерфейсе Bright OS.']
+    ]) {
+      upsertType.run(...type, now);
+    }
+    this.db.exec(`
+      UPDATE inbox
+      SET record_type_id = 1
+      WHERE record_type_id = 4
+        AND (
+          id LIKE 'inbound:inbox:%'
+          OR last_event_id LIKE 'inbound:inbox:%'
+          OR source <> ''
+        );
+    `);
     this.db
       .prepare('INSERT INTO items (id, created_at_utc) VALUES (?, ?) ON CONFLICT(id) DO NOTHING')
       .run('inbox', now);
