@@ -30,6 +30,8 @@ export async function createFixture(times, options = {}) {
     releaseDir: options.releaseFiles ? releaseDir : null,
     inboundToken: options.inboundToken ?? INBOUND_TOKEN,
     inboundStorageRoot: options.inboundStorageRoot ?? path.join(tmp, 'inbox-attachments'),
+    codexBin: options.codexBin,
+    codexTimeoutMs: options.codexTimeoutMs,
     inboundTitleGenerator: options.inboundTitleGenerator,
     now: () => new Date(times[Math.min(index++, times.length - 1)]),
     logger: { error: () => {} }

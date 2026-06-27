@@ -181,12 +181,13 @@ function codexTitle(text, codexBin = 'codex', timeoutMs = 3000) {
   return new Promise((resolve, reject) => {
     let settled = false;
     const child = spawn(codexBin, [
-      'exec',
-      '--ephemeral',
       '--sandbox',
       'read-only',
       '--ask-for-approval',
       'never',
+      'exec',
+      '--ephemeral',
+      '--skip-git-repo-check',
       '--output-last-message',
       outputPath,
       '-'

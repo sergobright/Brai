@@ -152,6 +152,45 @@ test('inbound inbox rejects invalid images without mutating inbox', async () => 
   }
 });
 
+test('inbound inbox can use Codex CLI title generation', async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bright-fake-codex-'));
+  const fakeCodex = path.join(tmp, 'codex');
+  fs.writeFileSync(fakeCodex, `#!/usr/bin/env node
+const fs = require('node:fs');
+const args = process.argv.slice(2);
+const expected = ['--sandbox', 'read-only', '--ask-for-approval', 'never', 'exec', '--ephemeral', '--skip-git-repo-check'];
+for (let i = 0; i < expected.length; i += 1) {
+  if (args[i] !== expected[i]) process.exit(2);
+}
+const outputIndex = args.indexOf('--output-last-message');
+if (outputIndex < 0 || !args[outputIndex + 1]) process.exit(3);
+process.stdin.resume();
+process.stdin.on('end', () => fs.writeFileSync(args[outputIndex + 1], 'Codex title'));
+`);
+  fs.chmodSync(fakeCodex, 0o700);
+  const fixture = await createFixture(['2026-06-27T10:00:00.000Z'], {
+    codexBin: fakeCodex,
+    codexTimeoutMs: 1000
+  });
+
+  try {
+    const response = await inboundRequest(fixture.url, '/v1/in/inbox', {
+      method: 'POST',
+      body: JSON.stringify({
+        text: 'Проверить генерацию заголовка через Codex CLI',
+        image_base64: IMAGE_BASE64,
+        image_mime: 'image/png'
+      })
+    });
+
+    assert.equal(response.status, 201);
+    assert.equal(response.body.state.inbox[0].title, 'Codex title');
+  } finally {
+    await fixture.close();
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test('inbound inbox falls back to a local title when Codex title generation fails', async () => {
   const fixture = await createFixture(['2026-06-27T10:00:00.000Z'], {
     inboundTitleGenerator: async () => {
