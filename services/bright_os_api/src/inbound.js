@@ -30,6 +30,7 @@ export async function receiveInboxInbound({
   body,
   storageRoot,
   codexBin,
+  codexModel,
   codexTimeoutMs,
   titleGenerator,
   nowDate
@@ -53,7 +54,7 @@ export async function receiveInboxInbound({
 
   try {
     if (!fs.existsSync(filePath)) fs.writeFileSync(filePath, image.bytes, { flag: 'wx' });
-    const title = await generateTitle(text, { codexBin, codexTimeoutMs, titleGenerator });
+    const title = await generateTitle(text, { codexBin, codexModel, codexTimeoutMs, titleGenerator });
     store.createInboundInboxItem({
       eventId,
       inboxId,
@@ -141,12 +142,12 @@ function decodeImage(body) {
   return { bytes, extension: imageType.extension };
 }
 
-async function generateTitle(text, { codexBin, codexTimeoutMs, titleGenerator }) {
+async function generateTitle(text, { codexBin, codexModel, codexTimeoutMs, titleGenerator }) {
   const fallback = fallbackTitle(text);
   try {
     const title = titleGenerator
       ? await titleGenerator(text)
-      : await codexTitle(text, codexBin, codexTimeoutMs);
+      : await codexTitle(text, codexBin, codexModel, codexTimeoutMs);
     return cleanTitle(title) || fallback;
   } catch {
     return fallback;
@@ -168,7 +169,7 @@ function cleanTitle(value) {
     .trim() ?? '';
 }
 
-function codexTitle(text, codexBin = 'codex', timeoutMs = 3000) {
+function codexTitle(text, codexBin = 'codex', codexModel = null, timeoutMs = 3000) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bright-inbound-title-'));
   const outputPath = path.join(tmp, 'title.txt');
   const prompt = [
@@ -180,18 +181,22 @@ function codexTitle(text, codexBin = 'codex', timeoutMs = 3000) {
 
   return new Promise((resolve, reject) => {
     let settled = false;
-    const child = spawn(codexBin, [
+    const args = [
       '--sandbox',
       'read-only',
       '--ask-for-approval',
-      'never',
+      'never'
+    ];
+    if (codexModel) args.push('--model', codexModel);
+    args.push(
       'exec',
       '--ephemeral',
       '--skip-git-repo-check',
       '--output-last-message',
       outputPath,
       '-'
-    ], { stdio: ['pipe', 'ignore', 'ignore'] });
+    );
+    const child = spawn(codexBin, args, { stdio: ['pipe', 'ignore', 'ignore'] });
     const timer = setTimeout(() => {
       child.kill('SIGKILL');
       finish(reject, new Error('codex_title_timeout'));

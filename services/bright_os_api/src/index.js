@@ -14,6 +14,7 @@ const inboundToken = process.env.BRIGHT_OS_INBOUND_TOKEN;
 const inboundStorageRoot =
   process.env.BRIGHT_OS_INBOUND_STORAGE_ROOT ?? path.join(path.dirname(dbPath), 'inbox-attachments');
 const codexBin = process.env.BRIGHT_OS_CODEX_BIN ?? 'codex';
+const codexModel = process.env.BRIGHT_OS_CODEX_MODEL?.trim() || null;
 const parsedCodexTimeoutMs = Number(process.env.BRIGHT_OS_CODEX_TIMEOUT_MS ?? 3000);
 const codexTimeoutMs = Number.isFinite(parsedCodexTimeoutMs) ? parsedCodexTimeoutMs : 3000;
 const releaseDir =
@@ -44,6 +45,7 @@ const runtime = createBrightOsServer({
   inboundToken,
   inboundStorageRoot,
   codexBin,
+  codexModel,
   codexTimeoutMs
 });
 runtime.server.listen(port, '127.0.0.1', () => {

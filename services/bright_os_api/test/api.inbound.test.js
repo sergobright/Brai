@@ -158,7 +158,7 @@ test('inbound inbox can use Codex CLI title generation', async () => {
   fs.writeFileSync(fakeCodex, `#!/usr/bin/env node
 const fs = require('node:fs');
 const args = process.argv.slice(2);
-const expected = ['--sandbox', 'read-only', '--ask-for-approval', 'never', 'exec', '--ephemeral', '--skip-git-repo-check'];
+const expected = ['--sandbox', 'read-only', '--ask-for-approval', 'never', '--model', 'gpt-4.1-mini', 'exec', '--ephemeral', '--skip-git-repo-check'];
 for (let i = 0; i < expected.length; i += 1) {
   if (args[i] !== expected[i]) process.exit(2);
 }
@@ -170,6 +170,7 @@ process.stdin.on('end', () => fs.writeFileSync(args[outputIndex + 1], 'Codex tit
   fs.chmodSync(fakeCodex, 0o700);
   const fixture = await createFixture(['2026-06-27T10:00:00.000Z'], {
     codexBin: fakeCodex,
+    codexModel: 'gpt-4.1-mini',
     codexTimeoutMs: 1000
   });
 
