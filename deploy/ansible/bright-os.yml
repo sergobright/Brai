@@ -135,7 +135,7 @@
         group: "{{ bright_os_deploy_user }}"
         mode: "0775"
 
-    - name: Allow deploy user to publish production web and OTA assets
+    - name: Allow deploy user to publish production site, web, and OTA assets
       ansible.builtin.file:
         path: "{{ item }}"
         state: directory
@@ -143,6 +143,7 @@
         mode: "u=rwX,g=rwX,o=rX"
         recurse: true
       loop:
+        - "{{ bright_os_public_site_root }}"
         - "{{ bright_os_repo }}/deploy/web"
         - "{{ bright_os_repo }}/deploy/mobile-update"
 
@@ -228,7 +229,7 @@
         label: "{{ item.value.service }}"
       notify: Reload systemd
 
-    - name: Install Bright OS dev and preview Caddy routes
+    - name: Install Bright OS Caddy routes
       ansible.builtin.blockinfile:
         path: "{{ bright_os_caddyfile }}"
         marker: "# {mark} BRIGHT OS DEV/PREVIEW ENVIRONMENTS"

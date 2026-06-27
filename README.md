@@ -7,6 +7,7 @@ The project is built around a simple rule: the device should remain useful first
 ## What Is Inside
 
 - Local-first work tracking with durable client-side queues.
+- A public Bright OS site served separately from the protected app.
 - Focus, goal, history, archive, and activity views in one app shell.
 - A Next.js web app that also ships inside a Capacitor Android wrapper.
 - Android web-layer OTA updates for shipping UI fixes without rebuilding the APK.
@@ -16,6 +17,7 @@ The project is built around a simple rule: the device should remain useful first
 ## Repository Layout
 
 - `apps/bright_os_app/` - Next.js 16, React 19, Tailwind CSS, source-owned UI, and Capacitor Android.
+- `apps/bright_os_site/` - static public site source for `brightos.world`.
 - `services/bright_os_api/` - Node.js Bright OS API with SQLite storage and offline-first sync endpoints.
 - `deploy/` - deployment scripts, Ansible playbooks, Caddy/systemd templates, and environment mapping.
 - `docs/` - development guidelines, checklists, and operations notes.
@@ -59,6 +61,7 @@ Work on the app:
 npm run app:dev
 npm run app:build
 npm run app:e2e
+npm run site:publish
 ```
 
 Build Android artifacts:
@@ -77,7 +80,8 @@ Release APK signing is configured through environment variables outside the repo
 
 ## Deployment Flow
 
-- `main` is production and deploys to `app.brightos.world`.
+- `brightos.world` serves the public site without Caddy basic auth.
+- `main` is production and deploys the protected app to `app.brightos.world`.
 - `dev` is shared development and deploys to `dev.brightos.world`.
 - `codex/*` branches deploy to preview slots `A` through `E`.
 

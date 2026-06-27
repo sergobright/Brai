@@ -38,6 +38,7 @@ coverage/
 *.apk
 *.aab
 deploy/web/
+deploy/site/
 deploy/releases/
 deploy/mobile-update/
 output/

@@ -110,16 +110,25 @@ describe("mobile OTA publish scripts", () => {
 
   it("keeps non-production OTA public while protecting only the web shell in Caddy", async () => {
     const template = await readFile(path.join(workspaceRoot, "deploy/ansible/templates/Caddyfile.j2"), "utf8");
-    const apiBlock = template.slice(template.indexOf("handle_path /api/*"), template.indexOf("handle /releases*"));
-    const mobileIndex = template.indexOf("handle_path /mobile-update/*");
-    const mobileBlock = template.slice(mobileIndex, template.indexOf("handle {"));
-    const webShellBlock = template.slice(template.indexOf("handle {"), template.indexOf("try_files"));
+    const nonProductionStart = template.indexOf("{% for name, env in bright_os_envs.items() if name != 'prod' %}");
+    expect(nonProductionStart).toBeGreaterThanOrEqual(0);
+    const nonProductionTemplate = template.slice(nonProductionStart);
+    const apiBlock = nonProductionTemplate.slice(
+      nonProductionTemplate.indexOf("handle_path /api/*"),
+      nonProductionTemplate.indexOf("handle /releases*"),
+    );
+    const mobileIndex = nonProductionTemplate.indexOf("handle_path /mobile-update/*");
+    const mobileBlock = nonProductionTemplate.slice(mobileIndex, nonProductionTemplate.indexOf("handle {"));
+    const webShellBlock = nonProductionTemplate.slice(
+      nonProductionTemplate.indexOf("handle {"),
+      nonProductionTemplate.indexOf("try_files"),
+    );
 
-    expect(template).not.toMatch(/\{\{ env\.domain \}\} \{\n\s+\{\{ bright_os_basic_auth_directive \}\}/);
+    expect(nonProductionTemplate).not.toMatch(/\{\{ env\.domain \}\} \{\n\s+\{\{ bright_os_basic_auth_directive \}\}/);
     expect(apiBlock).not.toContain("bright_os_basic_auth_directive");
     expect(apiBlock).not.toContain("header_up Authorization");
-    expect(mobileIndex).toBeGreaterThan(template.indexOf("handle /releases*"));
-    expect(mobileIndex).toBeLessThan(template.indexOf("handle {"));
+    expect(mobileIndex).toBeGreaterThan(nonProductionTemplate.indexOf("handle /releases*"));
+    expect(mobileIndex).toBeLessThan(nonProductionTemplate.indexOf("handle {"));
     expect(mobileBlock).toContain('header /manifest.json Cache-Control "no-store"');
     expect(webShellBlock).toContain("bright_os_basic_auth_directive");
   });

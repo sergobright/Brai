@@ -1,6 +1,7 @@
 # System Patterns
 
 - Next.js client source lives in `apps/bright_os_app/`.
+- Public site source lives in `apps/bright_os_site/`.
 - Bright OS API source lives in `services/bright_os_api/`.
 - Accepted requirements live in `openspec/specs/`.
 - Development rules live in `docs/guidelines/`.
@@ -11,6 +12,7 @@ Deployment branch classes:
 - `main` deploys production.
 - `dev` deploys the shared development environment.
 - `codex/*` deploys preview slots `A` through `E`.
+- `brightos.world` serves the public site without Caddy basic auth.
 
 Security boundaries:
 

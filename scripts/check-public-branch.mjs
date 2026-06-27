@@ -7,7 +7,7 @@ const pathRules = [
   },
   {
     reason: "generated deployment artifact",
-    test: (filePath) => /(^|\/)deploy\/(web|mobile-update|releases)(\/|$)/i.test(filePath),
+    test: (filePath) => /(^|\/)deploy\/(site|web|mobile-update|releases)(\/|$)/i.test(filePath),
   },
   {
     reason: "local deployment inventory",
