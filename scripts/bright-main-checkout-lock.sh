@@ -67,7 +67,7 @@ if getent group bright-deploy >/dev/null 2>&1; then
   done
 fi
 
-if [ "${BRIGHT_OS_LOCK_STALE_WORKTREES:-0}" = "1" ]; then
+if [ "${BRIGHT_OS_LOCK_STALE_WORKTREES:-1}" = "1" ]; then
 while IFS= read -r line; do
   case "$line" in
     "worktree "*)

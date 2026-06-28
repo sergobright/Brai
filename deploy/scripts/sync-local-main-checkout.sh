@@ -149,6 +149,23 @@ if [ "${BRIGHT_OS_MAIN_SYNC_LOCK_CHECKOUT:-1}" = "1" ]; then
       fi
     done
   fi
+
+  if [ "${BRIGHT_OS_LOCK_STALE_WORKTREES:-1}" = "1" ]; then
+    while IFS= read -r line; do
+      case "$line" in
+        "worktree "*)
+          worktree_path="${line#worktree }"
+          if [ "$worktree_path" = "$REPO" ]; then
+            continue
+          fi
+          if [ -d "$worktree_path" ]; then
+            chown -R root:mark "$worktree_path"
+            chmod -R u=rwX,g=rX,o= "$worktree_path"
+          fi
+          ;;
+      esac
+    done < <(git_cmd worktree list --porcelain)
+  fi
 fi
 
 echo "Synced $REPO to origin/$BRANCH@$TARGET_COMMIT"

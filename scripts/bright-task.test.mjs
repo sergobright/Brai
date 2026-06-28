@@ -88,11 +88,11 @@ test("codex project pre-tool hook is unconditional and uses the installed guard"
   assert.match(hooks.hooks.Stop[0].hooks[0].command, /\/srv\/opt\/bright-os-codex-plugins\/plugins\/bright-os-guard\/hooks\/bright-os-guard\.mjs stop/);
 });
 
-test("main checkout lock keeps task worktrees writable by default", () => {
+test("main checkout lock locks non-current worktrees by default", () => {
   const script = fs.readFileSync(new URL("./bright-main-checkout-lock.sh", import.meta.url), "utf8");
   assert.match(script, /git -C "\$root" worktree list --porcelain/);
   assert.match(script, /bright-os-worktrees/);
-  assert.match(script, /BRIGHT_OS_LOCK_STALE_WORKTREES/);
+  assert.match(script, /BRIGHT_OS_LOCK_STALE_WORKTREES:-1/);
   assert.match(script, /BRIGHT_OS_LOCK_CURRENT_WORKTREE/);
   assert.match(script, /sudo chmod 0751 "\$root"/);
   assert.match(script, /sudo chmod u=rwx,g=rx,o=x "\$root\/deploy"/);
@@ -115,6 +115,9 @@ test("local main sync preserves runtime dirs and hard resets to origin main", ()
   assert.match(script, /bright-os-rescue/);
   assert.match(script, /chmod 0751 "\$REPO"/);
   assert.match(script, /chmod u=rwx,g=rx,o=x deploy/);
+  assert.match(script, /BRIGHT_OS_LOCK_STALE_WORKTREES:-1/);
+  assert.match(script, /git_cmd worktree list --porcelain/);
+  assert.match(script, /chown -R root:mark "\$worktree_path"/);
   assert.match(ciScript, /sudo -n \/srv\/opt\/bright-os-main-sync\.sh "\$BRIGHT_OS_COMMIT"/);
   assert.doesNotMatch(ciScript, /DEPLOY_REPO/);
   assert.doesNotMatch(ciScript, /sudo BRIGHT_DEPLOY_REPO=/);
