@@ -87,6 +87,14 @@ test("codex project pre-tool hook is unconditional and uses the installed guard"
   assert.match(hooks.hooks.Stop[0].hooks[0].command, /\/srv\/opt\/bright-os-codex-plugins\/plugins\/bright-os-guard\/hooks\/bright-os-guard\.mjs stop/);
 });
 
+test("main checkout lock also locks stale registered worktrees", () => {
+  const script = fs.readFileSync(new URL("./bright-main-checkout-lock.sh", import.meta.url), "utf8");
+  assert.match(script, /git -C "\$root" worktree list --porcelain/);
+  assert.match(script, /bright-os-worktrees/);
+  assert.match(script, /BRIGHT_OS_LOCK_CURRENT_WORKTREE/);
+  assert.match(script, /stale registered worktrees are read-only/);
+});
+
 test("hook analysis fails closed for bad input and unknown tool shapes", () => {
   assert.equal(analyzeHookInput("not-json").ok, false);
   assert.equal(analyzeHookInput(JSON.stringify({ tool_name: "mystery_writer", tool_input: {} })).ok, false);
