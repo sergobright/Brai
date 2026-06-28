@@ -152,6 +152,7 @@ html[data-platform="android"] .app-shell {
   }
 
   html[data-sidebar-state="collapsed"] [data-app-shell] .desktop-rail [data-slot="sidebar-group-label"],
+  html[data-sidebar-state="collapsed"] [data-app-shell] .desktop-rail [data-slot="sidebar-group-content"],
   html[data-sidebar-state="collapsed"] [data-app-shell] .desktop-rail [data-sidebar="menu-button"] > span:not([data-slot="avatar"]),
   html[data-sidebar-state="collapsed"] [data-app-shell] .desktop-rail [data-sidebar="menu-button"] > svg.ml-auto,
   html[data-sidebar-state="collapsed"] [data-app-shell] .desktop-rail .rail-profile > div:not([data-slot="avatar"]),

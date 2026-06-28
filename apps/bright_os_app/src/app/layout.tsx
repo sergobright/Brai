@@ -36,6 +36,8 @@ export const viewport: Viewport = {
   ],
 };
 
+const earlyPaintStyle = "html,body{min-height:100%;margin:0;background:#050607;color-scheme:dark light}";
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -44,6 +46,11 @@ export default function RootLayout({
   return (
     <html lang="ru" data-theme="dark" className={`${GeistSans.variable} ${GeistMono.variable}`} suppressHydrationWarning>
       <head>
+        <style
+          dangerouslySetInnerHTML={{
+            __html: earlyPaintStyle,
+          }}
+        />
         <script
           dangerouslySetInnerHTML={{
             __html: appInitScript,
