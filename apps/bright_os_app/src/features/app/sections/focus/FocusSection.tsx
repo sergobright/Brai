@@ -257,6 +257,7 @@ function TimerSection({
 }) {
   const elapsedSeconds = active ? Math.max(0, Math.floor(state.elapsed_seconds ?? 0)) : 0;
   const duration = timerClockParts(elapsedSeconds);
+  const timerDigitsKey = active ? state.active_session?.id ?? "active" : "idle";
 
   return (
     <section
@@ -287,6 +288,7 @@ function TimerSection({
             />
           ) : null}
           <div
+            key={timerDigitsKey}
             className={cx(
               "timer-digits my-[24px] mb-[22px] text-center whitespace-nowrap text-5xl font-semibold leading-[0.95] tabular-nums",
               centered && "sm:text-6xl md:text-7xl lg:text-8xl",
@@ -295,15 +297,15 @@ function TimerSection({
           >
             <div aria-hidden="true" className="inline-flex items-center gap-0.5">
               <div data-slot="timer-hours" className="inline-flex">
-                <SlidingNumber value={duration.hours} padStart snapKey={elapsedSeconds} />
+                <SlidingNumber value={duration.hours} padStart instant={!active} snapKey={elapsedSeconds} />
               </div>
               <span>:</span>
               <div data-slot="timer-minutes" className="inline-flex">
-                <SlidingNumber value={duration.minutes} padStart snapKey={elapsedSeconds} />
+                <SlidingNumber value={duration.minutes} padStart instant={!active} snapKey={elapsedSeconds} />
               </div>
               <span>:</span>
               <div data-slot="timer-seconds" className="inline-flex">
-                <SlidingNumber value={duration.seconds} padStart snapKey={elapsedSeconds} />
+                <SlidingNumber value={duration.seconds} padStart instant={!active} snapKey={elapsedSeconds} />
               </div>
             </div>
           </div>

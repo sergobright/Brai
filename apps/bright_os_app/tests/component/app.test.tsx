@@ -150,6 +150,60 @@ describe("BrightOsApp shell", () => {
     expect(screen.getByRole("button", { name: "Запустить" })).toBeInTheDocument();
   });
 
+  it("remounts timer digits when a remote stop leaves stale elapsed time", () => {
+    const props = {
+      active: true,
+      busy: false,
+      contextPanel: "none" as const,
+      goal: emptyGoal(),
+      history: emptyHistory(),
+      todayKey: "2026-06-22",
+      background: "galaxy" as const,
+      onStart: () => undefined,
+      onStop: () => undefined,
+      onBackground: () => undefined,
+    };
+    const view = render(
+      <FocusSection
+        {...props}
+        state={{
+          server_time_utc: "2026-06-22T12:13:42.000Z",
+          server_revision: 8,
+          timezone: "Europe/Moscow",
+          active_session: {
+            id: "remote-active",
+            started_at_utc: "2026-06-22T08:25:25.000Z",
+            ended_at_utc: null,
+            duration_seconds: null,
+          },
+          elapsed_seconds: 13697,
+        }}
+      />,
+    );
+    const runningDigits = document.querySelector(".timer-digits");
+
+    expect(runningDigits).toHaveAttribute("aria-label", "03:48:17");
+
+    view.rerender(
+      <FocusSection
+        {...props}
+        active={false}
+        state={{
+          server_time_utc: "2026-06-22T12:13:43.000Z",
+          server_revision: 9,
+          timezone: "Europe/Moscow",
+          active_session: null,
+          elapsed_seconds: 13697,
+        }}
+      />,
+    );
+
+    const idleDigits = document.querySelector(".timer-digits");
+    expect(idleDigits).not.toBe(runningDigits);
+    expect(idleDigits).toHaveAttribute("aria-label", "00:00:00");
+    expect(screen.getByRole("button", { name: "Запустить" })).toBeInTheDocument();
+  });
+
   it("snaps timer digits only after skipped seconds", () => {
     expect(shouldSnapSlidingNumber(10, 11)).toBe(false);
     expect(shouldSnapSlidingNumber(10, 12)).toBe(true);
