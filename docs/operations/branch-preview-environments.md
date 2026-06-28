@@ -29,7 +29,7 @@ Use the checked-in task starter before the first project-file change:
 scripts/bright-task-start.sh <task-slug>
 ```
 
-The starter fetches `origin/main`, refuses to reuse an existing remote `codex/<task-slug>`, creates a separate worktree under `../bright-os-worktrees/<task-slug>`, creates `codex/<task-slug>` with `--no-track`, writes ignored local task state under `.bright-task/` including the current Codex thread id, enables `.githooks`, and links existing ignored `node_modules` directories from the main checkout when present. In Codex Desktop this sibling worktree is outside the normal repository sandbox, so run the starter with `sandbox_permissions=require_escalated` immediately. If that is unavailable, stop without project-file changes; do not create or switch to a manual fallback branch in the current checkout.
+The starter fetches `origin/main`, refuses to reuse an existing remote `codex/<task-slug>`, creates a separate worktree under `.codex-worktrees/<task-slug>`, creates `codex/<task-slug>` with `--no-track`, writes ignored local task state under `.bright-task/` including the current Codex thread id, enables `.githooks`, and links existing ignored `node_modules` directories from the main checkout when present. In Codex Desktop run the starter with `sandbox_permissions=require_escalated` immediately because it updates Git worktree metadata. If that is unavailable, stop without project-file changes; do not create or switch to a manual fallback branch in the current checkout. The main checkout is root-owned read-only because Codex internal file-change events can bypass lifecycle hooks; `.codex-worktrees/` is the writable implementation area.
 
 Repository Codex hooks are defined in `.codex/hooks.json`:
 

@@ -79,6 +79,14 @@ test("hook analysis detects namespaced custom and nested write tools", () => {
   }
 });
 
+test("codex project pre-tool hook is unconditional and uses the installed guard", () => {
+  const hooks = JSON.parse(fs.readFileSync(new URL("../.codex/hooks.json", import.meta.url), "utf8"));
+  assert.equal(hooks.hooks.PreToolUse.length, 1);
+  assert.equal(Object.hasOwn(hooks.hooks.PreToolUse[0], "matcher"), false);
+  assert.match(hooks.hooks.PreToolUse[0].hooks[0].command, /\/srv\/opt\/bright-os-codex-plugins\/plugins\/bright-os-guard\/hooks\/bright-os-guard\.mjs pre-tool-use/);
+  assert.match(hooks.hooks.Stop[0].hooks[0].command, /\/srv\/opt\/bright-os-codex-plugins\/plugins\/bright-os-guard\/hooks\/bright-os-guard\.mjs stop/);
+});
+
 test("hook analysis fails closed for bad input and unknown tool shapes", () => {
   assert.equal(analyzeHookInput("not-json").ok, false);
   assert.equal(analyzeHookInput(JSON.stringify({ tool_name: "mystery_writer", tool_input: {} })).ok, false);
@@ -295,22 +303,25 @@ test("task state rejects origin-dev based branch that is not based on current or
 });
 
 test("task start guidance requires escalation and forbids manual branch fallback", () => {
-  const message = taskStartGuidance("/srv/projects/bright-os-worktrees");
+  const message = taskStartGuidance("/srv/projects/bright-os/.codex-worktrees");
   assert.match(message, /sandbox_permissions=require_escalated/);
   assert.match(message, /bright-os-guard\.mjs start <task-slug>/);
   assert.match(message, /Do not create or switch to a manual fallback branch/);
   assert.match(message, /stale checkout/);
 });
 
-test("task starter creates sibling worktrees from repo and task worktree roots", () => {
-  assert.equal(taskWorktreeParent("/srv/projects/bright-os"), "/srv/projects/bright-os-worktrees");
+test("task starter creates writable nested worktrees from repo and supports legacy task roots", () => {
+  assert.equal(taskWorktreeParent("/srv/projects/bright-os"), "/srv/projects/bright-os/.codex-worktrees");
+  assert.equal(taskWorktreeParent("/srv/projects/bright-os/.codex-worktrees/existing-task"), "/srv/projects/bright-os/.codex-worktrees");
   assert.equal(taskWorktreeParent("/srv/projects/bright-os-worktrees/existing-task"), "/srv/projects/bright-os-worktrees");
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "bright-task-source-"));
   const canonical = path.join(tmp, "bright-os");
   const worktree = path.join(tmp, "bright-os-worktrees", "existing-task");
+  const nestedWorktree = path.join(canonical, ".codex-worktrees", "nested-task");
   fs.mkdirSync(canonical, { recursive: true });
   fs.writeFileSync(path.join(canonical, "package.json"), "{}\n");
   assert.equal(dependencySourceRoot(worktree), canonical);
+  assert.equal(dependencySourceRoot(nestedWorktree), canonical);
 });
 
 test("task starter blocks another open branch in the same Codex thread", () => {
