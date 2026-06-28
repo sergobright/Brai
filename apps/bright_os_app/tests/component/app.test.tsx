@@ -10,7 +10,7 @@ import { shouldSnapSlidingNumber } from "@/shared/ui/sliding-number";
 describe("BrightOsApp shell", () => {
   setupBrightOsAppTest();
 
-  it("renders the actions-first shell", () => {
+  it("renders the actions-first shell", async () => {
     render(<BrightOsApp />);
     expect(screen.getByRole("heading", { name: "Действия" })).toBeInTheDocument();
     expect(screen.getAllByLabelText("Действия").length).toBeGreaterThan(0);
@@ -20,7 +20,7 @@ describe("BrightOsApp shell", () => {
     expect(screen.queryByRole("button", { name: "Цели фокусировки" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Настройки" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Открыть меню" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Информация о действиях" })).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Информация о действиях" })).toBeInTheDocument());
     expect(screen.getAllByLabelText("Информация о действиях").length).toBeGreaterThan(0);
     expect(screen.getByRole("textbox", { name: "Добавить" })).toBeInTheDocument();
   });

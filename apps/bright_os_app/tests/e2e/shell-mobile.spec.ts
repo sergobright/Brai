@@ -83,14 +83,35 @@ test("keeps the mobile Actions FAB vertically stable when a dock swipe starts", 
   await dispatchElementTouch(page, ".main-dock", "touchend", { x: start.x - 36, y: start.y + 1 });
 });
 
-test("shows mobile Actions info without a closeable sheet", async ({ page }, testInfo) => {
+test("opens and closes mobile Actions info as a bottom sheet", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "mobile", "mobile-only actions info");
 
   await page.goto("/");
+  await page.getByRole("button", { name: "Информация о действиях" }).click();
+  const sheet = page.locator(".mobile-context-sheet");
+  const visualBackdrop = page.locator(".mobile-context-backdrop > div").first();
+  await expect(sheet).toBeVisible();
+  await expect(sheet.locator(".mobile-context-grabber")).toBeVisible();
+  await expect(page.getByRole("navigation", { name: "Основная навигация" })).toHaveCount(0);
+
+  const backdropBox = await visualBackdrop.boundingBox();
+  const topbar = await page.locator(".section-page-current .topbar").boundingBox();
+  const topbarBottom = (topbar?.y ?? 0) + (topbar?.height ?? 0);
+  expect(Math.abs((backdropBox?.y ?? 0) - topbarBottom)).toBeLessThanOrEqual(1);
+
+  await dispatchTouch(page, "touchstart", { x: 320, y: 220 });
+  await dispatchTouch(page, "touchend", { x: 180, y: 224 });
+  await expect(page.getByRole("heading", { name: "Действия", exact: true })).toBeVisible();
+  await expect(sheet).toBeVisible();
+
+  const dragZone = await sheet.locator(".mobile-context-drag-zone").boundingBox();
+  const viewport = page.viewportSize();
+  const dragX = (dragZone?.x ?? 0) + (dragZone?.width ?? 0) / 2;
+  await page.mouse.move(dragX, (dragZone?.y ?? 0) + 8);
+  await page.mouse.down();
+  await page.mouse.move(dragX, (viewport?.height ?? 640) - 12, { steps: 6 });
+  await page.mouse.up();
   await expect(page.locator(".mobile-context-sheet")).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Информация о действиях" })).toHaveCount(0);
-  await expect(page.locator(".section-page-current .actions-info-panel:not(.desktop)")).toBeVisible();
-  await expect(page.getByRole("navigation", { name: "Основная навигация" })).toBeVisible();
 });
 
 test("keeps a single mobile action compact without creating empty scroll", async ({ page }, testInfo) => {
