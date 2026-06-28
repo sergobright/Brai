@@ -52,7 +52,7 @@ export function DetailPanelTabBar({
 }) {
   return (
     <div
-      className="actions-detail-tabs flex min-w-0 gap-1 overflow-x-auto border-b border-border [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      className="actions-detail-tabs -mt-2 flex min-w-0 gap-1 overflow-x-auto border-b border-border [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
       role="tablist"
       aria-label="Вкладки панели деталей"
     >
