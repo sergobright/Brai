@@ -119,7 +119,44 @@ describe("mobile OTA publish scripts", () => {
     expect(manifest.archiveUrl).toBe("https://b.test.brightos.world/mobile-update/bundles/9.9.9.99.0/bundle.zip");
   });
 
-  it("resolves non-production OTA APK compatibility from the release index", async () => {
+  it("does not force a new Preview APK for web-only OTA bundles", async () => {
+    const root = await fixtureRoot("bright-web-only-apk-");
+    await writeStaticExport(root, "web-only-apk");
+    await mkdir(path.join(root, "deploy"), { recursive: true });
+    await copyFile(
+      path.join(workspaceRoot, "deploy/environments.json"),
+      path.join(root, "deploy/environments.json"),
+    );
+    const releaseDir = path.join(root, "releases");
+    await mkdir(releaseDir, { recursive: true });
+    await writeFile(
+      path.join(releaseDir, "releases.json"),
+      JSON.stringify({ schemaVersion: 1, sections: { a: { versionCode: 20 } } }),
+    );
+    const envRoot = path.join(root, "envs/preview-a");
+
+    await execFileAsync("bash", [path.join(workspaceRoot, "deploy/scripts/publish-client-web-layer.sh")], {
+      env: {
+        ...process.env,
+        BRIGHT_OS_ROOT: root,
+        BRIGHT_OS_BUILD_CLIENT: "false",
+        BRIGHT_OS_APP_VERSION: "9.9.9.99",
+        BRIGHT_OS_WEB_TARGET: path.join(envRoot, "web"),
+        BRIGHT_OS_MOBILE_TARGET: path.join(envRoot, "mobile-update"),
+        BRIGHT_OS_UPDATE_BASE_URL: "https://a.test.brightos.world/mobile-update",
+        BRIGHT_OS_MOBILE_BUNDLE_VERSION: "9.9.9.99.42",
+        BRIGHT_OS_RELEASE_TARGET: releaseDir,
+        BRIGHT_OS_ENVIRONMENT: "preview-a",
+        BRIGHT_OS_PUBLISHED_AT: "2026-06-15T00:00:00Z",
+      },
+    });
+
+    const manifest = JSON.parse(await readFile(path.join(envRoot, "mobile-update/manifest.json"), "utf8"));
+    expect(manifest.minApkVersionCode).toBe(1);
+    expect(manifest.maxApkVersionCode).toBeNull();
+  });
+
+  it("resolves native non-production OTA APK compatibility from the release index", async () => {
     const root = await fixtureRoot("bright-required-apk-");
     await writeStaticExport(root, "required-apk");
     await mkdir(path.join(root, "deploy"), { recursive: true });
@@ -147,6 +184,7 @@ describe("mobile OTA publish scripts", () => {
         BRIGHT_OS_MOBILE_BUNDLE_VERSION: "9.9.9.99.42",
         BRIGHT_OS_RELEASE_TARGET: releaseDir,
         BRIGHT_OS_ENVIRONMENT: "preview-a",
+        BRIGHT_OS_NATIVE_APK_CHANGE: "true",
         BRIGHT_OS_PUBLISHED_AT: "2026-06-15T00:00:00Z",
       },
     });

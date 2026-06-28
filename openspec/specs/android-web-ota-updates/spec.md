@@ -39,7 +39,7 @@ Bright OS Android SHALL discover mobile web-layer updates from a self-hosted upd
 ### Requirement: Android applies only compatible OTA bundles
 Bright OS Android SHALL apply only OTA bundles compatible with the installed APK.
 
-Preview OTA manifests SHALL require exact Android `versionCode` compatibility by setting both `minApkVersionCode` and `maxApkVersionCode` to the required technical APK code.
+Native-boundary Preview OTA manifests SHALL require exact Android `versionCode` compatibility by setting both `minApkVersionCode` and `maxApkVersionCode` to the required technical APK code. Web-only Preview OTA manifests SHALL NOT force a new APK when the installed native shell is still compatible.
 
 #### Scenario: Bundle requires newer APK
 - **WHEN** the manifest `minApkVersionCode` is greater than the installed Android `versionCode`
@@ -54,9 +54,16 @@ Preview OTA manifests SHALL require exact Android `versionCode` compatibility by
 
 #### Scenario: Preview APK does not match
 - **WHEN** a Preview Android app checks an OTA manifest
+- **AND** the manifest was published for a native-boundary change
 - **AND** the installed Android `versionCode` is lower or higher than the manifest requirement
 - **THEN** the bundle is skipped as incompatible
 - **AND** the app blocks normal Preview use with an APK update screen
+
+#### Scenario: Web-only Preview update is published
+- **WHEN** a Preview mobile OTA manifest is published for a web-only change
+- **AND** the installed Preview APK is compatible with the existing native bridge
+- **THEN** the manifest does not set an exact APK `versionCode` gate
+- **AND** the app may download and activate the web bundle without installing a new APK
 
 ### Requirement: Android verifies OTA bundle integrity before activation
 Bright OS Android SHALL verify downloaded OTA bundles before extracting or activating them.
