@@ -188,13 +188,13 @@ function preToolUse() {
   if (analysis.manualCodexBranch) {
     return blockHook(`Manual branch or worktree commands are blocked.\n\n${taskStartGuidance()}`);
   }
+  if (analysis.blockedReason) return blockHook(analysis.blockedReason);
   if (!analysis.write && !analysis.officialTaskStarter) return allowHook();
   if (!currentThreadId()) {
     return blockHook("Bright OS cannot verify the current Codex thread id; blocking project-file writes fail-closed.");
   }
   if (analysis.officialTaskStarter) return allowHook();
 
-  fetchAcceptedBase();
   const validation = validateTaskBranch({ requireExpectedUpstream: false });
   if (!validation.ok) {
     return blockHook(`Bright OS blocks project-file writes before a valid task branch exists.\n\n${validation.message}\n\n${taskStartGuidance()}`);
@@ -637,9 +637,9 @@ function validatePushUpdate(line, currentBranchName = "", { isAcceptedRemote = (
 
 function taskStartGuidance(parent = "../bright-os-worktrees") {
   return (
-    `Run the official starter with escalation: scripts/bright-task-start.sh <task-slug>\n` +
+    `Run the installed starter with escalation: /srv/opt/node-v22.16.0/bin/node /srv/opt/bright-os-codex-plugins/plugins/bright-os-guard/hooks/bright-os-guard.mjs start <task-slug>\n` +
     `In Codex Desktop, request sandbox_permissions=require_escalated because the starter creates a sibling worktree under ${parent}.\n` +
-    `Do not create or switch to a manual fallback branch in the current checkout.`
+    `Do not create or switch to a manual fallback branch, and do not use a repo-local starter from a stale checkout.`
   );
 }
 
@@ -670,10 +670,7 @@ function dependencySourceRoot(root) {
   return root;
 }
 
-function findOpenTaskForThread(parent, threadId, branchToCreate, isAccepted = taskPath => {
-  const head = gitMaybeIn(taskPath, "rev-parse", "HEAD");
-  return head ? isAncestor(head, acceptedBaseRef()) : true;
-}) {
+function findOpenTaskForThread(parent, threadId, branchToCreate, isAccepted = taskPathAccepted) {
   if (!threadId || !fs.existsSync(parent)) return null;
   for (const entry of fs.readdirSync(parent, { withFileTypes: true })) {
     if (!entry.isDirectory()) continue;
@@ -690,6 +687,20 @@ function findOpenTaskForThread(parent, threadId, branchToCreate, isAccepted = ta
     return { branch: marker.branch, path: taskPath };
   }
   return null;
+}
+
+function taskPathAccepted(taskPath) {
+  const marker = readJson(path.join(taskPath, ".bright-task", "task.json"));
+  const receipt = readJson(path.join(taskPath, ".bright-task", "delivery-handoff.json"));
+  if (
+    receipt?.receiptType === DELIVERY_RECEIPT_VERSION &&
+    receipt?.branch === marker?.branch &&
+    receipt?.prState === "MERGED"
+  ) {
+    return true;
+  }
+  const head = gitMaybeIn(taskPath, "rev-parse", "HEAD");
+  return head ? isAncestor(head, acceptedBaseRef()) : true;
 }
 
 function linkDependencyDirs(sourceRoot, targetRoot, dependencyDirs = DEPENDENCY_DIRS) {
@@ -745,6 +756,7 @@ function analyzeHookInput(source) {
   for (const call of calls) {
     const classified = classifyToolCall(call);
     if (!classified.ok) return { ...classified, write: true };
+    if (classified.blockedReason) return { ok: true, write: true, blockedReason: classified.blockedReason };
     if (classified.manualCodexBranch) return { ok: true, write: true, manualCodexBranch: true };
     officialTaskStarter ||= Boolean(classified.officialTaskStarter);
     write ||= Boolean(classified.write);
@@ -783,6 +795,9 @@ function classifyToolCall({ tool, input }) {
   if (isShellTool(effectiveTool)) {
     const commandText = String(input?.cmd ?? input?.command ?? "");
     if (!commandText.trim()) return { ok: false, reason: `Shell tool ${effectiveTool} did not include a command; blocking fail-closed.` };
+    if (isUnsafeRepoTaskStarterCommand(commandText)) {
+      return { ok: true, write: true, blockedReason: `Repo-local task starter is stale in this checkout.\n\n${taskStartGuidance()}` };
+    }
     if (isManualCodexBranchCommand(commandText)) return { ok: true, write: true, manualCodexBranch: true };
     if (isOfficialTaskStarterCommand(commandText)) return { ok: true, write: false, officialTaskStarter: true };
     return { ok: true, write: isWriteLikeCommand(commandText) };
@@ -805,8 +820,29 @@ function isWriteLikeCommand(commandText) {
 function isOfficialTaskStarterCommand(commandText) {
   const segments = splitShellSegments(commandText);
   return segments.length > 0 && segments.every((segment) =>
-    /^(?:scripts\/bright-task-start\.sh|(?:\S+\/)?scripts\/bright-task-start\.sh|scripts\/use-node22\.sh\s+node\s+scripts\/bright-task\.mjs\s+start|node\s+scripts\/bright-task\.mjs\s+start)\s+[a-z0-9][a-z0-9._-]*$/.test(segment),
+    isInstalledTaskStarterSegment(segment) ||
+      (isRepoTaskStarterSegment(segment) && repoTaskStarterIsStable()),
   );
+}
+
+function isUnsafeRepoTaskStarterCommand(commandText) {
+  return splitShellSegments(commandText).some((segment) => isRepoTaskStarterSegment(segment) && !repoTaskStarterIsStable());
+}
+
+function isInstalledTaskStarterSegment(segment) {
+  return /^\/srv\/opt\/node-v22\.16\.0\/bin\/node\s+\/srv\/opt\/bright-os-codex-plugins\/plugins\/bright-os-guard\/hooks\/bright-os-guard\.mjs\s+start\s+[a-z0-9][a-z0-9._-]*$/.test(segment);
+}
+
+function isRepoTaskStarterSegment(segment) {
+  return /^(?:scripts\/bright-task-start\.sh|(?:\S+\/)?scripts\/bright-task-start\.sh|scripts\/use-node22\.sh\s+node\s+scripts\/bright-task\.mjs\s+start|node\s+scripts\/bright-task\.mjs\s+start)\s+[a-z0-9][a-z0-9._-]*$/.test(segment);
+}
+
+function repoTaskStarterIsStable() {
+  const root = gitMaybe("rev-parse", "--show-toplevel");
+  if (!root) return false;
+  const starter = path.join(root, "scripts", "bright-task-start.sh");
+  if (!fs.existsSync(starter)) return false;
+  return fs.readFileSync(starter, "utf8").includes("/srv/opt/bright-os-codex-plugins/plugins/bright-os-guard/hooks/bright-os-guard.mjs start");
 }
 
 function isReadOnlyShellCommand(commandText) {

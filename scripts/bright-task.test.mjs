@@ -93,7 +93,12 @@ test("hook analysis allows read-only shell and official task starter", () => {
     manualCodexBranch: false,
   });
 
-  const starter = analyzeHookInput(JSON.stringify({ tool_name: "functions.exec_command", tool_input: { cmd: "scripts/bright-task-start.sh guard-task" } }));
+  const starter = analyzeHookInput(JSON.stringify({
+    tool_name: "functions.exec_command",
+    tool_input: {
+      cmd: "/srv/opt/node-v22.16.0/bin/node /srv/opt/bright-os-codex-plugins/plugins/bright-os-guard/hooks/bright-os-guard.mjs start guard-task",
+    },
+  }));
   assert.equal(starter.ok, true);
   assert.equal(starter.write, false);
   assert.equal(starter.officialTaskStarter, true);
@@ -103,6 +108,23 @@ test("hook analysis allows read-only shell and official task starter", () => {
 
   const nonCodexManual = analyzeHookInput(JSON.stringify({ tool_name: "functions.exec_command", tool_input: { cmd: "git switch main" } }));
   assert.equal(nonCodexManual.manualCodexBranch, true);
+});
+
+test("hook analysis blocks stale repo-local task starter", () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "bright-task-stale-starter-"));
+  const previous = process.cwd();
+  try {
+    git(["init"], tmp);
+    fs.mkdirSync(path.join(tmp, "scripts"));
+    fs.writeFileSync(path.join(tmp, "scripts", "bright-task-start.sh"), "#!/usr/bin/env bash\nnode scripts/bright-task.mjs start \"$@\"\n");
+    process.chdir(tmp);
+
+    const result = analyzeHookInput(JSON.stringify({ tool_name: "functions.exec_command", tool_input: { cmd: "scripts/bright-task-start.sh guard-task" } }));
+    assert.equal(result.ok, true);
+    assert.match(result.blockedReason, /stale/);
+  } finally {
+    process.chdir(previous);
+  }
 });
 
 test("sensitive paths are rejected for commits", () => {
@@ -275,8 +297,9 @@ test("task state rejects origin-dev based branch that is not based on current or
 test("task start guidance requires escalation and forbids manual branch fallback", () => {
   const message = taskStartGuidance("/srv/projects/bright-os-worktrees");
   assert.match(message, /sandbox_permissions=require_escalated/);
-  assert.match(message, /scripts\/bright-task-start\.sh <task-slug>/);
+  assert.match(message, /bright-os-guard\.mjs start <task-slug>/);
   assert.match(message, /Do not create or switch to a manual fallback branch/);
+  assert.match(message, /stale checkout/);
 });
 
 test("task starter creates sibling worktrees from repo and task worktree roots", () => {
@@ -317,6 +340,69 @@ test("task starter blocks another open branch in the same Codex thread", () => {
   });
   assert.equal(findOpenTaskForThread(parent, "thread-b", "codex/new-task", () => false), null);
   assert.equal(findOpenTaskForThread(parent, "thread-a", "codex/public-site-live", (taskPath) => taskPath === accepted), null);
+});
+
+test("task starter ignores squash-merged infra docs branches with delivery receipt", () => {
+  const control = fs.mkdtempSync(path.join(os.tmpdir(), "bright-task-control-"));
+  const parent = fs.mkdtempSync(path.join(os.tmpdir(), "bright-task-squash-"));
+  const merged = path.join(parent, "merged-task");
+  const open = path.join(parent, "open-task");
+  const previous = process.cwd();
+  try {
+    git(["init"], control);
+    git(["config", "user.email", "test@example.invalid"], control);
+    git(["config", "user.name", "Bright Test"], control);
+    fs.writeFileSync(path.join(control, "base.txt"), "base\n");
+    git(["add", "base.txt"], control);
+    git(["commit", "-m", "base"], control);
+    git(["update-ref", "refs/remotes/origin/main", "HEAD"], control);
+
+    for (const [taskPath, branch, withReceipt] of [
+      [merged, "codex/merged-task", true],
+      [open, "codex/open-task", false],
+    ]) {
+      fs.mkdirSync(taskPath, { recursive: true });
+      git(["init"], taskPath);
+      git(["config", "user.email", "test@example.invalid"], taskPath);
+      git(["config", "user.name", "Bright Test"], taskPath);
+      fs.writeFileSync(path.join(taskPath, "change.txt"), branch);
+      git(["add", "change.txt"], taskPath);
+      git(["commit", "-m", branch], taskPath);
+      fs.mkdirSync(path.join(taskPath, ".bright-task"));
+      fs.writeFileSync(
+        path.join(taskPath, ".bright-task", "task.json"),
+        `${JSON.stringify({
+          branch,
+          mode: "new",
+          base: "1111111111111111111111111111111111111111",
+          createdAt: "2026-06-26T00:00:00.000Z",
+          threadId: "thread-a",
+        })}\n`,
+      );
+      if (withReceipt) {
+        fs.writeFileSync(
+          path.join(taskPath, ".bright-task", "delivery-handoff.json"),
+          `${JSON.stringify({
+            receiptType: "bright-delivery-handoff-v1",
+            branch,
+            commit: git(["rev-parse", "HEAD"], taskPath).stdout.trim(),
+            deliveryClass: "infra-docs",
+            prState: "MERGED",
+            runId: 123,
+            verifiedAt: "2026-06-26T00:00:00.000Z",
+          })}\n`,
+        );
+      }
+    }
+
+    process.chdir(control);
+    assert.deepEqual(findOpenTaskForThread(parent, "thread-a", "codex/new-task"), {
+      branch: "codex/open-task",
+      path: open,
+    });
+  } finally {
+    process.chdir(previous);
+  }
 });
 
 test("task starter links existing dependency dirs into new worktrees", () => {
