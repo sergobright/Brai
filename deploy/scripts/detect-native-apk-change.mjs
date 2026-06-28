@@ -10,8 +10,12 @@ const nativePrefixes = [
   "deploy/scripts/apk-version-code",
   "deploy/scripts/build-android-env-apk",
   "deploy/scripts/build-nonproduction-apks",
+  "deploy/scripts/ci-ssh-deploy",
+  "deploy/scripts/ci-ssh-release-slot",
+  "deploy/scripts/detect-native-apk-change",
   "deploy/scripts/publish-capacitor-apk",
   "deploy/scripts/resolve-android-env",
+  "deploy/scripts/resolve-app-version",
 ];
 const nativePackageFiles = new Set([
   "apps/bright_os_app/package.json",

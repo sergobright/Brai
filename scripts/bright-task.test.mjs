@@ -205,6 +205,10 @@ test("delivery classifier separates infra-docs from runtime preview", () => {
 
 test("native APK detector ignores OTA web-layer changes", () => {
   assert.equal(requiresNativeApkChange(["apps/bright_os_app/android/app/build.gradle"]), true);
+  assert.equal(requiresNativeApkChange(["deploy/scripts/ci-ssh-deploy.sh"]), true);
+  assert.equal(requiresNativeApkChange(["deploy/scripts/ci-ssh-release-slot.sh"]), true);
+  assert.equal(requiresNativeApkChange(["deploy/scripts/detect-native-apk-change.mjs"]), true);
+  assert.equal(requiresNativeApkChange(["deploy/scripts/resolve-app-version.mjs"]), true);
   assert.equal(requiresNativeApkChange(["apps/bright_os_app/src/shared/platform/ota.ts"]), false);
   assert.equal(requiresNativeApkChange(["apps/bright_os_app/src/shared/platform/androidTimerNotification.ts"]), false);
   assert.equal(
