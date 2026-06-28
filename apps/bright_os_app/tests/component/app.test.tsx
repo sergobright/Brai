@@ -14,13 +14,14 @@ describe("BrightOsApp shell", () => {
     render(<BrightOsApp />);
     expect(screen.getByRole("heading", { name: "Действия" })).toBeInTheDocument();
     expect(screen.getAllByLabelText("Действия").length).toBeGreaterThan(0);
-    ["Действия", "Фокус"].forEach((title) => {
+    ["Действия", "Входящие", "Фокус"].forEach((title) => {
       expect(screen.getAllByRole("button", { name: title }).length).toBeGreaterThan(0);
     });
     expect(screen.queryByRole("button", { name: "Цели фокусировки" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Настройки" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Открыть меню" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Информация о действиях" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Информация о действиях" })).not.toBeInTheDocument();
+    expect(screen.getAllByLabelText("Информация о действиях").length).toBeGreaterThan(0);
     expect(screen.getByRole("textbox", { name: "Добавить" })).toBeInTheDocument();
   });
 

@@ -290,7 +290,7 @@ describe("BrightOsApp actions", () => {
     });
   });
 
-  it("restores the desktop Actions info panel after detail closes", async () => {
+  it("keeps the desktop Actions info panel open by default", async () => {
     vi.stubGlobal(
       "matchMedia",
       vi.fn(() => ({
@@ -309,25 +309,17 @@ describe("BrightOsApp actions", () => {
 
     render(<BrightOsApp />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Информация о действиях" }));
-    expect(screen.getByRole("button", { name: "Информация о действиях" })).toHaveAttribute("aria-pressed", "true");
-    expect(document.querySelector(".actions-info-panel")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Информация о действиях" })).not.toBeInTheDocument();
+    expect(document.querySelector(".actions-info-panel.desktop")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Закрыть информацию о действиях" })).not.toBeInTheDocument();
 
     await waitFor(() => expect(screen.getByText("Информационная замена")).toBeInTheDocument());
     fireEvent.click(screen.getByRole("textbox", { name: "Название действия: Информационная замена" }));
-    expect(document.querySelector(".actions-info-panel")).not.toBeInTheDocument();
+    expect(document.querySelector(".actions-info-panel.desktop")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Закрыть редактор" })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Закрыть редактор" }));
-    expect(document.querySelector(".actions-info-panel")).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: "Информация о действиях" }));
-    expect(document.querySelector(".actions-info-panel")).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("textbox", { name: "Название действия: Информационная замена" }));
-    expect(screen.getByRole("button", { name: "Закрыть редактор" })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Информация о действиях" }));
-    expect(screen.queryByRole("button", { name: "Закрыть редактор" })).not.toBeInTheDocument();
-    expect(document.querySelector(".actions-info-panel")).toBeInTheDocument();
+    expect(document.querySelector(".actions-info-panel.desktop")).toBeInTheDocument();
   });
 
   it("opens the mobile full-screen detail editor and flushes through the Android back bridge", async () => {

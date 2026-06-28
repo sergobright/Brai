@@ -10,6 +10,7 @@ import { Button } from "@/shared/ui/button";
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/shared/ui/input-group";
 import { ScrollArea } from "@/shared/ui/scroll-area";
 import { cx } from "../../appUtils";
+import { useMobileNavigationViewport } from "../../navigation/useSectionSwipeNavigation";
 import { ActionRow, type DetailTitleFocus } from "./ActionRow";
 import { SortableActionList } from "./ActionList";
 import { ActionsInfoPanel } from "./ActionsInfoPanel";
@@ -27,8 +28,6 @@ export function ActionsSection({
   onDelete,
   onReorder,
   onMobileOverlayChange,
-  infoOpen,
-  onInfoOpenChange,
   autoFocusAddInput,
 }: {
   state: ActivitiesState;
@@ -41,8 +40,6 @@ export function ActionsSection({
   onDelete: (action: ActivityItem) => Promise<void>;
   onReorder: (orderedIds: string[], movedAction: ActivityItem) => Promise<void>;
   onMobileOverlayChange: (open: boolean) => void;
-  infoOpen: boolean;
-  onInfoOpenChange: (open: boolean) => void;
 }) {
   const [draft, setDraft] = useState("");
   const [mobileCreateOpen, setMobileCreateOpen] = useState(false);
@@ -54,7 +51,6 @@ export function ActionsSection({
   const [splitPercent, setSplitPercent] = useState(ACTIONS_SPLIT_DEFAULT_PERCENT);
   const [titleDrafts, setTitleDrafts] = useState<Record<string, string>>({});
   const [detailTitleFocusRequest, setDetailTitleFocusRequest] = useState(0);
-  const previousInfoOpenRef = useRef(infoOpen);
   const suppressMobileCreatePopRef = useRef(false);
   const workspaceRef = useRef<HTMLDivElement | null>(null);
   const splitDragStyleRef = useRef<{ cursor: string; userSelect: string } | null>(null);
@@ -67,7 +63,8 @@ export function ActionsSection({
   const visibleOpenDeleteActionId =
     openDeleteActionId && state.actions.some((action) => action.id === openDeleteActionId) ? openDeleteActionId : null;
   const mobileOverlayOpen = mobileCreateOpen || mobileEditAction != null;
-  const desktopSidePanelOpen = Boolean(selectedAction && !mobileEditAction) || infoOpen;
+  const mobileViewport = useMobileNavigationViewport();
+  const desktopSidePanelOpen = true;
 
   useEffect(() => {
     if (autoFocusAddInput) desktopInputRef.current?.focus();
@@ -85,13 +82,6 @@ export function ActionsSection({
       onMobileOverlayChange(false);
     };
   }, [mobileOverlayOpen, onMobileOverlayChange]);
-
-  useEffect(() => {
-    if (!previousInfoOpenRef.current && infoOpen) {
-      setSelectedActionId(null);
-    }
-    previousInfoOpenRef.current = infoOpen;
-  }, [infoOpen]);
 
   useEffect(() => {
     if (!mobileCreateOpen) return;
@@ -263,12 +253,12 @@ export function ActionsSection({
       <div
         ref={workspaceRef}
         className={cx(
-          "actions-workspace relative grid h-full min-h-0 min-w-0 items-stretch gap-[18px] max-[860px]:block",
+          "actions-workspace relative grid h-full min-h-0 min-w-0 items-stretch gap-[18px] max-[860px]:grid max-[860px]:grid-cols-[minmax(0,1fr)] max-[860px]:grid-rows-[minmax(0,1fr)_auto]",
           desktopSidePanelOpen ? "has-detail grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-0" : "grid-cols-[minmax(0,1fr)]",
           desktopSidePanelOpen && "overflow-hidden",
         )}
         style={
-          desktopSidePanelOpen
+          desktopSidePanelOpen && !mobileViewport
             ? ({
                 "--actions-list-percent": `${splitPercent}%`,
                 gridTemplateColumns: "minmax(0,var(--actions-list-percent)) minmax(0,calc(100% - var(--actions-list-percent)))",
@@ -358,6 +348,8 @@ export function ActionsSection({
           ) : null}
         </ScrollArea>
 
+        <ActionsInfoPanel mobile />
+
         {desktopSidePanelOpen ? (
           <>
             <button
@@ -389,7 +381,7 @@ export function ActionsSection({
                 onAutosaveDetails={onAutosaveDetails}
               />
             ) : (
-              <ActionsInfoPanel onClose={() => onInfoOpenChange(false)} />
+              <ActionsInfoPanel />
             )}
           </>
         ) : null}

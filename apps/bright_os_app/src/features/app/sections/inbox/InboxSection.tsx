@@ -13,7 +13,8 @@ import { InputGroup, InputGroupAddon, InputGroupInput } from "@/shared/ui/input-
 import { ScrollArea } from "@/shared/ui/scroll-area";
 import { cx, fitTextareaHeight } from "../../appUtils";
 import { useMobileSheetDrag } from "../../hooks/useMobileSheetDrag";
-import { isMobileNavigationViewport } from "../../navigation/useSectionSwipeNavigation";
+import { isMobileNavigationViewport, useMobileNavigationViewport } from "../../navigation/useSectionSwipeNavigation";
+import { ActionsInfoPanel } from "../actions/ActionsInfoPanel";
 import { ACTION_DELETE_REVEAL_WIDTH, ACTION_ROW_SERVICE_SELECTOR, ACTIONS_SPLIT_DEFAULT_PERCENT, ACTIONS_SPLIT_MIN_PERCENT, clampActionsSplitPercent, loadActivityMarkdownPreviewMode, saveActivityMarkdownPreviewMode } from "../actions/constants";
 
 type DetailTitleFocus = "end" | null;
@@ -56,7 +57,8 @@ export function InboxSection({
   const visibleOpenDeleteItemId =
     openDeleteItemId && state.inbox.some((item) => item.id === openDeleteItemId) ? openDeleteItemId : null;
   const mobileOverlayOpen = mobileCreateOpen || mobileEditItem != null;
-  const desktopSidePanelOpen = Boolean(selectedItem && !mobileEditItem);
+  const mobileViewport = useMobileNavigationViewport();
+  const desktopSidePanelOpen = true;
 
   useEffect(() => {
     if (autoFocusAddInput) desktopInputRef.current?.focus();
@@ -240,12 +242,12 @@ export function InboxSection({
       <div
         ref={workspaceRef}
         className={cx(
-          "actions-workspace relative grid h-full min-h-0 min-w-0 items-stretch gap-[18px] max-[860px]:block",
+          "actions-workspace relative grid h-full min-h-0 min-w-0 items-stretch gap-[18px] max-[860px]:grid max-[860px]:grid-cols-[minmax(0,1fr)] max-[860px]:grid-rows-[minmax(0,1fr)_auto]",
           desktopSidePanelOpen ? "has-detail grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-0" : "grid-cols-[minmax(0,1fr)]",
           desktopSidePanelOpen && "overflow-hidden",
         )}
         style={
-          desktopSidePanelOpen
+          desktopSidePanelOpen && !mobileViewport
             ? ({
                 "--actions-list-percent": `${splitPercent}%`,
                 gridTemplateColumns: "minmax(0,var(--actions-list-percent)) minmax(0,calc(100% - var(--actions-list-percent)))",
@@ -296,7 +298,9 @@ export function InboxSection({
           </div>
         </ScrollArea>
 
-        {selectedItem && !mobileEditItem ? (
+        <ActionsInfoPanel label="Информация о входящих" mobile />
+
+        {desktopSidePanelOpen ? (
           <>
             <button
               type="button"
@@ -316,16 +320,20 @@ export function InboxSection({
             >
               <span className="block h-full w-px bg-border transition-colors group-hover:bg-primary" aria-hidden="true" />
             </button>
-            <InboxDetailEditor
-              key={selectedItem.id}
-              item={selectedItem}
-              titleDraft={titleDrafts[selectedItem.id]}
-              mode="desktop"
-              focusTitleRequest={detailTitleFocusRequest}
-              onClose={() => setSelectedItemId(null)}
-              onTitleDraftChange={setTitleDraft}
-              onAutosaveDetails={onAutosaveDetails}
-            />
+            {selectedItem && !mobileEditItem ? (
+              <InboxDetailEditor
+                key={selectedItem.id}
+                item={selectedItem}
+                titleDraft={titleDrafts[selectedItem.id]}
+                mode="desktop"
+                focusTitleRequest={detailTitleFocusRequest}
+                onClose={() => setSelectedItemId(null)}
+                onTitleDraftChange={setTitleDraft}
+                onAutosaveDetails={onAutosaveDetails}
+              />
+            ) : (
+              <ActionsInfoPanel label="Информация о входящих" />
+            )}
           </>
         ) : null}
       </div>
