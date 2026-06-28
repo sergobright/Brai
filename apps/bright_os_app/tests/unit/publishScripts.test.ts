@@ -3,11 +3,13 @@ import { createHash } from "node:crypto";
 import { chmod, copyFile, mkdir, mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
 
 const execFileAsync = promisify(execFile);
-const workspaceRoot = path.resolve(process.cwd(), "../..");
+const workspaceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
+const nodeCliEnv = { ...process.env, NODE_OPTIONS: "" };
 
 describe("mobile OTA publish scripts", () => {
   it("publishes browser web and Android OTA from one web-layer command", async () => {
@@ -192,9 +194,61 @@ describe("mobile OTA publish scripts", () => {
     expect(buildApk).toContain('/srv/opt/android-build-env/build-android.sh "$ROOT/apps/bright_os_app/android" "$GRADLE_TASK"');
   });
 
+  it("resolves Android APK app versions from deployment sources", async () => {
+    const root = await fixtureRoot("bright-apk-version-resolve-");
+    await writeStaticExport(root, "stale-public-version");
+    const dbPath = path.join(root, "bright.sqlite");
+    await execFileAsync("node", ["--input-type=module", "-e", `
+const { pathToFileURL } = await import("node:url");
+const { BrightOsStore } = await import(pathToFileURL(process.argv[1]));
+const store = new BrightOsStore(process.argv[2]);
+try {
+  store.upsertBuildVersion({
+    majorVersion: 0,
+    releaseVersion: 5,
+    buildVersion: 43,
+    apkVersion: 1,
+    version: "0.5.43.1",
+    shortChanges: "Production release",
+    detailedChanges: "Production release",
+    reason: "Needed for test",
+    releasedAtUtc: "2026-06-28T17:29:00.000Z",
+  });
+} finally {
+  store.close();
+}
+`, path.join(workspaceRoot, "services/bright_os_api/src/store.js"), dbPath], { env: nodeCliEnv });
+
+    await mkdir(path.join(root, "deploy/web"), { recursive: true });
+    await writeFile(path.join(root, "deploy/web/version.json"), JSON.stringify({ version: "0.5.43.1" }));
+    const resolver = path.join(workspaceRoot, "deploy/scripts/resolve-app-version.mjs");
+    const outputPath = path.join(root, "resolved-versions.json");
+    await execFileAsync("node", ["--input-type=module", "-e", `
+const fs = await import("node:fs/promises");
+const { pathToFileURL } = await import("node:url");
+const [, resolver, root, db, prodWebVersionJson, outputPath] = process.argv.slice(1);
+const { resolveAppVersion } = await import(pathToFileURL(resolver));
+await fs.writeFile(outputPath, JSON.stringify({
+  production: resolveAppVersion({ environment: "prod", root, db, explicit: "" }),
+  preview: resolveAppVersion({ environment: "preview-a", root, prodWebVersionJson, explicit: "" }),
+}));
+`, "import-helper", resolver, root, dbPath, path.join(root, "deploy/web/version.json"), outputPath], { env: nodeCliEnv });
+    const versions = JSON.parse(await readFile(outputPath, "utf8"));
+
+    expect(versions.production).toBe("0.5.43.1");
+    expect(versions.preview).toBe("0.5.43.1");
+  });
+
   it("promotes production deployment metadata into the production database path", async () => {
     const script = await readFile(path.join(workspaceRoot, "deploy/scripts/ci-ssh-promote-deployment.sh"), "utf8");
     expect(script).toContain('export BRIGHT_OS_DB="$DEPLOY_REPO/data/bright_os.sqlite"');
+  });
+
+  it("restores stale preview source permissions before deploy cleanup", async () => {
+    const script = await readFile(path.join(workspaceRoot, "deploy/scripts/ci-ssh-deploy.sh"), "utf8");
+
+    expect(script).toContain('find "$SOURCE_ROOT" -user "$(id -u)" -exec chmod u+rwX,g+rwX {} + || true');
+    expect(script.indexOf('find "$SOURCE_ROOT" -user "$(id -u)"')).toBeLessThan(script.indexOf('rm -rf "$SOURCE_ROOT"'));
   });
 
   it("publishes a versioned bundle and atomic manifest from a static export", async () => {

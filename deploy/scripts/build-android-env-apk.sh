@@ -28,13 +28,11 @@ export BRIGHT_OS_ROOT="$ROOT"
 if [[ -z "${BRIGHT_OS_ANDROID_VERSION_CODE:-}" ]]; then
   export BRIGHT_OS_ANDROID_VERSION_CODE="$("$SCRIPT_DIR/apk-version-code.sh" next "manual $FLAVOR APK")"
 fi
-export BRIGHT_OS_APP_VERSION="${BRIGHT_OS_APP_VERSION:-$("$NODE_BIN" -e '
-const fs = require("node:fs");
-const path = require("node:path");
-const root = process.argv[1];
-const parsed = JSON.parse(fs.readFileSync(path.join(root, "apps/bright_os_app/public/version.json"), "utf8"));
-console.log(parsed.version);
-' "$ROOT")}"
+export BRIGHT_OS_APP_VERSION="${BRIGHT_OS_APP_VERSION:-$("$NODE_BIN" "$SCRIPT_DIR/resolve-app-version.mjs" \
+  --environment "$ENVIRONMENT" \
+  --root "$ROOT" \
+  --db "${BRIGHT_OS_DB:-}" \
+  --prod-web-version-json "${BRIGHT_OS_PROD_WEB_VERSION_JSON:-}")}"
 export NEXT_PUBLIC_BRIGHT_OS_ENVIRONMENT="$ENVIRONMENT"
 export NEXT_PUBLIC_BRIGHT_OS_PREVIEW_SLOT="$SLOT"
 export NEXT_PUBLIC_BRIGHT_OS_BRANCH="${BRIGHT_OS_BRANCH:-}"

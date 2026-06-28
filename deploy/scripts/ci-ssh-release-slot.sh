@@ -96,6 +96,7 @@ if [[ -n "${SLOT_META[0]:-}" ]]; then
   export BRIGHT_OS_COMMIT=""
   export BRIGHT_OS_ROOT="$BASELINE_SOURCE"
   export BRIGHT_OS_RELEASE_TARGET="$DEPLOY_REPO/deploy/releases"
+  export BRIGHT_OS_PROD_WEB_VERSION_JSON="$DEPLOY_REPO/deploy/web/version.json"
   export BRIGHT_OS_ANDROID_VERSION_CODE="$(deploy/scripts/apk-version-code.sh next "released $RELEASE_BRANCH baseline preview ${SLOT_META[0]}")"
   deploy/scripts/build-android-env-apk.sh "preview${SLOT_META[0]}"
   cd "$RELEASE_ROOT"

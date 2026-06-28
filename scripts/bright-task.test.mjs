@@ -30,6 +30,7 @@ import {
   validatePushUpdate,
 } from "./bright-task.mjs";
 import { acceptedPreviewBranches } from "../deploy/scripts/accepted-preview-branches.mjs";
+import { requiresNativeApkChange } from "../deploy/scripts/detect-native-apk-change.mjs";
 
 test("valid codex task branch names are strict", () => {
   assert.equal(CODEX_BRANCH_RE.test("codex/enforce-branch-preview-guards"), true);
@@ -200,6 +201,20 @@ test("delivery classifier separates infra-docs from runtime preview", () => {
   assert.equal(classifyDelivery(["docs/foo.md", "apps/bright_os_app/src/app/page.tsx"]).deliveryClass, "runtime-preview");
   assert.equal(classifyDelivery(["package.json"]).fallback, "unknown_path");
   assert.equal(classifyDelivery(["deploy/web/index.html"]).deliveryClass, "blocked");
+});
+
+test("native APK detector ignores OTA web-layer changes", () => {
+  assert.equal(requiresNativeApkChange(["apps/bright_os_app/android/app/build.gradle"]), true);
+  assert.equal(requiresNativeApkChange(["apps/bright_os_app/src/shared/platform/ota.ts"]), false);
+  assert.equal(requiresNativeApkChange(["apps/bright_os_app/src/shared/platform/androidTimerNotification.ts"]), false);
+  assert.equal(
+    requiresNativeApkChange(["apps/bright_os_app/package.json"], '+    "next": "16.0.0",\n'),
+    false,
+  );
+  assert.equal(
+    requiresNativeApkChange(["apps/bright_os_app/package.json"], '+    "@capacitor/app": "7.0.0",\n'),
+    true,
+  );
 });
 
 test("pre-push ref updates must stay on matching codex ref", () => {
