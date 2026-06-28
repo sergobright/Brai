@@ -251,6 +251,18 @@ await fs.writeFile(outputPath, JSON.stringify({
     expect(script.indexOf('find "$SOURCE_ROOT" -user "$(id -u)"')).toBeLessThan(script.indexOf('rm -rf "$SOURCE_ROOT"'));
   });
 
+  it("rebuilds all APK release rows from production native deploys", async () => {
+    const deploy = await readFile(path.join(workspaceRoot, "deploy/scripts/ci-ssh-deploy.sh"), "utf8");
+    const releaseSlot = await readFile(path.join(workspaceRoot, "deploy/scripts/ci-ssh-release-slot.sh"), "utf8");
+    const prodBlock = deploy.slice(deploy.indexOf('elif [[ "$ENVIRONMENT" == "prod" ]]'));
+
+    expect(prodBlock).toContain('deploy/scripts/build-android-env-apk.sh production');
+    expect(prodBlock).toContain('node deploy/scripts/resolve-app-version.mjs --environment prod --root "$SOURCE_ROOT" --db "${BRIGHT_OS_DB:-}"');
+    expect(prodBlock).toContain('deploy/scripts/build-nonproduction-apks.sh');
+    expect(prodBlock.indexOf('deploy/scripts/build-android-env-apk.sh production')).toBeLessThan(prodBlock.indexOf('deploy/scripts/build-nonproduction-apks.sh'));
+    expect(releaseSlot).toContain('deploy/scripts/build-android-env-apk.sh "preview${SLOT_META[0]}" >&2');
+  });
+
   it("publishes a versioned bundle and atomic manifest from a static export", async () => {
     const root = await fixtureRoot("bright-mobile-publish-");
     await writeStaticExport(root, "ota");
