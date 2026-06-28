@@ -945,8 +945,10 @@ function deliveryClassForFile(file) {
     return "docs";
   }
   if (
+    file === ".gitignore" ||
     file === ".github/workflows/bright-os-delivery.yml" ||
     file === ".codex/hooks.json" ||
+    file.startsWith("deploy/ansible/") ||
     file.startsWith(".githooks/") ||
     file.startsWith("scripts/bright-") ||
     file.startsWith("services/bright_os_temporal/") ||
@@ -958,10 +960,12 @@ function deliveryClassForFile(file) {
       "deploy/scripts/ci-ssh-deploy.sh",
       "deploy/scripts/ci-ssh-promote-deployment.sh",
       "deploy/scripts/ci-ssh-release-slot.sh",
+      "deploy/scripts/ci-ssh-sync-main-checkout.sh",
       "deploy/scripts/deploy-branch.sh",
       "deploy/scripts/detect-native-apk-change.mjs",
       "deploy/scripts/promote-accepted-deployment.sh",
       "deploy/scripts/promote-deployment.mjs",
+      "deploy/scripts/sync-local-main-checkout.sh",
     ].includes(file)
   ) {
     return "infra";

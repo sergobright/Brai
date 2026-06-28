@@ -10,6 +10,7 @@ node_modules/
 
 # Local secrets and runtime data
 /admin/
+/data/
 .env
 .env.*
 !.env.example

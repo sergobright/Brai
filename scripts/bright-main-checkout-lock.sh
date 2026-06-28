@@ -12,11 +12,18 @@ else
 fi
 worktrees="$root/.codex-worktrees"
 current_worktree="$repo_root"
+runtime_paths=(
+  "$root/data"
+  "$root/deploy/site"
+  "$root/deploy/web"
+  "$root/deploy/mobile-update"
+  "$root/deploy/releases"
+)
 
 mkdir -p "$worktrees"
 
 sudo chown root:mark "$root"
-sudo chmod 0750 "$root"
+sudo chmod 0751 "$root"
 
 sudo chown -R mark:mark "$root/.git" "$worktrees"
 sudo chmod 0700 "$worktrees"
@@ -28,13 +35,39 @@ fi
 sudo find "$root" \
   -path "$root/.git" -prune -o \
   -path "$worktrees" -prune -o \
+  -path "$root/data" -prune -o \
+  -path "$root/deploy/site" -prune -o \
+  -path "$root/deploy/web" -prune -o \
+  -path "$root/deploy/mobile-update" -prune -o \
+  -path "$root/deploy/releases" -prune -o \
   -exec chown root:mark {} +
 
 sudo find "$root" \
   -path "$root/.git" -prune -o \
   -path "$worktrees" -prune -o \
+  -path "$root/data" -prune -o \
+  -path "$root/deploy/site" -prune -o \
+  -path "$root/deploy/web" -prune -o \
+  -path "$root/deploy/mobile-update" -prune -o \
+  -path "$root/deploy/releases" -prune -o \
   -exec chmod u=rwX,g=rX,o= {} +
 
+sudo chmod 0751 "$root"
+if [ -d "$root/deploy" ]; then
+  sudo chmod u=rwx,g=rx,o=x "$root/deploy"
+fi
+
+if getent group bright-deploy >/dev/null 2>&1; then
+  for runtime_path in "${runtime_paths[@]}"; do
+    if [ -d "$runtime_path" ]; then
+      sudo chgrp -R bright-deploy "$runtime_path"
+      sudo chmod -R u=rwX,g=rwX,o=rX "$runtime_path"
+      sudo find "$runtime_path" -type d -exec chmod g+s {} +
+    fi
+  done
+fi
+
+if [ "${BRIGHT_OS_LOCK_STALE_WORKTREES:-0}" = "1" ]; then
 while IFS= read -r line; do
   case "$line" in
     "worktree "*)
@@ -52,6 +85,7 @@ while IFS= read -r line; do
       ;;
   esac
 done < <(git -C "$root" worktree list --porcelain)
+fi
 
-echo "Locked $root read-only for non-root writes; stale registered worktrees are read-only too."
+echo "Locked $root source files read-only for non-root writes."
 echo "Writable task worktree parent: $worktrees"

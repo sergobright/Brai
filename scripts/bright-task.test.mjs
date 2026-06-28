@@ -87,12 +87,39 @@ test("codex project pre-tool hook is unconditional and uses the installed guard"
   assert.match(hooks.hooks.Stop[0].hooks[0].command, /\/srv\/opt\/bright-os-codex-plugins\/plugins\/bright-os-guard\/hooks\/bright-os-guard\.mjs stop/);
 });
 
-test("main checkout lock also locks stale registered worktrees", () => {
+test("main checkout lock keeps task worktrees writable by default", () => {
   const script = fs.readFileSync(new URL("./bright-main-checkout-lock.sh", import.meta.url), "utf8");
   assert.match(script, /git -C "\$root" worktree list --porcelain/);
   assert.match(script, /bright-os-worktrees/);
+  assert.match(script, /BRIGHT_OS_LOCK_STALE_WORKTREES/);
   assert.match(script, /BRIGHT_OS_LOCK_CURRENT_WORKTREE/);
-  assert.match(script, /stale registered worktrees are read-only/);
+  assert.match(script, /sudo chmod 0751 "\$root"/);
+  assert.match(script, /sudo chmod u=rwx,g=rx,o=x "\$root\/deploy"/);
+  assert.match(script, /Writable task worktree parent/);
+});
+
+test("local main sync preserves runtime dirs and hard resets to origin main", () => {
+  const script = fs.readFileSync(new URL("../deploy/scripts/sync-local-main-checkout.sh", import.meta.url), "utf8");
+  const ciScript = fs.readFileSync(new URL("../deploy/scripts/ci-ssh-sync-main-checkout.sh", import.meta.url), "utf8");
+  const playbook = fs.readFileSync(new URL("../deploy/ansible/bright-os.yml", import.meta.url), "utf8");
+  assert.match(script, /REPO="\/srv\/projects\/bright-os"/);
+  assert.match(script, /Usage: \$0 \[expected-main-commit\]/);
+  assert.match(script, /runuser -u "\$GIT_USER"/);
+  assert.match(script, /core\.hooksPath=\/dev\/null/);
+  assert.match(script, /git_cmd checkout -f -B "\$BRANCH" "origin\/\$BRANCH"/);
+  assert.match(script, /git_cmd reset --hard "origin\/\$BRANCH"/);
+  assert.match(script, /-e data\//);
+  assert.match(script, /-e deploy\/web\//);
+  assert.match(script, /-e deploy\/releases\//);
+  assert.match(script, /bright-os-rescue/);
+  assert.match(script, /chmod 0751 "\$REPO"/);
+  assert.match(script, /chmod u=rwx,g=rx,o=x deploy/);
+  assert.match(ciScript, /sudo -n \/srv\/opt\/bright-os-main-sync\.sh "\$BRIGHT_OS_COMMIT"/);
+  assert.doesNotMatch(ciScript, /DEPLOY_REPO/);
+  assert.doesNotMatch(ciScript, /sudo BRIGHT_DEPLOY_REPO=/);
+  assert.match(playbook, /bright_os_repo }}\/deploy\/releases/);
+  assert.match(playbook, /dest: \/srv\/opt\/bright-os-main-sync\.sh/);
+  assert.match(playbook, /owner: root/);
 });
 
 test("hook analysis fails closed for bad input and unknown tool shapes", () => {
@@ -157,7 +184,11 @@ test("delivery classifier separates infra-docs from runtime preview", () => {
   assert.equal(deliveryClassForFile("docs/operations/branch-preview-environments.md"), "docs");
   assert.equal(deliveryClassForFile("openspec/specs/repository-operations/spec.md"), "docs");
   assert.equal(deliveryClassForFile(".github/workflows/bright-os-delivery.yml"), "infra");
+  assert.equal(deliveryClassForFile(".gitignore"), "infra");
+  assert.equal(deliveryClassForFile("deploy/ansible/bright-os.yml"), "infra");
   assert.equal(deliveryClassForFile("deploy/scripts/classify-delivery.mjs"), "infra");
+  assert.equal(deliveryClassForFile("deploy/scripts/sync-local-main-checkout.sh"), "infra");
+  assert.equal(deliveryClassForFile("deploy/scripts/ci-ssh-sync-main-checkout.sh"), "infra");
   assert.equal(deliveryClassForFile("scripts/bright-task.mjs"), "infra");
   assert.equal(deliveryClassForFile("services/bright_os_temporal/src/state.mjs"), "infra");
   assert.equal(deliveryClassForFile("deploy/web/index.html"), "blocked");

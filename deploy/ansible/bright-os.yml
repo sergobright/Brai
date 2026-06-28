@@ -146,6 +146,7 @@
         - "{{ bright_os_public_site_root }}"
         - "{{ bright_os_repo }}/deploy/web"
         - "{{ bright_os_repo }}/deploy/mobile-update"
+        - "{{ bright_os_repo }}/deploy/releases"
 
     - name: Allow deploy user to update production Bright OS database ledger
       ansible.builtin.file:
@@ -228,6 +229,14 @@
       loop_control:
         label: "{{ item.value.service }}"
       notify: Reload systemd
+
+    - name: Install Bright OS main checkout sync script
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../scripts/sync-local-main-checkout.sh"
+        dest: /srv/opt/bright-os-main-sync.sh
+        owner: root
+        group: root
+        mode: "0755"
 
     - name: Install Bright OS Caddy routes
       ansible.builtin.blockinfile:
