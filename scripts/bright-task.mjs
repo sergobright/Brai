@@ -635,17 +635,18 @@ function validatePushUpdate(line, currentBranchName = "", { isAcceptedRemote = (
   }
 }
 
-function taskStartGuidance(parent = "../bright-os-worktrees") {
+function taskStartGuidance(parent = ".codex-worktrees") {
   return (
     `Run the installed starter with escalation: /srv/opt/node-v22.16.0/bin/node /srv/opt/bright-os-codex-plugins/plugins/bright-os-guard/hooks/bright-os-guard.mjs start <task-slug>\n` +
-    `In Codex Desktop, request sandbox_permissions=require_escalated because the starter creates a sibling worktree under ${parent}.\n` +
+    `In Codex Desktop, request sandbox_permissions=require_escalated because the starter updates Git worktree metadata and creates an isolated worktree under ${parent}.\n` +
     `Do not create or switch to a manual fallback branch, and do not use a repo-local starter from a stale checkout.`
   );
 }
 
 function taskWorktreeParent(root) {
   const parent = path.dirname(root);
-  return path.basename(parent) === "bright-os-worktrees" ? parent : path.resolve(root, "..", "bright-os-worktrees");
+  if (path.basename(parent) === ".codex-worktrees" || path.basename(parent) === "bright-os-worktrees") return parent;
+  return path.join(root, ".codex-worktrees");
 }
 
 function acceptedBaseBranch() {
@@ -663,6 +664,10 @@ function acceptedBaseFetchRefspec() {
 
 function dependencySourceRoot(root) {
   const parent = path.dirname(root);
+  if (path.basename(parent) === ".codex-worktrees") {
+    const canonical = path.dirname(parent);
+    if (fs.existsSync(path.join(canonical, "package.json"))) return canonical;
+  }
   if (path.basename(parent) === "bright-os-worktrees") {
     const canonical = path.join(path.dirname(parent), "bright-os");
     if (fs.existsSync(path.join(canonical, "package.json"))) return canonical;
