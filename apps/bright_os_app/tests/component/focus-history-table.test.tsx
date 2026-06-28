@@ -43,8 +43,8 @@ describe("FocusHistoryTable", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Применить ввод времени" }));
 
-    await waitFor(() => expect(screen.getByRole("button", { name: "00:30" })).toHaveClass("text-destructive"));
-    expect(screen.getByRole("button", { name: "13:30" })).toHaveClass("text-destructive");
+    await waitFor(() => expect(screen.getByRole("button", { name: "00:30" })).toHaveClass("text-amber-600"));
+    expect(screen.getByRole("button", { name: "13:30" })).toHaveClass("text-amber-600");
 
     fireEvent.click(screen.getByRole("button", { name: "00:30" }));
     fireEvent.change(screen.getByRole("textbox", { name: "Значение времени" }), {
