@@ -235,21 +235,21 @@ export function FocusHistoryTable({
                                 value={formatTimeInput(rowDraft.endMs)}
                               />
                             </div>
-                            <div className="flex h-9 shrink-0 items-center justify-end gap-0.5 border-l pl-1">
-                              <Button aria-label="Отменить редактирование фокуса" className="size-7 text-muted-foreground" onClick={(event) => {
+                            <div className="flex h-8 shrink-0 items-center justify-end gap-0.5 border-l pl-1">
+                              <Button aria-label="Отменить редактирование фокуса" className="size-6 text-muted-foreground" onClick={(event) => {
                                 event.stopPropagation();
                                 closeEditor();
                               }} size="icon-sm" type="button" variant="ghost">
-                                <X className="size-4" aria-hidden="true" />
+                                <X className="size-3.5" aria-hidden="true" />
                               </Button>
-                              <Button aria-label="Удалить запись фокуса" className="size-7 text-destructive" onClick={(event) => void deleteRow(row, event)} size="icon-sm" type="button" variant="ghost">
-                                <Trash2 className="size-4" aria-hidden="true" />
+                              <Button aria-label="Удалить запись фокуса" className="size-6 text-destructive" onClick={(event) => void deleteRow(row, event)} size="icon-sm" type="button" variant="ghost">
+                                <Trash2 className="size-3.5" aria-hidden="true" />
                               </Button>
-                              <Button aria-label="Закрыть редактирование фокуса" className="size-7" onClick={(event) => {
+                              <Button aria-label="Закрыть редактирование фокуса" className="size-6" onClick={(event) => {
                                 event.stopPropagation();
                                 void saveActiveDraft({ close: true });
                               }} size="icon-sm" type="button" variant="ghost">
-                                <Check className="size-4" aria-hidden="true" />
+                                <Check className="size-3.5" aria-hidden="true" />
                               </Button>
                             </div>
                           </div>
@@ -304,79 +304,77 @@ function TimeEditor({
   return (
     <div
       className={cx(
-        "grid h-10 min-w-0 grid-rows-[0.75rem_1fr] rounded-md border bg-background/35 px-1 py-0.5 transition-colors",
+        "relative h-10 min-w-0 rounded-md border bg-background/35 px-1 py-0.5 transition-colors",
         featured && !changed && "border-primary/35 bg-primary/10",
         changed && "border-destructive/60 bg-destructive/10",
         editing && "border-ring bg-accent/35",
       )}
     >
-      <span className={cx("truncate text-center text-xs leading-3", changed ? "text-destructive" : "text-muted-foreground")}>{label}</span>
-      <div className="grid min-w-0 grid-cols-[1.25rem_minmax(2.1rem,1fr)_1.25rem] items-center gap-0.5">
-        <Button
-          aria-label={editing ? "Отменить ввод времени" : "Уменьшить на 5 минут"}
-          className="size-5 rounded-sm"
+      <span className={cx("absolute inset-x-1 top-0.5 truncate text-center text-xs leading-3", changed ? "text-destructive" : "text-muted-foreground")}>{label}</span>
+      <Button
+        aria-label={editing ? "Отменить ввод времени" : "Уменьшить на 5 минут"}
+        className="absolute bottom-1 left-1 size-5 rounded-sm"
+        onClick={(event) => {
+          event.stopPropagation();
+          if (editing) {
+            onCancelInput();
+          } else {
+            onStep(-1);
+          }
+        }}
+        size="icon-xs"
+        type="button"
+        variant="ghost"
+      >
+        {editing ? <X className="size-3" aria-hidden="true" /> : <Minus className="size-3" aria-hidden="true" />}
+      </Button>
+      {editing ? (
+        <Input
+          aria-invalid={invalid}
+          aria-label="Значение времени"
+          className="absolute inset-x-6 bottom-1 h-5.5 min-w-0 px-1 text-center text-xs text-destructive tabular-nums"
+          inputMode="numeric"
+          onChange={(event) => onInput(event.target.value)}
+          onClick={(event) => event.stopPropagation()}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") onCommitInput();
+            if (event.key === "Escape") onCancelInput();
+          }}
+          value={inputValue}
+        />
+      ) : (
+        <button
+          className={cx(
+            "absolute inset-x-6 bottom-1 h-5.5 min-w-0 rounded-sm px-0.5 text-center text-sm font-semibold tabular-nums transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50",
+            changed ? "text-destructive" : featured ? "text-primary" : "text-foreground",
+          )}
           onClick={(event) => {
             event.stopPropagation();
-            if (editing) {
-              onCancelInput();
-            } else {
-              onStep(-1);
-            }
+            onBeginInput(field);
           }}
-          size="icon-xs"
           type="button"
-          variant="ghost"
         >
-          {editing ? <X className="size-3" aria-hidden="true" /> : <Minus className="size-3" aria-hidden="true" />}
-        </Button>
-        {editing ? (
-          <Input
-            aria-invalid={invalid}
-            aria-label="Значение времени"
-            className="h-6 min-w-0 px-1 text-center text-xs text-destructive tabular-nums"
-            inputMode="numeric"
-            onChange={(event) => onInput(event.target.value)}
-            onClick={(event) => event.stopPropagation()}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") onCommitInput();
-              if (event.key === "Escape") onCancelInput();
-            }}
-            value={inputValue}
-          />
-        ) : (
-          <button
-            className={cx(
-              "h-6 min-w-0 rounded-sm px-1 text-center text-sm font-semibold tabular-nums transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50",
-              changed ? "text-destructive" : featured ? "text-primary" : "text-foreground",
-            )}
-            onClick={(event) => {
-              event.stopPropagation();
-              onBeginInput(field);
-            }}
-            type="button"
-          >
-            {value}
-          </button>
-        )}
-        <Button
-          aria-label={editing ? "Применить ввод времени" : "Увеличить на 5 минут"}
-          className="size-5 rounded-sm"
-          disabled={invalid}
-          onClick={(event) => {
-            event.stopPropagation();
-            if (editing) {
-              onCommitInput();
-            } else {
-              onStep(1);
-            }
-          }}
-          size="icon-xs"
-          type="button"
-          variant="ghost"
-        >
-          {editing ? <Check className="size-3" aria-hidden="true" /> : <Plus className="size-3" aria-hidden="true" />}
-        </Button>
-      </div>
+          {value}
+        </button>
+      )}
+      <Button
+        aria-label={editing ? "Применить ввод времени" : "Увеличить на 5 минут"}
+        className="absolute right-1 bottom-1 size-5 rounded-sm"
+        disabled={invalid}
+        onClick={(event) => {
+          event.stopPropagation();
+          if (editing) {
+            onCommitInput();
+          } else {
+            onStep(1);
+          }
+        }}
+        size="icon-xs"
+        type="button"
+        variant="ghost"
+      >
+        {editing ? <Check className="size-3" aria-hidden="true" /> : <Plus className="size-3" aria-hidden="true" />}
+      </Button>
     </div>
   );
 }
