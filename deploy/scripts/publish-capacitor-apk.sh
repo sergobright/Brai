@@ -37,8 +37,15 @@ fi
 
 mkdir -p "$TARGET_DIR"
 PRIMARY="$TARGET_DIR/$FILENAME"
-cp "$SOURCE" "$PRIMARY"
-chmod u=rw,go=r "$PRIMARY"
+TMP="$TARGET_DIR/.$FILENAME.$$.tmp"
+cleanup() {
+  rm -f "$TMP"
+}
+trap cleanup EXIT
+cp "$SOURCE" "$TMP"
+chmod u=rw,go=r "$TMP"
+mv -f "$TMP" "$PRIMARY"
+trap - EXIT
 
 "$NODE_BIN" "$SCRIPT_DIR/update-release-index.mjs" \
   --release "$RELEASE_ENV" \

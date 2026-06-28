@@ -112,8 +112,10 @@ test('websocket receives timer events', async () => {
 
 test('event sync is idempotent and returns canonical state', async () => {
   const fixture = await createFixture([
-    '2026-06-14T12:00:03.000Z',
-    '2026-06-14T12:00:04.000Z'
+    '2026-06-14T13:30:00.000Z',
+    '2026-06-14T13:30:01.000Z',
+    '2026-06-14T13:30:02.000Z',
+    '2026-06-14T13:30:03.000Z'
   ]);
   const body = {
     device: { device_id: 'web-device', platform: 'web' },
@@ -299,6 +301,162 @@ test('event sync ignores invalid focus session edits', async () => {
         .get(sessionId).count,
       1
     );
+  } finally {
+    await fixture.close();
+  }
+});
+
+test('event sync soft-deletes completed focus sessions idempotently', async () => {
+  const fixture = await createFixture([
+    '2026-06-14T12:00:03.000Z',
+    '2026-06-14T12:00:04.000Z'
+  ]);
+
+  try {
+    await request(fixture.url, '/v1/timer/events/sync', {
+      method: 'POST',
+      body: JSON.stringify({
+        device: { device_id: 'web-device', platform: 'web' },
+        events: [
+          syncEvent('web-start', 1, 'start', '2026-06-14T10:00:00.000Z'),
+          syncEvent('web-stop', 2, 'stop', '2026-06-14T11:00:00.000Z')
+        ]
+      })
+    });
+    const before = await request(fixture.url, '/v1/sessions');
+    const sessionId = before.body.sessions[0].id;
+
+    const deleted = await request(fixture.url, '/v1/timer/events/sync', {
+      method: 'POST',
+      body: JSON.stringify({
+        device: { device_id: 'web-device', platform: 'web' },
+        events: [
+          {
+            ...syncEvent('delete-session', 3, 'delete_session', '2026-06-14T12:00:00.000Z'),
+            metadata: { focus_session_id: sessionId }
+          }
+        ]
+      })
+    });
+    assert.deepEqual(deleted.body.ignored_events, []);
+    assert.equal((await request(fixture.url, '/v1/sessions')).body.sessions.length, 0);
+    assert.equal(
+      (await request(fixture.url, '/v1/goals/challenge?now=2026-06-14T12:30:00.000Z'))
+        .body.days.find((item) => item.date === '2026-06-14').completed_seconds,
+      0
+    );
+    assert.equal(
+      fixture.store.db
+        .prepare('SELECT deleted_at_utc FROM focus_sessions WHERE id = ?')
+        .get(sessionId).deleted_at_utc,
+      '2026-06-14T12:00:00.000Z'
+    );
+    assert.equal(
+      fixture.store.db
+        .prepare('SELECT COUNT(*) AS count FROM focus_session_versions WHERE focus_session_id = ?')
+        .get(sessionId).count,
+      1
+    );
+
+    const duplicate = await request(fixture.url, '/v1/timer/events/sync', {
+      method: 'POST',
+      body: JSON.stringify({
+        device: { device_id: 'web-device', platform: 'web' },
+        events: [
+          {
+            ...syncEvent('delete-session-again', 4, 'delete_session', '2026-06-14T12:05:00.000Z'),
+            metadata: { focus_session_id: sessionId }
+          }
+        ]
+      })
+    });
+    assert.deepEqual(duplicate.body.ignored_events, []);
+
+    const editAfterDelete = await request(fixture.url, '/v1/timer/events/sync', {
+      method: 'POST',
+      body: JSON.stringify({
+        device: { device_id: 'web-device', platform: 'web' },
+        events: [
+          {
+            ...syncEvent('edit-deleted', 5, 'edit_session', '2026-06-14T12:04:00.000Z'),
+            metadata: {
+              focus_session_id: sessionId,
+              started_at_utc: '2026-06-14T10:15:00.000Z',
+              ended_at_utc: '2026-06-14T11:45:00.000Z'
+            }
+          }
+        ]
+      })
+    });
+    assert.deepEqual(editAfterDelete.body.ignored_events, [
+      { event_id: 'edit-deleted', reason: 'focus_session_deleted' }
+    ]);
+  } finally {
+    await fixture.close();
+  }
+});
+
+test('event sync rejects focus session edits that overlap neighbors', async () => {
+  const fixture = await createFixture([
+    '2026-06-14T13:30:00.000Z',
+    '2026-06-14T13:30:01.000Z',
+    '2026-06-14T13:30:02.000Z',
+    '2026-06-14T13:30:03.000Z'
+  ]);
+
+  try {
+    await request(fixture.url, '/v1/timer/events/sync', {
+      method: 'POST',
+      body: JSON.stringify({
+        device: { device_id: 'web-device', platform: 'web' },
+        events: [
+          syncEvent('first-start', 1, 'start', '2026-06-14T10:00:00.000Z'),
+          syncEvent('first-stop', 2, 'stop', '2026-06-14T11:00:00.000Z'),
+          syncEvent('second-start', 3, 'start', '2026-06-14T12:00:00.000Z'),
+          syncEvent('second-stop', 4, 'stop', '2026-06-14T13:00:00.000Z')
+        ]
+      })
+    });
+    const sessions = (await request(fixture.url, '/v1/sessions')).body.sessions;
+    const first = sessions.find((session) => session.started_at_utc === '2026-06-14T10:00:00.000Z');
+
+    const overlapping = await request(fixture.url, '/v1/timer/events/sync', {
+      method: 'POST',
+      body: JSON.stringify({
+        device: { device_id: 'web-device', platform: 'web' },
+        events: [
+          {
+            ...syncEvent('overlap-edit', 5, 'edit_session', '2026-06-14T13:30:00.000Z'),
+            metadata: {
+              focus_session_id: first.id,
+              started_at_utc: '2026-06-14T10:30:00.000Z',
+              ended_at_utc: '2026-06-14T12:30:00.000Z'
+            }
+          }
+        ]
+      })
+    });
+    assert.deepEqual(overlapping.body.ignored_events, [
+      { event_id: 'overlap-edit', reason: 'focus_session_overlap' }
+    ]);
+
+    const touching = await request(fixture.url, '/v1/timer/events/sync', {
+      method: 'POST',
+      body: JSON.stringify({
+        device: { device_id: 'web-device', platform: 'web' },
+        events: [
+          {
+            ...syncEvent('touching-edit', 6, 'edit_session', '2026-06-14T13:31:00.000Z'),
+            metadata: {
+              focus_session_id: first.id,
+              started_at_utc: '2026-06-14T11:00:00.000Z',
+              ended_at_utc: '2026-06-14T12:00:00.000Z'
+            }
+          }
+        ]
+      })
+    });
+    assert.deepEqual(touching.body.ignored_events, []);
   } finally {
     await fixture.close();
   }

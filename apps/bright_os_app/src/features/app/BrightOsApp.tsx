@@ -119,6 +119,7 @@ export function BrightOsApp({ initialSection = "actions" }: { initialSection?: S
             background={app.focusBackground}
             onStart={app.onStart}
             onStop={app.onStop}
+            onDeleteSession={app.onDeleteFocusSession}
             onEditSession={app.onEditFocusSession}
             onBackground={app.setFocusBackground}
           />
@@ -210,10 +211,10 @@ export function BrightOsApp({ initialSection = "actions" }: { initialSection?: S
         </MobileContextSheet>
       ) : null}
       {app.mobileContextPanel === "focus-goal" && app.section === "focus" ? (
-        <FocusContextPanelSheet panel="goal" history={app.history} goal={app.goal} todayKey={app.todayKey} onClose={() => app.setMobileContextPanel(null)} onCloseStart={app.markMobileContextPanelClosing} onEditSession={app.onEditFocusSession} />
+        <FocusContextPanelSheet panel="goal" history={app.history} goal={app.goal} todayKey={app.todayKey} onClose={() => app.setMobileContextPanel(null)} onCloseStart={app.markMobileContextPanelClosing} onDeleteSession={app.onDeleteFocusSession} onEditSession={app.onEditFocusSession} />
       ) : null}
       {app.mobileContextPanel === "focus-history" && app.section === "focus" ? (
-        <FocusContextPanelSheet panel="history" history={app.history} goal={app.goal} todayKey={app.todayKey} onClose={() => app.setMobileContextPanel(null)} onCloseStart={app.markMobileContextPanelClosing} onEditSession={app.onEditFocusSession} />
+        <FocusContextPanelSheet panel="history" history={app.history} goal={app.goal} todayKey={app.todayKey} onClose={() => app.setMobileContextPanel(null)} onCloseStart={app.markMobileContextPanelClosing} onDeleteSession={app.onDeleteFocusSession} onEditSession={app.onEditFocusSession} />
       ) : null}
     </SidebarProvider>
   );

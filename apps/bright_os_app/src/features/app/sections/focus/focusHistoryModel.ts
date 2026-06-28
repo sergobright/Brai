@@ -1,8 +1,10 @@
 import { moscowTime, sessionDuration } from "@/shared/time/format";
 import type { TimerSession } from "@/shared/types/timer";
+import { canonicalSessionId } from "./focusHistoryEditModel";
 
 export type FocusHistoryRow = {
   id: string;
+  sessionId: string;
   destination: string;
   departureTime: string;
   arrivalTime: string;
@@ -20,6 +22,7 @@ export function focusHistoryRows(sessions: TimerSession[]): FocusHistoryRow[] {
     duration: formatCompactSessionDuration(sessionDuration(session)),
     endedAtUtc: session.ended_at_utc,
     id: session.id,
+    sessionId: canonicalSessionId(session),
     pending: session.pending === true,
     startedAtUtc: session.started_at_utc,
   }));

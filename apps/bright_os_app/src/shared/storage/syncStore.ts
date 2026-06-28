@@ -62,6 +62,19 @@ export async function enqueueFocusSessionEdit(params: {
   });
 }
 
+export async function enqueueFocusSessionDelete(params: {
+  sessionId: string;
+  baseServerRevision: number;
+}): Promise<PendingTimerEvent> {
+  return enqueueTimerEvent({
+    type: "delete_session",
+    baseServerRevision: params.baseServerRevision,
+    metadata: {
+      focus_session_id: params.sessionId,
+    },
+  });
+}
+
 export async function pendingEvents(): Promise<PendingTimerEvent[]> {
   return clientDb().outbox_events.orderBy("clientSequence").toArray();
 }
@@ -208,6 +221,7 @@ function sessionDayChunks(session: TimerSession): TimerSession[] {
       chunks.push({
         ...session,
         id: isWholeSession ? session.id : `${session.id}:${date}`,
+        source_session_id: session.id,
         started_at_utc: startedAtUtc,
         ended_at_utc: endedAtUtc,
         duration_seconds: durationSeconds,

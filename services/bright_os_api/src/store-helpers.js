@@ -122,6 +122,7 @@ function sessionDayChunks(session) {
       chunks.push({
         ...session,
         id: isWholeSession ? session.id : `${session.id}:${date}`,
+        source_session_id: session.id,
         started_at_utc: startedAtUtc,
         ended_at_utc: endedAtUtc,
         duration_seconds: durationSeconds,

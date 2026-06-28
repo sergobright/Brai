@@ -73,4 +73,27 @@ describe("pending projection", () => {
     });
     expect(projected.groups["2026-06-14"].total_seconds).toBe(5400);
   });
+
+  it("projects offline completed session deletes over cached history", () => {
+    const history: HistoryData = {
+      sessions: [
+        {
+          id: "session-1",
+          started_at_utc: "2026-06-14T10:00:00.000Z",
+          ended_at_utc: "2026-06-14T11:00:00.000Z",
+          duration_seconds: 3600,
+        },
+      ],
+      groups: {},
+    };
+
+    const projected = projectHistoryData(history, [
+      event(1, "delete_session", "2026-06-14T12:00:00.000Z", {
+        focus_session_id: "session-1",
+      }),
+    ]);
+
+    expect(projected.sessions).toHaveLength(0);
+    expect(projected.groups).toEqual({});
+  });
 });

@@ -36,6 +36,7 @@ export function FocusSection({
   background = "galaxy",
   onStart,
   onStop,
+  onDeleteSession,
   onEditSession,
   onBackground = () => undefined,
 }: {
@@ -49,6 +50,7 @@ export function FocusSection({
   background?: FocusBackgroundMode;
   onStart: () => void;
   onStop: () => void;
+  onDeleteSession?: (sessionId: string) => void | Promise<void>;
   onEditSession?: (sessionId: string, startedAtUtc: string, endedAtUtc: string) => void | Promise<void>;
   onBackground?: (background: FocusBackgroundMode) => void;
 }) {
@@ -83,7 +85,7 @@ export function FocusSection({
       aria-label="Фокус"
     >
       {timerPane}
-      {contextPanel === "history" ? <FocusDesktopPanel label={FOCUS_HISTORY_LABEL}><HistorySection history={history} goal={goal} onEditSession={onEditSession} /></FocusDesktopPanel> : null}
+      {contextPanel === "history" ? <FocusDesktopPanel label={FOCUS_HISTORY_LABEL}><HistorySection history={history} goal={goal} onDeleteSession={onDeleteSession} onEditSession={onEditSession} /></FocusDesktopPanel> : null}
       {contextPanel === "goal" ? <FocusDesktopPanel label={FOCUS_GOAL_LABEL}><GoalSection goal={goal} todayKey={todayKey} /></FocusDesktopPanel> : null}
     </section>
   );
@@ -96,6 +98,7 @@ export function FocusContextPanelSheet({
   todayKey,
   onClose,
   onCloseStart,
+  onDeleteSession,
   onEditSession,
 }: {
   panel: Exclude<FocusContextPanel, "none">;
@@ -104,12 +107,13 @@ export function FocusContextPanelSheet({
   todayKey: string;
   onClose: () => void;
   onCloseStart?: () => void;
+  onDeleteSession?: (sessionId: string) => void | Promise<void>;
   onEditSession?: (sessionId: string, startedAtUtc: string, endedAtUtc: string) => void | Promise<void>;
 }) {
   const label = panel === "goal" ? FOCUS_GOAL_LABEL : FOCUS_HISTORY_LABEL;
   return (
     <MobileContextSheet label={label} className={`focus-${panel}-backdrop`} onClose={onClose} onCloseStart={onCloseStart}>
-      {panel === "goal" ? <GoalSection goal={goal} todayKey={todayKey} /> : <HistorySection history={history} goal={goal} onEditSession={onEditSession} />}
+      {panel === "goal" ? <GoalSection goal={goal} todayKey={todayKey} /> : <HistorySection history={history} goal={goal} onDeleteSession={onDeleteSession} onEditSession={onEditSession} />}
     </MobileContextSheet>
   );
 }
@@ -376,10 +380,12 @@ function TimerSection({
 function HistorySection({
   history,
   goal,
+  onDeleteSession,
   onEditSession,
 }: {
   history: HistoryData;
   goal: GoalData;
+  onDeleteSession?: (sessionId: string) => void | Promise<void>;
   onEditSession?: (sessionId: string, startedAtUtc: string, endedAtUtc: string) => void | Promise<void>;
 }) {
   const groups = historyGroupsView(history, goal);
@@ -415,7 +421,7 @@ function HistorySection({
                 </div>
               </header>
               <CollapsibleContent>
-                <FocusHistoryTable sessions={group.sessions} onEditSession={onEditSession} />
+                <FocusHistoryTable allSessions={history.sessions} sessions={group.sessions} onDeleteSession={onDeleteSession} onEditSession={onEditSession} />
               </CollapsibleContent>
             </Collapsible>
           </div>

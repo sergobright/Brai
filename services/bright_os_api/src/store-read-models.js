@@ -31,6 +31,7 @@ export const readModelMethods = {
       JOIN focus_session_versions v
         ON v.focus_session_id = s.id AND v.is_current = 1
       WHERE v.ended_at_utc IS NOT NULL
+        AND s.deleted_at_utc IS NULL
     `;
     const params = [];
     if (fromUtc) {
@@ -59,6 +60,7 @@ export const readModelMethods = {
         JOIN focus_session_versions v
           ON v.focus_session_id = s.id AND v.is_current = 1
         WHERE v.ended_at_utc IS NOT NULL
+          AND s.deleted_at_utc IS NULL
           AND v.ended_at_utc > ?
           AND v.started_at_utc < ?
         ORDER BY v.started_at_utc ASC

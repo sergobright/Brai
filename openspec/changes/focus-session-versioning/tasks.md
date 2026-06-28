@@ -4,4 +4,8 @@
 - [x] 1.4 Update client timer types, IndexedDB outbox, API payload, and optimistic history projection for offline edits.
 - [x] 1.5 Add focused UI controls for editing completed Focus session start/end.
 - [x] 1.6 Verify with API, client, OpenSpec, and public guard checks.
-- [ ] 1.7 Archive the OpenSpec change after review/merge.
+- [x] 1.7 Add `delete_session` soft-delete event handling and exclude deleted sessions from history/goals.
+- [x] 1.8 Replace the pencil edit control with an inline row editor for start, duration, finish, delete, and overlap warnings.
+- [x] 1.9 Cover soft delete, overlap validation, client projection, and edit math with focused tests.
+- [x] 1.10 Refine inline editor sizing, grouping, changed-value color, discard close action, and row-bound overlap overlay.
+- [ ] 1.11 Archive the OpenSpec change after review/merge.

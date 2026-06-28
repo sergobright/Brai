@@ -8,8 +8,10 @@ sessions can be edited offline-first while preserving audit history.
 ## Capabilities
 
 - `timer-data`: completed Focus sessions have current versions, edit events sync
-  through the existing timer event endpoint, and history/goal calculations use
-  the current version.
+  through the existing timer event endpoint, soft delete events preserve audit,
+  and history/goal calculations use non-deleted current versions.
+- `next-capacitor-client`: Focus history rows open an inline one-row editor
+  from row tap/click instead of a pencil control.
 
 ## Rationale
 

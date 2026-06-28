@@ -1,4 +1,4 @@
-export type TimerEventType = "start" | "stop" | "edit_session";
+export type TimerEventType = "start" | "stop" | "edit_session" | "delete_session";
 
 export type SyncStatus =
   | "connecting"
@@ -13,6 +13,7 @@ export interface TimerSession {
   started_at_utc: string;
   ended_at_utc: string | null;
   duration_seconds: number | null;
+  source_session_id?: string;
   started_date_msk?: string;
   started_hour_msk?: number;
   ended_date_msk?: string | null;

@@ -23,6 +23,7 @@ export const migrationMethods = {
 
     this.ensureEventSchema();
     this.allowTimerEditSessionEvents();
+    this.allowTimerDeleteSessionEvents();
     this.ensureFocusSessionSchema();
     if (!this.hasMigration(2)) {
       this.seedLegacyEvents();
@@ -207,6 +208,13 @@ export const migrationMethods = {
     if (!this.hasMigration(35)) {
       this.recordMigration(35, 'add handler registry');
     }
+
+    if (!this.hasMigration(36)) {
+      this.allowTimerDeleteSessionEvents();
+      this.ensureFocusSessionSchema();
+      this.recomputeCanonicalSessions(now);
+      this.recordMigration(36, 'add focus session soft delete events');
+    }
   }
 ,
 
@@ -252,7 +260,7 @@ export const migrationMethods = {
         device_id TEXT NOT NULL,
         client_sequence INTEGER NOT NULL,
         server_sequence INTEGER NOT NULL UNIQUE,
-        type TEXT NOT NULL CHECK (type IN ('start', 'stop', 'edit_session', 'invalid')),
+        type TEXT NOT NULL CHECK (type IN ('start', 'stop', 'edit_session', 'delete_session', 'invalid')),
         occurred_at_utc TEXT NOT NULL,
         received_at_utc TEXT NOT NULL,
         local_timer_id TEXT,
@@ -287,7 +295,9 @@ export const migrationMethods = {
       CREATE TABLE IF NOT EXISTS focus_sessions (
         id TEXT PRIMARY KEY,
         created_at_utc TEXT NOT NULL,
-        updated_at_utc TEXT NOT NULL
+        updated_at_utc TEXT NOT NULL,
+        deleted_at_utc TEXT,
+        deleted_event_id TEXT
       );
 
       CREATE TABLE IF NOT EXISTS focus_session_versions (
@@ -328,6 +338,12 @@ export const migrationMethods = {
         FOREIGN KEY (event_id) REFERENCES timer_events(event_id)
       );
     `);
+    if (this.tableExists('focus_sessions') && !this.columnExists('focus_sessions', 'deleted_at_utc')) {
+      this.db.exec('ALTER TABLE focus_sessions ADD COLUMN deleted_at_utc TEXT;');
+    }
+    if (this.tableExists('focus_sessions') && !this.columnExists('focus_sessions', 'deleted_event_id')) {
+      this.db.exec('ALTER TABLE focus_sessions ADD COLUMN deleted_event_id TEXT;');
+    }
   }
 ,
 
@@ -347,6 +363,54 @@ export const migrationMethods = {
           client_sequence INTEGER NOT NULL,
           server_sequence INTEGER NOT NULL UNIQUE,
           type TEXT NOT NULL CHECK (type IN ('start', 'stop', 'edit_session', 'invalid')),
+          occurred_at_utc TEXT NOT NULL,
+          received_at_utc TEXT NOT NULL,
+          local_timer_id TEXT,
+          base_server_revision INTEGER,
+          status TEXT NOT NULL CHECK (status IN ('accepted', 'ignored')),
+          ignore_reason TEXT,
+          payload_version INTEGER NOT NULL,
+          metadata_json TEXT,
+          FOREIGN KEY (device_id) REFERENCES timer_devices(device_id)
+        );
+
+        INSERT INTO timer_events_next (
+          event_id, device_id, client_sequence, server_sequence, type,
+          occurred_at_utc, received_at_utc, local_timer_id, base_server_revision,
+          status, ignore_reason, payload_version, metadata_json
+        )
+        SELECT
+          event_id, device_id, client_sequence, server_sequence, type,
+          occurred_at_utc, received_at_utc, local_timer_id, base_server_revision,
+          status, ignore_reason, payload_version, metadata_json
+        FROM timer_events;
+
+        DROP TABLE timer_events;
+        ALTER TABLE timer_events_next RENAME TO timer_events;
+      `);
+    } finally {
+      this.db.pragma('foreign_keys = ON');
+    }
+    this.ensureEventSchema();
+  }
+,
+
+  allowTimerDeleteSessionEvents() {
+    if (!this.tableExists('timer_events')) return;
+    const row = this.db
+      .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'timer_events'")
+      .get();
+    if (row?.sql?.includes("'delete_session'")) return;
+
+    this.db.pragma('foreign_keys = OFF');
+    try {
+      this.db.exec(`
+        CREATE TABLE timer_events_next (
+          event_id TEXT PRIMARY KEY,
+          device_id TEXT NOT NULL,
+          client_sequence INTEGER NOT NULL,
+          server_sequence INTEGER NOT NULL UNIQUE,
+          type TEXT NOT NULL CHECK (type IN ('start', 'stop', 'edit_session', 'delete_session', 'invalid')),
           occurred_at_utc TEXT NOT NULL,
           received_at_utc TEXT NOT NULL,
           local_timer_id TEXT,
@@ -409,7 +473,7 @@ export const migrationMethods = {
       ['build_version_refs', 'Связи версий', 'Технические связи версий.', 'Хранит source/target branch и commit для build_versions, чтобы audit-метаданные не подменяли короткое изменение, детальные изменения и причину выпуска.'],
       ['build_versions', 'Версии', 'Журнал публичных версий.', 'Хранит принятые web/OTA сборки и APK-релизы с описанием изменений, причиной выпуска и временем релиза.'],
       ['deployment_records', 'Деплои', 'Журнал выкладок.', 'Хранит факты деплоя: окружение, ветку, commit, домен, web/OTA версию, APK версию и описание доставки.'],
-      ['focus_sessions', 'Сессии фокуса', 'Стабильные Focus-сессии.', 'Хранит стабильные идентификаторы Focus-сессий. Редактируемые время старта, финиша и длительность лежат в focus_session_versions.'],
+      ['focus_sessions', 'Сессии фокуса', 'Стабильные Focus-сессии.', 'Хранит стабильные идентификаторы Focus-сессий, включая soft-delete метку. Редактируемые время старта, финиша и длительность лежат в focus_session_versions.'],
       ['focus_session_sources', 'Источники Focus-сессий', 'Связи Focus-сессий и событий.', 'Связывает итоговые Focus-сессии с timer_events, из которых они получились при deterministic replay.'],
       ['focus_session_versions', 'Версии Focus-сессий', 'История значений Focus-сессий.', 'Хранит версии старта, финиша и длительности Focus-сессий. Только одна версия на сессию может быть текущей.'],
       ['inbox', 'Входящие', 'Список входящих материалов.', 'Хранит входящие материалы Bright OS до нормализации: заголовок, описание, источник, ключ источника, требование ответа, связь с предыдущим входящим, тип записи, дату, автора, предварительный раздел, срочность, ссылки на вложения, пояснение, текст нормализации и признак нормализации.'],
@@ -421,7 +485,7 @@ export const migrationMethods = {
       ['sqlite_sequence', 'Счётчики', 'Служебные счетчики SQLite.', 'Внутренняя таблица SQLite для AUTOINCREMENT-счетчиков. Это не бизнес-данные Bright OS.'],
       ['table_descriptions', 'Описания таблиц', 'Справочник описаний таблиц.', 'Хранит читаемый русский заголовок и описание для каждой SQLite-таблицы, которые показывает admin-панель.'],
       ['timer_devices', 'Устройства', 'Устройства синхронизации.', 'Хранит устройства, которые отправляют события фокуса и действий: stable device_id, платформу, имя и параметры синхронизации.'],
-      ['timer_events', 'События фокуса', 'Журнал событий фокуса.', 'Хранит start, stop и edit_session события фокуса с устройством, клиентской и серверной последовательностью.'],
+      ['timer_events', 'События фокуса', 'Журнал событий фокуса.', 'Хранит start, stop, edit_session и delete_session события фокуса с устройством, клиентской и серверной последовательностью.'],
       ['version_types', 'Типы версий', 'Справочник типов версий.', 'Хранит типы записей для build_versions: обычную сборочную версию build и APK-версию apk.']
     ];
     const actualTables = new Set(

@@ -19,4 +19,10 @@ public class BrightOtaVersionTest {
         assertTrue(BrightOtaVersion.compare("0.0.1.2", "0.0.1.1") > 0);
         assertTrue(BrightOtaVersion.compare("0.0.1.1", "0.0.1.1") == 0);
     }
+
+    @Test
+    public void treatsPreviewBundleSuffixAsNewerThanBaseUnifiedVersion() {
+        assertTrue(BrightOtaVersion.compare("0.0.10.1.20260628151556", "0.0.10.1") > 0);
+        assertTrue(BrightOtaVersion.compare("0.0.10.1", "0.0.10.1.20260628151556") < 0);
+    }
 }

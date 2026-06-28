@@ -8,16 +8,11 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 final class BrightOtaVersion {
-    private static final Pattern UNIFIED_VERSION_PATTERN = Pattern.compile("\\d+\\.\\d+\\.\\d+\\.\\d+");
     private static final Pattern TOKEN_PATTERN = Pattern.compile("\\d+|[A-Za-z]+");
 
     private BrightOtaVersion() {}
 
     static int compare(String left, String right) {
-        boolean leftUnified = isUnifiedVersion(left);
-        boolean rightUnified = isUnifiedVersion(right);
-        if (leftUnified != rightUnified) return leftUnified ? 1 : -1;
-
         List<String> leftTokens = tokens(left);
         List<String> rightTokens = tokens(right);
         int count = Math.max(leftTokens.size(), rightTokens.size());
@@ -28,10 +23,6 @@ final class BrightOtaVersion {
             if (compared != 0) return compared;
         }
         return 0;
-    }
-
-    private static boolean isUnifiedVersion(String version) {
-        return UNIFIED_VERSION_PATTERN.matcher(version == null ? "" : version).matches();
     }
 
     private static List<String> tokens(String version) {

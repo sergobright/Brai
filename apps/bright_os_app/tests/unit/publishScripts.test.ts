@@ -254,6 +254,42 @@ describe("mobile OTA publish scripts", () => {
     await expect(readFile(path.join(root, "deploy/releases/bright-os-9.9.9.99-capacitor.apk"), "utf8")).resolves.toBe("apk");
   });
 
+  it("replaces an existing APK instead of rewriting it in place", async () => {
+    const root = await fixtureRoot("bright-apk-replace-");
+    await writeStaticExport(root, "apk-replace");
+    await mkdir(path.join(root, "deploy"), { recursive: true });
+    await copyFile(
+      path.join(workspaceRoot, "deploy/environments.json"),
+      path.join(root, "deploy/environments.json"),
+    );
+    const apkPath = path.join(root, "app-release.apk");
+    await writeFile(apkPath, "new-apk");
+    const releaseDir = path.join(root, "deploy/releases");
+    const releasePath = path.join(releaseDir, "bright-os-a-9.9.9.99-capacitor.apk");
+    await mkdir(releaseDir, { recursive: true });
+    await writeFile(releasePath, "old-apk");
+    await chmod(releasePath, 0o444);
+    const previousInode = (await stat(releasePath)).ino;
+
+    try {
+      await execFileAsync("bash", [path.join(workspaceRoot, "deploy/scripts/publish-capacitor-apk.sh")], {
+        env: {
+          ...process.env,
+          BRIGHT_OS_ROOT: root,
+          BRIGHT_OS_APK_SOURCE: apkPath,
+          BRIGHT_OS_RELEASE_ENV: "a",
+          BRIGHT_OS_ANDROID_VERSION_CODE: "2999",
+          BRIGHT_OS_PUBLISHED_AT: "2026-06-15T00:00:00Z",
+        },
+      });
+    } finally {
+      await chmod(releasePath, 0o600).catch(() => {});
+    }
+
+    expect((await stat(releasePath)).ino).not.toBe(previousInode);
+    await expect(readFile(releasePath, "utf8")).resolves.toBe("new-apk");
+  });
+
   it("allocates APK versionCode above existing release metadata", async () => {
     const root = await fixtureRoot("bright-apk-code-");
     const envsRoot = path.join(root, "envs");

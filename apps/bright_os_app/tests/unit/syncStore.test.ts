@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { clientDb, getMeta } from "@/shared/storage/db";
 import {
   enqueueTimerEvent,
+  enqueueFocusSessionDelete,
   enqueueFocusSessionEdit,
   loadCanonicalState,
   loadHistoryCache,
@@ -49,6 +50,19 @@ describe("sync store guards", () => {
       focus_session_id: "session-1",
       started_at_utc: "2026-06-14T10:15:00.000Z",
       ended_at_utc: "2026-06-14T11:45:00.000Z",
+    });
+  });
+
+  it("queues completed focus session deletes as timer events", async () => {
+    await enqueueFocusSessionDelete({
+      sessionId: "session-1",
+      baseServerRevision: 7,
+    });
+
+    const [event] = await pendingEvents();
+    expect(event.type).toBe("delete_session");
+    expect(event.metadata).toMatchObject({
+      focus_session_id: "session-1",
     });
   });
 

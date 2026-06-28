@@ -50,8 +50,13 @@ export function projectHistoryData(history: HistoryData, pending: PendingTimerEv
   const sessions = new Map(history.sessions.map((session) => [session.id, { ...session, pending: false }]));
 
   for (const event of [...pending].sort((a, b) => a.clientSequence - b.clientSequence)) {
-    if (event.type !== "edit_session") continue;
     const sessionId = stringValue(event.metadata?.focus_session_id) ?? stringValue(event.metadata?.session_id);
+    if (event.type === "delete_session") {
+      if (sessionId) sessions.delete(sessionId);
+      continue;
+    }
+
+    if (event.type !== "edit_session") continue;
     const startedMs = Date.parse(stringValue(event.metadata?.started_at_utc) ?? "");
     const endedMs = Date.parse(stringValue(event.metadata?.ended_at_utc) ?? "");
     if (!sessionId || !sessions.has(sessionId) || !Number.isFinite(startedMs) || !Number.isFinite(endedMs) || endedMs <= startedMs) {
@@ -112,6 +117,7 @@ function sessionDayChunks(session: TimerSession): TimerSession[] {
       chunks.push({
         ...session,
         id: isWholeSession ? session.id : `${session.id}:${date}`,
+        source_session_id: session.id,
         started_at_utc: startedAtUtc,
         ended_at_utc: endedAtUtc,
         duration_seconds: durationSeconds,
