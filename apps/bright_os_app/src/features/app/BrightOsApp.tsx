@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useSyncExternalStore } from "react";
 import { BookOpen, Crown, Info, Settings } from "lucide-react";
 import { APP_ENVIRONMENT, APP_OTA_CHANNEL, APP_PREVIEW_SLOT } from "@/shared/config/runtime";
 import { installAndroidBackHandler } from "@/shared/platform/platform";
@@ -14,9 +14,9 @@ import { cx } from "./appUtils";
 import { AuthPanel, IconButton, MobileContextSheet, ScreenHeader, ThemeButton } from "./chrome/AppChrome";
 import { useBrightOsAppState } from "./hooks/useBrightOsAppState";
 import { DesktopRail, MainDock, MobileMenuButton, MobileProfileDrawer } from "./navigation/AppNavigation";
-import { sectionSwipePageStyle, useLeftEdgeMenuSwipe } from "./navigation/useSectionSwipeNavigation";
-import { ActionsInfoPanel } from "./sections/actions/ActionsInfoPanel";
+import { isMobileNavigationViewport, sectionSwipePageStyle, useLeftEdgeMenuSwipe } from "./navigation/useSectionSwipeNavigation";
 import { ActionsSection } from "./sections/actions/ActionsSection";
+import { ActionsInfoPanel } from "./sections/actions/ActionsInfoPanel";
 import { ArchiveSection } from "./sections/actions/ArchiveSection";
 import { EvilEyeSection } from "./sections/EvilEyeSection";
 import { FocusBackground, FocusContextPanelSheet, FocusSection } from "./sections/focus/FocusSection";
@@ -27,6 +27,7 @@ const SECTION_PAGE_INSET_CLASS = "grid h-full min-h-0 grid-rows-[auto_minmax(0,1
 
 export function BrightOsApp({ initialSection = "actions" }: { initialSection?: SectionId }) {
   const app = useBrightOsAppState(initialSection);
+  const mobileViewport = useMountedMobileNavigationViewport();
   const sectionRef = useRef(app.section);
   const selectSectionRef = useRef(app.selectSection);
   const adjacentSection = app.swipeNavigation.visual?.to;
@@ -62,8 +63,10 @@ export function BrightOsApp({ initialSection = "actions" }: { initialSection?: S
           pendingCount={app.totalPendingCount}
           leading={isPrimarySection(screenSection) ? <MobileMenuButton onClick={() => app.setMobileMenuOpen(true)} /> : null}
           trailing={
-            screenSection === "actions" ? (
+            screenSection === "actions" && mobileViewport ? (
               <IconButton icon={Info} label="Информация о действиях" active={app.actionsInfoActive} onClick={app.toggleActionsInfoPanel} />
+            ) : screenSection === "inbox" && mobileViewport ? (
+              <IconButton icon={Info} label="Информация о входящих" active={app.inboxInfoActive} onClick={app.toggleInboxInfoPanel} />
             ) : screenSection === "focus" ? (
               <>
                 <IconButton icon={Crown} label="Цели фокусировки" active={app.focusGoalActive} onClick={() => app.toggleFocusContextPanel("goal")} />
@@ -90,8 +93,6 @@ export function BrightOsApp({ initialSection = "actions" }: { initialSection?: S
             onDelete={app.onDeleteAction}
             onReorder={app.onReorderActions}
             onMobileOverlayChange={app.setActionOverlayOpen}
-            infoOpen={app.actionsInfoOpen}
-            onInfoOpenChange={app.setActionsInfoOpen}
           />
         ) : screenSection === "inbox" ? (
           <InboxSection
@@ -198,19 +199,39 @@ export function BrightOsApp({ initialSection = "actions" }: { initialSection?: S
           onLogout={app.onLogout}
         />
       ) : null}
+      {app.mobileContextPanel === "actions-info" && app.section === "actions" ? (
+        <MobileContextSheet label="Информация о действиях" onClose={() => app.setMobileContextPanel(null)} onCloseStart={app.markMobileContextPanelClosing}>
+          <ActionsInfoPanel mobile />
+        </MobileContextSheet>
+      ) : null}
+      {app.mobileContextPanel === "inbox-info" && app.section === "inbox" ? (
+        <MobileContextSheet label="Информация о входящих" onClose={() => app.setMobileContextPanel(null)} onCloseStart={app.markMobileContextPanelClosing}>
+          <ActionsInfoPanel label="Информация о входящих" mobile />
+        </MobileContextSheet>
+      ) : null}
       {app.mobileContextPanel === "focus-goal" && app.section === "focus" ? (
         <FocusContextPanelSheet panel="goal" history={app.history} goal={app.goal} todayKey={app.todayKey} onClose={() => app.setMobileContextPanel(null)} onCloseStart={app.markMobileContextPanelClosing} onEditSession={app.onEditFocusSession} />
       ) : null}
       {app.mobileContextPanel === "focus-history" && app.section === "focus" ? (
         <FocusContextPanelSheet panel="history" history={app.history} goal={app.goal} todayKey={app.todayKey} onClose={() => app.setMobileContextPanel(null)} onCloseStart={app.markMobileContextPanelClosing} onEditSession={app.onEditFocusSession} />
       ) : null}
-      {app.mobileContextPanel === "actions-info" && app.section === "actions" ? (
-        <MobileContextSheet label="Информация о действиях" onClose={() => app.setMobileContextPanel(null)} onCloseStart={app.markMobileContextPanelClosing}>
-          <ActionsInfoPanel mobile />
-        </MobileContextSheet>
-      ) : null}
     </SidebarProvider>
   );
+}
+
+function useMountedMobileNavigationViewport(): boolean {
+  return useSyncExternalStore(
+    subscribeMobileNavigationViewport,
+    isMobileNavigationViewport,
+    () => false,
+  );
+}
+
+function subscribeMobileNavigationViewport(onStoreChange: () => void) {
+  if (typeof window === "undefined" || typeof window.matchMedia !== "function") return () => undefined;
+  const query = window.matchMedia("(max-width: 860px)");
+  query.addEventListener("change", onStoreChange);
+  return () => query.removeEventListener("change", onStoreChange);
 }
 
 function isDevPreviewApkIncompatible(otaState: BrightOtaState | null): boolean {

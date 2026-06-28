@@ -63,7 +63,6 @@ export function useBrightOsAppState(initialSection: SectionId) {
   const [busy, setBusy] = useState(false);
   const [timerBusy, setTimerBusy] = useState(false);
   const [actionOverlayOpen, setActionOverlayOpen] = useState(false);
-  const [actionsInfoOpen, setActionsInfoOpen] = useState(false);
   const [focusContextPanel, setFocusContextPanel] = useState<FocusContextPanel>(loadFocusContextPanelPreference);
   const [focusBackground, setFocusBackgroundState] = useState<FocusBackgroundMode>(loadFocusBackgroundPreference);
   const [mobileContextPanel, setMobileContextPanel] = useState<MobileContextPanel | null>(null);
@@ -587,15 +586,6 @@ export function useBrightOsAppState(initialSection: SectionId) {
     selectSection("settings");
   }
 
-  function toggleActionsInfoPanel() {
-    if (isMobileNavigationViewport()) {
-      setMobileContextPanelClosing(false);
-      setMobileContextPanel((current) => (current === "actions-info" ? null : "actions-info"));
-      return;
-    }
-    setActionsInfoOpen((current) => !current);
-  }
-
   function toggleFocusContextPanel(panel: Exclude<FocusContextPanel, "none">) {
     if (isMobileNavigationViewport()) {
       const mobilePanel = panel === "goal" ? "focus-goal" : "focus-history";
@@ -607,6 +597,16 @@ export function useBrightOsAppState(initialSection: SectionId) {
     const nextPanel = focusContextPanel === panel ? "none" : panel;
     setFocusContextPanel(nextPanel);
     saveFocusContextPanelPreference(nextPanel);
+  }
+
+  function toggleActionsInfoPanel() {
+    setMobileContextPanelClosing(false);
+    setMobileContextPanel((current) => (current === "actions-info" ? null : "actions-info"));
+  }
+
+  function toggleInboxInfoPanel() {
+    setMobileContextPanelClosing(false);
+    setMobileContextPanel((current) => (current === "inbox-info" ? null : "inbox-info"));
   }
 
   function setFocusBackground(nextBackground: FocusBackgroundMode) {
@@ -636,7 +636,8 @@ export function useBrightOsAppState(initialSection: SectionId) {
   }
 
   const mobileContextPanelActive = !mobileContextPanelClosing;
-  const actionsInfoActive = mobileViewport ? mobileContextPanelActive && mobileContextPanel === "actions-info" : actionsInfoOpen;
+  const actionsInfoActive = mobileContextPanelActive && mobileContextPanel === "actions-info";
+  const inboxInfoActive = mobileContextPanelActive && mobileContextPanel === "inbox-info";
   const focusGoalActive = mobileViewport ? mobileContextPanelActive && mobileContextPanel === "focus-goal" : focusContextPanel === "goal";
   const focusHistoryActive = mobileViewport ? mobileContextPanelActive && mobileContextPanel === "focus-history" : focusContextPanel === "history";
   const actionCommands = createBrightOsActionCommands({
@@ -654,7 +655,7 @@ export function useBrightOsAppState(initialSection: SectionId) {
     setSyncStatus,
   });
 
-  return { actionOverlayOpen, actions, actionsInfoActive, actionsInfoOpen, active, bundlePublishedAt, busy, desktopRailExpanded, displaySyncStatus, focusBackground, focusContextPanel, focusGoalActive, focusHistoryActive, goal, history, inbox, localSnapshotReady, markMobileContextPanelClosing, mobileContextPanel, mobileMenuOpen, ...actionCommands, ...inboxCommands, onEditFocusSession, onLogin, onLogout, onStart, onStop, openSettingsPage, otaCheckedAt, otaRefreshing, otaState, refreshOtaStateOnce, section, selectSection, setActionOverlayOpen, setActionsInfoOpen, setDesktopRailExpanded, setFocusBackground, setMobileContextPanel: setMobileContextPanelState, setMobileMenuOpen, setTheme, swipeNavigation, theme, timer, timerBusy, todayKey, toggleActionsInfoPanel, toggleFocusContextPanel, totalPendingCount };
+  return { actionOverlayOpen, actions, actionsInfoActive, active, bundlePublishedAt, busy, desktopRailExpanded, displaySyncStatus, focusBackground, focusContextPanel, focusGoalActive, focusHistoryActive, goal, history, inbox, inboxInfoActive, localSnapshotReady, markMobileContextPanelClosing, mobileContextPanel, mobileMenuOpen, ...actionCommands, ...inboxCommands, onEditFocusSession, onLogin, onLogout, onStart, onStop, openSettingsPage, otaCheckedAt, otaRefreshing, otaState, refreshOtaStateOnce, section, selectSection, setActionOverlayOpen, setDesktopRailExpanded, setFocusBackground, setMobileContextPanel: setMobileContextPanelState, setMobileMenuOpen, setTheme, swipeNavigation, theme, timer, timerBusy, todayKey, toggleActionsInfoPanel, toggleFocusContextPanel, toggleInboxInfoPanel, totalPendingCount };
 }
 
 function loadFocusContextPanelPreference(): FocusContextPanel {

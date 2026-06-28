@@ -10,18 +10,30 @@ import { shouldSnapSlidingNumber } from "@/shared/ui/sliding-number";
 describe("BrightOsApp shell", () => {
   setupBrightOsAppTest();
 
-  it("renders the actions-first shell", () => {
+  it("renders the actions-first shell", async () => {
     render(<BrightOsApp />);
     expect(screen.getByRole("heading", { name: "Действия" })).toBeInTheDocument();
     expect(screen.getAllByLabelText("Действия").length).toBeGreaterThan(0);
-    ["Действия", "Фокус"].forEach((title) => {
+    ["Действия", "Входящие", "Фокус"].forEach((title) => {
       expect(screen.getAllByRole("button", { name: title }).length).toBeGreaterThan(0);
     });
     expect(screen.queryByRole("button", { name: "Цели фокусировки" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Настройки" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Открыть меню" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Информация о действиях" })).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Информация о действиях" })).toBeInTheDocument());
+    expect(screen.getAllByLabelText("Информация о действиях").length).toBeGreaterThan(0);
     expect(screen.getByRole("textbox", { name: "Добавить" })).toBeInTheDocument();
+  });
+
+  it("opens the mobile Inbox info sheet", async () => {
+    render(<BrightOsApp initialSection="inbox" />);
+
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Входящие" })).toBeInTheDocument());
+    const infoButton = await screen.findByRole("button", { name: "Информация о входящих" });
+    fireEvent.click(infoButton);
+
+    expect(document.querySelector(".mobile-context-sheet")).toBeInTheDocument();
+    expect(infoButton).toHaveAttribute("aria-pressed", "true");
   });
 
   it("keeps contextual actions before the rightmost sync status", async () => {

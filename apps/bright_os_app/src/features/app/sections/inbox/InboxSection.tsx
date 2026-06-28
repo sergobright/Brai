@@ -14,6 +14,7 @@ import { ScrollArea } from "@/shared/ui/scroll-area";
 import { cx, fitTextareaHeight } from "../../appUtils";
 import { useMobileSheetDrag } from "../../hooks/useMobileSheetDrag";
 import { isMobileNavigationViewport } from "../../navigation/useSectionSwipeNavigation";
+import { ActionsInfoPanel } from "../actions/ActionsInfoPanel";
 import { ACTION_DELETE_REVEAL_WIDTH, ACTION_ROW_SERVICE_SELECTOR, ACTIONS_SPLIT_DEFAULT_PERCENT, ACTIONS_SPLIT_MIN_PERCENT, clampActionsSplitPercent, loadActivityMarkdownPreviewMode, saveActivityMarkdownPreviewMode } from "../actions/constants";
 
 type DetailTitleFocus = "end" | null;
@@ -56,7 +57,7 @@ export function InboxSection({
   const visibleOpenDeleteItemId =
     openDeleteItemId && state.inbox.some((item) => item.id === openDeleteItemId) ? openDeleteItemId : null;
   const mobileOverlayOpen = mobileCreateOpen || mobileEditItem != null;
-  const desktopSidePanelOpen = Boolean(selectedItem && !mobileEditItem);
+  const desktopSidePanelOpen = true;
 
   useEffect(() => {
     if (autoFocusAddInput) desktopInputRef.current?.focus();
@@ -241,8 +242,7 @@ export function InboxSection({
         ref={workspaceRef}
         className={cx(
           "actions-workspace relative grid h-full min-h-0 min-w-0 items-stretch gap-[18px] max-[860px]:block",
-          desktopSidePanelOpen ? "has-detail grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-0" : "grid-cols-[minmax(0,1fr)]",
-          desktopSidePanelOpen && "overflow-hidden",
+          desktopSidePanelOpen ? "has-detail grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-0 overflow-hidden" : "grid-cols-[minmax(0,1fr)]",
         )}
         style={
           desktopSidePanelOpen
@@ -296,7 +296,7 @@ export function InboxSection({
           </div>
         </ScrollArea>
 
-        {selectedItem && !mobileEditItem ? (
+        {desktopSidePanelOpen ? (
           <>
             <button
               type="button"
@@ -316,16 +316,20 @@ export function InboxSection({
             >
               <span className="block h-full w-px bg-border transition-colors group-hover:bg-primary" aria-hidden="true" />
             </button>
-            <InboxDetailEditor
-              key={selectedItem.id}
-              item={selectedItem}
-              titleDraft={titleDrafts[selectedItem.id]}
-              mode="desktop"
-              focusTitleRequest={detailTitleFocusRequest}
-              onClose={() => setSelectedItemId(null)}
-              onTitleDraftChange={setTitleDraft}
-              onAutosaveDetails={onAutosaveDetails}
-            />
+            {selectedItem && !mobileEditItem ? (
+              <InboxDetailEditor
+                key={selectedItem.id}
+                item={selectedItem}
+                titleDraft={titleDrafts[selectedItem.id]}
+                mode="desktop"
+                focusTitleRequest={detailTitleFocusRequest}
+                onClose={() => setSelectedItemId(null)}
+                onTitleDraftChange={setTitleDraft}
+                onAutosaveDetails={onAutosaveDetails}
+              />
+            ) : (
+              <ActionsInfoPanel label="Информация о входящих" />
+            )}
           </>
         ) : null}
       </div>

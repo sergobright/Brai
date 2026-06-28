@@ -4,13 +4,13 @@ export type SectionId = "actions" | "inbox" | "focus" | "archive" | "settings" |
 export type PrimarySectionId = "actions" | "inbox" | "focus";
 export type FocusContextPanel = "none" | "goal" | "history";
 export type FocusBackgroundMode = "galaxy" | "evil-eye";
-export type MobileContextPanel = "actions-info" | "focus-goal" | "focus-history";
+export type MobileContextPanel = "actions-info" | "inbox-info" | "focus-goal" | "focus-history";
 export type ThemeMode = "light" | "dark";
 export type Tone = "ok" | "warn" | "bad" | "muted";
 export const SECTION_GRID_CLASS = "grid gap-3.5";
 export const navItems: Array<{ id: PrimarySectionId; label: string; icon: LucideIcon; group: "Platform" | "Time"; }> = [
   { id: "actions", label: "Действия", icon: SquareTerminal, group: "Platform" },
-  { id: "inbox", label: "Inbox", icon: InboxIcon, group: "Platform" },
+  { id: "inbox", label: "Входящие", icon: InboxIcon, group: "Platform" },
   { id: "focus", label: "Фокус", icon: Timer, group: "Time" },
 ];
 export const FOCUS_CONTEXT_PANEL_STORAGE_KEY = "bright_os_focus_context_panel";

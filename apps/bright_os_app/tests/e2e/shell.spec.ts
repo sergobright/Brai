@@ -9,12 +9,12 @@ test("renders mobile and desktop navigation without starter content", async ({ p
   if (testInfo.project.name === "mobile") {
     await expect(page.getByRole("button", { name: "Добавить действие" })).toBeVisible();
     await expect(page.locator(".mobile-nav .nav-label").first()).toBeHidden();
-    await expect(page.locator(".mobile-nav .nav-button")).toHaveCount(2);
-    await expect(page.locator(".mobile-nav .nav-button").nth(1)).not.toHaveClass(/active:scale/);
+    await expect(page.locator(".mobile-nav .nav-button")).toHaveCount(3);
+    await expect(page.locator(".mobile-nav .nav-button").nth(2)).not.toHaveClass(/active:scale/);
   } else {
     await expect(page.getByRole("textbox", { name: "Добавить" })).toBeVisible();
-    await expect(page.getByText("Platform")).toBeVisible();
-    await expect(page.getByText("Time")).toBeVisible();
+    await expect(page.getByText("Меню страницы")).toBeVisible();
+    await expect(page.getByText("Действия").first()).toBeVisible();
   }
   await expect(page.getByText("Deploy Now")).toHaveCount(0);
 });
@@ -25,12 +25,12 @@ test("renders the mobile floating dock without inactive circular backgrounds", a
   await page.goto("/");
   await expect(page.locator(".mobile-nav")).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
   const items = page.locator(".mobile-nav .nav-button");
-  await expect(items).toHaveCount(2);
-  await expect(items.nth(1)).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+  await expect(items).toHaveCount(3);
+  await expect(items.nth(2)).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
 
   await page.getByRole("button", { name: "Фокус" }).last().click();
   await expect(page.getByRole("heading", { name: "Фокус" })).toBeVisible();
-  await expect(items.nth(1)).not.toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+  await expect(items.nth(2)).not.toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
 });
 
 test("expands the desktop rail as a layout column", async ({ page }, testInfo) => {

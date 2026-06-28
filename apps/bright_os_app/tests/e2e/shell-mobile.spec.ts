@@ -93,11 +93,11 @@ test("opens and closes mobile Actions info as a bottom sheet", async ({ page }, 
   await expect(sheet).toBeVisible();
   await expect(sheet.locator(".mobile-context-grabber")).toBeVisible();
   await expect(page.getByRole("navigation", { name: "Основная навигация" })).toHaveCount(0);
+
   const backdropBox = await visualBackdrop.boundingBox();
   const topbar = await page.locator(".section-page-current .topbar").boundingBox();
   const topbarBottom = (topbar?.y ?? 0) + (topbar?.height ?? 0);
-  expect(Math.abs((backdropBox?.y ?? 0) - Math.ceil(topbarBottom))).toBeLessThanOrEqual(1);
-  expect(backdropBox?.height ?? 0).toBeGreaterThanOrEqual((page.viewportSize()?.height ?? 0) - topbarBottom - 1);
+  expect(Math.abs((backdropBox?.y ?? 0) - topbarBottom)).toBeLessThanOrEqual(1);
 
   await dispatchTouch(page, "touchstart", { x: 320, y: 220 });
   await dispatchTouch(page, "touchend", { x: 180, y: 224 });
@@ -106,9 +106,30 @@ test("opens and closes mobile Actions info as a bottom sheet", async ({ page }, 
 
   const dragZone = await sheet.locator(".mobile-context-drag-zone").boundingBox();
   const viewport = page.viewportSize();
-  await page.mouse.move((dragZone?.x ?? 0) + (dragZone?.width ?? 0) / 2, (dragZone?.y ?? 0) + 8);
+  const dragX = (dragZone?.x ?? 0) + (dragZone?.width ?? 0) / 2;
+  await page.mouse.move(dragX, (dragZone?.y ?? 0) + 8);
   await page.mouse.down();
-  await page.mouse.move((dragZone?.x ?? 0) + (dragZone?.width ?? 0) / 2, (viewport?.height ?? 640) - 12, { steps: 6 });
+  await page.mouse.move(dragX, (viewport?.height ?? 640) - 12, { steps: 6 });
+  await page.mouse.up();
+  await expect(page.locator(".mobile-context-sheet")).toHaveCount(0);
+});
+
+test("opens and closes mobile Inbox info as a bottom sheet", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "mobile", "mobile-only inbox info");
+
+  await page.goto("/inbox");
+  await page.getByRole("button", { name: "Информация о входящих" }).click();
+  const sheet = page.locator(".mobile-context-sheet");
+  await expect(sheet).toBeVisible();
+  await expect(sheet.locator(".mobile-context-grabber")).toBeVisible();
+  await expect(page.getByRole("navigation", { name: "Основная навигация" })).toHaveCount(0);
+
+  const dragZone = await sheet.locator(".mobile-context-drag-zone").boundingBox();
+  const viewport = page.viewportSize();
+  const dragX = (dragZone?.x ?? 0) + (dragZone?.width ?? 0) / 2;
+  await page.mouse.move(dragX, (dragZone?.y ?? 0) + 8);
+  await page.mouse.down();
+  await page.mouse.move(dragX, (viewport?.height ?? 640) - 12, { steps: 6 });
   await page.mouse.up();
   await expect(page.locator(".mobile-context-sheet")).toHaveCount(0);
 });

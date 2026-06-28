@@ -7,7 +7,7 @@ import { setupBrightOsAppTest } from "./app-test-support";
 describe("BrightOsApp inbox", () => {
   setupBrightOsAppTest();
 
-  it("opens Inbox from the main dock and creates an incoming item without action statuses", async () => {
+  it("opens Входящие from the main dock and creates an incoming item without action statuses", async () => {
     vi.stubGlobal(
       "matchMedia",
       vi.fn(() => ({
@@ -25,8 +25,10 @@ describe("BrightOsApp inbox", () => {
 
     render(<BrightOsApp />);
 
-    fireEvent.click(screen.getAllByRole("button", { name: "Inbox" }).at(-1) as HTMLElement);
+    fireEvent.click(screen.getAllByRole("button", { name: "Входящие" }).at(-1) as HTMLElement);
     await waitFor(() => expect(screen.getByRole("heading", { name: "Входящие" })).toBeInTheDocument());
+    expect(screen.getAllByLabelText("Информация о входящих").length).toBeGreaterThan(0);
+    expect(screen.queryByRole("button", { name: "Закрыть информацию о входящих" })).not.toBeInTheDocument();
 
     const input = screen.getByRole("textbox", { name: "Добавить входящее" });
     fireEvent.change(input, { target: { value: " Новое письмо " } });
