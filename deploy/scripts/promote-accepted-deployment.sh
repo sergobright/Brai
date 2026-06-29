@@ -113,4 +113,4 @@ fi
   --source-short-changes "${SOURCE_SHORT_CHANGES:-Accepted preview changes without authored release notes.}" \
   --source-details "${SOURCE_DETAILS:-No authored preview release notes were available; audit metadata is stored separately.}" \
   --reason "${BRIGHT_OS_PROMOTE_REASON:-Accepted branch promotion}" \
-  --record-production-release "${BRIGHT_OS_RECORD_PRODUCTION_RELEASE:-true}"
+  --record-production-release "${BRIGHT_OS_RECORD_PRODUCTION_RELEASE:-false}"

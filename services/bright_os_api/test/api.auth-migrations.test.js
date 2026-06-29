@@ -330,145 +330,30 @@ test('migration seeds unified build version ledger', async () => {
       .prepare('SELECT id FROM version_types ORDER BY id')
       .all()
       .map((row) => row.id);
-    assert.deepEqual(versionTypes, ['apk', 'build']);
+    assert.deepEqual(versionTypes, ['apk', 'build', 'canon', 'release']);
 
     const versions = fixture.store.db
       .prepare('SELECT * FROM build_versions ORDER BY version_type_id, version')
       .all();
-    assert.equal(versions.length, 12);
+    assert.equal(versions.length, 2);
 
-    const buildVersions = versions
-      .filter((version) => version.version_type_id === 'build')
-      .sort((left, right) => left.build_version - right.build_version);
-    assert.equal(buildVersions.length, 11);
-    assert.deepEqual(
-      buildVersions.map((version) => version.build_version),
-      [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
-    );
-    assert.equal(buildVersions.at(-1).build_version, buildVersions.length);
-    assert.equal(buildVersions.at(-1).version, '0.0.11.1');
-
-    const baselineApk = versions.find((version) => version.version_type_id === 'apk' && version.version === '0.0.1.1');
+    const baselineApk = versions.find((version) => version.version_type_id === 'apk' && version.version === 1);
     assert.ok(baselineApk);
-    assert.equal(baselineApk.major_version, 0);
-    assert.equal(baselineApk.release_version, 0);
-    assert.equal(baselineApk.build_version, 1);
-    assert.equal(baselineApk.apk_version, 1);
+    assert.equal(baselineApk.included_in_version_id, null);
     assert.equal(baselineApk.released_at_utc, '2026-06-23T09:13:50Z');
     assert.match(baselineApk.short_changes, /APK/);
     assert.match(baselineApk.detailed_changes, /versionCode 1/);
     assert.match(baselineApk.detailed_changes, /Release signing material/);
-    assert.match(baselineApk.reason, /first installable public Android APK baseline/);
 
-    const baselineBuild = versions.find((version) => version.version_type_id === 'build' && version.version === '0.0.1.1');
+    const baselineBuild = versions.find((version) => version.version_type_id === 'build' && version.version === 1);
     assert.ok(baselineBuild);
-    assert.equal(baselineBuild.major_version, 0);
-    assert.equal(baselineBuild.release_version, 0);
-    assert.equal(baselineBuild.build_version, 1);
-    assert.equal(baselineBuild.apk_version, 1);
+    assert.equal(baselineBuild.included_in_version_id, null);
     assert.equal(baselineBuild.released_at_utc, '2026-06-23T09:12:45Z');
     assert.match(baselineBuild.short_changes, /web\/OTA/);
     assert.match(baselineBuild.detailed_changes, /min APK versionCode 1/);
-    assert.match(baselineBuild.reason, /first clean public web\/OTA version/);
-
-    const firstTaskBuild = versions.find((version) => version.version_type_id === 'build' && version.version === '0.0.2.1');
-    assert.ok(firstTaskBuild);
-    assert.equal(firstTaskBuild.major_version, 0);
-    assert.equal(firstTaskBuild.release_version, 0);
-    assert.equal(firstTaskBuild.build_version, 2);
-    assert.equal(firstTaskBuild.apk_version, 1);
-    assert.equal(firstTaskBuild.released_at_utc, '2026-06-24T13:45:00Z');
-    assert.match(firstTaskBuild.detailed_changes, /dev promotions to main increment Y/);
-    assert.match(firstTaskBuild.reason, /explicit X\.Y\.Z\.S rules/);
-
-    const secondTaskBuild = versions.find((version) => version.version_type_id === 'build' && version.version === '0.0.3.1');
-    assert.ok(secondTaskBuild);
-    assert.equal(secondTaskBuild.major_version, 0);
-    assert.equal(secondTaskBuild.release_version, 0);
-    assert.equal(secondTaskBuild.build_version, 3);
-    assert.equal(secondTaskBuild.apk_version, 1);
-    assert.equal(secondTaskBuild.released_at_utc, '2026-06-24T14:05:00Z');
-    assert.match(secondTaskBuild.detailed_changes, /codex task branches deploy to isolated preview slots/);
-    assert.match(secondTaskBuild.reason, /unfinished local work/);
-
-    const thirdTaskBuild = versions.find((version) => version.version_type_id === 'build' && version.version === '0.0.4.1');
-    assert.ok(thirdTaskBuild);
-    assert.equal(thirdTaskBuild.major_version, 0);
-    assert.equal(thirdTaskBuild.release_version, 0);
-    assert.equal(thirdTaskBuild.build_version, 4);
-    assert.equal(thirdTaskBuild.apk_version, 1);
-    assert.equal(thirdTaskBuild.released_at_utc, '2026-06-24T14:25:00Z');
-    assert.match(thirdTaskBuild.detailed_changes, /preview slot has already been released/);
-    assert.match(thirdTaskBuild.reason, /preview cleanup could fail/);
-
-    const fourthTaskBuild = versions.find((version) => version.version_type_id === 'build' && version.version === '0.0.5.1');
-    assert.ok(fourthTaskBuild);
-    assert.equal(fourthTaskBuild.major_version, 0);
-    assert.equal(fourthTaskBuild.release_version, 0);
-    assert.equal(fourthTaskBuild.build_version, 5);
-    assert.equal(fourthTaskBuild.apk_version, 1);
-    assert.equal(fourthTaskBuild.released_at_utc, '2026-06-24T14:40:00Z');
-    assert.match(fourthTaskBuild.detailed_changes, /environment-specific favicon/);
-    assert.match(fourthTaskBuild.reason, /visually distinguishable/);
-
-    const fifthTaskBuild = versions.find((version) => version.version_type_id === 'build' && version.version === '0.0.6.1');
-    assert.ok(fifthTaskBuild);
-    assert.equal(fifthTaskBuild.major_version, 0);
-    assert.equal(fifthTaskBuild.release_version, 0);
-    assert.equal(fifthTaskBuild.build_version, 6);
-    assert.equal(fifthTaskBuild.apk_version, 1);
-    assert.equal(fifthTaskBuild.released_at_utc, '2026-06-24T15:10:00Z');
-    assert.match(fifthTaskBuild.detailed_changes, /preview deployments keep the current accepted dev app version/);
-    assert.match(fifthTaskBuild.reason, /unaccepted version numbers/);
-
-    const sixthTaskBuild = versions.find((version) => version.version_type_id === 'build' && version.version === '0.0.7.1');
-    assert.ok(sixthTaskBuild);
-    assert.equal(sixthTaskBuild.major_version, 0);
-    assert.equal(sixthTaskBuild.release_version, 0);
-    assert.equal(sixthTaskBuild.build_version, 7);
-    assert.equal(sixthTaskBuild.apk_version, 1);
-    assert.equal(sixthTaskBuild.released_at_utc, '2026-06-24T18:20:00Z');
-    assert.match(sixthTaskBuild.detailed_changes, /production Android web\/OTA bundles use the public API endpoint/);
-    assert.match(sixthTaskBuild.reason, /public API endpoint/);
-
-    const eighthTaskBuild = versions.find((version) => version.version_type_id === 'build' && version.version === '0.0.8.1');
-    assert.ok(eighthTaskBuild);
-    assert.equal(eighthTaskBuild.major_version, 0);
-    assert.equal(eighthTaskBuild.release_version, 0);
-    assert.equal(eighthTaskBuild.build_version, 8);
-    assert.equal(eighthTaskBuild.apk_version, 1);
-    assert.equal(eighthTaskBuild.released_at_utc, '2026-06-24T21:40:47Z');
-    assert.match(eighthTaskBuild.detailed_changes, /Z follows the accepted dev build sequence/);
-    assert.match(eighthTaskBuild.reason, /accepted dev build numbering/);
-
-    const ninthTaskBuild = versions.find((version) => version.version_type_id === 'build' && version.version === '0.0.9.1');
-    assert.ok(ninthTaskBuild);
-    assert.equal(ninthTaskBuild.build_version, 9);
-    assert.match(ninthTaskBuild.reason, /mobile navigation lacked/);
-
-    const tenthTaskBuild = versions.find((version) => version.version_type_id === 'build' && version.version === '0.0.10.1');
-    assert.ok(tenthTaskBuild);
-    assert.equal(tenthTaskBuild.build_version, 10);
-    assert.match(tenthTaskBuild.reason, /preview slots could remain occupied/);
-
-    const eleventhTaskBuild = versions.find((version) => version.version_type_id === 'build' && version.version === '0.0.11.1');
-    assert.ok(eleventhTaskBuild);
-    assert.equal(eleventhTaskBuild.build_version, 11);
-    assert.match(eleventhTaskBuild.reason, /duplicate or miss accepted build ledger rows/);
 
     fixture.store.migrate();
-    assert.equal(fixture.store.db.prepare('SELECT COUNT(*) AS count FROM build_versions').get().count, 12);
-
-    fixture.store.db
-      .prepare("DELETE FROM build_versions WHERE version_type_id = 'build' AND version = '0.0.11.1'")
-      .run();
-    fixture.store.db.prepare('DELETE FROM schema_migrations WHERE version = 21').run();
-    fixture.store.migrate();
-    assert.ok(
-      fixture.store.db
-        .prepare("SELECT 1 FROM build_versions WHERE version_type_id = 'build' AND version = '0.0.11.1'")
-        .get()
-    );
+    assert.equal(fixture.store.db.prepare('SELECT COUNT(*) AS count FROM build_versions').get().count, 2);
   } finally {
     await fixture.close();
   }

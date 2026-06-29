@@ -90,9 +90,16 @@ import { BrightOsStore } from "./services/bright_os_api/src/store.js";
 const store = new BrightOsStore(process.argv[1]);
 try {
   const row = store.db
-    .prepare("SELECT version FROM build_versions WHERE version_type_id = ? ORDER BY release_version DESC, build_version DESC LIMIT 1")
-    .get("build");
-  if (row?.version) console.log(row.version);
+    .prepare(`
+      SELECT
+        COALESCE(MAX(CASE WHEN version_type_id = 'canon' THEN version END), 0) AS canon,
+        COALESCE(MAX(CASE WHEN version_type_id = 'release' THEN version END), 0) AS release,
+        COALESCE(MAX(CASE WHEN version_type_id = 'build' THEN version END), 0) AS build,
+        COALESCE(MAX(CASE WHEN version_type_id = 'apk' THEN version END), 0) AS apk
+      FROM build_versions
+    `)
+    .get();
+  if (row?.build && row?.apk) console.log(`${row.canon}.${row.release}.${row.build}.${row.apk}`);
 } finally {
   store.close();
 }

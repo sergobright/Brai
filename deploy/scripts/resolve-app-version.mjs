@@ -49,14 +49,16 @@ function latestProductionVersion(dbPath) {
   try {
     const row = db
       .prepare(`
-        SELECT version
+        SELECT
+          COALESCE(MAX(CASE WHEN version_type_id = 'canon' THEN version END), 0) AS canon,
+          COALESCE(MAX(CASE WHEN version_type_id = 'release' THEN version END), 0) AS release,
+          COALESCE(MAX(CASE WHEN version_type_id = 'build' THEN version END), 0) AS build,
+          COALESCE(MAX(CASE WHEN version_type_id = 'apk' THEN version END), 0) AS apk
         FROM build_versions
-        WHERE version_type_id = ? AND release_version > 0
-        ORDER BY release_version DESC, build_version DESC
-        LIMIT 1
       `)
-      .get("build");
-    return row?.version || "";
+      .get();
+    if (!row?.build || !row?.apk) return "";
+    return `${row.canon}.${row.release}.${row.build}.${row.apk}`;
   } finally {
     db.close();
   }

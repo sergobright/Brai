@@ -82,62 +82,50 @@ export const migrationMethods = {
     }
 
     if (!this.hasMigration(11)) {
-      this.seedPublicVersionRulesBuildVersion();
       this.recordMigration(11, 'record public version rules task');
     }
 
     if (!this.hasMigration(12)) {
-      this.seedCleanTaskFinishBuildVersion();
       this.recordMigration(12, 'record clean task finish rules task');
     }
 
     if (!this.hasMigration(13)) {
-      this.seedPreviewCleanupBuildVersion();
       this.recordMigration(13, 'record preview cleanup workflow task');
     }
 
     if (!this.hasMigration(14)) {
-      this.seedEnvironmentFaviconBuildVersion();
       this.recordMigration(14, 'record environment favicon task');
     }
 
     if (!this.hasMigration(15)) {
-      this.seedPreviewVersionSemanticsBuildVersion();
       this.recordMigration(15, 'record preview version semantics task');
     }
 
     if (!this.hasMigration(16)) {
-      this.seedProductionAndroidOtaApiBuildVersion();
       this.recordMigration(16, 'record production Android OTA API endpoint fix');
     }
 
     if (!this.hasMigration(17)) {
-      this.seedSplitLeftMenuBuildVersion();
       this.recordMigration(17, 'record split left menu task');
     }
 
     if (!this.hasMigration(18)) {
-      this.seedGithubCliSandboxAuthBuildVersion();
       this.recordMigration(18, 'record GitHub CLI sandbox auth guidance');
     }
 
     if (!this.hasMigration(19)) {
-      this.realignBuildVersionLedger();
       this.recordMigration(19, 'realign build version ledger sequence');
     }
 
     if (!this.hasMigration(20)) {
-      this.seedAcceptedDevBuildLedgerBackfill();
       this.recordMigration(20, 'record accepted dev build versions 9 and 10');
     }
 
     if (!this.hasMigration(21)) {
-      this.seedAcceptedDevBuild11LedgerBackfill();
       this.recordMigration(21, 'record accepted dev build version 11');
     }
 
     if (!this.hasMigration(22)) {
-      this.removePrVersionCouplingFromBuildLedger();
       this.recordMigration(22, 'remove pull request coupling from version ledger');
     }
 
@@ -158,38 +146,30 @@ export const migrationMethods = {
     this.ensureTableDescriptions();
 
     if (!this.hasMigration(25)) {
-      this.repairTechnicalBuildVersionDescriptions();
       this.recordMigration(25, 'repair technical build version descriptions');
     }
 
     if (!this.hasMigration(26)) {
-      this.repairLateTechnicalBuildVersionDescriptions();
       this.recordMigration(26, 'repair late technical build version descriptions');
     }
 
     if (!this.hasMigration(27)) {
-      this.repairBuildVersionReasonText();
-      this.backfillBuildVersionRefs();
       this.recordMigration(27, 'separate build version audit refs from reasons');
     }
 
     if (!this.hasMigration(28)) {
-      this.repairAcceptedAuditMetadataBuildVersionDescription();
       this.recordMigration(28, 'repair accepted audit metadata build description');
     }
 
     if (!this.hasMigration(29)) {
-      this.repairGenericAcceptedBuildNotesDescription();
       this.recordMigration(29, 'repair generic accepted build notes description');
     }
 
     if (!this.hasMigration(30)) {
-      this.repairAcceptedGitNotesBuildVersionDescription();
       this.recordMigration(30, 'repair accepted git notes build description');
     }
 
     if (!this.hasMigration(31)) {
-      this.repairAcceptedSshNotesBuildVersionDescription();
       this.recordMigration(31, 'repair accepted ssh notes build description');
     }
 
@@ -214,6 +194,11 @@ export const migrationMethods = {
       this.ensureFocusSessionSchema();
       this.recomputeCanonicalSessions(now);
       this.recordMigration(36, 'add focus session soft delete events');
+    }
+
+    if (!this.hasMigration(37)) {
+      this.rebuildVersionLedgerTypes();
+      this.recordMigration(37, 'rebuild version ledger as typed counters');
     }
   }
 ,
@@ -471,7 +456,7 @@ export const migrationMethods = {
       ['activity_events', 'События действий', 'Журнал изменений действий.', 'Хранит каждое клиентское событие по действиям для синхронизации, аудита и восстановления текущей таблицы activities.'],
       ['app_settings', 'Настройки', 'Глобальные настройки приложения.', 'Хранит runtime-настройки в формате ключ-значение: дату старта цели, длительность цели, дневную норму фокуса и похожие параметры.'],
       ['build_version_refs', 'Связи версий', 'Технические связи версий.', 'Хранит source/target branch и commit для build_versions, чтобы audit-метаданные не подменяли короткое изменение, детальные изменения и причину выпуска.'],
-      ['build_versions', 'Версии', 'Журнал публичных версий.', 'Хранит принятые web/OTA сборки и APK-релизы с описанием изменений, причиной выпуска и временем релиза.'],
+      ['build_versions', 'Версии', 'Типизированный журнал версий.', 'Хранит версии типов apk, build, release и canon. Поле version является счётчиком внутри типа; included_in_version_id связывает build/APK с release и release с canon. Публичная строка версии собирается из последних счётчиков.'],
       ['deployment_records', 'Деплои', 'Журнал выкладок.', 'Хранит факты деплоя: окружение, ветку, commit, домен, web/OTA версию, APK версию и описание доставки.'],
       ['focus_sessions', 'Сессии фокуса', 'Стабильные Focus-сессии.', 'Хранит стабильные идентификаторы Focus-сессий, включая soft-delete метку. Редактируемые время старта, финиша и длительность лежат в focus_session_versions.'],
       ['focus_session_sources', 'Источники Focus-сессий', 'Связи Focus-сессий и событий.', 'Связывает итоговые Focus-сессии с timer_events, из которых они получились при deterministic replay.'],
@@ -486,7 +471,7 @@ export const migrationMethods = {
       ['table_descriptions', 'Описания таблиц', 'Справочник описаний таблиц.', 'Хранит читаемый русский заголовок и описание для каждой SQLite-таблицы, которые показывает admin-панель.'],
       ['timer_devices', 'Устройства', 'Устройства синхронизации.', 'Хранит устройства, которые отправляют события фокуса и действий: stable device_id, платформу, имя и параметры синхронизации.'],
       ['timer_events', 'События фокуса', 'Журнал событий фокуса.', 'Хранит start, stop, edit_session и delete_session события фокуса с устройством, клиентской и серверной последовательностью.'],
-      ['version_types', 'Типы версий', 'Справочник типов версий.', 'Хранит типы записей для build_versions: обычную сборочную версию build и APK-версию apk.']
+      ['version_types', 'Типы версий', 'Справочник типов версий.', 'Хранит типы записей для build_versions: apk, build, release и canon.']
     ];
     const actualTables = new Set(
       this.db
@@ -1016,17 +1001,15 @@ export const migrationMethods = {
       CREATE TABLE IF NOT EXISTS build_versions (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         version_type_id TEXT NOT NULL,
-        major_version INTEGER NOT NULL CHECK (major_version >= 0),
-        release_version INTEGER NOT NULL CHECK (release_version >= 0),
-        build_version INTEGER NOT NULL CHECK (build_version >= 0),
-        apk_version INTEGER NOT NULL CHECK (apk_version >= 0),
-        version TEXT NOT NULL,
+        version INTEGER NOT NULL CHECK (version > 0),
+        included_in_version_id INTEGER,
         short_changes TEXT NOT NULL,
         detailed_changes TEXT NOT NULL,
         reason TEXT NOT NULL,
         released_at_utc TEXT NOT NULL,
         created_at_utc TEXT NOT NULL,
         FOREIGN KEY (version_type_id) REFERENCES version_types(id),
+        FOREIGN KEY (included_in_version_id) REFERENCES build_versions(id) ON DELETE SET NULL,
         UNIQUE (version_type_id, version)
       );
 
@@ -1042,14 +1025,26 @@ export const migrationMethods = {
     `);
     insertType.run(
       'build',
-      'Сборочная версия',
-      'Web/OTA ledger: accepted dev builds increment Z; production releases increment Y.',
+      'Build версия',
+      'Accepted web/OTA build counter. Builds are linked to a release only by manual release recording.',
       now
     );
     insertType.run(
       'apk',
       'APK версия',
-      'APK релиз Bright OS: увеличивает только S в версии X.Y.Z.S.',
+      'Installable Android APK counter. The current APK row is linked when a release is recorded.',
+      now
+    );
+    insertType.run(
+      'release',
+      'Release версия',
+      'Manual release counter. A release collects unlinked build rows and the current APK row.',
+      now
+    );
+    insertType.run(
+      'canon',
+      'Canon версия',
+      'Manual canon counter. A canon collects unlinked release rows.',
       now
     );
   }
@@ -1060,7 +1055,7 @@ export const migrationMethods = {
       CREATE TABLE IF NOT EXISTS build_version_refs (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         version_type_id TEXT NOT NULL,
-        version TEXT NOT NULL,
+        version INTEGER NOT NULL,
         source_branch TEXT,
         source_commit TEXT,
         target_branch TEXT NOT NULL,
@@ -1076,6 +1071,159 @@ export const migrationMethods = {
   }
 ,
 
+  rebuildVersionLedgerTypes() {
+    if (!this.tableExists('build_versions') || !this.columnExists('build_versions', 'major_version')) return;
+
+    const oldVersions = this.db
+      .prepare('SELECT * FROM build_versions ORDER BY id')
+      .all();
+    const oldRefs = this.tableExists('build_version_refs')
+      ? this.db.prepare('SELECT * FROM build_version_refs ORDER BY id').all()
+      : [];
+    const counters = { apk: 0, build: 0, release: 0, canon: 0 };
+    const versionMap = new Map();
+    const releaseRanges = [];
+    let previousReleaseBuild = 0;
+
+    this.db.pragma('foreign_keys = OFF');
+    try {
+      this.db.exec(`
+        CREATE TABLE build_versions_next (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          version_type_id TEXT NOT NULL,
+          version INTEGER NOT NULL CHECK (version > 0),
+          included_in_version_id INTEGER,
+          short_changes TEXT NOT NULL,
+          detailed_changes TEXT NOT NULL,
+          reason TEXT NOT NULL,
+          released_at_utc TEXT NOT NULL,
+          created_at_utc TEXT NOT NULL,
+          FOREIGN KEY (version_type_id) REFERENCES version_types(id),
+          FOREIGN KEY (included_in_version_id) REFERENCES build_versions_next(id) ON DELETE SET NULL,
+          UNIQUE (version_type_id, version)
+        );
+      `);
+      const insertVersion = this.db.prepare(`
+        INSERT INTO build_versions_next (
+          id,
+          version_type_id,
+          version,
+          included_in_version_id,
+          short_changes,
+          detailed_changes,
+          reason,
+          released_at_utc,
+          created_at_utc
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+      for (const row of oldVersions) {
+        const oldVersion = String(row.version);
+        const nextType = row.version_type_id === 'build' && row.release_version > 0 ? 'release' : row.version_type_id;
+        if (!Object.hasOwn(counters, nextType)) continue;
+        const nextVersion = ++counters[nextType];
+        insertVersion.run(
+          row.id,
+          nextType,
+          nextVersion,
+          null,
+          row.short_changes,
+          row.detailed_changes,
+          row.reason,
+          row.released_at_utc,
+          row.created_at_utc,
+        );
+        versionMap.set(`${row.version_type_id}|${oldVersion}`, {
+          versionTypeId: nextType,
+          version: nextVersion,
+          id: row.id,
+        });
+        if (nextType === 'release') {
+          releaseRanges.push({
+            id: row.id,
+            from: previousReleaseBuild,
+            to: row.build_version,
+          });
+          previousReleaseBuild = row.build_version;
+        }
+      }
+      const link = this.db.prepare('UPDATE build_versions_next SET included_in_version_id = ? WHERE id = ?');
+      for (const release of releaseRanges) {
+        for (const row of oldVersions) {
+          if (row.version_type_id !== 'build' || row.release_version !== 0) continue;
+          if (row.build_version > release.from && row.build_version <= release.to) {
+            link.run(release.id, row.id);
+          }
+        }
+      }
+      const latestRelease = releaseRanges.at(-1);
+      const latestApk = oldVersions.filter((row) => row.version_type_id === 'apk').at(-1);
+      if (latestRelease && latestApk) link.run(latestRelease.id, latestApk.id);
+
+      this.db.exec(`
+        CREATE TABLE build_version_refs_next (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          version_type_id TEXT NOT NULL,
+          version INTEGER NOT NULL,
+          source_branch TEXT,
+          source_commit TEXT,
+          target_branch TEXT NOT NULL,
+          target_commit TEXT NOT NULL,
+          created_at_utc TEXT NOT NULL,
+          FOREIGN KEY (version_type_id, version) REFERENCES build_versions_next(version_type_id, version) ON DELETE CASCADE,
+          UNIQUE (version_type_id, target_branch, target_commit)
+        );
+      `);
+      const insertRef = this.db.prepare(`
+        INSERT INTO build_version_refs_next (
+          id,
+          version_type_id,
+          version,
+          source_branch,
+          source_commit,
+          target_branch,
+          target_commit,
+          created_at_utc
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(version_type_id, target_branch, target_commit) DO UPDATE SET
+          version = excluded.version,
+          source_branch = excluded.source_branch,
+          source_commit = excluded.source_commit
+      `);
+      for (const ref of oldRefs) {
+        const mapped = versionMap.get(`${ref.version_type_id}|${ref.version}`);
+        if (!mapped) continue;
+        insertRef.run(
+          ref.id,
+          mapped.versionTypeId,
+          mapped.version,
+          ref.source_branch,
+          ref.source_commit,
+          ref.target_branch,
+          ref.target_commit,
+          ref.created_at_utc,
+        );
+      }
+
+      this.db.exec(`
+        DROP TABLE IF EXISTS build_version_refs;
+        DROP TABLE build_versions;
+        ALTER TABLE build_versions_next RENAME TO build_versions;
+        ALTER TABLE build_version_refs_next RENAME TO build_version_refs;
+
+        CREATE INDEX IF NOT EXISTS idx_build_versions_type_released
+        ON build_versions (version_type_id, released_at_utc);
+
+        CREATE INDEX IF NOT EXISTS idx_build_version_refs_version
+        ON build_version_refs (version_type_id, version);
+      `);
+    } finally {
+      this.db.pragma('foreign_keys = ON');
+    }
+  }
+,
+
   seedInitialBuildVersion() {
     const now = new Date().toISOString();
     const buildReleasedAt = '2026-06-23T09:12:45Z';
@@ -1083,951 +1231,37 @@ export const migrationMethods = {
     const insertVersion = this.db.prepare(`
         INSERT INTO build_versions (
           version_type_id,
-          major_version,
-          release_version,
-          build_version,
-          apk_version,
           version,
+          included_in_version_id,
           short_changes,
           detailed_changes,
           reason,
           released_at_utc,
           created_at_utc
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(version_type_id, version) DO NOTHING
       `);
     insertVersion.run(
       'build',
-      0,
-      0,
       1,
-      1,
-      '0.0.1.1',
+      null,
       'Initial public web/OTA baseline.',
-      'Published browser web and Android OTA bundle 0.0.1.1 with X=0, Y=0, Z=1, S=1 and min APK versionCode 1. Browser web and Android OTA use the same public version.',
+      'Published browser web and Android OTA baseline build 1 with min APK versionCode 1.',
       'Initial public baseline.',
       buildReleasedAt,
       now
     );
     insertVersion.run(
       'apk',
-      0,
-      0,
       1,
-      1,
-      '0.0.1.1',
+      null,
       'Initial public APK baseline.',
-      'APK uses public version 0.0.1.1 with S=1 and Android versionCode 1. Release signing material is supplied outside the repository.',
+      'APK baseline 1 uses Android versionCode 1. Release signing material is supplied outside the repository.',
       'Initial public baseline.',
       apkReleasedAt,
       now
     );
-  }
-,
-
-  seedPublicVersionRulesBuildVersion() {
-    const now = new Date().toISOString();
-    this.db.prepare(`
-        INSERT INTO build_versions (
-          version_type_id,
-          major_version,
-          release_version,
-          build_version,
-          apk_version,
-          version,
-          short_changes,
-          detailed_changes,
-          reason,
-          released_at_utc,
-          created_at_utc
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(version_type_id, version) DO NOTHING
-      `).run(
-      'build',
-      0,
-      0,
-      2,
-      1,
-      '0.0.2.1',
-      'Accepted public version baseline rules.',
-      'Recorded the first accepted public task: task merges into dev increment Z, dev promotions to main increment Y, and APK releases increment S. Browser web and Android OTA use version 0.0.2.1 with Android versionCode 1.',
-      'Accepted first public task into dev.',
-      '2026-06-24T13:45:00Z',
-      now
-    );
-  }
-,
-
-  seedCleanTaskFinishBuildVersion() {
-    const now = new Date().toISOString();
-    this.db.prepare(`
-        INSERT INTO build_versions (
-          version_type_id,
-          major_version,
-          release_version,
-          build_version,
-          apk_version,
-          version,
-          short_changes,
-          detailed_changes,
-          reason,
-          released_at_utc,
-          created_at_utc
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(version_type_id, version) DO NOTHING
-      `).run(
-      'build',
-      0,
-      0,
-      3,
-      1,
-      '0.0.3.1',
-      'Accepted clean task finish rules.',
-      'Recorded the second accepted public task: implementation work must finish with committed and pushed tracked changes unless explicitly local-only, and codex task branches deploy to isolated preview slots before dev acceptance.',
-      'Accepted clean task finish workflow into dev.',
-      '2026-06-24T14:05:00Z',
-      now
-    );
-  }
-,
-
-  seedPreviewCleanupBuildVersion() {
-    const now = new Date().toISOString();
-    this.db.prepare(`
-        INSERT INTO build_versions (
-          version_type_id,
-          major_version,
-          release_version,
-          build_version,
-          apk_version,
-          version,
-          short_changes,
-          detailed_changes,
-          reason,
-          released_at_utc,
-          created_at_utc
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(version_type_id, version) DO NOTHING
-      `).run(
-      'build',
-      0,
-      0,
-      4,
-      1,
-      '0.0.4.1',
-      'Accepted idempotent preview cleanup.',
-      'Recorded the third accepted public task: preview metadata promotion skips cleanly when the preview slot has already been released by a delete event.',
-      'Accepted preview cleanup workflow into dev.',
-      '2026-06-24T14:25:00Z',
-      now
-    );
-  }
-,
-
-  seedEnvironmentFaviconBuildVersion() {
-    const now = new Date().toISOString();
-    this.db.prepare(`
-        INSERT INTO build_versions (
-          version_type_id,
-          major_version,
-          release_version,
-          build_version,
-          apk_version,
-          version,
-          short_changes,
-          detailed_changes,
-          reason,
-          released_at_utc,
-          created_at_utc
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(version_type_id, version) DO NOTHING
-      `).run(
-      'build',
-      0,
-      0,
-      5,
-      1,
-      '0.0.5.1',
-      'Accepted environment-specific favicons.',
-      'Recorded the fourth accepted public task: dev and preview web/PWA builds use environment-specific favicon and manifest icon assets while production keeps the canonical Bright OS icons.',
-      'Accepted dev and preview favicon separation into dev.',
-      '2026-06-24T14:40:00Z',
-      now
-    );
-  }
-,
-
-  seedPreviewVersionSemanticsBuildVersion() {
-    const now = new Date().toISOString();
-    this.db.prepare(`
-        INSERT INTO build_versions (
-          version_type_id,
-          major_version,
-          release_version,
-          build_version,
-          apk_version,
-          version,
-          short_changes,
-          detailed_changes,
-          reason,
-          released_at_utc,
-          created_at_utc
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(version_type_id, version) DO NOTHING
-      `).run(
-      'build',
-      0,
-      0,
-      6,
-      1,
-      '0.0.6.1',
-      'Accepted preview version semantics.',
-      'Recorded the fifth accepted public task: preview deployments keep the current accepted dev app version and record preview deployment metadata, while the next public build version becomes visible only after deploy-dev succeeds.',
-      'Accepted preview/dev version separation into dev.',
-      '2026-06-24T15:10:00Z',
-      now
-    );
-  }
-,
-
-  seedProductionAndroidOtaApiBuildVersion() {
-    const now = new Date().toISOString();
-    this.db.prepare(`
-        INSERT INTO build_versions (
-          version_type_id,
-          major_version,
-          release_version,
-          build_version,
-          apk_version,
-          version,
-          short_changes,
-          detailed_changes,
-          reason,
-          released_at_utc,
-          created_at_utc
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(version_type_id, version) DO NOTHING
-      `).run(
-      'build',
-      0,
-      0,
-      7,
-      1,
-      '0.0.7.1',
-      'Accepted production Android OTA API endpoint fix.',
-      'Recorded the sixth accepted public task: production Android web/OTA bundles use the public API endpoint while browser web keeps same-origin /api, and OTA manifests are prepared for cache-safe publication.',
-      'Accepted production Android OTA API endpoint fix into dev.',
-      '2026-06-24T18:20:00Z',
-      now
-    );
-  }
-,
-
-  seedSplitLeftMenuBuildVersion() {
-    const now = new Date().toISOString();
-    this.db.prepare(`
-        INSERT INTO build_versions (
-          version_type_id,
-          major_version,
-          release_version,
-          build_version,
-          apk_version,
-          version,
-          short_changes,
-          detailed_changes,
-          reason,
-          released_at_utc,
-          created_at_utc
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(version_type_id, version) DO NOTHING
-      `).run(
-      'build',
-      0,
-      0,
-      8,
-      1,
-      '0.0.8.1',
-      'Accepted split left menu by page.',
-      'Recorded the seventh accepted public task: desktop rail navigation no longer duplicates the dock and instead shows page-specific menu actions with regression coverage.',
-      'Accepted split left menu by page into dev.',
-      '2026-06-24T21:10:59Z',
-      now
-    );
-  }
-,
-
-  seedGithubCliSandboxAuthBuildVersion() {
-    const now = new Date().toISOString();
-    this.db.prepare(`
-        INSERT INTO build_versions (
-          version_type_id,
-          major_version,
-          release_version,
-          build_version,
-          apk_version,
-          version,
-          short_changes,
-          detailed_changes,
-          reason,
-          released_at_utc,
-          created_at_utc
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(version_type_id, version) DO NOTHING
-      `).run(
-      'build',
-      0,
-      0,
-      9,
-      1,
-      '0.0.9.1',
-      'Accepted GitHub CLI sandbox auth guidance.',
-      'Recorded the eighth accepted public task: Codex agents must recheck GitHub CLI authentication outside the sandbox before treating gh token errors as real authentication failures.',
-      'Accepted GitHub CLI sandbox auth guidance into dev.',
-      '2026-06-24T21:17:09Z',
-      now
-    );
-  }
-,
-
-  realignBuildVersionLedger() {
-    const now = new Date().toISOString();
-    this.db.prepare(`
-        INSERT INTO build_versions (
-          version_type_id,
-          major_version,
-          release_version,
-          build_version,
-          apk_version,
-          version,
-          short_changes,
-          detailed_changes,
-          reason,
-          released_at_utc,
-          created_at_utc
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(version_type_id, version) DO UPDATE SET
-          short_changes = excluded.short_changes,
-          detailed_changes = excluded.detailed_changes,
-          reason = excluded.reason,
-          released_at_utc = excluded.released_at_utc
-      `).run(
-      'build',
-      0,
-      0,
-      8,
-      1,
-      '0.0.8.1',
-      'Aligned dev build ledger sequence.',
-      'Recorded accepted dev build 0.0.8.1: dev build Z follows the accepted dev build sequence, and the current dev source keeps the accepted menu and GitHub CLI sandbox-auth fixes.',
-      'Accepted dev build ledger alignment into dev.',
-      '2026-06-24T21:40:47Z',
-      now
-    );
-
-    this.db
-      .prepare("DELETE FROM build_versions WHERE version_type_id = 'build' AND version = '0.0.9.1'")
-      .run();
-  }
-,
-
-  seedAcceptedDevBuildLedgerBackfill() {
-    const now = new Date().toISOString();
-    const insert = this.db.prepare(`
-        INSERT INTO build_versions (
-          version_type_id,
-          major_version,
-          release_version,
-          build_version,
-          apk_version,
-          version,
-          short_changes,
-          detailed_changes,
-          reason,
-          released_at_utc,
-          created_at_utc
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(version_type_id, version) DO UPDATE SET
-          short_changes = excluded.short_changes,
-          detailed_changes = excluded.detailed_changes,
-          reason = excluded.reason,
-          released_at_utc = excluded.released_at_utc
-      `);
-    insert.run(
-      'build',
-      0,
-      0,
-      9,
-      1,
-      '0.0.9.1',
-      'Accepted dev build 0.0.9.1.',
-      'Recorded accepted dev build 0.0.9.1: mobile edge menu swipe, bottom-dock-only page swipes, and 80 percent left menu width.',
-      'Accepted dev build 0.0.9.1 into dev.',
-      '2026-06-24T22:52:31.873Z',
-      now
-    );
-    insert.run(
-      'build',
-      0,
-      0,
-      10,
-      1,
-      '0.0.10.1',
-      'Accepted dev build 0.0.10.1.',
-      'Recorded accepted dev build 0.0.10.1: preview slot release now uses a deploy-readable checkout, full preview pools queue FIFO, and acceptance release frees the slot automatically.',
-      'Accepted dev build 0.0.10.1 into dev.',
-      '2026-06-24T23:10:19.023Z',
-      now
-    );
-  }
-,
-
-  seedAcceptedDevBuild11LedgerBackfill() {
-    const now = new Date().toISOString();
-    this.db.prepare(`
-        INSERT INTO build_versions (
-          version_type_id,
-          major_version,
-          release_version,
-          build_version,
-          apk_version,
-          version,
-          short_changes,
-          detailed_changes,
-          reason,
-          released_at_utc,
-          created_at_utc
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(version_type_id, version) DO UPDATE SET
-          short_changes = excluded.short_changes,
-          detailed_changes = excluded.detailed_changes,
-          reason = excluded.reason,
-          released_at_utc = excluded.released_at_utc
-      `).run(
-      'build',
-      0,
-      0,
-      11,
-      1,
-      '0.0.11.1',
-      'Accepted dev build 0.0.11.1.',
-      'Recorded accepted dev build 0.0.11.1: build ledger acceptance flow records dev build versions idempotently before future dev deployments.',
-      'Accepted dev build 0.0.11.1 into dev.',
-      '2026-06-25T00:08:24Z',
-      now
-    );
-  }
-,
-
-  removePrVersionCouplingFromBuildLedger() {
-    this.db
-      .prepare("UPDATE version_types SET description = ? WHERE id = 'build'")
-      .run('Web/OTA ledger: accepted dev builds increment Z; production releases increment Y.');
-    const updates = [
-      [
-        '0.0.8.1',
-        'Aligned dev build ledger sequence.',
-        'Recorded accepted dev build 0.0.8.1: dev build Z follows the accepted dev build sequence, and the current dev source keeps the accepted menu and GitHub CLI sandbox-auth fixes.',
-        'Accepted dev build ledger alignment into dev.',
-      ],
-      [
-        '0.0.9.1',
-        'Accepted dev build 0.0.9.1.',
-        'Recorded accepted dev build 0.0.9.1: mobile edge menu swipe, bottom-dock-only page swipes, and 80 percent left menu width.',
-        'Accepted dev build 0.0.9.1 into dev.',
-      ],
-      [
-        '0.0.10.1',
-        'Accepted dev build 0.0.10.1.',
-        'Recorded accepted dev build 0.0.10.1: preview slot release now uses a deploy-readable checkout, full preview pools queue FIFO, and acceptance release frees the slot automatically.',
-        'Accepted dev build 0.0.10.1 into dev.',
-      ],
-      [
-        '0.0.11.1',
-        'Accepted dev build 0.0.11.1.',
-        'Recorded accepted dev build 0.0.11.1: build ledger acceptance flow records dev build versions idempotently before future dev deployments.',
-        'Accepted dev build 0.0.11.1 into dev.',
-      ],
-    ];
-    const update = this.db.prepare(`
-      UPDATE build_versions
-      SET short_changes = ?, detailed_changes = ?, reason = ?
-      WHERE version_type_id = 'build' AND version = ?
-    `);
-    for (const [version, shortChanges, detailedChanges, reason] of updates) {
-      update.run(shortChanges, detailedChanges, reason, version);
-    }
-  }
-,
-
-  repairTechnicalBuildVersionDescriptions() {
-    const updates = [
-      [
-        '0.0.8.1',
-        'Aligned dev build ledger sequence.',
-        'Dev build Z follows the accepted dev build sequence, and the current dev source keeps the accepted menu and GitHub CLI sandbox-auth fixes.',
-        'Accepted dev build ledger alignment into dev.',
-      ],
-      [
-        '0.0.9.1',
-        'Added mobile edge menu swipe.',
-        'Mobile navigation now opens the left menu from an edge swipe, keeps horizontal page swipes on the bottom dock only, and uses an 80 percent mobile left menu width.',
-        'Accepted dev build 0.0.9.1 into dev.',
-      ],
-      [
-        '0.0.10.1',
-        'Fixed preview slot release and queueing.',
-        'Preview slot release now uses a deploy-readable checkout, full preview pools queue FIFO, and acceptance release frees the slot automatically.',
-        'Accepted dev build 0.0.10.1 into dev.',
-      ],
-      [
-        '0.0.11.1',
-        'Recorded accepted build ledger idempotently.',
-        'The acceptance flow records dev build versions idempotently before future dev deployments.',
-        'Accepted dev build 0.0.11.1 into dev.',
-      ],
-      [
-        '0.0.12.1',
-        'Renamed Bright OS API infrastructure.',
-        'Renamed Bright OS API infrastructure, fixed local-first timer controls during sync, avoided stale OTA checking state, and rewrote the public README.',
-        'Accepted dev build 0.0.12.1: codex/rename-bright-os-api@4eafe83852f9ff3723dd23d3401019a7b6dde233 -> dev@0c57b8f74f4dd8ad2c500bac08714392c932cc1d.',
-      ],
-      [
-        '0.0.13.1',
-        'Backfilled accepted build 0.0.11.1.',
-        'Backfilled the accepted 0.0.11.1 build ledger row and migration tests so existing dev history is represented in build_versions.',
-        'Accepted dev build 0.0.13.1: codex/backfill-pr11-build-ledger@0ae30248632de2c92668d7ad649f71c86cf09008 -> dev@4ba274fed068106057521c319b7b385ce0b0ed45.',
-      ],
-      [
-        '0.0.14.1',
-        'Promoted dev build ledger to production.',
-        'Production promotion now copies accepted dev build ledger rows and creates production release rows that reference the included dev builds.',
-        'Accepted dev build 0.0.14.1: codex/promote-dev-ledger-to-prod@72035952b3cfd243322ea6c4b1d1a28be7e293b3 -> dev@5cbde5ca771201924e72a13d418fa832d266abb3.',
-      ],
-      [
-        '0.0.15.1',
-        'Fixed version ledger semantics.',
-        'Versioning no longer couples dev build numbers to GitHub PR numbers; accepted branches create Z versions and production promotion creates Y releases with included build references.',
-        'Accepted dev build 0.0.15.1: codex/fix-version-ledger-semantics@b743abaaa3e344bd511c959f9963ab9ece096a10 -> dev@a2a8d0cfb8d5f72cbb398de31d60a3a8678eb17c.',
-      ],
-      [
-        '0.0.16.1',
-        'Required preview slot release after dev deploy.',
-        'Accepted preview cleanup now waits for deploy-dev metadata promotion and releases preview slots only after the dev deployment succeeds.',
-        'Accepted dev build 0.0.16.1: codex/require-preview-slot-release@c811cf9c584fa06b58e416118957b68f2066f59b -> dev@1c50f30328f3aaf2b6f8254909dcd37bbda80738.',
-      ],
-      [
-        '0.0.17.1',
-        'Fixed preview promotion metadata fallback.',
-        'Accepted preview promotion now falls back to branch and commit metadata when the preview database is unavailable and cleans up previously accepted preview slots.',
-        'Accepted dev build 0.0.17.1: codex/fix-preview-promotion-fallback@9a00d6312ef0f963ac81847fae106b2c170a7979 -> dev@6ae3a7b2c23c561194375d42b49bccdebb49ac77.',
-      ],
-      [
-        '0.0.18.1',
-        'Connected Temporal CI/CD delivery gates.',
-        'Delivery now records checks, preview deploys, accepted-preview promotion, slot release, dev deploy, and production deploy in Temporal with strict blocking signals and documented recovery rules.',
-        'Accepted dev build 0.0.18.1: codex/fix-preview-promotion-fallback@3329474d5da1b09d5b6930287dbe231a516b1845 -> dev@4c1b5cbd5a26d9bb576ca8a2a3e1a83266dd1758.',
-      ],
-      [
-        '0.0.19.1',
-        'Document table_descriptions schema metadata rule.',
-        'Project rules now require table_descriptions updates for server SQLite schema metadata changes, while content-only row changes are exempt.',
-        'Accepted dev build 0.0.19.1: codex/table-descriptions-metadata-rules@683f8f7f0f77e5e85e3527b2ee2cb955ea309e69 -> dev@1546e6062f1b6a743e18a7c45d78b4298177d9cb.',
-      ],
-      [
-        '0.0.20.1',
-        'Optimize activity projection sync.',
-        'Activity sync now applies incremental projection updates for activity events and client command method names instead of relying on full recompute paths.',
-        'Accepted dev build 0.0.20.1: codex/incremental-activity-projection@7cd4ee2bccfb34842dab52c1ca8d3012bbaab95a -> dev@e8a58dd2e1df97131189878651808e967a50eaa8.',
-      ],
-      [
-        '0.0.21.1',
-        'Implemented focus session versioning.',
-        'Focus history now uses versioned completed focus sessions, completed session start/end edits sync through timer events, and legacy timer sessions migrate into the new versioned model.',
-        'Accepted dev build 0.0.21.1: codex/focus-session-versioning@f80e1bc64f9e3b84ec01088d91e5684901b7f0a8 -> dev@ee0c387eea1b0786c70926058bc257ab25828135.',
-      ],
-      [
-        '0.0.22.1',
-        'Enforced branch preview guard rails.',
-        'Task-start, handoff, git hook, and Codex hook guards now keep implementation work on codex/* branches, require clean committed pushes, and prevent preview handoff without a verified slot.',
-        'Accepted dev build 0.0.22.1: codex/enforce-branch-preview-guards@5b9c621be5dd33c3c4bd3588f702fa69f53fca78 -> dev@f0c71767234ab38b80e5999a0f9fa6cea4877d58.',
-      ],
-    ];
-    const update = this.db.prepare(`
-      UPDATE build_versions
-      SET short_changes = ?, detailed_changes = ?, reason = ?
-      WHERE version_type_id = 'build'
-        AND version = ?
-    `);
-    for (const [version, shortChanges, detailedChanges, reason] of updates) {
-      update.run(shortChanges, detailedChanges, reason, version);
-    }
-  }
-,
-
-  repairLateTechnicalBuildVersionDescriptions() {
-    const updates = [
-      [
-        '0.0.23.1',
-        'Required runtime DB fact verification.',
-        'Project rules now require direct runtime verification before claiming database, service, or deployment facts; document SQLite WAL read-only checks; and add handoff/checklist requirements for non-visual runtime facts.',
-        'Accepted dev build 0.0.23.1: codex/require-runtime-db-verification@9846d4db644824b20c8f050aff99ea9fef8a3d38 -> dev@82be3ab928dca8444594f808b3f6fe2a3cb21a55.',
-      ],
-      [
-        '0.0.24.1',
-        'Fixed build version release notes.',
-        'Accepted build version rows now keep human-readable release notes in short_changes and detailed_changes, move deployment audit metadata into reason, preserve source changelog text during promotion, and repair historical technical descriptions.',
-        'Accepted dev build 0.0.24.1: codex/fix-build-version-descriptions@5c16c8450e77273d95d327f4792f502b0dfceee8 -> dev@d778efdcadfa06af938c91fe1247ab1309ebebf8.',
-      ],
-    ];
-    const update = this.db.prepare(`
-      UPDATE build_versions
-      SET short_changes = ?, detailed_changes = ?, reason = ?
-      WHERE version_type_id = 'build'
-        AND version = ?
-    `);
-    for (const [version, shortChanges, detailedChanges, reason] of updates) {
-      update.run(shortChanges, detailedChanges, reason, version);
-    }
-  }
-,
-
-  repairBuildVersionReasonText() {
-    const updates = [
-      [
-        '0.0.1.1',
-        'Initial public web/OTA baseline.',
-        'Published browser web and Android OTA bundle 0.0.1.1 with X=0, Y=0, Z=1, S=1 and min APK versionCode 1. Browser web and Android OTA use the same public version.',
-        'Needed to establish the first clean public web/OTA version after the repository baseline was reset.',
-      ],
-      [
-        '0.0.2.1',
-        'Accepted public version baseline rules.',
-        'Recorded the first accepted public task: task merges into dev increment Z, dev promotions to main increment Y, and APK releases increment S. Browser web and Android OTA use version 0.0.2.1 with Android versionCode 1.',
-        'Needed explicit X.Y.Z.S rules so public builds, production promotions, and APK releases were not tracked ad hoc.',
-      ],
-      [
-        '0.0.3.1',
-        'Accepted clean task finish rules.',
-        'Recorded the second accepted public task: implementation work must finish with committed and pushed tracked changes unless explicitly local-only, and codex task branches deploy to isolated preview slots before dev acceptance.',
-        'Needed to prevent unfinished local work or unreviewed task branches from being treated as accepted dev work.',
-      ],
-      [
-        '0.0.4.1',
-        'Accepted idempotent preview cleanup.',
-        'Recorded the third accepted public task: preview metadata promotion skips cleanly when the preview slot has already been released by a delete event.',
-        'Needed because preview cleanup could fail when an accepted slot had already been released.',
-      ],
-      [
-        '0.0.5.1',
-        'Accepted environment-specific favicons.',
-        'Recorded the fourth accepted public task: dev and preview web/PWA builds use environment-specific favicon and manifest icon assets while production keeps the canonical Bright OS icons.',
-        'Needed so dev and preview builds were visually distinguishable while production kept the canonical brand assets.',
-      ],
-      [
-        '0.0.6.1',
-        'Accepted preview version semantics.',
-        'Recorded the fifth accepted public task: preview deployments keep the current accepted dev app version and record preview deployment metadata, while the next public build version becomes visible only after deploy-dev succeeds.',
-        'Needed because preview deployments were exposing unaccepted version numbers before dev acceptance.',
-      ],
-      [
-        '0.0.7.1',
-        'Accepted production Android OTA API endpoint fix.',
-        'Recorded the sixth accepted public task: production Android web/OTA bundles use the public API endpoint while browser web keeps same-origin /api, and OTA manifests are prepared for cache-safe publication.',
-        'Needed because production Android OTA bundles had to call the public API endpoint instead of browser-only same-origin /api.',
-      ],
-      [
-        '0.0.8.1',
-        'Aligned dev build ledger sequence.',
-        'Dev build Z follows the accepted dev build sequence, and the current dev source keeps the accepted menu and GitHub CLI sandbox-auth fixes.',
-        'Needed to make accepted dev build numbering and ledger rows consistent after earlier backfills and workflow fixes.',
-      ],
-      [
-        '0.0.9.1',
-        'Added mobile edge menu swipe.',
-        'Mobile navigation now opens the left menu from an edge swipe, keeps horizontal page swipes on the bottom dock only, and uses an 80 percent mobile left menu width.',
-        'Needed because mobile navigation lacked a reliable edge gesture and page swipes conflicted with menu access.',
-      ],
-      [
-        '0.0.10.1',
-        'Fixed preview slot release and queueing.',
-        'Preview slot release now uses a deploy-readable checkout, full preview pools queue FIFO, and acceptance release frees the slot automatically.',
-        'Needed because preview slots could remain occupied or unavailable, blocking queued task branches.',
-      ],
-      [
-        '0.0.11.1',
-        'Recorded accepted build ledger idempotently.',
-        'The acceptance flow records dev build versions idempotently before future dev deployments.',
-        'Needed because repeated acceptance or deploy steps could duplicate or miss accepted build ledger rows.',
-      ],
-      [
-        '0.0.12.1',
-        'Renamed Bright OS API infrastructure.',
-        'Renamed Bright OS API infrastructure, fixed local-first timer controls during sync, avoided stale OTA checking state, and rewrote the public README.',
-        'Needed to remove stale API naming, keep timer controls responsive during sync, and stop OTA checks from showing stale state.',
-      ],
-      [
-        '0.0.13.1',
-        'Backfilled accepted build 0.0.11.1.',
-        'Backfilled the accepted 0.0.11.1 build ledger row and migration tests so existing dev history is represented in build_versions.',
-        'Needed because existing dev history was missing the accepted 0.0.11.1 build ledger row.',
-      ],
-      [
-        '0.0.14.1',
-        'Promoted dev build ledger to production.',
-        'Production promotion now copies accepted dev build ledger rows and creates production release rows that reference the included dev builds.',
-        'Needed because production releases did not preserve the accepted dev build history they included.',
-      ],
-      [
-        '0.0.15.1',
-        'Fixed version ledger semantics.',
-        'Versioning no longer couples dev build numbers to GitHub PR numbers; accepted branches create Z versions and production promotion creates Y releases with included build references.',
-        'Needed because build versions were coupled to GitHub PR numbers instead of accepted dev and production release sequence.',
-      ],
-      [
-        '0.0.16.1',
-        'Required preview slot release after dev deploy.',
-        'Accepted preview cleanup now waits for deploy-dev metadata promotion and releases preview slots only after the dev deployment succeeds.',
-        'Needed because preview slots could be released before dev deployment metadata was safely promoted.',
-      ],
-      [
-        '0.0.17.1',
-        'Fixed preview promotion metadata fallback.',
-        'Accepted preview promotion now falls back to branch and commit metadata when the preview database is unavailable and cleans up previously accepted preview slots.',
-        'Needed because acceptance could fail or leave slots occupied when preview deployment metadata was unavailable.',
-      ],
-      [
-        '0.0.18.1',
-        'Connected Temporal CI/CD delivery gates.',
-        'Delivery now records checks, preview deploys, accepted-preview promotion, slot release, dev deploy, and production deploy in Temporal with strict blocking signals and documented recovery rules.',
-        'Needed because delivery checks, deploys, promotions, failures, and recovery did not have one strict control ledger.',
-      ],
-      [
-        '0.0.19.1',
-        'Document table_descriptions schema metadata rule.',
-        'Project rules now require table_descriptions updates for server SQLite schema metadata changes, while content-only row changes are exempt.',
-        'Needed because SQLite schema metadata could change without the admin panel descriptions staying current.',
-      ],
-      [
-        '0.0.20.1',
-        'Optimize activity projection sync.',
-        'Activity sync now applies incremental projection updates for activity events and client command method names instead of relying on full recompute paths.',
-        'Needed because activity sync relied on heavier full recompute paths and stale client command method names.',
-      ],
-      [
-        '0.0.21.1',
-        'Implemented focus session versioning.',
-        'Focus history now uses versioned completed focus sessions, completed session start/end edits sync through timer events, and legacy timer sessions migrate into the new versioned model.',
-        'Needed because completed focus-session edits required versioned history and syncable edit events instead of mutating legacy timer rows.',
-      ],
-      [
-        '0.0.22.1',
-        'Enforced branch preview guard rails.',
-        'Task-start, handoff, git hook, and Codex hook guards now keep implementation work on codex/* branches, require clean committed pushes, and prevent preview handoff without a verified slot.',
-        'Needed because implementation work could happen on unsafe branches or be handed off without a clean pushed preview slot.',
-      ],
-      [
-        '0.0.23.1',
-        'Required runtime DB fact verification.',
-        'Project rules now require direct runtime verification before claiming database, service, or deployment facts; document SQLite WAL read-only checks; and add handoff/checklist requirements for non-visual runtime facts.',
-        'Needed because agents were making database and deployment claims from code, screenshots, or assumptions instead of checking the real runtime target.',
-      ],
-      [
-        '0.0.24.1',
-        'Fixed build version release notes.',
-        'Accepted build version rows now keep human-readable release notes in short_changes and detailed_changes, preserve source changelog text during promotion, repair historical technical descriptions, and keep audit metadata out of the visible change text.',
-        'Needed because version rows showed branch, commit, and deploy metadata instead of readable release notes and real change reasons.',
-      ],
-      [
-        '0.0.25.1',
-        'Repaired late build version descriptions.',
-        'Late accepted build rows now restore readable release notes for runtime verification and release-note fixes, ignore technical preview metadata during promotion, and keep branch/commit audit data out of visible change fields.',
-        'Needed because a newly accepted build row still showed branch metadata instead of readable release notes.',
-      ],
-    ];
-    const update = this.db.prepare(`
-      UPDATE build_versions
-      SET short_changes = ?, detailed_changes = ?, reason = ?
-      WHERE version_type_id = 'build'
-        AND version = ?
-    `);
-    for (const [version, shortChanges, detailedChanges, reason] of updates) {
-      update.run(shortChanges, detailedChanges, reason, version);
-    }
-    this.db
-      .prepare("UPDATE build_versions SET reason = ? WHERE version_type_id = 'apk' AND version = '0.0.1.1'")
-      .run('Needed to establish the first installable public Android APK baseline with signing kept outside the repository.');
-  }
-,
-
-  backfillBuildVersionRefs() {
-    const refs = [
-      ['0.0.8.1', 'codex/align-pr-version-ledger', '20c96fa', 'dev', '17976ea'],
-      ['0.0.9.1', 'codex/mobile-menu-edge-swipe', 'a2b9cce', 'dev', '3fbef43'],
-      ['0.0.10.1', 'codex/fix-preview-slot-release', '1a3eb10', 'dev', '266f7b0'],
-      ['0.0.11.1', 'codex/fix-accepted-build-ledger', '2169878', 'dev', 'df4b717'],
-      ['0.0.12.1', 'codex/rename-bright-os-api', '4eafe83852f9ff3723dd23d3401019a7b6dde233', 'dev', '0c57b8f74f4dd8ad2c500bac08714392c932cc1d'],
-      ['0.0.13.1', 'codex/backfill-pr11-build-ledger', '0ae30248632de2c92668d7ad649f71c86cf09008', 'dev', '4ba274fed068106057521c319b7b385ce0b0ed45'],
-      ['0.0.14.1', 'codex/promote-dev-ledger-to-prod', '72035952b3cfd243322ea6c4b1d1a28be7e293b3', 'dev', '5cbde5ca771201924e72a13d418fa832d266abb3'],
-      ['0.0.15.1', 'codex/fix-version-ledger-semantics', 'b743abaaa3e344bd511c959f9963ab9ece096a10', 'dev', 'a2a8d0cfb8d5f72cbb398de31d60a3a8678eb17c'],
-      ['0.0.16.1', 'codex/require-preview-slot-release', 'c811cf9c584fa06b58e416118957b68f2066f59b', 'dev', '1c50f30328f3aaf2b6f8254909dcd37bbda80738'],
-      ['0.0.17.1', 'codex/fix-preview-promotion-fallback', '9a00d6312ef0f963ac81847fae106b2c170a7979', 'dev', '6ae3a7b2c23c561194375d42b49bccdebb49ac77'],
-      ['0.0.18.1', 'codex/fix-preview-promotion-fallback', '3329474d5da1b09d5b6930287dbe231a516b1845', 'dev', '4c1b5cbd5a26d9bb576ca8a2a3e1a83266dd1758'],
-      ['0.0.19.1', 'codex/table-descriptions-metadata-rules', '683f8f7f0f77e5e85e3527b2ee2cb955ea309e69', 'dev', '1546e6062f1b6a743e18a7c45d78b4298177d9cb'],
-      ['0.0.20.1', 'codex/incremental-activity-projection', '7cd4ee2bccfb34842dab52c1ca8d3012bbaab95a', 'dev', 'e8a58dd2e1df97131189878651808e967a50eaa8'],
-      ['0.0.21.1', 'codex/focus-session-versioning', 'f80e1bc64f9e3b84ec01088d91e5684901b7f0a8', 'dev', 'ee0c387eea1b0786c70926058bc257ab25828135'],
-      ['0.0.22.1', 'codex/enforce-branch-preview-guards', '5b9c621be5dd33c3c4bd3588f702fa69f53fca78', 'dev', 'f0c71767234ab38b80e5999a0f9fa6cea4877d58'],
-      ['0.0.23.1', 'codex/require-runtime-db-verification', '9846d4db644824b20c8f050aff99ea9fef8a3d38', 'dev', '82be3ab928dca8444594f808b3f6fe2a3cb21a55'],
-      ['0.0.24.1', 'codex/fix-build-version-descriptions', '5c16c8450e77273d95d327f4792f502b0dfceee8', 'dev', 'd778efdcadfa06af938c91fe1247ab1309ebebf8'],
-      ['0.0.25.1', 'codex/repair-late-build-version-descriptions', '50caeb4c844d0487d04a28de64ced4161c1eaa00', 'dev', 'a1887a755689967b2a892ebc6a8b50ca31072958'],
-    ];
-    const exists = this.db.prepare("SELECT 1 FROM build_versions WHERE version_type_id = 'build' AND version = ?");
-    for (const [version, sourceBranch, sourceCommit, targetBranch, targetCommit] of refs) {
-      if (!exists.get(version)) continue;
-      this.upsertBuildVersionRef({
-        versionTypeId: 'build',
-        version,
-        sourceBranch,
-        sourceCommit,
-        targetBranch,
-        targetCommit,
-      });
-    }
-  }
-,
-
-  repairAcceptedAuditMetadataBuildVersionDescription() {
-    this.db
-      .prepare(`
-        UPDATE build_versions
-        SET short_changes = ?,
-            detailed_changes = ?,
-            reason = ?
-        WHERE version_type_id = 'build'
-          AND version = '0.0.26.1'
-      `)
-      .run(
-        'Separated build ledger audit metadata.',
-        'Build version rows now store branch and commit audit references in build_version_refs, repair late accepted release-note rows, and prevent technical Accepted codex fallbacks from entering visible change fields.',
-        'Needed because accepted build metadata still fell back to generic release-note text when the dev checkout could not see the preview source commit.',
-      );
-    const exists = this.db
-      .prepare("SELECT 1 FROM build_versions WHERE version_type_id = 'build' AND version = '0.0.26.1'")
-      .get();
-    if (exists) {
-      this.upsertBuildVersionRef({
-        versionTypeId: 'build',
-        version: '0.0.26.1',
-        sourceBranch: 'codex/repair-late-build-version-descriptions',
-        sourceCommit: 'ca6b2e282d6bbc5f8fd2b2f11817e89c6791fac1',
-        targetBranch: 'dev',
-        targetCommit: 'f3592f7c9adfc492e5920623aefda087532d6015',
-      });
-    }
-  }
-,
-
-  repairGenericAcceptedBuildNotesDescription() {
-    this.db
-      .prepare(`
-        UPDATE build_versions
-        SET short_changes = ?,
-            detailed_changes = ?,
-            reason = ?
-        WHERE version_type_id = 'build'
-          AND version = '0.0.27.1'
-      `)
-      .run(
-        'Used preview source for accepted build notes.',
-        'Accepted preview promotion now attempts to read release notes from the preview checkout instead of the dev deploy source and repairs the generic 0.0.26.1 build description through migration 28.',
-        'Needed because accepted build metadata could not be read from the dev deploy source and fell back to generic no-release-notes text.',
-      );
-    const exists = this.db
-      .prepare("SELECT 1 FROM build_versions WHERE version_type_id = 'build' AND version = '0.0.27.1'")
-      .get();
-    if (exists) {
-      this.upsertBuildVersionRef({
-        versionTypeId: 'build',
-        version: '0.0.27.1',
-        sourceBranch: 'codex/repair-late-build-version-descriptions',
-        sourceCommit: '2804346377fbb3f2cb81ff703d79ae20cd0ef735',
-        targetBranch: 'dev',
-        targetCommit: '449bb5a9a908243dd0a2685b2e56519b86a92393',
-      });
-    }
-  }
-,
-
-  repairAcceptedGitNotesBuildVersionDescription() {
-    this.db
-      .prepare(`
-        UPDATE build_versions
-        SET short_changes = ?,
-            detailed_changes = ?,
-            reason = ?
-        WHERE version_type_id = 'build'
-          AND version = '0.0.28.1'
-      `)
-      .run(
-        'Read accepted build notes from git history.',
-        'Accepted preview promotion now reads authored commit notes from the deploy repo git history when tar-copied preview/dev sources have no .git directory, ignores generic no-release-notes placeholders when better fallback notes exist, and repairs the 0.0.27.1 build ledger row with migration 29.',
-        'Needed because accepted preview promotion still wrote generic no-release-notes text instead of the authored source commit notes.',
-      );
-    const exists = this.db
-      .prepare("SELECT 1 FROM build_versions WHERE version_type_id = 'build' AND version = '0.0.28.1'")
-      .get();
-    if (exists) {
-      this.upsertBuildVersionRef({
-        versionTypeId: 'build',
-        version: '0.0.28.1',
-        sourceBranch: 'codex/repair-late-build-version-descriptions',
-        sourceCommit: '53866e6800be4c5789a60ef049911d26a5693b0a',
-        targetBranch: 'dev',
-        targetCommit: '1dc4f8af7eb719aa8632b40a3f8b569f2a47884d',
-      });
-    }
-  }
-,
-
-  repairAcceptedSshNotesBuildVersionDescription() {
-    this.db
-      .prepare(`
-        UPDATE build_versions
-        SET short_changes = ?,
-            detailed_changes = ?,
-            reason = ?
-        WHERE version_type_id = 'build'
-          AND version = '0.0.29.1'
-      `)
-      .run(
-        'Passed accepted build notes before SSH.',
-        'Acceptance now resolves authored source-branch commit notes in the GitHub runner and passes them to server-side promotion before SSH, so accepted build_versions rows no longer depend on tar-copied deploy sources or server git checkout state. Migration 30 repaired the 0.0.28.1 row that still received the generic no-release-notes fallback.',
-        'Needed because accepted build notes were still unavailable on the server during preview promotion.',
-      );
-    const exists = this.db
-      .prepare("SELECT 1 FROM build_versions WHERE version_type_id = 'build' AND version = '0.0.29.1'")
-      .get();
-    if (exists) {
-      this.upsertBuildVersionRef({
-        versionTypeId: 'build',
-        version: '0.0.29.1',
-        sourceBranch: 'codex/repair-late-build-version-descriptions',
-        sourceCommit: 'bdb660b18b0e20363967c15a8018548be32550df',
-        targetBranch: 'dev',
-        targetCommit: 'e68cf2685dfce4903f7d28dc8e38ef7c7ab25d8f',
-      });
-    }
   }
 ,
 

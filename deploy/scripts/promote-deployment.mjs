@@ -8,7 +8,7 @@ const targetBranch = required(args, "target-branch");
 const targetCommit = required(args, "target-commit");
 const deployedAtUtc = args["deployed-at"] || new Date().toISOString();
 const ledgerOnly = args["ledger-only"] === "true";
-const recordProductionRelease = args["record-production-release"] !== "false";
+const recordProductionRelease = args["record-production-release"] === "true";
 const target = new BrightOsStore(required(args, "target-db"));
 let source = null;
 
@@ -20,10 +20,6 @@ try {
     fallbackRecord,
   );
   if (!sourceRecord) throw new Error(`no deployment metadata for ${sourceBranch}`);
-
-  if (targetEnvironment === "prod" && source) {
-    promoteBuildVersions(source, target);
-  }
 
   if (!ledgerOnly) {
     target.recordDeployment({
@@ -51,7 +47,7 @@ try {
     targetEnvironment,
     releasedAtUtc: deployedAtUtc,
   });
-  if (recordProductionRelease) recordProductionReleaseVersion(target, {
+  if (recordProductionRelease) recordReleaseVersion(target, {
     sourceBranch,
     sourceCommit: sourceRecord.commit_sha,
     sourceShortChanges: sourceRecord.short_changes,
@@ -125,51 +121,6 @@ function usefulChanges(value) {
   return text;
 }
 
-function promoteBuildVersions(source, target) {
-  const rows = source.db
-    .prepare("SELECT * FROM build_versions WHERE version_type_id = ? AND release_version = 0 ORDER BY build_version")
-    .all("build");
-  const insert = target.db.prepare(`
-    INSERT INTO build_versions (
-      version_type_id,
-      major_version,
-      release_version,
-      build_version,
-      apk_version,
-      version,
-      short_changes,
-      detailed_changes,
-      reason,
-      released_at_utc,
-      created_at_utc
-    )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(version_type_id, version) DO UPDATE SET
-      short_changes = excluded.short_changes,
-      detailed_changes = excluded.detailed_changes,
-      reason = excluded.reason,
-      released_at_utc = excluded.released_at_utc
-  `);
-  const copy = target.db.transaction(() => {
-    for (const row of rows) {
-      insert.run(
-        row.version_type_id,
-        row.major_version,
-        row.release_version,
-        row.build_version,
-        row.apk_version,
-        row.version,
-        row.short_changes,
-        row.detailed_changes,
-        row.reason,
-        row.released_at_utc,
-        row.created_at_utc,
-      );
-    }
-  });
-  copy();
-}
-
 function recordAcceptedBuildVersion(
   target,
   { sourceBranch, sourceCommit, sourceShortChanges, sourceReason, sourceDetails, targetBranch, targetCommit, targetEnvironment, releasedAtUtc },
@@ -193,12 +144,12 @@ function canUseSourceFallback(values, targetEnvironment) {
   return Boolean(values["source-commit"] && (targetEnvironment === "dev" || (targetEnvironment === "prod" && values["source-branch"]?.startsWith("codex/"))));
 }
 
-function recordProductionReleaseVersion(
+function recordReleaseVersion(
   target,
   { sourceBranch, sourceCommit, sourceShortChanges, sourceReason, sourceDetails, targetBranch, targetCommit, targetEnvironment, releasedAtUtc },
 ) {
   if (targetEnvironment !== "prod") return;
-  target.recordProductionReleaseVersion({
+  target.recordReleaseVersion({
     sourceBranch,
     sourceCommit,
     sourceShortChanges,

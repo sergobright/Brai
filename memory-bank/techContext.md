@@ -28,12 +28,13 @@ Public version baseline:
 - Baseline version: `0.0.1.1`
 - Android `versionCode`: `1`
 - Release ledger table: `build_versions`
-- Runtime `build_versions` is the source of truth for current app/web/OTA versions.
-- Initial ledger rows: `build` = `0.0.1.1`, `apk` = `0.0.1.1`
-- Accepted working-branch merge into `main`: increment `Z`, with `release_version = 0`
-- Production deploy from `main`: increment `Y`, keep latest included `Z`, and reference included accepted build rows
-- Next shipped APK release: increment `S`
+- Runtime `build_versions` is the source of truth for typed counters: `apk`, `build`, `release`, `canon`.
+- `build_versions.version` is an integer scoped to `version_type_id`.
+- Public app version is assembled as `canon.release.build.apk` from latest counters, using `0` for missing `canon` or `release`.
+- Accepted working-branch merge into `main`: add one `build` row.
+- Production deploy from `main`: no automatic `release` or `canon` row.
+- Explicit release command: add one `release` row and link unlinked `build` rows plus the current `apk`.
+- Explicit canon command: add one `canon` row and link unlinked `release` rows.
 - GitHub PR numbers are review metadata and do not define version numbers.
-- Example: accepted build `0.0.10.1` promotes to production release `0.1.10.1`.
 
 Do not commit SQLite files, APKs, OTA bundles, keystores, `.env` files, private keys, or generated deploy output such as `deploy/site`, `deploy/web`, and `deploy/mobile-update`.

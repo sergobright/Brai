@@ -80,10 +80,7 @@ for index in "${!REQUIRED_BRANCHES[@]}"; do
   branch="${REQUIRED_BRANCHES[$index]}"
   echo "Completing accepted preview $branch -> $TARGET_BRANCH@$TARGET_COMMIT."
   if [[ "$MODE" == "all" || "$MODE" == "promote" ]]; then
-    RECORD_PRODUCTION_RELEASE=true
-    if [[ "$TARGET_ENVIRONMENT" == "prod" && "$index" -lt "$((${#REQUIRED_BRANCHES[@]} - 1))" ]]; then
-      RECORD_PRODUCTION_RELEASE=false
-    fi
+    RECORD_PRODUCTION_RELEASE=false
     signal_temporal_preview "$branch" pr_merged
     signal_temporal_preview "$branch" accepted_preview_started
     if BRIGHT_OS_SOURCE_BRANCH="$branch" \

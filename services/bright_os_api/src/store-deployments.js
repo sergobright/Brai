@@ -65,20 +65,17 @@ export const deploymentMethods = {
     targetCommit,
     releasedAtUtc,
   }) {
-    const existing = this.findBuildVersionByTargetCommit({ targetBranch, targetCommit, releaseOnly: false });
-    const buildVersion = existing?.build_version ?? this.nextAcceptedBuildVersion();
-    const version = `0.0.${buildVersion}.1`;
+    const existing = this.findBuildVersionByTargetCommit({ targetBranch, targetCommit, versionTypeId: 'build' });
+    const version = existing?.version ?? this.nextVersion('build');
     const fallbackShortChanges = 'Accepted preview changes without authored release notes.';
     const fallbackDetailedChanges = 'No authored preview release notes were available; audit metadata is stored separately.';
     const fallbackReason = 'Needed because no authored preview release notes were available; audit metadata is stored separately.';
     const shortChanges = usefulChanges(sourceShortChanges) || fallbackShortChanges;
     const detailedChanges = usefulChanges(sourceDetails) || (shortChanges === fallbackShortChanges ? fallbackDetailedChanges : shortChanges);
     this.upsertBuildVersion({
-      majorVersion: 0,
-      releaseVersion: 0,
-      buildVersion,
-      apkVersion: 1,
+      versionTypeId: 'build',
       version,
+      includedInVersionId: null,
       shortChanges,
       detailedChanges,
       reason: usefulReason(sourceReason)
@@ -91,10 +88,10 @@ export const deploymentMethods = {
       targetBranch,
       targetCommit,
     });
-    return { buildVersion, version };
+    return { versionTypeId: 'build', version };
   },
 
-  recordProductionReleaseVersion({
+  recordReleaseVersion({
     sourceBranch,
     sourceCommit,
     sourceShortChanges = null,
@@ -104,64 +101,95 @@ export const deploymentMethods = {
     targetCommit,
     releasedAtUtc,
   }) {
-    const existing = this.findBuildVersionByTargetCommit({ targetBranch, targetCommit, releaseOnly: true });
-    if (existing) {
-      return {
-        releaseVersion: existing.release_version,
-        buildVersion: existing.build_version,
-        version: existing.version,
-      };
-    }
-    const acceptedBuilds = this.db
+    const existing = this.findBuildVersionByTargetCommit({ targetBranch, targetCommit, versionTypeId: 'release' });
+    if (existing) return { versionTypeId: 'release', version: existing.version };
+    const builds = this.db
       .prepare(`
         SELECT *
         FROM build_versions
-        WHERE version_type_id = 'build' AND release_version = 0
-        ORDER BY build_version
+        WHERE version_type_id = 'build' AND included_in_version_id IS NULL
+        ORDER BY version
       `)
       .all();
-    const latest = acceptedBuilds.at(-1);
-    if (!latest) throw new Error('cannot create production release without accepted builds');
-
-    const previousRelease = this.db
-      .prepare(`
-        SELECT release_version, build_version
-        FROM build_versions
-        WHERE version_type_id = 'build' AND release_version > 0
-        ORDER BY release_version DESC
-        LIMIT 1
-      `)
-      .get() ?? { release_version: 0, build_version: 0 };
-    const releaseVersion = previousRelease.release_version + 1;
-    const includedBuilds = acceptedBuilds.filter((row) => row.build_version > previousRelease.build_version);
-    const referencedBuilds = includedBuilds.length > 0 ? includedBuilds : [latest];
-    const version = `0.${releaseVersion}.${latest.build_version}.${latest.apk_version}`;
+    if (builds.length === 0) throw new Error('cannot create release without unlinked builds');
+    const version = this.nextVersion('release');
     const sourceChanges = usefulChanges(sourceDetails);
 
     this.upsertBuildVersion({
-      majorVersion: 0,
-      releaseVersion,
-      buildVersion: latest.build_version,
-      apkVersion: latest.apk_version,
+      versionTypeId: 'release',
       version,
-      shortChanges: usefulChanges(sourceShortChanges) || `Production release ${version}.`,
+      includedInVersionId: null,
+      shortChanges: usefulChanges(sourceShortChanges) || `Release ${version}.`,
       detailedChanges: [
-        `Included accepted builds: ${referencedBuilds.map((row) => `${row.version}: ${row.short_changes}`).join('; ')}.`,
+        `Included builds: ${builds.map((row) => `build ${row.version}: ${row.short_changes}`).join('; ')}.`,
         sourceChanges,
       ].filter(Boolean).join(' '),
-      reason: usefulReason(sourceReason) || 'Needed to publish accepted changes to production after validation.',
+      reason: usefulReason(sourceReason) || 'Needed to group accepted builds into a manual release.',
       releasedAtUtc,
       sourceBranch,
       sourceCommit,
       targetBranch,
       targetCommit,
     });
-    return { releaseVersion, buildVersion: latest.build_version, version };
+    const release = this.db
+      .prepare("SELECT id FROM build_versions WHERE version_type_id = 'release' AND version = ?")
+      .get(version);
+    const link = this.db.prepare("UPDATE build_versions SET included_in_version_id = ? WHERE id = ?");
+    for (const build of builds) link.run(release.id, build.id);
+    const apk = this.latestVersion('apk');
+    if (apk) link.run(release.id, apk.id);
+    return { versionTypeId: 'release', version };
   },
 
-  findBuildVersionByTargetCommit({ targetBranch, targetCommit, releaseOnly }) {
+  recordCanonVersion({
+    sourceBranch,
+    sourceCommit,
+    sourceShortChanges = null,
+    sourceReason = null,
+    sourceDetails,
+    targetBranch,
+    targetCommit,
+    releasedAtUtc,
+  }) {
+    const existing = this.findBuildVersionByTargetCommit({ targetBranch, targetCommit, versionTypeId: 'canon' });
+    if (existing) return { versionTypeId: 'canon', version: existing.version };
+    const releases = this.db
+      .prepare(`
+        SELECT *
+        FROM build_versions
+        WHERE version_type_id = 'release' AND included_in_version_id IS NULL
+        ORDER BY version
+      `)
+      .all();
+    if (releases.length === 0) throw new Error('cannot create canon without unlinked releases');
+    const version = this.nextVersion('canon');
+    const sourceChanges = usefulChanges(sourceDetails);
+    this.upsertBuildVersion({
+      versionTypeId: 'canon',
+      version,
+      includedInVersionId: null,
+      shortChanges: usefulChanges(sourceShortChanges) || `Canon ${version}.`,
+      detailedChanges: [
+        `Included releases: ${releases.map((row) => `release ${row.version}: ${row.short_changes}`).join('; ')}.`,
+        sourceChanges,
+      ].filter(Boolean).join(' '),
+      reason: usefulReason(sourceReason) || 'Needed to group releases into a manual canon.',
+      releasedAtUtc,
+      sourceBranch,
+      sourceCommit,
+      targetBranch,
+      targetCommit,
+    });
+    const canon = this.db
+      .prepare("SELECT id FROM build_versions WHERE version_type_id = 'canon' AND version = ?")
+      .get(version);
+    const link = this.db.prepare("UPDATE build_versions SET included_in_version_id = ? WHERE id = ?");
+    for (const release of releases) link.run(canon.id, release.id);
+    return { versionTypeId: 'canon', version };
+  },
+
+  findBuildVersionByTargetCommit({ targetBranch, targetCommit, versionTypeId }) {
     if (!targetCommit) return null;
-    const releaseFilter = releaseOnly ? 'release_version > 0' : 'release_version = 0';
     const fromRef = this.db
       .prepare(`
         SELECT build_versions.*
@@ -169,46 +197,49 @@ export const deploymentMethods = {
         JOIN build_versions
           ON build_versions.version_type_id = build_version_refs.version_type_id
          AND build_versions.version = build_version_refs.version
-        WHERE build_version_refs.version_type_id = 'build'
+        WHERE build_version_refs.version_type_id = ?
+          AND build_versions.version_type_id = ?
           AND build_version_refs.target_branch = ?
           AND build_version_refs.target_commit = ?
-          AND ${releaseFilter}
-        ORDER BY build_versions.release_version DESC, build_versions.build_version DESC
+        ORDER BY build_versions.version DESC
         LIMIT 1
       `)
-      .get(targetBranch || '', targetCommit);
+      .get(versionTypeId, versionTypeId, targetBranch || '', targetCommit);
     if (fromRef) return fromRef;
 
     return this.db
       .prepare(`
         SELECT *
         FROM build_versions
-        WHERE version_type_id = 'build'
+        WHERE version_type_id = ?
           AND (instr(detailed_changes, ?) > 0 OR instr(reason, ?) > 0)
-          AND ${releaseFilter}
-        ORDER BY release_version DESC, build_version DESC
+        ORDER BY version DESC
         LIMIT 1
       `)
-      .get(`@${targetCommit}`, `@${targetCommit}`);
+      .get(versionTypeId, `@${targetCommit}`, `@${targetCommit}`);
   },
 
-  nextAcceptedBuildVersion() {
+  nextVersion(versionTypeId) {
     const row = this.db
       .prepare(`
-        SELECT COALESCE(MAX(build_version), 0) + 1 AS next
+        SELECT COALESCE(MAX(version), 0) + 1 AS next
         FROM build_versions
-        WHERE version_type_id = 'build' AND release_version = 0
+        WHERE version_type_id = ?
       `)
-      .get();
+      .get(versionTypeId);
     return row.next;
   },
 
+  latestVersion(versionTypeId) {
+    return this.db
+      .prepare("SELECT * FROM build_versions WHERE version_type_id = ? ORDER BY version DESC LIMIT 1")
+      .get(versionTypeId);
+  },
+
   upsertBuildVersion({
-    majorVersion,
-    releaseVersion,
-    buildVersion,
-    apkVersion,
+    versionTypeId,
     version,
+    includedInVersionId,
     shortChanges,
     detailedChanges,
     reason,
@@ -222,31 +253,26 @@ export const deploymentMethods = {
       .prepare(`
         INSERT INTO build_versions (
           version_type_id,
-          major_version,
-          release_version,
-          build_version,
-          apk_version,
           version,
+          included_in_version_id,
           short_changes,
           detailed_changes,
           reason,
           released_at_utc,
           created_at_utc
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(version_type_id, version) DO UPDATE SET
+          included_in_version_id = excluded.included_in_version_id,
           short_changes = excluded.short_changes,
           detailed_changes = excluded.detailed_changes,
           reason = excluded.reason,
           released_at_utc = excluded.released_at_utc
       `)
       .run(
-        'build',
-        majorVersion,
-        releaseVersion,
-        buildVersion,
-        apkVersion,
+        versionTypeId,
         version,
+        includedInVersionId,
         shortChanges,
         detailedChanges,
         reason,
@@ -255,7 +281,7 @@ export const deploymentMethods = {
       );
     if (targetBranch && targetCommit) {
       this.upsertBuildVersionRef({
-        versionTypeId: 'build',
+        versionTypeId,
         version,
         sourceBranch,
         sourceCommit,
