@@ -152,10 +152,6 @@ if [[ "$BRIGHT_OS_NATIVE_APK_CHANGE" == "true" ]]; then
     FLAVOR="preview$BRIGHT_OS_PREVIEW_SLOT"
     export BRIGHT_OS_ANDROID_VERSION_CODE="$(deploy/scripts/apk-version-code.sh next "$BRIGHT_OS_BRANCH $BRIGHT_OS_COMMIT $FLAVOR")"
     deploy/scripts/build-android-env-apk.sh "$FLAVOR"
-  elif [[ "$ENVIRONMENT" == "dev" ]]; then
-    export BRIGHT_OS_ANDROID_VERSION_CODE="$(deploy/scripts/apk-version-code.sh next "dev non-production APK baseline $BRIGHT_OS_COMMIT")"
-    deploy/scripts/build-nonproduction-apks.sh
-    deploy/scripts/publish-environment-web-layer.sh preview-a preview-b preview-c preview-d preview-e
   elif [[ "$ENVIRONMENT" == "prod" ]]; then
     export BRIGHT_OS_ANDROID_VERSION_CODE="$(deploy/scripts/apk-version-code.sh next "production APK $BRIGHT_OS_COMMIT")"
     deploy/scripts/build-android-env-apk.sh production

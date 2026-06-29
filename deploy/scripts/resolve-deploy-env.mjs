@@ -10,7 +10,6 @@ const { environments } = JSON.parse(fs.readFileSync(path.join(root, "deploy/envi
 let key;
 
 if (branch === "main") key = "prod";
-else if (branch === "dev") key = "dev";
 else if (branch.startsWith("codex/")) {
   const slot = process.env.BRIGHT_OS_PREVIEW_SLOT || resolvePreviewSlot(branch);
   key = `preview-${slot.toLowerCase()}`;

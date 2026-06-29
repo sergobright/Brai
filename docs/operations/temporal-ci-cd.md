@@ -66,7 +66,7 @@ identity so CI can reuse it even when the repository keeps the default `GITHUB_T
 create pull requests. GitHub Actions still owns the `auto_merge_*` Temporal signals and must not
 push directly to `main`.
 
-For `infra-docs`, `pr_merged` marks the compatibility task key `accepted_for_dev` (`Accepted for target`) as passed and completes the preview
+For `infra-docs`, `pr_merged` marks the `accepted_for_target` (`Accepted for target`) task as passed and completes the preview
 lifecycle without requiring an accepted-preview metadata promotion or preview slot release.
 
 ## BranchPreviewWorkflow
@@ -91,9 +91,7 @@ The `state` query exposes `deliveryClass`, `handoff`, `autoMerge`, `tasks`, `mis
 
 `PromotionWorkflow` tracks accepted preview promotion, target deploy, and preview slot release:
 
-- Workflow ID for disabled dev deploy, if temporarily re-enabled: `bright-os:promotion:dev:<sha>`.
 - Workflow ID for production deploy: `bright-os:promotion:prod:<sha>`.
-- Dev signals: `dev_deploy_started`, `dev_version_recorded`, `accepted_previews_started`, `accepted_previews_passed`, `accepted_previews_failed`, `dev_deploy_passed`, `dev_deploy_failed`.
 - Prod signals: `prod_deploy_started`, `prod_version_recorded`, `accepted_previews_started`, `accepted_previews_passed`, `accepted_previews_failed`, `prod_deploy_passed`, `prod_deploy_failed`.
 
 The production checklist requires accepted-preview metadata promotion, version/ledger recording, deployment, and preview-slot cleanup. `prod_deploy_passed` completes the promotion workflow only after prior required steps have succeeded in GitHub Actions. Human-readable `build_versions` release notes are part of the existing version/ledger recording step; changing their text source does not add a new Temporal gate.

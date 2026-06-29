@@ -12,7 +12,7 @@ const PREVIEW_TASKS = {
   preview_deploy: "Preview deploy",
   delivery_handoff: "Infra/docs delivery handoff",
   auto_merge: "Infra/docs auto-merge",
-  accepted_for_dev: "Accepted for target",
+  accepted_for_target: "Accepted for target",
   accepted_preview_promotion: "Accepted preview metadata promotion",
   slot_release: "Preview slot release"
 };
@@ -127,7 +127,7 @@ export function applyPreviewEvent(state, rawEvent) {
       resetTask(state, "auto_merge", event);
       resetTask(state, "checks", event);
       resetTask(state, "preview_deploy", event);
-      resetTask(state, "accepted_for_dev", event);
+      resetTask(state, "accepted_for_target", event);
       resetTask(state, "accepted_preview_promotion", event);
       resetTask(state, "slot_release", event);
       setTask(state, "branch_pushed", "passed", event);
@@ -213,8 +213,8 @@ export function applyPreviewEvent(state, rawEvent) {
       setTask(state, "preview_deploy", "failed", event);
       break;
     case "pr_merged":
-      setTask(state, "accepted_for_dev", "passed", event);
-      state.status = "accepted_for_dev";
+      setTask(state, "accepted_for_target", "passed", event);
+      state.status = "accepted_for_target";
       if (isNoPreviewRequired(state)) {
         state.slot = "";
         state.terminal = true;

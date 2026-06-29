@@ -39,13 +39,13 @@ The live Bright OS API service SHALL run with the supported Bright OS Node.js ru
 - **AND** native SQLite dependencies are installed or rebuilt for that runtime
 - **AND** the test suite passes without a native `SIGSEGV`
 
-### Requirement: One VPS hosts prod, dev, and preview services behind Caddy
-Bright OS SHALL host production, dev, and preview Bright OS API services on localhost-only ports behind Caddy.
+### Requirement: One VPS hosts production and preview services behind Caddy
+Bright OS SHALL host production and preview Bright OS API services on localhost-only ports behind Caddy.
 
 #### Scenario: Environment services are installed
 - **WHEN** server automation is applied
 - **THEN** production uses `127.0.0.1:3020`
-- **AND** dev and preview slots use `127.0.0.1:3030` through `127.0.0.1:3035`
+- **AND** preview slots use `127.0.0.1:3031` through `127.0.0.1:3035`
 - **AND** Caddy exposes only HTTPS/HTTP entrypoints externally while app services remain localhost-only
 
 ### Requirement: Deployment credentials stay outside source

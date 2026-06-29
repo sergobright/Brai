@@ -135,7 +135,7 @@ Bright OS SHALL reserve OTA updates for web-layer changes compatible with the in
 
 #### Scenario: Native-boundary change is published
 - **WHEN** a change crosses the native Android boundary
-- **THEN** the Dev or Preview OTA manifest requires the newly published APK `versionCode`
+- **THEN** the Preview OTA manifest requires the newly published APK `versionCode`
 
 ### Requirement: OTA update failures are non-blocking for normal startup
 Bright OS Android SHALL continue to start from a known-good local web layer when OTA update checks or downloads fail.

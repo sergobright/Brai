@@ -168,7 +168,7 @@ describe("mobile OTA publish scripts", () => {
     await mkdir(releaseDir, { recursive: true });
     await writeFile(
       path.join(releaseDir, "releases.json"),
-      JSON.stringify({ schemaVersion: 1, sections: { dev: { versionCode: 7 }, a: { versionCode: 8 } } }),
+      JSON.stringify({ schemaVersion: 1, sections: { production: { versionCode: 7 }, a: { versionCode: 8 } } }),
     );
     const envRoot = path.join(root, "envs/preview-a");
 
@@ -570,7 +570,7 @@ await fs.writeFile(outputPath, JSON.stringify({
     expect(registry.queue).toEqual([]);
   });
 
-  it("renders exactly seven APK release sections without stale missing links", async () => {
+  it("renders production and preview APK release sections without stale missing links", async () => {
     const root = await fixtureRoot("bright-release-page-");
     const releaseDir = path.join(root, "deploy/releases");
     await mkdir(releaseDir, { recursive: true });
@@ -586,8 +586,8 @@ await fs.writeFile(outputPath, JSON.stringify({
     });
 
     const html = await readFile(path.join(releaseDir, "index.html"), "utf8");
-    expect(html.match(/<section>/g)?.length).toBe(7);
-    expect(html).toContain("Bright OS Dev");
+    expect(html.match(/<section>/g)?.length).toBe(6);
+    expect(html).toContain("<h2>Production</h2>");
     expect(html).toContain("Bright OS E");
     expect(html).toContain("APK ещё не опубликован");
     expect(html).toContain("bright-os-0.0.1.1-capacitor.apk");

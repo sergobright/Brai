@@ -90,7 +90,8 @@ test("infra docs delivery completes without preview slot release", () => {
   assert.equal(state.tasks.preview_deploy.status, "not_applicable");
   assert.equal(state.tasks.accepted_preview_promotion.status, "not_applicable");
   assert.equal(state.tasks.slot_release.status, "not_applicable");
-  assert.equal(state.tasks.accepted_for_dev.status, "passed");
+  assert.equal(state.tasks.accepted_for_target.status, "passed");
+  assert.equal(state.status, "accepted_for_target");
   assert.equal(state.terminal, true);
   assert.equal(state.gates.complete, true);
 });

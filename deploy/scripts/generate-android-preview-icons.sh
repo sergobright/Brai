@@ -63,7 +63,6 @@ generate_density() {
   local density="$1"
   local icon_size="$2"
   local foreground_size="$3"
-  generate_icons dev DEV "$density" "$icon_size" "$foreground_size"
   generate_icons previewA A "$density" "$icon_size" "$foreground_size"
   generate_icons previewB B "$density" "$icon_size" "$foreground_size"
   generate_icons previewC C "$density" "$icon_size" "$foreground_size"
@@ -77,4 +76,4 @@ generate_density xhdpi 96 216
 generate_density xxhdpi 144 324
 generate_density xxxhdpi 192 432
 
-echo "Generated production-style launcher icons with safe-scale Dev and preview labels"
+echo "Generated production-style launcher icons with safe-scale preview labels"

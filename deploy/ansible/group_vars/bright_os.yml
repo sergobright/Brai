@@ -17,11 +17,6 @@ bright_os_envs:
     path: prod
     api_port: 3020
     service: brightos-api.service
-  dev:
-    domain: dev.brightos.world
-    path: dev
-    api_port: 3030
-    service: brightos-api-dev.service
   preview-a:
     domain: a.test.brightos.world
     path: preview-a

@@ -31,10 +31,9 @@ handlers за тем же маршрутом. Не заводи для них н
 | Окружение | Внешний URL |
 | --- | --- |
 | Production | `https://api.brightos.world/v1/in/inbox` |
-| Dev/Test | `https://dev.brightos.world/api/v1/in/inbox` |
 | Preview | `https://<slot>.test.brightos.world/api/v1/in/inbox` |
 
-В dev и preview сегмент `/api` нужен только из-за Caddy: он проксирует
+В preview сегмент `/api` нужен только из-за Caddy: он проксирует
 `/api/*` в API service и срезает `/api` перед Node-сервисом.
 
 ## Авторизация

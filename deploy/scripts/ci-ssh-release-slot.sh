@@ -52,8 +52,6 @@ NODE
 )"
   if [[ -n "$SLOT_SOURCE" && -r "$ENVS_ROOT/$SLOT_SOURCE/deploy/scripts/preview-slots.mjs" ]]; then
     RELEASE_ROOT="$ENVS_ROOT/$SLOT_SOURCE"
-  elif [[ -r "$ENVS_ROOT/dev/source/deploy/scripts/preview-slots.mjs" ]]; then
-    RELEASE_ROOT="$ENVS_ROOT/dev/source"
   fi
 fi
 
@@ -84,8 +82,6 @@ if [[ -n "${SLOT_META[0]:-}" ]]; then
     BASELINE_SOURCE="$ENVS_ROOT/prod/source"
   elif [[ -d "$DEPLOY_REPO/.git" ]]; then
     BASELINE_SOURCE="$DEPLOY_REPO"
-  elif [[ -d "$ENVS_ROOT/dev/source" ]]; then
-    BASELINE_SOURCE="$ENVS_ROOT/dev/source"
   fi
   if [[ ! -d "$BASELINE_SOURCE" ]]; then
     echo "Cannot rebuild baseline preview APK without source: $BASELINE_SOURCE" >&2

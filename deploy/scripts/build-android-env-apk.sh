@@ -8,7 +8,7 @@ NPM_BIN="${NPM_BIN:-npm}"
 FLAVOR="${1:-}"
 
 if [[ -z "$FLAVOR" ]]; then
-  echo "usage: build-android-env-apk.sh production|dev|previewA|previewB|previewC|previewD|previewE" >&2
+  echo "usage: build-android-env-apk.sh production|previewA|previewB|previewC|previewD|previewE" >&2
   exit 1
 fi
 
