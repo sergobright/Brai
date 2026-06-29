@@ -42,7 +42,7 @@ npm run publish:client-web-layer
 ## Security
 
 - Не хранить secrets в docs, Memory Bank, source, build artifacts или deployment registry.
-- Не embed Bearer tokens в web/OTA bundles.
+- Не embed Bearer tokens или inbound API keys в web/OTA bundles.
 - Auth boundaries, input validation, data-loss prevention и rollback behavior не упрощаются ради Ponytail.
 - Если проверка касается secrets, сканируй staged/generated content перед commit.
 
@@ -51,4 +51,3 @@ npm run publish:client-web-layer
 - Не добавляй heavy animation/canvas/shader/3D engine в product screen без explicit approval.
 - Для mobile UI учитывай Android WebView, static export и gesture conflicts.
 - Новая dependency должна быть оправдана реальным need. Если existing dependency или platform покрывает задачу, новую не добавлять.
-

@@ -28,7 +28,7 @@ export async function createFixture(times, options = {}) {
     releasePassword: options.releasePassword,
     sessionSecret: options.sessionSecret,
     releaseDir: options.releaseFiles ? releaseDir : null,
-    inboundToken: options.inboundToken ?? INBOUND_TOKEN,
+    inboundApiKey: options.inboundApiKey ?? options.inboundToken ?? INBOUND_TOKEN,
     inboundStorageRoot: options.inboundStorageRoot ?? path.join(tmp, 'inbox-attachments'),
     codexBin: options.codexBin,
     codexModel: options.codexModel,
@@ -75,7 +75,7 @@ export async function inboundRequest(baseUrl, pathName, options = {}, authorized
       ...options,
       headers: authorized
         ? {
-            authorization: `Bearer ${INBOUND_TOKEN}`,
+            'x-bright-api-key': INBOUND_TOKEN,
             ...(options.headers ?? {})
           }
         : options.headers

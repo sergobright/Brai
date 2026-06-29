@@ -10,7 +10,7 @@ const token = process.env.BRIGHT_OS_TOKEN;
 const webPassword = process.env.BRIGHT_OS_WEB_PASSWORD;
 const releasePassword = process.env.BRIGHT_OS_RELEASE_PASSWORD ?? webPassword;
 const sessionSecret = process.env.BRIGHT_OS_SESSION_SECRET;
-const inboundToken = process.env.BRIGHT_OS_INBOUND_TOKEN;
+const inboundApiKey = process.env.BRIGHT_OS_INBOUND_API_KEY ?? process.env.BRIGHT_OS_INBOUND_TOKEN;
 const inboundStorageRoot =
   process.env.BRIGHT_OS_INBOUND_STORAGE_ROOT ?? path.join(path.dirname(dbPath), 'inbox-attachments');
 const codexBin = process.env.BRIGHT_OS_CODEX_BIN ?? 'codex';
@@ -42,7 +42,7 @@ const runtime = createBrightOsServer({
   releasePassword,
   sessionSecret,
   releaseDir,
-  inboundToken,
+  inboundApiKey,
   inboundStorageRoot,
   codexBin,
   codexModel,

@@ -9,29 +9,34 @@ Bright OS.
 
 ## Текущий контракт
 
-Bright OS использует один универсальный формат маршрута:
+Bright OS использует короткий inbound endpoint:
 
 ```text
-/v1/in/:target
+/v1/in
 ```
 
-`:target` выбирает обработчик connector-а. Сейчас поддерживается:
+Если request не указывает точку назначения, API использует `inbox`. Явная точка
+назначения передается в JSON body через `target`/`destination` или в header
+`X-Bright-Target`/`X-Bright-Destination`.
+
+Старый маршрут `/v1/in/:target` остается legacy alias. Сейчас поддерживается:
 
 | Target | Статус | Назначение |
 | --- | --- | --- |
 | `inbox` | Активен | Создать Inbox-запись из внешнего текста, описания, metadata и вложений. |
 
 Будущие target-ы, например `finance` или `calendar`, добавляются как новые
-handlers за тем же маршрутом. Не заводи для них новую top-level группу routes.
+handlers за тем же коротким endpoint. Не заводи для них новую top-level группу
+routes.
 
 ## URL
 
-Внутри Node-сервиса маршрут всегда `/v1/in/:target`.
+Внутри Node-сервиса основной маршрут всегда `/v1/in`.
 
 | Окружение | Внешний URL |
 | --- | --- |
-| Production | `https://api.brightos.world/v1/in/inbox` |
-| Preview | `https://<slot>.test.brightos.world/api/v1/in/inbox` |
+| Production | `https://api.brightos.world/v1/in` |
+| Preview | `https://<slot>.test.brightos.world/api/v1/in` |
 
 В preview сегмент `/api` нужен только из-за Caddy: он проксирует
 `/api/*` в API service и срезает `/api` перед Node-сервисом.
@@ -41,11 +46,13 @@ handlers за тем же маршрутом. Не заводи для них н
 Все inbound-запросы требуют:
 
 ```http
-Authorization: Bearer <BRIGHT_OS_INBOUND_TOKEN>
+X-Bright-API-Key: <BRIGHT_OS_INBOUND_API_KEY>
 ```
 
-Значение токена живет в env как `BRIGHT_OS_INBOUND_TOKEN`. Не коммить значение
-и не пиши его в документации.
+Значение API-ключа живет в env как `BRIGHT_OS_INBOUND_API_KEY`. Legacy env
+`BRIGHT_OS_INBOUND_TOKEN` и legacy `Authorization: Bearer <key>` пока
+принимаются для обратной совместимости. Новый caller должен использовать
+`X-Bright-API-Key`. Не коммить значение и не пиши его в документации.
 
 Неверная или отсутствующая inbound-авторизация возвращает HTTP `401`:
 
@@ -59,8 +66,8 @@ Authorization: Bearer <BRIGHT_OS_INBOUND_TOKEN>
 будет слать данные.
 
 ```http
-GET /v1/in/inbox
-Authorization: Bearer <token>
+GET /v1/in
+X-Bright-API-Key: <api-key>
 ```
 
 Успех:
@@ -78,9 +85,18 @@ Authorization: Bearer <token>
 { "error": "unsupported_target" }
 ```
 
+Можно проверить будущий target через header:
+
+```http
+GET /v1/in
+X-Bright-API-Key: <api-key>
+X-Bright-Target: finance
+```
+
 ## Прием Inbox
 
-`POST /v1/in/inbox` принимает JSON.
+`POST /v1/in` принимает JSON. Если `target`/`destination` не указан, payload
+попадает в `inbox`.
 
 Минимальный payload:
 
@@ -94,6 +110,7 @@ Authorization: Bearer <token>
 
 ```json
 {
+  "target": "inbox",
   "text": "текст пояснения",
   "description": {
     "kind": "optional structured content"
@@ -134,6 +151,8 @@ Authorization: Bearer <token>
 
 | Payload field | Обязательное | Где хранится | Примечание |
 | --- | --- | --- | --- |
+| `target` | Нет | routing | Точка назначения. Default: `inbox`. |
+| `destination` | Нет | routing | Алиас для `target`. |
 | `text` | Да | `inbox.explanation_text` | Также используется для генерации заголовка и поиска фразы про предыдущее сообщение. |
 | `description_text` | Нет | `inbox.description_text` | Строковое описание. |
 | `description` | Нет | `inbox.description_text` | Строка сохраняется как trimmed text; object/array сохраняется как pretty JSON. |
@@ -288,7 +307,8 @@ Prompt хранится в `handlers.llm_prompt_template`; `{{text}}` замен
 | 400 | `invalid_image` | Legacy image base64 или image signature не прошли validation. |
 | 400 | `invalid_response_required` | `response_required` не boolean-like. |
 | 400 | `invalid_record_type` | Inbound API получил record type не `1` и не `2`. |
-| 401 | `unauthorized` | Нет inbound Bearer token или он неверный. |
+| 400 | `invalid_target` | `target`/`destination` передан не строкой или содержит `/`. |
+| 401 | `unauthorized` | Нет inbound API key или он неверный. |
 | 404 | `unsupported_target` | Route target не зарегистрирован. |
 | 405 | `method_not_allowed` | Method не `GET` и не `POST`. |
 | 413 | `attachment_too_large` | Одно non-legacy вложение больше 8 MB decoded. |
@@ -304,7 +324,7 @@ Prompt хранится в `handlers.llm_prompt_template`; `{{text}}` замен
 
 Обновляй релевантный раздел, если меняется что-то из этого:
 
-- route shape, target name, environment URL, Caddy path behavior или auth;
+- route shape, target/destination name, environment URL, Caddy path behavior или auth;
 - request payload fields, aliases, defaults, limits или validation rules;
 - accepted MIME types, file storage path, attachment link format или file serving;
 - response payload, status code или error string;

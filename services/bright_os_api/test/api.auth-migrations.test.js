@@ -214,7 +214,7 @@ test('migration adds inbox entity schema and metadata', async () => {
       .get();
     assert.equal(handler.target, 'inbox');
     assert.equal(handler.kind, 'inbound_llm_title_generator');
-    assert.match(handler.trigger_description, /POST \/v1\/in\/inbox/);
+    assert.match(handler.trigger_description, /POST \/v1\/in/);
     assert.match(handler.conditions_description, /duplicate idempotency_key/);
     assert.equal(handler.llm_provider, 'codex-cli');
     assert.match(handler.llm_prompt_template, /{{text}}/);

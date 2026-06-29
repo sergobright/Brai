@@ -5,11 +5,13 @@
 This specification defines the stable external inbound API shape for connector-style writes into Bright OS.
 ## Requirements
 ### Requirement: Inbound API routes by target
-Bright OS SHALL expose a universal inbound API at `/v1/in/:target` where the
-target path segment selects the connector handler.
+Bright OS SHALL expose a universal inbound API at `/v1/in` where omitted
+destination defaults to `inbox`, and explicit destination can be selected by
+request body `target`/`destination`, header `X-Bright-Target`/
+`X-Bright-Destination`, or the legacy `/v1/in/:target` path.
 
 #### Scenario: Inbound target handshakes
-- **WHEN** an external app sends `GET /v1/in/inbox` with the inbound Bearer token
+- **WHEN** an external app sends `GET /v1/in` with the inbound API key
 - **THEN** the API returns `{ "ok": true, "target": "inbox" }`
 
 #### Scenario: Unknown target is requested
@@ -18,10 +20,10 @@ target path segment selects the connector handler.
 - **AND** no inbox data is mutated
 
 ### Requirement: Inbound Inbox receives text and attachments
-Bright OS SHALL support `POST /v1/in/inbox` for the first inbound connector.
+Bright OS SHALL support `POST /v1/in` for the default inbound Inbox connector.
 
 #### Scenario: Inbox payload is received
-- **WHEN** an external app sends text with the inbound Bearer token
+- **WHEN** an external app sends text with the inbound API key
 - **THEN** the text is stored in the Inbox explanation field
 - **AND** optional description content is stored in the Inbox description field
 - **AND** optional legacy `image_base64`/`image_mime` or `attachments[]` files are saved as attachments
@@ -40,6 +42,6 @@ Bright OS SHALL support `POST /v1/in/inbox` for the first inbound connector.
 - **AND** the new record stores a reference to the previous Inbox record from the same source key or source
 
 #### Scenario: Inbound request is unauthorized
-- **WHEN** an inbound request omits the valid inbound Bearer token
+- **WHEN** an inbound request omits the valid inbound API key
 - **THEN** the API returns `401`
 - **AND** no inbox data or attachment file is created

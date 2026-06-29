@@ -200,6 +200,10 @@ export const migrationMethods = {
       this.rebuildVersionLedgerTypes();
       this.recordMigration(37, 'rebuild version ledger as typed counters');
     }
+
+    if (!this.hasMigration(38)) {
+      this.recordMigration(38, 'standardize inbound API key and default target');
+    }
   }
 ,
 
@@ -689,7 +693,7 @@ export const migrationMethods = {
       'active',
       'Генератор заголовка входящего сообщения',
       'Создает короткий русский заголовок для новой Inbox-записи из обязательного inbound text.',
-      'Срабатывает внутри POST /v1/in/inbox после проверки inbound Bearer token, JSON payload, обязательного text, record_type_id, вложений, idempotency key и связи с предыдущим сообщением, но до записи create-события inbox.',
+      'Срабатывает внутри POST /v1/in или legacy POST /v1/in/inbox после проверки inbound API key, JSON payload, destination/target, обязательного text, record_type_id, вложений, idempotency key и связи с предыдущим сообщением, но до записи create-события inbox.',
       'Запускается только для поддержанного target inbox и только при создании новой записи. Не запускается для duplicate idempotency_key, неавторизованных запросов, invalid payload, неподдержанных вложений или ошибок validation.',
       'Получает trimmed body.text. Остальные поля inbound payload участвуют в создании Inbox-записи, но не передаются в LLM prompt.',
       'Возвращает строку inbox.title: первая непустая строка ответа модели очищается от внешних кавычек, обрезается до 80 символов и сохраняется через inbox_events create payload.',

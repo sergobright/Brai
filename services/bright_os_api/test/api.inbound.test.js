@@ -25,7 +25,20 @@ const IMAGE_BASE64 = PNG_BYTES.toString('base64');
 const PDF_BYTES = Buffer.from('%PDF-1.4\n1 0 obj\n<<>>\nendobj\n%%EOF\n');
 const TEXT_BYTES = Buffer.from('hello inbound file\n', 'utf8');
 
-test('inbound inbox endpoint returns a bearer-protected handshake', async () => {
+test('inbound short endpoint returns an api-key protected default inbox handshake', async () => {
+  const fixture = await createFixture(['2026-06-27T10:00:00.000Z']);
+
+  try {
+    const response = await inboundRequest(fixture.url, '/v1/in');
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(response.body, { ok: true, target: 'inbox' });
+  } finally {
+    await fixture.close();
+  }
+});
+
+test('inbound legacy target URL remains an alias', async () => {
   const fixture = await createFixture(['2026-06-27T10:00:00.000Z']);
 
   try {
@@ -46,7 +59,7 @@ test('inbound inbox POST creates an inbox row with explanation and attachment li
   });
 
   try {
-    const response = await inboundRequest(fixture.url, '/v1/in/inbox', {
+    const response = await inboundRequest(fixture.url, '/v1/in', {
       method: 'POST',
       body: JSON.stringify({
         text: 'Положить это во входящие',
@@ -93,6 +106,32 @@ test('inbound inbox POST creates an inbox row with explanation and attachment li
   } finally {
     await fixture.close();
     fs.rmSync(storageRoot, { recursive: true, force: true });
+  }
+});
+
+test('inbound short POST accepts destination from body or header', async () => {
+  const fixture = await createFixture(['2026-06-27T10:00:00.000Z']);
+
+  try {
+    const bodyTarget = await inboundRequest(fixture.url, '/v1/in', {
+      method: 'POST',
+      headers: { 'x-bright-target': 'inbox' },
+      body: JSON.stringify({
+        target: 'finance',
+        text: 'Пока не сохранять в неизвестное место'
+      })
+    });
+    const headerTarget = await inboundRequest(fixture.url, '/v1/in', {
+      headers: { 'x-bright-target': 'finance' }
+    });
+
+    assert.equal(bodyTarget.status, 404);
+    assert.equal(headerTarget.status, 404);
+    assert.equal(bodyTarget.body.error, 'unsupported_target');
+    assert.equal(headerTarget.body.error, 'unsupported_target');
+    assert.equal(tableCount(fixture, 'inbox'), 0);
+  } finally {
+    await fixture.close();
   }
 });
 
@@ -197,7 +236,7 @@ test('inbound inbox rejects unsupported API record types', async () => {
   }
 });
 
-test('inbound inbox rejects invalid bearer without mutating inbox', async () => {
+test('inbound inbox rejects invalid api key without mutating inbox', async () => {
   const fixture = await createFixture(['2026-06-27T10:00:00.000Z']);
 
   try {
@@ -206,7 +245,7 @@ test('inbound inbox rejects invalid bearer without mutating inbox', async () => 
       '/v1/in/inbox',
       {
         method: 'POST',
-        headers: { authorization: 'Bearer wrong' },
+        headers: { 'x-bright-api-key': 'wrong' },
         body: JSON.stringify({
           text: 'Не сохранять',
           image_base64: IMAGE_BASE64,
@@ -219,6 +258,21 @@ test('inbound inbox rejects invalid bearer without mutating inbox', async () => 
     assert.equal(response.status, 401);
     assert.equal(tableCount(fixture, 'inbox'), 0);
     assert.equal(tableCount(fixture, 'inbox_events'), 0);
+  } finally {
+    await fixture.close();
+  }
+});
+
+test('inbound inbox still accepts legacy bearer authorization', async () => {
+  const fixture = await createFixture(['2026-06-27T10:00:00.000Z']);
+
+  try {
+    const response = await inboundRequest(fixture.url, '/v1/in', {
+      headers: { authorization: 'Bearer test-inbound-token' }
+    }, false);
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(response.body, { ok: true, target: 'inbox' });
   } finally {
     await fixture.close();
   }

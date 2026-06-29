@@ -5,8 +5,8 @@ import path from 'node:path';
 import { WebSocketServer } from 'ws';
 import {
   INBOUND_BODY_LIMIT_BYTES,
-  hasInboundToken,
-  inboundPathTarget,
+  hasInboundApiKey,
+  inboundRequestTarget,
   receiveInboxInbound,
   serveInboxAttachment
 } from './inbound.js';
@@ -16,7 +16,7 @@ import { BrightOsStore, formatSession } from './store.js';
 const BASE_JSON_HEADERS = {
   'content-type': 'application/json; charset=utf-8',
   'access-control-allow-methods': 'GET,POST,OPTIONS',
-  'access-control-allow-headers': 'authorization,content-type',
+  'access-control-allow-headers': 'authorization,content-type,x-api-key,x-bright-api-key,x-bright-target,x-bright-destination',
   'access-control-allow-credentials': 'true'
 };
 const SESSION_COOKIE = 'bright_os_session';
@@ -29,6 +29,7 @@ export function createBrightOsServer({
   releasePassword = webPassword,
   sessionSecret = null,
   releaseDir = null,
+  inboundApiKey = null,
   inboundToken = null,
   inboundStorageRoot = path.join(path.dirname(dbPath), 'inbox-attachments'),
   codexBin = 'codex',
@@ -127,13 +128,15 @@ export function createBrightOsServer({
         return;
       }
 
-      if (url.pathname.startsWith('/v1/in/')) {
-        if (!hasInboundToken(req, inboundToken)) {
+      if (url.pathname === '/v1/in' || url.pathname.startsWith('/v1/in/')) {
+        if (!hasInboundApiKey(req, inboundApiKey ?? inboundToken)) {
           sendJson(req, res, 401, { error: 'unauthorized' });
           return;
         }
 
-        const target = inboundPathTarget(url.pathname);
+        const requestNow = now();
+        const body = req.method === 'POST' ? await readJson(req, { limit: INBOUND_BODY_LIMIT_BYTES }) : {};
+        const target = inboundRequestTarget(req, url.pathname, body);
         const inboundHandler = target ? inboundHandlers.get(target) : null;
         if (!target || !inboundHandler) {
           sendJson(req, res, 404, { error: 'unsupported_target' });
@@ -146,8 +149,6 @@ export function createBrightOsServer({
         }
 
         if (req.method === 'POST') {
-          const requestNow = now();
-          const body = await readJson(req, { limit: INBOUND_BODY_LIMIT_BYTES });
           const result = await inboundHandler.receive(body, requestNow);
           const state = inboxState(store, requestNow);
           broadcast(sockets, { type: 'inbox_synced', inbox_state: state });
