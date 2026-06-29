@@ -243,7 +243,7 @@ function PageMenu({
         <SidebarGroup>
           <SidebarGroupLabel>Меню страницы</SidebarGroupLabel>
           <SidebarGroupContent>
-            <div className="px-2 py-1.5 text-sm font-medium text-sidebar-foreground">{sectionTitle(section)}</div>
+            <div className="px-2 py-1.5 text-sm font-medium text-sidebar-foreground" data-rail-page-title>{sectionTitle(section)}</div>
           </SidebarGroupContent>
         </SidebarGroup>
       ) : null}

@@ -53,6 +53,20 @@ test("opens Engine from the profile menu", async ({ page }) => {
   await expect(page.getByText("Build 52")).toBeVisible();
 });
 
+test("keeps Engine text out of the collapsed desktop rail on load", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop", "desktop-only rail");
+
+  await page.context().addCookies([{ name: "sidebar_state", value: "false", url: "http://127.0.0.1:3201" }]);
+  await page.goto("/engine");
+
+  const rail = page.locator(".desktop-rail");
+  await expect(rail).not.toHaveClass(/expanded/);
+  await expect(rail.locator("[data-rail-page-title]")).toBeHidden();
+  await expect
+    .poll(async () => (await rail.locator(".rail-profile").boundingBox())?.width ?? 0)
+    .toBeLessThanOrEqual(42);
+});
+
 test("opens Archive from the profile menu and restores a deleted action", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop", "desktop-only archive flow");
 
