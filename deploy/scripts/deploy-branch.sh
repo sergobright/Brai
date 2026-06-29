@@ -76,26 +76,12 @@ if [[ "$ENVIRONMENT" == preview-* && "$ALLOCATED_NEW" == "true" && "${BRIGHT_OS_
   esac
 fi
 
-SOURCE_VERSION="$("$NODE_BIN" -e '
-const fs = require("node:fs");
-const path = require("node:path");
-const root = process.argv[1];
-const parsed = JSON.parse(fs.readFileSync(path.join(root, "apps/bright_os_app/public/version.json"), "utf8"));
-console.log(parsed.version);
-' "$ROOT")"
-LEDGER_VERSION=""
-if [[ "$ENVIRONMENT" == "prod" && -z "${BRIGHT_OS_APP_VERSION:-}" ]]; then
-  LEDGER_VERSION="$("$NODE_BIN" "$SCRIPT_DIR/resolve-app-version.mjs" --environment prod --root "$ROOT" --db "$DB_PATH")"
-fi
-VERSION="${BRIGHT_OS_APP_VERSION:-${LEDGER_VERSION:-$SOURCE_VERSION}}"
-
-if [[ "$ENVIRONMENT" == preview-* && -z "${BRIGHT_OS_APP_VERSION:-}" && -f "${BRIGHT_OS_PROD_WEB_VERSION_JSON:-}" ]]; then
-  VERSION="$("$NODE_BIN" -e '
-const fs = require("node:fs");
-const parsed = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
-console.log(parsed.version);
-' "$BRIGHT_OS_PROD_WEB_VERSION_JSON")"
-fi
+VERSION="${BRIGHT_OS_APP_VERSION:-$("$NODE_BIN" "$SCRIPT_DIR/resolve-app-version.mjs" \
+  --environment "$ENVIRONMENT" \
+  --root "$ROOT" \
+  --db "$DB_PATH" \
+  --prod-db "${BRIGHT_OS_PROD_DB:-}" \
+  --prod-web-version-json "${BRIGHT_OS_PROD_WEB_VERSION_JSON:-}")}"
 
 if [[ "$ENVIRONMENT" == "prod" ]]; then
   BUNDLE_VERSION="${BRIGHT_OS_MOBILE_BUNDLE_VERSION:-$VERSION}"

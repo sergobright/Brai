@@ -14,6 +14,7 @@ if (path.resolve(process.argv[1] ?? "") === fileURLToPath(import.meta.url)) {
     root: args.root,
     environment: args.environment,
     db: args.db,
+    prodDb: args["prod-db"],
     prodWebVersionJson: args["prod-web-version-json"],
   }));
 }
@@ -22,6 +23,7 @@ export function resolveAppVersion({
   root = process.env.BRIGHT_OS_ROOT || path.resolve(import.meta.dirname, "../.."),
   environment = process.env.NEXT_PUBLIC_BRIGHT_OS_ENVIRONMENT || "",
   db = "",
+  prodDb = process.env.BRIGHT_OS_PROD_DB || "",
   prodWebVersionJson = "",
   explicit = process.env.BRIGHT_OS_APP_VERSION || "",
 } = {}) {
@@ -29,6 +31,11 @@ export function resolveAppVersion({
 
   if (environment === "prod" && db) {
     const ledgerVersion = latestProductionVersion(db);
+    if (ledgerVersion) return validVersion(ledgerVersion);
+  }
+
+  if (environment !== "prod" && prodDb && fs.existsSync(prodDb)) {
+    const ledgerVersion = latestProductionVersion(prodDb);
     if (ledgerVersion) return validVersion(ledgerVersion);
   }
 
