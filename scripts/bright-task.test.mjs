@@ -95,6 +95,11 @@ test("main checkout lock locks non-current worktrees by default", () => {
   assert.match(script, /bright-os-worktrees/);
   assert.match(script, /BRIGHT_OS_LOCK_STALE_WORKTREES:-1/);
   assert.match(script, /BRIGHT_OS_LOCK_CURRENT_WORKTREE/);
+  assert.match(script, /restore_task_state_access\(\)/);
+  assert.match(script, /restore_task_state_access "\$worktree_path"/);
+  assert.match(script, /sudo chown mark:mark "\$task_state"/);
+  assert.match(script, /sudo chmod 0770 "\$task_state"/);
+  assert.match(script, /-maxdepth 1 -type f -name '\*\.json'/);
   assert.match(script, /sudo chmod 0751 "\$root"/);
   assert.match(script, /sudo chmod u=rwx,g=rx,o=x "\$root\/deploy"/);
   assert.match(script, /Writable task worktree parent/);
@@ -119,6 +124,10 @@ test("local main sync preserves runtime dirs and hard resets to origin main", ()
   assert.match(script, /BRIGHT_OS_LOCK_STALE_WORKTREES:-1/);
   assert.match(script, /git_cmd worktree list --porcelain/);
   assert.match(script, /chown -R root:mark "\$worktree_path"/);
+  assert.match(script, /restore_task_state_access\(\)/);
+  assert.match(script, /restore_task_state_access "\$worktree_path"/);
+  assert.match(script, /chown "\$GIT_USER:mark" "\$task_state"/);
+  assert.match(script, /chmod 0770 "\$task_state"/);
   assert.match(ciScript, /sudo -n \/srv\/opt\/bright-os-main-sync\.sh "\$BRIGHT_OS_COMMIT"/);
   assert.doesNotMatch(ciScript, /DEPLOY_REPO/);
   assert.doesNotMatch(ciScript, /sudo BRIGHT_DEPLOY_REPO=/);
@@ -818,9 +827,15 @@ test("task state rejects squash-merged branch by merged PR head oid", () => {
 
 test("accept preview checks verified preview before PR actions", () => {
   const script = fs.readFileSync(path.join(process.cwd(), "deploy/scripts/accept-preview.sh"), "utf8");
+  const acceptancePreflightCall = script.indexOf("\nensure_acceptance_marker_writable\n");
   assert.ok(script.indexOf("require-preview") > 0);
   assert.ok(script.indexOf("require-preview") < script.indexOf("gh pr list"));
   assert.ok(script.indexOf("require-preview") < script.indexOf("gh pr merge"));
+  assert.ok(acceptancePreflightCall > 0);
+  assert.ok(acceptancePreflightCall < script.indexOf("gh pr list"));
+  assert.ok(acceptancePreflightCall < script.indexOf("gh pr merge"));
+  assert.match(script, /Bright OS task state must not be a symlink/);
+  assert.match(script, /mktemp "\$dir\/\.acceptance-write\.XXXXXX"/);
   assert.match(script, /write_acceptance_marker/);
   assert.match(script, /acceptance\.json/);
   assert.match(script, /deliveryClass/);

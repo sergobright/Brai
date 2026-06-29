@@ -43,6 +43,17 @@ git_cmd() {
     "$@"
 }
 
+restore_task_state_access() {
+  local task_state="$1/.bright-task"
+  if [ ! -d "$task_state" ] || [ -L "$task_state" ]; then
+    return
+  fi
+  chown "$GIT_USER:mark" "$task_state"
+  chmod 0770 "$task_state"
+  find "$task_state" -maxdepth 1 -type f -name '*.json' -exec chown "$GIT_USER:mark" {} +
+  find "$task_state" -maxdepth 1 -type f -name '*.json' -exec chmod 0640 {} +
+}
+
 exec 9>"$LOCK_FILE"
 flock 9
 
@@ -161,6 +172,7 @@ if [ "${BRIGHT_OS_MAIN_SYNC_LOCK_CHECKOUT:-1}" = "1" ]; then
           if [ -d "$worktree_path" ]; then
             chown -R root:mark "$worktree_path"
             chmod -R u=rwX,g=rX,o= "$worktree_path"
+            restore_task_state_access "$worktree_path"
           fi
           ;;
       esac
