@@ -48,9 +48,10 @@ test("opens Engine from the profile menu", async ({ page }) => {
   await openEngineFromProfile(page);
 
   await expect(page.getByRole("heading", { name: "Engine", exact: true })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Engine v0.11.52.1" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Проверить обновление" })).toBeVisible();
-  await expect(page.getByText("Build 52")).toBeVisible();
+  await expect(page.getByRole("heading", { name: /Текущая версия v/ })).toBeVisible();
+  await expect(page.getByText("Доступно обновление v0.11.52.1")).toBeVisible();
+  await expect(page.getByText("Перезагрузите страницу, чтобы получить новую версию.")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Проверить обновления" })).toBeVisible();
 });
 
 test("keeps Engine text out of the collapsed desktop rail on load", async ({ page }, testInfo) => {

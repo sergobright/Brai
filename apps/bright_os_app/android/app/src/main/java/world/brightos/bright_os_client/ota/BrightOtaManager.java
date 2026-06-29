@@ -56,6 +56,9 @@ public final class BrightOtaManager {
     private String activeBundleVersion;
     private Runnable readinessTimeout;
     private boolean checkInProgress;
+    private String downloadProgressVersion;
+    private long downloadProgressBytes;
+    private long downloadProgressTotalBytes;
 
     public BrightOtaManager(Context context) {
         this.context = context.getApplicationContext();
@@ -144,6 +147,10 @@ public final class BrightOtaManager {
         state.put("lastUpdateError", prefs.getString(KEY_LAST_ERROR, null));
         state.put("failedBundleVersions", prefs.getString(KEY_FAILED_VERSIONS, ""));
         state.put("checkInProgress", checkInProgress);
+        state.put("downloadProgressVersion", downloadProgressVersion);
+        state.put("downloadProgressBytes", downloadProgressBytes);
+        state.put("downloadProgressTotalBytes", downloadProgressTotalBytes);
+        state.put("downloadProgressPercent", downloadProgressTotalBytes > 0 ? downloadProgressPercent(downloadProgressBytes, downloadProgressTotalBytes) : null);
         return state;
     }
 
@@ -235,6 +242,8 @@ public final class BrightOtaManager {
 
         File archive = null;
         try {
+            recordStatus("downloading", null);
+            recordDownloadProgress(manifest.bundleVersion, 0, manifest.sizeBytes);
             archive = downloadArchive(manifest);
             verifyArchive(manifest, archive);
 
@@ -339,6 +348,7 @@ public final class BrightOtaManager {
                     if (downloadedBytes > manifest.sizeBytes || downloadedBytes > BrightOtaArchive.MAX_ARCHIVE_BYTES) {
                         throw new BrightOtaException("archive_download_size_exceeded");
                     }
+                    recordDownloadProgress(manifest.bundleVersion, downloadedBytes, manifest.sizeBytes);
                     output.write(buffer, 0, read);
                 }
             } catch (Exception error) {
@@ -413,7 +423,10 @@ public final class BrightOtaManager {
             .apply();
     }
 
-    private void recordStatus(String status, String error) {
+    private synchronized void recordStatus(String status, String error) {
+        if (!"downloading".equals(status)) {
+            recordDownloadProgress(null, 0, 0);
+        }
         SharedPreferences.Editor editor = prefs.edit().putString(KEY_LAST_STATUS, status);
         if (error == null) {
             editor.remove(KEY_LAST_ERROR);
@@ -421,6 +434,12 @@ public final class BrightOtaManager {
             editor.putString(KEY_LAST_ERROR, error);
         }
         editor.apply();
+    }
+
+    private synchronized void recordDownloadProgress(String version, long bytes, long totalBytes) {
+        downloadProgressVersion = version;
+        downloadProgressBytes = Math.max(0, bytes);
+        downloadProgressTotalBytes = Math.max(0, totalBytes);
     }
 
     private Set<String> failedVersions() {
@@ -454,6 +473,12 @@ public final class BrightOtaManager {
 
     static boolean isActiveCandidate(String candidateVersion, String activeBundleVersion) {
         return candidateVersion != null && candidateVersion.equals(activeBundleVersion);
+    }
+
+    static int downloadProgressPercent(long bytes, long totalBytes) {
+        if (totalBytes <= 0) return 0;
+        long safeBytes = Math.max(0, Math.min(bytes, totalBytes));
+        return (int) Math.min(100, Math.round((safeBytes * 100.0) / totalBytes));
     }
 
     static String updateErrorCode(Throwable error) {

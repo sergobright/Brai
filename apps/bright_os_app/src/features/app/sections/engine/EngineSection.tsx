@@ -1,28 +1,21 @@
 "use client";
 
-import { Cpu, Download, RefreshCw } from "lucide-react";
+import { RefreshCw } from "lucide-react";
 import type { AppVersionState } from "@/shared/api/brightOsApi";
-import { APP_BRANCH, APP_COMMIT, APP_ENVIRONMENT, APP_OTA_CHANNEL, APP_PREVIEW_SLOT, APP_VERSION } from "@/shared/config/runtime";
+import { APP_VERSION } from "@/shared/config/runtime";
 import type { BrightOtaState } from "@/shared/platform/ota";
-import { moscowDateTime, moscowTime } from "@/shared/time/format";
-import { Badge } from "@/shared/ui/badge";
+import { platformName } from "@/shared/platform/platform";
+import { moscowTime } from "@/shared/time/format";
 import { Button } from "@/shared/ui/button";
 import { Card } from "@/shared/ui/card";
-import type { Tone } from "../../appModel";
+import { Field, FieldLabel } from "@/shared/ui/field";
+import { Progress } from "@/shared/ui/progress";
 import { SECTION_GRID_CLASS } from "../../appModel";
 import { cx } from "../../appUtils";
 import { engineSectionView } from "./engineModel";
 
-const updateStatusVariants: Record<Tone, "secondary" | "outline" | "destructive"> = {
-  ok: "secondary",
-  warn: "outline",
-  bad: "destructive",
-  muted: "secondary",
-};
-
 export function EngineSection({
   appVersionState,
-  bundlePublishedAt,
   otaCheckedAt,
   otaRefreshing,
   otaState,
@@ -49,86 +42,67 @@ export function EngineSection({
     versionError,
     versionRefreshing,
   });
-  const title = view.latestVersion ? `Engine v${view.latestVersion}` : "Engine";
-  const Icon = view.hasUpdate ? Download : Cpu;
-  const rows = [
-    { label: "Web", value: view.activeWebVersion },
-    view.latestVersion ? { label: "Последняя", value: view.latestVersion } : null,
-    { label: "APK", value: view.nativeApk },
-    otaState?.candidateBundleVersion ? { label: "Готово", value: otaState.candidateBundleVersion } : null,
-    bundlePublishedAt ? { label: "Опубликовано", value: moscowDateTime(bundlePublishedAt) } : null,
-    versionCheckedAt || otaCheckedAt ? { label: "Проверено", value: moscowTime(versionCheckedAt ?? otaCheckedAt ?? "") } : null,
-    ...nonProductionRows(otaState),
-  ].filter((row): row is { label: string; value: string } => Boolean(row?.value));
+  const isAndroid = platformName() === "android";
+  const checkedAt = versionCheckedAt ?? otaCheckedAt;
 
   return (
-    <section className={SECTION_GRID_CLASS} aria-label="Engine">
-      <Card className="grid gap-5 p-4">
-        <div className="flex items-start justify-between gap-3.5 max-[560px]:flex-col">
-          <div className="flex min-w-0 items-start gap-3">
-            <div className={cx("grid size-10 flex-none place-items-center rounded-md bg-accent text-accent-foreground", view.hasUpdate && "text-primary")}>
-              <Icon className="size-5" aria-hidden="true" />
-            </div>
-            <div className="min-w-0">
-              <p className="m-0 text-xs font-semibold uppercase text-muted-foreground">Bright OS Engine</p>
-              <h2 className="m-0 text-2xl leading-tight tracking-normal">{title}</h2>
-              <p className="m-0 text-sm leading-6 text-muted-foreground">{view.updateStatus.body}</p>
-            </div>
-          </div>
-          <Badge className="min-h-[30px] flex-none px-2.5 text-xs font-semibold" variant={updateStatusVariants[view.updateStatus.tone]}>
-            {view.updateStatus.label}
-          </Badge>
+    <section className={cx(SECTION_GRID_CLASS, "xl:w-1/2")} aria-label="Engine">
+      <Card className="grid gap-4 p-4 sm:p-5">
+        <div className="grid gap-1.5">
+          <h2 className="m-0 text-xl leading-tight tracking-normal">Текущая версия v{view.installedVersion}</h2>
+          <p className="m-0 text-sm leading-6 text-muted-foreground">{view.updateStatus.body}</p>
+          {checkedAt ? <p className="m-0 text-xs text-muted-foreground">Проверено {moscowTime(checkedAt)}</p> : null}
         </div>
 
-        <dl className="m-0 grid gap-2 sm:grid-cols-2">
-          {rows.map((row) => (
-            <div key={row.label} className="min-w-0 rounded-md border border-border px-3 py-2">
-              <dt className="text-xs font-normal uppercase text-muted-foreground">{row.label}</dt>
-              <dd className="m-0 [overflow-wrap:anywhere] text-sm tabular-nums text-foreground">{row.value}</dd>
-            </div>
-          ))}
-        </dl>
+        {!isAndroid && view.hasUpdate ? <WebUpdateNotice latestVersion={view.latestVersion} /> : null}
+        {isAndroid && view.androidUpdateStage !== "idle" ? <AndroidUpdateNotice view={view} /> : null}
 
         <Button className="justify-self-start" type="button" variant="secondary" disabled={view.isChecking} onClick={() => void onRefreshEngine()}>
           <RefreshCw className={cx("size-4", view.isChecking && "animate-spin")} aria-hidden="true" />
-          {view.isChecking ? "Проверяем..." : "Проверить обновление"}
+          {view.isChecking ? "Проверяем..." : "Проверить обновления"}
         </Button>
       </Card>
-
-      {view.ledgerRows.length > 0 ? (
-        <Card className="grid gap-3 p-4">
-          <div>
-            <h2 className="m-0 text-base leading-tight">Журнал версий</h2>
-            <p className="m-0 text-sm text-muted-foreground">Последние записи runtime ledger.</p>
-          </div>
-          <div className="grid gap-2">
-            {view.ledgerRows.map((row) => (
-              <div key={row.id} className="grid gap-1 rounded-md border border-border px-3 py-2">
-                <div className="flex items-baseline justify-between gap-3 max-[460px]:grid max-[460px]:gap-0.5">
-                  <span className="text-sm font-medium">{row.label} {row.version}</span>
-                  <span className="text-xs text-muted-foreground tabular-nums">{moscowDateTime(row.releasedAtUtc)}</span>
-                </div>
-                <p className="m-0 text-sm text-muted-foreground">{row.shortChanges}</p>
-              </div>
-            ))}
-          </div>
-        </Card>
-      ) : null}
     </section>
   );
 }
 
-function nonProductionRows(otaState: BrightOtaState | null): Array<{ label: string; value: string }> {
-  const nativeEnvironment = otaState?.nativeEnvironment;
-  const environment = APP_ENVIRONMENT !== "prod" ? APP_ENVIRONMENT : nativeEnvironment;
-  if (!environment || environment === "prod") return [];
+function WebUpdateNotice({ latestVersion }: { latestVersion: string }) {
+  return (
+    <div className="grid gap-1 rounded-md border border-border bg-muted px-3 py-2.5">
+      <p className="m-0 text-sm font-medium">Доступно обновление v{latestVersion}</p>
+      <p className="m-0 text-sm text-muted-foreground">Перезагрузите страницу, чтобы получить новую версию.</p>
+    </div>
+  );
+}
 
-  const slot = APP_PREVIEW_SLOT || otaState?.nativePreviewSlot || "";
-  const rows = [
-    { label: "Окружение", value: environment === "dev" ? "Dev" : slot || environment },
-  ];
-  if (APP_BRANCH) rows.push({ label: "Ветка", value: APP_BRANCH });
-  if (APP_COMMIT) rows.push({ label: "Commit", value: APP_COMMIT.slice(0, 12) });
-  rows.push({ label: "OTA", value: APP_OTA_CHANNEL || otaState?.nativeOtaChannel || "" });
-  return rows.filter((row) => row.value);
+function AndroidUpdateNotice({ view }: { view: ReturnType<typeof engineSectionView> }) {
+  if (view.androidUpdateStage === "ready") {
+    return (
+      <div className="rounded-md border border-border bg-muted px-3 py-2.5">
+        <p className="m-0 text-sm font-medium">Обновление v{view.latestVersion} загружено</p>
+        <p className="m-0 text-sm text-muted-foreground">Закройте приложение, чтобы новая версия применилась.</p>
+      </div>
+    );
+  }
+
+  if (view.androidUpdateStage === "downloading") {
+    const progress = view.downloadProgressPercent ?? 0;
+    const version = view.downloadProgressVersion ?? view.latestVersion;
+    return (
+      <Field className="rounded-md border border-border bg-muted px-3 py-2.5">
+        <FieldLabel htmlFor="engine-update-progress" className="w-full">
+          <span>Загрузка версии v{version}</span>
+          <span className="ml-auto tabular-nums">{progress}%</span>
+        </FieldLabel>
+        <Progress value={progress} id="engine-update-progress" />
+      </Field>
+    );
+  }
+
+  return (
+    <div className="rounded-md border border-border bg-muted px-3 py-2.5">
+      <p className="m-0 text-sm font-medium">Доступна новая версия v{view.latestVersion}</p>
+      <p className="m-0 text-sm text-muted-foreground">Нажмите «Проверить обновления», чтобы скачать её.</p>
+    </div>
+  );
 }

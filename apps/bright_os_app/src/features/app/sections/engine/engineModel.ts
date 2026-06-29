@@ -43,6 +43,7 @@ const updateErrorMessages: Record<string, string> = {
 };
 
 const readyStatuses = new Set(["candidate_ready_for_next_start", "ready_candidate_pending", "candidate_already_pending"]);
+const downloadingStatuses = new Set(["checking", "downloading"]);
 const ledgerLabels: Record<VersionTypeId, string> = {
   release: "Release",
   build: "Build",
@@ -59,7 +60,10 @@ export type UpdateStatusView = {
 
 export type EngineSectionView = {
   activeWebVersion: string;
+  androidUpdateStage: "idle" | "available" | "downloading" | "ready";
   appBuild: string;
+  downloadProgressVersion: string | null;
+  downloadProgressPercent: number | null;
   hasUpdate: boolean;
   installedVersion: string;
   isChecking: boolean;
@@ -95,14 +99,18 @@ export function engineSectionView({
 }): EngineSectionView {
   const activeWebVersion = otaState?.activeBundleVersion ?? appBuild;
   const installedVersion = unifiedVersion(activeWebVersion) ?? appBuild;
-  const latestVersion = appVersionState?.version && compareBrightVersions(appVersionState.version, installedVersion) >= 0
-    ? appVersionState.version
-    : installedVersion;
+  const latestVersion = latestKnownVersion(
+    installedVersion,
+    appVersionState?.version,
+    unifiedVersion(otaState?.candidateBundleVersion),
+    unifiedVersion(otaState?.downloadProgressVersion),
+  );
   const nativeApk = nativeApkLabel(otaState) ?? (appVersionState?.latest.apk ? `${appVersionState.latest.apk.version}` : null);
   const isChecking = otaRefreshing || versionRefreshing || Boolean(otaState?.checkInProgress);
   const visibleState =
     !isChecking && otaState?.lastCheckStatus === "checking" ? { ...otaState, lastCheckStatus: "unknown" } : otaState;
   const hasUpdate = compareBrightVersions(latestVersion, installedVersion) > 0 || hasReadyOtaUpdate(visibleState);
+  const androidUpdateStage = androidStage(visibleState, hasUpdate);
   const updateStatus = engineStatusView({
     hasUpdate,
     isChecking,
@@ -114,7 +122,10 @@ export function engineSectionView({
 
   return {
     activeWebVersion,
+    androidUpdateStage,
     appBuild,
+    downloadProgressVersion: visibleState?.downloadProgressVersion ?? null,
+    downloadProgressPercent: progressPercent(visibleState),
     hasUpdate,
     installedVersion,
     isChecking,
@@ -204,7 +215,9 @@ function engineStatusView({
     case "candidate_ready_for_next_start":
     case "ready_candidate_pending":
     case "candidate_already_pending":
-      return { label: "готово", body: "Обновление скачано. Закрой и открой приложение.", tone: "warn" };
+      return { label: "готово", body: "Закройте приложение, чтобы новая версия применилась.", tone: "warn" };
+    case "downloading":
+      return { label: "загрузка", body: `Загружается версия ${latestVersion}.`, tone: "warn" };
     case "candidate_loading":
       return { label: "загрузка", body: "Запускается новая web-версия.", tone: "warn" };
     case "candidate_failed":
@@ -229,6 +242,33 @@ function engineStatusView({
 
 function hasReadyOtaUpdate(state: BrightOtaState | null): boolean {
   return Boolean(state?.lastCheckStatus && readyStatuses.has(state.lastCheckStatus) && state.candidateBundleVersion);
+}
+
+function androidStage(state: BrightOtaState | null, hasUpdate: boolean): EngineSectionView["androidUpdateStage"] {
+  if (!state) return "idle";
+  if (state.lastCheckStatus && readyStatuses.has(state.lastCheckStatus)) return "ready";
+  if (state.checkInProgress || (state.lastCheckStatus && downloadingStatuses.has(state.lastCheckStatus))) return "downloading";
+  return hasUpdate ? "available" : "idle";
+}
+
+function progressPercent(state: BrightOtaState | null): number | null {
+  const explicit = state?.downloadProgressPercent;
+  if (typeof explicit === "number" && Number.isFinite(explicit)) return clampProgress(explicit);
+  const bytes = state?.downloadProgressBytes;
+  const total = state?.downloadProgressTotalBytes;
+  if (typeof bytes !== "number" || typeof total !== "number" || total <= 0) return null;
+  return clampProgress((bytes / total) * 100);
+}
+
+function clampProgress(value: number): number {
+  return Math.max(0, Math.min(100, Math.round(value)));
+}
+
+function latestKnownVersion(installedVersion: string, ...versions: Array<string | null | undefined>): string {
+  return versions.reduce<string>((latest, version) => {
+    if (!version) return latest;
+    return compareBrightVersions(version, latest) > 0 ? version : latest;
+  }, installedVersion);
 }
 
 function ledgerRows(state: AppVersionState | null): EngineSectionView["ledgerRows"] {

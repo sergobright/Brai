@@ -27,8 +27,8 @@ describe("BrightOsApp settings", () => {
     await openEngineFromProfile();
 
     expect(screen.getByRole("heading", { name: "Engine" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Engine v0.0.10.1" })).toBeInTheDocument();
-    expect(screen.getByText("Журнал версий")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Текущая версия v0.0.10.1" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Проверить обновления" })).toBeInTheDocument();
   });
 
   it("keeps Engine available in the mobile profile drawer outside Actions", async () => {
@@ -72,9 +72,26 @@ describe("BrightOsApp settings", () => {
     render(<BrightOsApp />);
     await openEngineFromProfile();
 
-    await waitFor(() => expect(screen.getByText("Обновление скачано. Закрой и открой приложение.")).toBeInTheDocument());
-    expect(screen.getByText("0.0.11.1")).toBeInTheDocument();
-    expect(screen.getByText("0.0.10.1 (1)")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText("Обновление v0.0.11.1 загружено")).toBeInTheDocument());
+    expect(screen.getAllByText("Закройте приложение, чтобы новая версия применилась.").length).toBeGreaterThan(0);
+  });
+
+  it("shows Android OTA download progress", async () => {
+    stubAndroidCapacitor();
+    otaPlugin.getState.mockResolvedValue({
+      activeBundleVersion: "0.0.10.1",
+      downloadProgressPercent: 66,
+      downloadProgressVersion: "0.0.11.1",
+      checkInProgress: true,
+      lastCheckStatus: "downloading",
+    });
+
+    render(<BrightOsApp />);
+    await openEngineFromProfile();
+
+    await waitFor(() => expect(screen.getByText("Загрузка версии v0.0.11.1")).toBeInTheDocument());
+    expect(screen.getByText("66%")).toBeInTheDocument();
+    expect(screen.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "66");
   });
 
   it.each([
@@ -142,11 +159,10 @@ describe("BrightOsApp settings", () => {
 
     render(<BrightOsApp />);
     await openEngineFromProfile();
-    fireEvent.click(await screen.findByRole("button", { name: "Проверить обновление" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Проверить обновления" }));
 
     await waitFor(() => expect(otaPlugin.checkForUpdates).toHaveBeenCalledTimes(1));
-    expect(await screen.findByText("Обновление скачано. Закрой и открой приложение.")).toBeInTheDocument();
-    expect(screen.getByText("0.0.11.1")).toBeInTheDocument();
+    expect(await screen.findByText("Обновление v0.0.11.1 загружено")).toBeInTheDocument();
   });
 
   it("returns from Settings through the Android back bridge", async () => {

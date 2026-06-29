@@ -45,4 +45,26 @@ describe("engineSectionView", () => {
     expect(view.nativeApk).toBeNull();
     expect(view.hasUpdate).toBe(false);
   });
+
+  it("normalizes Android OTA download progress", () => {
+    const view = engineSectionView({
+      appBuild: "0.0.10.1",
+      appVersionState: null,
+      otaRefreshing: false,
+      otaState: {
+        activeBundleVersion: "0.0.10.1",
+        checkInProgress: true,
+        downloadProgressBytes: 2,
+        downloadProgressTotalBytes: 3,
+        downloadProgressVersion: "0.0.11.1",
+        lastCheckStatus: "downloading",
+      },
+      versionError: false,
+      versionRefreshing: false,
+    });
+
+    expect(view.androidUpdateStage).toBe("downloading");
+    expect(view.downloadProgressPercent).toBe(67);
+    expect(view.downloadProgressVersion).toBe("0.0.11.1");
+  });
 });

@@ -3,13 +3,7 @@
 import { formatGoalDuration, formatPercent } from "@/shared/time/format";
 import type { GoalData } from "@/shared/types/timer";
 import { Card } from "@/shared/ui/card";
-import {
-  Progress,
-  ProgressIndicator,
-  ProgressLabel,
-  ProgressTrack,
-  ProgressValue,
-} from "@/shared/ui/progress";
+import { Progress } from "@/shared/ui/progress";
 import { BarChart, type TooltipProps } from "@/shared/ui/tremor-bar-chart";
 import { SECTION_GRID_CLASS } from "../../appModel";
 import { cx } from "../../appUtils";
@@ -78,15 +72,11 @@ function GoalProgressCard({
 
   return (
     <Card className="min-w-0 gap-4 p-5">
-      <Progress max={Math.max(100, safeValue)} value={safeValue}>
-        <div className="flex items-center justify-between gap-2">
-          <ProgressLabel>{label}</ProgressLabel>
-          <ProgressValue className={valueClassName} />
-        </div>
-        <ProgressTrack>
-          <ProgressIndicator />
-        </ProgressTrack>
-      </Progress>
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-sm font-medium">{label}</span>
+        <span className={cx("text-sm tabular-nums", valueClassName)}>{formatPercent(safeValue)}</span>
+      </div>
+      <Progress max={Math.max(100, safeValue)} value={safeValue} />
       <small className="m-0 text-sm text-muted-foreground">{detail}</small>
     </Card>
   );
