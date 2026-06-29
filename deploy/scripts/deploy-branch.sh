@@ -85,25 +85,7 @@ console.log(parsed.version);
 ' "$ROOT")"
 LEDGER_VERSION=""
 if [[ "$ENVIRONMENT" == "prod" && -z "${BRIGHT_OS_APP_VERSION:-}" ]]; then
-  LEDGER_VERSION="$("$NODE_BIN" -e '
-import { BrightOsStore } from "./services/bright_os_api/src/store.js";
-const store = new BrightOsStore(process.argv[1]);
-try {
-  const row = store.db
-    .prepare(`
-      SELECT
-        COALESCE(MAX(CASE WHEN version_type_id = 'canon' THEN version END), 0) AS canon,
-        COALESCE(MAX(CASE WHEN version_type_id = 'release' THEN version END), 0) AS release,
-        COALESCE(MAX(CASE WHEN version_type_id = 'build' THEN version END), 0) AS build,
-        COALESCE(MAX(CASE WHEN version_type_id = 'apk' THEN version END), 0) AS apk
-      FROM build_versions
-    `)
-    .get();
-  if (row?.build && row?.apk) console.log(`${row.canon}.${row.release}.${row.build}.${row.apk}`);
-} finally {
-  store.close();
-}
-' "$DB_PATH")"
+  LEDGER_VERSION="$("$NODE_BIN" "$SCRIPT_DIR/resolve-app-version.mjs" --environment prod --root "$ROOT" --db "$DB_PATH")"
 fi
 VERSION="${BRIGHT_OS_APP_VERSION:-${LEDGER_VERSION:-$SOURCE_VERSION}}"
 

@@ -239,6 +239,15 @@ test("native APK detector ignores OTA web-layer changes", () => {
   );
 });
 
+test("production deploy resolves ledger version through the shared resolver", () => {
+  const script = fs.readFileSync(new URL("../deploy/scripts/deploy-branch.sh", import.meta.url), "utf8");
+  assert.match(script, /resolve-app-version\.mjs/);
+  assert.doesNotMatch(script, /version_type_id = 'canon'/);
+  assert.doesNotMatch(script, /version_type_id = 'release'/);
+  assert.doesNotMatch(script, /version_type_id = 'build'/);
+  assert.doesNotMatch(script, /version_type_id = 'apk'/);
+});
+
 test("pre-push ref updates must stay on matching codex ref", () => {
   assert.doesNotThrow(() =>
     validatePushUpdate("refs/heads/codex/foo 1111111111111111111111111111111111111111 refs/heads/codex/foo 0000000000000000000000000000000000000000"),
