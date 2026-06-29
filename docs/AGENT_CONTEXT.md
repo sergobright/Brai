@@ -7,7 +7,6 @@
 ## Где что лежит
 
 - `apps/bright_os_app/` - основной Next.js 16 / React 19 / Capacitor Android клиент.
-- `apps/bright_os_site/` - статический исходник публичного сайта для `brightos.world`.
 - `apps/bright_os_app/AGENTS.md` - локальное правило Next.js: перед правками Next-кода читать релевантные docs из `node_modules/next/dist/docs/`.
 - `apps/bright_os_app/src/app/` - routes, layout, manifest, global CSS.
 - `apps/bright_os_app/src/features/` - пользовательские модули: `app`, `goal`, `history`, `settings`, `timer`.
@@ -20,7 +19,6 @@
 - `services/bright_os_temporal/` - Temporal worker/client для required CI/CD control ledger preview и promotion flows.
 - `admin/` - техническая admin-панель для protected admin subdomain.
 - `deploy/scripts/` - publish scripts; `deploy/systemd/` - service units; `deploy/web/` и `deploy/mobile-update/bundles/` - опубликованные артефакты.
-- `deploy/site/` - сгенерированный public site root, не коммитить.
 - `deploy/ansible/` и `deploy/environments.json` - one-VPS production/preview environment setup and routing source.
 - `docs/operations/branch-preview-environments.md` - branch preview workflow, CI secrets, deploy-user boundary and branch protection steps.
 - `openspec/` - accepted/planned requirements.
@@ -34,7 +32,6 @@
 - `npm run app:lint` - ESLint клиента.
 - `npm run app:test` - Vitest клиента.
 - `npm run app:e2e` - Playwright клиента.
-- `npm run site:publish` - публикация статического public site source в `deploy/site`.
 - `npm run app:cap:sync` - Capacitor sync Android.
 - `npm run android:build:release` - release APK build.
 - `npm run openspec:guard` - проверка, что завершённые OpenSpec changes не оставлены активными.

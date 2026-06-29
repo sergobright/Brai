@@ -1,20 +1,3 @@
-http://{{ bright_os_public_site_domain }} {
-  redir https://{{ bright_os_public_site_domain }}{uri} permanent
-}
-
-{{ bright_os_public_site_domain }} {
-  encode zstd gzip
-  tls {
-    issuer acme {
-      disable_http_challenge
-    }
-  }
-
-  root * {{ bright_os_public_site_root }}
-  try_files {path} {path}.html {path}/ /index.html
-  file_server
-}
-
 {% for name, env in bright_os_envs.items() if name != 'prod' %}
 http://{{ env.domain }} {
   redir https://{{ env.domain }}{uri} permanent

@@ -25,20 +25,6 @@ Bright OS SHALL preserve the existing Caddy route boundaries for web, API proxy,
 - **AND** `/releases*` remains routed to the release/auth flow before the web catch-all
 - **AND** application service ports remain localhost-only
 
-### Requirement: Public site is separated from protected app delivery
-Bright OS SHALL serve the public website from a separate static root from the protected Bright OS app web layer.
-
-#### Scenario: Public site is served
-- **WHEN** `brightos.world` is requested
-- **THEN** Caddy serves the public site static root
-- **AND** Caddy does not apply unified Basic Auth to that route
-- **AND** protected app environments keep their existing authentication boundaries
-
-#### Scenario: Public site assets are published
-- **WHEN** production branch deployment runs
-- **THEN** the public site source is copied to `deploy/site`
-- **AND** the generated public site output is not committed
-
 ### Requirement: Android release uses Capacitor APK artifacts
 Bright OS SHALL publish Capacitor Android APK artifacts through the existing protected release flow after the migration.
 

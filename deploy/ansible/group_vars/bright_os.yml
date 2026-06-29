@@ -3,8 +3,6 @@ bright_os_env_root: /srv/projects/bright-os-envs
 bright_os_node_root: /srv/opt/node-v22.16.0
 bright_os_node_bin: /srv/opt/node-v22.16.0/bin/node
 bright_os_caddyfile: /etc/caddy/Caddyfile
-bright_os_public_site_domain: brightos.world
-bright_os_public_site_root: "{{ bright_os_repo }}/deploy/site"
 bright_os_deploy_user: bright-deploy
 bright_os_deploy_writers: []
 bright_os_service_user: bright-os

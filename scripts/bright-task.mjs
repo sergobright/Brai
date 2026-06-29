@@ -1011,7 +1011,6 @@ function deliveryClassForFile(file) {
   }
   if (
     file.startsWith("apps/bright_os_app/") ||
-    file.startsWith("apps/bright_os_site/") ||
     file.startsWith("services/bright_os_api/") ||
     file.startsWith("assets/brand/")
   ) {

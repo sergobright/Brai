@@ -125,10 +125,6 @@ export NEXT_PUBLIC_BRIGHT_OS_ANDROID_API="$ANDROID_API"
 
 "$SCRIPT_DIR/publish-client-web-layer.sh"
 
-if [[ "$ENVIRONMENT" == "prod" ]]; then
-  "$SCRIPT_DIR/publish-site.sh"
-fi
-
 if [[ "$ENVIRONMENT" != "prod" ]]; then
   find "$TARGET_ROOT" -user "$(id -u)" -exec chmod u+rwX,g+rwX {} +
 fi

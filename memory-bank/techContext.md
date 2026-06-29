@@ -4,7 +4,6 @@ Stack:
 
 - Node.js 22+
 - Next.js 16, React 19, TypeScript, Tailwind CSS
-- Static HTML/CSS for the public site
 - Capacitor Android
 - SQLite through `better-sqlite3`
 - shadcn-compatible local UI primitives
@@ -19,7 +18,6 @@ npm run socraticode:preflight
 npm run openspec:validate
 npm run app:lint
 npm run app:test
-npm run site:publish
 npm --prefix services/bright_os_api test
 ```
 
@@ -37,4 +35,4 @@ Public version baseline:
 - Explicit canon command: add one `canon` row and link unlinked `release` rows.
 - GitHub PR numbers are review metadata and do not define version numbers.
 
-Do not commit SQLite files, APKs, OTA bundles, keystores, `.env` files, private keys, or generated deploy output such as `deploy/site`, `deploy/web`, and `deploy/mobile-update`.
+Do not commit SQLite files, APKs, OTA bundles, keystores, `.env` files, private keys, or generated deploy output such as `deploy/web` and `deploy/mobile-update`.

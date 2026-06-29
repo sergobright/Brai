@@ -126,7 +126,6 @@ case "$SOURCE_ROOT" in
 esac
 
 if [[ "$ENVIRONMENT" == "prod" ]]; then
-  export BRIGHT_OS_SITE_TARGET="$DEPLOY_REPO/deploy/site"
   export BRIGHT_OS_WEB_TARGET="$DEPLOY_REPO/deploy/web"
   export BRIGHT_OS_MOBILE_TARGET="$DEPLOY_REPO/deploy/mobile-update"
   export BRIGHT_OS_DB="$DEPLOY_REPO/data/bright_os.sqlite"

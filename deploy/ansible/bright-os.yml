@@ -135,7 +135,7 @@
         group: "{{ bright_os_deploy_user }}"
         mode: "0775"
 
-    - name: Allow deploy user to publish production site, web, and OTA assets
+    - name: Allow deploy user to publish production web and OTA assets
       ansible.builtin.file:
         path: "{{ item }}"
         state: directory
@@ -143,7 +143,6 @@
         mode: "u=rwX,g=rwX,o=rX"
         recurse: true
       loop:
-        - "{{ bright_os_public_site_root }}"
         - "{{ bright_os_repo }}/deploy/web"
         - "{{ bright_os_repo }}/deploy/mobile-update"
         - "{{ bright_os_repo }}/deploy/releases"
