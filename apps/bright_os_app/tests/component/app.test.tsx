@@ -32,8 +32,8 @@ describe("BrightOsApp shell", () => {
     render(<BrightOsApp />);
 
     await waitFor(() => expect(document.querySelector('[data-slot="sidebar"][data-state="collapsed"]')).toBeInTheDocument());
-    fireEvent.click(screen.getByRole("button", { name: /Engine v/ }));
-    await waitFor(() => expect(screen.getByRole("heading", { name: "Engine" })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: /Angen/ }));
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Angen" })).toBeInTheDocument());
     expect(window.location.pathname).toBe("/engine");
 
     fireEvent.click(screen.getByRole("button", { name: "Настройки" }));
@@ -832,6 +832,7 @@ describe("BrightOsApp shell", () => {
     expect(rail).not.toHaveTextContent("Platform");
     expect(rail).not.toHaveTextContent("Time");
     expect(rail).not.toHaveTextContent("Фокус");
+    expect(screen.getByRole("button", { name: /Angen/ }).closest('[data-sidebar="footer"]')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Свернуть меню" }));
     expect(shell).not.toHaveClass("is-rail-expanded");
@@ -843,7 +844,7 @@ describe("BrightOsApp shell", () => {
     expect(rail).toContainElement(screen.getByRole("button", { name: "Развернуть меню" }));
     expect(rail).toContainElement(screen.getByRole("button", { name: "Настройки" }));
     expect(rail).toContainElement(screen.getByRole("button", { name: "Архив" }));
-    expect(rail).toContainElement(screen.getByRole("button", { name: /Engine v/ }));
+    expect(rail).toContainElement(screen.getByRole("button", { name: /Angen/ }));
     expect(rail).not.toHaveTextContent("Platform");
     expect(rail).not.toHaveTextContent("Time");
     expect(rail).not.toHaveTextContent("Фокус");
@@ -903,7 +904,7 @@ describe("BrightOsApp shell", () => {
     expect(document.querySelector(".mobile-profile-drawer")).toHaveTextContent("Фокус");
     expect(document.querySelector(".mobile-profile-drawer")).toHaveTextContent("Действия");
     expect(within(document.querySelector(".mobile-profile-drawer") as HTMLElement).getByRole("button", { name: "Настройки" })).toBeInTheDocument();
-    expect(within(document.querySelector(".mobile-profile-drawer") as HTMLElement).getByRole("button", { name: /Engine v/ })).toBeInTheDocument();
+    expect(within(document.querySelector(".mobile-profile-drawer") as HTMLElement).getByRole("button", { name: /Angen/ })).toBeInTheDocument();
   });
 });
 

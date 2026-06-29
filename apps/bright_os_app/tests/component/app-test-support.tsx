@@ -119,8 +119,8 @@ export async function openSettingsFromProfile() {
 }
 
 export async function openEngineFromProfile() {
-  await openProfileMenuItem(/Engine v/);
-  await waitFor(() => expect(screen.getByRole("heading", { name: "Engine" })).toBeInTheDocument());
+  await openProfileMenuItem(/^Angen(?: v.+)?$/);
+  await waitFor(() => expect(screen.getByRole("heading", { name: "Angen" })).toBeInTheDocument());
 }
 
 export function swipe(

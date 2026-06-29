@@ -21,25 +21,25 @@ describe("BrightOsApp settings", () => {
     expect(screen.queryByText("APK")).not.toBeInTheDocument();
   });
 
-  it("opens Engine from the profile menu", async () => {
+  it("opens Angen from the profile menu", async () => {
     render(<BrightOsApp />);
 
     await openEngineFromProfile();
 
-    expect(screen.getByRole("heading", { name: "Engine" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Engine v0.0.10.1" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Angen" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Angen v0.0.10.1" })).toBeInTheDocument();
     expect(screen.getByText("Журнал версий")).toBeInTheDocument();
   });
 
-  it("keeps Engine available in the mobile profile drawer outside Actions", async () => {
+  it("keeps Angen available in the mobile profile drawer outside Actions", async () => {
     render(<BrightOsApp initialSection="inbox" />);
 
     await openEngineFromProfile();
 
-    expect(screen.getByRole("heading", { name: "Engine" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Angen" })).toBeInTheDocument();
   });
 
-  it("marks Engine when a newer ledger version is available", async () => {
+  it("marks Angen when a newer ledger version is available", async () => {
     Object.defineProperty(window, "innerWidth", { configurable: true, writable: true, value: 1200 });
     vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL) => {
       const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
@@ -54,7 +54,7 @@ describe("BrightOsApp settings", () => {
 
     render(<BrightOsApp />);
 
-    const engineButton = await screen.findByRole("button", { name: "Engine v0.0.11.1" });
+    const engineButton = await screen.findByRole("button", { name: "Angen v0.0.11.1" });
     expect(engineButton.querySelector(".lucide-download")).toBeInTheDocument();
   });
 
@@ -137,7 +137,7 @@ describe("BrightOsApp settings", () => {
     expect(screen.queryByRole("heading", { name: "Установленный APK не подходит для этой версии" })).not.toBeInTheDocument();
   });
 
-  it("starts an Android OTA check from Engine", async () => {
+  it("starts an Android OTA check from Angen", async () => {
     stubAndroidCapacitor();
 
     render(<BrightOsApp />);

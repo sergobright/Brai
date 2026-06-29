@@ -8,7 +8,7 @@ import { installAndroidBackHandler } from "@/shared/platform/platform";
 import type { BrightOtaState } from "@/shared/platform/ota";
 import { Avatar, AvatarFallback } from "@/shared/ui/avatar";
 import { FloatingDock } from "@/shared/ui/floating-dock";
-import { Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent, SidebarGroupLabel, SidebarHeader, SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarRail, useSidebar } from "@/shared/ui/sidebar";
+import { Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarGroupContent, SidebarGroupLabel, SidebarHeader, SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarRail, useSidebar } from "@/shared/ui/sidebar";
 import { cx } from "../appUtils";
 import { useMobileSheetDrag } from "../hooks/useMobileSheetDrag";
 import type { PrimarySectionId, SectionId } from "../appModel";
@@ -53,6 +53,7 @@ export function DesktopRail({
       <SidebarContent>
         <PageMenu
           expanded={expanded}
+          showEngineItem={false}
           section={section}
           appVersionState={appVersionState}
           otaRefreshing={otaRefreshing}
@@ -65,6 +66,17 @@ export function DesktopRail({
           onLogout={onLogout}
         />
       </SidebarContent>
+      <SidebarFooter>
+        <EngineMenuItem
+          active={section === "engine"}
+          appVersionState={appVersionState}
+          otaRefreshing={otaRefreshing}
+          otaState={otaState}
+          versionError={versionError}
+          versionRefreshing={versionRefreshing}
+          onClick={onEngine}
+        />
+      </SidebarFooter>
       <SidebarRail />
     </Sidebar>
   );
@@ -168,7 +180,7 @@ export function MobileProfileDrawer({
       <div ref={backdropRef} className="absolute inset-0 bg-foreground/15 dark:bg-background/80" style={backdropStyle} aria-hidden="true" />
       <aside
         ref={sheetRef}
-        className="mobile-profile-drawer grid h-full w-4/5 content-start border-r border-border bg-card px-2 pb-4 pt-[calc(12px+env(safe-area-inset-top))] shadow-xl animate-[mobile-drawer-in_180ms_ease-out] [touch-action:pan-y] will-change-transform"
+        className="mobile-profile-drawer flex h-full w-4/5 flex-col border-r border-border bg-card px-2 pb-4 pt-[calc(12px+env(safe-area-inset-top))] shadow-xl animate-[mobile-drawer-in_180ms_ease-out] [touch-action:pan-y] will-change-transform"
         style={sheetStyle}
         aria-label="Профиль"
         {...sheetDragHandlers}
@@ -197,6 +209,7 @@ export function MobileProfileDrawer({
 function PageMenu({
   expanded,
   forceActionMenu = false,
+  showEngineItem = true,
   section,
   appVersionState,
   otaRefreshing,
@@ -210,6 +223,7 @@ function PageMenu({
 }: {
   expanded: boolean;
   forceActionMenu?: boolean;
+  showEngineItem?: boolean;
   section: SectionId;
   appVersionState: AppVersionState | null;
   otaRefreshing: boolean;
@@ -221,15 +235,6 @@ function PageMenu({
   onArchive: () => void;
   onLogout: () => void | Promise<void>;
 }) {
-  const engineView = engineSectionView({
-    appBuild: APP_VERSION,
-    appVersionState,
-    otaRefreshing,
-    otaState,
-    versionError,
-    versionRefreshing,
-  });
-  const EngineIcon = engineView.hasUpdate ? Download : Cpu;
   const showActionMenu = forceActionMenu || section === "actions" || section === "settings" || section === "archive" || section === "engine";
 
   return (
@@ -254,17 +259,56 @@ function PageMenu({
           </SidebarGroupContent>
         </SidebarGroup>
       ) : null}
-      {showActionMenu ? (
+      {showActionMenu && showEngineItem ? (
         <SidebarGroup className="mt-auto">
           <SidebarGroupContent>
             <SidebarMenu>
-              <ActionMenuItem icon={EngineIcon} label={`Engine v${engineView.latestVersion}`} active={section === "engine"} onClick={onEngine} />
+              <EngineMenuItem
+                active={section === "engine"}
+                appVersionState={appVersionState}
+                otaRefreshing={otaRefreshing}
+                otaState={otaState}
+                versionError={versionError}
+                versionRefreshing={versionRefreshing}
+                onClick={onEngine}
+              />
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
       ) : null}
     </>
   );
+}
+
+function EngineMenuItem({
+  active,
+  appVersionState,
+  otaRefreshing,
+  otaState,
+  versionError,
+  versionRefreshing,
+  onClick,
+}: {
+  active: boolean;
+  appVersionState: AppVersionState | null;
+  otaRefreshing: boolean;
+  otaState: BrightOtaState | null;
+  versionError: boolean;
+  versionRefreshing: boolean;
+  onClick: () => void;
+}) {
+  const view = engineSectionView({
+    appBuild: APP_VERSION,
+    appVersionState,
+    otaRefreshing,
+    otaState,
+    versionError,
+    versionRefreshing,
+  });
+  const Icon = view.hasUpdate ? Download : Cpu;
+  const label = view.latestVersion ? `Angen v${view.latestVersion}` : "Angen";
+
+  return <ActionMenuItem icon={Icon} label={label} active={active} onClick={onClick} />;
 }
 
 function ActionMenuItem({

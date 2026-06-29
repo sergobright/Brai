@@ -19,7 +19,7 @@ export const FOCUS_BACKGROUND_STORAGE_KEY = "bright_os_focus_background";
 export function sectionTitle(section: SectionId): string {
   if (section === "archive") return "Архив";
   if (section === "settings") return "Настройки";
-  if (section === "engine") return "Engine";
+  if (section === "engine") return "Angen";
   if (section === "evil-eye") return "Evil Eye";
   if (section === "inbox") return "Входящие";
   return navItems.find((item) => item.id === section)?.label ?? "Фокус";

@@ -63,7 +63,7 @@ export type EngineSectionView = {
   hasUpdate: boolean;
   installedVersion: string;
   isChecking: boolean;
-  latestVersion: string;
+  latestVersion: string | null;
   ledgerRows: Array<{
     id: VersionTypeId;
     label: string;
@@ -71,7 +71,7 @@ export type EngineSectionView = {
     shortChanges: string;
     releasedAtUtc: string;
   }>;
-  nativeApk: string;
+  nativeApk: string | null;
   updateStatus: UpdateStatusView;
 };
 
@@ -95,12 +95,12 @@ export function engineSectionView({
 }): EngineSectionView {
   const activeWebVersion = otaState?.activeBundleVersion ?? appBuild;
   const installedVersion = unifiedVersion(activeWebVersion) ?? appBuild;
-  const latestVersion = appVersionState?.version ?? installedVersion;
-  const nativeApk = nativeApkLabel(otaState) ?? appBuild;
+  const latestVersion = appVersionState?.version ?? null;
+  const nativeApk = nativeApkLabel(otaState) ?? (appVersionState?.latest.apk ? `${appVersionState.latest.apk.version}` : null);
   const isChecking = otaRefreshing || versionRefreshing || Boolean(otaState?.checkInProgress);
   const visibleState =
     !isChecking && otaState?.lastCheckStatus === "checking" ? { ...otaState, lastCheckStatus: "unknown" } : otaState;
-  const hasUpdate = compareBrightVersions(latestVersion, installedVersion) > 0 || hasReadyOtaUpdate(visibleState);
+  const hasUpdate = Boolean(latestVersion && compareBrightVersions(latestVersion, installedVersion) > 0) || hasReadyOtaUpdate(visibleState);
   const updateStatus = engineStatusView({
     hasUpdate,
     isChecking,
@@ -191,7 +191,7 @@ function engineStatusView({
 }: {
   hasUpdate: boolean;
   isChecking: boolean;
-  latestVersion: string;
+  latestVersion: string | null;
   otaState: BrightOtaState | null;
   versionError: boolean;
   versionKnown: boolean;
@@ -220,7 +220,7 @@ function engineStatusView({
       break;
   }
 
-  if (hasUpdate) return { label: "доступно", body: `Доступна версия ${latestVersion}.`, tone: "warn" };
+  if (hasUpdate && latestVersion) return { label: "доступно", body: `Доступна версия ${latestVersion}.`, tone: "warn" };
   if (versionError && !versionKnown) return { label: "нет связи", body: "Не удалось проверить последнюю версию.", tone: "muted" };
   return { label: "актуально", body: "Установлена текущая версия Bright OS.", tone: "ok" };
 }

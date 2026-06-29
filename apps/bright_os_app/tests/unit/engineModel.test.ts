@@ -25,4 +25,19 @@ describe("engineSectionView", () => {
     expect(compareBrightVersions("0.11.52.1", "0.11.52.1.42")).toBe(0);
     expect(compareBrightVersions("0.10.52.1", "0.11.1.1")).toBeLessThan(0);
   });
+
+  it("does not invent the latest version from the installed web build", () => {
+    const view = engineSectionView({
+      appBuild: "0.0.1.1",
+      appVersionState: null,
+      otaRefreshing: false,
+      otaState: null,
+      versionError: false,
+      versionRefreshing: false,
+    });
+
+    expect(view.latestVersion).toBeNull();
+    expect(view.nativeApk).toBeNull();
+    expect(view.hasUpdate).toBe(false);
+  });
 });

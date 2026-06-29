@@ -49,10 +49,11 @@ export function EngineSection({
     versionError,
     versionRefreshing,
   });
+  const title = view.latestVersion ? `Angen v${view.latestVersion}` : "Angen";
   const Icon = view.hasUpdate ? Download : Cpu;
   const rows = [
     { label: "Web", value: view.activeWebVersion },
-    { label: "Последняя", value: view.latestVersion },
+    view.latestVersion ? { label: "Последняя", value: view.latestVersion } : null,
     { label: "APK", value: view.nativeApk },
     otaState?.candidateBundleVersion ? { label: "Готово", value: otaState.candidateBundleVersion } : null,
     bundlePublishedAt ? { label: "Опубликовано", value: moscowDateTime(bundlePublishedAt) } : null,
@@ -61,7 +62,7 @@ export function EngineSection({
   ].filter((row): row is { label: string; value: string } => Boolean(row?.value));
 
   return (
-    <section className={SECTION_GRID_CLASS} aria-label="Engine">
+    <section className={SECTION_GRID_CLASS} aria-label="Angen">
       <Card className="grid gap-5 p-4">
         <div className="flex items-start justify-between gap-3.5 max-[560px]:flex-col">
           <div className="flex min-w-0 items-start gap-3">
@@ -69,8 +70,8 @@ export function EngineSection({
               <Icon className="size-5" aria-hidden="true" />
             </div>
             <div className="min-w-0">
-              <p className="m-0 text-xs font-semibold uppercase text-muted-foreground">Bright OS Engine</p>
-              <h2 className="m-0 text-2xl leading-tight tracking-normal">Engine v{view.latestVersion}</h2>
+              <p className="m-0 text-xs font-semibold uppercase text-muted-foreground">Bright OS Angen</p>
+              <h2 className="m-0 text-2xl leading-tight tracking-normal">{title}</h2>
               <p className="m-0 text-sm leading-6 text-muted-foreground">{view.updateStatus.body}</p>
             </div>
           </div>

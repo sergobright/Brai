@@ -18,7 +18,7 @@ test("shows Settings without update state", async ({ page }, testInfo) => {
   await expect(page.getByRole("button", { name: "Выйти" })).toHaveCount(testInfo.project.name === "desktop" ? 1 : 0);
 });
 
-test("opens Engine from the profile menu", async ({ page }) => {
+test("opens Angen from the profile menu", async ({ page }) => {
   await page.route("**/api/v1/version", (route) => route.fulfill({
     contentType: "application/json",
     body: JSON.stringify({
@@ -47,8 +47,8 @@ test("opens Engine from the profile menu", async ({ page }) => {
   await page.goto("/");
   await openEngineFromProfile(page);
 
-  await expect(page.getByRole("heading", { name: "Engine", exact: true })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Engine v0.11.52.1" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Angen", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Angen v0.11.52.1" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Проверить обновление" })).toBeVisible();
   await expect(page.getByText("Build 52")).toBeVisible();
 });
