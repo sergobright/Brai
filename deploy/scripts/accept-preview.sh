@@ -54,6 +54,24 @@ run_bright_node() {
   node "$@"
 }
 
+ensure_acceptance_marker_writable() {
+  local dir="$ROOT/.bright-task"
+  local probe
+  if [[ -L "$dir" ]]; then
+    echo "Bright OS task state must not be a symlink: $dir" >&2
+    exit 1
+  fi
+  if ! mkdir -p "$dir"; then
+    echo "Cannot create Bright OS task state directory: $dir" >&2
+    exit 1
+  fi
+  if ! probe="$(mktemp "$dir/.acceptance-write.XXXXXX")"; then
+    echo "Cannot write Bright OS acceptance receipt under $dir; repair task-state permissions before accepting preview work." >&2
+    exit 1
+  fi
+  rm -f "$probe"
+}
+
 write_acceptance_marker() {
   local status="$1"
   local pr_number="${2:-}"
@@ -85,6 +103,8 @@ if [[ -n "$(git status --porcelain)" ]]; then
   echo "Working tree must be clean before accepting preview work." >&2
   exit 1
 fi
+
+ensure_acceptance_marker_writable
 
 git fetch origin "$BASE_BRANCH:refs/remotes/origin/$BASE_BRANCH" "$BRANCH:refs/remotes/origin/$BRANCH"
 HEAD_SHA="$(git rev-parse "origin/$BRANCH")"
