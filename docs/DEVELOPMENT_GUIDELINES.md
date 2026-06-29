@@ -12,6 +12,10 @@ This document is the index for project rules. `AGENTS.md` routes here; detailed 
 6. `memory-bank/`
 7. Real repository state
 
+## Rule Ownership
+
+Each procedural rule must have one canonical home. Other files may only route to that home or summarize it without adding conditions, exceptions, or independent interpretation. When a rule changes, update the canonical source and replace conflicting duplicates with links.
+
 ## Read Before Work
 
 | Task | Guideline |
