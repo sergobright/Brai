@@ -236,6 +236,38 @@ export const deploymentMethods = {
       .get(versionTypeId);
   },
 
+  currentAppVersion() {
+    const rows = this.db
+      .prepare(`
+        SELECT build_versions.*
+        FROM build_versions
+        JOIN (
+          SELECT version_type_id, MAX(version) AS version
+          FROM build_versions
+          GROUP BY version_type_id
+        ) latest
+          ON latest.version_type_id = build_versions.version_type_id
+         AND latest.version = build_versions.version
+      `)
+      .all();
+    const latest = { canon: null, release: null, build: null, apk: null };
+    for (const row of rows) {
+      if (Object.hasOwn(latest, row.version_type_id)) latest[row.version_type_id] = formatBuildVersionRow(row);
+    }
+    const parts = {
+      canon: latest.canon?.version ?? 0,
+      release: latest.release?.version ?? 0,
+      build: latest.build?.version ?? 0,
+      apk: latest.apk?.version ?? 0,
+    };
+
+    return {
+      version: `${parts.canon}.${parts.release}.${parts.build}.${parts.apk}`,
+      parts,
+      latest,
+    };
+  },
+
   upsertBuildVersion({
     versionTypeId,
     version,
@@ -360,4 +392,18 @@ function reasonFromChanges(detailedChanges, shortChanges) {
   const text = usefulChanges(detailedChanges) || usefulChanges(shortChanges);
   if (!text) return '';
   return `Needed because ${text.replace(/\.$/, '').replace(/^./, (letter) => letter.toLowerCase())}.`;
+}
+
+function formatBuildVersionRow(row) {
+  return {
+    id: row.id,
+    version_type_id: row.version_type_id,
+    version: row.version,
+    included_in_version_id: row.included_in_version_id,
+    short_changes: row.short_changes,
+    detailed_changes: row.detailed_changes,
+    reason: row.reason,
+    released_at_utc: row.released_at_utc,
+    created_at_utc: row.created_at_utc,
+  };
 }

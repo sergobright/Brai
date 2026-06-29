@@ -1,8 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useRef, type TouchEventHandler } from "react";
-import { Archive, LogOut, Menu, PanelLeftClose, Settings, type LucideIcon } from "lucide-react";
+import { Archive, Cpu, Download, LogOut, Menu, PanelLeftClose, Settings, type LucideIcon } from "lucide-react";
+import type { AppVersionState } from "@/shared/api/brightOsApi";
+import { APP_VERSION } from "@/shared/config/runtime";
 import { installAndroidBackHandler } from "@/shared/platform/platform";
+import type { BrightOtaState } from "@/shared/platform/ota";
 import { Avatar, AvatarFallback } from "@/shared/ui/avatar";
 import { FloatingDock } from "@/shared/ui/floating-dock";
 import { Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent, SidebarGroupLabel, SidebarHeader, SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarRail, useSidebar } from "@/shared/ui/sidebar";
@@ -10,17 +13,30 @@ import { cx } from "../appUtils";
 import { useMobileSheetDrag } from "../hooks/useMobileSheetDrag";
 import type { PrimarySectionId, SectionId } from "../appModel";
 import { isPrimarySection, navHref, navItems, sectionTitle } from "../appModel";
+import { engineSectionView } from "../sections/engine/engineModel";
 
 export function DesktopRail({
   expanded,
   section,
+  appVersionState,
+  otaRefreshing,
+  otaState,
+  versionError,
+  versionRefreshing,
   onSettings,
+  onEngine,
   onArchive,
   onLogout,
 }: {
   expanded: boolean;
   section: SectionId;
+  appVersionState: AppVersionState | null;
+  otaRefreshing: boolean;
+  otaState: BrightOtaState | null;
+  versionError: boolean;
+  versionRefreshing: boolean;
   onSettings: () => void;
+  onEngine: () => void;
   onArchive: () => void;
   onLogout: () => Promise<void>;
 }) {
@@ -35,7 +51,19 @@ export function DesktopRail({
         <RailCollapseButton />
       </SidebarHeader>
       <SidebarContent>
-        <PageMenu expanded={expanded} section={section} onSettings={onSettings} onArchive={onArchive} onLogout={onLogout} />
+        <PageMenu
+          expanded={expanded}
+          section={section}
+          appVersionState={appVersionState}
+          otaRefreshing={otaRefreshing}
+          otaState={otaState}
+          versionError={versionError}
+          versionRefreshing={versionRefreshing}
+          onSettings={onSettings}
+          onEngine={onEngine}
+          onArchive={onArchive}
+          onLogout={onLogout}
+        />
       </SidebarContent>
       <SidebarRail />
     </Sidebar>
@@ -57,14 +85,26 @@ export function MobileMenuButton({ onClick }: { onClick: () => void }) {
 
 export function MobileProfileDrawer({
   section,
+  appVersionState,
+  otaRefreshing,
+  otaState,
+  versionError,
+  versionRefreshing,
   onClose,
   onSettings,
+  onEngine,
   onArchive,
   onLogout,
 }: {
   section: SectionId;
+  appVersionState: AppVersionState | null;
+  otaRefreshing: boolean;
+  otaState: BrightOtaState | null;
+  versionError: boolean;
+  versionRefreshing: boolean;
   onClose: () => void;
   onSettings: () => void;
+  onEngine: () => void;
   onArchive: () => void;
   onLogout: () => Promise<void>;
 }) {
@@ -77,7 +117,7 @@ export function MobileProfileDrawer({
   }, [onClose]);
   const { backdropRef, backdropStyle, closeWithAnimation, resetOpen, sheetDragHandlers, sheetRef, sheetStyle } = useMobileSheetDrag({
     axis: "x",
-    excludeControls: false,
+    excludeControls: true,
     onClose: finishClose,
   });
 
@@ -136,9 +176,16 @@ export function MobileProfileDrawer({
       >
         <ProfileMenu />
         <PageMenu
+          forceActionMenu
           expanded
           section={section}
+          appVersionState={appVersionState}
+          otaRefreshing={otaRefreshing}
+          otaState={otaState}
+          versionError={versionError}
+          versionRefreshing={versionRefreshing}
           onSettings={() => closeThen(onSettings)}
+          onEngine={() => closeThen(onEngine)}
           onArchive={() => closeThen(onArchive)}
           onLogout={() => closeThenAsync(onLogout)}
         />
@@ -149,35 +196,69 @@ export function MobileProfileDrawer({
 
 function PageMenu({
   expanded,
+  forceActionMenu = false,
   section,
+  appVersionState,
+  otaRefreshing,
+  otaState,
+  versionError,
+  versionRefreshing,
   onSettings,
+  onEngine,
   onArchive,
   onLogout,
 }: {
   expanded: boolean;
+  forceActionMenu?: boolean;
   section: SectionId;
+  appVersionState: AppVersionState | null;
+  otaRefreshing: boolean;
+  otaState: BrightOtaState | null;
+  versionError: boolean;
+  versionRefreshing: boolean;
   onSettings: () => void;
+  onEngine: () => void;
   onArchive: () => void;
   onLogout: () => void | Promise<void>;
 }) {
-  if (!expanded) return null;
+  const engineView = engineSectionView({
+    appBuild: APP_VERSION,
+    appVersionState,
+    otaRefreshing,
+    otaState,
+    versionError,
+    versionRefreshing,
+  });
+  const EngineIcon = engineView.hasUpdate ? Download : Cpu;
+  const showActionMenu = forceActionMenu || section === "actions" || section === "settings" || section === "archive" || section === "engine";
 
   return (
     <>
-      <SidebarGroup>
-        <SidebarGroupLabel>Меню страницы</SidebarGroupLabel>
-        <SidebarGroupContent>
-          <div className="px-2 py-1.5 text-sm font-medium text-sidebar-foreground">{sectionTitle(section)}</div>
-        </SidebarGroupContent>
-      </SidebarGroup>
-      {section === "actions" ? (
+      {expanded ? (
+        <SidebarGroup>
+          <SidebarGroupLabel>Меню страницы</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <div className="px-2 py-1.5 text-sm font-medium text-sidebar-foreground">{sectionTitle(section)}</div>
+          </SidebarGroupContent>
+        </SidebarGroup>
+      ) : null}
+      {showActionMenu ? (
         <SidebarGroup>
           <SidebarGroupLabel>Действия</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              <ActionMenuItem icon={Settings} label="Настройки" onClick={onSettings} />
-              <ActionMenuItem icon={Archive} label="Архив" onClick={onArchive} />
+              <ActionMenuItem icon={Settings} label="Настройки" active={section === "settings"} onClick={onSettings} />
+              <ActionMenuItem icon={Archive} label="Архив" active={section === "archive"} onClick={onArchive} />
               <ActionMenuItem icon={LogOut} label="Выйти" onClick={onLogout} />
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+      ) : null}
+      {showActionMenu ? (
+        <SidebarGroup className="mt-auto">
+          <SidebarGroupContent>
+            <SidebarMenu>
+              <ActionMenuItem icon={EngineIcon} label={`Engine v${engineView.latestVersion}`} active={section === "engine"} onClick={onEngine} />
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
@@ -189,15 +270,17 @@ function PageMenu({
 function ActionMenuItem({
   icon: Icon,
   label,
+  active = false,
   onClick,
 }: {
   icon: LucideIcon;
   label: string;
+  active?: boolean;
   onClick: () => void | Promise<void>;
 }) {
   return (
     <SidebarMenuItem>
-      <SidebarMenuButton type="button" onClick={() => void onClick()}>
+      <SidebarMenuButton type="button" isActive={active} tooltip={label} onClick={() => void onClick()}>
         <Icon aria-hidden="true" />
         <span>{label}</span>
       </SidebarMenuButton>

@@ -51,7 +51,16 @@ export function setupBrightOsAppTest() {
       candidateBundleVersion: "0.0.11.1",
       lastCheckStatus: "candidate_ready_for_next_start",
     });
-    vi.stubGlobal("fetch", vi.fn(async () => Promise.reject(new Error("offline"))));
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      if (url.endsWith("/v1/version")) {
+        return new Response(JSON.stringify(testVersionState("0.0.10.1")), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return Promise.reject(new Error("offline"));
+    }));
     vi.stubGlobal(
       "matchMedia",
       vi.fn((query: string) => ({
@@ -99,7 +108,7 @@ export async function openProfileMenu() {
   });
 }
 
-export async function openProfileMenuItem(name: string) {
+export async function openProfileMenuItem(name: string | RegExp) {
   const drawer = await openProfileMenu();
   fireEvent.click(within(drawer).getByRole("button", { name }));
 }
@@ -107,6 +116,11 @@ export async function openProfileMenuItem(name: string) {
 export async function openSettingsFromProfile() {
   await openProfileMenuItem("Настройки");
   await waitFor(() => expect(screen.getByRole("heading", { name: "Настройки" })).toBeInTheDocument());
+}
+
+export async function openEngineFromProfile() {
+  await openProfileMenuItem(/Engine v/);
+  await waitFor(() => expect(screen.getByRole("heading", { name: "Engine" })).toBeInTheDocument());
 }
 
 export function swipe(
@@ -151,5 +165,34 @@ export function cachedActivitiesState(id: string, title: string, descriptionMd =
       },
     ],
     archived_actions: [],
+  };
+}
+
+export function testVersionState(version: string) {
+  const [canon, release, build, apk] = version.split(".").map(Number);
+  return {
+    server_time_utc: "2026-06-29T12:00:00.000Z",
+    version,
+    parts: { canon, release, build, apk },
+    latest: {
+      canon: null,
+      release: release > 0 ? versionRow("release", release, "Release changes.") : null,
+      build: versionRow("build", build, "Build changes."),
+      apk: versionRow("apk", apk, "APK changes."),
+    },
+  };
+}
+
+function versionRow(type: "release" | "build" | "apk", version: number, shortChanges: string) {
+  return {
+    id: version,
+    version_type_id: type,
+    version,
+    included_in_version_id: null,
+    short_changes: shortChanges,
+    detailed_changes: shortChanges,
+    reason: shortChanges,
+    released_at_utc: "2026-06-29T12:00:00.000Z",
+    created_at_utc: "2026-06-29T12:00:00.000Z",
   };
 }

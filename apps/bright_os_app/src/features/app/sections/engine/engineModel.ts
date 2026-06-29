@@ -1,3 +1,4 @@
+import type { AppVersionState, VersionTypeId } from "@/shared/api/brightOsApi";
 import type { BrightOtaState } from "@/shared/platform/ota";
 import type { Tone } from "../../appModel";
 
@@ -41,92 +42,112 @@ const updateErrorMessages: Record<string, string> = {
   unexpected_update_error: "Попробуй проверить его еще раз.",
 };
 
+const readyStatuses = new Set(["candidate_ready_for_next_start", "ready_candidate_pending", "candidate_already_pending"]);
+const ledgerLabels: Record<VersionTypeId, string> = {
+  release: "Release",
+  build: "Build",
+  apk: "APK",
+  canon: "Canon",
+};
+const ledgerOrder: VersionTypeId[] = ["release", "build", "apk", "canon"];
+
 export type UpdateStatusView = {
   label: string;
   body: string;
   tone: Tone;
 };
 
-export type SettingsSectionView = {
+export type EngineSectionView = {
   activeWebVersion: string;
   appBuild: string;
+  hasUpdate: boolean;
+  installedVersion: string;
   isChecking: boolean;
+  latestVersion: string;
+  ledgerRows: Array<{
+    id: VersionTypeId;
+    label: string;
+    version: string;
+    shortChanges: string;
+    releasedAtUtc: string;
+  }>;
   nativeApk: string;
   updateStatus: UpdateStatusView;
 };
 
-export function settingsSectionView({
+/**
+ * Combines runtime ledger and native OTA state into the Engine page view.
+ */
+export function engineSectionView({
   appBuild,
+  appVersionState,
   otaRefreshing,
   otaState,
+  versionError,
+  versionRefreshing,
 }: {
   appBuild: string;
+  appVersionState: AppVersionState | null;
   otaRefreshing: boolean;
   otaState: BrightOtaState | null;
-}): SettingsSectionView {
+  versionError: boolean;
+  versionRefreshing: boolean;
+}): EngineSectionView {
+  const activeWebVersion = otaState?.activeBundleVersion ?? appBuild;
+  const installedVersion = unifiedVersion(activeWebVersion) ?? appBuild;
+  const latestVersion = appVersionState?.version ?? installedVersion;
   const nativeApk = nativeApkLabel(otaState) ?? appBuild;
-  const activeWebVersion = otaState?.activeBundleVersion ?? `из APK (${appBuild})`;
-  const isChecking = otaRefreshing || Boolean(otaState?.checkInProgress);
+  const isChecking = otaRefreshing || versionRefreshing || Boolean(otaState?.checkInProgress);
   const visibleState =
     !isChecking && otaState?.lastCheckStatus === "checking" ? { ...otaState, lastCheckStatus: "unknown" } : otaState;
-  const updateStatus = updateStatusView(
-    isChecking ? { activeBundleVersion: activeWebVersion, lastCheckStatus: "checking" } : visibleState,
-  );
-  return { activeWebVersion, appBuild, isChecking, nativeApk, updateStatus };
+  const hasUpdate = compareBrightVersions(latestVersion, installedVersion) > 0 || hasReadyOtaUpdate(visibleState);
+  const updateStatus = engineStatusView({
+    hasUpdate,
+    isChecking,
+    latestVersion,
+    otaState: visibleState,
+    versionError,
+    versionKnown: Boolean(appVersionState),
+  });
+
+  return {
+    activeWebVersion,
+    appBuild,
+    hasUpdate,
+    installedVersion,
+    isChecking,
+    latestVersion,
+    ledgerRows: ledgerRows(appVersionState),
+    nativeApk,
+    updateStatus,
+  };
 }
 
+/**
+ * Compares Bright OS X.Y.Z.S versions and ignores non-production suffixes.
+ */
+export function compareBrightVersions(left: string, right: string): number {
+  const leftParts = brightVersionParts(left);
+  const rightParts = brightVersionParts(right);
+  if (!leftParts || !rightParts) return 0;
+  for (let index = 0; index < leftParts.length; index += 1) {
+    if (leftParts[index] !== rightParts[index]) return leftParts[index] - rightParts[index];
+  }
+  return 0;
+}
+
+/**
+ * Formats the native APK identity from the Android OTA bridge state.
+ */
 export function nativeApkLabel(state: BrightOtaState | null): string | null {
   if (state?.nativeVersionName) {
     const version = isUnifiedVersion(state.nativeVersionName) || !state.nativeBuild ? state.nativeVersionName : `${state.nativeVersionName}+${state.nativeBuild}`;
     return state.nativeVersionCode ? `${version} (${state.nativeVersionCode})` : version;
   }
-  const unifiedMatch = state?.fallbackBundleVersion?.match(/^(\d+\.\d+\.\d+\.\d+)(?:$|[.+-])/);
-  if (unifiedMatch) return unifiedMatch[1];
+  const fallbackUnified = unifiedVersion(state?.fallbackBundleVersion);
+  if (fallbackUnified) return fallbackUnified;
   const match = state?.fallbackBundleVersion?.match(/^([0-9.]+)\+([0-9]+)\.web\./);
   return match ? `${match[1]}+${match[2]}` : null;
-}
-
-function isUnifiedVersion(value: string): boolean {
-  return /^\d+\.\d+\.\d+\.\d+$/.test(value);
-}
-
-/**
- * Maps native OTA state into the compact Settings update status copy.
- */
-export function updateStatusView(state: BrightOtaState | null): UpdateStatusView {
-  if (!state) {
-    return {
-      label: "web",
-      body: "В браузере обновление появится после перезагрузки страницы.",
-      tone: "muted",
-    };
-  }
-
-  switch (state.lastCheckStatus) {
-    case "checking":
-      return { label: "проверка", body: "Проверяем, есть ли новая web-версия.", tone: "muted" };
-    case "candidate_ready_for_next_start":
-    case "ready_candidate_pending":
-    case "candidate_already_pending":
-      return { label: "готово", body: "Обновление скачано. Закрой и открой приложение.", tone: "warn" };
-    case "candidate_loading":
-      return { label: "загрузка", body: "Запускается новая web-версия.", tone: "warn" };
-    case "candidate_failed":
-    case "check_failed":
-      return { label: "ошибка", body: `Обновление не установилось. ${humanUpdateError(state.lastUpdateError)}`, tone: "bad" };
-    case "skipped_failed_bundle":
-      return {
-        label: "пропущено",
-        body: "Эта web-версия уже не запустилась на телефоне. Дождись следующей версии или установи новый APK.",
-        tone: "bad",
-      };
-    case "incompatible":
-      return { label: "нужен APK", body: "Для этой web-версии нужно установить новый APK.", tone: "bad" };
-    case "startup_fallback":
-      return { label: "из APK", body: "Работает web-версия, встроенная в APK.", tone: "muted" };
-    default:
-      return { label: "активно", body: "Установлена текущая web-версия.", tone: "ok" };
-  }
 }
 
 /**
@@ -158,4 +179,83 @@ export function humanUpdateError(raw: string | null | undefined): string {
     return updateErrorMessages.network_timeout;
   }
   return updateErrorMessages.unexpected_update_error;
+}
+
+function engineStatusView({
+  hasUpdate,
+  isChecking,
+  latestVersion,
+  otaState,
+  versionError,
+  versionKnown,
+}: {
+  hasUpdate: boolean;
+  isChecking: boolean;
+  latestVersion: string;
+  otaState: BrightOtaState | null;
+  versionError: boolean;
+  versionKnown: boolean;
+}): UpdateStatusView {
+  if (isChecking) return { label: "проверка", body: "Проверяем версии Bright OS.", tone: "muted" };
+
+  switch (otaState?.lastCheckStatus) {
+    case "candidate_ready_for_next_start":
+    case "ready_candidate_pending":
+    case "candidate_already_pending":
+      return { label: "готово", body: "Обновление скачано. Закрой и открой приложение.", tone: "warn" };
+    case "candidate_loading":
+      return { label: "загрузка", body: "Запускается новая web-версия.", tone: "warn" };
+    case "candidate_failed":
+    case "check_failed":
+      return { label: "ошибка", body: `Обновление не установилось. ${humanUpdateError(otaState.lastUpdateError)}`, tone: "bad" };
+    case "skipped_failed_bundle":
+      return {
+        label: "пропущено",
+        body: "Эта web-версия уже не запустилась на телефоне. Дождись следующей версии или установи новый APK.",
+        tone: "bad",
+      };
+    case "incompatible":
+      return { label: "нужен APK", body: "Для этой web-версии нужно установить новый APK.", tone: "bad" };
+    default:
+      break;
+  }
+
+  if (hasUpdate) return { label: "доступно", body: `Доступна версия ${latestVersion}.`, tone: "warn" };
+  if (versionError && !versionKnown) return { label: "нет связи", body: "Не удалось проверить последнюю версию.", tone: "muted" };
+  return { label: "актуально", body: "Установлена текущая версия Bright OS.", tone: "ok" };
+}
+
+function hasReadyOtaUpdate(state: BrightOtaState | null): boolean {
+  return Boolean(state?.lastCheckStatus && readyStatuses.has(state.lastCheckStatus) && state.candidateBundleVersion);
+}
+
+function ledgerRows(state: AppVersionState | null): EngineSectionView["ledgerRows"] {
+  if (!state) return [];
+  return ledgerOrder.flatMap((id) => {
+    const row = state.latest[id];
+    return row
+      ? [{
+          id,
+          label: ledgerLabels[id],
+          version: `${row.version}`,
+          shortChanges: row.short_changes,
+          releasedAtUtc: row.released_at_utc,
+        }]
+      : [];
+  });
+}
+
+function brightVersionParts(value: string | null | undefined): [number, number, number, number] | null {
+  const match = value?.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)/);
+  if (!match) return null;
+  return [Number(match[1]), Number(match[2]), Number(match[3]), Number(match[4])];
+}
+
+function isUnifiedVersion(value: string): boolean {
+  return /^\d+\.\d+\.\d+\.\d+$/.test(value);
+}
+
+function unifiedVersion(value: string | null | undefined): string | null {
+  const match = value?.match(/^(\d+\.\d+\.\d+\.\d+)(?:$|[.+-])/);
+  return match?.[1] ?? null;
 }

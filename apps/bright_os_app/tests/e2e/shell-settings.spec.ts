@@ -1,11 +1,8 @@
 import { expect, test } from "@playwright/test";
-import { openProfileMenuItem, openSettingsFromProfile } from "./shell-helpers";
+import { openEngineFromProfile, openProfileMenuItem, openSettingsFromProfile } from "./shell-helpers";
 
-test("shows update-focused Settings without duplicate sync", async ({ page }, testInfo) => {
+test("shows Settings without update state", async ({ page }, testInfo) => {
   await page.goto("/");
-  if (testInfo.project.name === "mobile") {
-    await page.locator(".section-page-current .mobile-menu-button").click();
-  }
   await openSettingsFromProfile(page);
 
   await expect(page.getByRole("heading", { name: "Настройки" })).toBeVisible();
@@ -14,11 +11,46 @@ test("shows update-focused Settings without duplicate sync", async ({ page }, te
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
   await expect(page.getByRole("button", { name: "Включить светлую тему" })).toBeVisible();
   await expect(page.getByRole("button", { name: /открыть выбор цвета/ })).toHaveCount(0);
-  await expect(page.getByRole("heading", { name: "Обновление" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Обновление" })).toHaveCount(0);
   await expect(page.getByRole("heading", { name: "Архив" })).toHaveCount(0);
   await expect(page.getByRole("heading", { name: "Синхронизация" })).toHaveCount(0);
-  await expect(page.getByText("APK", { exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Выйти" })).toHaveCount(0);
+  await expect(page.getByText("APK", { exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Выйти" })).toHaveCount(testInfo.project.name === "desktop" ? 1 : 0);
+});
+
+test("opens Engine from the profile menu", async ({ page }) => {
+  await page.route("**/api/v1/version", (route) => route.fulfill({
+    contentType: "application/json",
+    body: JSON.stringify({
+      server_time_utc: "2026-06-29T12:00:00.000Z",
+      version: "0.11.52.1",
+      parts: { canon: 0, release: 11, build: 52, apk: 1 },
+      latest: {
+        canon: null,
+        release: null,
+        build: {
+          id: 52,
+          version_type_id: "build",
+          version: 52,
+          included_in_version_id: null,
+          short_changes: "Fix single-line title editing",
+          detailed_changes: "Fix single-line title editing",
+          reason: "Fix single-line title editing",
+          released_at_utc: "2026-06-29T12:00:00.000Z",
+          created_at_utc: "2026-06-29T12:00:00.000Z",
+        },
+        apk: null,
+      },
+    }),
+  }));
+
+  await page.goto("/");
+  await openEngineFromProfile(page);
+
+  await expect(page.getByRole("heading", { name: "Engine", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Engine v0.11.52.1" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Проверить обновление" })).toBeVisible();
+  await expect(page.getByText("Build 52")).toBeVisible();
 });
 
 test("opens Archive from the profile menu and restores a deleted action", async ({ page }, testInfo) => {

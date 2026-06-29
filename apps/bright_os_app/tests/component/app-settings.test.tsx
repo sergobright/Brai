@@ -1,12 +1,12 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
-import { openSettingsFromProfile, otaPlugin, setupBrightOsAppTest, stubAndroidCapacitor } from "./app-test-support";
+import { describe, expect, it, vi } from "vitest";
+import { openEngineFromProfile, openSettingsFromProfile, otaPlugin, setupBrightOsAppTest, stubAndroidCapacitor, testVersionState } from "./app-test-support";
 import { BrightOsApp } from "@/features/app/BrightOsApp";
 
 describe("BrightOsApp settings", () => {
   setupBrightOsAppTest();
 
-  it("keeps Settings focused on update state instead of duplicate sync", async () => {
+  it("keeps Settings separate from update state", async () => {
     render(<BrightOsApp />);
 
     await openSettingsFromProfile();
@@ -15,11 +15,47 @@ describe("BrightOsApp settings", () => {
     expect(screen.getByRole("button", { name: "Включить темную тему" })).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Акценты" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /открыть выбор цвета/ })).not.toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Обновление" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Обновление" })).not.toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Архив" })).not.toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Сессия" })).not.toBeInTheDocument();
-    expect(screen.getByText("APK")).toBeInTheDocument();
-    expect(screen.getByText("0.0.10.1")).toBeInTheDocument();
+    expect(screen.queryByText("APK")).not.toBeInTheDocument();
+  });
+
+  it("opens Engine from the profile menu", async () => {
+    render(<BrightOsApp />);
+
+    await openEngineFromProfile();
+
+    expect(screen.getByRole("heading", { name: "Engine" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Engine v0.0.10.1" })).toBeInTheDocument();
+    expect(screen.getByText("Журнал версий")).toBeInTheDocument();
+  });
+
+  it("keeps Engine available in the mobile profile drawer outside Actions", async () => {
+    render(<BrightOsApp initialSection="inbox" />);
+
+    await openEngineFromProfile();
+
+    expect(screen.getByRole("heading", { name: "Engine" })).toBeInTheDocument();
+  });
+
+  it("marks Engine when a newer ledger version is available", async () => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, writable: true, value: 1200 });
+    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      if (url.endsWith("/v1/version")) {
+        return new Response(JSON.stringify(testVersionState("0.0.11.1")), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return Promise.reject(new Error("offline"));
+    });
+
+    render(<BrightOsApp />);
+
+    const engineButton = await screen.findByRole("button", { name: "Engine v0.0.11.1" });
+    expect(engineButton.querySelector(".lucide-download")).toBeInTheDocument();
   });
 
   it("shows when an Android OTA update is ready for restart", async () => {
@@ -34,7 +70,7 @@ describe("BrightOsApp settings", () => {
     });
 
     render(<BrightOsApp />);
-    await openSettingsFromProfile();
+    await openEngineFromProfile();
 
     await waitFor(() => expect(screen.getByText("Обновление скачано. Закрой и открой приложение.")).toBeInTheDocument());
     expect(screen.getByText("0.0.11.1")).toBeInTheDocument();
@@ -56,7 +92,7 @@ describe("BrightOsApp settings", () => {
     });
 
     render(<BrightOsApp />);
-    await openSettingsFromProfile();
+    await openEngineFromProfile();
 
     await waitFor(() => expect(screen.getByText(message)).toBeInTheDocument());
     expect(screen.queryByText(/Software caused connection abort|ENOENT|\/data\/user/)).not.toBeInTheDocument();
@@ -101,11 +137,11 @@ describe("BrightOsApp settings", () => {
     expect(screen.queryByRole("heading", { name: "Установленный APK не подходит для этой версии" })).not.toBeInTheDocument();
   });
 
-  it("starts an Android OTA check from Settings", async () => {
+  it("starts an Android OTA check from Engine", async () => {
     stubAndroidCapacitor();
 
     render(<BrightOsApp />);
-    await openSettingsFromProfile();
+    await openEngineFromProfile();
     fireEvent.click(await screen.findByRole("button", { name: "Проверить обновление" }));
 
     await waitFor(() => expect(otaPlugin.checkForUpdates).toHaveBeenCalledTimes(1));

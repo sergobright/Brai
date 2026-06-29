@@ -27,6 +27,25 @@ describe("BrightOsApi", () => {
     await expectation;
   });
 
+  it("loads the runtime version endpoint", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          server_time_utc: "2026-06-29T12:00:00.000Z",
+          version: "0.11.52.1",
+          parts: { canon: 0, release: 11, build: 52, apk: 1 },
+          latest: { canon: null, release: null, build: null, apk: null },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ),
+    );
+
+    const response = await new BrightOsApi("https://api.example.test").version();
+
+    expect(fetchMock.mock.calls[0][0]).toBe("https://api.example.test/v1/version");
+    expect(response.version).toBe("0.11.52.1");
+  });
+
   it("sends global stop metadata with synced timer events", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(
