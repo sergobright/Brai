@@ -18,6 +18,9 @@ const DEPENDENCY_DIRS = [
 const ZERO_SHA = "0000000000000000000000000000000000000000";
 const PREVIEW_SLOT_EMOJI = { A: "🅰️", B: "🅱️", C: "🅲", D: "🅳", E: "🅴" };
 const DELIVERY_RECEIPT_VERSION = "bright-delivery-handoff-v1";
+const ACCEPTANCE_RECEIPT_VERSION = "bright-acceptance-v1";
+const INFRA_DOCS_HANDOFF_WAIT_MS = Number(process.env.BRIGHT_OS_INFRA_DOCS_HANDOFF_WAIT_MS ?? 180000);
+const INFRA_DOCS_HANDOFF_POLL_MS = Number(process.env.BRIGHT_OS_INFRA_DOCS_HANDOFF_POLL_MS ?? 10000);
 const DELIVERY_CLASS = {
   BLOCKED: "blocked",
   INFRA_DOCS: "infra-docs",
@@ -42,6 +45,7 @@ export {
   enableGitHooks,
   isManualCodexBranchCommand,
   isManualBranchCommand,
+  isBlockingAcceptanceReceipt,
   isReadOnlyShellCommand,
   isSensitivePath,
   isWriteLikeCommand,
@@ -336,7 +340,7 @@ function deliveryHandoff(branchArg) {
     ensureInfraDocsPr(branch);
     pr = findInfraDocsPr(branch, head) ?? pr;
   }
-  const run = findSuccessfulDeliveryRun(branch, head, ["public-guard", "checks", "temporal-worker-check", "auto-merge-infra-docs"]);
+  const run = waitForSuccessfulDeliveryRun(branch, head, ["public-guard", "checks", "temporal-worker-check", "auto-merge-infra-docs"]);
   const receipt = {
     receiptType: DELIVERY_RECEIPT_VERSION,
     branch,
@@ -541,6 +545,21 @@ function validateBranchReuse() {
   const branch = currentBranch();
   const upstream = gitMaybe("rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}");
   const marker = readTaskMarker();
+  const branchHead = remoteBranchKnown(branch) ? gitMaybe("rev-parse", `origin/${branch}`) : gitMaybe("rev-parse", "HEAD");
+  const acceptance = readAcceptanceReceipt();
+  if (
+    acceptance?.receiptType === ACCEPTANCE_RECEIPT_VERSION &&
+    acceptance.branch === branch &&
+    acceptance.commit === branchHead &&
+    isBlockingAcceptanceReceipt(acceptance)
+  ) {
+    return {
+      ok: false,
+      message:
+        `Bright OS refuses to continue ${branch} because preview acceptance already started${acceptance.prUrl ? `: ${acceptance.prUrl}` : "."}\n\n` +
+        taskStartGuidance(),
+    };
+  }
   const markerValidation = validateTaskMarker(marker, branch);
   if (!markerValidation.ok) {
     return {
@@ -567,11 +586,12 @@ function validateBranchReuse() {
     isAncestor(marker.base, currentAcceptedBase) &&
     !upstream &&
     !remoteBranchKnown(branch);
-  if (remoteBranchAccepted(branch) || (isAncestor("HEAD", acceptedBaseRef()) && !freshStartedBranch)) {
+  const acceptedPr = remoteBranchMergedPr(branch, branchHead);
+  if (acceptedPr || remoteBranchAccepted(branch) || (isAncestor("HEAD", acceptedBaseRef()) && !freshStartedBranch)) {
     return {
       ok: false,
       message:
-        `Bright OS refuses to continue ${branch} because it is already included in ${acceptedBaseRef()}.\n\n` +
+        `Bright OS refuses to continue ${branch} because it is already accepted${acceptedPr?.url ? `: ${acceptedPr.url}` : ` in ${acceptedBaseRef()}`}.\n\n` +
         taskStartGuidance(),
     };
   }
@@ -696,6 +716,15 @@ function findOpenTaskForThread(parent, threadId, branchToCreate, isAccepted = ta
 
 function taskPathAccepted(taskPath) {
   const marker = readJson(path.join(taskPath, ".bright-task", "task.json"));
+  const acceptance = readJson(path.join(taskPath, ".bright-task", "acceptance.json"));
+  if (
+    acceptance?.receiptType === ACCEPTANCE_RECEIPT_VERSION &&
+    acceptance?.branch === marker?.branch &&
+    acceptance?.commit &&
+    isBlockingAcceptanceReceipt(acceptance)
+  ) {
+    return true;
+  }
   const receipt = readJson(path.join(taskPath, ".bright-task", "delivery-handoff.json"));
   if (
     receipt?.receiptType === DELIVERY_RECEIPT_VERSION &&
@@ -948,14 +977,19 @@ function deliveryClassForFile(file) {
     file === ".gitignore" ||
     file === ".github/workflows/bright-os-delivery.yml" ||
     file === ".codex/hooks.json" ||
+    file === "deploy/environments.json" ||
+    file === "apps/bright_os_app/tests/unit/publishScripts.test.ts" ||
     file.startsWith("deploy/ansible/") ||
     file.startsWith(".githooks/") ||
     file.startsWith("scripts/bright-") ||
+    file.startsWith("scripts/check-open-openspec-changes") ||
     file.startsWith("services/bright_os_temporal/") ||
     [
       "deploy/scripts/classify-delivery.mjs",
       "deploy/scripts/accept-preview.sh",
       "deploy/scripts/accepted-preview-branches.mjs",
+      "deploy/scripts/build-android-env-apk.sh",
+      "deploy/scripts/build-nonproduction-apks.sh",
       "deploy/scripts/ci-ssh-complete-accepted-previews.sh",
       "deploy/scripts/ci-ssh-deploy.sh",
       "deploy/scripts/ci-ssh-promote-deployment.sh",
@@ -963,9 +997,14 @@ function deliveryClassForFile(file) {
       "deploy/scripts/ci-ssh-sync-main-checkout.sh",
       "deploy/scripts/deploy-branch.sh",
       "deploy/scripts/detect-native-apk-change.mjs",
+      "deploy/scripts/generate-android-preview-icons.sh",
+      "deploy/scripts/publish-environment-web-layer.sh",
       "deploy/scripts/promote-accepted-deployment.sh",
       "deploy/scripts/promote-deployment.mjs",
+      "deploy/scripts/resolve-deploy-env.mjs",
+      "deploy/scripts/resolve-required-apk-version-code.mjs",
       "deploy/scripts/sync-local-main-checkout.sh",
+      "deploy/scripts/update-release-index.mjs",
     ].includes(file)
   ) {
     return "infra";
@@ -1091,6 +1130,33 @@ function remoteBranchAccepted(branch) {
   return isAncestor(remote, acceptedBaseRef());
 }
 
+function remoteBranchMergedPr(branch, head) {
+  if (!head || !remoteBranchKnown(branch)) return null;
+  if (process.env.BRIGHT_OS_TEST_MERGED_PRS_JSON) {
+    try {
+      const prs = JSON.parse(process.env.BRIGHT_OS_TEST_MERGED_PRS_JSON);
+      return Array.isArray(prs) ? prs.find((pr) => pr?.headRefOid === head) ?? null : null;
+    } catch {
+      return null;
+    }
+  }
+  const prs = runJsonMaybe([
+    "gh",
+    "pr",
+    "list",
+    "--base",
+    acceptedBaseBranch(),
+    "--head",
+    branch,
+    "--state",
+    "merged",
+    "--json",
+    "number,url,headRefOid,mergedAt",
+  ]);
+  if (!Array.isArray(prs)) return null;
+  return prs.find((pr) => pr?.headRefOid === head) ?? null;
+}
+
 function remoteBranchKnown(branch) {
   return Boolean(gitMaybe("rev-parse", "--verify", `origin/${branch}`));
 }
@@ -1132,6 +1198,18 @@ function readDeliveryReceipt() {
   const root = gitMaybe("rev-parse", "--show-toplevel");
   if (!root) return null;
   return readJson(path.join(root, ".bright-task", "delivery-handoff.json"));
+}
+
+function readAcceptanceReceipt() {
+  const root = gitMaybe("rev-parse", "--show-toplevel");
+  if (!root) return null;
+  return readJson(path.join(root, ".bright-task", "acceptance.json"));
+}
+
+function isBlockingAcceptanceReceipt(receipt) {
+  if (receipt?.receiptType !== ACCEPTANCE_RECEIPT_VERSION) return false;
+  if (receipt.status === "already_in_base" || receipt.status === "merged") return true;
+  return receipt.status === "acceptance_started" && receipt.deliveryClass === DELIVERY_CLASS.RUNTIME_PREVIEW;
 }
 
 function writePreviewReceipt(receipt) {
@@ -1182,6 +1260,36 @@ function runJson(args) {
     throw new Error(`${args.join(" ")} failed:\n${result.stderr || result.stdout || "(no output)"}`);
   }
   return JSON.parse(result.stdout);
+}
+
+function runJsonMaybe(args) {
+  const result = spawnSync(args[0], args.slice(1), {
+    cwd: git("rev-parse", "--show-toplevel"),
+    encoding: "utf8",
+    env: process.env,
+    timeout: 8000,
+  });
+  if (result.status !== 0 || result.error) return null;
+  try {
+    return JSON.parse(result.stdout);
+  } catch {
+    return null;
+  }
+}
+
+function waitForSuccessfulDeliveryRun(branch, sha, requiredJobs) {
+  const deadline = Date.now() + INFRA_DOCS_HANDOFF_WAIT_MS;
+  let lastError;
+  do {
+    try {
+      return findSuccessfulDeliveryRun(branch, sha, requiredJobs);
+    } catch (error) {
+      lastError = error;
+      if (Date.now() >= deadline) break;
+      spawnSync("sleep", [String(Math.max(1, Math.ceil(INFRA_DOCS_HANDOFF_POLL_MS / 1000)))], { stdio: "ignore" });
+    }
+  } while (Date.now() < deadline);
+  throw lastError;
 }
 
 function currentBranch() {

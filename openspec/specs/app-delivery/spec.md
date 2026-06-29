@@ -179,27 +179,25 @@ Bright OS SHALL not serve retired `/timer*` or `/history*` web app URLs after Ti
 - **THEN** Caddy returns 404
 - **AND** it does not serve the app fallback
 
-### Requirement: Branch classes map to seven self-hosted environments
-Bright OS SHALL use one production environment, one shared development environment, and five preview environments.
+### Requirement: Branch classes map to production and preview environments
+Bright OS SHALL use one production environment and five preview environments.
 
 #### Scenario: A branch is deployed
 - **WHEN** `main` is deployed
 - **THEN** it targets production at `app.brightos.world`
-- **WHEN** `dev` is deployed
-- **THEN** it targets `dev.brightos.world`
 - **WHEN** a `codex/*` branch is deployed
 - **THEN** it allocates or reuses one preview slot from `A` through `E`
 
 ### Requirement: Preview Android apps are separately installable
-Bright OS SHALL provide non-production Android flavors for Dev and preview slots `A` through `E`.
+Bright OS SHALL provide non-production Android flavors for preview slots `A` through `E`.
 
 #### Scenario: Non-production Android apps are built
-- **WHEN** Dev or preview APKs are built
+- **WHEN** preview APKs are built
 - **THEN** they use separate application ids, labels, icons, and OTA channels
 - **AND** they can be installed side-by-side with production
 
 ### Requirement: Non-production APK builds use exact OTA compatibility
-Bright OS SHALL keep Dev and Preview APK artifacts aligned with their OTA manifests through a monotonic technical Android `versionCode`.
+Bright OS SHALL keep Preview APK artifacts aligned with their OTA manifests through a monotonic technical Android `versionCode`.
 
 #### Scenario: Native preview APK is published
 - **WHEN** a `codex/*` branch changes the native Android boundary
@@ -211,7 +209,7 @@ Bright OS SHALL keep Dev and Preview APK artifacts aligned with their OTA manife
 - **THEN** Preview A-E APKs are rebuilt from production source during slot release
 
 ### Requirement: Deployment metadata is recorded per environment
-Bright OS SHALL record deployment metadata for production, dev, and preview environments. Dev metadata is retained for re-enabling dev but is not part of the active acceptance loop while dev is disabled.
+Bright OS SHALL record deployment metadata for production and preview environments.
 
 #### Scenario: Branch deployment completes
 - **WHEN** a branch deploy succeeds

@@ -37,7 +37,7 @@ function readIndex() {
   return {
     schemaVersion: 1,
     sections: Object.fromEntries(
-      ["production", "dev", "a", "b", "c", "d", "e"].map((key) => {
+      ["production", "a", "b", "c", "d", "e"].map((key) => {
         const sectionEnv = Object.values(environments).find((candidate) => candidate.releaseKey === key);
         return [
           key,
@@ -59,7 +59,7 @@ function readIndex() {
 }
 
 function renderReleasePage(data, htmlPath) {
-  const order = ["production", "dev", "a", "b", "c", "d", "e"];
+  const order = ["production", "a", "b", "c", "d", "e"];
   const cards = order.map((key) => sectionCard(data.sections[key])).join("\n");
   fs.writeFileSync(
     htmlPath,
@@ -91,7 +91,7 @@ function renderReleasePage(data, htmlPath) {
   <body>
     <main>
       <h1>APK-релизы Bright OS</h1>
-      <p class="lead">Production, Dev и preview A-E устанавливаются как отдельные Android-приложения.</p>
+      <p class="lead">Production и preview A-E устанавливаются как отдельные Android-приложения.</p>
       <div class="grid">${cards}</div>
     </main>
   </body>

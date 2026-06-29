@@ -35,11 +35,11 @@ The public repository SHALL start from a clean baseline history rather than expo
 - **THEN** reachable Git history contains only public-baseline commits
 - **AND** runtime databases, generated deployment artifacts, signing material, local backups, private keys, and personal workspace notes are absent from the tree and history
 
-### Requirement: Public hygiene gate protects every branch class
-Bright OS SHALL run the public branch guard before accepting source into `main`, `dev`, or `codex/*`.
+### Requirement: Public hygiene gate protects every active branch class
+Bright OS SHALL run the public branch guard before accepting source into `main` or `codex/*`.
 
 #### Scenario: A branch or pull request is checked
-- **WHEN** GitHub Actions runs for `main`, `dev`, a `codex/*` branch, or a pull request targeting `main` or `dev`
+- **WHEN** GitHub Actions runs for `main`, a `codex/*` branch, or a pull request targeting `main`
 - **THEN** `scripts/check-public-branch.mjs` runs against the checkout with reachable history available
 - **AND** the workflow fails on forbidden paths, signing files, credential-like files, high-confidence secrets, local workspace paths, or personal markers
 
@@ -101,6 +101,35 @@ Native-boundary preview branches SHALL publish a slot-specific APK before handof
 - **WHEN** the project owner uses a negated acceptance phrase such as "пока не принято" or "не принято"
 - **THEN** the agent does not run the preview acceptance script
 - **AND** the preview branch remains unmerged
+
+### Requirement: Agent delivery guards fail closed
+Bright OS SHALL block project-file writes, commits, pushes, and final handoff when local guard state cannot prove that the current task is on a valid same-thread `codex/*` branch from `origin/main` and has the required delivery verification.
+
+#### Scenario: Project-file write starts before valid task branch
+- **WHEN** an agent attempts to change a repository file before a valid task branch and task marker exist
+- **THEN** the write is blocked
+- **AND** the blocker names `scripts/bright-task-start.sh <task-slug>` as the required next step
+
+#### Scenario: Hook input is nested or unknown
+- **WHEN** hook input contains namespaced, custom, nested, or unknown tool calls
+- **THEN** the guard recursively classifies known nested calls
+- **AND** blocks fail-closed when the tool or command cannot be interpreted safely
+
+#### Scenario: Agent manually creates a task branch
+- **WHEN** an agent attempts to create or switch task branches through `git switch`, `git checkout`, `git branch`, or `git worktree`
+- **THEN** the guard rejects the manual branch operation
+- **AND** the blocker names the task starter or same-thread follow-up marker as the allowed path
+
+#### Scenario: Task branch is already accepted
+- **WHEN** a `codex/*` branch head is already accepted through a merged pull request into `main`
+- **THEN** new project-file writes, commits, and pushes on that branch are blocked even if the branch head is not an ancestor of `origin/main`
+- **AND** the agent starts a new `codex/*` branch from `origin/main`
+
+#### Scenario: Local verification passes without delivery
+- **WHEN** local lint, tests, builds, browser checks, or a local development server pass
+- **AND** the exact branch head lacks required preview or infra-docs handoff evidence
+- **THEN** final handoff is blocked
+- **AND** the agent reports the missing delivery evidence as incomplete or blocked
 
 ### Requirement: OpenSpec CLI is pinned as project tooling
 The project SHALL pin `@fission-ai/openspec` as development tooling and require the supported Bright OS Node 22 runtime for OpenSpec CLI usage.

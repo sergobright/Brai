@@ -14,6 +14,7 @@ import {
   deriveTaskState,
   enableGitHooks,
   findOpenTaskForThread,
+  isBlockingAcceptanceReceipt,
   isManualBranchCommand,
   isManualCodexBranchCommand,
   isReadOnlyShellCommand,
@@ -189,11 +190,16 @@ test("delivery classifier separates infra-docs from runtime preview", () => {
   assert.equal(deliveryClassForFile("openspec/specs/repository-operations/spec.md"), "docs");
   assert.equal(deliveryClassForFile(".github/workflows/bright-os-delivery.yml"), "infra");
   assert.equal(deliveryClassForFile(".gitignore"), "infra");
+  assert.equal(deliveryClassForFile("apps/bright_os_app/tests/unit/publishScripts.test.ts"), "infra");
+  assert.equal(deliveryClassForFile("deploy/environments.json"), "infra");
   assert.equal(deliveryClassForFile("deploy/ansible/bright-os.yml"), "infra");
+  assert.equal(deliveryClassForFile("deploy/scripts/build-nonproduction-apks.sh"), "infra");
+  assert.equal(deliveryClassForFile("deploy/scripts/resolve-deploy-env.mjs"), "infra");
   assert.equal(deliveryClassForFile("deploy/scripts/classify-delivery.mjs"), "infra");
   assert.equal(deliveryClassForFile("deploy/scripts/sync-local-main-checkout.sh"), "infra");
   assert.equal(deliveryClassForFile("deploy/scripts/ci-ssh-sync-main-checkout.sh"), "infra");
   assert.equal(deliveryClassForFile("scripts/bright-task.mjs"), "infra");
+  assert.equal(deliveryClassForFile("scripts/check-open-openspec-changes.mjs"), "infra");
   assert.equal(deliveryClassForFile("services/bright_os_temporal/src/state.mjs"), "infra");
   assert.equal(deliveryClassForFile("deploy/web/index.html"), "blocked");
   assert.equal(deliveryClassForFile("package.json"), "unknown");
@@ -531,6 +537,20 @@ test("delivery receipts must match exact branch, head, and class", () => {
   assert.match(validateDeliveryReceipt({ ...receipt, deliveryClass: "runtime-preview" }, "codex/foo", receipt.commit).message, /runtime-preview/);
 });
 
+test("acceptance markers block preview acceptance but not infra docs CI fixes", () => {
+  const base = {
+    receiptType: "bright-acceptance-v1",
+    branch: "codex/foo",
+    commit: "1111111111111111111111111111111111111111",
+    baseBranch: "main",
+  };
+  assert.equal(isBlockingAcceptanceReceipt({ ...base, status: "acceptance_started", deliveryClass: "runtime-preview" }), true);
+  assert.equal(isBlockingAcceptanceReceipt({ ...base, status: "acceptance_started", deliveryClass: "infra-docs" }), false);
+  assert.equal(isBlockingAcceptanceReceipt({ ...base, status: "acceptance_started" }), false);
+  assert.equal(isBlockingAcceptanceReceipt({ ...base, status: "merged", deliveryClass: "infra-docs" }), true);
+  assert.equal(isBlockingAcceptanceReceipt({ ...base, status: "already_in_base" }), true);
+});
+
 test("task state blocks local implementation work without exact preview receipt", () => {
   const repo = fs.mkdtempSync(path.join(os.tmpdir(), "bright-task-state-"));
   const previous = process.cwd();
@@ -698,11 +718,112 @@ test("task state allows exact delivery receipt after infra-docs branch was squas
   }
 });
 
+test("task state rejects same-thread writes after local acceptance marker", () => {
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), "bright-task-accepted-marker-"));
+  const previous = process.cwd();
+  try {
+    git(["init"], repo);
+    git(["config", "user.email", "test@example.invalid"], repo);
+    git(["config", "user.name", "Bright Test"], repo);
+    fs.writeFileSync(path.join(repo, ".gitignore"), ".bright-task/\n");
+    fs.writeFileSync(path.join(repo, "base.txt"), "base\n");
+    git(["add", ".gitignore", "base.txt"], repo);
+    git(["commit", "-m", "base"], repo);
+    const base = git(["rev-parse", "HEAD"], repo).stdout.trim();
+    git(["update-ref", "refs/remotes/origin/main", base], repo);
+    git(["checkout", "-b", "codex/foo"], repo);
+    fs.writeFileSync(path.join(repo, "change.txt"), "change\n");
+    git(["add", "change.txt"], repo);
+    git(["commit", "-m", "change"], repo);
+    const head = git(["rev-parse", "HEAD"], repo).stdout.trim();
+    git(["update-ref", "refs/remotes/origin/codex/foo", head], repo);
+    fs.mkdirSync(path.join(repo, ".bright-task"));
+    fs.writeFileSync(
+      path.join(repo, ".bright-task", "task.json"),
+      `${JSON.stringify({
+        branch: "codex/foo",
+        mode: "new",
+        base,
+        createdAt: "2026-06-26T00:00:00.000Z",
+        ...(process.env.CODEX_THREAD_ID ? { threadId: process.env.CODEX_THREAD_ID } : {}),
+      })}\n`,
+    );
+    fs.writeFileSync(
+      path.join(repo, ".bright-task", "acceptance.json"),
+      `${JSON.stringify({
+        receiptType: "bright-acceptance-v1",
+        branch: "codex/foo",
+        commit: head,
+        baseBranch: "main",
+        status: "acceptance_started",
+        deliveryClass: "runtime-preview",
+        acceptedAt: "2026-06-26T00:00:00.000Z",
+      })}\n`,
+    );
+    process.chdir(repo);
+
+    const state = deriveTaskState();
+    assert.equal(state.reuse.ok, false);
+    assert.match(state.reuse.message, /acceptance already started/);
+  } finally {
+    process.chdir(previous);
+  }
+});
+
+test("task state rejects squash-merged branch by merged PR head oid", () => {
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), "bright-task-merged-pr-"));
+  const previousCwd = process.cwd();
+  const previousMergedPrs = process.env.BRIGHT_OS_TEST_MERGED_PRS_JSON;
+  try {
+    git(["init"], repo);
+    git(["config", "user.email", "test@example.invalid"], repo);
+    git(["config", "user.name", "Bright Test"], repo);
+    fs.writeFileSync(path.join(repo, ".gitignore"), ".bright-task/\n");
+    fs.writeFileSync(path.join(repo, "base.txt"), "base\n");
+    git(["add", ".gitignore", "base.txt"], repo);
+    git(["commit", "-m", "base"], repo);
+    const base = git(["rev-parse", "HEAD"], repo).stdout.trim();
+    git(["update-ref", "refs/remotes/origin/main", base], repo);
+    git(["checkout", "-b", "codex/foo"], repo);
+    fs.writeFileSync(path.join(repo, "change.txt"), "change\n");
+    git(["add", "change.txt"], repo);
+    git(["commit", "-m", "change"], repo);
+    const head = git(["rev-parse", "HEAD"], repo).stdout.trim();
+    git(["update-ref", "refs/remotes/origin/codex/foo", head], repo);
+    fs.mkdirSync(path.join(repo, ".bright-task"));
+    fs.writeFileSync(
+      path.join(repo, ".bright-task", "task.json"),
+      `${JSON.stringify({
+        branch: "codex/foo",
+        mode: "new",
+        base,
+        createdAt: "2026-06-26T00:00:00.000Z",
+        ...(process.env.CODEX_THREAD_ID ? { threadId: process.env.CODEX_THREAD_ID } : {}),
+      })}\n`,
+    );
+    process.env.BRIGHT_OS_TEST_MERGED_PRS_JSON = JSON.stringify([
+      { number: 7, url: "https://github.example/pr/7", headRefOid: head, mergedAt: "2026-06-26T00:00:00Z" },
+    ]);
+    process.chdir(repo);
+
+    const state = deriveTaskState();
+    assert.equal(state.reuse.ok, false);
+    assert.match(state.reuse.message, /github\.example\/pr\/7/);
+  } finally {
+    if (previousMergedPrs == null) delete process.env.BRIGHT_OS_TEST_MERGED_PRS_JSON;
+    else process.env.BRIGHT_OS_TEST_MERGED_PRS_JSON = previousMergedPrs;
+    process.chdir(previousCwd);
+  }
+});
+
 test("accept preview checks verified preview before PR actions", () => {
   const script = fs.readFileSync(path.join(process.cwd(), "deploy/scripts/accept-preview.sh"), "utf8");
   assert.ok(script.indexOf("require-preview") > 0);
   assert.ok(script.indexOf("require-preview") < script.indexOf("gh pr list"));
   assert.ok(script.indexOf("require-preview") < script.indexOf("gh pr merge"));
+  assert.match(script, /write_acceptance_marker/);
+  assert.match(script, /acceptance\.json/);
+  assert.match(script, /deliveryClass/);
 });
 
 test("accepted preview branch lookup skips infra docs delivery PRs", () => {

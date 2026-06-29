@@ -76,19 +76,6 @@ if [[ "$ENVIRONMENT" == preview-* && "$ALLOCATED_NEW" == "true" && "${BRIGHT_OS_
   esac
 fi
 
-if [[ "$ENVIRONMENT" == "dev" ]]; then
-  "$NODE_BIN" "$SCRIPT_DIR/record-accepted-build-version.mjs" \
-    --db "$DB_PATH" \
-    --source-branch "$BRANCH" \
-    --source-commit "$COMMIT" \
-    --source-short-changes "$DEPLOY_SHORT_CHANGES" \
-    --source-reason "${BRIGHT_OS_CHANGE_REASON:-${BRIGHT_OS_DEPLOY_REASON:-}}" \
-    --target-branch "$BRANCH" \
-    --target-commit "$COMMIT" \
-    --source-details "$DEPLOY_DETAILED_CHANGES" \
-    --released-at "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-fi
-
 SOURCE_VERSION="$("$NODE_BIN" -e '
 const fs = require("node:fs");
 const path = require("node:path");
@@ -97,20 +84,6 @@ const parsed = JSON.parse(fs.readFileSync(path.join(root, "apps/bright_os_app/pu
 console.log(parsed.version);
 ' "$ROOT")"
 LEDGER_VERSION=""
-if [[ "$ENVIRONMENT" == "dev" && -z "${BRIGHT_OS_APP_VERSION:-}" ]]; then
-  LEDGER_VERSION="$("$NODE_BIN" -e '
-import { BrightOsStore } from "./services/bright_os_api/src/store.js";
-const store = new BrightOsStore(process.argv[1]);
-try {
-  const row = store.db
-    .prepare("SELECT version FROM build_versions WHERE version_type_id = ? ORDER BY build_version DESC LIMIT 1")
-    .get("build");
-  if (row?.version) console.log(row.version);
-} finally {
-  store.close();
-}
-' "$DB_PATH")"
-fi
 if [[ "$ENVIRONMENT" == "prod" && -z "${BRIGHT_OS_APP_VERSION:-}" ]]; then
   LEDGER_VERSION="$("$NODE_BIN" -e '
 import { BrightOsStore } from "./services/bright_os_api/src/store.js";

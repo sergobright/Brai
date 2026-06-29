@@ -80,7 +80,7 @@ if [[ -d "$NODE_PREFIX" ]]; then
 fi
 
 RUN_ROOT="$DEPLOY_REPO"
-if [[ "$BRIGHT_OS_SOURCE_BRANCH" == codex/* && ( "$BRIGHT_OS_TARGET_ENVIRONMENT" == "dev" || "$BRIGHT_OS_TARGET_ENVIRONMENT" == "prod" ) ]]; then
+if [[ "$BRIGHT_OS_SOURCE_BRANCH" == codex/* && "$BRIGHT_OS_TARGET_ENVIRONMENT" == "prod" ]]; then
   if ! SLOT="$(node -e '
 const fs = require("node:fs");
 const path = process.env.BRIGHT_OS_PREVIEW_REGISTRY || `${process.env.BRIGHT_OS_ENVS_ROOT || "/srv/projects/bright-os-envs"}/preview-slots.json`;
@@ -94,16 +94,10 @@ for (const slot of ["A", "B", "C", "D", "E"]) {
 }
 process.exit(1);
 ' "$BRIGHT_OS_SOURCE_BRANCH")"; then
-    if [[ "$BRIGHT_OS_TARGET_ENVIRONMENT" == "dev" ]]; then
-      echo "No preview slot found for $BRIGHT_OS_SOURCE_BRANCH; skipping metadata promotion."
-      exit 0
-    fi
     echo "No preview slot found for accepted production branch $BRIGHT_OS_SOURCE_BRANCH." >&2
     exit 1
   fi
   RUN_ROOT="$ENVS_ROOT/preview-$SLOT/source"
-elif [[ "$BRIGHT_OS_TARGET_ENVIRONMENT" == "prod" ]]; then
-  RUN_ROOT="$ENVS_ROOT/dev/source"
 fi
 if [[ "$BRIGHT_OS_TARGET_ENVIRONMENT" == "prod" ]]; then
   export BRIGHT_OS_DB="$DEPLOY_REPO/data/bright_os.sqlite"

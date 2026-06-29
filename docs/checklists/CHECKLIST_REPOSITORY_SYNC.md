@@ -15,8 +15,10 @@
 - [ ] Run or report relevant checks.
 - [ ] Commit intended changes.
 - [ ] Push the `codex/*` task branch to `origin` unless the task is explicitly local-only/no-push.
-- [ ] Wait for CI/deploy to assign or reuse a preview slot.
-- [ ] Run `scripts/bright-preview-handoff.sh` and use its verified preview letter, URL, branch, and commit.
+- [ ] Classify delivery with the guard: preview-class runtime/product or `infra-docs`.
+- [ ] For preview-class work, wait for CI/deploy to assign or reuse a preview slot.
+- [ ] For preview-class work, run `scripts/bright-preview-handoff.sh` and use its verified preview letter, URL, branch, and commit.
+- [ ] For `infra-docs` work, run `node scripts/bright-task.mjs handoff` and use its verified no-preview PR/auto-merge state.
 - [ ] If all preview slots are occupied, report queued status and queue position/source when available.
 - [ ] If the project owner accepts the preview (`Принято`, `принимаю`, `accepted`, or equivalent, but not negated phrases like `пока не принято`), run `deploy/scripts/accept-preview.sh <codex-branch>` instead of replying with an acknowledgement; the script must verify the exact branch head before PR or merge actions.
 - [ ] For accepted preview work, verify the successful `deploy-prod` post-step promoted metadata and released the preview slot; treat a missing release as a blocker.

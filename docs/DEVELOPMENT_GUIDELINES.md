@@ -32,6 +32,7 @@ This document is the index for project rules. `AGENTS.md` routes here; detailed 
 
 - Public hygiene: `npm run public:guard`
 - OpenSpec: `npm run openspec:validate`
+- Guard drift: `scripts/bright-guard-sync-check.sh --check`
 - Client: `npm run app:lint`, `npm run app:test`
 - API: `npm --prefix services/bright_os_api test`
 

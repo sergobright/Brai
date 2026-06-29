@@ -6,22 +6,17 @@
 - Public guard is part of the baseline design.
 - OpenSpec accepted specs are the durable requirements source.
 - Memory Bank has been reset to public-safe project context.
-- Clean `main` and `dev` were pushed to the public repository.
-- GitHub Actions deploys from `main`; `dev` delivery is temporarily disabled.
+- Clean `main` was pushed to the public repository.
+- GitHub Actions deploys production from `main`; the current delivery loop uses `main` and `codex/*`.
 - Branch protection requires `public-guard` and `checks`.
 - Public baseline version is `0.0.1.1`.
-- First accepted `dev` task version is `0.0.2.1`.
-- Second accepted `dev` task version is `0.0.3.1`.
-- Third accepted `dev` task version is `0.0.4.1`.
-- Fourth accepted `dev` task version is `0.0.5.1`.
-- Fifth accepted `dev` task version is `0.0.6.1`.
-- Sixth accepted `dev` task version is `0.0.7.1`.
+- Historical accepted task versions `0.0.2.1` through `0.0.7.1` were recorded before the current direct-to-`main` acceptance loop.
 - Versioning is no longer coupled to GitHub PR numbers.
 - Runtime `build_versions` is the source of truth for current accepted builds and production releases.
 
 ## Current State
 
-- Future work starts from `origin/main` on `codex/*` branches while dev is disabled.
+- Future work starts from `origin/main` on `codex/*` branches.
 - Task branches do not add `build_versions` rows by themselves.
 - Accepted working-branch merges into `main` add a detailed `build` ledger row with `release_version = 0` and increment `Z`.
 - Build ledger `short_changes` and `detailed_changes` are human-readable release notes; `reason` explains the problem or need behind the change; branch/commit/deploy audit metadata belongs in `build_version_refs` or `deployment_records`.

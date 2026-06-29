@@ -10,7 +10,6 @@
 Deployment branch classes:
 
 - `main` deploys production.
-- `dev` deploys the shared development environment.
 - `codex/*` deploys preview slots `A` through `E`.
 - `brightos.world` serves the public site without Caddy basic auth.
 

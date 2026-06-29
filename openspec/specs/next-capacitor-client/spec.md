@@ -102,75 +102,6 @@ The Next.js/Capacitor client SHALL preserve the current timer module workflows.
 - **THEN** Timer, History, Goal, Settings, Russian copy, light/dark theme, offline pending state, and live reconciliation are available in the Next.js/Capacitor client
 - **AND** accepted timer sync behavior is preserved
 
-### Requirement: Visual redesigns reproduce verified ready-made sources exactly by default
-Bright OS visual redesign work SHALL use existing Bright OS components or verified free ready-made shadcn-compatible sources by default, and SHALL reproduce a selected source exactly unless the project owner explicitly asks for custom design or structural adaptation.
-
-#### Scenario: A page redesign is requested broadly
-- **WHEN** the project owner asks to redesign a page without explicitly asking for custom design or adaptation
-- **THEN** the agent first searches existing Bright OS components, existing shared primitives, official shadcn/ui, and configured free/open registries for a suitable ready-made block or component
-- **AND** the selected candidate has a public demo or preview page, confirmed free/non-Pro status, and accessible source through MCP or the shadcn CLI
-- **AND** the agent does not implement a custom substitute if no suitable free ready-made block exists
-- **AND** the agent reports that no suitable free ready-made block exists and asks the project owner for direction
-
-#### Scenario: Registry search returns gated items
-- **WHEN** a configured registry search returns items marked Pro, paid, All Access, license-gated, API-key-gated, private-token-gated, `UNAUTHORIZED`, or `FORBIDDEN`
-- **THEN** those items are rejected before visual selection unless the project owner explicitly asks to use paid/private content
-- **AND** paid registry credentials, license keys, or API keys are not requested or configured unless the project owner explicitly asks to use paid/private content
-
-#### Scenario: A ready-made block is implemented
-- **WHEN** the project owner accepts a ready-made block or the source block is otherwise explicit
-- **THEN** the agent obtains the actual source code from the accepted source and copies it as the implementation baseline
-- **AND** the agent does not recreate the component from memory, screenshots, registry metadata, descriptions, or visually similar substitutes
-- **AND** the implementation preserves the original structure, class names and utilities, layout hierarchy, spacing, typography, radii, colors, animation, responsive behavior, and interaction behavior exactly
-- **AND** allowed edits are limited to import/path compatibility, replacing source demo content with existing Bright OS content, explicitly requested content/Russian copy/image/icon changes, data wiring, Bright OS actions, explicitly requested removals, and necessary size constraints
-- **AND** when the project owner asks to replace an existing Bright OS area with the selected block without explicitly requesting content changes, existing Bright OS content, data bindings, order, meaning, visibility, and item count are preserved by default
-- **AND** source demo content is used only as slot guidance and is removed instead of becoming Bright OS product content by default
-- **AND** if existing content cannot fit the selected block without losing meaning or inventing new content, the agent reports the blocker and asks the project owner for direction
-- **AND** additions remain minimal and use the selected block's existing style vocabulary
-- **AND** structural redesign, restyling, refactoring, mixing multiple blocks into a new composition, or stylistic invention requires project owner's explicit request to adapt or customize
-- **AND** if the accepted source code is unavailable, gated, legally unclear, or incompatible, the agent reports the blocker and asks the project owner for direction instead of inventing a replacement
-
-### Requirement: Shadcn-compatible UI uses Radix primitives for accessible behavior
-Bright OS interactive UI primitives SHALL use Radix UI Primitives as the default accessibility and behavior layer when a Radix primitive exists for the needed interaction.
-
-#### Scenario: Interactive primitive is added
-- **WHEN** a dialog, alert dialog, menu, popover, hover card, tooltip, tabs, accordion, checkbox, switch, slider, select, scroll area, or comparable interactive primitive is added
-- **THEN** the implementation uses an existing source-owned shadcn-compatible wrapper or approved ready-made block when available
-- **AND** uses Radix UI Primitives for keyboard behavior, focus management, ARIA semantics, portals, or controlled/uncontrolled state before custom headless behavior is written
-- **AND** visual styling remains Tailwind-first through Bright OS tokens and shadcn-compatible class patterns
-
-#### Scenario: Radix dependency is imported directly
-- **WHEN** client code imports from a specific `@radix-ui/react-*` package
-- **THEN** that package is declared as a direct dependency of `apps/bright_os_app`
-- **AND** code does not rely on transitive Radix packages pulled in by the installed `radix-ui` barrel package
-
-#### Scenario: Radix barrel import is used
-- **WHEN** an approved source intentionally imports primitives from the official `radix-ui` package
-- **THEN** the installed `radix-ui` client dependency may be used
-- **AND** Radix Themes or another design-system provider is not added unless the project owner explicitly asks for it
-
-#### Scenario: Product UI needs a visible scrolling surface
-- **WHEN** Bright OS product UI needs a visible scrollable area
-- **THEN** it uses the source-owned shadcn/Radix `ScrollArea` wrapper under `apps/bright_os_app/src/shared/ui/scroll-area.tsx`
-- **AND** native browser scrollbars are not exposed in product UI
-- **AND** text editors and Markdown previews either expand inside the standard `ScrollArea` or hide their native scrollbar
-- **AND** desktop split-screen product layouts give each pane its own vertical `ScrollArea` instead of making one pane scroll through the shared page or another pane's scroll
-- **AND** desktop split-screen scrollbars sit close to the pane or workspace edge with only a small inset
-- **AND** pane content/cards keep a small gap from the visible scrollbar instead of sitting underneath it
-- **AND** when a rightmost split pane must reach the workspace edge, only that pane extends to the edge instead of widening the whole split grid
-- **AND** exceptions require project owner's explicit approval
-
-#### Scenario: Text action button labels are rendered
-- **WHEN** a visible text action button or toggle button is shown in Bright OS product UI
-- **THEN** its label stays on one line or the control is made icon-only
-- **AND** the UI does not wrap words or individual characters inside compact buttons
-
-#### Scenario: Official shadcn base component is needed
-- **WHEN** future Bright OS UI work needs a base component from the official shadcn/ui docs list
-- **THEN** the agent uses the local source-owned file under `apps/bright_os_app/src/shared/ui` before reinstalling or hand-building an equivalent primitive
-- **AND** those local files remain the source of truth for Bright OS base components
-- **AND** `Data Table`, `Date Picker`, `Toast`, and `Typography` are treated as documentation compositions assembled from installed primitives instead of separate current registry UI files
-
 ### Requirement: Capacitor Android loads the latest verified local web bundle
 Bright OS Capacitor Android SHALL load the latest verified local OTA bundle when one exists, while retaining the bundled APK fallback.
 
@@ -215,15 +146,6 @@ Bright OS mobile OTA bundles SHALL be compatible with local WebView loading from
 - **THEN** it renders supported Markdown through client-side React code
 - **AND** it does not depend on server-side rendering or runtime server functions
 - **AND** raw HTML in Markdown is not enabled
-
-### Requirement: UI icons default to Lucide through the shadcn-compatible foundation
-Bright OS UI icons SHALL use `lucide-react` SVG icons through the shadcn-compatible foundation by default unless the project owner explicitly requests another icon style.
-
-#### Scenario: Primary navigation renders icons
-- **WHEN** the client renders primary navigation
-- **THEN** navigation and product controls use Lucide SVG icons by default
-- **AND** the item remains accessible by its Russian text label
-- **AND** emoji are used only as intentional content/tone choices or when the project owner explicitly asks for emoji
 
 ### Requirement: Activities UI supports fast capture and completion
 The Next.js/Capacitor client SHALL provide a fast `Действия` list UI optimized for desktop and Android-sized viewports.
@@ -360,53 +282,6 @@ The Next.js/Capacitor client SHALL provide a fast `Действия` list UI opt
 - **THEN** the implementation uses the real source from `npx motion-primitives@latest add text-effect` or project owner's explicit URL
 - **AND** no custom substitute is implemented from memory, screenshots, registry metadata, or a visually similar hand-built component
 - **AND** unavailable, gated, rate-limited, or security-checkpointed source access is reported as a blocker
-
-### Requirement: Client styling is Tailwind-first
-The Bright OS Next.js client SHALL express component styling through Tailwind CSS utilities and source-owned shadcn components, with global CSS limited to the standard shadcn/Tailwind token layer and unavoidable document-level rules.
-
-#### Scenario: Component layout is styled
-- **WHEN** app shell, navigation, cards, forms, lists, detail panels, buttons, charts, or status indicators are styled
-- **THEN** layout, spacing, typography, border, color, state, and responsive behavior are expressed with Tailwind utilities from the accepted shadcn source or local source-owned primitive
-- **AND** component-specific named CSS classes are not required for the visual result
-- **AND** visual-only local class names are not used as design contracts for tests or behavior
-
-#### Scenario: Behavior hooks are needed
-- **WHEN** client logic or tests need to identify UI elements such as delete controls, drag handles, rows, overlays, detail panels, chart containers, auth forms, or settings controls
-- **THEN** they use accessible roles/text, `data-slot`, or explicit behavior `data-*` attributes
-- **AND** they do not rely on styling-only class names such as `panel`, `settings-card`, `chart-panel`, `metric`, `auth-panel`, or `empty-state`
-
-#### Scenario: Global stylesheet is inspected
-- **WHEN** `apps/bright_os_app/src/app/globals.css` is inspected after the visual-system migration
-- **THEN** it follows the shadcn/Tailwind v4 shape: Tailwind import, required shadcn CSS import or equivalent local setup, dark variant, `@theme inline`, standard semantic token variables, `@layer base`, platform selectors, debug-console hiding selectors, and necessary keyframes only
-- **AND** base border/outline/body defaults live in `@layer base`
-- **AND** it does not contain component class blocks for the app shell, rail, navigation, panels, Activities, Timer, History, Goal, Settings, Auth, or chart UI
-
-#### Scenario: Runtime-calculated styles are needed
-- **WHEN** a component needs values calculated from runtime state, such as gesture transforms, sortable transforms, split-panel position, measured animation sizes, safe-area offsets, or chart geometry
-- **THEN** it may keep a narrow inline style for that dynamic value
-- **AND** static presentation around that value remains Tailwind-first and shadcn-token based
-
-### Requirement: Client typography uses the Bright OS Geist scale
-The Bright OS Next.js client SHALL use the configured app sans and mono font variables while following standard shadcn/Tailwind typography utility names instead of a custom Bright OS numeric weight scale.
-
-#### Scenario: App root loads project fonts
-- **WHEN** the Next root layout renders the application document
-- **THEN** it loads the configured app sans font and app mono font through the existing root font variables
-- **AND** global theme tokens expose those fonts through standard Tailwind/shadcn font aliases
-- **AND** new font families are not selected or added unless the project owner explicitly requests a font change or an accepted source block requires a documented font asset
-
-#### Scenario: Product UI chooses font utilities
-- **WHEN** product UI renders headings, navigation, buttons, badges, status labels, row titles, descriptions, metadata, values, inputs, or body copy
-- **THEN** it uses standard utility names from Tailwind/shadcn component source such as `font-normal`, `font-medium`, `font-semibold`, or source-provided equivalents
-- **AND** product UI does not use arbitrary font weights such as `font-[850]`
-- **AND** agents do not invent a project-specific typography scale or enforce the old `200/400/600` rule by default
-
-#### Scenario: Product UI chooses font sizes
-- **WHEN** product UI renders metadata, labels, rows, forms, buttons, settings text, page titles, section titles, body copy, or values
-- **THEN** it uses standard Tailwind/shadcn font-size utilities such as `text-xs`, `text-sm`, `text-base`, `text-lg`, `text-xl`, or `text-2xl`
-- **AND** `text-5xl` and larger sizes are reserved for explicit major metrics such as the running timer or primary goal progress
-- **AND** product UI does not use arbitrary font sizes such as `text-[15px]`, viewport-scaled typography, local CSS `font-size`, or a custom Bright OS type scale by default
-- **AND** copied accepted source components may keep their source-provided font-size utilities unless the project owner explicitly asks to normalize that source
 
 #### Scenario: Goal duration labels are compact
 - **WHEN** Goal or Focus Goal panels render duration totals
@@ -571,76 +446,59 @@ The Next.js/Capacitor client SHALL expose `Фокус` at `/focus`.
 - **WHEN** the user leaves `Фокус` for another primary section
 - **THEN** the browser address returns to `/`
 
-### Requirement: Bright OS UI uses the default shadcn visual system
-Bright OS client UI SHALL use official shadcn/ui defaults and configured shadcn-compatible registries as the default visual system, without agent-invented colors, radii, fonts, shadows, or custom visual composition.
+### Requirement: Focus history rows open an inline time editor
+The Next.js/Capacitor client SHALL let the project owner edit completed Focus
+history rows by tapping or clicking the row itself instead of a pencil icon.
 
-#### Scenario: Default visual source is needed
-- **WHEN** an agent designs, refactors, or implements Bright OS product UI
-- **THEN** `apps/bright_os_app/components.json` is the shadcn source of truth
-- **AND** the implementation follows `style: "new-york"`, `baseColor: "neutral"`, Tailwind CSS v4, CSS variables, the `@/shared/ui` aliases, and `lucide` icon library
-- **AND** the agent uses local source-owned shadcn/ui primitives before writing new visual markup
-- **AND** the agent does not create a competing design system, local style guide, custom theme provider, or standalone visual language
+#### Scenario: Focus history row opens
+- **WHEN** the user taps or clicks a completed Focus history row
+- **THEN** the row opens exactly one editor row below it
+- **AND** the editor animates open to one row of height
+- **AND** later rows move down rather than overlaying the editor
+- **AND** no pencil edit control is rendered
 
-#### Scenario: Product UI needs a visual decision
-- **WHEN** UI work needs color, radius, shadow, spacing density, typography, icon style, or interaction chrome
-- **THEN** the default answer comes from official shadcn/ui source, installed source-owned primitives, or an accepted registry block
-- **AND** the agent does not choose a new palette, typeface, radius scale, shadow style, gradient, decorative effect, or custom visual motif unless the project owner explicitly asks for custom design
-- **AND** Codex Desktop-like neutral dark/light density is treated as the target visual feel, not oversized custom dashboard cards
+#### Scenario: Another row is opened
+- **WHEN** one Focus history row editor is open
+- **AND** the user taps another Focus history row
+- **THEN** the current editor closes while the new row opens
+- **AND** a valid changed draft is saved before switching rows
 
-#### Scenario: Configured registries are used
-- **WHEN** official shadcn/ui does not cover a required product block
-- **THEN** the agent may search the configured registries from `components.json`
-- **AND** the selected item must have accessible source, public/free status, and no Pro/paid/license/API-key/private-token gate
-- **AND** the accepted source is copied as the baseline
-- **AND** any adaptation is limited to import compatibility, Bright OS data/actions, Russian copy required by the product, accessibility, and documented mobile/static-export compatibility
-- **AND** the adaptation keeps the shadcn token vocabulary instead of inventing a new visual style
+#### Scenario: Start, duration, and finish are edited
+- **WHEN** the Focus history row editor is open
+- **THEN** it shows start time, duration, and finish time in that order
+- **AND** each value is visually grouped under its own short label
+- **AND** each value can be changed by 5 minute plus/minus controls
+- **AND** clicking a value turns it into an input with check and cancel controls
+- **AND** valid `H:MM` and `HH:MM` inputs normalize to `HH:MM`
+- **AND** changing start shifts finish by the same delta
+- **AND** changing finish keeps start and recalculates duration
+- **AND** changing duration shifts finish
+- **AND** unchanged duration keeps the normal duration accent color
+- **AND** changed direct and derived values use a separate changed-value color
 
-### Requirement: Product styling uses semantic shadcn tokens instead of hardcoded colors
-Bright OS product UI SHALL express colors through semantic shadcn tokens and central theme variables, not hardcoded product colors in component markup.
+#### Scenario: Focus history editor is closed without saving
+- **WHEN** the Focus history row editor is open
+- **THEN** the editor shows a discard close control, delete control, and save
+  close control as a separate right-side action group
+- **AND** tapping the discard close control closes the editor without queuing an
+  edit or delete event
 
-#### Scenario: Product component needs color
-- **WHEN** a product component, page, control, status, chart, metric, surface, navigation item, or form needs color
-- **THEN** it uses semantic shadcn/Tailwind token utilities such as `bg-background`, `bg-card`, `text-foreground`, `text-muted-foreground`, `border-border`, `bg-accent`, `text-accent-foreground`, `bg-primary`, `text-primary-foreground`, `text-destructive`, `ring-ring`, or chart/sidebar token aliases
-- **AND** it does not hardcode product-specific hex, RGB, OKLCH, `color-mix`, arbitrary color utilities, or one-off palette classes for Bright OS styling
-- **AND** any exception must be copied from an accepted source block or documented as a non-product data visualization color requirement
+#### Scenario: Overlap attempt is blocked immediately
+- **WHEN** a Focus history edit would overlap another Focus session
+- **THEN** the client does not queue the edit
+- **AND** the parent row displays `Нельзя наложить на соседний фокус` with an
+  alarm icon and 80% opaque accent background for 3 seconds
+- **AND** the warning overlays the parent row without changing the row width,
+  row height, or layout of later rows
 
-#### Scenario: Product component needs radius or shadow
-- **WHEN** a product component needs radius, border, outline, ring, or shadow
-- **THEN** it uses the standard shadcn/Tailwind utility vocabulary from the accepted component source
-- **AND** it does not introduce static arbitrary radii, arbitrary shadows, or local `--radius` wrappers to recreate a custom card style
-- **AND** required runtime geometry, gestures, safe-area values, and measured transforms may stay as narrow dynamic inline styles
+#### Scenario: Focus history row is deleted
+- **WHEN** the user taps the delete icon in the open Focus history editor
+- **THEN** the client queues a `delete_session` event
+- **AND** the row disappears from projected history without waiting for the
+  server response
 
-### Requirement: Product surfaces use source-owned shadcn primitives
-Bright OS client UI SHALL show product surfaces through source-owned shadcn/Card primitives or accepted ready-made blocks instead of manual legacy border/surface containers.
-
-#### Scenario: New product surface is added
-- **WHEN** an agent adds a product surface with settings, controls, metrics, charts, tables, statuses, update information, auth forms, empty states, or comparable product content
-- **THEN** the surface uses a source-owned shadcn primitive such as `Card`, `CardHeader`, `CardContent`, `CardFooter`, `CardFrame`, `Table`, `Badge`, `Button`, `Input`, `ScrollArea`, or an accepted ready-made block
-- **AND** the agent does not create a new `panelClass`, `settings-card`, `chart-panel`, `metric`, `auth-panel`, `empty-state`, or comparable visual container class
-- **AND** the agent does not manually assemble the primary visual frame through `border border-border bg-card shadow-*` or older `border-[var(--line)] bg-[var(--surface)] shadow-[var(--shadow)]` class recipes
-
-#### Scenario: Legacy product surface is touched
-- **WHEN** an agent changes an existing product surface that still uses `panelClass` or comparable manual visual container markup
-- **THEN** the touched surface is migrated to the source-owned shadcn primitive path unless the project owner explicitly says the task is a non-visual emergency fix
-- **AND** any remaining legacy surface usage is listed as deferred debt
-- **AND** tests stop relying on styling-only class names when accessible roles, text, `data-slot`, or explicit behavior `data-*` selectors can identify the same element
-
-#### Scenario: Semantic form grouping is needed
-- **WHEN** a form group requires `fieldset` and `legend` semantics
-- **THEN** `fieldset` may be used for accessibility and form grouping
-- **AND** it is not styled as the primary visual card/frame when an existing shadcn surface primitive can provide the containing visual surface
-
-### Requirement: Runtime theme stays inside standard shadcn tokens
-Bright OS client theme control SHALL use standard shadcn semantic tokens and supported theme modes instead of user-authored arbitrary color palettes.
-
-#### Scenario: Theme mode is changed
-- **WHEN** the project owner changes the app theme
-- **THEN** the app switches between supported standard theme modes such as light and dark
-- **AND** the mode updates standard shadcn semantic tokens before visible UI renders
-- **AND** the app does not expose a product UI for arbitrary primary/success/warning/danger color selection by default
-
-#### Scenario: Theme tokens are edited in code
-- **WHEN** a developer changes theme token values
-- **THEN** the change is made centrally in the shadcn/Tailwind token layer
-- **AND** token names remain the standard shadcn semantic names
-- **AND** component files do not receive one-off color overrides to compensate for token changes
+#### Scenario: Cross-day display chunks keep canonical identity
+- **WHEN** a Focus session crosses a Europe/Moscow day boundary
+- **THEN** history may display per-day chunks
+- **AND** editing or deleting any chunk targets the single canonical Focus
+  session instead of creating separate physical sessions

@@ -21,7 +21,7 @@
 - `admin/` - техническая admin-панель для protected admin subdomain.
 - `deploy/scripts/` - publish scripts; `deploy/systemd/` - service units; `deploy/web/` и `deploy/mobile-update/bundles/` - опубликованные артефакты.
 - `deploy/site/` - сгенерированный public site root, не коммитить.
-- `deploy/ansible/` и `deploy/environments.json` - one-VPS prod/dev/preview environment setup and routing source.
+- `deploy/ansible/` и `deploy/environments.json` - one-VPS production/preview environment setup and routing source.
 - `docs/operations/branch-preview-environments.md` - branch preview workflow, CI secrets, deploy-user boundary and branch protection steps.
 - `openspec/` - accepted/planned requirements.
 - `memory-bank/` - фактический контекст и решения.
@@ -29,7 +29,7 @@
 
 ## Команды
 
-- `npm run app:dev` - dev server клиента.
+- `npm run app:dev` - local dev server клиента; не branch/deploy workflow.
 - `npm run app:build` - production build клиента.
 - `npm run app:lint` - ESLint клиента.
 - `npm run app:test` - Vitest клиента.
@@ -39,13 +39,14 @@
 - `npm run android:build:release` - release APK build.
 - `npm run openspec:guard` - проверка, что завершённые OpenSpec changes не оставлены активными.
 - `npm run openspec:validate` - completed-change guard плюс strict OpenSpec validation.
+- `scripts/bright-guard-sync-check.sh --check` - проверка, что installed Bright OS guard copy в `/srv/opt` совпадает с repo `scripts/bright-task.mjs`.
 - `npm run socraticode:preflight` - проверка, что SocratiCode подключён, context artifacts объявлены, и watcher активен для текущего project path.
 - `npm run publish:web` - публикация web layer.
 - `npm run publish:client-web-layer` - публикация клиентского web layer.
 - `npm run publish:mobile-bundle` - публикация mobile bundle.
 - `npm run publish:apk` - публикация APK.
-- `npm run android:icons:preview` - генерация Dev/A-E Android launcher icons from canonical logo.
-- `npm run android:build:env-apk -- <flavor>` - сборка и публикация non-production Android APK flavor (`dev`, `previewA`-`previewE`) with matching web fallback.
+- `npm run android:icons:preview` - генерация Preview A-E Android launcher icons from canonical logo.
+- `npm run android:build:env-apk -- <flavor>` - сборка и публикация Android APK flavor (`production`, `previewA`-`previewE`) with matching web fallback.
 - `deploy/scripts/preview-slots.sh` - lock-protected preview slot registry commands.
 - `deploy/scripts/accept-preview.sh <codex-branch>` - deterministic acceptance entrypoint when the project owner accepts a preview; creates/reuses PR into `main` and enables merge/auto-merge.
 - `npm --prefix services/bright_os_api test` - тесты Bright OS API.
@@ -69,4 +70,5 @@
 - `node_modules/`, кроме актуальных docs зависимостей, когда это прямо требует задача.
 - `.next/`, `out/`, `output/`, `test-results/`, Playwright screenshots/reports.
 - `.gradle/`, Android build directories.
-- `deploy/web/`, `deploy/mobile-update/bundles/`, если задача не про опубликованный артефакт.
+- `.codex-worktrees/`, кроме текущего task worktree, если работа уже стартовала там.
+- `deploy/web/`, `deploy/mobile-update/bundles/`, build artifacts и release outputs, если задача не про опубликованный артефакт.

@@ -54,6 +54,33 @@ run_bright_node() {
   node "$@"
 }
 
+write_acceptance_marker() {
+  local status="$1"
+  local pr_number="${2:-}"
+  local pr_url="${3:-}"
+  local accepted_at
+  accepted_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  run_bright_node -e '
+const fs = require("node:fs");
+const path = require("node:path");
+const [root, branch, commit, baseBranch, prNumber, prUrl, mergeMethod, status, deliveryClass, acceptedAt] = process.argv.slice(1);
+const dir = path.join(root, ".bright-task");
+fs.mkdirSync(dir, { recursive: true });
+fs.writeFileSync(path.join(dir, "acceptance.json"), `${JSON.stringify({
+  receiptType: "bright-acceptance-v1",
+  branch,
+  commit,
+  baseBranch,
+  prNumber: prNumber || null,
+  prUrl: prUrl || null,
+  mergeMethod,
+  status,
+  deliveryClass: deliveryClass || null,
+  acceptedAt,
+}, null, 2)}\n`);
+' "$ROOT" "$BRANCH" "$HEAD_SHA" "$BASE_BRANCH" "$pr_number" "$pr_url" "$MERGE_METHOD" "$status" "${DELIVERY_CLASS:-}" "$accepted_at"
+}
+
 if [[ -n "$(git status --porcelain)" ]]; then
   echo "Working tree must be clean before accepting preview work." >&2
   exit 1
@@ -64,6 +91,7 @@ HEAD_SHA="$(git rev-parse "origin/$BRANCH")"
 
 if git merge-base --is-ancestor "$HEAD_SHA" "origin/$BASE_BRANCH"; then
   echo "Preview branch already accepted: $HEAD_SHA is included in origin/$BASE_BRANCH"
+  write_acceptance_marker "already_in_base"
   exit 0
 fi
 
@@ -93,6 +121,7 @@ MERGED_PR_NUMBER="$(gh pr list --base "$BASE_BRANCH" --head "$BRANCH" --state me
 if [[ -n "$MERGED_PR_NUMBER" ]]; then
   MERGED_PR_URL="$(gh pr view "$MERGED_PR_NUMBER" --json url --jq ".url")"
   echo "Preview branch already accepted: $MERGED_PR_URL"
+  write_acceptance_marker "merged" "$MERGED_PR_NUMBER" "$MERGED_PR_URL"
   exit 0
 fi
 
@@ -136,6 +165,7 @@ fi
 
 if [[ "$PR_STATE" == "MERGED" ]]; then
   echo "Preview branch already accepted: $PR_URL"
+  write_acceptance_marker "merged" "$PR_NUMBER" "$PR_URL"
   exit 0
 fi
 
@@ -150,6 +180,7 @@ if [[ "$PR_HEAD" != "$HEAD_SHA" ]]; then
 fi
 
 gh pr merge "$PR_NUMBER" "--$MERGE_METHOD" --auto --match-head-commit "$HEAD_SHA"
+write_acceptance_marker "acceptance_started" "$PR_NUMBER" "$PR_URL"
 
 echo "Acceptance started for $BRANCH -> $BASE_BRANCH"
 echo "PR: $PR_URL"

@@ -149,7 +149,7 @@ function isAlreadyStarted(error) {
 function usage() {
   console.error(`usage:
   npm run signal -- preview --branch codex/example --sha <sha> --event branch_pushed
-  npm run signal -- promotion --target dev --sha <sha> --event dev_deploy_started
+  npm run signal -- promotion --target prod --sha <sha> --event prod_deploy_started
   npm run signal -- query-preview --branch codex/example
   npm run signal -- demo --branch codex/temporal-smoke`);
 }

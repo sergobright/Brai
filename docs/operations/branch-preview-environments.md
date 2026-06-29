@@ -1,9 +1,8 @@
 # Branch Preview Environments
 
-Bright OS uses one VPS for seven environments:
+Bright OS uses one VPS for six active app environments:
 
 - Production: `app.brightos.world`, branch `main`;
-- Dev: `dev.brightos.world`, branch `dev` (temporarily outside the delivery loop);
 - Preview A-E: `a.test.brightos.world` through `e.test.brightos.world`, branches `codex/*`;
 - Preview status: `previews.brightos.world`.
 
@@ -15,7 +14,7 @@ Agents must not reuse an existing `codex/*` branch just because Codex Desktop se
 
 A pushed preview-class `codex/*` branch allocates or reuses a preview slot through `deploy/scripts/preview-slots.sh`, deploys that slot, and reports the slot URL. If all slots `A` through `E` are occupied, the branch enters the preview queue until a slot is released. No push means no slot/deploy/queue.
 
-If the preview branch changes the Android native boundary, deploy also builds a slot-specific APK and records the APK file plus Android `versionCode` in the preview slot registry/status page. Dev/Preview OTA manifests then require that exact `versionCode`, so stale slot APKs block with an APK update screen instead of silently running an incompatible web bundle.
+If the preview branch changes the Android native boundary, deploy also builds a slot-specific APK and records the APK file plus Android `versionCode` in the preview slot registry/status page. Preview OTA manifests then require that exact `versionCode`, so stale slot APKs block with an APK update screen instead of silently running an incompatible web bundle.
 
 Infrastructure/documentation-only branches can use the Temporal no-preview path when the delivery class is `infra-docs`. That path records `delivery_classified`, `no_preview_required`, `delivery_handoff_*`, and `auto_merge_*` events instead of allocating a slot. Temporal then marks `preview_deploy`, `accepted_preview_promotion`, and `slot_release` as `not_applicable`; after `pr_merged`, the branch lifecycle is complete without a slot.
 
@@ -43,13 +42,25 @@ Repository Codex hooks are defined in `.codex/hooks.json`:
 
 Codex requires new or changed repo hooks to be reviewed and trusted through `/hooks`; that trust is local Codex security state and is not committed to Git.
 
+Codex hooks execute the installed stable guard copy under `/srv/opt/bright-os-codex-plugins/plugins/bright-os-guard/hooks/`. After changing `scripts/bright-task.mjs`, check drift with:
+
+```bash
+scripts/bright-guard-sync-check.sh --check
+```
+
+If it reports drift, sync the installed copy with escalation:
+
+```bash
+scripts/bright-guard-sync-check.sh --install
+```
+
 Git hooks live in `.githooks/`. Enable them in each local clone/worktree:
 
 ```bash
 git config core.hooksPath .githooks
 ```
 
-`pre-commit` blocks commits outside valid same-thread `codex/*` task branches and rejects staged generated/runtime/secret-like files. `pre-push` blocks direct `main`/`dev` pushes, ref mismatches, wrong-thread branches, accepted branches, branches not based on `origin/main`, and pushes that fail the public guard. CI/CD-sensitive pushes also run the Temporal test suite before leaving the machine.
+`pre-commit` blocks commits outside valid same-thread `codex/*` task branches and rejects staged generated/runtime/secret-like files. `pre-push` blocks direct `main` pushes, ref mismatches, wrong-thread branches, accepted branches, branches not based on `origin/main`, and pushes that fail the public guard. CI/CD-sensitive pushes also run the Temporal test suite before leaving the machine. The guard may also block other non-`codex/*` pushes; the public workflow documents only `main` and `codex/*`.
 
 Before a final preview-class implementation handoff, run:
 
@@ -61,9 +72,9 @@ The verifier requires a clean tree, pushed `origin/<codex-branch>` at `HEAD`, su
 
 The final response format for preview-class work is the top-level handoff contract in `AGENTS.md`: after this command succeeds, the final implementation response starts with the command's `<slot emoji> Preview` header, then includes preview URL, branch, and commit before any summary. Do not print a preview emoji in intermediary updates, status replies, questions, acceptance monitoring, no-preview handoffs, or any reply where the slot or deployed commit is unverified. If the preview letter or URL is missing because every slot is occupied, the response must say the branch is queued and include queue position/source when available. If it is missing for any other reason, the response must say exactly which push, CI, or deploy step blocked it. Ordinary preview-class `codex/*` branch push/deploy is standing Bright OS CI/CD automation and must not be treated as an optional manual confirmation step.
 
-For `infra-docs` no-preview work, `node scripts/bright-task.mjs handoff` creates or reuses the PR through the agent's GitHub identity before waiting for the CI auto-merge job. The CI job then reuses that PR, labels it `bright-delivery:infra-docs`, enables auto-merge, and reports the branch, commit, `deliveryClass=infra-docs`, `no_preview_required`, `handoff=passed`, `autoMerge=enabled`, and the merged PR state instead of a preview slot URL.
+For `infra-docs` no-preview work, `node scripts/bright-task.mjs handoff` creates or reuses the PR through the agent's GitHub identity, then polls the CI auto-merge job for a bounded period. The CI job reuses that PR, labels it `bright-delivery:infra-docs`, enables auto-merge, and the handoff reports the branch, commit, `deliveryClass=infra-docs`, `no_preview_required`, `handoff=passed`, `autoMerge=enabled`, and the merged PR state instead of a preview slot URL. If CI is still running after the bounded wait, rerun the handoff after GitHub Actions advances.
 
-Preview acceptance flow while dev is disabled:
+Preview acceptance flow:
 
 ```text
 codex/* accepted -> accept-preview.sh -> PR/merge queue into main -> production release/deploy -> release preview slot
@@ -95,7 +106,7 @@ Repository secret:
 ## Deploy User Boundary
 
 The deploy user needs write access to `/srv/projects/bright-os-envs/` for CI uploads,
-prod/dev/preview source checkouts, dev/preview web/OTA outputs, SQLite deployment metadata, and preview slot state.
+preview source checkouts, preview web/OTA outputs, SQLite deployment metadata, and preview slot state.
 For production deploys it also needs write access to the existing production web/OTA targets and
 Bright OS SQLite file:
 
@@ -113,7 +124,6 @@ The deploy user must not need read or write access to `/srv/projects/bright-os/.
 caddy validate --config /etc/caddy/Caddyfile
 systemctl reload caddy
 systemctl restart brightos-api.service
-systemctl restart brightos-api-dev.service
 systemctl restart brightos-api-preview-a.service
 systemctl restart brightos-api-preview-b.service
 systemctl restart brightos-api-preview-c.service
@@ -140,21 +150,21 @@ ansible-playbook -i deploy/ansible/inventory.example.ini deploy/ansible/bright-o
 ```
 
 The current local VPS setup keeps the existing production service name `brightos-api.service`.
-Prod, dev, and preview services run from the source checkout uploaded into
+Production and preview services run from the source checkout uploaded into
 `/srv/projects/bright-os-envs/<environment>/source/services/bright_os_api` as the configured service user/group.
 The limited `bright-deploy` user owns `/srv/projects/bright-os-envs`, publishes only the deployment
 artifacts above, and uses sudo only for Caddy validation, Caddy reload, and matching Bright OS API service restarts.
 
-Non-production Caddy routes keep the app shell protected with the unified Caddy Basic Auth login, but
+Preview Caddy routes keep the app shell protected with the unified Caddy Basic Auth login, but
 `/mobile-update/*` stays public for Android OTA and `/api/*` is proxied to the matching Bright OS API without
 Caddy Basic Auth or injected bearer headers. Bright OS API auth remains responsible for `/v1/*` data access,
-so newly installed Dev/A-E apps may need their own in-app login session before sync turns green.
+so newly installed Preview A-E apps may need their own in-app login session before sync turns green.
 
 If an environment exists before its first CI deploy, publish a baseline web/OTA layer without changing APK
 versions:
 
 ```bash
-BRIGHT_OS_MIN_APK_VERSION_CODE=1 deploy/scripts/publish-environment-web-layer.sh dev preview-b preview-c preview-d preview-e
+BRIGHT_OS_MIN_APK_VERSION_CODE=1 deploy/scripts/publish-environment-web-layer.sh preview-a preview-b preview-c preview-d preview-e
 ```
 
 Ansible templates do not store passwords, Caddy auth hashes, deploy keys, Android signing secrets, or Bright OS API secrets. Per-environment Bright OS API secret env files live outside source under:
@@ -174,4 +184,4 @@ After the clean public repository has its initial public `main`, configure GitHu
 - block force pushes;
 - block branch deletion.
 
-The public guard is required for `main`, `dev`, pull requests, and `codex/*` branches in the clean public repository.
+The public guard is required for `main`, pull requests, and `codex/*` branches in the clean public repository.

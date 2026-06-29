@@ -7,7 +7,7 @@ NODE_BIN="${NODE_BIN:-node}"
 ENVS_ROOT="${BRIGHT_OS_ENVS_ROOT:-/srv/projects/bright-os-envs}"
 
 if [[ "$#" -eq 0 ]]; then
-  echo "usage: publish-environment-web-layer.sh dev|preview-a|preview-b|preview-c|preview-d|preview-e [...]" >&2
+  echo "usage: publish-environment-web-layer.sh preview-a|preview-b|preview-c|preview-d|preview-e [...]" >&2
   exit 1
 fi
 

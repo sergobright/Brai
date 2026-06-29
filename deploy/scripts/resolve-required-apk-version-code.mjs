@@ -11,7 +11,7 @@ if (!env) throw new Error(`unknown environment: ${environment}`);
 
 const releaseIndex = path.join(releaseDir, "releases.json");
 const data = fs.existsSync(releaseIndex) ? JSON.parse(fs.readFileSync(releaseIndex, "utf8")) : { sections: {} };
-const candidates = [env.releaseKey, environment.startsWith("preview-") ? "dev" : null, "production"].filter(Boolean);
+const candidates = [env.releaseKey, "production"].filter(Boolean);
 for (const key of candidates) {
   const versionCode = Number(data.sections?.[key]?.versionCode);
   if (Number.isInteger(versionCode) && versionCode > 0) {

@@ -82,8 +82,8 @@ Release APK signing is configured through environment variables outside the repo
 
 - `brightos.world` serves the public site without Caddy basic auth.
 - `main` is production and deploys the protected app to `app.brightos.world`.
-- `dev` is shared development and deploys to `dev.brightos.world`.
 - `codex/*` branches deploy to preview slots `A` through `E`.
+- `npm run app:dev` is only the local Next.js development server.
 
 GitHub Actions run public hygiene checks, app lint/tests, Bright OS API tests, and the matching deployment job for the branch class. Deployment credentials live in GitHub Secrets/Variables and on the server, never in source.
 
