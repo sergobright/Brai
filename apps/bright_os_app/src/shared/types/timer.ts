@@ -1,4 +1,12 @@
-export type TimerEventType = "start" | "stop" | "edit_session" | "delete_session";
+export type TimerEventType =
+  | "start"
+  | "stop"
+  | "edit_session"
+  | "delete_session"
+  | "start_activity_focus"
+  | "switch_activity_focus"
+  | "stop_activity_focus"
+  | "edit_focus_interval";
 
 export type SyncStatus =
   | "connecting"
@@ -8,11 +16,34 @@ export type SyncStatus =
   | "auth_required"
   | "sync_failed";
 
+export interface FocusSessionInterval {
+  id: string;
+  focus_session_id: string;
+  activity_id: string | null;
+  activity_title: string | null;
+  started_at_utc: string;
+  ended_at_utc: string | null;
+  duration_seconds: number | null;
+  started_date_msk?: string;
+  started_hour_msk?: number;
+  ended_date_msk?: string | null;
+  ended_hour_msk?: number | null;
+  pending?: boolean;
+}
+
 export interface TimerSession {
   id: string;
   started_at_utc: string;
   ended_at_utc: string | null;
   duration_seconds: number | null;
+  intervals?: FocusSessionInterval[];
+  activity_interval_count?: number;
+  primary_activity_id?: string | null;
+  primary_activity_title?: string | null;
+  active_interval?: FocusSessionInterval | null;
+  active_activity_id?: string | null;
+  start_origin?: "focus" | "activity";
+  started_by_activity_id?: string | null;
   source_session_id?: string;
   started_date_msk?: string;
   started_hour_msk?: number;
@@ -27,6 +58,11 @@ export interface TimerState {
   timezone: "Europe/Moscow";
   active_session: TimerSession | null;
   elapsed_seconds: number;
+  active_interval?: FocusSessionInterval | null;
+  active_interval_elapsed_seconds?: number;
+  active_activity_id?: string | null;
+  active_session_start_origin?: "focus" | "activity" | null;
+  active_session_started_by_activity_id?: string | null;
 }
 
 export interface PendingTimerEvent {
@@ -107,6 +143,11 @@ export function emptyTimerState(now = new Date()): TimerState {
     timezone: "Europe/Moscow",
     active_session: null,
     elapsed_seconds: 0,
+    active_interval: null,
+    active_interval_elapsed_seconds: 0,
+    active_activity_id: null,
+    active_session_start_origin: null,
+    active_session_started_by_activity_id: null,
   };
 }
 

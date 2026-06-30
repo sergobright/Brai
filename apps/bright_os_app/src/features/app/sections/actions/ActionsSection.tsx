@@ -31,10 +31,16 @@ export function ActionsSection({
   onMobileCreateDraftChange,
   onMobileOverlayChange,
   autoFocusAddInput,
+  activeActivityId,
+  activeActivityElapsedSeconds,
+  onStartActionFocus,
+  onStopActionFocus,
 }: {
   state: ActivitiesState;
   localSnapshotReady: boolean;
   autoFocusAddInput: boolean;
+  activeActivityId: string | null;
+  activeActivityElapsedSeconds: number;
   onCreate: (title: string, descriptionMd?: string) => Promise<void>;
   onUpdateTitle: (action: ActivityItem, title: string) => Promise<void>;
   onAutosaveDetails: (action: ActivityItem, title: string, descriptionMd: string) => Promise<void>;
@@ -43,6 +49,8 @@ export function ActionsSection({
   onReorder: (orderedIds: string[], movedAction: ActivityItem) => Promise<void>;
   mobileCreateDraft: MobileCreateDraft;
   onMobileCreateDraftChange: (draft: MobileCreateDraft) => void;
+  onStartActionFocus: (activityId: string) => Promise<void>;
+  onStopActionFocus: (activityId?: string | null) => Promise<void>;
   onMobileOverlayChange: (open: boolean) => void;
 }) {
   const [draft, setDraft] = useState("");
@@ -56,7 +64,7 @@ export function ActionsSection({
   const [detailTitleFocusRequest, setDetailTitleFocusRequest] = useState(0);
   const suppressMobileCreatePopRef = useRef(false);
   const workspaceRef = useRef<HTMLDivElement | null>(null);
-  const splitDragStyleRef = useRef<{ userSelect: string } | null>(null);
+  const splitDragStyleRef = useRef<{ cursor: string; userSelect: string } | null>(null);
   const desktopInputRef = useRef<HTMLInputElement | null>(null);
   const newActions = state.actions.filter((action) => action.status === "New");
   const doneActions = state.actions.filter((action) => action.status === "Done");
@@ -183,8 +191,10 @@ export function ActionsSection({
     if (!workspace) return;
     event.preventDefault();
     splitDragStyleRef.current = {
+      cursor: document.documentElement.style.cursor,
       userSelect: document.body.style.userSelect,
     };
+    document.documentElement.style.cursor = "ew-resize";
     document.body.style.userSelect = "none";
     event.currentTarget.setPointerCapture(event.pointerId);
   }
@@ -204,6 +214,7 @@ export function ActionsSection({
     }
     const previous = splitDragStyleRef.current;
     if (!previous) return;
+    document.documentElement.style.cursor = previous.cursor;
     document.body.style.userSelect = previous.userSelect;
     splitDragStyleRef.current = null;
   }
@@ -286,6 +297,10 @@ export function ActionsSection({
                 onOpenDelete={setOpenDeleteActionId}
                 onCloseDelete={() => setOpenDeleteActionId(null)}
                 onReorder={onReorder}
+                activeActivityId={activeActivityId}
+                activeActivityElapsedSeconds={activeActivityElapsedSeconds}
+                onStartFocus={(action) => onStartActionFocus(action.id)}
+                onStopFocus={(action) => onStopActionFocus(action.id)}
               />
             )}
           </div>
@@ -320,6 +335,10 @@ export function ActionsSection({
                       onTitleDraftChange={setTitleDraft}
                       onSetStatus={onSetStatus}
                       onDelete={onDelete}
+                      activeFocus={activeActivityId === action.id}
+                      activeFocusElapsedSeconds={activeActivityId === action.id ? activeActivityElapsedSeconds : 0}
+                      onStartFocus={(item) => onStartActionFocus(item.id)}
+                      onStopFocus={(item) => onStopActionFocus(item.id)}
                       deleteOpen={visibleOpenDeleteActionId === action.id}
                       onOpenDelete={() => setOpenDeleteActionId(action.id)}
                       onCloseDelete={() => setOpenDeleteActionId(null)}

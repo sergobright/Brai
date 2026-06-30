@@ -25,26 +25,32 @@ export const readModelMethods = {
     const toUtc = to ? new Date(moscowDateStartUtcMs(addDays(to, 1))).toISOString() : null;
 
     let sql = `
-      SELECT s.id, v.started_at_utc, v.ended_at_utc, v.duration_seconds,
-        s.created_at_utc, s.updated_at_utc
+      SELECT s.id,
+        MIN(i.started_at_utc) AS started_at_utc,
+        MAX(i.ended_at_utc) AS ended_at_utc,
+        SUM(COALESCE(i.duration_seconds, 0)) AS duration_seconds,
+        s.created_at_utc, s.updated_at_utc, s.deleted_at_utc, s.deleted_event_id,
+        s.start_origin, s.started_by_activity_id
       FROM focus_sessions s
-      JOIN focus_session_versions v
-        ON v.focus_session_id = s.id AND v.is_current = 1
-      WHERE v.ended_at_utc IS NOT NULL
+      JOIN focus_session_intervals i ON i.focus_session_id = s.id
+      WHERE NOT EXISTS (
+          SELECT 1 FROM focus_session_intervals active
+          WHERE active.focus_session_id = s.id AND active.ended_at_utc IS NULL
+        )
         AND s.deleted_at_utc IS NULL
     `;
     const params = [];
     if (fromUtc) {
-      sql += ' AND v.ended_at_utc >= ?';
+      sql += ' AND i.ended_at_utc >= ?';
       params.push(fromUtc);
     }
     if (toUtc) {
-      sql += ' AND v.started_at_utc < ?';
+      sql += ' AND i.started_at_utc < ?';
       params.push(toUtc);
     }
-    sql += ' ORDER BY v.started_at_utc DESC';
+    sql += ' GROUP BY s.id ORDER BY started_at_utc DESC';
 
-    const sessions = this.db.prepare(sql).all(...params).map(formatSession);
+    const sessions = this.db.prepare(sql).all(...params).map((row) => formatSession(this.sessionWithIntervals(row)));
     return { sessions, groups: groupSessionsByDateHour(sessions, { from, to }) };
   }
 ,
@@ -54,16 +60,14 @@ export const readModelMethods = {
     const endUtc = new Date(challengeEndExclusiveUtcMs()).toISOString();
     const rows = this.db
       .prepare(`
-        SELECT s.id, v.started_at_utc, v.ended_at_utc, v.duration_seconds,
-          s.created_at_utc, s.updated_at_utc
+        SELECT i.id, i.started_at_utc, i.ended_at_utc, i.duration_seconds
         FROM focus_sessions s
-        JOIN focus_session_versions v
-          ON v.focus_session_id = s.id AND v.is_current = 1
-        WHERE v.ended_at_utc IS NOT NULL
+        JOIN focus_session_intervals i ON i.focus_session_id = s.id
+        WHERE i.ended_at_utc IS NOT NULL
           AND s.deleted_at_utc IS NULL
-          AND v.ended_at_utc > ?
-          AND v.started_at_utc < ?
-        ORDER BY v.started_at_utc ASC
+          AND i.ended_at_utc > ?
+          AND i.started_at_utc < ?
+        ORDER BY i.started_at_utc ASC
       `)
       .all(startUtc, endUtc);
 

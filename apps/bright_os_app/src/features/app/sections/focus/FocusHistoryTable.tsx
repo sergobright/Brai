@@ -1,8 +1,9 @@
 "use client";
 
 import { Fragment, type MouseEvent, useEffect, useMemo, useState } from "react";
-import { AlarmClock, Check, Minus, Plus, Timer, Trash2, X } from "lucide-react";
-import type { TimerSession } from "@/shared/types/timer";
+import { AlarmClock, Check, Minus, Pencil, Plus, SquareTerminal, Timer, Trash2, X } from "lucide-react";
+import type { FocusSessionInterval, TimerSession } from "@/shared/types/timer";
+import { formatHourMinute, moscowTime } from "@/shared/time/format";
 import { Badge } from "@/shared/ui/badge";
 import { Button } from "@/shared/ui/button";
 import { CardFrame } from "@/shared/ui/card";
@@ -14,6 +15,7 @@ import {
   applyFocusStep,
   canonicalSessionId,
   createFocusEditDraft,
+  createFocusIntervalEditDraft,
   draftChanged,
   draftUtcRange,
   formatDurationInput,
@@ -26,6 +28,7 @@ import {
 import { focusHistoryRows, type FocusHistoryRow } from "./focusHistoryModel";
 
 type WarningState = { rowId: string; message: string };
+type IntervalRangeEdit = { intervalId: string; sessionId: string; startedAtUtc: string; endedAtUtc: string };
 
 const OVERLAP_WARNING = "Нельзя наложить на соседний фокус";
 const FIELD_LABELS: Record<FocusEditField, string> = {
@@ -38,11 +41,13 @@ export function FocusHistoryTable({
   allSessions,
   sessions,
   onDeleteSession,
+  onEditInterval,
   onEditSession,
 }: {
   allSessions: TimerSession[];
   sessions: TimerSession[];
   onDeleteSession?: (sessionId: string) => void | Promise<void>;
+  onEditInterval?: (intervalId: string, sessionId: string, startedAtUtc: string, endedAtUtc: string) => void | Promise<void>;
   onEditSession?: (sessionId: string, startedAtUtc: string, endedAtUtc: string) => void | Promise<void>;
 }) {
   const rows = useMemo<FocusHistoryRow[]>(() => focusHistoryRows(sessions), [sessions]);
@@ -56,9 +61,15 @@ export function FocusHistoryTable({
   const [editingField, setEditingField] = useState<FocusEditField | null>(null);
   const [inputValue, setInputValue] = useState("");
   const [warning, setWarning] = useState<WarningState | null>(null);
+  const [expandedRows, setExpandedRows] = useState<Set<string>>(() => new Set());
+  const [confirmDeleteRowId, setConfirmDeleteRowId] = useState<string | null>(null);
 
   async function openRow(row: FocusHistoryRow) {
     if (activeRowId === row.id) return;
+    if (row.intervals.length > 1) {
+      setExpandedRows((current) => toggleSetValue(current, row.id));
+      return;
+    }
     if (!(await saveActiveDraft({ close: false }))) return;
     const session = canonicalSessions.get(row.sessionId) ?? displaySessions.get(row.id);
     if (!session?.ended_at_utc) return;
@@ -69,13 +80,34 @@ export function FocusHistoryTable({
     setEditingField(null);
   }
 
+  async function openInterval(row: FocusHistoryRow, interval: FocusSessionInterval, event: MouseEvent) {
+    event.stopPropagation();
+    if (!interval.ended_at_utc || activeRowId === interval.id) return;
+    if (!(await saveActiveDraft({ close: false }))) return;
+    const nextDraft = createFocusIntervalEditDraft(interval);
+    if (!nextDraft) return;
+    setExpandedRows((current) => new Set(current).add(row.id));
+    setActiveRowId(interval.id);
+    setDraft(nextDraft);
+    setEditingField(null);
+  }
+
   async function saveActiveDraft({ close }: { close: boolean }) {
     if (!draft || !activeRowId) return true;
-    if (hasFocusOverlap(draft, allSessions)) {
+    if (hasFocusOverlap(draft, allSessions, ignoredIntervalIdsForDraft(draft))) {
       showOverlapWarning(activeRowId);
       return false;
     }
-    if (draftChanged(draft) && onEditSession) {
+    if (draftChanged(draft) && draft.intervalId && onEditInterval) {
+      const edits = intervalRangeEdits(draft);
+      if (!edits) {
+        showOverlapWarning(activeRowId);
+        return false;
+      }
+      for (const edit of edits) {
+        await onEditInterval(edit.intervalId, edit.sessionId, edit.startedAtUtc, edit.endedAtUtc);
+      }
+    } else if (draftChanged(draft) && onEditSession) {
       const range = draftUtcRange(draft);
       await onEditSession(draft.sessionId, range.startedAtUtc, range.endedAtUtc);
     }
@@ -89,6 +121,17 @@ export function FocusHistoryTable({
     await onDeleteSession?.(row.sessionId);
   }
 
+  async function deleteMultiRow(row: FocusHistoryRow, event: MouseEvent) {
+    event.stopPropagation();
+    if (confirmDeleteRowId !== row.id) {
+      setConfirmDeleteRowId(row.id);
+      return;
+    }
+    setConfirmDeleteRowId(null);
+    closeEditor();
+    await onDeleteSession?.(row.sessionId);
+  }
+
   function closeEditor() {
     setActiveRowId(null);
     setDraft(null);
@@ -98,7 +141,7 @@ export function FocusHistoryTable({
   }
 
   useEffect(() => {
-    if (!activeRowId || rows.some((row) => row.id === activeRowId)) return;
+    if (!activeRowId || rows.some((row) => row.id === activeRowId || row.intervals.some((interval) => interval.id === activeRowId))) return;
     closeEditor();
   }, [activeRowId, rows]);
 
@@ -113,7 +156,7 @@ export function FocusHistoryTable({
   }
 
   function updateDraft(rowId: string, nextDraft: FocusEditDraft | null) {
-    if (!nextDraft || hasFocusOverlap(nextDraft, allSessions)) {
+    if (!nextDraft || hasFocusOverlap(nextDraft, allSessions, ignoredIntervalIdsForDraft(nextDraft)) || !intervalRangeEdits(nextDraft)) {
       showOverlapWarning(rowId);
       return;
     }
@@ -130,13 +173,140 @@ export function FocusHistoryTable({
     if (!draft || !editingField) return;
     const nextDraft = applyFocusInput(draft, editingField, inputValue);
     if (!nextDraft) return;
-    if (hasFocusOverlap(nextDraft, allSessions)) {
+    if (hasFocusOverlap(nextDraft, allSessions, ignoredIntervalIdsForDraft(nextDraft)) || !intervalRangeEdits(nextDraft)) {
       showOverlapWarning(rowId);
       return;
     }
     setDraft(nextDraft);
     setInputValue(normalizedInputValue(editingField, inputValue) ?? inputValue);
     setEditingField(null);
+  }
+
+  function activeIntervalRow(nextDraft: FocusEditDraft): FocusHistoryRow | null {
+    if (!nextDraft.intervalId) return null;
+    return rows.find((row) => row.intervals.some((interval) => interval.id === nextDraft.intervalId)) ?? null;
+  }
+
+  function ignoredIntervalIdsForDraft(nextDraft: FocusEditDraft): string[] {
+    const row = activeIntervalRow(nextDraft);
+    if (!row || !nextDraft.intervalId) return [];
+    const index = row.intervals.findIndex((interval) => interval.id === nextDraft.intervalId);
+    return [row.intervals[index - 1]?.id, row.intervals[index + 1]?.id].filter(Boolean) as string[];
+  }
+
+  function intervalRangeEdits(nextDraft: FocusEditDraft): IntervalRangeEdit[] | null {
+    if (!nextDraft.intervalId) return [];
+    const row = activeIntervalRow(nextDraft);
+    if (!row) return null;
+    const index = row.intervals.findIndex((interval) => interval.id === nextDraft.intervalId);
+    const interval = row.intervals[index];
+    if (!interval?.ended_at_utc) return null;
+    const beforeSelected: IntervalRangeEdit[] = [];
+    const afterSelected: IntervalRangeEdit[] = [];
+
+    const previous = row.intervals[index - 1];
+    const intervalStartMs = Date.parse(interval.started_at_utc);
+    if (previous?.ended_at_utc && Number.isFinite(intervalStartMs) && nextDraft.startMs !== intervalStartMs) {
+      const previousStartMs = Date.parse(previous.started_at_utc);
+      if (!Number.isFinite(previousStartMs) || nextDraft.startMs <= previousStartMs) return null;
+      const previousEdit = rangeEdit(previous.id, nextDraft.sessionId, previousStartMs, nextDraft.startMs);
+      if (nextDraft.startMs < intervalStartMs) {
+        beforeSelected.push(previousEdit);
+      } else {
+        afterSelected.push(previousEdit);
+      }
+    }
+
+    const next = row.intervals[index + 1];
+    const intervalEndMs = Date.parse(interval.ended_at_utc);
+    if (next?.ended_at_utc && Number.isFinite(intervalEndMs) && nextDraft.endMs !== intervalEndMs) {
+      const nextEndMs = Date.parse(next.ended_at_utc);
+      if (!Number.isFinite(nextEndMs) || nextDraft.endMs >= nextEndMs) return null;
+      const nextEdit = rangeEdit(next.id, nextDraft.sessionId, nextDraft.endMs, nextEndMs);
+      if (nextDraft.endMs > intervalEndMs) {
+        beforeSelected.push(nextEdit);
+      } else {
+        afterSelected.push(nextEdit);
+      }
+    }
+
+    return [
+      ...beforeSelected,
+      rangeEdit(interval.id, nextDraft.sessionId, nextDraft.startMs, nextDraft.endMs),
+      ...afterSelected,
+    ];
+  }
+
+  function renderEditorRow(row: FocusHistoryRow, rowDraft: FocusEditDraft, warningRowId: string) {
+    return (
+      <TableRow>
+        <TableCell className="!p-0 !ps-0 !pe-0" colSpan={3}>
+          <div className="grid max-h-14 overflow-hidden opacity-100 transition-[max-height,opacity] duration-200 ease-out">
+            <div className="grid h-14 w-full grid-cols-[minmax(0,1fr)_5rem] items-center gap-2 px-2 py-1.5" data-nav-swipe-exclusion>
+              <div className="grid min-w-0 grid-cols-3 gap-1.5">
+                <TimeEditor
+                  changed={rowDraft.startMs !== rowDraft.originalStartMs}
+                  editing={editingField === "start"}
+                  field="start"
+                  label={FIELD_LABELS.start}
+                  inputValue={inputValue}
+                  onBeginInput={beginInput}
+                  onCancelInput={() => setEditingField(null)}
+                  onCommitInput={() => commitInput(warningRowId)}
+                  onInput={setInputValue}
+                  onStep={(direction) => updateDraft(warningRowId, applyFocusStep(rowDraft, "start", direction))}
+                  value={formatTimeInput(rowDraft.startMs)}
+                />
+                <TimeEditor
+                  changed={(rowDraft.endMs - rowDraft.startMs) !== (rowDraft.originalEndMs - rowDraft.originalStartMs)}
+                  editing={editingField === "duration"}
+                  featured
+                  field="duration"
+                  label={FIELD_LABELS.duration}
+                  inputValue={inputValue}
+                  onBeginInput={beginInput}
+                  onCancelInput={() => setEditingField(null)}
+                  onCommitInput={() => commitInput(warningRowId)}
+                  onInput={setInputValue}
+                  onStep={(direction) => updateDraft(warningRowId, applyFocusStep(rowDraft, "duration", direction))}
+                  value={formatDurationInput(rowDraft.startMs, rowDraft.endMs)}
+                />
+                <TimeEditor
+                  changed={rowDraft.endMs !== rowDraft.originalEndMs}
+                  editing={editingField === "end"}
+                  field="end"
+                  label={FIELD_LABELS.end}
+                  inputValue={inputValue}
+                  onBeginInput={beginInput}
+                  onCancelInput={() => setEditingField(null)}
+                  onCommitInput={() => commitInput(warningRowId)}
+                  onInput={setInputValue}
+                  onStep={(direction) => updateDraft(warningRowId, applyFocusStep(rowDraft, "end", direction))}
+                  value={formatTimeInput(rowDraft.endMs)}
+                />
+              </div>
+              <div className="flex h-10 items-center justify-end gap-0.5 border-l pl-1">
+                <Button aria-label="Отменить редактирование фокуса" className="size-6 text-muted-foreground" onClick={(event) => {
+                  event.stopPropagation();
+                  closeEditor();
+                }} size="icon-sm" type="button" variant="ghost">
+                  <X className="size-3.5" aria-hidden="true" />
+                </Button>
+                <Button aria-label="Удалить запись фокуса" className="size-6 text-destructive" onClick={(event) => void deleteRow(row, event)} size="icon-sm" type="button" variant="ghost">
+                  <Trash2 className="size-3.5" aria-hidden="true" />
+                </Button>
+                <Button aria-label="Закрыть редактирование фокуса" className="size-6 text-foreground" onClick={(event) => {
+                  event.stopPropagation();
+                  void saveActiveDraft({ close: true });
+                }} size="icon-sm" type="button" variant="ghost">
+                  <Check className="size-3.5" aria-hidden="true" />
+                </Button>
+              </div>
+            </div>
+          </div>
+        </TableCell>
+      </TableRow>
+    );
   }
 
   return (
@@ -150,8 +320,12 @@ export function FocusHistoryTable({
         <TableBody>
           {rows.length ? (
             rows.map((row) => {
-              const rowDraft = activeRowId === row.id ? draft : null;
-              const warned = warning?.rowId === row.id;
+              const parentDraft = activeRowId === row.id ? draft : null;
+              const activeIntervalId = row.intervals.some((interval) => interval.id === activeRowId) ? activeRowId : null;
+              const warned = warning?.rowId === row.id || row.intervals.some((interval) => interval.id === warning?.rowId);
+              const warningMessage = warned ? warning?.message : null;
+              const expanded = expandedRows.has(row.id);
+              const additionalActionCount = Math.max(0, row.actionIntervalCount - 1);
               const rowEditLabel = `Редактировать фокус: ${row.departureTime} - ${row.duration} - ${row.arrivalTime}`;
               const openCurrentRow = () => {
                 if (!warned) void openRow(row);
@@ -160,14 +334,14 @@ export function FocusHistoryTable({
                 <Fragment key={row.id}>
                   <TableRow
                     className={cx("h-12 cursor-pointer overflow-hidden transition-colors", warned && "cursor-default")}
-                    data-state={rowDraft ? "selected" : undefined}
+                    data-state={parentDraft || activeIntervalId ? "selected" : undefined}
                     onClick={openCurrentRow}
                   >
                     {warned ? (
                       <TableCell className="h-12 p-0" colSpan={3}>
                         <div className="flex h-12 w-full items-center gap-2 bg-primary/80 px-2.5 font-medium text-primary-foreground">
                           <AlarmClock className="size-4 shrink-0" aria-hidden="true" />
-                          <span className="min-w-0 truncate">{warning.message}</span>
+                          <span className="min-w-0 truncate">{warningMessage}</span>
                         </div>
                       </TableCell>
                     ) : (
@@ -192,7 +366,7 @@ export function FocusHistoryTable({
                         <TableCell className="h-12 min-w-0 px-1.5 py-0">
                           <button
                             aria-label={rowEditLabel}
-                            className="block h-12 w-full min-w-0 overflow-hidden text-left font-medium outline-none [mask-image:linear-gradient(to_right,#000_calc(100%-1.25rem),transparent)] focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                            className="flex h-12 w-full min-w-0 items-center gap-1.5 overflow-hidden text-left font-medium outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
                             onClick={(event) => {
                               event.stopPropagation();
                               openCurrentRow();
@@ -200,7 +374,18 @@ export function FocusHistoryTable({
                             tabIndex={-1}
                             type="button"
                           >
-                            {row.destination}
+                            <span className="min-w-0 truncate">{row.destination}</span>
+                            {additionalActionCount > 0 ? (
+                              <Badge
+                                aria-label={`Дополнительных действий: ${additionalActionCount}`}
+                                className="h-5 shrink-0 px-1.5 text-xs font-medium tabular-nums"
+                                size="sm"
+                                title={`Еще действий: ${additionalActionCount}`}
+                                variant="outline"
+                              >
+                                +{additionalActionCount}
+                              </Badge>
+                            ) : null}
                             {row.pending ? <span className="ml-1 text-xs text-muted-foreground">...</span> : null}
                           </button>
                         </TableCell>
@@ -216,82 +401,58 @@ export function FocusHistoryTable({
                             type="button"
                           >
                             <Badge aria-label="Фокус" className="h-7 min-w-7 px-0 font-normal tabular-nums" size="lg" title="Фокус" variant="outline">
-                              {row.pending ? <span className="text-xs">...</span> : <Timer aria-hidden="true" />}
-                            </Badge>
+                            {row.pending ? <span className="text-xs">...</span> : row.actionIntervalCount > 0 ? <SquareTerminal aria-hidden="true" /> : <Timer aria-hidden="true" />}
+                          </Badge>
                           </button>
                         </TableCell>
                       </>
                     )}
                   </TableRow>
-                  <TableRow>
-                    <TableCell className="!p-0 !ps-0 !pe-0" colSpan={3}>
-                      <div className={cx("grid overflow-hidden transition-[max-height,opacity] duration-200 ease-out", rowDraft ? "max-h-14 opacity-100" : "max-h-0 opacity-0")}>
-                        {rowDraft ? (
-                          <div className="grid h-14 w-full grid-cols-[minmax(0,1fr)_5rem] items-center gap-2 px-2 py-1.5" data-nav-swipe-exclusion>
-                            <div className="grid min-w-0 grid-cols-3 gap-1.5">
-                              <TimeEditor
-                                changed={rowDraft.startMs !== rowDraft.originalStartMs}
-                                editing={editingField === "start"}
-                                field="start"
-                                label={FIELD_LABELS.start}
-                                inputValue={inputValue}
-                                onBeginInput={beginInput}
-                                onCancelInput={() => setEditingField(null)}
-                                onCommitInput={() => commitInput(row.id)}
-                                onInput={setInputValue}
-                                onStep={(direction) => updateDraft(row.id, applyFocusStep(rowDraft, "start", direction))}
-                                value={formatTimeInput(rowDraft.startMs)}
-                              />
-                              <TimeEditor
-                                changed={(rowDraft.endMs - rowDraft.startMs) !== (rowDraft.originalEndMs - rowDraft.originalStartMs)}
-                                editing={editingField === "duration"}
-                                featured
-                                field="duration"
-                                label={FIELD_LABELS.duration}
-                                inputValue={inputValue}
-                                onBeginInput={beginInput}
-                                onCancelInput={() => setEditingField(null)}
-                                onCommitInput={() => commitInput(row.id)}
-                                onInput={setInputValue}
-                                onStep={(direction) => updateDraft(row.id, applyFocusStep(rowDraft, "duration", direction))}
-                                value={formatDurationInput(rowDraft.startMs, rowDraft.endMs)}
-                              />
-                              <TimeEditor
-                                changed={rowDraft.endMs !== rowDraft.originalEndMs}
-                                editing={editingField === "end"}
-                                field="end"
-                                label={FIELD_LABELS.end}
-                                inputValue={inputValue}
-                                onBeginInput={beginInput}
-                                onCancelInput={() => setEditingField(null)}
-                                onCommitInput={() => commitInput(row.id)}
-                                onInput={setInputValue}
-                                onStep={(direction) => updateDraft(row.id, applyFocusStep(rowDraft, "end", direction))}
-                                value={formatTimeInput(rowDraft.endMs)}
-                              />
-                            </div>
-                            <div className="flex h-10 items-center justify-end gap-0.5 border-l pl-1">
-                              <Button aria-label="Отменить редактирование фокуса" className="size-6 text-muted-foreground" onClick={(event) => {
-                                event.stopPropagation();
-                                closeEditor();
-                              }} size="icon-sm" type="button" variant="ghost">
-                                <X className="size-3.5" aria-hidden="true" />
+                  {expanded && row.intervals.length > 1 ? (
+                    <>
+                      {row.intervals.map((interval) => (
+                        <Fragment key={interval.id}>
+                          <TableRow className="h-10 bg-muted/35">
+                            <TableCell className="h-10 px-2 py-0 text-xs tabular-nums text-muted-foreground">
+                              {moscowIntervalLabel(interval)}
+                            </TableCell>
+                            <TableCell className="h-10 min-w-0 px-2 py-0 text-sm">
+                              <span className="block truncate">{interval.activity_title ?? "В фокусе"}</span>
+                            </TableCell>
+                            <TableCell className="h-10 px-0.5 py-0 text-center">
+                              <Button
+                                aria-label={`Редактировать интервал: ${interval.activity_title ?? "В фокусе"}`}
+                                className="size-7 text-muted-foreground"
+                                disabled={!interval.ended_at_utc}
+                                onClick={(event) => void openInterval(row, interval, event)}
+                                size="icon-sm"
+                                type="button"
+                                variant="ghost"
+                              >
+                                <Pencil className="size-3.5" aria-hidden="true" />
                               </Button>
-                              <Button aria-label="Удалить запись фокуса" className="size-6 text-destructive" onClick={(event) => void deleteRow(row, event)} size="icon-sm" type="button" variant="ghost">
-                                <Trash2 className="size-3.5" aria-hidden="true" />
-                              </Button>
-                              <Button aria-label="Закрыть редактирование фокуса" className="size-6 text-foreground" onClick={(event) => {
-                                event.stopPropagation();
-                                void saveActiveDraft({ close: true });
-                              }} size="icon-sm" type="button" variant="ghost">
-                                <Check className="size-3.5" aria-hidden="true" />
-                              </Button>
-                            </div>
-                          </div>
-                        ) : null}
-                      </div>
-                    </TableCell>
-                  </TableRow>
+                            </TableCell>
+                          </TableRow>
+                          {activeIntervalId === interval.id && draft ? renderEditorRow(row, draft, interval.id) : null}
+                        </Fragment>
+                      ))}
+                      <TableRow className="h-10 bg-muted/35">
+                        <TableCell className="h-10 px-2 py-0" colSpan={3}>
+                          <Button
+                            className="h-8 w-full justify-center text-destructive"
+                            onClick={(event) => void deleteMultiRow(row, event)}
+                            size="sm"
+                            type="button"
+                            variant="ghost"
+                          >
+                            <Trash2 className="size-3.5" aria-hidden="true" />
+                            {confirmDeleteRowId === row.id ? "Подтвердить удаление" : "Удалить сессию"}
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    </>
+                  ) : null}
+                  {parentDraft ? renderEditorRow(row, parentDraft, row.id) : null}
                 </Fragment>
               );
             })
@@ -415,4 +576,27 @@ function TimeEditor({
       </div>
     </div>
   );
+}
+
+function moscowIntervalLabel(interval: FocusSessionInterval) {
+  return `${moscowTime(interval.started_at_utc)}-${moscowTime(interval.ended_at_utc)} · ${formatHourMinute(interval.duration_seconds)}`;
+}
+
+function rangeEdit(intervalId: string, sessionId: string, startMs: number, endMs: number): IntervalRangeEdit {
+  return {
+    intervalId,
+    sessionId,
+    startedAtUtc: new Date(startMs).toISOString(),
+    endedAtUtc: new Date(endMs).toISOString(),
+  };
+}
+
+function toggleSetValue(values: Set<string>, value: string) {
+  const next = new Set(values);
+  if (next.has(value)) {
+    next.delete(value);
+  } else {
+    next.add(value);
+  }
+  return next;
 }
