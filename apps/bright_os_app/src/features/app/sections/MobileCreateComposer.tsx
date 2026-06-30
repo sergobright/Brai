@@ -100,10 +100,10 @@ export function MobileCreateComposer({
       onClick={(event) => event.stopPropagation()}
       onSubmit={submit}
     >
-      <div className="mobile-create-text min-h-[76px] min-w-0 overflow-hidden">
+      <div className="mobile-create-text max-h-[calc(100dvh_-_env(safe-area-inset-top)_-_72px)] min-h-[76px] min-w-0 overflow-y-auto overscroll-contain">
         <textarea
           ref={titleRef}
-          className="actions-mobile-create-title block max-h-[calc(100dvh_-_env(safe-area-inset-top)_-_164px)] min-h-6 w-full min-w-0 resize-none overflow-y-auto border-0 bg-transparent p-0 text-lg/7 font-semibold tracking-normal text-foreground placeholder:text-muted-foreground/65 focus:outline-0"
+          className="actions-mobile-create-title block min-h-6 w-full min-w-0 resize-none overflow-hidden border-0 bg-transparent p-0 text-lg/7 font-semibold tracking-normal text-foreground placeholder:text-muted-foreground/65 focus:outline-0"
           value={draft.title}
           rows={1}
           enterKeyHint="enter"
@@ -114,7 +114,7 @@ export function MobileCreateComposer({
         />
         <textarea
           ref={descriptionRef}
-          className="actions-mobile-create-description mt-1.5 block min-h-10 w-full min-w-0 resize-none overflow-y-auto border-0 bg-transparent p-0 text-sm/5 font-normal tracking-normal text-muted-foreground/75 placeholder:text-muted-foreground/60 focus:outline-0"
+          className="actions-mobile-create-description mt-1.5 block min-h-10 w-full min-w-0 resize-none overflow-hidden border-0 bg-transparent p-0 text-sm/5 font-normal tracking-normal text-muted-foreground/75 placeholder:text-muted-foreground/60 focus:outline-0"
           value={draft.descriptionMd}
           rows={2}
           enterKeyHint="enter"

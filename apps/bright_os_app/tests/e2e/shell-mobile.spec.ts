@@ -61,23 +61,33 @@ test("opens mobile action input overlay from the floating plus button", async ({
   await expect(page.getByRole("navigation", { name: "Основная навигация" })).toBeVisible();
 });
 
-test("keeps mobile create description visible under a long title", async ({ page }, testInfo) => {
+test("scrolls mobile create title and description as one text area", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "mobile", "mobile-only action overlay");
 
   await page.goto("/");
   await page.locator(".actions-fab").click();
+  const textArea = page.locator(".mobile-create-text");
   const title = page.getByRole("textbox", { name: "Добавить действие" });
   const description = page.getByRole("textbox", { name: "Описание действия" });
-  await title.fill(Array.from({ length: 40 }, () => "Длинный заголовок занимает много строк").join(" "));
-  await description.fill("Описание остается на месте ");
+  await title.fill(Array.from({ length: 10 }, () => "Длинный заголовок занимает много строк").join(" "));
+  await description.fill(Array.from({ length: 80 }, () => "Большое описание вытесняет заголовок наверх").join(" "));
 
-  await expect.poll(() => title.evaluate((node) => node.scrollHeight > node.clientHeight)).toBe(true);
+  await expect.poll(() => textArea.evaluate((node) => node.scrollHeight > node.clientHeight)).toBe(true);
+  await expect.poll(() => title.evaluate((node) => node.scrollHeight <= node.clientHeight + 1)).toBe(true);
+  await expect.poll(() => description.evaluate((node) => node.scrollHeight <= node.clientHeight + 1)).toBe(true);
+  await textArea.evaluate((node) => {
+    node.scrollTop = node.scrollHeight;
+  });
+  await expect.poll(() => textArea.evaluate((node) => node.scrollTop)).toBeGreaterThan(0);
+
+  const textBox = await textArea.boundingBox();
+  const titleBox = await title.boundingBox();
   const descriptionBox = await description.boundingBox();
   const toolbarBox = await page.locator(".mobile-create-toolbar").boundingBox();
+  expect(titleBox?.y ?? 0).toBeLessThan(textBox?.y ?? 0);
   expect(descriptionBox?.height ?? 0).toBeGreaterThanOrEqual(36);
   expect((descriptionBox?.y ?? 0) + (descriptionBox?.height ?? 0)).toBeLessThanOrEqual(toolbarBox?.y ?? 0);
   await expect(description).toBeVisible();
-  await expect(description).toHaveValue("Описание остается на месте ");
 });
 
 test("keeps the mobile Actions FAB vertically stable when a dock swipe starts", async ({ page }, testInfo) => {
