@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { BrightOsApp } from "@/features/app/BrightOsApp";
+import { TITLE_MAX_LENGTH } from "@/shared/activities/text";
 import { pendingInboxEvents, saveInboxState } from "@/shared/storage/inboxStore";
 import { setupBrightOsAppTest } from "./app-test-support";
 
@@ -80,6 +81,12 @@ describe("BrightOsApp inbox", () => {
     const detailTabs = detailPanel.querySelector(".actions-detail-tabs") as HTMLElement;
     expect(detailTabs.compareDocumentPosition(detailTitle) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(detailTitle).not.toHaveClass("truncate");
+    expect(detailPanel).toHaveClass("overflow-hidden");
+    const limitedTitle = "В".repeat(TITLE_MAX_LENGTH);
+    fireEvent.change(detailTitle, { target: { value: `${limitedTitle}лишнее` } });
+    await waitFor(() => expect(detailTitle).toHaveValue(limitedTitle));
+    expect(detailPanel.querySelector(".actions-detail-title-counter")).toHaveTextContent("0");
+    expect(detailPanel.querySelector(".actions-detail-description-scroll")).toBeInTheDocument();
     const splitSlider = screen.getByRole("slider", { name: "Изменить ширину панелей" });
     expect(splitSlider).toHaveAttribute("aria-valuenow", "50");
     fireEvent.keyDown(splitSlider, { key: "End" });

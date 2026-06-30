@@ -4,7 +4,14 @@ import type { CSSProperties, KeyboardEvent } from "react";
 import { useEffect, useRef, useState } from "react";
 import { BookOpen, Pencil } from "lucide-react";
 import { installAndroidBackHandler } from "@/shared/platform/platform";
-import { cleanTitle, markdownPreviewSource, singleLineTitle, visibleDescriptionPreview } from "@/shared/activities/text";
+import {
+  cleanTitle,
+  limitTitle,
+  markdownPreviewSource,
+  TITLE_COUNTER_THRESHOLD,
+  TITLE_MAX_LENGTH,
+  visibleDescriptionPreview,
+} from "@/shared/activities/text";
 import type { ActivityItem } from "@/shared/types/activities";
 import { Button } from "@/shared/ui/button";
 import { hasMarkdownSyntax, MarkdownContent } from "@/shared/ui/markdown-content";
@@ -41,7 +48,9 @@ export function ActivityDetailEditor({
   onAutosaveDetails: (action: ActivityItem, title: string, descriptionMd: string) => Promise<void>;
 }) {
   const initial = activityDraftValues(action);
-  const title = singleLineTitle(titleDraft ?? initial.title);
+  const title = limitTitle(titleDraft ?? initial.title);
+  const titleRemaining = TITLE_MAX_LENGTH - title.length;
+  const showTitleCounter = titleRemaining <= TITLE_COUNTER_THRESHOLD;
   const [description, setDescription] = useState(initial.descriptionMd);
   const [markdownPreview, setMarkdownPreview] = useState(loadActivityMarkdownPreviewMode);
   const [activeTab, setActiveTab] = useState<DetailPanelTab>("info");
@@ -120,7 +129,7 @@ export function ActivityDetailEditor({
   }, [action.id, autosave, closeWithAnimation, mode, resetOpen]);
 
   function schedule(nextTitle: string, nextDescription: string) {
-    scheduleActivityDraftEdit(action, nextTitle, nextDescription, onTitleDraftChange, autosave);
+    scheduleActivityDraftEdit(action, limitTitle(nextTitle), nextDescription, onTitleDraftChange, autosave);
   }
 
   function setPreviewMode(checked: boolean) {
@@ -257,21 +266,33 @@ export function ActivityDetailEditor({
       {mode === "mobile" ? "✓" : "×"}
     </button>
   );
-  const detailTitle =
-    <textarea
-      ref={titleRef}
-      className={cx(
-        "actions-detail-title block w-full min-w-0 resize-none overflow-hidden border-0 bg-transparent p-0 font-semibold leading-[1.18] tracking-normal text-foreground [overflow-wrap:anywhere] focus:outline-0",
-        mode === "mobile" ? "mt-1.5 min-h-0 text-xl" : "mt-3 min-h-11 text-2xl",
-      )}
-      value={title}
-      rows={1}
-      aria-label="Название действия"
-      onChange={(event) => {
-        schedule(singleLineTitle(event.target.value), description);
-      }}
-      onKeyDown={onTitleKeyDown}
-    />;
+  const detailTitle = (
+    <div className={cx("actions-detail-title-block grid min-w-0", mode === "mobile" ? "mt-1.5" : "mt-3")}>
+      <textarea
+        ref={titleRef}
+        className={cx(
+          "actions-detail-title block w-full min-w-0 resize-none overflow-hidden border-0 bg-transparent p-0 font-semibold leading-[1.18] tracking-normal text-foreground [overflow-wrap:anywhere] focus:outline-0",
+          mode === "mobile" ? "min-h-0 text-xl" : "min-h-11 text-2xl",
+        )}
+        value={title}
+        rows={1}
+        maxLength={TITLE_MAX_LENGTH}
+        aria-label="Название действия"
+        onChange={(event) => {
+          schedule(limitTitle(event.target.value), description);
+        }}
+        onKeyDown={onTitleKeyDown}
+      />
+      {showTitleCounter ? (
+        <div
+          className="actions-detail-title-counter justify-self-end text-sm font-normal leading-[1.48] tracking-normal text-muted-foreground/60"
+          aria-label="Осталось символов в заголовке"
+        >
+          {titleRemaining}
+        </div>
+      ) : null}
+    </div>
+  );
   const dragHeader = (
     <header
       className={cx(
@@ -323,7 +344,7 @@ export function ActivityDetailEditor({
 
   return (
     <aside
-      className="actions-detail-panel desktop grid h-full min-h-0 min-w-0 grid-rows-[auto_auto_auto_auto_minmax(0,1fr)] gap-0 overflow-y-auto overflow-x-hidden pl-7 pr-7 max-[860px]:hidden"
+      className="actions-detail-panel desktop grid h-full min-h-0 min-w-0 grid-rows-[auto_auto_auto_auto_minmax(0,1fr)] gap-0 overflow-hidden pl-7 pr-7 max-[860px]:hidden"
       aria-label="Редактирование действия"
       data-nav-swipe-exclusion
       onKeyDown={onKeyDown}

@@ -4,7 +4,7 @@ import type { CSSProperties, HTMLAttributes, KeyboardEvent, MouseEvent, PointerE
 import { useId, useLayoutEffect, useRef, useState } from "react";
 import { Trash2, Undo2 } from "lucide-react";
 import { useSwipeable } from "react-swipeable";
-import { cleanTitle, singleLineTitle, visibleDescriptionPreview } from "@/shared/activities/text";
+import { cleanTitle, limitTitle, visibleDescriptionPreview } from "@/shared/activities/text";
 import type { ActivityItem, ActivityStatus } from "@/shared/types/activities";
 import { Checkbox } from "@/shared/ui/checkbox";
 import { cx } from "../../appUtils";
@@ -286,7 +286,7 @@ function ActionTitleEditor({
 
   function onInput() {
     titleRef.current?.animate?.([{ opacity: 0.72 }, { opacity: 1 }], { duration: 140, easing: "ease-out" });
-    const nextTitle = singleLineTitle(titleRef.current?.textContent ?? "");
+    const nextTitle = limitTitle(titleRef.current?.textContent ?? "");
     if (titleRef.current && titleRef.current.textContent !== nextTitle) titleRef.current.textContent = nextTitle;
     onTitleDraftChange(action.id, nextTitle);
   }

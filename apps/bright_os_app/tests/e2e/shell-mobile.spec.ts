@@ -340,6 +340,10 @@ test("opens the mobile bottom-sheet activity detail editor", async ({ page }, te
   expect(titleBox?.height ?? 0).toBeGreaterThan(44);
   await expect(editorLocator.locator(".actions-detail-header .actions-detail-preview-toggle")).toHaveCount(0);
   await expect(editorLocator.locator(".actions-detail-description-scroll .actions-detail-preview-toggle")).toBeVisible();
+  await detailTitle.fill("м".repeat(520));
+  await expect.poll(async () => (await detailTitle.inputValue()).length).toBe(500);
+  await expect(editorLocator.locator(".actions-detail-title-counter")).toHaveText("0");
+  await expect(page.getByRole("textbox", { name: "Описание действия" })).toBeVisible();
 
   await page.locator(".actions-detail-backdrop").click({ position: { x: 8, y: 8 } });
   await expect(page.getByRole("button", { name: "Сохранить и закрыть" })).toBeVisible();

@@ -3,7 +3,7 @@
 import type { FormEvent, KeyboardEvent } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Archive, CalendarDays, Ellipsis, Flag, Maximize2, Plus, Tag } from "lucide-react";
-import { cleanTitle, normalizeDescription, singleLineTitle } from "@/shared/activities/text";
+import { cleanTitle, limitTitle, normalizeDescription, TITLE_MAX_LENGTH } from "@/shared/activities/text";
 import { Button } from "@/shared/ui/button";
 import { useMobileSheetDrag } from "../hooks/useMobileSheetDrag";
 import { cx, fitTextareaHeight } from "../appUtils";
@@ -122,12 +122,13 @@ export function MobileCreateComposer({
         <textarea
           ref={titleRef}
           className="actions-mobile-create-title block min-h-6 w-full min-w-0 resize-none overflow-hidden border-0 bg-transparent p-0 text-lg/7 font-semibold tracking-normal text-foreground placeholder:text-muted-foreground/65 focus:outline-0"
-          value={draft.title}
+          value={limitTitle(draft.title)}
           rows={1}
+          maxLength={TITLE_MAX_LENGTH}
           enterKeyHint="enter"
           placeholder="Что бы вы хотели сделать?"
           aria-label={titleLabel}
-          onChange={(event) => onDraftChange({ ...draft, title: singleLineTitle(event.target.value) })}
+          onChange={(event) => onDraftChange({ ...draft, title: limitTitle(event.target.value) })}
           onKeyDown={onTitleKeyDown}
         />
         <textarea

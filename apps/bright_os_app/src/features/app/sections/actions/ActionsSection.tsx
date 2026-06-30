@@ -4,7 +4,7 @@ import type { CSSProperties, FormEvent, KeyboardEvent, MouseEvent, PointerEvent 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ChevronDown, FilePenLine, Plus } from "lucide-react";
 import { installAndroidBackHandler } from "@/shared/platform/platform";
-import { cleanTitle } from "@/shared/activities/text";
+import { cleanTitle, TITLE_MAX_LENGTH } from "@/shared/activities/text";
 import type { ActivityItem, ActivitiesState, ActivityStatus } from "@/shared/types/activities";
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/shared/ui/input-group";
 import { ScrollArea } from "@/shared/ui/scroll-area";
@@ -254,6 +254,7 @@ export function ActionsSection({
               <InputGroupInput
                 ref={desktopInputRef}
                 value={draft}
+                maxLength={TITLE_MAX_LENGTH}
                 placeholder="Добавить"
                 aria-label="Добавить"
                 autoFocus={autoFocusAddInput}

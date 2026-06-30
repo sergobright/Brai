@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { describe, expect, it, vi } from "vitest";
 import { cachedActivitiesState, openProfileMenuItem, setupBrightOsAppTest } from "./app-test-support";
 import { BrightOsApp } from "@/features/app/BrightOsApp";
+import { TITLE_MAX_LENGTH } from "@/shared/activities/text";
 import { pendingActivityEvents, saveActivitiesState } from "@/shared/storage/activityStore";
 
 describe("BrightOsApp actions", () => {
@@ -256,6 +257,12 @@ describe("BrightOsApp actions", () => {
     const detailTabs = detailPanel.querySelector(".actions-detail-tabs") as HTMLElement;
     expect(detailTabs.compareDocumentPosition(detailTitle) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(detailTitle).not.toHaveClass("truncate");
+    expect(detailPanel).toHaveClass("overflow-hidden");
+    const limitedTitle = "А".repeat(TITLE_MAX_LENGTH);
+    fireEvent.change(detailTitle, { target: { value: `${limitedTitle}лишнее` } });
+    await waitFor(() => expect(detailTitle).toHaveValue(limitedTitle));
+    expect(detailPanel.querySelector(".actions-detail-title-counter")).toHaveTextContent("0");
+    expect(detailPanel.querySelector(".actions-detail-description-scroll")).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Инфо" })).toHaveAttribute("aria-selected", "true");
     expect(screen.getByRole("tab", { name: "Связи" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "AI" })).toBeInTheDocument();

@@ -592,7 +592,8 @@ test("opens the desktop activity description split panel", async ({ page }, test
   await expect(page.locator(".actions-detail-tabs")).toHaveCSS("border-bottom-width", "1px");
   const workspace = await page.locator(".actions-workspace").boundingBox();
   const listPane = await page.locator(".actions-list-pane").boundingBox();
-  const panel = await page.locator(".actions-detail-panel.desktop").boundingBox();
+  const detailPanel = page.locator(".actions-detail-panel.desktop");
+  const panel = await detailPanel.boundingBox();
   const viewport = page.viewportSize();
   expect((listPane?.width ?? 0) / (workspace?.width ?? 1)).toBeGreaterThan(0.49);
   expect((listPane?.width ?? 0) / (workspace?.width ?? 1)).toBeLessThan(0.51);
@@ -600,7 +601,8 @@ test("opens the desktop activity description split panel", async ({ page }, test
   expect((panel?.width ?? 0) / (workspace?.width ?? 1)).toBeLessThan(0.51);
   expect((workspace?.x ?? 0) + (workspace?.width ?? 0)).toBeGreaterThan((viewport?.width ?? 0) - 36);
   expect(panel?.height ?? 0).toBeGreaterThan((viewport?.height ?? 0) - 140);
-  await expect(page.locator(".actions-detail-panel.desktop")).toHaveCSS("border-left-width", "0px");
+  await expect(detailPanel).toHaveCSS("border-left-width", "0px");
+  await expect(detailPanel).toHaveCSS("overflow-y", "hidden");
 
   const resizer = await page.locator(".actions-split-resizer").boundingBox();
   expect(resizer).not.toBeNull();
@@ -627,8 +629,14 @@ test("opens the desktop activity description split panel", async ({ page }, test
   await expect
     .poll(async () => ((await page.locator(".actions-list-pane").boundingBox())?.width ?? 0) / ((await page.locator(".actions-workspace").boundingBox())?.width ?? 1))
     .toBeGreaterThan(0.49);
+  const overLimitTitle = "я".repeat(520);
+  await detailTitle.fill(overLimitTitle);
+  await expect.poll(async () => (await detailTitle.inputValue()).length).toBe(500);
+  await expect(detailPanel.locator(".actions-detail-title-counter")).toHaveText("0");
+  await expect(page.locator(".actions-detail-tabs")).toBeVisible();
 
   const descriptionEditor = page.getByRole("textbox", { name: "Описание действия" });
+  await expect(descriptionEditor).toBeVisible();
   const descriptionText = `# Большое описание
 
 ## Цель

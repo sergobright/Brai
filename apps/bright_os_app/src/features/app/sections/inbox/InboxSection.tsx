@@ -4,7 +4,15 @@ import type { CSSProperties, FormEvent, KeyboardEvent, MouseEvent, PointerEvent 
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { BookOpen, FilePenLine, FileText, Inbox, Link2, Mail, MessageSquare, Pencil, Plus, Sparkles, Trash2, X } from "lucide-react";
 import { useSwipeable } from "react-swipeable";
-import { cleanTitle, markdownPreviewSource, normalizeDescription, singleLineTitle, visibleDescriptionPreview } from "@/shared/activities/text";
+import {
+  cleanTitle,
+  limitTitle,
+  markdownPreviewSource,
+  normalizeDescription,
+  TITLE_COUNTER_THRESHOLD,
+  TITLE_MAX_LENGTH,
+  visibleDescriptionPreview,
+} from "@/shared/activities/text";
 import { installAndroidBackHandler } from "@/shared/platform/platform";
 import type { InboxItem, InboxState } from "@/shared/types/inbox";
 import { Button } from "@/shared/ui/button";
@@ -257,6 +265,7 @@ export function InboxSection({
               <InputGroupInput
                 ref={desktopInputRef}
                 value={draft}
+                maxLength={TITLE_MAX_LENGTH}
                 placeholder="Добавить входящее"
                 aria-label="Добавить входящее"
                 autoFocus={autoFocusAddInput}
@@ -599,7 +608,7 @@ function InboxTitleEditor({
 
   function onInput() {
     titleRef.current?.animate?.([{ opacity: 0.72 }, { opacity: 1 }], { duration: 140, easing: "ease-out" });
-    const nextTitle = singleLineTitle(titleRef.current?.textContent ?? "");
+    const nextTitle = limitTitle(titleRef.current?.textContent ?? "");
     if (titleRef.current && titleRef.current.textContent !== nextTitle) titleRef.current.textContent = nextTitle;
     onTitleDraftChange(item.id, nextTitle);
   }
@@ -658,7 +667,9 @@ function InboxDetailEditor({
   const [description, setDescription] = useState(normalizeDescription(item.description_md));
   const [markdownPreview, setMarkdownPreview] = useState(loadActivityMarkdownPreviewMode);
   const [activeTab, setActiveTab] = useState<DetailPanelTab>("info");
-  const titleValue = singleLineTitle(titleDraft ?? item.title);
+  const titleValue = limitTitle(titleDraft ?? item.title);
+  const titleRemaining = TITLE_MAX_LENGTH - titleValue.length;
+  const showTitleCounter = titleRemaining <= TITLE_COUNTER_THRESHOLD;
   const titleRef = useRef<HTMLTextAreaElement | null>(null);
   const descriptionRef = useRef<HTMLTextAreaElement | null>(null);
   const latestRef = useRef<{ title: string; descriptionMd: string } | null>(null);
@@ -771,8 +782,9 @@ function InboxDetailEditor({
   }, [closeWithAnimation, mode]);
 
   function schedule(nextTitle: string, nextDescription: string) {
-    onTitleDraftChange(item.id, nextTitle === item.title ? null : nextTitle);
-    latestRef.current = { title: nextTitle, descriptionMd: nextDescription };
+    const limitedTitle = limitTitle(nextTitle);
+    onTitleDraftChange(item.id, limitedTitle === item.title ? null : limitedTitle);
+    latestRef.current = { title: limitedTitle, descriptionMd: nextDescription };
     if (timerRef.current != null) window.clearTimeout(timerRef.current);
     timerRef.current = window.setTimeout(flush, 600);
     if (maxTimerRef.current == null) maxTimerRef.current = window.setTimeout(flush, 2000);
@@ -903,19 +915,31 @@ function InboxDetailEditor({
       <X className={mode === "mobile" ? "h-7 w-7" : "h-4 w-4"} aria-hidden="true" />
     </button>
   );
-  const detailTitle =
-    <textarea
-      ref={titleRef}
-      className={cx(
-        "actions-detail-title block w-full min-w-0 resize-none overflow-hidden border-0 bg-transparent p-0 font-semibold leading-[1.18] tracking-normal text-foreground [overflow-wrap:anywhere] focus:outline-0",
-        mode === "mobile" ? "mt-1.5 min-h-0 text-xl" : "mt-3 min-h-11 text-2xl",
-      )}
-      value={titleValue}
-      rows={1}
-      aria-label="Название входящего"
-      onChange={(event) => schedule(singleLineTitle(event.target.value), description)}
-      onKeyDown={onTitleKeyDown}
-    />;
+  const detailTitle = (
+    <div className={cx("actions-detail-title-block grid min-w-0", mode === "mobile" ? "mt-1.5" : "mt-3")}>
+      <textarea
+        ref={titleRef}
+        className={cx(
+          "actions-detail-title block w-full min-w-0 resize-none overflow-hidden border-0 bg-transparent p-0 font-semibold leading-[1.18] tracking-normal text-foreground [overflow-wrap:anywhere] focus:outline-0",
+          mode === "mobile" ? "min-h-0 text-xl" : "min-h-11 text-2xl",
+        )}
+        value={titleValue}
+        rows={1}
+        maxLength={TITLE_MAX_LENGTH}
+        aria-label="Название входящего"
+        onChange={(event) => schedule(limitTitle(event.target.value), description)}
+        onKeyDown={onTitleKeyDown}
+      />
+      {showTitleCounter ? (
+        <div
+          className="actions-detail-title-counter justify-self-end text-sm font-normal leading-[1.48] tracking-normal text-muted-foreground/60"
+          aria-label="Осталось символов в заголовке"
+        >
+          {titleRemaining}
+        </div>
+      ) : null}
+    </div>
+  );
   const dragHeader = (
     <header
       className={cx(
@@ -962,7 +986,7 @@ function InboxDetailEditor({
 
   return (
     <aside
-      className="actions-detail-panel desktop grid h-full min-h-0 min-w-0 grid-rows-[auto_auto_auto_auto_minmax(0,1fr)] gap-0 overflow-y-auto overflow-x-hidden pl-7 pr-7 max-[860px]:hidden"
+      className="actions-detail-panel desktop grid h-full min-h-0 min-w-0 grid-rows-[auto_auto_auto_auto_minmax(0,1fr)] gap-0 overflow-hidden pl-7 pr-7 max-[860px]:hidden"
       aria-label="Редактирование входящего"
       data-nav-swipe-exclusion
       onKeyDown={onKeyDown}
