@@ -67,7 +67,12 @@ if [[ "$ENVIRONMENT" == preview-* && "$ALLOCATED_NEW" == "true" && "${BRIGHT_OS_
   case "$TARGET_ROOT" in
     "$ENVS_ROOT"/preview-*)
       find "$TARGET_ROOT" -user "$(id -u)" -exec chmod u+rwX,g+rwX {} + || true
-      rm -f "$TARGET_ROOT/data/bright_os.sqlite" "$TARGET_ROOT/data/bright_os.sqlite-shm" "$TARGET_ROOT/data/bright_os.sqlite-wal"
+      RESET_DB_FILES=("$TARGET_ROOT/data/bright_os.sqlite" "$TARGET_ROOT/data/bright_os.sqlite-shm" "$TARGET_ROOT/data/bright_os.sqlite-wal")
+      if ! rm -f "${RESET_DB_FILES[@]}"; then
+        if ! "${BRIGHT_OS_SUDO:-sudo}" -n rm -f "${RESET_DB_FILES[@]}"; then
+          echo "Warning: preview DB reset skipped; unable to remove existing SQLite files." >&2
+        fi
+      fi
       ;;
     *)
       echo "Refusing to reset preview DB outside $ENVS_ROOT/preview-* path: $TARGET_ROOT" >&2

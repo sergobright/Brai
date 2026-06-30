@@ -385,10 +385,14 @@ try {
 
   it("restores stale preview source permissions before deploy cleanup", async () => {
     const script = await readFile(path.join(workspaceRoot, "deploy/scripts/ci-ssh-deploy.sh"), "utf8");
+    const deployBranch = await readFile(path.join(workspaceRoot, "deploy/scripts/deploy-branch.sh"), "utf8");
 
     expect(script).toContain('find "$SOURCE_ROOT" -user "$(id -u)" -exec chmod u+rwX,g+rwX {} + || true');
     expect(script).toContain('rm -rf "$SOURCE_ROOT" || { sleep 2; rm -rf "$SOURCE_ROOT"; }');
     expect(script.indexOf('find "$SOURCE_ROOT" -user "$(id -u)"')).toBeLessThan(script.indexOf('rm -rf "$SOURCE_ROOT"'));
+    expect(deployBranch).toContain('if ! rm -f "${RESET_DB_FILES[@]}"; then');
+    expect(deployBranch).toContain('"${BRIGHT_OS_SUDO:-sudo}" -n rm -f "${RESET_DB_FILES[@]}"');
+    expect(deployBranch).toContain("Warning: preview DB reset skipped");
   });
 
   it("rebuilds all APK release rows from production native deploys", async () => {
