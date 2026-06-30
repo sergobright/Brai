@@ -22,6 +22,7 @@ type FloatingDockItem = {
   icon: React.ReactNode;
   href: string;
   active?: boolean;
+  fillIcon?: boolean;
   onClick?: () => void;
 };
 
@@ -70,7 +71,7 @@ const FloatingDockMobile = ({
               : "bg-transparent",
           )}
         >
-          <div className="h-5 w-5">{item.icon}</div>
+          <div className={cn(item.fillIcon ? "h-full w-full" : "h-5 w-5")}>{item.icon}</div>
           <span className="nav-label hidden">{item.title}</span>
         </a>
       ))}
@@ -108,6 +109,7 @@ function IconContainer({
   icon,
   href,
   active,
+  fillIcon,
   onClick,
 }: FloatingDockItem & {
   mouseX: MotionValue;
@@ -188,12 +190,18 @@ function IconContainer({
             </motion.div>
           )}
         </AnimatePresence>
-        <motion.div
-          style={{ width: widthIcon, height: heightIcon }}
-          className="flex items-center justify-center"
-        >
-          {icon}
-        </motion.div>
+        {fillIcon ? (
+          <div className="absolute inset-0 flex items-center justify-center">
+            {icon}
+          </div>
+        ) : (
+          <motion.div
+            style={{ width: widthIcon, height: heightIcon }}
+            className="flex items-center justify-center"
+          >
+            {icon}
+          </motion.div>
+        )}
       </motion.div>
     </a>
   );

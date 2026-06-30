@@ -94,6 +94,10 @@ export function BrightOsApp({ initialSection = "actions" }: { initialSection?: S
             onDelete={app.onDeleteAction}
             onReorder={app.onReorderActions}
             onMobileOverlayChange={app.setActionOverlayOpen}
+            activeActivityId={app.timer.active_activity_id ?? null}
+            activeActivityElapsedSeconds={app.timer.active_interval_elapsed_seconds ?? 0}
+            onStartActionFocus={app.onStartActionFocus}
+            onStopActionFocus={app.onStopActionFocus}
           />
         ) : screenSection === "inbox" ? (
           <InboxSection
@@ -121,6 +125,7 @@ export function BrightOsApp({ initialSection = "actions" }: { initialSection?: S
             onStart={app.onStart}
             onStop={app.onStop}
             onDeleteSession={app.onDeleteFocusSession}
+            onEditInterval={app.onEditFocusInterval}
             onEditSession={app.onEditFocusSession}
             onBackground={app.setFocusBackground}
           />
@@ -203,6 +208,7 @@ export function BrightOsApp({ initialSection = "actions" }: { initialSection?: S
         hidden={app.actionOverlayOpen || app.mobileContextPanel != null}
         onSection={app.selectSection}
         swipeHandlers={app.swipeNavigation.handlers}
+        timer={app.timer}
       />
       {app.mobileMenuOpen && isPrimarySection(app.section) ? (
         <MobileProfileDrawer
@@ -230,10 +236,10 @@ export function BrightOsApp({ initialSection = "actions" }: { initialSection?: S
         </MobileContextSheet>
       ) : null}
       {app.mobileContextPanel === "focus-goal" && app.section === "focus" ? (
-        <FocusContextPanelSheet panel="goal" history={app.history} goal={app.goal} todayKey={app.todayKey} onClose={() => app.setMobileContextPanel(null)} onCloseStart={app.markMobileContextPanelClosing} onDeleteSession={app.onDeleteFocusSession} onEditSession={app.onEditFocusSession} />
+        <FocusContextPanelSheet panel="goal" history={app.history} goal={app.goal} todayKey={app.todayKey} onClose={() => app.setMobileContextPanel(null)} onCloseStart={app.markMobileContextPanelClosing} onDeleteSession={app.onDeleteFocusSession} onEditInterval={app.onEditFocusInterval} onEditSession={app.onEditFocusSession} />
       ) : null}
       {app.mobileContextPanel === "focus-history" && app.section === "focus" ? (
-        <FocusContextPanelSheet panel="history" history={app.history} goal={app.goal} todayKey={app.todayKey} onClose={() => app.setMobileContextPanel(null)} onCloseStart={app.markMobileContextPanelClosing} onDeleteSession={app.onDeleteFocusSession} onEditSession={app.onEditFocusSession} />
+        <FocusContextPanelSheet panel="history" history={app.history} goal={app.goal} todayKey={app.todayKey} onClose={() => app.setMobileContextPanel(null)} onCloseStart={app.markMobileContextPanelClosing} onDeleteSession={app.onDeleteFocusSession} onEditInterval={app.onEditFocusInterval} onEditSession={app.onEditFocusSession} />
       ) : null}
     </SidebarProvider>
   );

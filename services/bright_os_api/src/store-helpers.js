@@ -31,16 +31,54 @@ export function formatSession(session) {
   if (!session) return null;
   const startedMs = Date.parse(session.started_at_utc);
   const endedMs = session.ended_at_utc ? Date.parse(session.ended_at_utc) : null;
+  const intervals = Array.isArray(session.intervals)
+    ? session.intervals.map(formatFocusInterval)
+    : [];
+  const activityIntervals = intervals.filter((interval) => interval.activity_id);
+  const primaryActivity = primaryActivityInterval(activityIntervals);
   return {
     id: session.id,
     started_at_utc: session.started_at_utc,
     ended_at_utc: session.ended_at_utc,
     duration_seconds: session.duration_seconds,
+    intervals,
+    activity_interval_count: activityIntervals.length,
+    primary_activity_id: primaryActivity?.activity_id ?? null,
+    primary_activity_title: primaryActivity?.activity_title ?? null,
+    active_interval: session.active_interval ? formatFocusInterval(session.active_interval) : null,
+    active_activity_id: session.active_interval?.activity_id ?? null,
+    start_origin: session.start_origin ?? 'focus',
+    started_by_activity_id: session.started_by_activity_id ?? null,
     started_date_msk: localDateFromUtcMs(startedMs),
     started_hour_msk: localHourFromUtcMs(startedMs),
     ended_date_msk: endedMs ? localDateFromUtcMs(endedMs) : null,
     ended_hour_msk: endedMs ? localHourFromUtcMs(endedMs) : null
   };
+}
+
+export function formatFocusInterval(interval) {
+  if (!interval) return null;
+  const startedMs = Date.parse(interval.started_at_utc);
+  const endedMs = interval.ended_at_utc ? Date.parse(interval.ended_at_utc) : null;
+  return {
+    id: interval.id,
+    focus_session_id: interval.focus_session_id,
+    activity_id: interval.activity_id ?? null,
+    activity_title: interval.activity_title ?? null,
+    started_at_utc: interval.started_at_utc,
+    ended_at_utc: interval.ended_at_utc,
+    duration_seconds: interval.duration_seconds,
+    started_date_msk: localDateFromUtcMs(startedMs),
+    started_hour_msk: localHourFromUtcMs(startedMs),
+    ended_date_msk: endedMs ? localDateFromUtcMs(endedMs) : null,
+    ended_hour_msk: endedMs ? localHourFromUtcMs(endedMs) : null
+  };
+}
+
+function primaryActivityInterval(intervals) {
+  return intervals
+    .slice()
+    .sort((left, right) => (right.duration_seconds ?? 0) - (left.duration_seconds ?? 0))[0] ?? null;
 }
 
 export function formatActivity(activity) {

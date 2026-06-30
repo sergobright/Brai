@@ -75,6 +75,58 @@ export async function enqueueFocusSessionDelete(params: {
   });
 }
 
+export async function enqueueStartActionFocus(params: {
+  activityId: string;
+  baseServerRevision: number;
+}): Promise<PendingTimerEvent> {
+  return enqueueTimerEvent({
+    type: "start_activity_focus",
+    baseServerRevision: params.baseServerRevision,
+    metadata: { activity_id: params.activityId },
+  });
+}
+
+export async function enqueueSwitchActionFocus(params: {
+  activityId: string;
+  baseServerRevision: number;
+}): Promise<PendingTimerEvent> {
+  return enqueueTimerEvent({
+    type: "switch_activity_focus",
+    baseServerRevision: params.baseServerRevision,
+    metadata: { activity_id: params.activityId },
+  });
+}
+
+export async function enqueueStopActionFocus(params: {
+  activityId?: string | null;
+  baseServerRevision: number;
+}): Promise<PendingTimerEvent> {
+  return enqueueTimerEvent({
+    type: "stop_activity_focus",
+    baseServerRevision: params.baseServerRevision,
+    metadata: params.activityId ? { activity_id: params.activityId } : undefined,
+  });
+}
+
+export async function enqueueFocusIntervalEdit(params: {
+  intervalId: string;
+  sessionId: string;
+  startedAtUtc: string;
+  endedAtUtc: string;
+  baseServerRevision: number;
+}): Promise<PendingTimerEvent> {
+  return enqueueTimerEvent({
+    type: "edit_focus_interval",
+    baseServerRevision: params.baseServerRevision,
+    metadata: {
+      focus_interval_id: params.intervalId,
+      focus_session_id: params.sessionId,
+      started_at_utc: params.startedAtUtc,
+      ended_at_utc: params.endedAtUtc,
+    },
+  });
+}
+
 export async function pendingEvents(): Promise<PendingTimerEvent[]> {
   return clientDb().outbox_events.orderBy("clientSequence").toArray();
 }
@@ -126,6 +178,9 @@ export async function saveIgnoredEvents(
   );
 }
 
+/**
+ * Stores the latest canonical timer snapshot and active interval details.
+ */
 export async function saveCanonicalState(state: TimerState): Promise<boolean> {
   const currentRevision = await lastServerRevision();
   if (state.server_revision < currentRevision) return false;
@@ -136,6 +191,11 @@ export async function saveCanonicalState(state: TimerState): Promise<boolean> {
     serverTimeUtc: state.server_time_utc,
     activeSessionJson: state.active_session,
     elapsedSeconds: state.elapsed_seconds,
+    activeIntervalJson: state.active_interval ?? state.active_session?.active_interval ?? null,
+    activeIntervalElapsedSeconds: state.active_interval_elapsed_seconds ?? 0,
+    activeActivityId: state.active_activity_id ?? null,
+    activeSessionStartOrigin: state.active_session_start_origin ?? state.active_session?.start_origin ?? null,
+    activeSessionStartedByActivityId: state.active_session_started_by_activity_id ?? state.active_session?.started_by_activity_id ?? null,
     updatedAtUtc: new Date().toISOString(),
   });
   await setMeta("lastServerRevision", state.server_revision);
@@ -152,6 +212,11 @@ export async function loadCanonicalState(): Promise<TimerState | null> {
     timezone: "Europe/Moscow",
     active_session: row.activeSessionJson,
     elapsed_seconds: row.elapsedSeconds,
+    active_interval: row.activeIntervalJson ?? row.activeSessionJson?.active_interval ?? null,
+    active_interval_elapsed_seconds: row.activeIntervalElapsedSeconds ?? 0,
+    active_activity_id: row.activeActivityId ?? row.activeSessionJson?.active_activity_id ?? null,
+    active_session_start_origin: row.activeSessionStartOrigin ?? row.activeSessionJson?.start_origin ?? null,
+    active_session_started_by_activity_id: row.activeSessionStartedByActivityId ?? row.activeSessionJson?.started_by_activity_id ?? null,
   };
 }
 

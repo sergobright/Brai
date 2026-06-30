@@ -1,8 +1,10 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { cachedActivitiesState, openProfileMenuItem, setupBrightOsAppTest } from "./app-test-support";
 import { BrightOsApp } from "@/features/app/BrightOsApp";
+import { ActionRow } from "@/features/app/sections/actions/ActionRow";
 import { pendingActivityEvents, saveActivitiesState } from "@/shared/storage/activityStore";
+import { pendingEvents, saveCanonicalState } from "@/shared/storage/syncStore";
 
 describe("BrightOsApp actions", () => {
   setupBrightOsAppTest();
@@ -64,6 +66,7 @@ describe("BrightOsApp actions", () => {
     await waitFor(() => expect(screen.getByRole("heading", { name: "Архив" })).toBeInTheDocument());
     const archiveList = screen.getByLabelText("Удаленные действия");
     expect(within(archiveList).getByText("Фокус")).toBeInTheDocument();
+    expect(archiveList.querySelector(".action-focus-button")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Восстановить: Фокус", hidden: true }));
     await waitFor(() => expect(within(archiveList).queryByText("Фокус")).not.toBeInTheDocument());
@@ -249,7 +252,184 @@ describe("BrightOsApp actions", () => {
     expect(activeRow).toHaveClass("selected", "bg-primary/10");
     expect(activeRow).toHaveClass("rounded-lg", "border-b-transparent");
     expect(activeRow).toHaveClass("[&:has(+_.action-row.selected)]:border-b-transparent");
-    expect(activeRow).toContainElement(activeRow.querySelector(".action-delete-button") as HTMLElement);
+    expect(activeRow).not.toHaveClass("grid-cols-[minmax(0,1fr)_44px_44px]");
+    const deleteButton = activeRow.querySelector(".action-delete-button") as HTMLElement;
+    const focusButton = activeRow.querySelector(".action-focus-button") as HTMLElement;
+    expect(activeRow).toContainElement(deleteButton);
+    expect(activeRow.querySelector(".action-row-controls")).toContainElement(deleteButton);
+    expect(activeRow.querySelector(".action-row-controls")).toContainElement(focusButton);
+    expect(deleteButton.compareDocumentPosition(focusButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("queues action focus from a desktop action row", async () => {
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn(() => ({
+        matches: false,
+        media: "(max-width: 860px)",
+        onchange: null,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+      })),
+    );
+    Object.defineProperty(window, "innerWidth", { configurable: true, writable: true, value: 1200 });
+    await saveActivitiesState(cachedActivitiesState("action-focus", "Фокус"));
+
+    render(<BrightOsApp />);
+
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Название действия: Фокус" })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Фокусироваться: Фокус", hidden: true }));
+
+    await waitFor(async () =>
+      expect(await pendingEvents()).toEqual([
+        expect.objectContaining({
+          type: "start_activity_focus",
+          metadata: { activity_id: "action-focus" },
+        }),
+      ]),
+    );
+  });
+
+  it("shows and stops active action focus from a desktop action row", async () => {
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn(() => ({
+        matches: false,
+        media: "(max-width: 860px)",
+        onchange: null,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+      })),
+    );
+    Object.defineProperty(window, "innerWidth", { configurable: true, writable: true, value: 1200 });
+    const startedAtUtc = new Date(Date.now() - 120_000).toISOString();
+    await saveActivitiesState(cachedActivitiesState("action-focus", "Фокус"));
+    await saveCanonicalState({
+      server_time_utc: new Date().toISOString(),
+      server_revision: 5,
+      timezone: "Europe/Moscow",
+      active_session: {
+        id: "session-active",
+        started_at_utc: startedAtUtc,
+        ended_at_utc: null,
+        duration_seconds: null,
+        intervals: [
+          {
+            id: "interval-active",
+            focus_session_id: "session-active",
+            activity_id: "action-focus",
+            activity_title: "Фокус",
+            started_at_utc: startedAtUtc,
+            ended_at_utc: null,
+            duration_seconds: null,
+          },
+        ],
+        active_interval: {
+          id: "interval-active",
+          focus_session_id: "session-active",
+          activity_id: "action-focus",
+          activity_title: "Фокус",
+          started_at_utc: startedAtUtc,
+          ended_at_utc: null,
+          duration_seconds: null,
+        },
+        active_activity_id: "action-focus",
+        start_origin: "activity",
+        started_by_activity_id: "action-focus",
+      },
+      elapsed_seconds: 120,
+      active_interval: {
+        id: "interval-active",
+        focus_session_id: "session-active",
+        activity_id: "action-focus",
+        activity_title: "Фокус",
+        started_at_utc: startedAtUtc,
+        ended_at_utc: null,
+        duration_seconds: null,
+      },
+      active_interval_elapsed_seconds: 120,
+      active_activity_id: "action-focus",
+      active_session_start_origin: "activity",
+      active_session_started_by_activity_id: "action-focus",
+    });
+
+    render(<BrightOsApp />);
+
+    const stopButton = await screen.findByRole("button", { name: "Остановить фокус: Фокус" });
+    expect(within(stopButton).queryByText("Стоп")).not.toBeInTheDocument();
+    expect(stopButton.querySelector("svg")).toBeInTheDocument();
+    fireEvent.click(stopButton);
+
+    await waitFor(async () =>
+      expect(await pendingEvents()).toEqual([
+        expect.objectContaining({
+          type: "stop_activity_focus",
+          metadata: { activity_id: "action-focus" },
+        }),
+      ]),
+    );
+  });
+
+  it("requires a second mobile tap before stopping active action focus", async () => {
+    vi.useFakeTimers();
+    try {
+      const onStopFocus = vi.fn(async () => undefined);
+      render(
+        <ActionRow
+          action={{
+            id: "action-focus",
+            title: "Фокус",
+            description_md: "",
+            status: "New",
+            created_at_utc: "2026-06-16T10:00:00.000Z",
+            updated_at_utc: "2026-06-16T10:00:00.000Z",
+            completed_at_utc: null,
+            sort_order: null,
+            deleted_at_utc: null,
+            restored_at_utc: null,
+          }}
+          selected={false}
+          activeFocus
+          activeFocusElapsedSeconds={120}
+          deleteOpen={false}
+          onCloseDelete={() => undefined}
+          onDelete={async () => undefined}
+          onEditMobile={() => undefined}
+          onOpenDelete={() => undefined}
+          onSelect={() => undefined}
+          onSetStatus={async () => undefined}
+          onStopFocus={onStopFocus}
+          onUpdateTitle={async () => undefined}
+        />,
+      );
+
+      const stopButton = screen.getByRole("button", { name: "Остановить фокус: Фокус" });
+      await act(async () => {
+        fireEvent.click(stopButton);
+      });
+      expect(onStopFocus).not.toHaveBeenCalled();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1700);
+      });
+      await act(async () => {
+        fireEvent.click(stopButton);
+      });
+      expect(onStopFocus).not.toHaveBeenCalled();
+
+      await act(async () => {
+        fireEvent.click(stopButton);
+      });
+      expect(onStopFocus).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("mirrors desktop title drafts between the list and detail editor", async () => {

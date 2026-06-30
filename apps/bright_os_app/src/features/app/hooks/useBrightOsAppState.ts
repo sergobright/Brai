@@ -8,7 +8,7 @@ import { acknowledgeActionEvents, loadActionsState, markActionAttempt, markActio
 import { ensureClientMeta } from "@/shared/storage/db";
 import { acknowledgeInboxEvents, loadInboxState, markInboxAttempt, markInboxFailure, pendingInboxEvents, projectInboxState, saveInboxState } from "@/shared/storage/inboxStore";
 import { projectHistoryData, projectTimerState } from "@/shared/storage/projection";
-import { acknowledgeEvents, enqueueFocusSessionDelete, enqueueFocusSessionEdit, enqueueTimerEvent, loadCanonicalState, loadGoalCache, loadHistoryCache, markAttempt, markFailure, pendingEvents, saveCanonicalState, saveGoalCache, saveHistoryCache, saveIgnoredEvents } from "@/shared/storage/syncStore";
+import { acknowledgeEvents, enqueueFocusIntervalEdit, enqueueFocusSessionDelete, enqueueFocusSessionEdit, enqueueStartActionFocus, enqueueStopActionFocus, enqueueSwitchActionFocus, enqueueTimerEvent, loadCanonicalState, loadGoalCache, loadHistoryCache, markAttempt, markFailure, pendingEvents, saveCanonicalState, saveGoalCache, saveHistoryCache, saveIgnoredEvents } from "@/shared/storage/syncStore";
 import { tickTimerState } from "@/shared/time/format";
 import type { ActionsState } from "@/shared/types/activities";
 import { emptyActionsState } from "@/shared/types/activities";
@@ -51,6 +51,7 @@ export function useBrightOsAppState(initialSection: SectionId) {
   const historyGoalRevisionRef = useRef(0);
   const activeRef = useRef(false);
   const androidStopInFlightRef = useRef(false);
+  const timerFlushTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const stopTimerRef = useRef<() => Promise<void>>(async () => undefined);
   const [timer, setTimer] = useState<TimerState>(() => emptyTimerState());
   const [actions, setActions] = useState<ActionsState>(() => emptyActionsState());
@@ -241,6 +242,14 @@ export function useBrightOsAppState(initialSection: SectionId) {
     }
   }
 
+  function flushPendingSoon() {
+    if (timerFlushTimeoutRef.current) return;
+    timerFlushTimeoutRef.current = setTimeout(() => {
+      timerFlushTimeoutRef.current = null;
+      void flushPending().catch(handleError);
+    }, 0);
+  }
+
   async function refreshHistoryAndGoal(sourceApi = apiRef.current, serverRevision = timer.server_revision) {
     if (serverRevision < historyGoalRevisionRef.current) return;
     const [nextHistory, nextGoal] = await Promise.all([sourceApi.history(), sourceApi.goal()]);
@@ -423,6 +432,54 @@ export function useBrightOsAppState(initialSection: SectionId) {
     setPendingCount(queued.length);
     setSyncStatus("pending_sync");
     void flushPending().catch(handleError);
+  }
+
+  async function onStartActionFocus(activityId: string) {
+    const activeActivityId = timer.active_activity_id ?? timer.active_interval?.activity_id ?? timer.active_session?.active_activity_id ?? null;
+    if (activeActivityId === activityId) return;
+    if (timer.active_session) {
+      await enqueueSwitchActionFocus({ activityId, baseServerRevision: timer.server_revision });
+    } else {
+      await enqueueStartActionFocus({ activityId, baseServerRevision: timer.server_revision });
+    }
+    const queued = await pendingEvents();
+    setTimerSnapshot(projectTimerState(timer, queued));
+    setPendingCount(queued.length);
+    setSyncStatus("pending_sync");
+    void flushPending().catch(handleError);
+  }
+
+  async function onSwitchActionFocus(activityId: string) {
+    await enqueueSwitchActionFocus({ activityId, baseServerRevision: timer.server_revision });
+    const queued = await pendingEvents();
+    setTimerSnapshot(projectTimerState(timer, queued));
+    setPendingCount(queued.length);
+    setSyncStatus("pending_sync");
+    void flushPending().catch(handleError);
+  }
+
+  async function onStopActionFocus(activityId?: string | null) {
+    await enqueueStopActionFocus({ activityId, baseServerRevision: timer.server_revision });
+    const queued = await pendingEvents();
+    setTimerSnapshot(projectTimerState(timer, queued));
+    setPendingCount(queued.length);
+    setSyncStatus("pending_sync");
+    void flushPending().catch(handleError);
+  }
+
+  async function onEditFocusInterval(intervalId: string, sessionId: string, startedAtUtc: string, endedAtUtc: string) {
+    await enqueueFocusIntervalEdit({
+      intervalId,
+      sessionId,
+      startedAtUtc,
+      endedAtUtc,
+      baseServerRevision: timer.server_revision,
+    });
+    const queued = await pendingEvents();
+    setHistory((current) => projectHistoryData(current, queued));
+    setPendingCount(queued.length);
+    setSyncStatus("pending_sync");
+    flushPendingSoon();
   }
 
   async function onLogin(password: string) {
@@ -674,7 +731,7 @@ export function useBrightOsAppState(initialSection: SectionId) {
     setSyncStatus,
   });
 
-  return { actionOverlayOpen, actions, actionsInfoActive, active, bundlePublishedAt, busy, desktopRailExpanded, displaySyncStatus, focusBackground, focusContextPanel, focusGoalActive, focusHistoryActive, goal, history, inbox, inboxInfoActive, localSnapshotReady, markMobileContextPanelClosing, mobileContextPanel, mobileMenuOpen, ...actionCommands, ...inboxCommands, onDeleteFocusSession, onEditFocusSession, onLogin, onLogout, onStart, onStop, openSettingsPage, otaCheckedAt, otaRefreshing, otaState, refreshEngineOnce, refreshOtaStateOnce, section, selectSection, setActionOverlayOpen, setDesktopRailExpanded, setFocusBackground, setMobileContextPanel: setMobileContextPanelState, setMobileMenuOpen, setTheme, swipeNavigation, theme, timer, timerBusy, todayKey, toggleActionsInfoPanel, toggleFocusContextPanel, toggleInboxInfoPanel, totalPendingCount, versionCheckedAt, versionError, versionRefreshing, versionState };
+  return { actionOverlayOpen, actions, actionsInfoActive, active, bundlePublishedAt, busy, desktopRailExpanded, displaySyncStatus, focusBackground, focusContextPanel, focusGoalActive, focusHistoryActive, goal, history, inbox, inboxInfoActive, localSnapshotReady, markMobileContextPanelClosing, mobileContextPanel, mobileMenuOpen, ...actionCommands, ...inboxCommands, onDeleteFocusSession, onEditFocusInterval, onEditFocusSession, onLogin, onLogout, onStart, onStartActionFocus, onStop, onStopActionFocus, onSwitchActionFocus, openSettingsPage, otaCheckedAt, otaRefreshing, otaState, refreshEngineOnce, refreshOtaStateOnce, section, selectSection, setActionOverlayOpen, setDesktopRailExpanded, setFocusBackground, setMobileContextPanel: setMobileContextPanelState, setMobileMenuOpen, setTheme, swipeNavigation, theme, timer, timerBusy, todayKey, toggleActionsInfoPanel, toggleFocusContextPanel, toggleInboxInfoPanel, totalPendingCount, versionCheckedAt, versionError, versionRefreshing, versionState };
 }
 
 function loadFocusContextPanelPreference(): FocusContextPanel {

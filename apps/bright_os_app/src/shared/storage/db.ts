@@ -20,6 +20,11 @@ export interface CanonicalStateRow {
   serverTimeUtc: string;
   activeSessionJson: TimerState["active_session"];
   elapsedSeconds: number;
+  activeIntervalJson?: TimerState["active_interval"];
+  activeIntervalElapsedSeconds?: number;
+  activeActivityId?: string | null;
+  activeSessionStartOrigin?: TimerState["active_session_start_origin"];
+  activeSessionStartedByActivityId?: string | null;
   updatedAtUtc: string;
 }
 

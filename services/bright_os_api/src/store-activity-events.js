@@ -2,7 +2,9 @@ import {
   ACTIVITY_EVENT_PAYLOAD_VERSION,
   ACTIVITY_EVENT_TYPES,
   ACTIVITY_STATUSES,
+  EVENT_PAYLOAD_VERSION,
   FUTURE_EVENT_TOLERANCE_MS,
+  LEGACY_DEVICE_ID,
   formatActivity,
   normalizeActionPayload,
   normalizeMarkdownSource,
@@ -92,6 +94,7 @@ export const activityEventMethods = {
       }
 
       this.projectAcceptedActivityEvents(acceptedEvents, receivedAt);
+      this.stopDeletedActiveActivityFocus(acceptedEvents, receivedAt);
     });
     run();
 
@@ -101,6 +104,42 @@ export const activityEventMethods = {
       acknowledged_event_ids: acknowledged,
       ignored_events: ignored
     };
+  }
+,
+
+  stopDeletedActiveActivityFocus(acceptedEvents, receivedAt) {
+    for (const event of acceptedEvents) {
+      if (event.type !== 'delete') continue;
+      const activeInterval = this.getActiveInterval?.();
+      if (!activeInterval || activeInterval.activity_id !== event.activity_id) continue;
+      this.upsertDevice(
+        {
+          device_id: LEGACY_DEVICE_ID,
+          platform: 'server',
+          display_name: 'Activity deletion focus bridge'
+        },
+        receivedAt
+      );
+      this.insertEvent({
+        event_id: `activity:${event.event_id}:stop-focus`,
+        device_id: LEGACY_DEVICE_ID,
+        client_sequence: this.nextDeviceSequence(LEGACY_DEVICE_ID),
+        type: 'stop_activity_focus',
+        occurred_at_utc: event.occurred_at_utc,
+        received_at_utc: receivedAt,
+        local_timer_id: activeInterval.focus_session_id,
+        base_server_revision: this.getServerRevision(),
+        status: 'accepted',
+        ignore_reason: null,
+        payload_version: EVENT_PAYLOAD_VERSION,
+        metadata_json: JSON.stringify({
+          activity_id: event.activity_id,
+          activity_delete_event_id: event.event_id,
+          preserve_focus_session: true
+        })
+      });
+      this.recomputeCanonicalSessions(receivedAt);
+    }
   }
 ,
 
