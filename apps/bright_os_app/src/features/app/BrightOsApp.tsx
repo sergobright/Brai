@@ -62,6 +62,7 @@ export function BrightOsApp({ initialSection = "actions" }: { initialSection?: S
           icon={sectionIcon(screenSection)}
           syncStatus={app.displaySyncStatus}
           pendingCount={app.totalPendingCount}
+          showSyncStatus={mobileViewport}
           leading={isPrimarySection(screenSection) ? <MobileMenuButton onClick={() => app.setMobileMenuOpen(true)} /> : null}
           trailing={
             screenSection === "actions" && mobileViewport ? (
@@ -172,8 +173,10 @@ export function BrightOsApp({ initialSection = "actions" }: { initialSection?: S
         appVersionState={app.versionState}
         otaRefreshing={app.otaRefreshing}
         otaState={app.otaState}
+        pendingCount={app.totalPendingCount}
         versionError={app.versionError}
         versionRefreshing={app.versionRefreshing}
+        syncStatus={app.displaySyncStatus}
         onSettings={app.openSettingsPage}
         onEngine={() => app.selectSection("engine")}
         onArchive={() => app.selectSection("archive")}

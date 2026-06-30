@@ -9,9 +9,10 @@ import type { BrightOtaState } from "@/shared/platform/ota";
 import { Avatar, AvatarFallback } from "@/shared/ui/avatar";
 import { FloatingDock } from "@/shared/ui/floating-dock";
 import { formatHourMinute } from "@/shared/time/format";
-import type { TimerState } from "@/shared/types/timer";
+import type { SyncStatus, TimerState } from "@/shared/types/timer";
 import { Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarGroupContent, SidebarGroupLabel, SidebarHeader, SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarRail, useSidebar } from "@/shared/ui/sidebar";
 import { cx } from "../appUtils";
+import { syncStatusIconToneClasses, syncStatusMeta } from "../chrome/AppChrome";
 import { useMobileSheetDrag } from "../hooks/useMobileSheetDrag";
 import type { PrimarySectionId, SectionId } from "../appModel";
 import { isPrimarySection, navHref, navItems, sectionTitle } from "../appModel";
@@ -23,8 +24,10 @@ export function DesktopRail({
   appVersionState,
   otaRefreshing,
   otaState,
+  pendingCount,
   versionError,
   versionRefreshing,
+  syncStatus,
   onSettings,
   onEngine,
   onArchive,
@@ -35,8 +38,10 @@ export function DesktopRail({
   appVersionState: AppVersionState | null;
   otaRefreshing: boolean;
   otaState: BrightOtaState | null;
+  pendingCount: number;
   versionError: boolean;
   versionRefreshing: boolean;
+  syncStatus: SyncStatus;
   onSettings: () => void;
   onEngine: () => void;
   onArchive: () => void;
@@ -69,15 +74,18 @@ export function DesktopRail({
         />
       </SidebarContent>
       <SidebarFooter>
-        <EngineMenuItem
-          active={section === "engine"}
-          appVersionState={appVersionState}
-          otaRefreshing={otaRefreshing}
-          otaState={otaState}
-          versionError={versionError}
-          versionRefreshing={versionRefreshing}
-          onClick={onEngine}
-        />
+        <SidebarMenu>
+          <ConnectionStatusMenuItem status={syncStatus} pendingCount={pendingCount} />
+          <EngineMenuItem
+            active={section === "engine"}
+            appVersionState={appVersionState}
+            otaRefreshing={otaRefreshing}
+            otaState={otaState}
+            versionError={versionError}
+            versionRefreshing={versionRefreshing}
+            onClick={onEngine}
+          />
+        </SidebarMenu>
       </SidebarFooter>
       <SidebarRail />
     </Sidebar>
@@ -281,6 +289,28 @@ function PageMenu({
         </SidebarGroup>
       ) : null}
     </>
+  );
+}
+
+function ConnectionStatusMenuItem({ status, pendingCount }: { status: SyncStatus; pendingCount: number }) {
+  const { label, shortLabel, tone, icon: Icon, spinning } = syncStatusMeta(status, pendingCount);
+
+  return (
+    <SidebarMenuItem>
+      <span
+        className={cx(
+          "flex h-8 w-full items-center gap-2 rounded-md p-2 text-sm group-data-[collapsible=icon]:size-8! group-data-[collapsible=icon]:p-2!",
+          "[&>svg]:size-4 [&>svg]:shrink-0",
+          syncStatusIconToneClasses[tone],
+        )}
+        title={label}
+        aria-label={label}
+        role="status"
+      >
+        <Icon className={cx(spinning && "animate-spin")} aria-hidden="true" />
+        <span className="truncate group-data-[collapsible=icon]:hidden">{shortLabel}</span>
+      </span>
+    </SidebarMenuItem>
   );
 }
 
