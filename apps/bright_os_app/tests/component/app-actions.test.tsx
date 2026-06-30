@@ -50,6 +50,7 @@ describe("BrightOsApp actions", () => {
     fireEvent.change(description, { target: { value: "Описание\nстрока 2" } });
     fireEvent.click(document.querySelector(".actions-mobile-overlay") as HTMLElement);
     await waitFor(() => expect(document.querySelector(".actions-mobile-overlay")).not.toBeInTheDocument());
+    expect(screen.getByRole("button", { name: "Продолжить черновик действия" })).toBeInTheDocument();
 
     fireEvent.click(document.querySelector(".actions-fab") as HTMLElement);
     const restoredTitle = screen.getByRole("textbox", { name: "Добавить действие" }) as HTMLTextAreaElement;
@@ -68,6 +69,44 @@ describe("BrightOsApp actions", () => {
         ]),
       );
     });
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Продолжить черновик действия" })).not.toBeInTheDocument());
+  });
+
+  it("keeps separate mobile create drafts while switching Actions and Inbox", async () => {
+    render(<BrightOsApp />);
+
+    fireEvent.click(document.querySelector(".actions-fab") as HTMLElement);
+    const actionOverlay = () => document.querySelector(".actions-mobile-overlay") as HTMLElement;
+    const closeComposer = async () => {
+      fireEvent.click(actionOverlay());
+      await waitFor(() => expect(document.querySelector(".actions-mobile-overlay")).not.toBeInTheDocument());
+    };
+
+    const actionTitle = within(actionOverlay()).getByRole("textbox", { name: "Добавить действие" });
+    fireEvent.change(actionTitle, { target: { value: "Черновик действия" } });
+    await closeComposer();
+    expect(document.querySelector(".actions-fab")).toHaveAttribute("aria-label", "Продолжить черновик действия");
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Входящие" }).at(-1) as HTMLElement);
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Входящие" })).toBeInTheDocument());
+    expect(document.querySelector(".actions-fab")).toHaveAttribute("aria-label", "Добавить входящее");
+
+    fireEvent.click(document.querySelector(".actions-fab") as HTMLElement);
+    const inboxTitle = within(actionOverlay()).getByRole("textbox", { name: "Добавить входящее" });
+    fireEvent.change(inboxTitle, { target: { value: "Черновик входящего" } });
+    await closeComposer();
+    expect(document.querySelector(".actions-fab")).toHaveAttribute("aria-label", "Продолжить черновик входящего");
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Действия" }).at(-1) as HTMLElement);
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Действия" })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Продолжить черновик действия" }));
+    expect(within(actionOverlay()).getByRole("textbox", { name: "Добавить действие" })).toHaveValue("Черновик действия");
+    await closeComposer();
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Входящие" }).at(-1) as HTMLElement);
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Входящие" })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Продолжить черновик входящего" }));
+    expect(within(actionOverlay()).getByRole("textbox", { name: "Добавить входящее" })).toHaveValue("Черновик входящего");
   });
 
   it("does not complete an action when its title is clicked", async () => {

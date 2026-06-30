@@ -2,14 +2,14 @@
 
 import type { CSSProperties, FormEvent, KeyboardEvent, MouseEvent, PointerEvent } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ChevronDown, Plus } from "lucide-react";
+import { ChevronDown, FilePenLine, Plus } from "lucide-react";
 import { installAndroidBackHandler } from "@/shared/platform/platform";
 import { cleanTitle } from "@/shared/activities/text";
 import type { ActivityItem, ActivitiesState, ActivityStatus } from "@/shared/types/activities";
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/shared/ui/input-group";
 import { ScrollArea } from "@/shared/ui/scroll-area";
 import { cx } from "../../appUtils";
-import { MobileCreateComposer, type MobileCreateDraft } from "../MobileCreateComposer";
+import { MobileCreateComposer, mobileCreateDraftHasText, type MobileCreateDraft } from "../MobileCreateComposer";
 import { ActionRow, type DetailTitleFocus } from "./ActionRow";
 import { SortableActionList } from "./ActionList";
 import { ActionsInfoPanel } from "./ActionsInfoPanel";
@@ -26,6 +26,8 @@ export function ActionsSection({
   onSetStatus,
   onDelete,
   onReorder,
+  mobileCreateDraft,
+  onMobileCreateDraftChange,
   onMobileOverlayChange,
   autoFocusAddInput,
 }: {
@@ -38,10 +40,11 @@ export function ActionsSection({
   onSetStatus: (action: ActivityItem, status: ActivityStatus) => Promise<void>;
   onDelete: (action: ActivityItem) => Promise<void>;
   onReorder: (orderedIds: string[], movedAction: ActivityItem) => Promise<void>;
+  mobileCreateDraft: MobileCreateDraft;
+  onMobileCreateDraftChange: (draft: MobileCreateDraft) => void;
   onMobileOverlayChange: (open: boolean) => void;
 }) {
   const [draft, setDraft] = useState("");
-  const [mobileCreateDraft, setMobileCreateDraft] = useState<MobileCreateDraft>({ title: "", descriptionMd: "" });
   const [mobileCreateOpen, setMobileCreateOpen] = useState(false);
   const [selectedActionId, setSelectedActionId] = useState<string | null>(null);
   const [mobileEditActionId, setMobileEditActionId] = useState<string | null>(null);
@@ -62,6 +65,9 @@ export function ActionsSection({
     openDeleteActionId && state.actions.some((action) => action.id === openDeleteActionId) ? openDeleteActionId : null;
   const mobileOverlayOpen = mobileCreateOpen || mobileEditAction != null;
   const desktopSidePanelOpen = true;
+  const mobileCreateHasDraft = mobileCreateDraftHasText(mobileCreateDraft);
+  const MobileCreateFabIcon = mobileCreateHasDraft ? FilePenLine : Plus;
+  const mobileCreateFabLabel = mobileCreateHasDraft ? "Продолжить черновик действия" : "Добавить действие";
 
   useEffect(() => {
     if (autoFocusAddInput) desktopInputRef.current?.focus();
@@ -138,7 +144,7 @@ export function ActionsSection({
 
   async function submitMobile(title: string, descriptionMd: string) {
     await onCreate(title, descriptionMd);
-    setMobileCreateDraft({ title: "", descriptionMd: "" });
+    onMobileCreateDraftChange({ title: "", descriptionMd: "" });
     closeMobileCreate();
   }
 
@@ -366,11 +372,11 @@ export function ActionsSection({
         <button
           type="button"
           className="actions-fab absolute bottom-[18px] right-[18px] z-[26] hidden h-[58px] w-[58px] place-items-center rounded-full border-0 bg-primary text-primary-foreground shadow-lg max-[860px]:grid"
-          aria-label="Добавить действие"
-          title="Добавить действие"
+          aria-label={mobileCreateFabLabel}
+          title={mobileCreateFabLabel}
           onClick={openMobileCreate}
         >
-          <Plus aria-hidden="true" />
+          <MobileCreateFabIcon aria-hidden="true" />
         </button>
       ) : null}
 
@@ -386,7 +392,7 @@ export function ActionsSection({
             descriptionLabel="Описание действия"
             submitLabel="Добавить действие"
             onCancel={closeMobileCreate}
-            onDraftChange={setMobileCreateDraft}
+            onDraftChange={onMobileCreateDraftChange}
             onSubmit={submitMobile}
           />
         </div>

@@ -2,7 +2,7 @@
 
 import type { CSSProperties, FormEvent, KeyboardEvent, MouseEvent, PointerEvent } from "react";
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
-import { BookOpen, FileText, Inbox, Link2, Mail, MessageSquare, Pencil, Plus, Sparkles, Trash2, X } from "lucide-react";
+import { BookOpen, FilePenLine, FileText, Inbox, Link2, Mail, MessageSquare, Pencil, Plus, Sparkles, Trash2, X } from "lucide-react";
 import { useSwipeable } from "react-swipeable";
 import { cleanTitle, markdownPreviewSource, normalizeDescription, singleLineTitle, visibleDescriptionPreview } from "@/shared/activities/text";
 import { installAndroidBackHandler } from "@/shared/platform/platform";
@@ -23,7 +23,7 @@ import {
   DetailPanelTabBar,
   type DetailPanelTab,
 } from "../DetailPanelTabs";
-import { MobileCreateComposer, type MobileCreateDraft } from "../MobileCreateComposer";
+import { MobileCreateComposer, mobileCreateDraftHasText, type MobileCreateDraft } from "../MobileCreateComposer";
 import { ActionsInfoPanel } from "../actions/ActionsInfoPanel";
 import { ACTION_DELETE_REVEAL_WIDTH, ACTION_ROW_SERVICE_SELECTOR, ACTIONS_SPLIT_DEFAULT_PERCENT, ACTIONS_SPLIT_MIN_PERCENT, clampActionsSplitPercent, loadActivityMarkdownPreviewMode, saveActivityMarkdownPreviewMode } from "../actions/constants";
 
@@ -37,6 +37,8 @@ export function InboxSection({
   onUpdateTitle,
   onAutosaveDetails,
   onDelete,
+  mobileCreateDraft,
+  onMobileCreateDraftChange,
   onMobileOverlayChange,
 }: {
   state: InboxState;
@@ -46,10 +48,11 @@ export function InboxSection({
   onUpdateTitle: (item: InboxItem, title: string) => Promise<void>;
   onAutosaveDetails: (item: InboxItem, title: string, descriptionMd: string) => Promise<void>;
   onDelete: (item: InboxItem) => Promise<void>;
+  mobileCreateDraft: MobileCreateDraft;
+  onMobileCreateDraftChange: (draft: MobileCreateDraft) => void;
   onMobileOverlayChange: (open: boolean) => void;
 }) {
   const [draft, setDraft] = useState("");
-  const [mobileCreateDraft, setMobileCreateDraft] = useState<MobileCreateDraft>({ title: "", descriptionMd: "" });
   const [mobileCreateOpen, setMobileCreateOpen] = useState(false);
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
   const [mobileEditItemId, setMobileEditItemId] = useState<string | null>(null);
@@ -67,6 +70,9 @@ export function InboxSection({
     openDeleteItemId && state.inbox.some((item) => item.id === openDeleteItemId) ? openDeleteItemId : null;
   const mobileOverlayOpen = mobileCreateOpen || mobileEditItem != null;
   const desktopSidePanelOpen = true;
+  const mobileCreateHasDraft = mobileCreateDraftHasText(mobileCreateDraft);
+  const MobileCreateFabIcon = mobileCreateHasDraft ? FilePenLine : Plus;
+  const mobileCreateFabLabel = mobileCreateHasDraft ? "Продолжить черновик входящего" : "Добавить входящее";
 
   useEffect(() => {
     if (autoFocusAddInput) desktopInputRef.current?.focus();
@@ -141,7 +147,7 @@ export function InboxSection({
 
   async function submitMobile(title: string, descriptionMd: string) {
     await onCreate(title, descriptionMd);
-    setMobileCreateDraft({ title: "", descriptionMd: "" });
+    onMobileCreateDraftChange({ title: "", descriptionMd: "" });
     closeMobileCreate();
   }
 
@@ -331,11 +337,11 @@ export function InboxSection({
         <button
           type="button"
           className="actions-fab absolute bottom-[18px] right-[18px] z-[26] hidden h-[58px] w-[58px] place-items-center rounded-full border-0 bg-primary text-primary-foreground shadow-lg max-[860px]:grid"
-          aria-label="Добавить входящее"
-          title="Добавить входящее"
+          aria-label={mobileCreateFabLabel}
+          title={mobileCreateFabLabel}
           onClick={openMobileCreate}
         >
-          <Plus aria-hidden="true" />
+          <MobileCreateFabIcon aria-hidden="true" />
         </button>
       ) : null}
 
@@ -351,7 +357,7 @@ export function InboxSection({
             descriptionLabel="Описание входящего"
             submitLabel="Добавить входящее"
             onCancel={closeMobileCreate}
-            onDraftChange={setMobileCreateDraft}
+            onDraftChange={onMobileCreateDraftChange}
             onSubmit={submitMobile}
           />
         </div>

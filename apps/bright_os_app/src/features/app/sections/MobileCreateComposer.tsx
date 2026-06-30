@@ -12,6 +12,8 @@ export interface MobileCreateDraft {
   descriptionMd: string;
 }
 
+const MOBILE_CREATE_AUTOFOCUS_DELAY_MS = 130;
+
 const MOBILE_CREATE_TOOL_ICONS = [
   ["calendar", "Дата", CalendarDays],
   ["flag", "Флаг", Flag],
@@ -20,6 +22,10 @@ const MOBILE_CREATE_TOOL_ICONS = [
   ["expand", "Развернуть", Maximize2],
   ["more", "Еще", Ellipsis],
 ] as const;
+
+export function mobileCreateDraftHasText(draft: MobileCreateDraft) {
+  return Boolean(draft.title.trim() || draft.descriptionMd.trim());
+}
 
 export function MobileCreateComposer({
   draft,
@@ -39,15 +45,22 @@ export function MobileCreateComposer({
   onSubmit: (title: string, descriptionMd: string) => Promise<void>;
 }) {
   const [descriptionActive, setDescriptionActive] = useState(false);
+  const formRef = useRef<HTMLFormElement | null>(null);
   const titleRef = useRef<HTMLTextAreaElement | null>(null);
   const descriptionRef = useRef<HTMLTextAreaElement | null>(null);
   const canSubmit = Boolean(cleanTitle(draft.title));
 
   useEffect(() => {
-    const input = titleRef.current;
-    if (!input) return;
-    input.focus();
-    input.setSelectionRange(input.value.length, input.value.length);
+    const delay = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ? 0 : MOBILE_CREATE_AUTOFOCUS_DELAY_MS;
+    const timer = window.setTimeout(() => {
+      const input = titleRef.current;
+      if (!input) return;
+      const activeElement = document.activeElement;
+      if (activeElement && formRef.current?.contains(activeElement) && activeElement !== input) return;
+      input.focus();
+      input.setSelectionRange(input.value.length, input.value.length);
+    }, delay);
+    return () => window.clearTimeout(timer);
   }, []);
 
   useEffect(() => {
@@ -82,7 +95,8 @@ export function MobileCreateComposer({
 
   return (
     <form
-      className="actions-mobile-editor flex max-h-[calc(100dvh_-_env(safe-area-inset-top)_-_8px)] w-full flex-col overflow-hidden rounded-t-2xl bg-card px-5 pb-1 pt-4 shadow-xl"
+      ref={formRef}
+      className="actions-mobile-editor flex max-h-[calc(100dvh_-_env(safe-area-inset-top)_-_8px)] w-full flex-col overflow-hidden rounded-t-2xl bg-card px-5 pb-1 pt-4 shadow-xl motion-safe:animate-[mobile-detail-sheet-in_180ms_ease-out] motion-safe:will-change-transform"
       onClick={(event) => event.stopPropagation()}
       onSubmit={submit}
     >

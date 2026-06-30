@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { BookOpen, Crown, Info, Settings } from "lucide-react";
 import { APP_ENVIRONMENT, APP_OTA_CHANNEL, APP_PREVIEW_SLOT } from "@/shared/config/runtime";
 import { installAndroidBackHandler } from "@/shared/platform/platform";
@@ -22,11 +22,15 @@ import { EvilEyeSection } from "./sections/EvilEyeSection";
 import { FocusBackground, FocusContextPanelSheet, FocusSection } from "./sections/focus/FocusSection";
 import { InboxSection } from "./sections/inbox/InboxSection";
 import { SettingsSection } from "./sections/settings/SettingsSection";
+import type { MobileCreateDraft } from "./sections/MobileCreateComposer";
 
 const SECTION_PAGE_INSET_CLASS = "grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] pb-11 pl-7 pr-0 pt-3.5 max-[860px]:px-3.5 max-[860px]:pb-7 max-[860px]:pt-[var(--mobile-top-padding)]";
+const EMPTY_MOBILE_CREATE_DRAFT: MobileCreateDraft = { title: "", descriptionMd: "" };
 
 export function BrightOsApp({ initialSection = "actions" }: { initialSection?: SectionId }) {
   const app = useBrightOsAppState(initialSection);
+  const [actionsMobileCreateDraft, setActionsMobileCreateDraft] = useState<MobileCreateDraft>(EMPTY_MOBILE_CREATE_DRAFT);
+  const [inboxMobileCreateDraft, setInboxMobileCreateDraft] = useState<MobileCreateDraft>(EMPTY_MOBILE_CREATE_DRAFT);
   const mobileViewport = useMountedMobileNavigationViewport();
   const sectionRef = useRef(app.section);
   const selectSectionRef = useRef(app.selectSection);
@@ -92,6 +96,8 @@ export function BrightOsApp({ initialSection = "actions" }: { initialSection?: S
             onSetStatus={app.onSetActionStatus}
             onDelete={app.onDeleteAction}
             onReorder={app.onReorderActions}
+            mobileCreateDraft={actionsMobileCreateDraft}
+            onMobileCreateDraftChange={setActionsMobileCreateDraft}
             onMobileOverlayChange={app.setActionOverlayOpen}
           />
         ) : screenSection === "inbox" ? (
@@ -103,6 +109,8 @@ export function BrightOsApp({ initialSection = "actions" }: { initialSection?: S
             onUpdateTitle={app.onUpdateInboxTitle}
             onAutosaveDetails={app.onAutosaveInboxDetails}
             onDelete={app.onDeleteInboxItem}
+            mobileCreateDraft={inboxMobileCreateDraft}
+            onMobileCreateDraftChange={setInboxMobileCreateDraft}
             onMobileOverlayChange={app.setActionOverlayOpen}
           />
         ) : screenSection === "archive" ? (
