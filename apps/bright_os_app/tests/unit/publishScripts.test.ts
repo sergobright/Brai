@@ -268,18 +268,6 @@ try {
     reason: "Needed for test",
     releasedAtUtc: "2026-06-28T17:29:00.000Z",
   });
-  store.recordDeployment({
-    environment: "prod",
-    slot: null,
-    branch: "main",
-    commit: "legacy-prod",
-    domain: "brightos.world",
-    webOtaVersion: "0.10.48.1",
-    shortChanges: "Legacy production OTA",
-    detailedChanges: "Legacy production OTA",
-    reason: "Needed to keep production OTA versions monotonic across ledger migration.",
-    deployedAtUtc: "2026-06-28T23:39:00.000Z",
-  });
 } finally {
   store.close();
 }
@@ -401,10 +389,13 @@ try {
 
   it("restores stale preview source permissions before deploy cleanup", async () => {
     const script = await readFile(path.join(workspaceRoot, "deploy/scripts/ci-ssh-deploy.sh"), "utf8");
+    const deployBranch = await readFile(path.join(workspaceRoot, "deploy/scripts/deploy-branch.sh"), "utf8");
 
     expect(script).toContain('find "$SOURCE_ROOT" -user "$(id -u)" -exec chmod u+rwX,g+rwX {} + || true');
     expect(script).toContain('rm -rf "$SOURCE_ROOT" || { sleep 2; rm -rf "$SOURCE_ROOT"; }');
     expect(script.indexOf('find "$SOURCE_ROOT" -user "$(id -u)"')).toBeLessThan(script.indexOf('rm -rf "$SOURCE_ROOT"'));
+    expect(deployBranch).toContain('if ! rm -f "${RESET_DB_FILES[@]}"; then');
+    expect(deployBranch).toContain('"${BRIGHT_OS_SUDO:-sudo}" rm -f "${RESET_DB_FILES[@]}"');
   });
 
   it("rebuilds all APK release rows from production native deploys", async () => {
