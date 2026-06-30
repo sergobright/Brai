@@ -76,16 +76,19 @@ if [[ "$ENVIRONMENT" == preview-* && "$ALLOCATED_NEW" == "true" && "${BRIGHT_OS_
   esac
 fi
 
-VERSION="${BRIGHT_OS_APP_VERSION:-$("$NODE_BIN" "$SCRIPT_DIR/resolve-app-version.mjs" \
+VERSION_ARGS=(
   --environment "$ENVIRONMENT" \
   --root "$ROOT" \
   --db "$DB_PATH" \
   --prod-db "${BRIGHT_OS_PROD_DB:-}" \
   --prod-web-version-json "${BRIGHT_OS_PROD_WEB_VERSION_JSON:-}" \
-  --mobile-target "$MOBILE_TARGET")}"
+  --mobile-target "$MOBILE_TARGET"
+)
+
+VERSION="${BRIGHT_OS_APP_VERSION:-$("$NODE_BIN" "$SCRIPT_DIR/resolve-app-version.mjs" "${VERSION_ARGS[@]}")}"
 
 if [[ "$ENVIRONMENT" == "prod" ]]; then
-  BUNDLE_VERSION="${BRIGHT_OS_MOBILE_BUNDLE_VERSION:-$VERSION}"
+  BUNDLE_VERSION="${BRIGHT_OS_MOBILE_BUNDLE_VERSION:-$("$NODE_BIN" "$SCRIPT_DIR/resolve-app-version.mjs" "${VERSION_ARGS[@]}" --mobile-bundle true)}"
 else
   BUNDLE_VERSION="${BRIGHT_OS_MOBILE_BUNDLE_VERSION:-$VERSION.$RUN_ID}"
 fi

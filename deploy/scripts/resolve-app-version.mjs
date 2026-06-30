@@ -17,6 +17,7 @@ if (path.resolve(process.argv[1] ?? "") === fileURLToPath(import.meta.url)) {
     prodDb: args["prod-db"],
     prodWebVersionJson: args["prod-web-version-json"],
     mobileTarget: args["mobile-target"],
+    mobileBundle: args["mobile-bundle"] === "true",
     nextApk: args["next-apk"] === "true",
     targetBranch: args["target-branch"],
     targetCommit: args["target-commit"],
@@ -31,6 +32,7 @@ export function resolveAppVersion({
   prodWebVersionJson = "",
   mobileTarget = "",
   explicit = process.env.BRIGHT_OS_APP_VERSION || "",
+  mobileBundle = false,
   nextApk = false,
   targetBranch = "",
   targetCommit = "",
@@ -39,7 +41,9 @@ export function resolveAppVersion({
 
   if (environment === "prod" && db) {
     const ledgerVersion = latestProductionVersion(db, { nextApk, targetBranch, targetCommit });
-    if (ledgerVersion) return validVersion(ledgerVersion);
+    if (ledgerVersion) {
+      return validVersion(mobileBundle ? productionMobileBundleVersion(ledgerVersion, mobileTarget) : ledgerVersion);
+    }
   }
 
   const resolvedVersion = latestBrightVersion([
@@ -122,6 +126,20 @@ function latestMobileTargetVersion(mobileTarget) {
   }
 
   return latestBrightVersion(versions);
+}
+
+function productionMobileBundleVersion(ledgerVersion, mobileTarget) {
+  const latestPublished = mobileTarget && latestMobileTargetVersion(mobileTarget);
+  if (latestPublished && compareBrightVersions(latestPublished, ledgerVersion) > 0) {
+    return nextWebBundleVersion(latestPublished);
+  }
+  return ledgerVersion;
+}
+
+function nextWebBundleVersion(version) {
+  const parts = version.split(".").map(Number);
+  parts[2] += 1;
+  return parts.join(".");
 }
 
 function latestBrightVersion(values) {
