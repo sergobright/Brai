@@ -63,4 +63,73 @@ describe("FocusHistoryTable", () => {
     fireEvent.click(screen.getByRole("button", { name: "Удалить запись фокуса" }));
     await waitFor(() => expect(onDeleteSession).toHaveBeenCalledWith("session-1"));
   });
+
+  it("edits a nested interval and confirms multi-interval deletion", async () => {
+    const onDeleteSession = vi.fn();
+    const onEditInterval = vi.fn();
+    const multiIntervalSession: TimerSession = {
+      id: "session-intervals",
+      started_at_utc: "2026-06-14T10:00:00.000Z",
+      ended_at_utc: "2026-06-14T11:00:00.000Z",
+      duration_seconds: 3600,
+      intervals: [
+        {
+          id: "interval-1",
+          focus_session_id: "session-intervals",
+          activity_id: "action-1",
+          activity_title: "Письмо",
+          started_at_utc: "2026-06-14T10:00:00.000Z",
+          ended_at_utc: "2026-06-14T10:30:00.000Z",
+          duration_seconds: 1800,
+        },
+        {
+          id: "interval-2",
+          focus_session_id: "session-intervals",
+          activity_id: null,
+          activity_title: null,
+          started_at_utc: "2026-06-14T10:30:00.000Z",
+          ended_at_utc: "2026-06-14T11:00:00.000Z",
+          duration_seconds: 1800,
+        },
+      ],
+      activity_interval_count: 1,
+      primary_activity_id: "action-1",
+      primary_activity_title: "Письмо",
+    };
+
+    render(
+      <FocusHistoryTable
+        allSessions={[multiIntervalSession]}
+        sessions={[multiIntervalSession]}
+        onDeleteSession={onDeleteSession}
+        onEditInterval={onEditInterval}
+      />,
+    );
+
+    fireEvent.click(screen.getByText("Письмо"));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Редактировать интервал: Письмо" })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Редактировать интервал: Письмо" }));
+
+    await waitFor(() => expect(screen.getByRole("button", { name: "Закрыть редактирование фокуса" })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "00:30" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Значение времени" }), {
+      target: { value: "0:20" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Применить ввод времени" }));
+    fireEvent.click(screen.getByRole("button", { name: "Закрыть редактирование фокуса" }));
+
+    await waitFor(() =>
+      expect(onEditInterval).toHaveBeenCalledWith(
+        "interval-1",
+        "session-intervals",
+        "2026-06-14T10:00:00.000Z",
+        "2026-06-14T10:20:00.000Z",
+      ),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Удалить сессию" }));
+    expect(onDeleteSession).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Подтвердить удаление" }));
+    await waitFor(() => expect(onDeleteSession).toHaveBeenCalledWith("session-intervals"));
+  });
 });

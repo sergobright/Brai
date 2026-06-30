@@ -2,8 +2,10 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { clientDb, getMeta } from "@/shared/storage/db";
 import {
   enqueueTimerEvent,
+  enqueueFocusIntervalEdit,
   enqueueFocusSessionDelete,
   enqueueFocusSessionEdit,
+  enqueueStartActionFocus,
   loadCanonicalState,
   loadHistoryCache,
   pendingEvents,
@@ -62,6 +64,28 @@ describe("sync store guards", () => {
     const [event] = await pendingEvents();
     expect(event.type).toBe("delete_session");
     expect(event.metadata).toMatchObject({
+      focus_session_id: "session-1",
+    });
+  });
+
+  it("queues action focus and interval edit timer events", async () => {
+    await enqueueStartActionFocus({
+      activityId: "action-1",
+      baseServerRevision: 7,
+    });
+    await enqueueFocusIntervalEdit({
+      intervalId: "interval-1",
+      sessionId: "session-1",
+      startedAtUtc: "2026-06-14T10:15:00.000Z",
+      endedAtUtc: "2026-06-14T10:45:00.000Z",
+      baseServerRevision: 7,
+    });
+
+    const events = await pendingEvents();
+    expect(events.map((item) => item.type)).toEqual(["start_activity_focus", "edit_focus_interval"]);
+    expect(events[0].metadata).toMatchObject({ activity_id: "action-1" });
+    expect(events[1].metadata).toMatchObject({
+      focus_interval_id: "interval-1",
       focus_session_id: "session-1",
     });
   });

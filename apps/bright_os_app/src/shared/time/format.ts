@@ -2,20 +2,31 @@ import type { TimerSession, TimerState } from "@/shared/types/timer";
 
 export const MOSCOW_OFFSET_MS = 3 * 60 * 60 * 1000;
 
+/**
+ * Advances active timer and interval elapsed counters against the current clock.
+ */
 export function tickTimerState(state: TimerState, now = new Date()): TimerState {
   if (!state.active_session) {
-    return { ...state, server_time_utc: now.toISOString(), elapsed_seconds: 0 };
+    return { ...state, server_time_utc: now.toISOString(), elapsed_seconds: 0, active_interval_elapsed_seconds: 0 };
   }
 
   const startedMs = Date.parse(state.active_session.started_at_utc);
+  const activeInterval = state.active_interval ?? state.active_session.active_interval ?? null;
+  const activeIntervalStartedMs = Date.parse(activeInterval?.started_at_utc ?? "");
   const elapsed = Number.isFinite(startedMs)
     ? Math.max(0, Math.floor((now.getTime() - startedMs) / 1000))
     : state.elapsed_seconds;
+  const activeIntervalElapsed = Number.isFinite(activeIntervalStartedMs)
+    ? Math.max(0, Math.floor((now.getTime() - activeIntervalStartedMs) / 1000))
+    : (state.active_interval_elapsed_seconds ?? 0);
 
   return {
     ...state,
     server_time_utc: now.toISOString(),
     elapsed_seconds: elapsed,
+    active_interval: activeInterval,
+    active_interval_elapsed_seconds: activeIntervalElapsed,
+    active_activity_id: activeInterval?.activity_id ?? state.active_activity_id ?? null,
   };
 }
 
@@ -25,6 +36,13 @@ export function formatDuration(seconds: number | null | undefined): string {
   const minutes = Math.floor((safe % 3600) / 60);
   const secs = safe % 60;
   return [hours, minutes, secs].map((item) => String(item).padStart(2, "0")).join(":");
+}
+
+export function formatHourMinute(seconds: number | null | undefined): string {
+  const safe = Math.max(0, Math.floor(seconds ?? 0));
+  const hours = Math.floor(safe / 3600);
+  const minutes = Math.floor((safe % 3600) / 60);
+  return `${hours}:${String(minutes).padStart(2, "0")}`;
 }
 
 export function formatHumanDuration(seconds: number | null | undefined): string {

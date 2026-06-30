@@ -5,6 +5,8 @@ import { Archive, LogOut, Menu, PanelLeftClose, Settings, type LucideIcon } from
 import { installAndroidBackHandler } from "@/shared/platform/platform";
 import { Avatar, AvatarFallback } from "@/shared/ui/avatar";
 import { FloatingDock } from "@/shared/ui/floating-dock";
+import { formatHourMinute } from "@/shared/time/format";
+import type { TimerState } from "@/shared/types/timer";
 import { Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent, SidebarGroupLabel, SidebarHeader, SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarRail, useSidebar } from "@/shared/ui/sidebar";
 import { cx } from "../appUtils";
 import { useMobileSheetDrag } from "../hooks/useMobileSheetDrag";
@@ -281,10 +283,12 @@ export function MainDock({
   hidden,
   onSection,
   swipeHandlers,
+  timer,
 }: {
   section: SectionId;
   hidden: boolean;
   onSection: (section: SectionId) => void;
+  timer: TimerState;
   swipeHandlers?: {
     onTouchStart: TouchEventHandler<HTMLElement>;
     onTouchMove: TouchEventHandler<HTMLElement>;
@@ -294,12 +298,13 @@ export function MainDock({
 }) {
   const dockItems = navItems.map((item) => {
     const Icon = item.icon;
+    const focusActive = item.id === "focus" && timer.active_session;
     return {
       title: item.label,
       href: navHref(item.id),
       active: isActiveNavItem(item.id, section),
       onClick: () => onSection(item.id),
-      icon: <Icon className="h-full w-full" aria-hidden="true" />,
+      icon: focusActive ? <FocusDockIcon seconds={timer.elapsed_seconds} /> : <Icon className="h-full w-full" aria-hidden="true" />,
     };
   });
 
@@ -320,6 +325,15 @@ export function MainDock({
         mobileClassName="mobile-nav"
       />
     </nav>
+  );
+}
+
+function FocusDockIcon({ seconds }: { seconds: number }) {
+  return (
+    <span className="relative grid h-full w-full place-items-center overflow-hidden rounded-full" aria-hidden="true">
+      <span className="absolute inset-0 rounded-full border border-primary/30 border-t-primary/80 animate-spin" />
+      <span className="relative scale-75 text-xs font-semibold leading-none tabular-nums">{formatHourMinute(seconds)}</span>
+    </span>
   );
 }
 

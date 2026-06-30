@@ -1,11 +1,12 @@
 "use client";
 
 import type { CSSProperties, HTMLAttributes, KeyboardEvent, MouseEvent, PointerEvent, ReactNode } from "react";
-import { useId, useLayoutEffect, useRef, useState } from "react";
-import { Trash2, Undo2 } from "lucide-react";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { Timer, Trash2, Undo2 } from "lucide-react";
 import { useSwipeable } from "react-swipeable";
 import { cleanTitle, singleLineTitle, visibleDescriptionPreview } from "@/shared/activities/text";
 import type { ActivityItem, ActivityStatus } from "@/shared/types/activities";
+import { formatHourMinute } from "@/shared/time/format";
 import { Checkbox } from "@/shared/ui/checkbox";
 import { cx } from "../../appUtils";
 import { isMobileNavigationViewport } from "../../navigation/useSectionSwipeNavigation";
@@ -22,6 +23,10 @@ export function ActionRow({
   onUpdateTitle,
   onSetStatus,
   onDelete,
+  onStartFocus,
+  onStopFocus,
+  activeFocus = false,
+  activeFocusElapsedSeconds = 0,
   onRestore,
   onSelect,
   titleDraft,
@@ -44,6 +49,10 @@ export function ActionRow({
   onUpdateTitle: (action: ActivityItem, title: string) => Promise<void>;
   onSetStatus: (action: ActivityItem, status: ActivityStatus) => Promise<void>;
   onDelete: (action: ActivityItem) => Promise<void>;
+  onStartFocus?: (action: ActivityItem) => Promise<void>;
+  onStopFocus?: (action: ActivityItem) => Promise<void>;
+  activeFocus?: boolean;
+  activeFocusElapsedSeconds?: number;
   onRestore?: (action: ActivityItem) => Promise<void>;
   titleDraft?: string;
   onTitleDraftChange?: (actionId: string, title: string | null) => void;
@@ -65,6 +74,8 @@ export function ActionRow({
   const [dragX, setDragX] = useState(0);
   const [dragging, setDragging] = useState(false);
   const [removing, setRemoving] = useState(false);
+  const [focusStopArmedActionId, setFocusStopArmedActionId] = useState<string | null>(null);
+  const focusStopArmed = activeFocus && focusStopArmedActionId === action.id;
   const tapStartRef = useRef<{ x: number; y: number } | null>(null);
   const actionControlOpen = deleteOpen || dragging || sortableDragging;
   const swipeHandlers = useSwipeable({
@@ -93,6 +104,12 @@ export function ActionRow({
   });
   const { ref: swipeRef, ...rowSwipeHandlers } = swipeHandlers;
 
+  useEffect(() => {
+    if (focusStopArmedActionId === null) return undefined;
+    const timeout = window.setTimeout(() => setFocusStopArmedActionId(null), 1600);
+    return () => window.clearTimeout(timeout);
+  }, [focusStopArmedActionId]);
+
   async function requestRowAction() {
     if (removing) return;
     onCloseDelete();
@@ -102,6 +119,21 @@ export function ActionRow({
       await onDelete(action);
     }
     setRemoving(true);
+  }
+
+  async function requestFocusAction(event: MouseEvent<HTMLButtonElement>) {
+    event.stopPropagation();
+    if (readonly) return;
+    if (activeFocus) {
+      if (isMobileNavigationViewport() && !focusStopArmed) {
+        setFocusStopArmedActionId(action.id);
+        return;
+      }
+      await onStopFocus?.(action);
+    } else {
+      setFocusStopArmedActionId(null);
+      await onStartFocus?.(action);
+    }
   }
 
   function isActionRowServiceTarget(target: EventTarget | null, rowSurface: Element) {
@@ -147,7 +179,7 @@ export function ActionRow({
     <div
       ref={setActionRowRef}
       className={cx(
-        "action-row group relative grid min-h-[54px] max-h-[220px] grid-cols-[minmax(0,1fr)_44px] items-stretch overflow-hidden border-b border-border transition-[max-height,opacity,border-color,box-shadow] duration-150 [&:has(+_.action-row.selected)]:border-b-transparent max-[860px]:grid-cols-[minmax(0,1fr)_46px] max-[860px]:[touch-action:pan-y]",
+        "action-row group relative grid min-h-[54px] max-h-[220px] grid-cols-[minmax(0,1fr)_44px_44px] items-stretch overflow-hidden border-b border-border transition-[max-height,opacity,border-color,box-shadow] duration-150 [&:has(+_.action-row.selected)]:border-b-transparent max-[860px]:grid-cols-[minmax(0,1fr)_46px_46px] max-[860px]:[touch-action:pan-y]",
         done && "done",
         action.pending && "pending opacity-80",
         deleteOpen && "delete-open",
@@ -212,6 +244,25 @@ export function ActionRow({
       <button
         type="button"
         className={cx(
+          "action-focus-button group/focus-control grid min-h-[54px] w-11 place-items-center border-0 bg-transparent text-primary transition duration-150 hover:opacity-80 focus-visible:opacity-90 focus-visible:outline-0 max-[860px]:w-[46px]",
+          activeFocus
+            ? "visible pointer-events-auto scale-100 opacity-100"
+            : actionControlOpen
+              ? "visible pointer-events-auto scale-100 opacity-[0.55]"
+              : "invisible pointer-events-none scale-[0.96] opacity-0",
+          !activeFocus && "group-hover:visible group-hover:pointer-events-auto group-hover:scale-100 group-hover:opacity-[0.55] group-focus-within:visible group-focus-within:pointer-events-auto group-focus-within:scale-100 group-focus-within:opacity-[0.55]",
+        )}
+        data-action-row-control
+        data-action-focus
+        aria-label={activeFocus ? `Остановить фокус: ${title}` : `Фокусироваться: ${title}`}
+        title={activeFocus ? "Стоп" : "Фокус"}
+        onClick={(event) => void requestFocusAction(event)}
+      >
+        {activeFocus ? <ActionFocusTime armed={focusStopArmed} seconds={activeFocusElapsedSeconds} /> : <Timer className="size-4" aria-hidden="true" />}
+      </button>
+      <button
+        type="button"
+        className={cx(
           "action-delete-button grid min-h-[54px] w-11 place-items-center border-0 bg-transparent transition duration-150 hover:opacity-70 focus-visible:opacity-70 focus-visible:outline-0 max-[860px]:w-[46px]",
           restoreControl ? "text-primary" : "text-destructive",
           actionControlOpen ? "visible pointer-events-auto scale-100 opacity-[0.42]" : "invisible pointer-events-none scale-[0.96] opacity-0",
@@ -231,6 +282,24 @@ export function ActionRow({
         {restoreControl ? <Undo2 aria-hidden="true" /> : <Trash2 aria-hidden="true" />}
       </button>
     </div>
+  );
+}
+
+function ActionFocusTime({ armed, seconds }: { armed: boolean; seconds: number }) {
+  const value = formatHourMinute(seconds);
+  const [hours, minutes] = value.split(":");
+  if (armed) return <span className="min-w-10 text-xs font-semibold leading-none">Стоп</span>;
+  return (
+    <span className="relative grid min-w-10 text-xs font-semibold tabular-nums leading-none">
+      <span className="grid grid-cols-[1fr_auto_1fr] transition-opacity min-[861px]:group-hover/focus-control:opacity-0 min-[861px]:group-focus-visible/focus-control:opacity-0">
+        <span className="text-right">{hours}</span>
+        <span className="animate-pulse px-px">:</span>
+        <span className="text-left">{minutes}</span>
+      </span>
+      <span className="pointer-events-none absolute inset-0 grid place-items-center opacity-0 transition-opacity min-[861px]:group-hover/focus-control:opacity-100 min-[861px]:group-focus-visible/focus-control:opacity-100">
+        Стоп
+      </span>
+    </span>
   );
 }
 

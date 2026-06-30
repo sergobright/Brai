@@ -23,10 +23,16 @@ export function SortableActionList({
   onReorder,
   titleDrafts = {},
   onTitleDraftChange = () => undefined,
+  activeActivityId = null,
+  activeActivityElapsedSeconds = 0,
+  onStartFocus,
+  onStopFocus,
 }: {
   actions: ActivityItem[];
   selectedActionId: string | null;
   openDeleteActionId: string | null;
+  activeActivityId?: string | null;
+  activeActivityElapsedSeconds?: number;
   onSelect: (actionId: string, focusDetailTitle?: DetailTitleFocus) => void;
   onEditMobile: (action: ActivityItem) => void;
   onUpdateTitle: (action: ActivityItem, title: string) => Promise<void>;
@@ -35,6 +41,8 @@ export function SortableActionList({
   onOpenDelete: (actionId: string) => void;
   onCloseDelete: () => void;
   onReorder: (orderedIds: string[], movedAction: ActivityItem) => Promise<void>;
+  onStartFocus?: (action: ActivityItem) => Promise<void>;
+  onStopFocus?: (action: ActivityItem) => Promise<void>;
   titleDrafts?: Record<string, string>;
   onTitleDraftChange?: (actionId: string, title: string | null) => void;
 }) {
@@ -73,6 +81,10 @@ export function SortableActionList({
             onTitleDraftChange={onTitleDraftChange}
             onSetStatus={onSetStatus}
             onDelete={onDelete}
+            activeFocus={activeActivityId === action.id}
+            activeFocusElapsedSeconds={activeActivityId === action.id ? activeActivityElapsedSeconds : 0}
+            onStartFocus={onStartFocus}
+            onStopFocus={onStopFocus}
             deleteOpen={openDeleteActionId === action.id}
             onOpenDelete={() => onOpenDelete(action.id)}
             onCloseDelete={onCloseDelete}
@@ -91,6 +103,10 @@ function SortableActionRow(props: {
   onUpdateTitle: (action: ActivityItem, title: string) => Promise<void>;
   onSetStatus: (action: ActivityItem, status: ActivityStatus) => Promise<void>;
   onDelete: (action: ActivityItem) => Promise<void>;
+  onStartFocus?: (action: ActivityItem) => Promise<void>;
+  onStopFocus?: (action: ActivityItem) => Promise<void>;
+  activeFocus?: boolean;
+  activeFocusElapsedSeconds?: number;
   deleteOpen: boolean;
   onOpenDelete: () => void;
   onCloseDelete: () => void;

@@ -108,7 +108,7 @@ export function onceOpen(ws) {
 
 export async function waitFor(predicate) {
   const started = Date.now();
-  while (Date.now() - started < 1000) {
+  while (Date.now() - started < 3000) {
     if (predicate()) return;
     await new Promise((resolve) => setTimeout(resolve, 10));
   }

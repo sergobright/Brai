@@ -1,10 +1,11 @@
 import { MOSCOW_OFFSET_MS } from "@/shared/time/format";
-import type { TimerSession } from "@/shared/types/timer";
+import type { FocusSessionInterval, TimerSession } from "@/shared/types/timer";
 
 export type FocusEditField = "start" | "duration" | "end";
 
 export type FocusEditDraft = {
   sessionId: string;
+  intervalId?: string;
   originalStartMs: number;
   originalEndMs: number;
   startMs: number;
@@ -18,11 +19,27 @@ export function canonicalSessionId(session: TimerSession): string {
 }
 
 export function createFocusEditDraft(session: TimerSession): FocusEditDraft | null {
+  const interval = session.intervals?.length === 1 ? session.intervals[0] : null;
   const startMs = Date.parse(session.started_at_utc);
   const endMs = Date.parse(session.ended_at_utc ?? "");
   if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) return null;
   return {
     sessionId: canonicalSessionId(session),
+    intervalId: interval?.id,
+    originalStartMs: startMs,
+    originalEndMs: endMs,
+    startMs,
+    endMs,
+  };
+}
+
+export function createFocusIntervalEditDraft(interval: FocusSessionInterval): FocusEditDraft | null {
+  const startMs = Date.parse(interval.started_at_utc);
+  const endMs = Date.parse(interval.ended_at_utc ?? "");
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) return null;
+  return {
+    sessionId: interval.focus_session_id,
+    intervalId: interval.id,
     originalStartMs: startMs,
     originalEndMs: endMs,
     startMs,
@@ -78,10 +95,18 @@ export function applyFocusInput(draft: FocusEditDraft, field: FocusEditField, va
 
 export function hasFocusOverlap(draft: FocusEditDraft, sessions: TimerSession[]): boolean {
   return sessions.some((session) => {
+    if (draft.intervalId && session.intervals?.some((interval) => interval.id === draft.intervalId)) {
+      return session.intervals.some((interval) => {
+        if (interval.id === draft.intervalId) return false;
+        const startMs = Date.parse(interval.started_at_utc);
+        const endMs = interval.ended_at_utc ? Date.parse(interval.ended_at_utc) : Number.POSITIVE_INFINITY;
+        return Number.isFinite(startMs) && startMs < draft.endMs && endMs > draft.startMs;
+      });
+    }
     if (canonicalSessionId(session) === draft.sessionId) return false;
     const startMs = Date.parse(session.started_at_utc);
-    const endMs = Date.parse(session.ended_at_utc ?? "");
-    return Number.isFinite(startMs) && Number.isFinite(endMs) && startMs < draft.endMs && endMs > draft.startMs;
+    const endMs = session.ended_at_utc ? Date.parse(session.ended_at_utc) : Number.POSITIVE_INFINITY;
+    return Number.isFinite(startMs) && startMs < draft.endMs && endMs > draft.startMs;
   });
 }
 

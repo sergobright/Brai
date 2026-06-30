@@ -28,16 +28,24 @@ export function ActionsSection({
   onReorder,
   onMobileOverlayChange,
   autoFocusAddInput,
+  activeActivityId,
+  activeActivityElapsedSeconds,
+  onStartActionFocus,
+  onStopActionFocus,
 }: {
   state: ActivitiesState;
   localSnapshotReady: boolean;
   autoFocusAddInput: boolean;
+  activeActivityId: string | null;
+  activeActivityElapsedSeconds: number;
   onCreate: (title: string) => Promise<void>;
   onUpdateTitle: (action: ActivityItem, title: string) => Promise<void>;
   onAutosaveDetails: (action: ActivityItem, title: string, descriptionMd: string) => Promise<void>;
   onSetStatus: (action: ActivityItem, status: ActivityStatus) => Promise<void>;
   onDelete: (action: ActivityItem) => Promise<void>;
   onReorder: (orderedIds: string[], movedAction: ActivityItem) => Promise<void>;
+  onStartActionFocus: (activityId: string) => Promise<void>;
+  onStopActionFocus: (activityId?: string | null) => Promise<void>;
   onMobileOverlayChange: (open: boolean) => void;
 }) {
   const [draft, setDraft] = useState("");
@@ -300,6 +308,10 @@ export function ActionsSection({
                 onOpenDelete={setOpenDeleteActionId}
                 onCloseDelete={() => setOpenDeleteActionId(null)}
                 onReorder={onReorder}
+                activeActivityId={activeActivityId}
+                activeActivityElapsedSeconds={activeActivityElapsedSeconds}
+                onStartFocus={(action) => onStartActionFocus(action.id)}
+                onStopFocus={(action) => onStopActionFocus(action.id)}
               />
             )}
           </div>
@@ -334,6 +346,10 @@ export function ActionsSection({
                       onTitleDraftChange={setTitleDraft}
                       onSetStatus={onSetStatus}
                       onDelete={onDelete}
+                      activeFocus={activeActivityId === action.id}
+                      activeFocusElapsedSeconds={activeActivityId === action.id ? activeActivityElapsedSeconds : 0}
+                      onStartFocus={(item) => onStartActionFocus(item.id)}
+                      onStopFocus={(item) => onStopActionFocus(item.id)}
                       deleteOpen={visibleOpenDeleteActionId === action.id}
                       onOpenDelete={() => setOpenDeleteActionId(action.id)}
                       onCloseDelete={() => setOpenDeleteActionId(null)}
