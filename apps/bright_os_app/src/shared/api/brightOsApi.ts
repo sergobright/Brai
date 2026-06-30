@@ -233,6 +233,12 @@ export type AppVersionState = {
   version: string;
   parts: Record<VersionTypeId, number>;
   latest: Record<VersionTypeId, AppVersionLedgerRow | null>;
+  apk_release: {
+    file: string;
+    version: string | null;
+    version_code: number;
+    published_at: string | null;
+  } | null;
 };
 
 function fromActivitiesState(state: ActivitiesApiState): ActivitiesState {

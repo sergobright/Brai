@@ -176,7 +176,7 @@ export function createBrightOsServer({
       }
 
       if (req.method === 'GET' && url.pathname === '/v1/version') {
-        sendJson(req, res, 200, versionState(store, now()));
+        sendJson(req, res, 200, versionState(store, now(), releaseDir));
         return;
       }
 
@@ -367,11 +367,29 @@ export function activitiesState(store, nowDate) {
   };
 }
 
-export function versionState(store, nowDate) {
+export function versionState(store, nowDate, releaseDir = null) {
   return {
     server_time_utc: nowDate.toISOString(),
-    ...store.currentAppVersion()
+    ...store.currentAppVersion(),
+    apk_release: latestApkRelease(releaseDir)
   };
+}
+
+function latestApkRelease(releaseDir) {
+  if (!releaseDir) return null;
+  try {
+    const releaseIndex = JSON.parse(fs.readFileSync(path.join(releaseDir, 'releases.json'), 'utf8'));
+    const production = releaseIndex.sections?.production;
+    if (!production?.file || !Number.isInteger(production.versionCode)) return null;
+    return {
+      file: production.file,
+      version: production.version ?? null,
+      version_code: production.versionCode,
+      published_at: production.publishedAt ?? null
+    };
+  } catch {
+    return null;
+  }
 }
 
 export function inboxState(store, nowDate) {

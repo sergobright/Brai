@@ -67,6 +67,9 @@ export type EngineSectionView = {
   hasUpdate: boolean;
   installedVersion: string;
   isChecking: boolean;
+  apkUpdateAvailable: boolean;
+  apkReleaseVersion: string | null;
+  apkReleaseVersionCode: number | null;
   latestVersion: string;
   ledgerRows: Array<{
     id: VersionTypeId;
@@ -106,12 +109,20 @@ export function engineSectionView({
     unifiedVersion(otaState?.downloadProgressVersion),
   );
   const nativeApk = nativeApkLabel(otaState) ?? (appVersionState?.latest.apk ? `${appVersionState.latest.apk.version}` : null);
+  const apkRelease = appVersionState?.apk_release ?? null;
+  const nativeVersionCode = otaState?.nativeVersionCode;
+  const apkUpdateAvailable = Boolean(
+    apkRelease && typeof nativeVersionCode === "number" && apkRelease.version_code > nativeVersionCode,
+  );
   const isChecking = otaRefreshing || versionRefreshing || Boolean(otaState?.checkInProgress);
   const visibleState =
     !isChecking && otaState?.lastCheckStatus === "checking" ? { ...otaState, lastCheckStatus: "unknown" } : otaState;
-  const hasUpdate = compareBrightVersions(latestVersion, installedVersion) > 0 || hasReadyOtaUpdate(visibleState);
+  const hasUpdate = apkUpdateAvailable || compareBrightVersions(latestVersion, installedVersion) > 0 || hasReadyOtaUpdate(visibleState);
   const androidUpdateStage = androidStage(visibleState, hasUpdate);
   const updateStatus = engineStatusView({
+    apkReleaseVersion: apkRelease?.version ?? null,
+    apkReleaseVersionCode: apkRelease?.version_code ?? null,
+    apkUpdateAvailable,
     hasUpdate,
     isChecking,
     latestVersion,
@@ -124,6 +135,9 @@ export function engineSectionView({
     activeWebVersion,
     androidUpdateStage,
     appBuild,
+    apkUpdateAvailable,
+    apkReleaseVersion: apkRelease?.version ?? null,
+    apkReleaseVersionCode: apkRelease?.version_code ?? null,
     downloadProgressVersion: visibleState?.downloadProgressVersion ?? null,
     downloadProgressPercent: progressPercent(visibleState),
     hasUpdate,
@@ -195,6 +209,9 @@ export function humanUpdateError(raw: string | null | undefined): string {
 }
 
 function engineStatusView({
+  apkReleaseVersion,
+  apkReleaseVersionCode,
+  apkUpdateAvailable,
   hasUpdate,
   isChecking,
   latestVersion,
@@ -202,6 +219,9 @@ function engineStatusView({
   versionError,
   versionKnown,
 }: {
+  apkReleaseVersion: string | null;
+  apkReleaseVersionCode: number | null;
+  apkUpdateAvailable: boolean;
   hasUpdate: boolean;
   isChecking: boolean;
   latestVersion: string;
@@ -235,6 +255,10 @@ function engineStatusView({
       break;
   }
 
+  if (apkUpdateAvailable) {
+    const code = apkReleaseVersionCode ? `, versionCode ${apkReleaseVersionCode}` : "";
+    return { label: "нужен APK", body: `Доступен новый APK v${apkReleaseVersion ?? latestVersion}${code}.`, tone: "warn" };
+  }
   if (hasUpdate) return { label: "доступно", body: `Доступна версия ${latestVersion}.`, tone: "warn" };
   if (versionError && !versionKnown) return { label: "нет связи", body: "Не удалось проверить последнюю версию.", tone: "muted" };
   return { label: "актуально", body: "Установлена текущая версия Bright OS.", tone: "ok" };

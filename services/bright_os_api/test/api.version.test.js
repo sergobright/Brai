@@ -3,7 +3,21 @@ import assert from 'node:assert/strict';
 import { createFixture, request } from '../test-support/api.js';
 
 test('version endpoint returns current build ledger counters', async () => {
-  const fixture = await createFixture(['2026-06-29T12:00:00.000Z']);
+  const fixture = await createFixture(['2026-06-29T12:00:00.000Z'], {
+    releaseFiles: {
+      'releases.json': JSON.stringify({
+        schemaVersion: 1,
+        sections: {
+          production: {
+            file: 'bright-os-0.0.41.3-capacitor.apk',
+            version: '0.0.41.3',
+            versionCode: 47,
+            publishedAt: '2026-06-30T20:23:42Z'
+          }
+        }
+      })
+    }
+  });
 
   try {
     fixture.store.recordAcceptedBuildVersion({
@@ -43,6 +57,12 @@ test('version endpoint returns current build ledger counters', async () => {
     assert.equal(response.body.latest.release.short_changes, 'Release one.');
     assert.equal(response.body.latest.build.short_changes, 'Ship next build.');
     assert.equal(response.body.latest.apk.version, 1);
+    assert.deepEqual(response.body.apk_release, {
+      file: 'bright-os-0.0.41.3-capacitor.apk',
+      version: '0.0.41.3',
+      version_code: 47,
+      published_at: '2026-06-30T20:23:42Z'
+    });
   } finally {
     await fixture.close();
   }

@@ -76,6 +76,17 @@ function WebUpdateNotice({ latestVersion }: { latestVersion: string }) {
 }
 
 function AndroidUpdateNotice({ view }: { view: ReturnType<typeof engineSectionView> }) {
+  if (view.apkUpdateAvailable) {
+    return (
+      <div className="rounded-md border border-border bg-muted/50 px-3 py-2.5">
+        <p className="m-0 text-sm font-medium">Доступен новый APK v{view.apkReleaseVersion ?? view.latestVersion}</p>
+        <p className="m-0 text-sm text-muted-foreground">
+          Откройте APK-релизы и установите сборку versionCode {view.apkReleaseVersionCode ?? "новее"}.
+        </p>
+      </div>
+    );
+  }
+
   if (view.androidUpdateStage === "ready") {
     return (
       <div className="rounded-md border border-border bg-muted/50 px-3 py-2.5">
