@@ -45,7 +45,7 @@ export function ActivityDetailEditor({
   const [description, setDescription] = useState(initial.descriptionMd);
   const [markdownPreview, setMarkdownPreview] = useState(loadActivityMarkdownPreviewMode);
   const [activeTab, setActiveTab] = useState<DetailPanelTab>("info");
-  const titleRef = useRef<HTMLInputElement | HTMLTextAreaElement | null>(null);
+  const titleRef = useRef<HTMLTextAreaElement | null>(null);
   const descriptionRef = useRef<HTMLTextAreaElement | null>(null);
   const autosave = useActivityDraftAutosave(action, onAutosaveDetails);
   const suppressPopRef = useRef(false);
@@ -76,10 +76,8 @@ export function ActivityDetailEditor({
   }, [description, markdownPreview, mode]);
 
   useEffect(() => {
-    if (mode === "mobile" && titleRef.current instanceof HTMLTextAreaElement) {
-      fitTextareaHeight(titleRef.current);
-    }
-  }, [mode, title]);
+    fitTextareaHeight(titleRef.current);
+  }, [title]);
 
   useEffect(() => {
     function flushOnHide() {
@@ -151,7 +149,7 @@ export function ActivityDetailEditor({
     }
   }
 
-  function onTitleKeyDown(event: KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) {
+  function onTitleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (event.key !== "Enter") return;
     event.preventDefault();
     schedule(cleanTitle(event.currentTarget.value), description);
@@ -171,7 +169,7 @@ export function ActivityDetailEditor({
       type="button"
       variant="ghost"
       size="icon-sm"
-      className={cx("actions-detail-preview-toggle text-muted-foreground hover:text-foreground", mode === "mobile" && "absolute right-0 top-0 z-[1]")}
+      className="actions-detail-preview-toggle absolute right-0 top-0 z-[1] text-muted-foreground hover:text-foreground"
       aria-label={previewModeLabel}
       aria-pressed={markdownPreview}
       title={previewModeLabel}
@@ -184,12 +182,12 @@ export function ActivityDetailEditor({
     activeTab === "info" ? (
       <ScrollArea className="actions-detail-description-scroll min-h-0 w-full min-w-0" role="tabpanel">
         <div className="relative min-h-full w-full min-w-0">
-          {mode === "mobile" ? previewToggle : null}
+          {previewToggle}
           {markdownPreview ? (
             <div
               className={cx(
                 "actions-detail-description actions-detail-description-preview min-h-full w-full min-w-0 pb-6 pl-0 pt-1",
-                mode === "mobile" ? "pr-12" : "pr-0",
+                previewToggle ? "pr-12" : "pr-0",
               )}
               aria-label="MD просмотр описания действия"
             >
@@ -212,7 +210,7 @@ export function ActivityDetailEditor({
               ref={descriptionRef}
               className={cx(
                 "actions-detail-description block min-h-full w-full min-w-0 resize-none overflow-hidden border-0 bg-transparent pb-6 pl-0 pt-1 text-sm font-normal leading-[1.48] tracking-normal text-foreground placeholder:text-muted-foreground/55 focus:outline-0 max-[860px]:text-base",
-                mode === "mobile" ? "pr-12" : "pr-0",
+                previewToggle ? "pr-12" : "pr-0",
               )}
               value={description}
               placeholder="Введите описание"
@@ -252,45 +250,31 @@ export function ActivityDetailEditor({
     </button>
   );
   const detailTitle =
-    mode === "mobile" ? (
-      <textarea
-        ref={(element) => {
-          titleRef.current = element;
-        }}
-        className="actions-detail-title block min-h-0 w-full min-w-0 resize-none overflow-hidden border-0 bg-transparent p-0 text-xl font-semibold leading-[1.18] tracking-normal text-foreground [overflow-wrap:anywhere] focus:outline-0"
-        value={title}
-        rows={1}
-        aria-label="Название действия"
-        onChange={(event) => {
-          schedule(singleLineTitle(event.target.value), description);
-        }}
-        onKeyDown={onTitleKeyDown}
-      />
-    ) : (
-      <input
-        ref={(element) => {
-          titleRef.current = element;
-        }}
-        className="actions-detail-title block min-h-11 w-full min-w-0 truncate border-0 bg-transparent p-0 text-2xl font-semibold leading-[1.18] text-foreground tracking-normal focus:outline-0"
-        value={title}
-        aria-label="Название действия"
-        onChange={(event) => {
-          schedule(singleLineTitle(event.target.value), description);
-        }}
-        onKeyDown={onTitleKeyDown}
-      />
-    );
+    <textarea
+      ref={titleRef}
+      className={cx(
+        "actions-detail-title block w-full min-w-0 resize-none overflow-hidden border-0 bg-transparent p-0 font-semibold leading-[1.18] tracking-normal text-foreground [overflow-wrap:anywhere] focus:outline-0",
+        mode === "mobile" ? "min-h-0 text-xl" : "min-h-11 text-2xl",
+      )}
+      value={title}
+      rows={1}
+      aria-label="Название действия"
+      onChange={(event) => {
+        schedule(singleLineTitle(event.target.value), description);
+      }}
+      onKeyDown={onTitleKeyDown}
+    />;
   const dragHeader = (
     <header
       className={cx(
         "actions-detail-header flex min-h-9 items-center gap-3",
         mode === "desktop" && "justify-end",
-        mode === "mobile" && "relative h-6 min-h-6 justify-center pt-0",
+        mode === "mobile" && "relative h-4 min-h-4 justify-center pt-0",
       )}
     >
       {mode === "mobile" ? (
         <div
-          className="actions-detail-drag-zone absolute left-1/2 top-0 flex h-6 w-32 -translate-x-1/2 touch-none cursor-grab items-start justify-center pt-1.5 active:cursor-grabbing"
+          className="actions-detail-drag-zone absolute left-1/2 top-0 flex h-4 w-32 -translate-x-1/2 touch-none cursor-grab items-start justify-center pt-1 active:cursor-grabbing"
         >
           <span
             className="actions-detail-grabber h-1 w-11 rounded-full bg-muted-foreground/30"
@@ -298,23 +282,15 @@ export function ActivityDetailEditor({
           />
         </div>
       ) : null}
-      {mode === "desktop" ? previewToggle : null}
       {closeButton}
     </header>
   );
-  const editorBody = mode === "mobile" ? (
+  const editorBody = (
     <>
       {dragHeader}
       <DetailPanelTabBar activeTab={activeTab} className="mt-0 border-b-0" onChange={setActiveTab} />
       {detailTitle}
       <div className="h-px bg-border" aria-hidden="true" />
-      {detailContent}
-    </>
-  ) : (
-    <>
-      {dragHeader}
-      {detailTitle}
-      <DetailPanelTabBar activeTab={activeTab} onChange={setActiveTab} />
       {detailContent}
     </>
   );
@@ -325,7 +301,7 @@ export function ActivityDetailEditor({
         <div ref={backdropRef} className="absolute inset-0 bg-foreground/20 dark:bg-background/80" style={backdropStyle} aria-hidden="true" />
         <aside
           ref={sheetRef}
-          className="actions-detail-panel mobile absolute inset-x-0 bottom-0 top-[env(safe-area-inset-top)] z-[1] grid min-h-0 min-w-0 grid-rows-[auto_auto_auto_auto_minmax(0,1fr)] gap-2 overflow-hidden rounded-t-2xl border-t border-border bg-card px-[18px] pb-[env(safe-area-inset-bottom)] pt-2 shadow-xl animate-[mobile-detail-sheet-in_180ms_ease-out] will-change-transform"
+          className="actions-detail-panel mobile absolute inset-x-0 bottom-0 top-[env(safe-area-inset-top)] z-[1] grid min-h-0 min-w-0 grid-rows-[auto_auto_auto_auto_minmax(0,1fr)] gap-1 overflow-hidden rounded-t-2xl border-t border-border bg-card px-[18px] pb-[env(safe-area-inset-bottom)] pt-1 shadow-xl animate-[mobile-detail-sheet-in_180ms_ease-out] will-change-transform"
           style={{ ...mobileSheetStyle, top: mobileSheetTop } as CSSProperties}
           aria-label="Редактирование действия"
           onKeyDown={onKeyDown}
@@ -339,7 +315,7 @@ export function ActivityDetailEditor({
 
   return (
     <aside
-      className="actions-detail-panel desktop grid h-full min-h-0 min-w-0 grid-rows-[auto_auto_auto_minmax(0,1fr)] gap-3 overflow-hidden pl-7 pr-7 max-[860px]:hidden"
+      className="actions-detail-panel desktop grid h-full min-h-0 min-w-0 grid-rows-[auto_auto_auto_auto_minmax(0,1fr)] gap-2 overflow-hidden pl-7 pr-7 max-[860px]:hidden"
       aria-label="Редактирование действия"
       data-nav-swipe-exclusion
       onKeyDown={onKeyDown}

@@ -75,6 +75,11 @@ describe("BrightOsApp inbox", () => {
     expect(inboxRow).toHaveClass("rounded-lg", "border-b-transparent");
     expect(inboxRow).toHaveClass("[&:has(+_.action-row.selected)]:border-b-transparent");
     expect(screen.getByLabelText("Редактирование входящего")).toHaveClass("pr-7");
+    const detailPanel = screen.getByLabelText("Редактирование входящего");
+    const detailTitle = screen.getByRole("textbox", { name: "Название входящего" });
+    const detailTabs = detailPanel.querySelector(".actions-detail-tabs") as HTMLElement;
+    expect(detailTabs.compareDocumentPosition(detailTitle) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(detailTitle).not.toHaveClass("truncate");
     const splitSlider = screen.getByRole("slider", { name: "Изменить ширину панелей" });
     expect(splitSlider).toHaveAttribute("aria-valuenow", "50");
     fireEvent.keyDown(splitSlider, { key: "End" });
@@ -85,8 +90,14 @@ describe("BrightOsApp inbox", () => {
     fireEvent.change(descriptionEditor, {
       target: { value: "# Контекст\n\n## Источник\n\n**важно**" },
     });
+    expect(detailPanel.querySelector(".actions-detail-header .actions-detail-preview-toggle")).not.toBeInTheDocument();
+    expect(detailPanel.querySelector(".actions-detail-description-scroll .actions-detail-preview-toggle")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Читать описание" }));
     await waitFor(() => expect(screen.getByLabelText("MD просмотр описания входящего")).toHaveTextContent("Контекст"));
+    fireEvent.click(screen.getByRole("tab", { name: "Детали" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Инфо" }));
+    expect(screen.getByLabelText("MD просмотр описания входящего")).toHaveTextContent("Источник");
+    expect(screen.getByLabelText("MD просмотр описания входящего")).toHaveTextContent("важно");
     fireEvent.click(screen.getByRole("button", { name: "Закрыть редактор" }));
     await waitFor(() => expect(screen.getByRole("status", { name: "сбой" })).toBeInTheDocument());
 

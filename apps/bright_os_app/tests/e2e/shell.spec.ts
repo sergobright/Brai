@@ -678,3 +678,47 @@ test("opens the desktop activity description split panel", async ({ page }, test
   await expect(page.getByRole("button", { name: "Закрыть редактор" })).toBeVisible();
   await expect(page.getByRole("textbox", { name: "Название действия", exact: true })).toBeFocused();
 });
+
+test("keeps the desktop inbox detail info after tab switches", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop", "desktop-only inbox detail panel");
+
+  const title = "Уже лучше, но теперь есть нюанс: когда я пытаюсь раскрывать длинный заголовок входящего";
+  const descriptionText = [
+    "# Контекст",
+    "",
+    "Описание",
+    "Описание",
+    "Описание",
+    "Описание",
+    "Описание",
+    "О О О Л Л Л Л Ь Л Д Л",
+  ].join("\n");
+  await page.goto("/inbox");
+  await page.getByRole("textbox", { name: "Добавить входящее" }).fill(title);
+  await page.keyboard.press("Enter");
+  const rowTitle = page.getByRole("textbox", { name: `Название входящего: ${title}` });
+  await expect(rowTitle).toBeVisible();
+
+  await rowTitle.click();
+  const panel = page.locator(".actions-detail-panel.desktop");
+  await expect(panel).toBeVisible();
+  const detailTitle = page.getByRole("textbox", { name: "Название входящего", exact: true });
+  const tabsBox = await panel.locator(".actions-detail-tabs").boundingBox();
+  const titleBox = await detailTitle.boundingBox();
+  await expect(detailTitle).toHaveValue(title);
+  await expect(detailTitle).toHaveCSS("white-space", "pre-wrap");
+  await expect(detailTitle).toHaveCSS("overflow-wrap", "anywhere");
+  expect(tabsBox?.y ?? 0).toBeLessThan(titleBox?.y ?? 0);
+  expect(titleBox?.height ?? 0).toBeGreaterThan(44);
+  await expect(panel.locator(".actions-detail-header .actions-detail-preview-toggle")).toHaveCount(0);
+  await expect(panel.locator(".actions-detail-description-scroll .actions-detail-preview-toggle")).toBeVisible();
+
+  await page.getByRole("textbox", { name: "Описание входящего" }).fill(descriptionText);
+  await page.getByRole("button", { name: "Читать описание" }).click();
+  await expect(page.locator(".actions-detail-description-preview")).toContainText("Контекст");
+  await expect(page.locator(".actions-detail-description-preview")).toContainText("Д Л");
+  await page.getByRole("tab", { name: "Детали" }).click();
+  await page.getByRole("tab", { name: "Инфо" }).click();
+  await expect(page.locator(".actions-detail-description-preview")).toContainText("Контекст");
+  await expect(page.locator(".actions-detail-description-preview")).toContainText("Д Л");
+});

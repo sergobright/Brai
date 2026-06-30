@@ -251,8 +251,11 @@ describe("BrightOsApp actions", () => {
     fireEvent.click(screen.getByRole("textbox", { name: "Название действия: Детальное действие" }));
     expect(screen.getByRole("button", { name: "Закрыть редактор" })).toBeInTheDocument();
     expect(screen.getByLabelText("Редактирование действия")).toHaveClass("pr-7");
+    const detailPanel = screen.getByLabelText("Редактирование действия");
     const detailTitle = screen.getByRole("textbox", { name: "Название действия" });
-    expect(detailTitle).toHaveClass("truncate");
+    const detailTabs = detailPanel.querySelector(".actions-detail-tabs") as HTMLElement;
+    expect(detailTabs.compareDocumentPosition(detailTitle) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(detailTitle).not.toHaveClass("truncate");
     expect(screen.getByRole("tab", { name: "Инфо" })).toHaveAttribute("aria-selected", "true");
     expect(screen.getByRole("tab", { name: "Связи" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "AI" })).toBeInTheDocument();
@@ -279,6 +282,8 @@ describe("BrightOsApp actions", () => {
       target: { value: "# Большое описание\n\n## Цель\n\n**важно**" },
     });
     const readModeButton = screen.getByRole("button", { name: "Читать описание" });
+    expect(detailPanel.querySelector(".actions-detail-header .actions-detail-preview-toggle")).not.toBeInTheDocument();
+    expect(detailPanel.querySelector(".actions-detail-description-scroll .actions-detail-preview-toggle")).toBeInTheDocument();
     expect(readModeButton).toHaveAttribute("aria-pressed", "false");
     fireEvent.click(readModeButton);
     await waitFor(() => expect(screen.getByRole("button", { name: "Редактировать описание" })).toHaveAttribute("aria-pressed", "true"));
