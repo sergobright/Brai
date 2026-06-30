@@ -8,6 +8,8 @@ import { installAndroidBackHandler } from "@/shared/platform/platform";
 import type { BrightOtaState } from "@/shared/platform/ota";
 import { Avatar, AvatarFallback } from "@/shared/ui/avatar";
 import { FloatingDock } from "@/shared/ui/floating-dock";
+import { formatHourMinute } from "@/shared/time/format";
+import type { TimerState } from "@/shared/types/timer";
 import { Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarGroupContent, SidebarGroupLabel, SidebarHeader, SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarRail, useSidebar } from "@/shared/ui/sidebar";
 import { cx } from "../appUtils";
 import { useMobileSheetDrag } from "../hooks/useMobileSheetDrag";
@@ -410,10 +412,12 @@ export function MainDock({
   hidden,
   onSection,
   swipeHandlers,
+  timer,
 }: {
   section: SectionId;
   hidden: boolean;
   onSection: (section: SectionId) => void;
+  timer: TimerState;
   swipeHandlers?: {
     onTouchStart: TouchEventHandler<HTMLElement>;
     onTouchMove: TouchEventHandler<HTMLElement>;
@@ -423,12 +427,14 @@ export function MainDock({
 }) {
   const dockItems = navItems.map((item) => {
     const Icon = item.icon;
+    const focusActive = item.id === "focus" && Boolean(timer.active_session);
     return {
       title: item.label,
       href: navHref(item.id),
       active: isActiveNavItem(item.id, section),
+      fillIcon: focusActive,
       onClick: () => onSection(item.id),
-      icon: <Icon className="h-full w-full" aria-hidden="true" />,
+      icon: focusActive ? <FocusDockIcon seconds={timer.elapsed_seconds} /> : <Icon className="h-full w-full" aria-hidden="true" />,
     };
   });
 
@@ -449,6 +455,39 @@ export function MainDock({
         mobileClassName="mobile-nav"
       />
     </nav>
+  );
+}
+
+function FocusDockIcon({ seconds }: { seconds: number }) {
+  const value = formatHourMinute(seconds);
+  const fontSize = value.length >= 5 ? 23 : value.length >= 4 ? 27 : 30;
+  return (
+    <svg className="focus-dock-icon block h-full w-full" viewBox="0 0 100 100" aria-hidden="true">
+      <circle className="text-primary/20" cx="50" cy="50" r="41" fill="none" stroke="currentColor" strokeWidth="5" />
+      <g className="origin-center animate-[spin_28s_linear_infinite]">
+        <circle
+          className="focus-dock-orbit text-primary"
+          cx="50"
+          cy="50"
+          r="41"
+          fill="none"
+          stroke="currentColor"
+          strokeDasharray="34 258"
+          strokeLinecap="round"
+          strokeWidth="5"
+        />
+      </g>
+      <text
+        className="focus-dock-timer fill-current font-bold tabular-nums"
+        dominantBaseline="middle"
+        style={{ fontSize }}
+        textAnchor="middle"
+        x="50"
+        y="52"
+      >
+        {value}
+      </text>
+    </svg>
   );
 }
 

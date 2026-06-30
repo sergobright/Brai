@@ -130,8 +130,8 @@ describe("BrightOsApp gestures", () => {
       changedTouches: [{ identifier: 1, clientX: 80, clientY: 124 }],
     });
 
-    await waitFor(() => expect((drawer as HTMLElement).style.transform).toBe("translate3d(-200px, 0, 0)"));
-    expect(Number((backdrop as HTMLElement).style.opacity)).toBeLessThan(1);
+    await waitFor(() => expect((drawer as HTMLElement).style.getPropertyValue("--mobile-sheet-offset")).toBe("190px"));
+    expect(Number((backdrop as HTMLElement).style.getPropertyValue("--mobile-sheet-backdrop-opacity"))).toBeLessThan(1);
 
     fireEvent.touchEnd(drawer as HTMLElement, {
       changedTouches: [{ identifier: 1, clientX: 80, clientY: 124 }],
@@ -183,8 +183,8 @@ describe("BrightOsApp gestures", () => {
       changedTouches: [{ identifier: 1, clientX: 200, clientY: 350 }],
     });
 
-    await waitFor(() => expect(Number((backdrop as HTMLElement).style.opacity)).toBeLessThan(1));
-    expect((sheet as HTMLElement).style.transform).toBe("translate3d(0, 250px, 0)");
+    await waitFor(() => expect(Number((backdrop as HTMLElement).style.getPropertyValue("--mobile-sheet-backdrop-opacity"))).toBeLessThan(1));
+    expect((sheet as HTMLElement).style.getPropertyValue("--mobile-sheet-offset")).toBe("240px");
   });
 
   it("closes an open mobile sheet through the Android back bridge", async () => {

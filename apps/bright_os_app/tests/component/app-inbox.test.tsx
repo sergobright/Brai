@@ -1,11 +1,42 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { BrightOsApp } from "@/features/app/BrightOsApp";
+import { TITLE_MAX_LENGTH } from "@/shared/activities/text";
 import { pendingInboxEvents, saveInboxState } from "@/shared/storage/inboxStore";
 import { setupBrightOsAppTest } from "./app-test-support";
 
 describe("BrightOsApp inbox", () => {
   setupBrightOsAppTest();
+
+  it("creates a mobile inbox item with a description from the composer", async () => {
+    render(<BrightOsApp />);
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Входящие" }).at(-1) as HTMLElement);
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Входящие" })).toBeInTheDocument());
+    fireEvent.click(document.querySelector(".actions-fab") as HTMLElement);
+    const overlay = within(document.querySelector(".actions-mobile-overlay") as HTMLElement);
+
+    const title = overlay.getByRole("textbox", { name: "Добавить входящее" }) as HTMLTextAreaElement;
+    await waitFor(() => expect(title).toHaveFocus());
+    expect(title).toHaveAttribute("enterkeyhint", "enter");
+
+    const description = overlay.getByRole("textbox", { name: "Описание входящего" });
+    fireEvent.focus(description);
+    fireEvent.change(title, { target: { value: " Новое письмо " } });
+    fireEvent.change(description, { target: { value: "Контекст письма" } });
+    fireEvent.click(overlay.getByRole("button", { name: "Добавить входящее" }));
+
+    await waitFor(async () => {
+      expect(await pendingInboxEvents()).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: "create",
+            payload: { title: "Новое письмо", description_md: "Контекст письма" },
+          }),
+        ]),
+      );
+    });
+  });
 
   it("opens Входящие from the main dock and creates an incoming item without action statuses", async () => {
     vi.stubGlobal(
@@ -39,12 +70,28 @@ describe("BrightOsApp inbox", () => {
     expect(screen.queryByRole("checkbox", { name: "Новое письмо" })).not.toBeInTheDocument();
     expect(screen.queryByText("Выполнено")).not.toBeInTheDocument();
     expect(screen.getByText("Тип входящего")).toBeInTheDocument();
+    expect(inboxRow).toHaveClass("max-[860px]:select-none");
 
     fireEvent.click(title);
     await waitFor(() => expect(screen.getByRole("button", { name: "Закрыть редактор" })).toBeInTheDocument());
     expect(inboxRow).toHaveClass("rounded-lg", "border-b-transparent");
     expect(inboxRow).toHaveClass("[&:has(+_.action-row.selected)]:border-b-transparent");
-    expect(screen.getByLabelText("Редактирование входящего")).toHaveClass("pr-7");
+    const detailPanel = screen.getByLabelText("Редактирование входящего");
+    expect(detailPanel).toHaveClass("px-0");
+    const detailTitle = screen.getByRole("textbox", { name: "Название входящего" });
+    const detailTabs = detailPanel.querySelector(".actions-detail-tabs") as HTMLElement;
+    expect(detailTabs.compareDocumentPosition(detailTitle) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(detailTitle.closest(".actions-detail-title-block")).toHaveClass("mt-6");
+    expect(detailTitle).not.toHaveClass("truncate");
+    expect(detailPanel).toHaveClass("overflow-hidden");
+    const limitedTitle = "В".repeat(TITLE_MAX_LENGTH);
+    fireEvent.change(detailTitle, { target: { value: `${limitedTitle}лишнее` } });
+    await waitFor(() => expect(detailTitle).toHaveValue(limitedTitle));
+    expect(detailPanel.querySelector(".actions-detail-title-counter")).toHaveTextContent("0");
+    expect(detailPanel.querySelector(".actions-detail-title-counter")).toHaveClass("text-destructive");
+    const detailScroll = detailPanel.querySelector(".actions-detail-description-scroll");
+    expect(detailScroll).toBeInTheDocument();
+    expect(detailScroll?.parentElement).toBe(detailPanel);
     const splitSlider = screen.getByRole("slider", { name: "Изменить ширину панелей" });
     expect(splitSlider).toHaveAttribute("aria-valuenow", "50");
     fireEvent.keyDown(splitSlider, { key: "End" });
@@ -52,11 +99,19 @@ describe("BrightOsApp inbox", () => {
     fireEvent.keyDown(splitSlider, { key: "Home" });
     expect(splitSlider).toHaveAttribute("aria-valuenow", "30");
     const descriptionEditor = screen.getByRole("textbox", { name: "Описание входящего" });
-    fireEvent.change(descriptionEditor, {
-      target: { value: "# Контекст\n\n## Источник\n\n**важно**" },
-    });
+    expect(descriptionEditor).toHaveClass("before:float-right", "before:w-12");
+    descriptionEditor.textContent = "# Контекст\n\n## Источник\n\n**важно**";
+    fireEvent.input(descriptionEditor);
+    expect(detailPanel.querySelector(".actions-detail-header .actions-detail-preview-toggle")).not.toBeInTheDocument();
+    expect(detailPanel.querySelector(".actions-detail-description-scroll .actions-detail-preview-toggle")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Читать описание" })).toHaveClass("absolute");
+    expect(screen.getByRole("button", { name: "Читать описание" })).not.toHaveClass("float-right");
     fireEvent.click(screen.getByRole("button", { name: "Читать описание" }));
     await waitFor(() => expect(screen.getByLabelText("MD просмотр описания входящего")).toHaveTextContent("Контекст"));
+    fireEvent.click(screen.getByRole("tab", { name: "Детали" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Инфо" }));
+    expect(screen.getByLabelText("MD просмотр описания входящего")).toHaveTextContent("Источник");
+    expect(screen.getByLabelText("MD просмотр описания входящего")).toHaveTextContent("важно");
     fireEvent.click(screen.getByRole("button", { name: "Закрыть редактор" }));
     await waitFor(() => expect(screen.getByRole("status", { name: "сбой" })).toBeInTheDocument());
 

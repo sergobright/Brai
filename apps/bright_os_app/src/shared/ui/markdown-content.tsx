@@ -75,7 +75,7 @@ export function hasMarkdownSyntax(source: string): boolean {
 
 export function MarkdownContent({ source, className }: { source: string; className?: string }) {
   return (
-    <div className={cn("markdown-content text-sm font-normal leading-7 text-foreground", className)}>
+    <div className={cn("markdown-content min-w-0 text-sm font-normal leading-7 text-foreground [overflow-wrap:anywhere]", className)}>
       <Markdown components={markdownComponents} skipHtml>
         {source}
       </Markdown>

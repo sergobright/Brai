@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   applyFocusInput,
   createFocusEditDraft,
+  createFocusIntervalEditDraft,
   hasFocusOverlap,
   normalizedInputValue,
 } from "@/features/app/sections/focus/focusHistoryEditModel";
@@ -37,5 +38,46 @@ describe("focus history edit model", () => {
 
     expect(hasFocusOverlap(draft, [neighbor])).toBe(false);
     expect(hasFocusOverlap(applyFocusInput(draft, "duration", "1:05")!, [neighbor])).toBe(true);
+  });
+
+  it("detects overlaps with active sessions and active intervals", () => {
+    const draft = createFocusEditDraft(session)!;
+    const activeNeighbor: TimerSession = {
+      id: "session-active",
+      started_at_utc: "2026-06-14T11:00:00.000Z",
+      ended_at_utc: null,
+      duration_seconds: null,
+    };
+    const multiInterval: TimerSession = {
+      id: "session-intervals",
+      started_at_utc: "2026-06-14T10:00:00.000Z",
+      ended_at_utc: null,
+      duration_seconds: null,
+      intervals: [
+        {
+          id: "interval-1",
+          focus_session_id: "session-intervals",
+          activity_id: null,
+          activity_title: null,
+          started_at_utc: "2026-06-14T10:00:00.000Z",
+          ended_at_utc: "2026-06-14T11:00:00.000Z",
+          duration_seconds: 3600,
+        },
+        {
+          id: "interval-active",
+          focus_session_id: "session-intervals",
+          activity_id: "action-1",
+          activity_title: "Письмо",
+          started_at_utc: "2026-06-14T11:30:00.000Z",
+          ended_at_utc: null,
+          duration_seconds: null,
+        },
+      ],
+    };
+    const intervalDraft = createFocusIntervalEditDraft(multiInterval.intervals![0])!;
+
+    expect(hasFocusOverlap(draft, [activeNeighbor])).toBe(false);
+    expect(hasFocusOverlap(applyFocusInput(draft, "duration", "1:05")!, [activeNeighbor])).toBe(true);
+    expect(hasFocusOverlap(applyFocusInput(intervalDraft, "duration", "1:45")!, [multiInterval])).toBe(true);
   });
 });

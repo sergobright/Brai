@@ -10,6 +10,27 @@ export function fitTextareaHeight(node: HTMLTextAreaElement | null): void {
   node.style.height = `${node.scrollHeight}px`;
 }
 
+export function setPlainEditableText(node: HTMLElement | null, value: string): void {
+  if (!node || plainEditableText(node) === value) return;
+  node.textContent = value;
+}
+
+export function plainEditableText(node: HTMLElement): string {
+  return (node.innerText ?? node.textContent ?? "").replace(/\n$/, "");
+}
+
+export function focusEditableEnd(node: HTMLElement | null): void {
+  if (!node) return;
+  node.focus();
+  const selection = window.getSelection();
+  if (!selection) return;
+  const range = document.createRange();
+  range.selectNodeContents(node);
+  range.collapse(false);
+  selection.removeAllRanges();
+  selection.addRange(range);
+}
+
 export function normalizeHistory(history: HistoryData): HistoryData {
   return {
     sessions: history.sessions ?? [],

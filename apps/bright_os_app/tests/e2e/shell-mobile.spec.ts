@@ -55,12 +55,43 @@ test("opens mobile action input overlay from the floating plus button", async ({
   await expect(page.getByRole("navigation", { name: "Основная навигация" })).toBeHidden();
 
   const editor = await page.locator(".actions-mobile-editor").boundingBox();
-  expect(editor?.height ?? 999).toBeLessThanOrEqual(96);
+  expect(editor?.height ?? 0).toBeGreaterThan(120);
+  expect(editor?.height ?? 999).toBeLessThanOrEqual(190);
 
   await expect.poll(() => page.evaluate(() => (window as Window & { BrightOsAndroidBack?: () => boolean }).BrightOsAndroidBack?.())).toBe(true);
   await expect(page.locator(".actions-mobile-overlay")).toHaveCount(0);
   await expect(page.getByRole("heading", { name: "Действия", exact: true })).toBeVisible();
   await expect(page.getByRole("navigation", { name: "Основная навигация" })).toBeVisible();
+});
+
+test("scrolls mobile create title and description as one text area", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "mobile", "mobile-only action overlay");
+
+  await page.goto("/");
+  await page.locator(".actions-fab").click();
+  const textArea = page.locator(".mobile-create-text");
+  const title = page.getByRole("textbox", { name: "Добавить действие" });
+  const description = page.getByRole("textbox", { name: "Описание действия" });
+  await title.fill(Array.from({ length: 10 }, () => "Длинный заголовок занимает много строк").join(" "));
+  await description.fill(Array.from({ length: 80 }, () => "Большое описание вытесняет заголовок наверх").join(" "));
+
+  await expect.poll(() => textArea.evaluate((node) => node.scrollHeight > node.clientHeight)).toBe(true);
+  await expect.poll(() => title.evaluate((node) => node.scrollHeight <= node.clientHeight + 1)).toBe(true);
+  await expect.poll(() => description.evaluate((node) => node.scrollHeight <= node.clientHeight + 1)).toBe(true);
+  await expect.poll(() => textArea.evaluate((node) => node.scrollTop)).toBeGreaterThan(0);
+
+  const editorBox = await page.locator(".actions-mobile-editor").boundingBox();
+  const topbar = await page.locator(".section-page-current .topbar").boundingBox();
+  const textBox = await textArea.boundingBox();
+  const titleBox = await title.boundingBox();
+  const descriptionBox = await description.boundingBox();
+  const toolbarBox = await page.locator(".mobile-create-toolbar").boundingBox();
+  const topbarBottom = (topbar?.y ?? 0) + (topbar?.height ?? 0);
+  expect(Math.abs((editorBox?.y ?? 0) - Math.ceil(topbarBottom))).toBeLessThanOrEqual(1);
+  expect(titleBox?.y ?? 0).toBeLessThan(textBox?.y ?? 0);
+  expect(descriptionBox?.height ?? 0).toBeGreaterThanOrEqual(36);
+  expect((descriptionBox?.y ?? 0) + (descriptionBox?.height ?? 0)).toBeLessThanOrEqual(toolbarBox?.y ?? 0);
+  await expect(description).toBeVisible();
 });
 
 test("keeps the mobile Actions FAB vertically stable when a dock swipe starts", async ({ page }, testInfo) => {
@@ -134,6 +165,20 @@ test("opens and closes mobile Inbox info as a bottom sheet", async ({ page }, te
   await page.mouse.move(dragX, (viewport?.height ?? 640) - 12, { steps: 6 });
   await page.mouse.up();
   await expect(page.locator(".mobile-context-sheet")).toHaveCount(0);
+});
+
+test("prevents text selection on mobile inbox rows", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "mobile", "mobile-only inbox row selection");
+
+  await page.goto("/inbox");
+  await page.locator(".actions-fab").click();
+  await page.getByRole("textbox", { name: "Добавить входящее" }).fill("Не выделять текст");
+  await page.getByRole("textbox", { name: "Описание входящего" }).fill("Долгий тап не должен выделять описание");
+  await page.getByRole("button", { name: "Добавить входящее" }).click();
+
+  const row = page.locator(".action-row").first();
+  await expect(row).toContainText("Не выделять текст");
+  await expect(row).toHaveCSS("user-select", "none");
 });
 
 test("keeps a single mobile action compact without creating empty scroll", async ({ page }, testInfo) => {
@@ -274,7 +319,8 @@ test("opens the mobile bottom-sheet activity detail editor", async ({ page }, te
   test.skip(testInfo.project.name !== "mobile", "mobile-only detail editor");
 
   await page.goto("/");
-  await createMobileAction(page, "Описание mobile");
+  const longTitle = "Очень длинный заголовок детали который обязан переноситься полностью на несколько строк без троеточия";
+  await createMobileAction(page, longTitle);
 
   const rowSurface = page.locator(".action-row-surface").first();
   const rowSurfaceBox = await rowSurface.boundingBox();
@@ -289,13 +335,46 @@ test("opens the mobile bottom-sheet activity detail editor", async ({ page }, te
   await expect(page.locator(".actions-detail-backdrop")).toBeVisible();
   await expect(page.locator(".actions-detail-grabber")).toBeVisible();
   const editorLocator = page.locator(".actions-detail-panel.mobile");
-  await expect.poll(async () => (await editorLocator.boundingBox())?.y ?? 999).toBeLessThanOrEqual(20);
+  const topbar = await page.locator(".section-page-current .topbar").boundingBox();
+  const topbarBottom = (topbar?.y ?? 0) + (topbar?.height ?? 0);
+  await expect.poll(async () => Math.abs(((await editorLocator.boundingBox())?.y ?? 999) - Math.ceil(topbarBottom))).toBeLessThanOrEqual(1);
   const editor = await editorLocator.boundingBox();
   const viewport = page.viewportSize();
-  expect(editor?.y ?? 0).toBeGreaterThanOrEqual(0);
+  expect(editor?.y ?? 0).toBeGreaterThanOrEqual(topbarBottom - 1);
   expect(editor?.height ?? 999).toBeLessThanOrEqual((viewport?.height ?? 0) + 1);
   expect((editor?.y ?? 0) + (editor?.height ?? 0)).toBeGreaterThanOrEqual((viewport?.height ?? 0) - 1);
   await expect(editorLocator).toHaveCSS("border-top-width", "1px");
+  const grabberBox = await editorLocator.locator(".actions-detail-grabber").boundingBox();
+  const tabsBox = await editorLocator.locator(".actions-detail-tabs").boundingBox();
+  const detailTitle = page.getByRole("textbox", { name: "Название действия", exact: true });
+  const titleBox = await detailTitle.boundingBox();
+  await expect(detailTitle).toHaveValue(longTitle);
+  await expect(editorLocator.locator(".actions-detail-tabs")).toHaveCSS("border-bottom-width", "1px");
+  expect((tabsBox?.y ?? 0) - ((grabberBox?.y ?? 0) + (grabberBox?.height ?? 0))).toBeLessThanOrEqual(16);
+  expect(tabsBox?.y ?? 0).toBeLessThan(titleBox?.y ?? 0);
+  expect((titleBox?.y ?? 0) - ((tabsBox?.y ?? 0) + (tabsBox?.height ?? 0))).toBeGreaterThanOrEqual(20);
+  expect((titleBox?.y ?? 0) - ((tabsBox?.y ?? 0) + (tabsBox?.height ?? 0))).toBeLessThanOrEqual(28);
+  expect(titleBox?.height ?? 0).toBeGreaterThan(44);
+  await expect(editorLocator.locator(".actions-detail-header .actions-detail-preview-toggle")).toHaveCount(0);
+  await expect(editorLocator.locator(".actions-detail-description-scroll .actions-detail-preview-toggle")).toBeVisible();
+  await detailTitle.fill("м".repeat(270));
+  await expect.poll(async () => (await detailTitle.inputValue()).length).toBe(250);
+  await expect(editorLocator.locator(".actions-detail-title-counter")).toHaveText("0");
+  await expect(editorLocator.locator(".actions-detail-title-counter")).toHaveClass(/text-destructive/);
+  const mobileDescriptionEditor = page.getByRole("textbox", { name: "Описание действия" });
+  await expect(mobileDescriptionEditor).toBeVisible();
+  await expect(mobileDescriptionEditor).toHaveCSS("padding-right", "0px");
+  await expect.poll(() => mobileDescriptionEditor.evaluate((node) => getComputedStyle(node, "::before").float)).toBe("right");
+  expect(Math.abs(((await mobileDescriptionEditor.boundingBox())?.width ?? 0) - ((await detailTitle.boundingBox())?.width ?? 0))).toBeLessThanOrEqual(1);
+  await expect.poll(() => detailTitle.evaluate((node) => node.scrollHeight <= node.clientHeight + 1)).toBe(true);
+  const titleHeightBeforeTabSwitch = (await detailTitle.boundingBox())?.height ?? 0;
+  await page.getByRole("tab", { name: "Связи" }).click();
+  await expect.poll(() => detailTitle.evaluate((node) => node.scrollHeight <= node.clientHeight + 1)).toBe(true);
+  expect(Math.abs(((await detailTitle.boundingBox())?.height ?? 0) - titleHeightBeforeTabSwitch)).toBeLessThanOrEqual(2);
+  await page.getByRole("tab", { name: "Инфо" }).click();
+  await expect.poll(() => detailTitle.evaluate((node) => node.scrollHeight <= node.clientHeight + 1)).toBe(true);
+  expect(Math.abs(((await detailTitle.boundingBox())?.height ?? 0) - titleHeightBeforeTabSwitch)).toBeLessThanOrEqual(2);
+  await expect(mobileDescriptionEditor).toBeVisible();
 
   await page.locator(".actions-detail-backdrop").click({ position: { x: 8, y: 8 } });
   await expect(page.getByRole("button", { name: "Сохранить и закрыть" })).toBeVisible();
@@ -308,24 +387,41 @@ test("opens the mobile bottom-sheet activity detail editor", async ({ page }, te
   };
   await swipeTouch(page, dragStart, { x: dragStart.x, y: dragStart.y + 80 });
   await expect(page.getByRole("button", { name: "Сохранить и закрыть" })).toBeVisible();
-  await expect.poll(async () => (await editorLocator.boundingBox())?.y ?? 999).toBeLessThanOrEqual(20);
+  await expect.poll(async () => Math.abs(((await editorLocator.boundingBox())?.y ?? 999) - Math.ceil(topbarBottom))).toBeLessThanOrEqual(1);
 
   await page.getByRole("textbox", { name: "Описание действия" }).fill("мобильное **описание**");
   await page.getByRole("button", { name: "Читать описание" }).click();
   await expect(page.locator(".actions-detail-description-preview")).toContainText("мобильное описание");
   await expect(page.locator(".actions-detail-description-preview")).not.toContainText("**");
   await page.getByRole("button", { name: "Редактировать описание" }).click();
-  await expect(page.getByRole("textbox", { name: "Описание действия" })).toHaveValue("мобильное **описание**");
+  await expect(page.getByRole("textbox", { name: "Описание действия" })).toContainText("мобильное **описание**");
   await page.getByRole("textbox", { name: "Описание действия" }).fill(
     Array.from({ length: 36 }, (_, index) => `строка ${index + 1} для проверки прокрутки`).join("\n\n"),
   );
   await page.getByRole("button", { name: "Читать описание" }).click();
   await expect(page.locator(".actions-detail-description-preview")).toContainText("строка 36");
+  await page.getByRole("tab", { name: "Связи" }).click();
+  await expect.poll(() => detailTitle.evaluate((node) => node.scrollHeight <= node.clientHeight + 1)).toBe(true);
+  await page.getByRole("tab", { name: "Инфо" }).click();
+  await expect(page.locator(".actions-detail-description-preview")).toContainText("строка 36");
+  await expect.poll(() => detailTitle.evaluate((node) => node.scrollHeight <= node.clientHeight + 1)).toBe(true);
   const descriptionViewport = page.locator(".actions-detail-description-scroll [data-slot='scroll-area-viewport']");
+  const infoScrollbar = editorLocator.locator(".actions-detail-description-scroll > [data-slot='scroll-area-scrollbar']");
+  const editorBox = await editorLocator.boundingBox();
+  const scrollbarBox = await infoScrollbar.boundingBox();
+  expect(scrollbarBox).not.toBeNull();
+  expect(
+    Math.abs(
+      ((editorBox?.x ?? 0) + (editorBox?.width ?? 0) - ((scrollbarBox?.x ?? 0) + (scrollbarBox?.width ?? 0))) -
+        ((scrollbarBox?.width ?? 0) / 2),
+    ),
+  ).toBeLessThanOrEqual(1);
+  const titleTopBeforeScroll = (await detailTitle.boundingBox())?.y ?? 0;
   await descriptionViewport.evaluate((element) => {
     element.scrollTop = 180;
   });
   await expect.poll(() => descriptionViewport.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+  expect((await detailTitle.boundingBox())?.y ?? 0).toBeLessThan(titleTopBeforeScroll - 20);
   const previewBox = await page.locator(".actions-detail-description-preview").boundingBox();
   const bodyDragX = (previewBox?.x ?? 0) + (previewBox?.width ?? 320) / 2;
   const bodyDragY = (previewBox?.y ?? 0) + Math.min((previewBox?.height ?? 320) / 2, 220);
@@ -530,11 +626,13 @@ test("opens and closes mobile Focus history as a bottom sheet", async ({ page },
   const titleBox = await sheet.getByRole("heading", { name: "История фокуса" }).boundingBox();
   expect(horizontalCenterOffset(grabberBox, sheetBox)).toBeLessThanOrEqual(1);
   expect(horizontalCenterOffset(titleBox, sheetBox)).toBeLessThanOrEqual(1);
-  await expect.poll(async () => {
+  const grabberTitleGap = expect.poll(async () => {
     const grabber = await sheet.locator(".mobile-context-grabber").boundingBox();
     const title = await sheet.getByRole("heading", { name: "История фокуса" }).boundingBox();
     return (title?.y ?? 0) - ((grabber?.y ?? 0) + (grabber?.height ?? 0));
-  }).toBeGreaterThanOrEqual(8);
+  });
+  await grabberTitleGap.toBeGreaterThanOrEqual(4);
+  await grabberTitleGap.toBeLessThanOrEqual(8);
   await expectMobileSheetScrollbarGeometry(sheet, ".history-group, [data-slot='card']");
 
   await dispatchTouch(page, "touchstart", { x: 320, y: 220 });

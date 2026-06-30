@@ -502,6 +502,82 @@ test("shows the desktop action delete button only on row hover", async ({ page }
   await expect(page.getByRole("textbox", { name: "Название действия: Фокус" })).toHaveCount(0);
 });
 
+test("pins the active desktop action focus timer to the right edge", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop", "desktop-only action focus control");
+
+  await page.goto("/");
+  await page.getByRole("textbox", { name: "Добавить" }).fill("Фокус");
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("textbox", { name: "Название действия: Фокус" })).toBeVisible();
+
+  const row = page.locator(".action-row").first();
+  await row.hover();
+  await page.getByRole("button", { name: "Фокусироваться: Фокус" }).click();
+
+  const focusButton = row.locator(".action-focus-button");
+  const deleteButton = row.locator(".action-delete-button");
+  await expect(page.getByRole("button", { name: "Остановить фокус: Фокус" })).toBeVisible();
+  await page.mouse.move(1, 1);
+  await expect(deleteButton).toHaveCSS("visibility", "hidden");
+  await expect(focusButton).not.toContainText("Стоп");
+
+  await expect
+    .poll(() =>
+      row.evaluate((element) => {
+        const rowRect = element.getBoundingClientRect();
+        const focusRect = element.querySelector(".action-focus-button")?.getBoundingClientRect();
+        const deleteRect = element.querySelector(".action-delete-button")?.getBoundingClientRect();
+        if (!focusRect || !deleteRect) return null;
+        return {
+          deleteWidth: Math.round(deleteRect.width),
+          rightGap: Math.round(rowRect.right - focusRect.right),
+        };
+      }),
+    )
+    .toEqual({ deleteWidth: 0, rightGap: 0 });
+
+  const focusXBeforeHover = await focusButton.evaluate((element) => Math.round(element.getBoundingClientRect().x));
+  await row.hover();
+  await expect(deleteButton).toBeVisible();
+  await expect
+    .poll(() =>
+      row.evaluate((element) => {
+        const deleteButtonElement = element.querySelector(".action-delete-button");
+        const focusButtonElement = element.querySelector(".action-focus-button");
+        const deleteRect = deleteButtonElement?.getBoundingClientRect();
+        const focusRect = focusButtonElement?.getBoundingClientRect();
+        if (!deleteButtonElement || !focusButtonElement || !deleteRect || !focusRect) return null;
+        return {
+          focusX: Math.round(focusRect.x),
+          order: Boolean(deleteButtonElement.compareDocumentPosition(focusButtonElement) & Node.DOCUMENT_POSITION_FOLLOWING),
+          touches: Math.abs(deleteRect.right - focusRect.left) <= 1,
+        };
+      }),
+    )
+    .toEqual({ focusX: focusXBeforeHover, order: true, touches: true });
+
+  const focusDock = page.locator('.main-dock [aria-label="Фокус"]').filter({ visible: true });
+  await focusDock.hover();
+  await expect
+    .poll(() =>
+      focusDock.evaluate((element) => {
+        const circle = element.querySelector(":scope > div")?.getBoundingClientRect();
+        const icon = element.querySelector(".focus-dock-icon")?.getBoundingClientRect();
+        const timer = element.querySelector(".focus-dock-timer")?.getBoundingClientRect();
+        const orbit = element.querySelector(".focus-dock-orbit")?.parentElement;
+        if (!circle || !icon || !timer || !orbit) return null;
+        return {
+          heightGap: Math.round(Math.abs(circle.height - icon.height)),
+          slow: Number.parseFloat(getComputedStyle(orbit).animationDuration) >= 28,
+          textFits: timer.width < icon.width * 0.74,
+          textScales: timer.height > 18,
+          widthGap: Math.round(Math.abs(circle.width - icon.width)),
+        };
+      }),
+    )
+    .toEqual({ heightGap: 0, slow: true, textFits: true, textScales: true, widthGap: 0 });
+});
+
 test("reorders desktop actions by dragging the row handle", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop", "desktop-only action sorting");
 
@@ -570,7 +646,7 @@ test("reorders mobile actions by long-pressing a row", async ({ page }, testInfo
 test("opens the desktop activity description split panel", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop", "desktop-only detail panel");
 
-  const title = "Пересобрать механизм страницы Действий";
+  const title = "Пересобрать механизм страницы Действий с длинным заголовком который должен быть виден полностью";
   await page.goto("/");
   await expect
     .poll(() =>
@@ -588,9 +664,12 @@ test("opens the desktop activity description split panel", async ({ page }, test
   const detailTitle = page.getByRole("textbox", { name: "Название действия", exact: true });
   await expect(detailTitle).toHaveCSS("white-space", "pre-wrap");
   await expect(detailTitle).toHaveCSS("overflow-wrap", "anywhere");
+  await expect.poll(() => detailTitle.evaluate((node) => node.scrollHeight <= node.clientHeight + 1)).toBe(true);
+  await expect(page.locator(".actions-detail-tabs")).toHaveCSS("border-bottom-width", "1px");
   const workspace = await page.locator(".actions-workspace").boundingBox();
   const listPane = await page.locator(".actions-list-pane").boundingBox();
-  const panel = await page.locator(".actions-detail-panel.desktop").boundingBox();
+  const detailPanel = page.locator(".actions-detail-panel.desktop");
+  const panel = await detailPanel.boundingBox();
   const viewport = page.viewportSize();
   expect((listPane?.width ?? 0) / (workspace?.width ?? 1)).toBeGreaterThan(0.49);
   expect((listPane?.width ?? 0) / (workspace?.width ?? 1)).toBeLessThan(0.51);
@@ -598,11 +677,13 @@ test("opens the desktop activity description split panel", async ({ page }, test
   expect((panel?.width ?? 0) / (workspace?.width ?? 1)).toBeLessThan(0.51);
   expect((workspace?.x ?? 0) + (workspace?.width ?? 0)).toBeGreaterThan((viewport?.width ?? 0) - 36);
   expect(panel?.height ?? 0).toBeGreaterThan((viewport?.height ?? 0) - 140);
-  await expect(page.locator(".actions-detail-panel.desktop")).toHaveCSS("border-left-width", "0px");
+  await expect(detailPanel).toHaveCSS("border-left-width", "0px");
+  await expect(detailPanel).toHaveCSS("overflow-y", "hidden");
 
   const resizer = await page.locator(".actions-split-resizer").boundingBox();
   expect(resizer).not.toBeNull();
   await expect(page.locator(".actions-split-resizer")).toHaveCSS("cursor", "ew-resize");
+  await expect(page.locator(".desktop-rail")).not.toHaveCSS("cursor", "ew-resize");
   const resizerCursors = await page.locator(".actions-split-resizer").evaluate((node) => {
     const rect = node.getBoundingClientRect();
     return [2, rect.width / 2, rect.width - 2].map((offset) => {
@@ -615,6 +696,8 @@ test("opens the desktop activity description split panel", async ({ page }, test
   await page.mouse.down();
   await page.mouse.move((workspace?.x ?? 0) + (workspace?.width ?? 0) * 0.3, (resizer?.y ?? 0) + (resizer?.height ?? 0) / 2);
   await page.mouse.up();
+  await expect.poll(() => page.evaluate(() => document.documentElement.style.cursor)).not.toBe("ew-resize");
+  await expect.poll(() => detailTitle.evaluate((node) => node.scrollHeight <= node.clientHeight + 1)).toBe(true);
   await expect.poll(async () => ((await page.locator(".actions-list-pane").boundingBox())?.width ?? 0) / ((await page.locator(".actions-workspace").boundingBox())?.width ?? 1)).toBeGreaterThan(0.29);
   await expect.poll(async () => ((await page.locator(".actions-list-pane").boundingBox())?.width ?? 0) / ((await page.locator(".actions-workspace").boundingBox())?.width ?? 1)).toBeLessThan(0.31);
   await page.getByRole("button", { name: "Закрыть редактор" }).click();
@@ -622,16 +705,49 @@ test("opens the desktop activity description split panel", async ({ page }, test
   await expect
     .poll(async () => ((await page.locator(".actions-list-pane").boundingBox())?.width ?? 0) / ((await page.locator(".actions-workspace").boundingBox())?.width ?? 1))
     .toBeGreaterThan(0.49);
+  const overLimitTitle = "я".repeat(270);
+  await detailTitle.fill(overLimitTitle);
+  await expect.poll(async () => (await detailTitle.inputValue()).length).toBe(250);
+  await expect(detailPanel.locator(".actions-detail-title-counter")).toHaveText("0");
+  await expect(detailPanel.locator(".actions-detail-title-counter")).toHaveClass(/text-destructive/);
+  await expect(page.locator(".actions-detail-tabs")).toBeVisible();
 
   const descriptionEditor = page.getByRole("textbox", { name: "Описание действия" });
+  await expect(descriptionEditor).toBeVisible();
+  expect(Math.abs(((await descriptionEditor.boundingBox())?.width ?? 0) - ((await detailTitle.boundingBox())?.width ?? 0))).toBeLessThanOrEqual(1);
   const descriptionText = `# Большое описание
 
 ## Цель
 
-**важно** ${"длинная строка ".repeat(20)}`;
+**важно** ${"длинная строка ".repeat(120)}`;
   await expect.poll(() => descriptionEditor.evaluate((node) => node.closest(".actions-detail-description-scroll")?.getAttribute("data-slot"))).toBe("scroll-area");
   await expect(descriptionEditor).toHaveClass(/overflow-hidden/);
+  await expect(descriptionEditor).toHaveCSS("padding-right", "0px");
+  await expect.poll(() => descriptionEditor.evaluate((node) => getComputedStyle(node, "::before").float)).toBe("right");
   await descriptionEditor.fill(descriptionText);
+  const infoScrollArea = detailPanel.locator(".actions-detail-description-scroll");
+  const infoScrollbar = infoScrollArea.locator("> [data-slot='scroll-area-scrollbar']");
+  const panelBox = await detailPanel.boundingBox();
+  const scrollbarBox = await infoScrollbar.boundingBox();
+  expect(scrollbarBox).not.toBeNull();
+  expect(
+    Math.abs(
+      ((panelBox?.x ?? 0) + (panelBox?.width ?? 0) - ((scrollbarBox?.x ?? 0) + (scrollbarBox?.width ?? 0))) -
+        ((scrollbarBox?.width ?? 0) / 2),
+    ),
+  ).toBeLessThanOrEqual(1);
+  const infoViewport = page.locator(".actions-detail-description-scroll > [data-slot='scroll-area-viewport']");
+  await descriptionEditor.evaluate((node) => (node as HTMLElement).blur());
+  await infoViewport.evaluate((element) => {
+    element.scrollTop = 0;
+  });
+  await expect.poll(() => infoViewport.evaluate((element) => element.scrollTop)).toBe(0);
+  const titleTopBeforeScroll = (await detailTitle.boundingBox())?.y ?? 0;
+  await infoViewport.evaluate((element) => {
+    element.scrollTop = 120;
+  });
+  await expect.poll(() => infoViewport.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+  expect((await detailTitle.boundingBox())?.y ?? 0).toBeLessThan(titleTopBeforeScroll - 20);
   const readModeButton = page.getByRole("button", { name: "Читать описание" });
   await expect(readModeButton).toHaveAttribute("aria-pressed", "false");
   await readModeButton.click();
@@ -652,7 +768,7 @@ test("opens the desktop activity description split panel", async ({ page }, test
   await expect(page.locator(".actions-detail-description-preview")).not.toContainText("**");
   await page.getByRole("button", { name: "Редактировать описание" }).click();
   await expect.poll(() => page.evaluate(() => window.localStorage.getItem("bright_os_activity_md_preview"))).toBe("false");
-  await expect(page.getByRole("textbox", { name: "Описание действия" })).toHaveValue(descriptionText);
+  await expect(page.getByRole("textbox", { name: "Описание действия" })).toContainText(descriptionText);
   await page.getByRole("button", { name: "Закрыть редактор" }).click();
   const rowPreview = page.locator(".action-description-preview");
   await expect(rowPreview).toContainText("Большое описание");
@@ -677,4 +793,59 @@ test("opens the desktop activity description split panel", async ({ page }, test
   });
   await expect(page.getByRole("button", { name: "Закрыть редактор" })).toBeVisible();
   await expect(page.getByRole("textbox", { name: "Название действия", exact: true })).toBeFocused();
+});
+
+test("keeps the desktop inbox detail info after tab switches", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop", "desktop-only inbox detail panel");
+
+  const title = "Уже лучше, но теперь есть нюанс: когда я пытаюсь раскрывать длинный заголовок входящего";
+  const descriptionText = [
+    "# Контекст",
+    "",
+    "Описание",
+    "Описание",
+    "Описание",
+    "Описание",
+    "Описание",
+    "О О О Л Л Л Л Ь Л Д Л",
+  ].join("\n");
+  await page.goto("/inbox");
+  await page.getByRole("textbox", { name: "Добавить входящее" }).fill(title);
+  await page.keyboard.press("Enter");
+  const rowTitle = page.getByRole("textbox", { name: `Название входящего: ${title}` });
+  await expect(rowTitle).toBeVisible();
+
+  await rowTitle.click();
+  const panel = page.locator(".actions-detail-panel.desktop");
+  await expect(panel).toBeVisible();
+  const detailTitle = page.getByRole("textbox", { name: "Название входящего", exact: true });
+  const tabsBox = await panel.locator(".actions-detail-tabs").boundingBox();
+  const titleBox = await detailTitle.boundingBox();
+  await expect(detailTitle).toHaveValue(title);
+  await expect(detailTitle).toHaveCSS("white-space", "pre-wrap");
+  await expect(detailTitle).toHaveCSS("overflow-wrap", "anywhere");
+  expect(tabsBox?.y ?? 0).toBeLessThan(titleBox?.y ?? 0);
+  expect((titleBox?.y ?? 0) - ((tabsBox?.y ?? 0) + (tabsBox?.height ?? 0))).toBeGreaterThanOrEqual(20);
+  expect((titleBox?.y ?? 0) - ((tabsBox?.y ?? 0) + (tabsBox?.height ?? 0))).toBeLessThanOrEqual(28);
+  expect(titleBox?.height ?? 0).toBeGreaterThan(44);
+  await expect.poll(() => detailTitle.evaluate((node) => node.scrollHeight <= node.clientHeight + 1)).toBe(true);
+  const titleHeightBeforeTabSwitch = titleBox?.height ?? 0;
+  await expect(panel.locator(".actions-detail-header .actions-detail-preview-toggle")).toHaveCount(0);
+  await expect(panel.locator(".actions-detail-description-scroll .actions-detail-preview-toggle")).toBeVisible();
+
+  const descriptionEditor = page.getByRole("textbox", { name: "Описание входящего" });
+  await expect(descriptionEditor).toHaveCSS("padding-right", "0px");
+  await expect.poll(() => descriptionEditor.evaluate((node) => getComputedStyle(node, "::before").float)).toBe("right");
+  await descriptionEditor.fill(descriptionText);
+  await page.getByRole("button", { name: "Читать описание" }).click();
+  await expect(page.locator(".actions-detail-description-preview")).toContainText("Контекст");
+  await expect(page.locator(".actions-detail-description-preview")).toContainText("Д Л");
+  await page.getByRole("tab", { name: "Детали" }).click();
+  await expect.poll(() => detailTitle.evaluate((node) => node.scrollHeight <= node.clientHeight + 1)).toBe(true);
+  expect(Math.abs(((await detailTitle.boundingBox())?.height ?? 0) - titleHeightBeforeTabSwitch)).toBeLessThanOrEqual(2);
+  await page.getByRole("tab", { name: "Инфо" }).click();
+  await expect.poll(() => detailTitle.evaluate((node) => node.scrollHeight <= node.clientHeight + 1)).toBe(true);
+  expect(Math.abs(((await detailTitle.boundingBox())?.height ?? 0) - titleHeightBeforeTabSwitch)).toBeLessThanOrEqual(2);
+  await expect(page.locator(".actions-detail-description-preview")).toContainText("Контекст");
+  await expect(page.locator(".actions-detail-description-preview")).toContainText("Д Л");
 });

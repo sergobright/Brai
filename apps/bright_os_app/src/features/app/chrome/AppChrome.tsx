@@ -1,7 +1,7 @@
 "use client";
 
 import type { CSSProperties, FormEvent, ReactNode } from "react";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { CheckCircle2, Loader2, Lock, TriangleAlert, WifiOff, type LucideIcon } from "lucide-react";
 import { ENVIRONMENT_BADGE_LABEL, isProductionEnvironment } from "@/shared/config/runtime";
 import { installAndroidBackHandler } from "@/shared/platform/platform";
@@ -16,6 +16,7 @@ import { TextEffect } from "@/shared/ui/text-effect";
 import type { ThemeMode, Tone } from "../appModel";
 import { cx } from "../appUtils";
 import { useMobileSheetDrag } from "../hooks/useMobileSheetDrag";
+import { useMobileSheetTop } from "../hooks/useMobileSheetTop";
 
 const syncStatusIconToneClasses: Record<Tone, string> = {
   ok: "text-primary",
@@ -128,32 +129,12 @@ export function MobileContextSheet({
 }) {
   const suppressPopRef = useRef(false);
   const onCloseRef = useRef(onClose);
-  const [sheetTop, setSheetTop] = useState<number | null>(null);
+  const sheetTop = useMobileSheetTop();
   const { backdropRef, backdropStyle, closeWithAnimation, resetOpen, sheetDragHandlers, sheetRef, sheetStyle } = useMobileSheetDrag({ onClose, onCloseStart });
 
   useEffect(() => {
     onCloseRef.current = onClose;
   }, [onClose]);
-
-  useLayoutEffect(() => {
-    function updateSheetTop() {
-      const topbar = document.querySelector<HTMLElement>(".section-page-current .topbar");
-      const nextTop = Math.ceil(topbar?.getBoundingClientRect().bottom ?? 0);
-      setSheetTop((currentTop) => (currentTop === nextTop ? currentTop : nextTop));
-    }
-
-    updateSheetTop();
-    const topbar = document.querySelector<HTMLElement>(".section-page-current .topbar");
-    const observer = topbar && "ResizeObserver" in window ? new ResizeObserver(updateSheetTop) : null;
-    if (topbar) observer?.observe(topbar);
-    window.addEventListener("resize", updateSheetTop);
-    window.visualViewport?.addEventListener("resize", updateSheetTop);
-    return () => {
-      observer?.disconnect();
-      window.removeEventListener("resize", updateSheetTop);
-      window.visualViewport?.removeEventListener("resize", updateSheetTop);
-    };
-  }, []);
 
   useEffect(() => {
     resetOpen();
@@ -195,7 +176,7 @@ export function MobileContextSheet({
   return (
     <div
       className={cx("mobile-context-backdrop pointer-events-none fixed inset-0 z-[84] hidden items-end max-[860px]:flex", className)}
-      style={{ top: sheetTop ?? "var(--mobile-top-padding)" } as CSSProperties}
+      style={{ top: sheetTop } as CSSProperties}
       data-nav-swipe-exclusion
     >
       <div
@@ -212,14 +193,14 @@ export function MobileContextSheet({
         {...sheetDragHandlers}
         onClick={(event) => event.stopPropagation()}
       >
-        <header className="relative flex min-h-14 items-start justify-center pt-6">
+        <header className="relative flex min-h-12 items-start justify-center pt-4">
           <button type="button" className="sr-only" aria-label={`Закрыть панель: ${label}`} onClick={closeSheet}>
             Закрыть
           </button>
           <div
-            className="mobile-context-drag-zone absolute left-1/2 top-0 flex h-8 w-32 -translate-x-1/2 touch-none cursor-grab items-start justify-center pt-2 active:cursor-grabbing"
+            className="mobile-context-drag-zone absolute left-1/2 top-0 flex h-6 w-32 -translate-x-1/2 touch-none cursor-grab items-start justify-center pt-1.5 active:cursor-grabbing"
           >
-            <span className="mobile-context-grabber h-1.5 w-[50px] rounded-full bg-muted-foreground/30" aria-hidden="true" />
+            <span className="mobile-context-grabber h-1 w-11 rounded-full bg-muted-foreground/30" aria-hidden="true" />
           </div>
           <h2 className="m-0 text-lg font-semibold leading-tight">{label}</h2>
         </header>

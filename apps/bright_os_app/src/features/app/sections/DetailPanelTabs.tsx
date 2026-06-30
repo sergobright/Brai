@@ -45,14 +45,16 @@ const fieldReference = rawFieldReference as DetailReference;
 
 export function DetailPanelTabBar({
   activeTab,
+  className,
   onChange,
 }: {
   activeTab: DetailPanelTab;
+  className?: string;
   onChange: (tab: DetailPanelTab) => void;
 }) {
   return (
     <div
-      className="actions-detail-tabs -mt-2 flex min-w-0 gap-1 overflow-x-auto border-b border-border [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      className={cn("actions-detail-tabs -mt-2 flex min-w-0 gap-1 overflow-x-auto border-b border-border [scrollbar-width:none] [&::-webkit-scrollbar]:hidden", className)}
       role="tablist"
       aria-label="Вкладки панели деталей"
     >
@@ -61,7 +63,7 @@ export function DetailPanelTabBar({
           key={tab.id}
           type="button"
           className={cn(
-            "h-8 shrink-0 border-b-2 border-transparent px-2.5 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-0 focus-visible:ring-2 focus-visible:ring-ring",
+            "-mb-px h-8 shrink-0 border-b-2 border-transparent px-2.5 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-0 focus-visible:ring-2 focus-visible:ring-ring",
             activeTab === tab.id && "border-primary text-foreground",
           )}
           role="tab"

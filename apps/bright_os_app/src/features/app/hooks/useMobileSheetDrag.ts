@@ -19,8 +19,11 @@ type DragAxis = "x" | "y";
 
 const DRAG_EXCLUSION_SELECTOR = "button, input, select, a, [role='button'], [role='switch'], [role='slider'], [contenteditable='true'], [data-mobile-sheet-no-drag]";
 const SCROLL_VIEWPORT_SELECTOR = "[data-slot='scroll-area-viewport']";
+const DRAG_ACTIVATION_PX = 10;
 const SETTLE_MS = 180;
 const BACKDROP_FADE_START_RATIO = 0.5;
+const SHEET_OFFSET_VAR = "--mobile-sheet-offset";
+const BACKDROP_OPACITY_VAR = "--mobile-sheet-backdrop-opacity";
 
 /**
  * Provides touch and pointer drag behavior for dismissible mobile sheets.
@@ -73,15 +76,17 @@ export function useMobileSheetDrag({
     const offset = Math.max(0, nextOffset);
     currentOffsetRef.current = offset;
     if (sheetElementRef.current) {
-      sheetElementRef.current.style.transform = axis === "x" ? `translate3d(${-offset}px, 0, 0)` : `translate3d(0, ${offset}px, 0)`;
+      sheetElementRef.current.style.setProperty(SHEET_OFFSET_VAR, `${offset}px`);
     }
     if (backdropElementRef.current) {
-      backdropElementRef.current.style.opacity = String(backdropOpacity(offset, panelSize(sheetElementRef.current, axis)));
+      backdropElementRef.current.style.setProperty(BACKDROP_OPACITY_VAR, String(backdropOpacity(offset, panelSize(sheetElementRef.current, axis))));
     }
   }, [axis]);
 
   const scheduleOffset = useCallback((nextOffset: number) => {
-    pendingOffsetRef.current = nextOffset;
+    const offset = Math.max(0, nextOffset);
+    currentOffsetRef.current = offset;
+    pendingOffsetRef.current = offset;
     if (frameRef.current != null) return;
     frameRef.current = window.requestAnimationFrame(() => {
       frameRef.current = null;
@@ -154,9 +159,11 @@ export function useMobileSheetDrag({
         dragRef.current = null;
         return;
       }
-      if (axis === "x" && deltaX > -10) return;
-      if (axis === "y" && deltaY < 10) return;
+      if (axis === "x" && deltaX > -DRAG_ACTIVATION_PX) return;
+      if (axis === "y" && deltaY < DRAG_ACTIVATION_PX) return;
       if (axis === "y" && drag.scrollViewport && drag.scrollViewport.scrollTop > 0) return;
+      if (axis === "x") drag.startX -= DRAG_ACTIVATION_PX;
+      if (axis === "y") drag.startY += DRAG_ACTIVATION_PX;
       if (drag.startedWithScrollableOffset) {
         drag.startY += drag.initialScrollTop;
         drag.startedWithScrollableOffset = false;
@@ -243,10 +250,12 @@ export function useMobileSheetDrag({
   }, [end]);
 
   const sheetStyle = {
+    transform: sheetTransform(axis),
     transition: dragging ? "none" : closing ? `transform ${SETTLE_MS}ms ease-in` : settling ? `transform ${SETTLE_MS}ms ease-out` : undefined,
   } as CSSProperties;
 
   const backdropStyle = {
+    opacity: `var(${BACKDROP_OPACITY_VAR}, 1)`,
     transition: dragging ? "none" : closing ? `opacity ${SETTLE_MS}ms ease-in` : settling ? `opacity ${SETTLE_MS}ms ease-out` : undefined,
   } as CSSProperties;
 
@@ -281,6 +290,10 @@ function closestScrollViewport(target: EventTarget | null) {
 
 function dragOffset(drag: DragState, axis: DragAxis) {
   return axis === "x" ? Math.max(0, drag.startX - drag.currentX) : Math.max(0, drag.currentY - drag.startY);
+}
+
+function sheetTransform(axis: DragAxis) {
+  return axis === "x" ? `translate3d(calc(var(${SHEET_OFFSET_VAR}, 0px) * -1), 0, 0)` : `translate3d(0, var(${SHEET_OFFSET_VAR}, 0px), 0)`;
 }
 
 function closeDistance(element: HTMLElement | null, axis: DragAxis) {

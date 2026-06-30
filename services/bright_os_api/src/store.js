@@ -5,7 +5,7 @@ import { migrationMethods } from './store-migrations.js';
 import { deploymentMethods } from './store-deployments.js';
 import { readModelMethods } from './store-read-models.js';
 import { timerEventMethods } from './store-timer-events.js';
-export { formatActivity, formatSession, groupSessionsByDateHour } from './store-helpers.js';
+export { formatActivity, formatFocusInterval, formatSession, groupSessionsByDateHour } from './store-helpers.js';
 
 export class BrightOsStore {
   constructor(dbPath) {

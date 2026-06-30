@@ -1,8 +1,11 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { cachedActivitiesState, openProfileMenuItem, setupBrightOsAppTest } from "./app-test-support";
 import { BrightOsApp } from "@/features/app/BrightOsApp";
+import { ActionRow } from "@/features/app/sections/actions/ActionRow";
+import { TITLE_MAX_LENGTH } from "@/shared/activities/text";
 import { pendingActivityEvents, saveActivitiesState } from "@/shared/storage/activityStore";
+import { pendingEvents, saveCanonicalState } from "@/shared/storage/syncStore";
 
 describe("BrightOsApp actions", () => {
   setupBrightOsAppTest();
@@ -21,6 +24,135 @@ describe("BrightOsApp actions", () => {
 
     await waitFor(() => expect(screen.getByRole("button", { name: /Выполнено 1/ })).toBeInTheDocument());
     expect(screen.getByRole("checkbox", { name: "Фокус" })).toBeChecked();
+  });
+
+  it("creates a mobile action with a description from the composer", async () => {
+    render(<BrightOsApp />);
+
+    fireEvent.click(document.querySelector(".actions-fab") as HTMLElement);
+    const title = screen.getByRole("textbox", { name: "Добавить действие" }) as HTMLTextAreaElement;
+    await waitFor(() => expect(title).toHaveFocus());
+    expect(title).toHaveAttribute("placeholder", "Что бы вы хотели сделать?");
+    expect(title).toHaveAttribute("enterkeyhint", "enter");
+    expect(document.querySelector(".mobile-create-grabber")).toHaveClass("h-1", "w-11");
+    expect(document.querySelector(".mobile-create-text")).toHaveClass("overflow-y-auto");
+    expect(title).toHaveClass("overflow-hidden", "text-lg/7", "font-semibold", "text-foreground");
+
+    const description = screen.getByRole("textbox", { name: "Описание действия" }) as HTMLTextAreaElement;
+    expect(description).toHaveClass("min-h-10", "overflow-hidden", "text-sm/5", "text-muted-foreground/75");
+    expect(description).toHaveAttribute("placeholder", "");
+    fireEvent.focus(description);
+    expect(description).toHaveAttribute("placeholder", "Описание");
+    expect(document.querySelectorAll(".mobile-create-tool-icon svg")).toHaveLength(6);
+    const dateButton = screen.getByRole("button", { name: "Дата" });
+    expect(dateButton).toHaveClass("mobile-create-tool-icon");
+    dateButton.focus();
+    expect(dateButton).toHaveFocus();
+    fireEvent.click(dateButton);
+    expect(screen.getByRole("textbox", { name: "Добавить действие" })).toBeInTheDocument();
+
+    fireEvent.change(title, { target: { value: " Большой план " } });
+    fireEvent.change(description, { target: { value: "Описание\nстрока 2" } });
+    fireEvent.click(document.querySelector(".actions-mobile-overlay") as HTMLElement);
+    await waitFor(() => expect(document.querySelector(".actions-mobile-overlay")).not.toBeInTheDocument());
+    expect(screen.getByRole("button", { name: "Продолжить черновик действия" })).toBeInTheDocument();
+
+    fireEvent.click(document.querySelector(".actions-fab") as HTMLElement);
+    const restoredTitle = screen.getByRole("textbox", { name: "Добавить действие" }) as HTMLTextAreaElement;
+    const restoredDescription = screen.getByRole("textbox", { name: "Описание действия" }) as HTMLTextAreaElement;
+    expect(restoredTitle).toHaveValue(" Большой план ");
+    expect(restoredDescription).toHaveValue("Описание\nстрока 2");
+    fireEvent.click(screen.getByRole("button", { name: "Добавить действие" }));
+
+    await waitFor(async () => {
+      expect(await pendingActivityEvents()).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: "create",
+            payload: { title: "Большой план", description_md: "Описание\nстрока 2" },
+          }),
+        ]),
+      );
+    });
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Продолжить черновик действия" })).not.toBeInTheDocument());
+  });
+
+  it("closes the mobile create composer by pulling down and keeps the draft", async () => {
+    render(<BrightOsApp />);
+
+    fireEvent.click(document.querySelector(".actions-fab") as HTMLElement);
+    const editor = document.querySelector(".actions-mobile-editor") as HTMLElement;
+    expect(editor).toBeInstanceOf(HTMLElement);
+    fireEvent.change(screen.getByRole("textbox", { name: "Добавить действие" }), { target: { value: "Свайп-черновик" } });
+
+    Object.defineProperty(editor, "getBoundingClientRect", {
+      configurable: true,
+      value: () => ({ bottom: 500, height: 400, left: 0, right: 360, top: 100, width: 360, x: 0, y: 100 }),
+    });
+    fireEvent.touchStart(editor, { changedTouches: [{ identifier: 1, clientX: 180, clientY: 120 }] });
+    fireEvent.touchMove(editor, { changedTouches: [{ identifier: 1, clientX: 180, clientY: 260 }] });
+    fireEvent.touchEnd(editor, { changedTouches: [{ identifier: 1, clientX: 180, clientY: 260 }] });
+
+    await waitFor(() => expect(document.querySelector(".actions-mobile-overlay")).not.toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Продолжить черновик действия" }));
+    expect(screen.getByRole("textbox", { name: "Добавить действие" })).toHaveValue("Свайп-черновик");
+  });
+
+  it("keeps separate mobile create drafts while switching Actions and Inbox", async () => {
+    render(<BrightOsApp />);
+
+    fireEvent.click(document.querySelector(".actions-fab") as HTMLElement);
+    const actionOverlay = () => document.querySelector(".actions-mobile-overlay") as HTMLElement;
+    const closeComposer = async () => {
+      fireEvent.click(actionOverlay());
+      await waitFor(() => expect(document.querySelector(".actions-mobile-overlay")).not.toBeInTheDocument());
+    };
+
+    const actionTitle = within(actionOverlay()).getByRole("textbox", { name: "Добавить действие" });
+    fireEvent.change(actionTitle, { target: { value: "Черновик действия" } });
+    await closeComposer();
+    expect(document.querySelector(".actions-fab")).toHaveAttribute("aria-label", "Продолжить черновик действия");
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Входящие" }).at(-1) as HTMLElement);
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Входящие" })).toBeInTheDocument());
+    expect(document.querySelector(".actions-fab")).toHaveAttribute("aria-label", "Добавить входящее");
+
+    fireEvent.click(document.querySelector(".actions-fab") as HTMLElement);
+    const inboxTitle = within(actionOverlay()).getByRole("textbox", { name: "Добавить входящее" });
+    fireEvent.change(inboxTitle, { target: { value: "Черновик входящего" } });
+    await closeComposer();
+    expect(document.querySelector(".actions-fab")).toHaveAttribute("aria-label", "Продолжить черновик входящего");
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Действия" }).at(-1) as HTMLElement);
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Действия" })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Продолжить черновик действия" }));
+    expect(within(actionOverlay()).getByRole("textbox", { name: "Добавить действие" })).toHaveValue("Черновик действия");
+    await closeComposer();
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Входящие" }).at(-1) as HTMLElement);
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Входящие" })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Продолжить черновик входящего" }));
+    expect(within(actionOverlay()).getByRole("textbox", { name: "Добавить входящее" })).toHaveValue("Черновик входящего");
+  });
+
+  it("restores a mobile create draft after the app remounts", async () => {
+    const { unmount } = render(<BrightOsApp />);
+
+    fireEvent.click(document.querySelector(".actions-fab") as HTMLElement);
+    const overlay = () => document.querySelector(".actions-mobile-overlay") as HTMLElement;
+    fireEvent.change(within(overlay()).getByRole("textbox", { name: "Добавить действие" }), {
+      target: { value: "Черновик после закрытия" },
+    });
+    fireEvent.change(within(overlay()).getByRole("textbox", { name: "Описание действия" }), {
+      target: { value: "Описание тоже осталось" },
+    });
+
+    unmount();
+    render(<BrightOsApp />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Продолжить черновик действия" }));
+    expect(within(overlay()).getByRole("textbox", { name: "Добавить действие" })).toHaveValue("Черновик после закрытия");
+    expect(within(overlay()).getByRole("textbox", { name: "Описание действия" })).toHaveValue("Описание тоже осталось");
   });
 
   it("does not complete an action when its title is clicked", async () => {
@@ -64,6 +196,7 @@ describe("BrightOsApp actions", () => {
     await waitFor(() => expect(screen.getByRole("heading", { name: "Архив" })).toBeInTheDocument());
     const archiveList = screen.getByLabelText("Удаленные действия");
     expect(within(archiveList).getByText("Фокус")).toBeInTheDocument();
+    expect(archiveList.querySelector(".action-focus-button")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Восстановить: Фокус", hidden: true }));
     await waitFor(() => expect(within(archiveList).queryByText("Фокус")).not.toBeInTheDocument());
@@ -121,9 +254,22 @@ describe("BrightOsApp actions", () => {
     await waitFor(() => expect(screen.getByText("Детальное действие")).toBeInTheDocument());
     fireEvent.click(screen.getByRole("textbox", { name: "Название действия: Детальное действие" }));
     expect(screen.getByRole("button", { name: "Закрыть редактор" })).toBeInTheDocument();
-    expect(screen.getByLabelText("Редактирование действия")).toHaveClass("pr-7");
+    const detailPanel = screen.getByLabelText("Редактирование действия");
+    expect(detailPanel).toHaveClass("px-0");
     const detailTitle = screen.getByRole("textbox", { name: "Название действия" });
-    expect(detailTitle).toHaveClass("truncate");
+    const detailTabs = detailPanel.querySelector(".actions-detail-tabs") as HTMLElement;
+    expect(detailTabs.compareDocumentPosition(detailTitle) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(detailTitle.closest(".actions-detail-title-block")).toHaveClass("mt-6");
+    expect(detailTitle).not.toHaveClass("truncate");
+    expect(detailPanel).toHaveClass("overflow-hidden");
+    const limitedTitle = "А".repeat(TITLE_MAX_LENGTH);
+    fireEvent.change(detailTitle, { target: { value: `${limitedTitle}лишнее` } });
+    await waitFor(() => expect(detailTitle).toHaveValue(limitedTitle));
+    expect(detailPanel.querySelector(".actions-detail-title-counter")).toHaveTextContent("0");
+    expect(detailPanel.querySelector(".actions-detail-title-counter")).toHaveClass("text-destructive");
+    const detailScroll = detailPanel.querySelector(".actions-detail-description-scroll");
+    expect(detailScroll).toBeInTheDocument();
+    expect(detailScroll?.parentElement).toBe(detailPanel);
     expect(screen.getByRole("tab", { name: "Инфо" })).toHaveAttribute("aria-selected", "true");
     expect(screen.getByRole("tab", { name: "Связи" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "AI" })).toBeInTheDocument();
@@ -145,11 +291,14 @@ describe("BrightOsApp actions", () => {
 
     const descriptionEditor = screen.getByRole("textbox", { name: "Описание действия" });
     expect(descriptionEditor.closest("[data-slot='scroll-area']")).toBeInTheDocument();
-    expect(descriptionEditor).toHaveClass("overflow-hidden");
-    fireEvent.change(descriptionEditor, {
-      target: { value: "# Большое описание\n\n## Цель\n\n**важно**" },
-    });
+    expect(descriptionEditor).toHaveClass("overflow-hidden", "before:float-right", "before:w-12");
+    descriptionEditor.textContent = "# Большое описание\n\n## Цель\n\n**важно**";
+    fireEvent.input(descriptionEditor);
     const readModeButton = screen.getByRole("button", { name: "Читать описание" });
+    expect(detailPanel.querySelector(".actions-detail-header .actions-detail-preview-toggle")).not.toBeInTheDocument();
+    expect(detailPanel.querySelector(".actions-detail-description-scroll .actions-detail-preview-toggle")).toBeInTheDocument();
+    expect(readModeButton).toHaveClass("absolute");
+    expect(readModeButton).not.toHaveClass("float-right");
     expect(readModeButton).toHaveAttribute("aria-pressed", "false");
     fireEvent.click(readModeButton);
     await waitFor(() => expect(screen.getByRole("button", { name: "Редактировать описание" })).toHaveAttribute("aria-pressed", "true"));
@@ -233,6 +382,8 @@ describe("BrightOsApp actions", () => {
 
     expect(activeRow.querySelector(".action-row-surface")).toHaveClass("grid-cols-[20px_28px_minmax(0,1fr)]");
     expect(completedRow.querySelector(".action-row-surface")).toHaveClass("grid-cols-[20px_28px_minmax(0,1fr)]");
+    expect(activeRow).toHaveClass("max-[860px]:select-none");
+    expect(completedRow).toHaveClass("max-[860px]:select-none");
     expect(activeRow.querySelector(".action-drag-handle svg")).toBeInTheDocument();
     expect(completedRow.querySelector(".action-drag-placeholder")).toBeInTheDocument();
     expect(completedRow.querySelector(".action-drag-handle")).not.toBeInTheDocument();
@@ -249,7 +400,184 @@ describe("BrightOsApp actions", () => {
     expect(activeRow).toHaveClass("selected", "bg-primary/10");
     expect(activeRow).toHaveClass("rounded-lg", "border-b-transparent");
     expect(activeRow).toHaveClass("[&:has(+_.action-row.selected)]:border-b-transparent");
-    expect(activeRow).toContainElement(activeRow.querySelector(".action-delete-button") as HTMLElement);
+    expect(activeRow).not.toHaveClass("grid-cols-[minmax(0,1fr)_44px_44px]");
+    const deleteButton = activeRow.querySelector(".action-delete-button") as HTMLElement;
+    const focusButton = activeRow.querySelector(".action-focus-button") as HTMLElement;
+    expect(activeRow).toContainElement(deleteButton);
+    expect(activeRow.querySelector(".action-row-controls")).toContainElement(deleteButton);
+    expect(activeRow.querySelector(".action-row-controls")).toContainElement(focusButton);
+    expect(deleteButton.compareDocumentPosition(focusButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("queues action focus from a desktop action row", async () => {
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn(() => ({
+        matches: false,
+        media: "(max-width: 860px)",
+        onchange: null,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+      })),
+    );
+    Object.defineProperty(window, "innerWidth", { configurable: true, writable: true, value: 1200 });
+    await saveActivitiesState(cachedActivitiesState("action-focus", "Фокус"));
+
+    render(<BrightOsApp />);
+
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Название действия: Фокус" })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Фокусироваться: Фокус", hidden: true }));
+
+    await waitFor(async () =>
+      expect(await pendingEvents()).toEqual([
+        expect.objectContaining({
+          type: "start_activity_focus",
+          metadata: { activity_id: "action-focus" },
+        }),
+      ]),
+    );
+  });
+
+  it("shows and stops active action focus from a desktop action row", async () => {
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn(() => ({
+        matches: false,
+        media: "(max-width: 860px)",
+        onchange: null,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+      })),
+    );
+    Object.defineProperty(window, "innerWidth", { configurable: true, writable: true, value: 1200 });
+    const startedAtUtc = new Date(Date.now() - 120_000).toISOString();
+    await saveActivitiesState(cachedActivitiesState("action-focus", "Фокус"));
+    await saveCanonicalState({
+      server_time_utc: new Date().toISOString(),
+      server_revision: 5,
+      timezone: "Europe/Moscow",
+      active_session: {
+        id: "session-active",
+        started_at_utc: startedAtUtc,
+        ended_at_utc: null,
+        duration_seconds: null,
+        intervals: [
+          {
+            id: "interval-active",
+            focus_session_id: "session-active",
+            activity_id: "action-focus",
+            activity_title: "Фокус",
+            started_at_utc: startedAtUtc,
+            ended_at_utc: null,
+            duration_seconds: null,
+          },
+        ],
+        active_interval: {
+          id: "interval-active",
+          focus_session_id: "session-active",
+          activity_id: "action-focus",
+          activity_title: "Фокус",
+          started_at_utc: startedAtUtc,
+          ended_at_utc: null,
+          duration_seconds: null,
+        },
+        active_activity_id: "action-focus",
+        start_origin: "activity",
+        started_by_activity_id: "action-focus",
+      },
+      elapsed_seconds: 120,
+      active_interval: {
+        id: "interval-active",
+        focus_session_id: "session-active",
+        activity_id: "action-focus",
+        activity_title: "Фокус",
+        started_at_utc: startedAtUtc,
+        ended_at_utc: null,
+        duration_seconds: null,
+      },
+      active_interval_elapsed_seconds: 120,
+      active_activity_id: "action-focus",
+      active_session_start_origin: "activity",
+      active_session_started_by_activity_id: "action-focus",
+    });
+
+    render(<BrightOsApp />);
+
+    const stopButton = await screen.findByRole("button", { name: "Остановить фокус: Фокус" });
+    expect(within(stopButton).queryByText("Стоп")).not.toBeInTheDocument();
+    expect(stopButton.querySelector("svg")).toBeInTheDocument();
+    fireEvent.click(stopButton);
+
+    await waitFor(async () =>
+      expect(await pendingEvents()).toEqual([
+        expect.objectContaining({
+          type: "stop_activity_focus",
+          metadata: { activity_id: "action-focus" },
+        }),
+      ]),
+    );
+  });
+
+  it("requires a second mobile tap before stopping active action focus", async () => {
+    vi.useFakeTimers();
+    try {
+      const onStopFocus = vi.fn(async () => undefined);
+      render(
+        <ActionRow
+          action={{
+            id: "action-focus",
+            title: "Фокус",
+            description_md: "",
+            status: "New",
+            created_at_utc: "2026-06-16T10:00:00.000Z",
+            updated_at_utc: "2026-06-16T10:00:00.000Z",
+            completed_at_utc: null,
+            sort_order: null,
+            deleted_at_utc: null,
+            restored_at_utc: null,
+          }}
+          selected={false}
+          activeFocus
+          activeFocusElapsedSeconds={120}
+          deleteOpen={false}
+          onCloseDelete={() => undefined}
+          onDelete={async () => undefined}
+          onEditMobile={() => undefined}
+          onOpenDelete={() => undefined}
+          onSelect={() => undefined}
+          onSetStatus={async () => undefined}
+          onStopFocus={onStopFocus}
+          onUpdateTitle={async () => undefined}
+        />,
+      );
+
+      const stopButton = screen.getByRole("button", { name: "Остановить фокус: Фокус" });
+      await act(async () => {
+        fireEvent.click(stopButton);
+      });
+      expect(onStopFocus).not.toHaveBeenCalled();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1700);
+      });
+      await act(async () => {
+        fireEvent.click(stopButton);
+      });
+      expect(onStopFocus).not.toHaveBeenCalled();
+
+      await act(async () => {
+        fireEvent.click(stopButton);
+      });
+      expect(onStopFocus).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("mirrors desktop title drafts between the list and detail editor", async () => {
@@ -282,11 +610,11 @@ describe("BrightOsApp actions", () => {
     expect(detailTitle).toHaveValue("Из detail без переноса");
     expect(mirroredListTitle).toHaveTextContent("Из detail без переноса");
 
-    const description = screen.getByRole("textbox", { name: "Описание действия" }) as HTMLTextAreaElement;
-    fireEvent.change(description, { target: { value: "Описание" } });
+    const description = screen.getByRole("textbox", { name: "Описание действия" });
+    description.textContent = "Описание";
+    fireEvent.input(description);
     fireEvent.keyDown(detailTitle, { key: "Enter" });
     expect(document.activeElement).toBe(description);
-    expect(description.selectionStart).toBe("Описание".length);
 
     mirroredListTitle.textContent = "Из списка";
     fireEvent.input(mirroredListTitle);
@@ -348,16 +676,16 @@ describe("BrightOsApp actions", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: "Сохранить и закрыть" })).toBeInTheDocument());
 
     const plainDescription = "https://magicui.design/docs/templates/changelog использовать вот этот\nшаблон";
-    fireEvent.change(screen.getByRole("textbox", { name: "Описание действия" }), {
-      target: { value: plainDescription },
-    });
+    const descriptionEditor = screen.getByRole("textbox", { name: "Описание действия" });
+    descriptionEditor.textContent = plainDescription;
+    fireEvent.input(descriptionEditor);
     fireEvent.click(screen.getByRole("button", { name: "Читать описание" }));
     const preview = await screen.findByLabelText("MD просмотр описания действия");
     expect(preview).toHaveTextContent("https://magicui.design/docs/templates/changelog");
     expect(preview.querySelector(".markdown-content")).toBeNull();
-    expect(preview.firstElementChild).toHaveClass("whitespace-pre-wrap", "leading-[1.48]");
+    expect(preview.querySelector(".whitespace-pre-wrap")).toHaveClass("leading-[1.48]");
     fireEvent.click(screen.getByRole("button", { name: "Редактировать описание" }));
-    await waitFor(() => expect(screen.getByRole("textbox", { name: "Описание действия" })).toHaveValue(plainDescription));
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Описание действия" }).textContent).toBe(plainDescription));
     expect(window.localStorage.getItem("bright_os_activity_md_preview")).toBe("false");
     await waitFor(() => expect(window.BrightOsAndroidBack).toBeTypeOf("function"));
     expect(window.BrightOsAndroidBack?.()).toBe(true);

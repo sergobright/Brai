@@ -30,12 +30,12 @@ export function createBrightOsActionCommands({
     await flushActionPending();
   }
 
-  async function onCreateAction(title: string) {
+  async function onCreateAction(title: string, descriptionMd = "") {
     const trimmed = cleanTitle(title);
     if (!trimmed) return;
     await queueActionEvent({
       type: "create",
-      payload: { title: trimmed },
+      payload: { title: trimmed, description_md: normalizeDescription(descriptionMd) },
       baseServerRevision: actions.server_revision,
     });
   }

@@ -30,12 +30,12 @@ export function createBrightOsInboxCommands({
     await flushInboxPending();
   }
 
-  async function onCreateInboxItem(title: string) {
+  async function onCreateInboxItem(title: string, descriptionMd = "") {
     const trimmed = cleanTitle(title);
     if (!trimmed) return;
     await queueInboxEvent({
       type: "create",
-      payload: { title: trimmed },
+      payload: { title: trimmed, description_md: normalizeDescription(descriptionMd) },
       baseServerRevision: inbox.server_revision,
     });
   }
