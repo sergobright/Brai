@@ -251,8 +251,8 @@ describe("BrightOsApp actions", () => {
     await waitFor(() => expect(screen.getByText("Детальное действие")).toBeInTheDocument());
     fireEvent.click(screen.getByRole("textbox", { name: "Название действия: Детальное действие" }));
     expect(screen.getByRole("button", { name: "Закрыть редактор" })).toBeInTheDocument();
-    expect(screen.getByLabelText("Редактирование действия")).toHaveClass("pr-7");
     const detailPanel = screen.getByLabelText("Редактирование действия");
+    expect(detailPanel).toHaveClass("px-0");
     const detailTitle = screen.getByRole("textbox", { name: "Название действия" });
     const detailTabs = detailPanel.querySelector(".actions-detail-tabs") as HTMLElement;
     expect(detailTabs.compareDocumentPosition(detailTitle) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
@@ -262,7 +262,9 @@ describe("BrightOsApp actions", () => {
     fireEvent.change(detailTitle, { target: { value: `${limitedTitle}лишнее` } });
     await waitFor(() => expect(detailTitle).toHaveValue(limitedTitle));
     expect(detailPanel.querySelector(".actions-detail-title-counter")).toHaveTextContent("0");
-    expect(detailPanel.querySelector(".actions-detail-description-scroll")).toBeInTheDocument();
+    const detailScroll = detailPanel.querySelector(".actions-detail-description-scroll");
+    expect(detailScroll).toBeInTheDocument();
+    expect(detailScroll?.parentElement).toBe(detailPanel);
     expect(screen.getByRole("tab", { name: "Инфо" })).toHaveAttribute("aria-selected", "true");
     expect(screen.getByRole("tab", { name: "Связи" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "AI" })).toBeInTheDocument();
@@ -291,6 +293,8 @@ describe("BrightOsApp actions", () => {
     const readModeButton = screen.getByRole("button", { name: "Читать описание" });
     expect(detailPanel.querySelector(".actions-detail-header .actions-detail-preview-toggle")).not.toBeInTheDocument();
     expect(detailPanel.querySelector(".actions-detail-description-scroll .actions-detail-preview-toggle")).toBeInTheDocument();
+    expect(readModeButton).toHaveClass("absolute");
+    expect(readModeButton).not.toHaveClass("float-right");
     expect(readModeButton).toHaveAttribute("aria-pressed", "false");
     fireEvent.click(readModeButton);
     await waitFor(() => expect(screen.getByRole("button", { name: "Редактировать описание" })).toHaveAttribute("aria-pressed", "true"));

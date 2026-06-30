@@ -836,7 +836,7 @@ function InboxDetailEditor({
       type="button"
       variant="ghost"
       size="icon-sm"
-      className="actions-detail-preview-toggle float-right mb-1 ml-3 text-muted-foreground hover:text-foreground"
+      className="actions-detail-preview-toggle absolute right-0 top-3 z-[1] text-muted-foreground hover:text-foreground"
       aria-label={previewModeLabel}
       aria-pressed={markdownPreview}
       title={previewModeLabel}
@@ -846,12 +846,12 @@ function InboxDetailEditor({
     </Button>
   ) : null;
   const detailDescription = (
-    <div className="min-h-full w-full min-w-0 px-0 pb-6 pt-1">
+    <div className="min-h-full w-full min-w-0 px-0 pb-6 pt-3">
       <DetailAttachments links={item.attachment_links} />
-      <div className="min-w-0">
+      <div className="relative min-w-0">
         {markdownPreview ? (
           <div
-            className="actions-detail-description actions-detail-description-preview min-h-full w-full min-w-0"
+            className="actions-detail-description actions-detail-description-preview relative min-h-full w-full min-w-0 before:float-right before:h-10 before:w-12 before:content-['']"
             aria-label="MD просмотр описания входящего"
           >
             {previewToggle}
@@ -912,7 +912,7 @@ function InboxDetailEditor({
     </button>
   );
   const detailTitle = (
-    <div className={cx("actions-detail-title-block relative grid min-w-0", mode === "mobile" ? "mt-1.5" : "mt-3")}>
+    <div className={cx("actions-detail-title-block relative mb-2 grid min-w-0", mode === "mobile" ? "mt-1.5" : "mt-3")}>
       <textarea
         ref={titleRef}
         className={cx(
@@ -936,12 +936,15 @@ function InboxDetailEditor({
       ) : null}
     </div>
   );
+  const infoChromeInset = mode === "mobile" ? "pl-[18px] pr-5" : "pl-7 pr-5";
+  const infoScrollInset = mode === "mobile" ? "pl-[18px]" : "pl-7";
   const dragHeader = (
     <header
       className={cx(
         "actions-detail-header flex items-center gap-3",
         mode === "desktop" && "min-h-9 justify-end",
         mode === "mobile" && "relative h-3 min-h-3 justify-center pt-0",
+        activeTab === "info" && infoChromeInset,
       )}
     >
       {mode === "mobile" ? (
@@ -955,9 +958,11 @@ function InboxDetailEditor({
   const editorBody = activeTab === "info" ? (
     <>
       {dragHeader}
-      <DetailPanelTabBar activeTab={activeTab} className="mt-0" onChange={setActiveTab} />
+      <div className={infoChromeInset}>
+        <DetailPanelTabBar activeTab={activeTab} className="mt-0" onChange={setActiveTab} />
+      </div>
       <ScrollArea className="actions-detail-description-scroll min-h-0 w-full min-w-0" role="tabpanel">
-        <div className="min-h-full w-full min-w-0">
+        <div className={cx("min-h-full w-full min-w-0", infoScrollInset)}>
           {detailTitle}
           <div className="h-px bg-border" aria-hidden="true" />
           {detailDescription}
@@ -974,6 +979,7 @@ function InboxDetailEditor({
     </>
   );
   const panelRows = activeTab === "info" ? "grid-rows-[auto_auto_minmax(0,1fr)]" : "grid-rows-[auto_auto_auto_auto_minmax(0,1fr)]";
+  const panelPadding = activeTab === "info" ? "px-0" : mode === "mobile" ? "px-[18px]" : "pl-7 pr-7";
 
   if (mode === "mobile") {
     return (
@@ -981,7 +987,7 @@ function InboxDetailEditor({
         <div ref={backdropRef} className="absolute inset-0 bg-foreground/20 dark:bg-background/80" style={backdropStyle} aria-hidden="true" />
         <aside
           ref={sheetRef}
-          className={cx("actions-detail-panel mobile absolute inset-x-0 bottom-0 top-[env(safe-area-inset-top)] z-[1] grid min-h-0 min-w-0 gap-0 overflow-hidden rounded-t-2xl border-t border-border bg-card px-[18px] pb-[env(safe-area-inset-bottom)] pt-1 shadow-xl animate-[mobile-detail-sheet-in_180ms_ease-out] will-change-transform", panelRows)}
+          className={cx("actions-detail-panel mobile absolute inset-x-0 bottom-0 top-[env(safe-area-inset-top)] z-[1] grid min-h-0 min-w-0 gap-0 overflow-hidden rounded-t-2xl border-t border-border bg-card pb-[env(safe-area-inset-bottom)] pt-1 shadow-xl animate-[mobile-detail-sheet-in_180ms_ease-out] will-change-transform", panelRows, panelPadding)}
           style={{ ...mobileSheetStyle, top: mobileSheetTop } as CSSProperties}
           aria-label="Редактирование входящего"
           onKeyDown={onKeyDown}
@@ -995,7 +1001,7 @@ function InboxDetailEditor({
 
   return (
     <aside
-      className={cx("actions-detail-panel desktop grid h-full min-h-0 min-w-0 gap-0 overflow-hidden pl-7 pr-7 max-[860px]:hidden", panelRows)}
+      className={cx("actions-detail-panel desktop grid h-full min-h-0 min-w-0 gap-0 overflow-hidden max-[860px]:hidden", panelRows, panelPadding)}
       aria-label="Редактирование входящего"
       data-nav-swipe-exclusion
       onKeyDown={onKeyDown}

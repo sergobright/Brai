@@ -75,8 +75,8 @@ describe("BrightOsApp inbox", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: "Закрыть редактор" })).toBeInTheDocument());
     expect(inboxRow).toHaveClass("rounded-lg", "border-b-transparent");
     expect(inboxRow).toHaveClass("[&:has(+_.action-row.selected)]:border-b-transparent");
-    expect(screen.getByLabelText("Редактирование входящего")).toHaveClass("pr-7");
     const detailPanel = screen.getByLabelText("Редактирование входящего");
+    expect(detailPanel).toHaveClass("px-0");
     const detailTitle = screen.getByRole("textbox", { name: "Название входящего" });
     const detailTabs = detailPanel.querySelector(".actions-detail-tabs") as HTMLElement;
     expect(detailTabs.compareDocumentPosition(detailTitle) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
@@ -86,7 +86,9 @@ describe("BrightOsApp inbox", () => {
     fireEvent.change(detailTitle, { target: { value: `${limitedTitle}лишнее` } });
     await waitFor(() => expect(detailTitle).toHaveValue(limitedTitle));
     expect(detailPanel.querySelector(".actions-detail-title-counter")).toHaveTextContent("0");
-    expect(detailPanel.querySelector(".actions-detail-description-scroll")).toBeInTheDocument();
+    const detailScroll = detailPanel.querySelector(".actions-detail-description-scroll");
+    expect(detailScroll).toBeInTheDocument();
+    expect(detailScroll?.parentElement).toBe(detailPanel);
     const splitSlider = screen.getByRole("slider", { name: "Изменить ширину панелей" });
     expect(splitSlider).toHaveAttribute("aria-valuenow", "50");
     fireEvent.keyDown(splitSlider, { key: "End" });
@@ -99,6 +101,8 @@ describe("BrightOsApp inbox", () => {
     });
     expect(detailPanel.querySelector(".actions-detail-header .actions-detail-preview-toggle")).not.toBeInTheDocument();
     expect(detailPanel.querySelector(".actions-detail-description-scroll .actions-detail-preview-toggle")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Читать описание" })).toHaveClass("absolute");
+    expect(screen.getByRole("button", { name: "Читать описание" })).not.toHaveClass("float-right");
     fireEvent.click(screen.getByRole("button", { name: "Читать описание" }));
     await waitFor(() => expect(screen.getByLabelText("MD просмотр описания входящего")).toHaveTextContent("Контекст"));
     fireEvent.click(screen.getByRole("tab", { name: "Детали" }));

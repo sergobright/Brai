@@ -637,6 +637,7 @@ test("opens the desktop activity description split panel", async ({ page }, test
 
   const descriptionEditor = page.getByRole("textbox", { name: "Описание действия" });
   await expect(descriptionEditor).toBeVisible();
+  expect(Math.abs(((await descriptionEditor.boundingBox())?.width ?? 0) - ((await detailTitle.boundingBox())?.width ?? 0))).toBeLessThanOrEqual(1);
   const descriptionText = `# Большое описание
 
 ## Цель
@@ -645,6 +646,17 @@ test("opens the desktop activity description split panel", async ({ page }, test
   await expect.poll(() => descriptionEditor.evaluate((node) => node.closest(".actions-detail-description-scroll")?.getAttribute("data-slot"))).toBe("scroll-area");
   await expect(descriptionEditor).toHaveClass(/overflow-hidden/);
   await descriptionEditor.fill(descriptionText);
+  const infoScrollArea = detailPanel.locator(".actions-detail-description-scroll");
+  const infoScrollbar = infoScrollArea.locator("> [data-slot='scroll-area-scrollbar']");
+  const panelBox = await detailPanel.boundingBox();
+  const scrollbarBox = await infoScrollbar.boundingBox();
+  expect(scrollbarBox).not.toBeNull();
+  expect(
+    Math.abs(
+      ((panelBox?.x ?? 0) + (panelBox?.width ?? 0) - ((scrollbarBox?.x ?? 0) + (scrollbarBox?.width ?? 0))) -
+        ((scrollbarBox?.width ?? 0) / 2),
+    ),
+  ).toBeLessThanOrEqual(1);
   const infoViewport = page.locator(".actions-detail-description-scroll > [data-slot='scroll-area-viewport']");
   const titleTopBeforeScroll = (await detailTitle.boundingBox())?.y ?? 0;
   await infoViewport.evaluate((element) => {

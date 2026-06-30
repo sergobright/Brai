@@ -343,7 +343,9 @@ test("opens the mobile bottom-sheet activity detail editor", async ({ page }, te
   await detailTitle.fill("м".repeat(270));
   await expect.poll(async () => (await detailTitle.inputValue()).length).toBe(250);
   await expect(editorLocator.locator(".actions-detail-title-counter")).toHaveText("0");
-  await expect(page.getByRole("textbox", { name: "Описание действия" })).toBeVisible();
+  const mobileDescriptionEditor = page.getByRole("textbox", { name: "Описание действия" });
+  await expect(mobileDescriptionEditor).toBeVisible();
+  expect(Math.abs(((await mobileDescriptionEditor.boundingBox())?.width ?? 0) - ((await detailTitle.boundingBox())?.width ?? 0))).toBeLessThanOrEqual(1);
 
   await page.locator(".actions-detail-backdrop").click({ position: { x: 8, y: 8 } });
   await expect(page.getByRole("button", { name: "Сохранить и закрыть" })).toBeVisible();
@@ -370,6 +372,16 @@ test("opens the mobile bottom-sheet activity detail editor", async ({ page }, te
   await page.getByRole("button", { name: "Читать описание" }).click();
   await expect(page.locator(".actions-detail-description-preview")).toContainText("строка 36");
   const descriptionViewport = page.locator(".actions-detail-description-scroll [data-slot='scroll-area-viewport']");
+  const infoScrollbar = editorLocator.locator(".actions-detail-description-scroll > [data-slot='scroll-area-scrollbar']");
+  const editorBox = await editorLocator.boundingBox();
+  const scrollbarBox = await infoScrollbar.boundingBox();
+  expect(scrollbarBox).not.toBeNull();
+  expect(
+    Math.abs(
+      ((editorBox?.x ?? 0) + (editorBox?.width ?? 0) - ((scrollbarBox?.x ?? 0) + (scrollbarBox?.width ?? 0))) -
+        ((scrollbarBox?.width ?? 0) / 2),
+    ),
+  ).toBeLessThanOrEqual(1);
   const titleTopBeforeScroll = (await detailTitle.boundingBox())?.y ?? 0;
   await descriptionViewport.evaluate((element) => {
     element.scrollTop = 180;
