@@ -8,12 +8,12 @@ import { Button } from "@/shared/ui/button";
 import { cx, fitTextareaHeight } from "../appUtils";
 
 const MOBILE_CREATE_TOOL_ICONS = [
-  ["calendar", CalendarDays],
-  ["flag", Flag],
-  ["tag", Tag],
-  ["archive", Archive],
-  ["expand", Maximize2],
-  ["more", Ellipsis],
+  ["calendar", "Дата", CalendarDays],
+  ["flag", "Флаг", Flag],
+  ["tag", "Тег", Tag],
+  ["archive", "Архив", Archive],
+  ["expand", "Развернуть", Maximize2],
+  ["more", "Еще", Ellipsis],
 ] as const;
 
 export function MobileCreateComposer({
@@ -72,14 +72,14 @@ export function MobileCreateComposer({
 
   return (
     <form
-      className="actions-mobile-editor flex max-h-[calc(100dvh_-_env(safe-area-inset-top)_-_8px)] w-full flex-col overflow-hidden rounded-t-2xl bg-card px-6 pb-4 pt-6 shadow-xl"
+      className="actions-mobile-editor flex max-h-[calc(100dvh_-_env(safe-area-inset-top)_-_8px)] w-full flex-col overflow-hidden rounded-t-2xl bg-card px-6 pb-2 pt-5 shadow-xl"
       onClick={(event) => event.stopPropagation()}
       onSubmit={submit}
     >
-      <div className="mobile-create-text min-h-[84px] min-w-0 flex-1 overflow-y-auto overscroll-contain">
+      <div className="mobile-create-text min-h-[84px] min-w-0 overflow-y-auto overscroll-contain">
         <textarea
           ref={titleRef}
-          className="actions-mobile-create-title block min-h-6 w-full min-w-0 resize-none overflow-hidden border-0 bg-transparent p-0 text-base/6 font-normal tracking-normal text-foreground placeholder:text-muted-foreground/65 focus:outline-0"
+          className="actions-mobile-create-title block min-h-7 w-full min-w-0 resize-none overflow-hidden border-0 bg-transparent p-0 text-lg/7 font-medium tracking-normal text-foreground placeholder:text-muted-foreground/65 focus:outline-0"
           value={title}
           rows={1}
           enterKeyHint="enter"
@@ -90,7 +90,7 @@ export function MobileCreateComposer({
         />
         <textarea
           ref={descriptionRef}
-          className="actions-mobile-create-description mt-2 block min-h-12 w-full min-w-0 resize-none overflow-hidden border-0 bg-transparent p-0 text-base/6 font-normal tracking-normal text-foreground placeholder:text-muted-foreground/65 focus:outline-0"
+          className="actions-mobile-create-description mt-2 block min-h-12 w-full min-w-0 resize-none overflow-hidden border-0 bg-transparent p-0 text-base/6 font-normal tracking-normal text-muted-foreground placeholder:text-muted-foreground/65 focus:outline-0"
           value={description}
           rows={2}
           enterKeyHint="enter"
@@ -101,12 +101,19 @@ export function MobileCreateComposer({
           onKeyDown={onDescriptionKeyDown}
         />
       </div>
-      <div className="mobile-create-toolbar mt-7 flex h-10 shrink-0 items-center justify-between gap-4 text-muted-foreground">
-        <div className="flex min-w-0 items-center gap-4">
-          {MOBILE_CREATE_TOOL_ICONS.map(([name, Icon]) => (
-            <span key={name} className="mobile-create-tool-icon inline-grid size-6 place-items-center" aria-hidden="true">
+      <div className="mobile-create-toolbar mt-3 flex h-10 shrink-0 items-center justify-between gap-4 text-muted-foreground">
+        <div className="flex min-w-0 items-center gap-3">
+          {MOBILE_CREATE_TOOL_ICONS.map(([name, label, Icon]) => (
+            <button
+              key={name}
+              type="button"
+              className="mobile-create-tool-icon inline-grid size-8 place-items-center rounded-md border-0 bg-transparent text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-0 focus-visible:ring-[3px] focus-visible:ring-ring/50 active:bg-accent/80 active:text-foreground"
+              aria-label={label}
+              title={label}
+              onPointerDown={(event) => event.preventDefault()}
+            >
               <Icon className="size-5" />
-            </span>
+            </button>
           ))}
         </div>
         <Button

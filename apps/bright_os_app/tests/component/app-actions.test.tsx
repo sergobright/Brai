@@ -31,12 +31,20 @@ describe("BrightOsApp actions", () => {
     await waitFor(() => expect(title).toHaveFocus());
     expect(title).toHaveAttribute("placeholder", "Что бы вы хотели сделать?");
     expect(title).toHaveAttribute("enterkeyhint", "enter");
+    expect(title).toHaveClass("text-lg/7", "font-medium", "text-foreground");
 
     const description = screen.getByRole("textbox", { name: "Описание действия" }) as HTMLTextAreaElement;
+    expect(description).toHaveClass("text-base/6", "text-muted-foreground");
     expect(description).toHaveAttribute("placeholder", "");
     fireEvent.focus(description);
     expect(description).toHaveAttribute("placeholder", "Описание");
     expect(document.querySelectorAll(".mobile-create-tool-icon svg")).toHaveLength(6);
+    const dateButton = screen.getByRole("button", { name: "Дата" });
+    expect(dateButton).toHaveClass("mobile-create-tool-icon");
+    dateButton.focus();
+    expect(dateButton).toHaveFocus();
+    fireEvent.click(dateButton);
+    expect(screen.getByRole("textbox", { name: "Добавить действие" })).toBeInTheDocument();
 
     fireEvent.change(title, { target: { value: " Большой план " } });
     fireEvent.change(description, { target: { value: "Описание\nстрока 2" } });
