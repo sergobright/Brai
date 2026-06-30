@@ -28,6 +28,8 @@ Same-thread follow-up writes may continue an existing `codex/*` branch only befo
 node scripts/bright-task.mjs follow-up
 ```
 
+The task base is frozen at starter time in `.bright-task/task.json`. Before acceptance, do not refresh that branch from the later `origin/main`: no `git fetch origin main`, `git pull origin main`, `git merge origin/main`, `git rebase origin/main`, or equivalent base-update command. Continue follow-up work on the same branch and let the acceptance PR/merge surface any real conflict; if the branch was already accepted, start a new task branch from the then-current `origin/main`.
+
 After a branch is accepted through PR/merge into `main`, every new write starts a new `codex/*` branch, even inside the same thread.
 
 If a question arrives during implementation and the user did not say stop, pause, or only answer, answer the question, add the new information to context, and continue the task.

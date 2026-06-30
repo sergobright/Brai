@@ -7,6 +7,7 @@
 - [ ] If the starter cannot create the `.codex-worktrees/` task worktree, stop without project-file changes; do not create or switch to a manual fallback branch in the current checkout.
 - [ ] Do not run `npm ci` in every fresh task worktree just because ignored `node_modules` are missing; the starter links existing dependency dirs from the main checkout when available.
 - [ ] Continue an existing `codex/*` branch only inside the same Codex thread before acceptance, and run `node scripts/bright-task.mjs follow-up` before new project-file writes.
+- [ ] For an unaccepted preview/follow-up branch, keep the original `.bright-task/task.json` base; do not fetch, pull, merge, or rebase the later `origin/main` into the branch.
 - [ ] Do not continue project-file work on a `codex/*` branch that is already included in `origin/main`; create a new task branch even if the UI selected the old branch.
 - [ ] Confirm local Git hooks are enabled with `git config core.hooksPath .githooks`.
 - [ ] For suspicious guard state, run `node scripts/bright-task.mjs doctor --strict`; nonzero means the task is not ready for handoff.

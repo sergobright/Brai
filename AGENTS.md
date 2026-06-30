@@ -15,6 +15,7 @@ This file routes agents to the project rules.
 - Перед первой правкой файлов проекта в новом Codex thread всегда запускать официальный starter от актуального `origin/main`: `scripts/bright-task-start.sh <task-slug>`; выбранная UI ветка не имеет значения.
 - Нельзя вручную создавать/switch-ить fallback ветки через `git switch`, `git checkout`, `git branch`, `git worktree`.
 - Если текущий thread уже вывел ветку на preview и пользователь ещё не принял её, прямые follow-up правки в этом же thread идут в ту же `codex/*` ветку через `node scripts/bright-task.mjs follow-up`.
+- Пока preview/follow-up ветка не принята, не подтягивать в неё новый `origin/main`: не делать `git fetch origin main`, `git pull origin main`, `git merge origin/main`, `git rebase origin/main` и эквиваленты. База задачи заморожена в `.bright-task/task.json` с момента starter; новые изменения `main` учитываются только после принятия или в новой задаче.
 - Если ветка уже принята через PR/merge в `main`, любые новые правки, даже в этом же thread, обязаны начинаться с новой `codex/*` ветки от `origin/main`.
 - Если в процессе работы пришёл вопрос и пользователь не сказал остановиться/пауза/только ответь, ответить на вопрос, принять новые данные в контекст и продолжать задачу.
 - Перед завершением классифицировать доставку по guard-классу: `runtime/product`, включая runtime bugfix, идёт через preview; `docs/infra` guard-fix идёт через no-preview PR/auto-merge в `main`.
