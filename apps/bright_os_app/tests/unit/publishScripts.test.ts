@@ -274,25 +274,37 @@ try {
 `, path.join(workspaceRoot, "services/bright_os_api/src/store.js"), dbPath], { env: nodeCliEnv });
 
     await mkdir(path.join(root, "deploy/web"), { recursive: true });
-    await writeFile(path.join(root, "deploy/web/version.json"), JSON.stringify({ version: "0.5.43.1" }));
+    await writeFile(path.join(root, "deploy/web/version.json"), JSON.stringify({ version: "0.0.38.1" }));
+    const mobileTarget = path.join(root, "envs/preview-a/mobile-update");
+    await mkdir(path.join(mobileTarget, "bundles/0.11.52.1.20260629202736"), { recursive: true });
+    await writeFile(
+      path.join(mobileTarget, "bundles/0.11.52.1.20260629202736/metadata.json"),
+      JSON.stringify({ bundleVersion: "0.11.52.1.20260629202736" }),
+    );
     const resolver = path.join(workspaceRoot, "deploy/scripts/resolve-app-version.mjs");
     const outputPath = path.join(root, "resolved-versions.json");
     await execFileAsync("node", ["--input-type=module", "-e", `
 const fs = await import("node:fs/promises");
 const { pathToFileURL } = await import("node:url");
-const [, resolver, root, db, prodWebVersionJson, outputPath] = process.argv.slice(1);
+const [, resolver, root, db, prodWebVersionJson, mobileTarget, outputPath] = process.argv.slice(1);
 const { resolveAppVersion } = await import(pathToFileURL(resolver));
 await fs.writeFile(outputPath, JSON.stringify({
   production: resolveAppVersion({ environment: "prod", root, db, explicit: "" }),
   nextProductionApk: resolveAppVersion({ environment: "prod", root, db, explicit: "", nextApk: true, targetBranch: "main", targetCommit: "abc" }),
-  preview: resolveAppVersion({ environment: "preview-a", root, prodWebVersionJson, explicit: "" }),
+  preview: resolveAppVersion({ environment: "preview-a", root, prodDb: db, prodWebVersionJson, mobileTarget, explicit: "" }),
 }));
-`, "import-helper", resolver, root, dbPath, path.join(root, "deploy/web/version.json"), outputPath], { env: nodeCliEnv });
+`, "import-helper", resolver, root, dbPath, path.join(root, "deploy/web/version.json"), mobileTarget, outputPath], { env: nodeCliEnv });
     const versions = JSON.parse(await readFile(outputPath, "utf8"));
+    const deployBranch = await readFile(path.join(workspaceRoot, "deploy/scripts/deploy-branch.sh"), "utf8");
+    const ciDeploy = await readFile(path.join(workspaceRoot, "deploy/scripts/ci-ssh-deploy.sh"), "utf8");
 
     expect(versions.production).toBe("0.5.43.1");
     expect(versions.nextProductionApk).toBe("0.5.43.2");
-    expect(versions.preview).toBe("0.5.43.1");
+    expect(versions.preview).toBe("0.11.52.1");
+    expect(deployBranch).toContain('--prod-db "${BRIGHT_OS_PROD_DB:-}"');
+    expect(deployBranch).toContain('--mobile-target "$MOBILE_TARGET"');
+    expect(await readFile(path.join(workspaceRoot, "deploy/scripts/build-android-env-apk.sh"), "utf8")).toContain('--mobile-target "${BRIGHT_OS_MOBILE_TARGET:-${BRIGHT_OS_ENVS_ROOT:-/srv/projects/bright-os-envs}/$ENV_PATH/mobile-update}"');
+    expect(ciDeploy).toContain('export BRIGHT_OS_PROD_DB="$DEPLOY_REPO/data/bright_os.sqlite"');
   });
 
   it("records shipped APK ledger rows idempotently by target commit", async () => {

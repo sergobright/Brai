@@ -175,6 +175,11 @@ export function createBrightOsServer({
         return;
       }
 
+      if (req.method === 'GET' && url.pathname === '/v1/version') {
+        sendJson(req, res, 200, versionState(store, now()));
+        return;
+      }
+
       if (req.method === 'POST' && url.pathname === '/v1/timer/events/sync') {
         const requestNow = now();
         const body = await readJson(req, { limit: 256 * 1024 });
@@ -359,6 +364,13 @@ export function activitiesState(store, nowDate) {
     server_revision: store.getActivityServerRevision(),
     activities: store.listActivities(),
     archived_activities: store.listArchivedActivities()
+  };
+}
+
+export function versionState(store, nowDate) {
+  return {
+    server_time_utc: nowDate.toISOString(),
+    ...store.currentAppVersion()
   };
 }
 

@@ -18,6 +18,7 @@ SLOT="${META[1]}"
 DOMAIN="${META[2]}"
 GRADLE_TASK="${META[3]}"
 RELEASE_KEY="${META[4]}"
+ENV_PATH="${META[5]}"
 
 ANDROID_API="https://$DOMAIN/api"
 if [[ "$ENVIRONMENT" == "prod" ]]; then
@@ -33,7 +34,9 @@ VERSION_ARGS=(
   --environment "$ENVIRONMENT" \
   --root "$ROOT" \
   --db "${BRIGHT_OS_DB:-}" \
-  --prod-web-version-json "${BRIGHT_OS_PROD_WEB_VERSION_JSON:-}"
+  --prod-db "${BRIGHT_OS_PROD_DB:-}" \
+  --prod-web-version-json "${BRIGHT_OS_PROD_WEB_VERSION_JSON:-}" \
+  --mobile-target "${BRIGHT_OS_MOBILE_TARGET:-${BRIGHT_OS_ENVS_ROOT:-/srv/projects/bright-os-envs}/$ENV_PATH/mobile-update}"
 )
 if [[ "$ENVIRONMENT" == "prod" && -n "${BRIGHT_OS_DB:-}" && -z "${BRIGHT_OS_APP_VERSION:-}" && -n "${BRIGHT_OS_BRANCH:-}" && -n "${BRIGHT_OS_COMMIT:-}" ]]; then
   APK_LEDGER_RECORD=true

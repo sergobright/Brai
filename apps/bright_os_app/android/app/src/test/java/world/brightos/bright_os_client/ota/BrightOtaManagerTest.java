@@ -27,6 +27,13 @@ public class BrightOtaManagerTest {
     }
 
     @Test
+    public void roundsDownloadProgressPercent() {
+        assertEquals(67, BrightOtaManager.downloadProgressPercent(2, 3));
+        assertEquals(100, BrightOtaManager.downloadProgressPercent(5, 3));
+        assertEquals(0, BrightOtaManager.downloadProgressPercent(1, 0));
+    }
+
+    @Test
     public void classifiesUpdateFailuresWithoutLeakingRawMessages() {
         assertEquals("network_connection_lost", BrightOtaManager.updateErrorCode(new SocketException("Software caused connection abort")));
         assertEquals("local_archive_missing", BrightOtaManager.updateErrorCode(new FileNotFoundException("open failed: ENOENT")));

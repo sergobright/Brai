@@ -25,6 +25,23 @@ describe("BrightOsApp shell", () => {
     expect(screen.getByRole("textbox", { name: "Добавить" })).toBeInTheDocument();
   });
 
+  it("keeps collapsed desktop rail action icons clickable", async () => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, writable: true, value: 1200 });
+    document.cookie = "sidebar_state=false; path=/";
+
+    render(<BrightOsApp />);
+
+    await waitFor(() => expect(document.querySelector('[data-slot="sidebar"][data-state="collapsed"]')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: /Engine/ }));
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Engine" })).toBeInTheDocument());
+    expect(window.location.pathname).toBe("/engine");
+
+    fireEvent.click(screen.getByRole("button", { name: "Настройки" }));
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Настройки" })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Архив" }));
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Архив" })).toBeInTheDocument());
+  });
+
   it("opens the mobile Inbox info sheet", async () => {
     render(<BrightOsApp initialSection="inbox" />);
 
@@ -815,6 +832,7 @@ describe("BrightOsApp shell", () => {
     expect(rail).not.toHaveTextContent("Platform");
     expect(rail).not.toHaveTextContent("Time");
     expect(rail).not.toHaveTextContent("Фокус");
+    expect(screen.getByRole("button", { name: /Engine/ }).closest('[data-sidebar="footer"]')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Свернуть меню" }));
     expect(shell).not.toHaveClass("is-rail-expanded");
@@ -824,9 +842,11 @@ describe("BrightOsApp shell", () => {
     expect(topbar?.querySelector("[data-screen-icon]")).toBeInTheDocument();
     expect(topbar?.querySelector('[aria-label="Развернуть меню"]')).not.toBeInTheDocument();
     expect(rail).toContainElement(screen.getByRole("button", { name: "Развернуть меню" }));
+    expect(rail).toContainElement(screen.getByRole("button", { name: "Настройки" }));
+    expect(rail).toContainElement(screen.getByRole("button", { name: "Архив" }));
+    expect(rail).toContainElement(screen.getByRole("button", { name: /Engine/ }));
     expect(rail).not.toHaveTextContent("Platform");
     expect(rail).not.toHaveTextContent("Time");
-    expect(rail).not.toHaveTextContent("Действия");
     expect(rail).not.toHaveTextContent("Фокус");
 
     fireEvent.click(screen.getByRole("button", { name: "Развернуть меню" }));
@@ -882,8 +902,9 @@ describe("BrightOsApp shell", () => {
     expect(document.querySelector(".mobile-menu-backdrop")).toBeInTheDocument();
     expect(document.querySelector(".mobile-profile-drawer")).toHaveTextContent("Меню страницы");
     expect(document.querySelector(".mobile-profile-drawer")).toHaveTextContent("Фокус");
-    expect(document.querySelector(".mobile-profile-drawer")).not.toHaveTextContent("Действия");
-    expect(within(document.querySelector(".mobile-profile-drawer") as HTMLElement).queryByRole("button", { name: "Настройки" })).not.toBeInTheDocument();
+    expect(document.querySelector(".mobile-profile-drawer")).toHaveTextContent("Действия");
+    expect(within(document.querySelector(".mobile-profile-drawer") as HTMLElement).getByRole("button", { name: "Настройки" })).toBeInTheDocument();
+    expect(within(document.querySelector(".mobile-profile-drawer") as HTMLElement).getByRole("button", { name: /Engine/ })).toBeInTheDocument();
   });
 });
 

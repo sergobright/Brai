@@ -214,7 +214,7 @@ export function ActivityDetailEditor({
       >
         {mode === "mobile" ? (
           <div
-            className="actions-detail-drag-zone absolute left-1/2 top-0 flex h-8 w-32 -translate-x-1/2 touch-none cursor-grab items-start justify-center pt-2 active:cursor-grabbing"
+            className="actions-detail-drag-zone absolute left-1/2 top-0 z-[3] flex h-8 w-32 -translate-x-1/2 touch-none cursor-grab items-start justify-center pt-2 active:cursor-grabbing"
           >
             <span
               className="actions-detail-grabber h-1.5 w-[50px] rounded-full bg-muted-foreground/30"

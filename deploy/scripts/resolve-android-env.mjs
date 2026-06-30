@@ -14,3 +14,4 @@ console.log(environment.startsWith("preview-") ? env.displayLabel : "");
 console.log(env.domain);
 console.log(`assemble${flavor[0].toUpperCase()}${flavor.slice(1)}Release`);
 console.log(env.releaseKey);
+console.log(env.path);

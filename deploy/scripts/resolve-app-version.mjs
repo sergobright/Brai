@@ -14,7 +14,9 @@ if (path.resolve(process.argv[1] ?? "") === fileURLToPath(import.meta.url)) {
     root: args.root,
     environment: args.environment,
     db: args.db,
+    prodDb: args["prod-db"],
     prodWebVersionJson: args["prod-web-version-json"],
+    mobileTarget: args["mobile-target"],
     nextApk: args["next-apk"] === "true",
     targetBranch: args["target-branch"],
     targetCommit: args["target-commit"],
@@ -25,7 +27,9 @@ export function resolveAppVersion({
   root = process.env.BRIGHT_OS_ROOT || path.resolve(import.meta.dirname, "../.."),
   environment = process.env.NEXT_PUBLIC_BRIGHT_OS_ENVIRONMENT || "",
   db = "",
+  prodDb = process.env.BRIGHT_OS_PROD_DB || "",
   prodWebVersionJson = "",
+  mobileTarget = "",
   explicit = process.env.BRIGHT_OS_APP_VERSION || "",
   nextApk = false,
   targetBranch = "",
@@ -38,9 +42,13 @@ export function resolveAppVersion({
     if (ledgerVersion) return validVersion(ledgerVersion);
   }
 
-  if (environment !== "prod" && prodWebVersionJson && fs.existsSync(prodWebVersionJson)) {
-    return validVersion(readVersionJson(prodWebVersionJson));
-  }
+  const resolvedVersion = latestBrightVersion([
+    environment !== "prod" && prodDb && latestProductionVersion(prodDb),
+    environment !== "prod" && db && latestProductionVersion(db),
+    prodWebVersionJson && readVersionJson(prodWebVersionJson),
+    mobileTarget && latestMobileTargetVersion(mobileTarget),
+  ]);
+  if (resolvedVersion) return validVersion(resolvedVersion);
 
   return validVersion(readVersionJson(path.join(root, "apps/bright_os_app/public/version.json")));
 }
@@ -51,6 +59,7 @@ function validVersion(version) {
 }
 
 function latestProductionVersion(dbPath, { nextApk = false, targetBranch = "", targetCommit = "" } = {}) {
+  if (!fs.existsSync(dbPath)) return "";
   const db = new Database(dbPath, { readonly: true, fileMustExist: true });
   try {
     const row = db
@@ -63,6 +72,7 @@ function latestProductionVersion(dbPath, { nextApk = false, targetBranch = "", t
         FROM build_versions
       `)
       .get();
+    const parts = ["canon", "release", "build"].map((key) => numericPart(row?.[key]));
     let apk = Number(row?.apk || 0);
     if (nextApk) {
       const existing = targetCommit
@@ -78,17 +88,67 @@ function latestProductionVersion(dbPath, { nextApk = false, targetBranch = "", t
           `)
           .get(targetBranch || "", targetCommit)
         : null;
-      apk = existing?.version ?? apk + 1;
+      apk = numericPart(existing?.version) ?? apk + 1;
     }
-    if (!row?.build || !apk) return "";
-    return `${row.canon}.${row.release}.${row.build}.${apk}`;
+    if (parts.some((part) => part == null) || !parts[2] || !apk) return "";
+    return `${parts[0]}.${parts[1]}.${parts[2]}.${apk}`;
   } finally {
     db.close();
   }
 }
 
 function readVersionJson(filePath) {
+  if (!fs.existsSync(filePath)) return "";
   return JSON.parse(fs.readFileSync(filePath, "utf8")).version || "";
+}
+
+function latestMobileTargetVersion(mobileTarget) {
+  const versions = [];
+  const manifestPath = path.join(mobileTarget, "manifest.json");
+  if (fs.existsSync(manifestPath)) {
+    versions.push(JSON.parse(fs.readFileSync(manifestPath, "utf8")).bundleVersion || "");
+  }
+
+  const bundlesPath = path.join(mobileTarget, "bundles");
+  if (fs.existsSync(bundlesPath)) {
+    for (const entry of fs.readdirSync(bundlesPath, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      versions.push(entry.name);
+      const metadataPath = path.join(bundlesPath, entry.name, "metadata.json");
+      if (fs.existsSync(metadataPath)) {
+        versions.push(JSON.parse(fs.readFileSync(metadataPath, "utf8")).bundleVersion || "");
+      }
+    }
+  }
+
+  return latestBrightVersion(versions);
+}
+
+function latestBrightVersion(values) {
+  return values.reduce((latest, value) => {
+    const version = normalizeBrightVersion(value);
+    if (!version) return latest;
+    return compareBrightVersions(version, latest) > 0 ? version : latest;
+  }, "");
+}
+
+function normalizeBrightVersion(value) {
+  const match = String(value || "").match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)(?:[._+-].*)?$/);
+  return match ? match.slice(1, 5).join(".") : "";
+}
+
+function compareBrightVersions(left, right) {
+  const leftParts = left.split(".").map(Number);
+  const rightParts = (right || "0.0.0.0").split(".").map(Number);
+  for (let index = 0; index < 4; index += 1) {
+    if (leftParts[index] !== rightParts[index]) return leftParts[index] - rightParts[index];
+  }
+  return 0;
+}
+
+function numericPart(value) {
+  const number = Number(value);
+  return Number.isInteger(number) && number >= 0 ? number : null;
 }
 
 function parseArgs(values) {

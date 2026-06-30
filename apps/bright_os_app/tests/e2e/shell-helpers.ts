@@ -156,11 +156,26 @@ export async function openSettingsFromProfile(page: Page) {
   await openProfileMenuItem(page, "Настройки");
 }
 
-export async function openProfileMenuItem(page: Page, name: string) {
-  if ((await page.getByRole("button", { name }).count()) === 0) {
-    await page.getByRole("button", { name: "Открыть меню" }).click();
+export async function openEngineFromProfile(page: Page) {
+  await openProfileMenuItem(page, /^Engine(?: v.+)?$/);
+}
+
+export async function openProfileMenuItem(page: Page, name: string | RegExp) {
+  const drawer = page.locator(".mobile-profile-drawer");
+  if ((await drawer.count()) > 0 && await drawer.isVisible()) {
+    await drawer.getByRole("button", { name }).click();
+    return;
   }
-  await page.getByRole("button", { name }).click();
+
+  const button = page.getByRole("button", { name }).first();
+  if ((await button.count()) === 0 || !(await button.isVisible().catch(() => false))) {
+    await page.getByRole("button", { name: "Открыть меню" }).click();
+    await expect(drawer).toBeVisible();
+    await drawer.getByRole("button", { name }).click();
+    return;
+  }
+
+  await button.click();
 }
 
 export function horizontalCenterOffset(

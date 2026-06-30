@@ -10,11 +10,14 @@ test("opens the mobile profile drawer with navigation over dimmed content", asyn
   await expect(page.locator(".mobile-profile-drawer")).toContainText("Workspace");
   await expect(page.locator(".mobile-profile-drawer")).not.toContainText("Platform");
   await expect(page.locator(".mobile-profile-drawer")).not.toContainText("Time");
+  await expect(page.locator(".mobile-profile-drawer").getByRole("button", { name: /Engine/ })).toBeVisible();
 
   const drawer = await page.locator(".mobile-profile-drawer").boundingBox();
+  const engine = await page.locator(".mobile-profile-drawer").getByRole("button", { name: /Engine/ }).boundingBox();
   const viewport = page.viewportSize();
-  expect(drawer?.width ?? 0).toBeGreaterThan((viewport?.width ?? 0) * 0.66);
-  expect(drawer?.width ?? 0).toBeLessThan((viewport?.width ?? 0) * 0.74);
+  expect(drawer?.width ?? 0).toBeGreaterThan((viewport?.width ?? 0) * 0.78);
+  expect(drawer?.width ?? 0).toBeLessThan((viewport?.width ?? 0) * 0.82);
+  expect((viewport?.height ?? 0) - ((engine?.y ?? 0) + (engine?.height ?? 0))).toBeGreaterThanOrEqual(56);
 
   await dispatchTouch(page, "touchstart", { x: 320, y: 220 });
   await dispatchTouch(page, "touchend", { x: 180, y: 224 });
@@ -45,7 +48,7 @@ test("opens mobile action input overlay from the floating plus button", async ({
 
   await page.goto("/");
   await expect(page.getByRole("navigation", { name: "Основная навигация" })).toBeVisible();
-  await page.locator(".actions-fab").click();
+  await page.locator(".section-page-current .actions-fab").click();
   await expect(page.getByRole("textbox", { name: "Добавить действие" })).toBeFocused();
   await expect(page.locator(".actions-add-submit")).toBeVisible();
   await expect(page.locator(".actions-add-submit svg")).toBeVisible();
@@ -64,7 +67,7 @@ test("keeps the mobile Actions FAB vertically stable when a dock swipe starts", 
   test.skip(testInfo.project.name !== "mobile", "mobile-only action swipe layout");
 
   await page.goto("/");
-  const fab = page.locator(".actions-fab");
+  const fab = page.locator(".section-page-current .actions-fab");
   await expect(fab).toBeVisible();
   const before = await fab.boundingBox();
   const dock = await page.locator(".main-dock").boundingBox();
@@ -367,9 +370,10 @@ test("closes the mobile activity detail editor from its drag handle", async ({ p
   });
   const editorLocator = page.locator(".actions-detail-panel.mobile");
   await expect(editorLocator).toBeVisible();
+  await expect.poll(async () => (await editorLocator.boundingBox())?.y ?? 999).toBeLessThanOrEqual(20);
   const dragZone = page.locator(".actions-detail-drag-zone");
   const secondDragZoneBox = await dragZone.boundingBox();
-  await swipeTouch(
+  await dragTouch(
     page,
     {
       x: (secondDragZoneBox?.x ?? 0) + (secondDragZoneBox?.width ?? 0) / 2,
