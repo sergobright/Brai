@@ -19,6 +19,7 @@ import { ActionsSection } from "./sections/actions/ActionsSection";
 import { ActionsInfoPanel } from "./sections/actions/ActionsInfoPanel";
 import { ArchiveSection } from "./sections/actions/ArchiveSection";
 import { EvilEyeSection } from "./sections/EvilEyeSection";
+import { EngineSection } from "./sections/engine/EngineSection";
 import { FocusBackground, FocusContextPanelSheet, FocusSection } from "./sections/focus/FocusSection";
 import { InboxSection } from "./sections/inbox/InboxSection";
 import { SettingsSection } from "./sections/settings/SettingsSection";
@@ -130,14 +131,20 @@ export function BrightOsApp({ initialSection = "actions" }: { initialSection?: S
           />
         ) : screenSection === "evil-eye" ? (
           <EvilEyeSection />
-        ) : screenSection === "settings" ? (
-          <SettingsSection
+        ) : screenSection === "engine" ? (
+          <EngineSection
+            appVersionState={app.versionState}
             otaState={app.otaState}
             otaCheckedAt={app.otaCheckedAt}
             otaRefreshing={app.otaRefreshing}
             bundlePublishedAt={app.bundlePublishedAt}
-            onRefreshOta={app.refreshOtaStateOnce}
+            versionCheckedAt={app.versionCheckedAt}
+            versionError={app.versionError}
+            versionRefreshing={app.versionRefreshing}
+            onRefreshEngine={app.refreshEngineOnce}
           />
+        ) : screenSection === "settings" ? (
+          <SettingsSection />
         ) : null}
       </>
     );
@@ -162,7 +169,13 @@ export function BrightOsApp({ initialSection = "actions" }: { initialSection?: S
       <DesktopRail
         expanded={app.desktopRailExpanded}
         section={app.section}
+        appVersionState={app.versionState}
+        otaRefreshing={app.otaRefreshing}
+        otaState={app.otaState}
+        versionError={app.versionError}
+        versionRefreshing={app.versionRefreshing}
         onSettings={app.openSettingsPage}
+        onEngine={() => app.selectSection("engine")}
         onArchive={() => app.selectSection("archive")}
         onLogout={app.onLogout}
       />
@@ -200,8 +213,14 @@ export function BrightOsApp({ initialSection = "actions" }: { initialSection?: S
       {app.mobileMenuOpen && isPrimarySection(app.section) ? (
         <MobileProfileDrawer
           section={app.section}
+          appVersionState={app.versionState}
+          otaRefreshing={app.otaRefreshing}
+          otaState={app.otaState}
+          versionError={app.versionError}
+          versionRefreshing={app.versionRefreshing}
           onClose={() => app.setMobileMenuOpen(false)}
           onSettings={app.openSettingsPage}
+          onEngine={() => app.selectSection("engine")}
           onArchive={() => app.selectSection("archive")}
           onLogout={app.onLogout}
         />

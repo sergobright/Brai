@@ -133,7 +133,7 @@ fi
 if [[ -d "$SOURCE_ROOT" ]]; then
   find "$SOURCE_ROOT" -user "$(id -u)" -exec chmod u+rwX,g+rwX {} + || true
 fi
-rm -rf "$SOURCE_ROOT"
+rm -rf "$SOURCE_ROOT" || { sleep 2; rm -rf "$SOURCE_ROOT"; }
 mkdir -p "$(dirname "$SOURCE_ROOT")"
 mv "$REMOTE_UPLOAD" "$SOURCE_ROOT"
 
@@ -145,6 +145,7 @@ npm --prefix services/bright_os_api ci
 export BRIGHT_OS_BRANCH BRIGHT_OS_COMMIT
 export BRIGHT_OS_ROOT="$SOURCE_ROOT"
 export BRIGHT_OS_RELEASE_TARGET="$DEPLOY_REPO/deploy/releases"
+export BRIGHT_OS_PROD_DB="$DEPLOY_REPO/data/bright_os.sqlite"
 export BRIGHT_OS_PROD_WEB_VERSION_JSON="$DEPLOY_REPO/deploy/web/version.json"
 if [[ "$BRIGHT_OS_NATIVE_APK_CHANGE" == "true" ]]; then
   if [[ "$ENVIRONMENT" == preview-* ]]; then

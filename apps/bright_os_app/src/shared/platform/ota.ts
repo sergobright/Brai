@@ -18,6 +18,10 @@ export type BrightOtaState = {
   lastUpdateError?: string | null;
   failedBundleVersions?: string;
   checkInProgress?: boolean;
+  downloadProgressVersion?: string | null;
+  downloadProgressBytes?: number;
+  downloadProgressTotalBytes?: number;
+  downloadProgressPercent?: number | null;
 };
 
 type BrightOtaPlugin = {

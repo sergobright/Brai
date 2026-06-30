@@ -25,6 +25,7 @@ import { createBrightOsInboxCommands } from "./useBrightOsInboxCommands";
 import { useBrightOsLiveUpdates } from "./useBrightOsLiveUpdates";
 import { useBrightOsOta } from "./useBrightOsOta";
 import { useBrightOsTheme } from "./useBrightOsTheme";
+import { useBrightOsVersion } from "./useBrightOsVersion";
 
 /**
  * Owns the Bright OS client state machine, local cache loading, and sync flow.
@@ -37,6 +38,7 @@ export function useBrightOsAppState(initialSection: SectionId) {
   const [todayKey] = useState(() => moscowTodayKey());
   const [apiBase, setApiBase] = useState(defaultApiBase());
   const api = useMemo(() => new BrightOsApi(apiBase), [apiBase]);
+  const { refreshVersionOnce, versionCheckedAt, versionError, versionRefreshing, versionState } = useBrightOsVersion(api);
   const apiRef = useRef(api);
   const refreshAllRef = useRef<(sourceApi?: BrightOsApi) => Promise<void>>(async () => undefined);
   const refreshStateAndFlushRef = useRef<() => Promise<void>>(async () => undefined);
@@ -500,6 +502,10 @@ export function useBrightOsAppState(initialSection: SectionId) {
     setSyncStatus("auth_required");
   }
 
+  async function refreshEngineOnce() {
+    await Promise.all([refreshVersionOnce(), refreshOtaStateOnce()]);
+  }
+
   function handleError(error: unknown) {
     if (error instanceof Error && error.name === "UnauthorizedError") {
       setSyncStatus("auth_required");
@@ -692,6 +698,7 @@ export function useBrightOsAppState(initialSection: SectionId) {
       !actionOverlayOpen &&
       section !== "archive" &&
       section !== "settings" &&
+      section !== "engine" &&
       section !== "evil-eye",
   );
 
@@ -724,7 +731,7 @@ export function useBrightOsAppState(initialSection: SectionId) {
     setSyncStatus,
   });
 
-  return { actionOverlayOpen, actions, actionsInfoActive, active, bundlePublishedAt, busy, desktopRailExpanded, displaySyncStatus, focusBackground, focusContextPanel, focusGoalActive, focusHistoryActive, goal, history, inbox, inboxInfoActive, localSnapshotReady, markMobileContextPanelClosing, mobileContextPanel, mobileMenuOpen, ...actionCommands, ...inboxCommands, onDeleteFocusSession, onEditFocusInterval, onEditFocusSession, onLogin, onLogout, onStart, onStartActionFocus, onStop, onStopActionFocus, onSwitchActionFocus, openSettingsPage, otaCheckedAt, otaRefreshing, otaState, refreshOtaStateOnce, section, selectSection, setActionOverlayOpen, setDesktopRailExpanded, setFocusBackground, setMobileContextPanel: setMobileContextPanelState, setMobileMenuOpen, setTheme, swipeNavigation, theme, timer, timerBusy, todayKey, toggleActionsInfoPanel, toggleFocusContextPanel, toggleInboxInfoPanel, totalPendingCount };
+  return { actionOverlayOpen, actions, actionsInfoActive, active, bundlePublishedAt, busy, desktopRailExpanded, displaySyncStatus, focusBackground, focusContextPanel, focusGoalActive, focusHistoryActive, goal, history, inbox, inboxInfoActive, localSnapshotReady, markMobileContextPanelClosing, mobileContextPanel, mobileMenuOpen, ...actionCommands, ...inboxCommands, onDeleteFocusSession, onEditFocusInterval, onEditFocusSession, onLogin, onLogout, onStart, onStartActionFocus, onStop, onStopActionFocus, onSwitchActionFocus, openSettingsPage, otaCheckedAt, otaRefreshing, otaState, refreshEngineOnce, refreshOtaStateOnce, section, selectSection, setActionOverlayOpen, setDesktopRailExpanded, setFocusBackground, setMobileContextPanel: setMobileContextPanelState, setMobileMenuOpen, setTheme, swipeNavigation, theme, timer, timerBusy, todayKey, toggleActionsInfoPanel, toggleFocusContextPanel, toggleInboxInfoPanel, totalPendingCount, versionCheckedAt, versionError, versionRefreshing, versionState };
 }
 
 function loadFocusContextPanelPreference(): FocusContextPanel {

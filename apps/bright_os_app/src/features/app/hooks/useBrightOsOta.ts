@@ -9,6 +9,10 @@ import {
 } from "@/shared/platform/ota";
 import { platformName } from "@/shared/platform/platform";
 
+const OTA_CHECK_INTERVAL_MS = 5 * 60 * 1000;
+const OTA_STATE_POLL_MS = 5000;
+const OTA_ACTIVE_POLL_MS = 250;
+
 /**
  * Exposes Android OTA state plus the current web bundle metadata.
  */
@@ -49,12 +53,21 @@ export function useBrightOsOta() {
       };
     }
 
-    const interval = window.setInterval(() => void refreshOtaState(), 5000);
+    const interval = window.setInterval(
+      () => void refreshOtaState(),
+      otaState?.checkInProgress ? OTA_ACTIVE_POLL_MS : OTA_STATE_POLL_MS,
+    );
     return () => {
       cancelled = true;
       window.clearInterval(interval);
     };
-  }, []);
+  }, [otaState?.checkInProgress]);
+
+  useEffect(() => {
+    if (platformName() !== "android") return;
+    const interval = window.setInterval(() => void refreshOtaStateOnce(), OTA_CHECK_INTERVAL_MS);
+    return () => window.clearInterval(interval);
+  }, [refreshOtaStateOnce]);
 
   useEffect(() => {
     let cancelled = false;

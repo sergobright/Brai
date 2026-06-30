@@ -268,29 +268,130 @@ try {
     reason: "Needed for test",
     releasedAtUtc: "2026-06-28T17:29:00.000Z",
   });
+  store.recordDeployment({
+    environment: "prod",
+    slot: null,
+    branch: "main",
+    commit: "legacy-prod",
+    domain: "brightos.world",
+    webOtaVersion: "0.10.48.1",
+    shortChanges: "Legacy production OTA",
+    detailedChanges: "Legacy production OTA",
+    reason: "Needed to keep production OTA versions monotonic across ledger migration.",
+    deployedAtUtc: "2026-06-28T23:39:00.000Z",
+  });
 } finally {
   store.close();
 }
 `, path.join(workspaceRoot, "services/bright_os_api/src/store.js"), dbPath], { env: nodeCliEnv });
 
     await mkdir(path.join(root, "deploy/web"), { recursive: true });
-    await writeFile(path.join(root, "deploy/web/version.json"), JSON.stringify({ version: "0.5.43.1" }));
+    await writeFile(path.join(root, "deploy/web/version.json"), JSON.stringify({ version: "0.0.38.1" }));
+    const prodMobileTarget = path.join(root, "deploy/mobile-update");
+    const mobileTarget = path.join(root, "envs/preview-a/mobile-update");
+    await mkdir(path.join(mobileTarget, "bundles/0.11.52.1.20260629202736"), { recursive: true });
+    await writeFile(
+      path.join(mobileTarget, "bundles/0.11.52.1.20260629202736/metadata.json"),
+      JSON.stringify({ bundleVersion: "0.11.52.1.20260629202736" }),
+    );
     const resolver = path.join(workspaceRoot, "deploy/scripts/resolve-app-version.mjs");
     const outputPath = path.join(root, "resolved-versions.json");
     await execFileAsync("node", ["--input-type=module", "-e", `
 const fs = await import("node:fs/promises");
 const { pathToFileURL } = await import("node:url");
-const [, resolver, root, db, prodWebVersionJson, outputPath] = process.argv.slice(1);
+const [, resolver, root, db, prodWebVersionJson, prodMobileTarget, mobileTarget, outputPath] = process.argv.slice(1);
 const { resolveAppVersion } = await import(pathToFileURL(resolver));
 await fs.writeFile(outputPath, JSON.stringify({
   production: resolveAppVersion({ environment: "prod", root, db, explicit: "" }),
-  preview: resolveAppVersion({ environment: "preview-a", root, prodWebVersionJson, explicit: "" }),
+  productionBundle: resolveAppVersion({ environment: "prod", root, db, mobileTarget: prodMobileTarget, explicit: "", mobileBundle: true }),
+  nextProductionApk: resolveAppVersion({ environment: "prod", root, db, explicit: "", nextApk: true, targetBranch: "main", targetCommit: "abc" }),
+  preview: resolveAppVersion({ environment: "preview-a", root, prodDb: db, prodWebVersionJson, mobileTarget, explicit: "" }),
 }));
-`, "import-helper", resolver, root, dbPath, path.join(root, "deploy/web/version.json"), outputPath], { env: nodeCliEnv });
+`, "import-helper", resolver, root, dbPath, path.join(root, "deploy/web/version.json"), prodMobileTarget, mobileTarget, outputPath], { env: nodeCliEnv });
     const versions = JSON.parse(await readFile(outputPath, "utf8"));
+    const deployBranch = await readFile(path.join(workspaceRoot, "deploy/scripts/deploy-branch.sh"), "utf8");
+    const ciDeploy = await readFile(path.join(workspaceRoot, "deploy/scripts/ci-ssh-deploy.sh"), "utf8");
 
     expect(versions.production).toBe("0.5.43.1");
-    expect(versions.preview).toBe("0.5.43.1");
+    expect(versions.productionBundle).toBe("0.10.49.1");
+    expect(versions.nextProductionApk).toBe("0.5.43.2");
+    expect(versions.preview).toBe("0.11.52.1");
+    expect(deployBranch).toContain('--prod-db "${BRIGHT_OS_PROD_DB:-}"');
+    expect(deployBranch).toContain('--mobile-target "$MOBILE_TARGET"');
+    expect(deployBranch).toContain("--mobile-bundle true");
+    expect(await readFile(path.join(workspaceRoot, "deploy/scripts/build-android-env-apk.sh"), "utf8")).toContain('--mobile-target "${BRIGHT_OS_MOBILE_TARGET:-${BRIGHT_OS_ENVS_ROOT:-/srv/projects/bright-os-envs}/$ENV_PATH/mobile-update}"');
+    expect(ciDeploy).toContain('export BRIGHT_OS_PROD_DB="$DEPLOY_REPO/data/bright_os.sqlite"');
+  });
+
+  it("records shipped APK ledger rows idempotently by target commit", async () => {
+    const root = await fixtureRoot("bright-apk-ledger-");
+    await writeStaticExport(root, "stale-public-version");
+    const dbPath = path.join(root, "bright.sqlite");
+    await execFileAsync("node", ["--input-type=module", "-e", `
+const { pathToFileURL } = await import("node:url");
+const { BrightOsStore } = await import(pathToFileURL(process.argv[1]));
+const store = new BrightOsStore(process.argv[2]);
+try {
+  store.upsertBuildVersion({
+    versionTypeId: "build",
+    version: 43,
+    includedInVersionId: null,
+    shortChanges: "Production build",
+    detailedChanges: "Production build",
+    reason: "Needed for test",
+    releasedAtUtc: "2026-06-28T17:29:00.000Z",
+  });
+  store.upsertBuildVersion({
+    versionTypeId: "apk",
+    version: 1,
+    includedInVersionId: null,
+    shortChanges: "Production APK",
+    detailedChanges: "Production APK",
+    reason: "Needed for test",
+    releasedAtUtc: "2026-06-28T17:29:00.000Z",
+  });
+} finally {
+  store.close();
+}
+`, path.join(workspaceRoot, "services/bright_os_api/src/store.js"), dbPath], { env: nodeCliEnv });
+
+    const recordScript = path.join(workspaceRoot, "deploy/scripts/record-shipped-apk-version.mjs");
+    const recordArgs = [
+      recordScript,
+      "--db", dbPath,
+      "--version", "0.0.43.2",
+      "--version-code", "3000",
+      "--target-branch", "main",
+      "--target-commit", "abc",
+      "--released-at", "2026-06-28T17:30:00.000Z",
+    ];
+    await execFileAsync("node", recordArgs, { env: nodeCliEnv });
+    await execFileAsync("node", recordArgs, { env: nodeCliEnv });
+
+    const resolver = path.join(workspaceRoot, "deploy/scripts/resolve-app-version.mjs");
+    const outputPath = path.join(root, "apk-ledger.json");
+    await execFileAsync("node", ["--input-type=module", "-e", `
+const fs = await import("node:fs/promises");
+const { pathToFileURL } = await import("node:url");
+const [, storeModule, resolver, db, outputPath] = process.argv.slice(1);
+const { BrightOsStore } = await import(pathToFileURL(storeModule));
+const { resolveAppVersion } = await import(pathToFileURL(resolver));
+const store = new BrightOsStore(db);
+try {
+  await fs.writeFile(outputPath, JSON.stringify({
+    apkRows: store.db.prepare("SELECT version FROM build_versions WHERE version_type_id = 'apk' ORDER BY version").all(),
+    sameCommit: resolveAppVersion({ environment: "prod", db, explicit: "", nextApk: true, targetBranch: "main", targetCommit: "abc" }),
+    nextCommit: resolveAppVersion({ environment: "prod", db, explicit: "", nextApk: true, targetBranch: "main", targetCommit: "def" }),
+  }));
+} finally {
+  store.close();
+}
+`, "import-helper", path.join(workspaceRoot, "services/bright_os_api/src/store.js"), resolver, dbPath, outputPath], { env: nodeCliEnv });
+    const ledger = JSON.parse(await readFile(outputPath, "utf8"));
+
+    expect(ledger.apkRows).toEqual([{ version: 1 }, { version: 2 }]);
+    expect(ledger.sameCommit).toBe("0.0.43.2");
+    expect(ledger.nextCommit).toBe("0.0.43.3");
   });
 
   it("promotes production deployment metadata into the production database path", async () => {
@@ -302,11 +403,13 @@ await fs.writeFile(outputPath, JSON.stringify({
     const script = await readFile(path.join(workspaceRoot, "deploy/scripts/ci-ssh-deploy.sh"), "utf8");
 
     expect(script).toContain('find "$SOURCE_ROOT" -user "$(id -u)" -exec chmod u+rwX,g+rwX {} + || true');
+    expect(script).toContain('rm -rf "$SOURCE_ROOT" || { sleep 2; rm -rf "$SOURCE_ROOT"; }');
     expect(script.indexOf('find "$SOURCE_ROOT" -user "$(id -u)"')).toBeLessThan(script.indexOf('rm -rf "$SOURCE_ROOT"'));
   });
 
   it("rebuilds all APK release rows from production native deploys", async () => {
     const deploy = await readFile(path.join(workspaceRoot, "deploy/scripts/ci-ssh-deploy.sh"), "utf8");
+    const buildApk = await readFile(path.join(workspaceRoot, "deploy/scripts/build-android-env-apk.sh"), "utf8");
     const releaseSlot = await readFile(path.join(workspaceRoot, "deploy/scripts/ci-ssh-release-slot.sh"), "utf8");
     const prodBlock = deploy.slice(deploy.indexOf('elif [[ "$ENVIRONMENT" == "prod" ]]'));
 
@@ -314,6 +417,8 @@ await fs.writeFile(outputPath, JSON.stringify({
     expect(prodBlock).toContain('node deploy/scripts/resolve-app-version.mjs --environment prod --root "$SOURCE_ROOT" --db "${BRIGHT_OS_DB:-}"');
     expect(prodBlock).toContain('deploy/scripts/build-nonproduction-apks.sh');
     expect(prodBlock.indexOf('deploy/scripts/build-android-env-apk.sh production')).toBeLessThan(prodBlock.indexOf('deploy/scripts/build-nonproduction-apks.sh'));
+    expect(buildApk).toContain('--next-apk true --target-branch "$BRIGHT_OS_BRANCH" --target-commit "$BRIGHT_OS_COMMIT"');
+    expect(buildApk).toContain('record-shipped-apk-version.mjs');
     expect(releaseSlot).toContain('deploy/scripts/build-android-env-apk.sh "preview${SLOT_META[0]}" >&2');
   });
 

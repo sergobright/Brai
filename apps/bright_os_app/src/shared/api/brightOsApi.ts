@@ -59,6 +59,10 @@ export class BrightOsApi {
     return this.request("/v1/inbox");
   }
 
+  async version(): Promise<AppVersionState> {
+    return this.request("/v1/version");
+  }
+
   async syncEvents(params: {
     deviceId: string;
     platform: string;
@@ -209,6 +213,33 @@ interface ActivitiesApiSyncResponse {
   server_time_utc: string;
   state: ActivitiesApiState;
 }
+
+export type VersionTypeId = "canon" | "release" | "build" | "apk";
+
+export type AppVersionLedgerRow = {
+  id: number;
+  version_type_id: VersionTypeId;
+  version: number;
+  included_in_version_id: number | null;
+  short_changes: string;
+  detailed_changes: string;
+  reason: string;
+  released_at_utc: string;
+  created_at_utc: string;
+};
+
+export type AppVersionState = {
+  server_time_utc: string;
+  version: string;
+  parts: Record<VersionTypeId, number>;
+  latest: Record<VersionTypeId, AppVersionLedgerRow | null>;
+  apk_release: {
+    file: string;
+    version: string | null;
+    version_code: number;
+    published_at: string | null;
+  } | null;
+};
 
 function fromActivitiesState(state: ActivitiesApiState): ActivitiesState {
   return {

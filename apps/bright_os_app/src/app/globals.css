@@ -152,13 +152,20 @@ html[data-platform="android"] .app-shell {
   }
 
   html[data-sidebar-state="collapsed"] [data-app-shell] .desktop-rail [data-slot="sidebar-group-label"],
-  html[data-sidebar-state="collapsed"] [data-app-shell] .desktop-rail [data-slot="sidebar-group-content"],
+  html[data-sidebar-state="collapsed"] [data-app-shell] .desktop-rail [data-rail-page-title],
   html[data-sidebar-state="collapsed"] [data-app-shell] .desktop-rail [data-sidebar="menu-button"] > span:not([data-slot="avatar"]),
   html[data-sidebar-state="collapsed"] [data-app-shell] .desktop-rail [data-sidebar="menu-button"] > svg.ml-auto,
   html[data-sidebar-state="collapsed"] [data-app-shell] .desktop-rail .rail-profile > div:not([data-slot="avatar"]),
   html[data-sidebar-state="collapsed"] [data-app-shell] .desktop-rail .rail-profile > svg,
   html[data-sidebar-state="collapsed"] [data-app-shell] .desktop-rail [aria-label="Свернуть меню"] {
     display: none;
+  }
+
+  html[data-sidebar-state="collapsed"] [data-app-shell] .desktop-rail .rail-profile {
+    width: 2rem !important;
+    height: 2rem !important;
+    padding: 0 !important;
+    justify-content: center;
   }
 }
 
