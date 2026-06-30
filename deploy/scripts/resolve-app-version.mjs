@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 const repoRoot = path.resolve(import.meta.dirname, "../..");
 const requireFromApi = createRequire(path.join(repoRoot, "services/bright_os_api/package.json"));
 const Database = requireFromApi("better-sqlite3");
+const LEGACY_PRODUCTION_MOBILE_BUNDLE_FLOOR = "0.10.48.1";
 if (path.resolve(process.argv[1] ?? "") === fileURLToPath(import.meta.url)) {
   const args = parseArgs(process.argv.slice(2));
   console.log(resolveAppVersion({
@@ -130,6 +131,8 @@ function latestMobileTargetVersion(mobileTarget) {
 
 function productionMobileBundleVersion(ledgerVersion, dbPath, mobileTarget) {
   const latestPublished = latestBrightVersion([
+    // APK 0.0.41.3 shipped with web 0.10.48.1 before the current prod deployment ledger existed.
+    LEGACY_PRODUCTION_MOBILE_BUNDLE_FLOOR,
     dbPath && latestProductionDeploymentVersion(dbPath),
     mobileTarget && latestMobileTargetVersion(mobileTarget),
   ]);

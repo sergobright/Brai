@@ -268,18 +268,6 @@ try {
     reason: "Needed for test",
     releasedAtUtc: "2026-06-28T17:29:00.000Z",
   });
-  store.recordDeployment({
-    environment: "prod",
-    slot: null,
-    branch: "main",
-    commit: "legacy-prod",
-    domain: "brightos.world",
-    webOtaVersion: "0.10.48.1",
-    shortChanges: "Legacy production OTA",
-    detailedChanges: "Legacy production OTA",
-    reason: "Needed to keep production OTA versions monotonic across ledger migration.",
-    deployedAtUtc: "2026-06-28T23:39:00.000Z",
-  });
 } finally {
   store.close();
 }
