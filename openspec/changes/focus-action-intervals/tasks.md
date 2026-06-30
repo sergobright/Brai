@@ -1,0 +1,30 @@
+- [ ] 1.1 Read `AGENTS.md`, `docs/DEVELOPMENT_GUIDELINES.md`, and guidelines `03`, `04`, `06`, and `12` before implementation edits.
+- [ ] 1.2 Start implementation from the official Bright task starter with slug `focus-action-intervals`.
+- [ ] 2.1 Add an idempotent API migration that creates `focus_session_intervals`, required indexes, and the active-interval guard where safe.
+- [ ] 2.2 Rebuild `focus_sessions` without temporal columns and add `start_origin` plus `started_by_activity_id`.
+- [ ] 2.3 Backfill current `focus_session_versions` rows into stable legacy intervals and drop `focus_session_versions` after successful migration.
+- [ ] 2.4 Update `table_descriptions` for Focus sessions, intervals, and timer event type metadata.
+- [ ] 3.1 Extend timer event validation, CHECK constraints, ingestion, ignored reasons, and metadata parsing for action-focus and interval-edit events.
+- [ ] 3.2 Rewrite canonical replay to derive Focus sessions and intervals from start/stop, action-focus, edit, and delete events.
+- [ ] 3.3 Update active session, latest completed session, session listing, and challenge summary reads to aggregate from intervals.
+- [ ] 3.4 Implement deterministic action-focus conflict splitting and equal-timestamp ordering coverage.
+- [ ] 3.5 Handle active activity deletion by closing the activity interval and continuing ordinary Focus when the main session should stay active.
+- [ ] 4.1 Extend `/v1/timer/state` with active interval, active activity, and session origin fields.
+- [ ] 4.2 Extend `/v1/sessions` with intervals, activity interval count, primary activity id/title, and current-title lookup for archived/deleted activities.
+- [ ] 4.3 Preserve existing top-level session fields as interval aggregates for compatibility.
+- [ ] 5.1 Extend client timer types with action-focus event types, `FocusSessionInterval`, interval fields, and active interval state.
+- [ ] 5.2 Update local outbox projection for `start_activity_focus`, `switch_activity_focus`, `stop_activity_focus`, `edit_focus_interval`, compatible `edit_session`, and `delete_session`.
+- [ ] 5.3 Add app state commands for starting, switching, stopping action focus, and editing Focus intervals.
+- [ ] 5.4 Update session cache handling and Dexie migration only if new local tables or indexes are introduced.
+- [ ] 6.1 Add Activity-row Focus controls for desktop hover/focus and mobile swipe/tap states without changing row height.
+- [ ] 6.2 Update the Focus dock button to show stable active elapsed time and clipped quiet rotation while preserving existing dimensions.
+- [ ] 6.3 Update Focus history parent rows, multi-interval expansion, interval edit placement, active-interval edit blocking, and multi-interval delete confirmation.
+- [ ] 6.4 Enforce interval edit bounds, no-overlap rules, gap handling, and 1-minute manual minimum with 5-minute step controls.
+- [ ] 7.1 Add API migration tests for old databases, table removal, table shape, and unchanged historical totals.
+- [ ] 7.2 Add API lifecycle tests for Focus-started and activity-started sessions, switching, stopping, active activity deletion, delete, edit, and conflict ordering.
+- [ ] 7.3 Add client projection and cache tests for new event types and reload survival.
+- [ ] 7.4 Add component tests for Activity-row controls, mobile stop timeout, dock stable sizing, and Focus history interval rules.
+- [ ] 7.5 Add visual/e2e coverage for desktop Activity rows, mobile swipe/stop flow, active Focus dock, and multi-interval history expansion.
+- [ ] 8.1 Run `npm run app:test`, `npm run app:lint`, `npm run app:build`, `npm --prefix services/bright_os_api test`, `npm run openspec:validate`, and `scripts/bright-guard-sync-check.sh --check`.
+- [ ] 8.2 Classify delivery as `runtime/product` and finish implementation through `scripts/bright-preview-handoff.sh`.
+

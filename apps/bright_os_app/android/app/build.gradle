@@ -6,6 +6,7 @@ def androidKeyAlias = System.getenv('BRIGHT_OS_ANDROID_KEY_ALIAS')
 def androidKeyPassword = System.getenv('BRIGHT_OS_ANDROID_KEY_PASSWORD') ?: androidStorePassword
 def androidReleaseKeystore = file(androidKeystorePath ?: 'missing-release-keystore.jks')
 def brightOsWebVersion = System.getenv('BRIGHT_OS_APP_VERSION') ?: '0.0.10.1'
+def brightOsAndroidApi = System.getenv('NEXT_PUBLIC_BRIGHT_OS_ANDROID_API') ?: 'https://api.brightos.world'
 def brightOsAndroidVersionCode = (System.getenv('BRIGHT_OS_ANDROID_VERSION_CODE') ?: '1') as Integer
 def brightOsProductionFallbackBundleVersion = System.getenv('BRIGHT_OS_PROD_FALLBACK_BUNDLE_VERSION') ?: '0.0.10.1'
 def brightOsNonProductionFallbackBundleVersion = System.getenv('BRIGHT_OS_NON_PROD_FALLBACK_BUNDLE_VERSION') ?: "${brightOsWebVersion}.0"
@@ -21,6 +22,7 @@ android {
         versionName brightOsWebVersion
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         manifestPlaceholders = [brightAppLabel: 'Bright OS']
+        buildConfigField "String", "BRIGHT_OS_ANDROID_API", "\"${brightOsAndroidApi}\""
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
              // Default: https://android.googlesource.com/platform/frameworks/base/+/282e181b58cf72b6ca770dc7ca5f91f135444502/tools/aapt/AaptAssets.cpp#61
