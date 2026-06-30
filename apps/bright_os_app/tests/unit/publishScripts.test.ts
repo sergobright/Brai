@@ -403,7 +403,14 @@ try {
     expect(prodBlock.indexOf('deploy/scripts/build-android-env-apk.sh production')).toBeLessThan(prodBlock.indexOf('deploy/scripts/build-nonproduction-apks.sh'));
     expect(buildApk).toContain('--next-apk true --target-branch "$BRIGHT_OS_BRANCH" --target-commit "$BRIGHT_OS_COMMIT"');
     expect(buildApk).toContain('record-shipped-apk-version.mjs');
-    expect(releaseSlot).toContain('deploy/scripts/build-android-env-apk.sh "preview${SLOT_META[0]}" >&2');
+    const releasePreviewBuild = 'deploy/scripts/build-android-env-apk.sh "preview${SLOT_META[0]}" >&2';
+    expect(releaseSlot).toContain(
+      'export BRIGHT_OS_APP_VERSION="$(node deploy/scripts/resolve-app-version.mjs --environment prod --root "$BASELINE_SOURCE" --db "$BRIGHT_OS_PROD_DB")"',
+    );
+    expect(releaseSlot.indexOf('export BRIGHT_OS_APP_VERSION=')).toBeLessThan(
+      releaseSlot.indexOf(releasePreviewBuild),
+    );
+    expect(releaseSlot).toContain(releasePreviewBuild);
   });
 
   it("publishes a versioned bundle and atomic manifest from a static export", async () => {
