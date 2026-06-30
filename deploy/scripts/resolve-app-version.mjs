@@ -17,6 +17,9 @@ if (path.resolve(process.argv[1] ?? "") === fileURLToPath(import.meta.url)) {
     prodDb: args["prod-db"],
     prodWebVersionJson: args["prod-web-version-json"],
     mobileTarget: args["mobile-target"],
+    nextApk: args["next-apk"] === "true",
+    targetBranch: args["target-branch"],
+    targetCommit: args["target-commit"],
   }));
 }
 
@@ -28,11 +31,14 @@ export function resolveAppVersion({
   prodWebVersionJson = "",
   mobileTarget = "",
   explicit = process.env.BRIGHT_OS_APP_VERSION || "",
+  nextApk = false,
+  targetBranch = "",
+  targetCommit = "",
 } = {}) {
   if (explicit) return validVersion(explicit);
 
   if (environment === "prod" && db) {
-    const ledgerVersion = latestProductionVersion(db);
+    const ledgerVersion = latestProductionVersion(db, { nextApk, targetBranch, targetCommit });
     if (ledgerVersion) return validVersion(ledgerVersion);
   }
 
@@ -52,7 +58,7 @@ function validVersion(version) {
   return version;
 }
 
-function latestProductionVersion(dbPath) {
+function latestProductionVersion(dbPath, { nextApk = false, targetBranch = "", targetCommit = "" } = {}) {
   if (!fs.existsSync(dbPath)) return "";
   const db = new Database(dbPath, { readonly: true, fileMustExist: true });
   try {
@@ -66,9 +72,26 @@ function latestProductionVersion(dbPath) {
         FROM build_versions
       `)
       .get();
-    const parts = ["canon", "release", "build", "apk"].map((key) => numericPart(row?.[key]));
-    if (parts.some((part) => part == null) || !parts[2] || !parts[3]) return "";
-    return parts.join(".");
+    const parts = ["canon", "release", "build"].map((key) => numericPart(row?.[key]));
+    let apk = Number(row?.apk || 0);
+    if (nextApk) {
+      const existing = targetCommit
+        ? db
+          .prepare(`
+            SELECT version
+            FROM build_version_refs
+            WHERE version_type_id = 'apk'
+              AND target_branch = ?
+              AND target_commit = ?
+            ORDER BY version DESC
+            LIMIT 1
+          `)
+          .get(targetBranch || "", targetCommit)
+        : null;
+      apk = numericPart(existing?.version) ?? apk + 1;
+    }
+    if (parts.some((part) => part == null) || !parts[2] || !apk) return "";
+    return `${parts[0]}.${parts[1]}.${parts[2]}.${apk}`;
   } finally {
     db.close();
   }

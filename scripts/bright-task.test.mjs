@@ -19,6 +19,7 @@ import {
   isManualCodexBranchCommand,
   isReadOnlyShellCommand,
   isSensitivePath,
+  isTaskBaseRefreshCommand,
   isWriteLikeCommand,
   linkDependencyDirs,
   parseHookInput,
@@ -64,6 +65,17 @@ test("manual branch commands are hard blocked", () => {
   assert.equal(isManualBranchCommand("git worktree list"), true);
 });
 
+test("task base refresh commands are hard blocked", () => {
+  assert.equal(isTaskBaseRefreshCommand("git fetch origin"), true);
+  assert.equal(isTaskBaseRefreshCommand("git fetch origin --prune"), true);
+  assert.equal(isTaskBaseRefreshCommand("git fetch origin main"), true);
+  assert.equal(isTaskBaseRefreshCommand("git fetch origin +refs/heads/main:refs/remotes/origin/main"), true);
+  assert.equal(isTaskBaseRefreshCommand("git pull origin main"), true);
+  assert.equal(isTaskBaseRefreshCommand("git merge origin/main"), true);
+  assert.equal(isTaskBaseRefreshCommand("git rebase origin/main"), true);
+  assert.equal(isTaskBaseRefreshCommand("git fetch origin +refs/heads/codex/foo:refs/remotes/origin/codex/foo"), false);
+});
+
 test("hook analysis detects namespaced custom and nested write tools", () => {
   for (const input of [
     { tool_name: "functions.apply_patch", tool_input: { patch: "*** Begin Patch" } },
@@ -78,6 +90,40 @@ test("hook analysis detects namespaced custom and nested write tools", () => {
     const result = analyzeHookInput(JSON.stringify(input));
     assert.equal(result.ok, true);
     assert.equal(result.write, true);
+  }
+});
+
+test("hook analysis blocks base refresh inside an active task branch", () => {
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), "bright-task-base-refresh-"));
+  const previous = process.cwd();
+  try {
+    git(["init"], repo);
+    git(["config", "user.email", "test@example.invalid"], repo);
+    git(["config", "user.name", "Bright Test"], repo);
+    fs.writeFileSync(path.join(repo, ".gitignore"), ".bright-task/\n");
+    fs.writeFileSync(path.join(repo, "base.txt"), "base\n");
+    git(["add", ".gitignore", "base.txt"], repo);
+    git(["commit", "-m", "base"], repo);
+    const base = git(["rev-parse", "HEAD"], repo).stdout.trim();
+    git(["update-ref", "refs/remotes/origin/main", base], repo);
+    git(["checkout", "-b", "codex/foo"], repo);
+    fs.mkdirSync(path.join(repo, ".bright-task"));
+    fs.writeFileSync(
+      path.join(repo, ".bright-task", "task.json"),
+      `${JSON.stringify({
+        branch: "codex/foo",
+        mode: "new",
+        base,
+        createdAt: "2026-06-26T00:00:00.000Z",
+      })}\n`,
+    );
+    process.chdir(repo);
+
+    const result = analyzeHookInput(JSON.stringify({ tool_name: "functions.exec_command", tool_input: { cmd: "git merge origin/main" } }));
+    assert.equal(result.ok, true);
+    assert.match(result.blockedReason, /original task base/);
+  } finally {
+    process.chdir(previous);
   }
 });
 
@@ -307,6 +353,47 @@ test("task marker is bound to the current Codex thread when one exists", () => {
   assert.match(validateTaskThread({ threadId: "thread-b" }, "thread-a").message, /thread-b/);
 });
 
+test("follow-up keeps the original task base after origin-main advances", () => {
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), "bright-task-follow-up-base-"));
+  const script = path.resolve(process.cwd(), "scripts/bright-task.mjs");
+  git(["init"], repo);
+  git(["config", "user.email", "test@example.invalid"], repo);
+  git(["config", "user.name", "Bright Test"], repo);
+  fs.writeFileSync(path.join(repo, ".gitignore"), ".bright-task/\n");
+  fs.writeFileSync(path.join(repo, "base.txt"), "base\n");
+  git(["add", ".gitignore", "base.txt"], repo);
+  git(["commit", "-m", "base"], repo);
+  const base = git(["rev-parse", "HEAD"], repo).stdout.trim();
+  git(["update-ref", "refs/remotes/origin/main", base], repo);
+  git(["checkout", "-b", "codex/foo"], repo);
+  fs.mkdirSync(path.join(repo, ".bright-task"));
+  fs.writeFileSync(
+    path.join(repo, ".bright-task", "task.json"),
+    `${JSON.stringify({
+      branch: "codex/foo",
+      mode: "new",
+      base,
+      createdAt: "2026-06-26T00:00:00.000Z",
+    })}\n`,
+  );
+  git(["checkout", "-b", "main", base], repo);
+  fs.writeFileSync(path.join(repo, "main.txt"), "main\n");
+  git(["add", "main.txt"], repo);
+  git(["commit", "-m", "advance main"], repo);
+  git(["update-ref", "refs/remotes/origin/main", "HEAD"], repo);
+  git(["checkout", "codex/foo"], repo);
+
+  const result = spawnSync(process.execPath, [script, "follow-up"], {
+    cwd: repo,
+    encoding: "utf8",
+    env: { ...process.env, CODEX_THREAD_ID: "" },
+  });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  const marker = JSON.parse(fs.readFileSync(path.join(repo, ".bright-task", "task.json"), "utf8"));
+  assert.equal(marker.mode, "follow-up");
+  assert.equal(marker.base, base);
+});
+
 test("task state rejects a branch with another task marker", () => {
   const repo = fs.mkdtempSync(path.join(os.tmpdir(), "bright-task-wrong-marker-"));
   const previous = process.cwd();
@@ -342,8 +429,8 @@ test("task state rejects a branch with another task marker", () => {
   }
 });
 
-test("task state rejects origin-dev based branch that is not based on current origin-main", () => {
-  const repo = fs.mkdtempSync(path.join(os.tmpdir(), "bright-task-origin-main-"));
+test("task state keeps the original task base when origin-main advances", () => {
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), "bright-task-frozen-base-"));
   const previous = process.cwd();
   try {
     git(["init"], repo);
@@ -352,26 +439,28 @@ test("task state rejects origin-dev based branch that is not based on current or
     fs.writeFileSync(path.join(repo, ".gitignore"), ".bright-task/\n");
     fs.writeFileSync(path.join(repo, "base.txt"), "base\n");
     git(["add", ".gitignore", "base.txt"], repo);
-    git(["commit", "-m", "dev base"], repo);
-    git(["update-ref", "refs/remotes/origin/dev", "HEAD"], repo);
-    git(["checkout", "-b", "codex/from-old-dev"], repo);
-    const branchHead = git(["rev-parse", "HEAD"], repo).stdout.trim();
+    git(["commit", "-m", "base"], repo);
+    const base = git(["rev-parse", "HEAD"], repo).stdout.trim();
+    git(["update-ref", "refs/remotes/origin/main", base], repo);
+    git(["checkout", "-b", "codex/frozen-base"], repo);
     fs.writeFileSync(path.join(repo, "branch.txt"), "branch\n");
     git(["add", "branch.txt"], repo);
     git(["commit", "-m", "branch change"], repo);
+    const branchHead = git(["rev-parse", "HEAD"], repo).stdout.trim();
+    git(["update-ref", "refs/remotes/origin/codex/frozen-base", branchHead], repo);
+    git(["checkout", "-b", "main", base], repo);
     fs.writeFileSync(path.join(repo, "main.txt"), "main\n");
-    git(["checkout", "-b", "main", branchHead], repo);
     git(["add", "main.txt"], repo);
     git(["commit", "-m", "current main"], repo);
     git(["update-ref", "refs/remotes/origin/main", "HEAD"], repo);
-    git(["checkout", "codex/from-old-dev"], repo);
+    git(["checkout", "codex/frozen-base"], repo);
     fs.mkdirSync(path.join(repo, ".bright-task"));
     fs.writeFileSync(
       path.join(repo, ".bright-task", "task.json"),
       `${JSON.stringify({
-        branch: "codex/from-old-dev",
+        branch: "codex/frozen-base",
         mode: "new",
-        base: branchHead,
+        base,
         createdAt: "2026-06-26T00:00:00.000Z",
         writeIntentAt: "2026-06-26T00:01:00.000Z",
         ...(process.env.CODEX_THREAD_ID ? { threadId: process.env.CODEX_THREAD_ID } : {}),
@@ -380,8 +469,9 @@ test("task state rejects origin-dev based branch that is not based on current or
     process.chdir(repo);
 
     const state = deriveTaskState();
+    assert.equal(state.validation.ok, true);
     assert.equal(state.ok, false);
-    assert.match(state.validation.message, /origin\/main is not an ancestor/);
+    assert.match(state.message, /delivery verification/);
   } finally {
     process.chdir(previous);
   }

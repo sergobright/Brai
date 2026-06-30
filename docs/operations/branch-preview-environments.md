@@ -12,6 +12,8 @@ Read-only questions, planning, investigation without project-file changes, and e
 
 Agents must not reuse an existing `codex/*` branch just because Codex Desktop selected it by default. A new Codex thread must start a new task branch before changing project files, regardless of which branch the UI selected. Direct follow-ups may continue the same branch only inside the same Codex thread while the branch is not accepted into `main`; explicit project-owner branch instructions do not override this thread boundary for project-file writes.
 
+Follow-up branches keep the exact task base recorded by the starter in `.bright-task/task.json`. While the branch is not accepted, agents must not update it from a later `origin/main` with fetch/pull/merge/rebase commands. Background merges into `main` are handled by the eventual PR/merge queue or by starting a new task after acceptance, not by repeatedly rebasing an in-review preview branch.
+
 A pushed preview-class `codex/*` branch allocates or reuses a preview slot through `deploy/scripts/preview-slots.sh`, deploys that slot, and reports the slot URL. If all slots `A` through `E` are occupied, the branch enters the preview queue until a slot is released. No push means no slot/deploy/queue.
 
 If the preview branch changes the Android native boundary, deploy also builds a slot-specific APK and records the APK file plus Android `versionCode` in the preview slot registry/status page. Preview OTA manifests then require that exact `versionCode`, so stale slot APKs block with an APK update screen instead of silently running an incompatible web bundle.
@@ -34,6 +36,7 @@ Repository Codex hooks are defined in `.codex/hooks.json`:
 
 - `PreToolUse` recursively inspects namespaced, custom, and nested tool calls such as `functions.apply_patch`, `custom_tool_call`, and `multi_tool_use.parallel`. Before a valid task state exists, only explicitly read-only shell commands and the official task starter are allowed; unknown shell commands are treated as write-like and blocked.
 - The local `.bright-task/` marker must come from `scripts/bright-task-start.sh` (`mode: new`) or an explicit same-thread `node scripts/bright-task.mjs follow-up` (`mode: follow-up`). Automatically created or manual markers are invalid for project-file writes.
+- The `.bright-task/task.json` `base` SHA is the frozen task base for follow-up, commit, push, and handoff checks. The guard blocks manual `origin/main` refresh commands in active `codex/*` task branches.
 - When Codex provides a thread id, the marker must match the current thread. A different or missing thread id blocks project-file writes, commits, and pushes; start a new task branch instead of continuing the auto-selected branch.
 - Manual creation or switching of `codex/*` branches through `git switch`, `git checkout`, `git branch`, or `git worktree` is blocked; use the task starter or same-thread follow-up marker instead.
 - If the current branch or its remote head is already included in `origin/main`, it is treated as accepted work and cannot receive more project-file changes. Start a new task branch even if Codex Desktop selected the old branch by default.

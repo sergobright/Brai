@@ -91,6 +91,33 @@ export const deploymentMethods = {
     return { versionTypeId: 'build', version };
   },
 
+  recordShippedApkVersion({
+    version,
+    versionCode,
+    sourceBranch = null,
+    sourceCommit = null,
+    targetBranch,
+    targetCommit,
+    releasedAtUtc,
+  }) {
+    const existing = this.findBuildVersionByTargetCommit({ targetBranch, targetCommit, versionTypeId: 'apk' });
+    if (existing) return { versionTypeId: 'apk', version: existing.version };
+    this.upsertBuildVersion({
+      versionTypeId: 'apk',
+      version,
+      includedInVersionId: null,
+      shortChanges: `Android APK ${version}.`,
+      detailedChanges: `Shipped Android APK ${version} with versionCode ${versionCode}.`,
+      reason: 'Needed because a native Android APK was shipped.',
+      releasedAtUtc,
+      sourceBranch,
+      sourceCommit,
+      targetBranch,
+      targetCommit,
+    });
+    return { versionTypeId: 'apk', version };
+  },
+
   recordReleaseVersion({
     sourceBranch,
     sourceCommit,

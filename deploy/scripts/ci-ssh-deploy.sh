@@ -133,7 +133,7 @@ fi
 if [[ -d "$SOURCE_ROOT" ]]; then
   find "$SOURCE_ROOT" -user "$(id -u)" -exec chmod u+rwX,g+rwX {} + || true
 fi
-rm -rf "$SOURCE_ROOT"
+rm -rf "$SOURCE_ROOT" || { sleep 2; rm -rf "$SOURCE_ROOT"; }
 mkdir -p "$(dirname "$SOURCE_ROOT")"
 mv "$REMOTE_UPLOAD" "$SOURCE_ROOT"
 

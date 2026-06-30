@@ -12,6 +12,10 @@ Bright OS version rows use four `version_type_id` values: `apk`, `build`, `relea
 
 Build and publish a release APK only when native Android code, Capacitor config, permissions, signing, manifest values, application id, SDK versions, icons, splash assets, native plugins, or native compatibility boundaries change.
 
+## Shipped APK Ledger Order
+
+For a production shipped APK, resolve the APK `versionName` from the production `build_versions` ledger as `canon.release.build.(apk + 1)` before the Gradle build, publish the APK with that exact `X.Y.Z.S`, then record the new `apk` row immediately after the APK is published. If the same target branch/commit is retried, reuse its existing `apk` row instead of incrementing again. Preview APKs and non-production baseline APK rebuilds must not create `apk` rows.
+
 Release APK signing is env-only. Required variables:
 
 - `BRIGHT_OS_ANDROID_KEYSTORE_PATH`

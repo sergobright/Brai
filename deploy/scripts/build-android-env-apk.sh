@@ -29,13 +29,20 @@ export BRIGHT_OS_ROOT="$ROOT"
 if [[ -z "${BRIGHT_OS_ANDROID_VERSION_CODE:-}" ]]; then
   export BRIGHT_OS_ANDROID_VERSION_CODE="$("$SCRIPT_DIR/apk-version-code.sh" next "manual $FLAVOR APK")"
 fi
-export BRIGHT_OS_APP_VERSION="${BRIGHT_OS_APP_VERSION:-$("$NODE_BIN" "$SCRIPT_DIR/resolve-app-version.mjs" \
+APK_LEDGER_RECORD=false
+VERSION_ARGS=(
   --environment "$ENVIRONMENT" \
   --root "$ROOT" \
   --db "${BRIGHT_OS_DB:-}" \
   --prod-db "${BRIGHT_OS_PROD_DB:-}" \
   --prod-web-version-json "${BRIGHT_OS_PROD_WEB_VERSION_JSON:-}" \
-  --mobile-target "${BRIGHT_OS_MOBILE_TARGET:-${BRIGHT_OS_ENVS_ROOT:-/srv/projects/bright-os-envs}/$ENV_PATH/mobile-update}")}"
+  --mobile-target "${BRIGHT_OS_MOBILE_TARGET:-${BRIGHT_OS_ENVS_ROOT:-/srv/projects/bright-os-envs}/$ENV_PATH/mobile-update}"
+)
+if [[ "$ENVIRONMENT" == "prod" && -n "${BRIGHT_OS_DB:-}" && -z "${BRIGHT_OS_APP_VERSION:-}" && -n "${BRIGHT_OS_BRANCH:-}" && -n "${BRIGHT_OS_COMMIT:-}" ]]; then
+  APK_LEDGER_RECORD=true
+  VERSION_ARGS+=(--next-apk true --target-branch "$BRIGHT_OS_BRANCH" --target-commit "$BRIGHT_OS_COMMIT")
+fi
+export BRIGHT_OS_APP_VERSION="${BRIGHT_OS_APP_VERSION:-$("$NODE_BIN" "$SCRIPT_DIR/resolve-app-version.mjs" "${VERSION_ARGS[@]}")}"
 export NEXT_PUBLIC_BRIGHT_OS_ENVIRONMENT="$ENVIRONMENT"
 export NEXT_PUBLIC_BRIGHT_OS_PREVIEW_SLOT="$SLOT"
 export NEXT_PUBLIC_BRIGHT_OS_BRANCH="${BRIGHT_OS_BRANCH:-}"
@@ -69,4 +76,21 @@ if [[ ! -f "$APK" ]]; then
   exit 1
 fi
 
+if [[ "$APK_LEDGER_RECORD" == "true" ]]; then
+  export BRIGHT_OS_PUBLISHED_AT="${BRIGHT_OS_PUBLISHED_AT:-$(date -u +"%Y-%m-%dT%H:%M:%SZ")}"
+fi
 BRIGHT_OS_RELEASE_ENV="$RELEASE_KEY" BRIGHT_OS_APK_SOURCE="$APK" "$SCRIPT_DIR/publish-capacitor-apk.sh"
+if [[ "$APK_LEDGER_RECORD" == "true" ]]; then
+  "$NODE_BIN" "$SCRIPT_DIR/record-shipped-apk-version.mjs" \
+    --db "$BRIGHT_OS_DB" \
+    --version "$BRIGHT_OS_APP_VERSION" \
+    --version-code "$BRIGHT_OS_ANDROID_VERSION_CODE" \
+    --target-branch "$BRIGHT_OS_BRANCH" \
+    --target-commit "$BRIGHT_OS_COMMIT" \
+    --released-at "$BRIGHT_OS_PUBLISHED_AT"
+  LEDGER_VERSION="$("$NODE_BIN" "$SCRIPT_DIR/resolve-app-version.mjs" --environment prod --root "$ROOT" --db "$BRIGHT_OS_DB")"
+  if [[ "$LEDGER_VERSION" != "$BRIGHT_OS_APP_VERSION" ]]; then
+    echo "Published APK version $BRIGHT_OS_APP_VERSION does not match ledger version $LEDGER_VERSION" >&2
+    exit 1
+  fi
+fi

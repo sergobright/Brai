@@ -45,6 +45,7 @@ export {
   enableGitHooks,
   isManualCodexBranchCommand,
   isManualBranchCommand,
+  isTaskBaseRefreshCommand,
   isBlockingAcceptanceReceipt,
   isReadOnlyShellCommand,
   isSensitivePath,
@@ -180,7 +181,7 @@ function markFollowUp(branchArg) {
   writeTaskMarker(git("rev-parse", "--show-toplevel"), withThreadId({
     branch,
     mode: "follow-up",
-    base: git("rev-parse", acceptedBaseRef()),
+    base: marker.base,
     createdAt: new Date().toISOString(),
   }));
   console.log(`Marked explicit follow-up for ${branch}`);
@@ -212,7 +213,6 @@ function preToolUse() {
 }
 
 function preCommit() {
-  fetchAcceptedBase();
   const validation = validateTaskBranch({ requireExpectedUpstream: true });
   if (!validation.ok) throw new Error(validation.message);
   const reuse = validateBranchReuse();
@@ -233,7 +233,6 @@ function preCommit() {
 function prePush(remoteName) {
   if (remoteName !== "origin") throw new Error(`Bright OS task branches must push to origin, got: ${remoteName || "(empty)"}`);
 
-  fetchAcceptedBase();
   const validation = validateTaskBranch({ requireExpectedUpstream: true });
   if (!validation.ok) throw new Error(validation.message);
   const reuse = validateBranchReuse();
@@ -244,14 +243,15 @@ function prePush(remoteName) {
     .split("\n")
     .map((line) => line.trim())
     .filter(Boolean);
-  for (const line of updates) validatePushUpdate(line, branch, { isAcceptedRemote: (sha) => isAncestor(sha, acceptedBaseRef()) });
+  for (const line of updates) validatePushUpdate(line, branch);
 
   const upstream = gitMaybe("rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}");
   if (upstream && upstream !== `origin/${branch}`) {
     throw new Error(`Wrong upstream: ${upstream}. Expected origin/${branch}. Fix with: git push -u origin HEAD`);
   }
-  if (!isAncestor(acceptedBaseRef(), "HEAD")) {
-    throw new Error(`${acceptedBaseRef()} is not an ancestor of HEAD. Start from current ${acceptedBaseRef()} or rebase intentionally before pushing.`);
+  const baseRef = taskBaseRefForBranch(branch);
+  if (!isAncestor(baseRef, "HEAD")) {
+    throw new Error(`Task base ${baseRef} is not an ancestor of HEAD. Start a fresh task branch instead of rebasing or merging ${acceptedBaseRef()}.`);
   }
 
   const changed = diffFromAcceptedBase();
@@ -288,11 +288,12 @@ function previewHandoff(branchArg) {
   if (branch !== currentBranch()) throw new Error(`Current branch is ${currentBranch()}, not ${branch}`);
   const head = git("rev-parse", "HEAD");
 
-  fetchAcceptedBaseAndBranch(branch);
+  fetchTaskBranch(branch);
   const remoteSha = git("rev-parse", `origin/${branch}`);
   if (remoteSha !== head) throw new Error(`HEAD ${head} is not pushed to origin/${branch} (${remoteSha}). Push before handoff.`);
   if (git("status", "--porcelain").trim()) throw new Error("Working tree is not clean. Commit or remove local changes before handoff.");
-  if (!isAncestor(acceptedBaseRef(), head)) throw new Error(`${acceptedBaseRef()} is not an ancestor of ${head}.`);
+  const baseRef = taskBaseRefForBranch(branch);
+  if (!isAncestor(baseRef, head)) throw new Error(`Task base ${baseRef} is not an ancestor of ${head}.`);
 
   const run = findSuccessfulDeliveryRun(branch, head, ["public-guard", "checks", "temporal-worker-check", "deploy-preview"]);
   const slot = readPreviewSlot(branch, head);
@@ -326,7 +327,7 @@ function deliveryHandoff(branchArg) {
   if (branch !== currentBranch()) throw new Error(`Current branch is ${currentBranch()}, not ${branch}`);
   const head = git("rev-parse", "HEAD");
 
-  fetchAcceptedBaseAndBranch(branch);
+  fetchTaskBranch(branch);
   const remoteSha = git("rev-parse", `origin/${branch}`);
   if (remoteSha !== head) throw new Error(`HEAD ${head} is not pushed to origin/${branch} (${remoteSha}). Push before handoff.`);
   if (git("status", "--porcelain").trim()) throw new Error("Working tree is not clean. Commit or remove local changes before handoff.");
@@ -523,8 +524,9 @@ function validateTaskBranch({ requireExpectedUpstream }) {
   if (!CODEX_BRANCH_RE.test(branch)) {
     return { ok: false, message: `Implementation work must run on codex/<task-slug>, got: ${branch}` };
   }
-  if (!gitMaybe("rev-parse", "--verify", acceptedBaseRef())) {
-    return { ok: false, message: `${acceptedBaseRef()} is missing locally. Run: git fetch origin ${acceptedBaseBranch()}` };
+  const baseRef = taskBaseRefForBranch(branch);
+  if (!gitMaybe("rev-parse", "--verify", `${baseRef}^{commit}`)) {
+    return { ok: false, message: `${baseRef} is missing locally. Start a fresh task branch with scripts/bright-task-start.sh <task-slug>.` };
   }
 
   const upstream = gitMaybe("rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}");
@@ -534,8 +536,8 @@ function validateTaskBranch({ requireExpectedUpstream }) {
   if (requireExpectedUpstream && upstream && upstream !== `origin/${branch}`) {
     return { ok: false, message: `${branch} tracks ${upstream}. Expected origin/${branch} or no upstream before first push.` };
   }
-  if (!isAncestor(acceptedBaseRef(), "HEAD")) {
-    return { ok: false, message: `${acceptedBaseRef()} is not an ancestor of HEAD. Start the task from ${acceptedBaseRef()}.` };
+  if (!isAncestor(baseRef, "HEAD")) {
+    return { ok: false, message: `Task base ${baseRef} is not an ancestor of HEAD. Start a fresh task branch instead of rebasing or merging ${acceptedBaseRef()}.` };
   }
 
   return { ok: true };
@@ -680,6 +682,11 @@ function acceptedBaseRef() {
 function acceptedBaseFetchRefspec() {
   const branch = acceptedBaseBranch();
   return `+refs/heads/${branch}:refs/remotes/origin/${branch}`;
+}
+
+function taskBaseRefForBranch(branch = currentBranch()) {
+  const marker = readTaskMarker();
+  return validateTaskMarker(marker, branch).ok ? marker.base : acceptedBaseRef();
 }
 
 function dependencySourceRoot(root) {
@@ -832,6 +839,15 @@ function classifyToolCall({ tool, input }) {
     if (isUnsafeRepoTaskStarterCommand(commandText)) {
       return { ok: true, write: true, blockedReason: `Repo-local task starter is stale in this checkout.\n\n${taskStartGuidance()}` };
     }
+    if (isTaskBaseRefreshCommand(commandText) && hasActiveTaskMarker()) {
+      return {
+        ok: true,
+        write: true,
+        blockedReason:
+          `Bright OS follow-up branches keep their original task base until acceptance.\n\n` +
+          `Do not fetch, pull, merge, or rebase ${acceptedBaseRef()} into an active codex/* branch; continue with: node scripts/bright-task.mjs follow-up`,
+      };
+    }
     if (isManualCodexBranchCommand(commandText)) return { ok: true, write: true, manualCodexBranch: true };
     if (isOfficialTaskStarterCommand(commandText)) return { ok: true, write: false, officialTaskStarter: true };
     return { ok: true, write: isWriteLikeCommand(commandText) };
@@ -914,6 +930,24 @@ function isReadOnlyShellSegment(segment) {
 
 function isManualCodexBranchCommand(commandText) {
   return isManualBranchCommand(commandText);
+}
+
+function isTaskBaseRefreshCommand(commandText) {
+  const base = acceptedBaseBranch().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const remoteBase = `origin/${base}`;
+  const basePattern = new RegExp(`(?:\\b${base}\\b|refs/heads/${base}|\\b${remoteBase}\\b)`);
+  return splitShellSegments(commandText).some((segment) => {
+    if (/^git\s+fetch\s+origin(?:\s|$)/.test(segment)) {
+      return !/^git\s+fetch\s+origin\s+\+?refs\/heads\/codex\//.test(segment) || basePattern.test(segment);
+    }
+    return new RegExp(`^git\\s+pull\\b.*\\borigin\\s+${base}\\b`).test(segment) ||
+      new RegExp(`^git\\s+(?:merge|rebase)\\b.*(?:\\b${remoteBase}\\b|\\b${base}\\b)`).test(segment);
+  });
+}
+
+function hasActiveTaskMarker() {
+  const branch = currentBranch();
+  return CODEX_BRANCH_RE.test(branch) && validateTaskMarker(readTaskMarker(), branch).ok;
 }
 
 function isManualBranchCommand(commandText) {
@@ -1115,8 +1149,8 @@ function fetchAcceptedBase() {
   git("fetch", "origin", acceptedBaseFetchRefspec());
 }
 
-function fetchAcceptedBaseAndBranch(branch) {
-  git("fetch", "origin", acceptedBaseFetchRefspec(), `+refs/heads/${branch}:refs/remotes/origin/${branch}`);
+function fetchTaskBranch(branch) {
+  git("fetch", "origin", `+refs/heads/${branch}:refs/remotes/origin/${branch}`);
 }
 
 function remoteBranchExists(branch) {
