@@ -268,6 +268,18 @@ try {
     reason: "Needed for test",
     releasedAtUtc: "2026-06-28T17:29:00.000Z",
   });
+  store.recordDeployment({
+    environment: "prod",
+    slot: null,
+    branch: "main",
+    commit: "legacy-prod",
+    domain: "brightos.world",
+    webOtaVersion: "0.10.48.1",
+    shortChanges: "Legacy production OTA",
+    detailedChanges: "Legacy production OTA",
+    reason: "Needed to keep production OTA versions monotonic across ledger migration.",
+    deployedAtUtc: "2026-06-28T23:39:00.000Z",
+  });
 } finally {
   store.close();
 }
@@ -276,11 +288,6 @@ try {
     await mkdir(path.join(root, "deploy/web"), { recursive: true });
     await writeFile(path.join(root, "deploy/web/version.json"), JSON.stringify({ version: "0.0.38.1" }));
     const prodMobileTarget = path.join(root, "deploy/mobile-update");
-    await mkdir(path.join(prodMobileTarget, "bundles/0.10.48.1"), { recursive: true });
-    await writeFile(
-      path.join(prodMobileTarget, "bundles/0.10.48.1/metadata.json"),
-      JSON.stringify({ bundleVersion: "0.10.48.1" }),
-    );
     const mobileTarget = path.join(root, "envs/preview-a/mobile-update");
     await mkdir(path.join(mobileTarget, "bundles/0.11.52.1.20260629202736"), { recursive: true });
     await writeFile(

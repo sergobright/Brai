@@ -42,7 +42,7 @@ export function resolveAppVersion({
   if (environment === "prod" && db) {
     const ledgerVersion = latestProductionVersion(db, { nextApk, targetBranch, targetCommit });
     if (ledgerVersion) {
-      return validVersion(mobileBundle ? productionMobileBundleVersion(ledgerVersion, mobileTarget) : ledgerVersion);
+      return validVersion(mobileBundle ? productionMobileBundleVersion(ledgerVersion, db, mobileTarget) : ledgerVersion);
     }
   }
 
@@ -128,12 +128,34 @@ function latestMobileTargetVersion(mobileTarget) {
   return latestBrightVersion(versions);
 }
 
-function productionMobileBundleVersion(ledgerVersion, mobileTarget) {
-  const latestPublished = mobileTarget && latestMobileTargetVersion(mobileTarget);
+function productionMobileBundleVersion(ledgerVersion, dbPath, mobileTarget) {
+  const latestPublished = latestBrightVersion([
+    dbPath && latestProductionDeploymentVersion(dbPath),
+    mobileTarget && latestMobileTargetVersion(mobileTarget),
+  ]);
   if (latestPublished && compareBrightVersions(latestPublished, ledgerVersion) > 0) {
     return nextWebBundleVersion(latestPublished);
   }
   return ledgerVersion;
+}
+
+function latestProductionDeploymentVersion(dbPath) {
+  if (!fs.existsSync(dbPath)) return "";
+  const db = new Database(dbPath, { readonly: true, fileMustExist: true });
+  try {
+    const rows = db
+      .prepare(`
+        SELECT web_ota_version
+        FROM deployment_records
+        WHERE environment = 'prod'
+          AND web_ota_version IS NOT NULL
+          AND web_ota_version != ''
+      `)
+      .all();
+    return latestBrightVersion(rows.map((row) => row.web_ota_version));
+  } finally {
+    db.close();
+  }
 }
 
 function nextWebBundleVersion(version) {
