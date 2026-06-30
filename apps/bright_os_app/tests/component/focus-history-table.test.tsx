@@ -85,14 +85,23 @@ describe("FocusHistoryTable", () => {
         {
           id: "interval-2",
           focus_session_id: "session-intervals",
+          activity_id: "action-2",
+          activity_title: "Очень длинная подготовка",
+          started_at_utc: "2026-06-14T10:30:00.000Z",
+          ended_at_utc: "2026-06-14T10:40:00.000Z",
+          duration_seconds: 600,
+        },
+        {
+          id: "interval-3",
+          focus_session_id: "session-intervals",
           activity_id: null,
           activity_title: null,
-          started_at_utc: "2026-06-14T10:30:00.000Z",
+          started_at_utc: "2026-06-14T10:40:00.000Z",
           ended_at_utc: "2026-06-14T11:00:00.000Z",
-          duration_seconds: 1800,
+          duration_seconds: 1200,
         },
       ],
-      activity_interval_count: 1,
+      activity_interval_count: 2,
       primary_activity_id: "action-1",
       primary_activity_title: "Письмо",
     };
@@ -106,7 +115,10 @@ describe("FocusHistoryTable", () => {
       />,
     );
 
-    fireEvent.click(screen.getByText("Письмо"));
+    expect(screen.getByText("Очень длинная подготовка")).toBeInTheDocument();
+    expect(screen.getByLabelText("Дополнительных действий: 1")).toHaveTextContent("+1");
+
+    fireEvent.click(screen.getByText("Очень длинная подготовка"));
     await waitFor(() => expect(screen.getByRole("button", { name: "Редактировать интервал: Письмо" })).toBeInTheDocument());
     fireEvent.click(screen.getByRole("button", { name: "Редактировать интервал: Письмо" }));
 

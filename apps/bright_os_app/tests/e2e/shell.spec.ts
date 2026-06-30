@@ -502,6 +502,77 @@ test("shows the desktop action delete button only on row hover", async ({ page }
   await expect(page.getByRole("textbox", { name: "Название действия: Фокус" })).toHaveCount(0);
 });
 
+test("pins the active desktop action focus timer to the right edge", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop", "desktop-only action focus control");
+
+  await page.goto("/");
+  await page.getByRole("textbox", { name: "Добавить" }).fill("Фокус");
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("textbox", { name: "Название действия: Фокус" })).toBeVisible();
+
+  const row = page.locator(".action-row").first();
+  await row.hover();
+  await page.getByRole("button", { name: "Фокусироваться: Фокус" }).click();
+
+  const focusButton = row.locator(".action-focus-button");
+  const deleteButton = row.locator(".action-delete-button");
+  await expect(page.getByRole("button", { name: "Остановить фокус: Фокус" })).toBeVisible();
+  await page.mouse.move(1, 1);
+  await expect(deleteButton).toHaveCSS("visibility", "hidden");
+  await expect(focusButton).not.toContainText("Стоп");
+
+  await expect
+    .poll(() =>
+      row.evaluate((element) => {
+        const rowRect = element.getBoundingClientRect();
+        const focusRect = element.querySelector(".action-focus-button")?.getBoundingClientRect();
+        const deleteRect = element.querySelector(".action-delete-button")?.getBoundingClientRect();
+        if (!focusRect || !deleteRect) return null;
+        return {
+          deleteWidth: Math.round(deleteRect.width),
+          rightGap: Math.round(rowRect.right - focusRect.right),
+        };
+      }),
+    )
+    .toEqual({ deleteWidth: 0, rightGap: 0 });
+
+  const focusXBeforeHover = await focusButton.evaluate((element) => Math.round(element.getBoundingClientRect().x));
+  await row.hover();
+  await expect(deleteButton).toBeVisible();
+  await expect
+    .poll(() =>
+      row.evaluate((element) => {
+        const deleteButtonElement = element.querySelector(".action-delete-button");
+        const focusButtonElement = element.querySelector(".action-focus-button");
+        const deleteRect = deleteButtonElement?.getBoundingClientRect();
+        const focusRect = focusButtonElement?.getBoundingClientRect();
+        if (!deleteButtonElement || !focusButtonElement || !deleteRect || !focusRect) return null;
+        return {
+          focusX: Math.round(focusRect.x),
+          order: Boolean(deleteButtonElement.compareDocumentPosition(focusButtonElement) & Node.DOCUMENT_POSITION_FOLLOWING),
+          touches: Math.abs(deleteRect.right - focusRect.left) <= 1,
+        };
+      }),
+    )
+    .toEqual({ focusX: focusXBeforeHover, order: true, touches: true });
+
+  await expect
+    .poll(() =>
+      page.locator('.main-dock [aria-label="Фокус"]').filter({ visible: true }).evaluate((element) => {
+        const circle = element.querySelector(":scope > div")?.getBoundingClientRect();
+        const icon = element.querySelector("span[aria-hidden='true']")?.getBoundingClientRect();
+        const timer = element.querySelector("span[aria-hidden='true'] > span:last-child");
+        if (!circle || !icon || !timer) return null;
+        return {
+          fontSize: Number.parseFloat(getComputedStyle(timer).fontSize),
+          heightGap: Math.round(Math.abs(circle.height - icon.height)),
+          widthGap: Math.round(Math.abs(circle.width - icon.width)),
+        };
+      }),
+    )
+    .toEqual({ fontSize: 14, heightGap: 0, widthGap: 0 });
+});
+
 test("reorders desktop actions by dragging the row handle", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop", "desktop-only action sorting");
 

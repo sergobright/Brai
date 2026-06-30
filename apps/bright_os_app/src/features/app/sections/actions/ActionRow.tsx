@@ -2,7 +2,7 @@
 
 import type { CSSProperties, HTMLAttributes, KeyboardEvent, MouseEvent, PointerEvent, ReactNode } from "react";
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
-import { Timer, Trash2, Undo2 } from "lucide-react";
+import { Square, Timer, Trash2, Undo2 } from "lucide-react";
 import { useSwipeable } from "react-swipeable";
 import { cleanTitle, singleLineTitle, visibleDescriptionPreview } from "@/shared/activities/text";
 import type { ActivityItem, ActivityStatus } from "@/shared/types/activities";
@@ -179,7 +179,7 @@ export function ActionRow({
     <div
       ref={setActionRowRef}
       className={cx(
-        "action-row group relative grid min-h-[54px] max-h-[220px] grid-cols-[minmax(0,1fr)_44px_44px] items-stretch overflow-hidden border-b border-border transition-[max-height,opacity,border-color,box-shadow] duration-150 [&:has(+_.action-row.selected)]:border-b-transparent max-[860px]:grid-cols-[minmax(0,1fr)_46px_46px] max-[860px]:[touch-action:pan-y]",
+        "action-row group relative min-h-[54px] max-h-[220px] overflow-hidden border-b border-border transition-[max-height,opacity,border-color,box-shadow] duration-150 [&:has(+_.action-row.selected)]:border-b-transparent max-[860px]:[touch-action:pan-y]",
         done && "done",
         action.pending && "pending opacity-80",
         deleteOpen && "delete-open",
@@ -195,8 +195,9 @@ export function ActionRow({
     >
       <div
         className={cx(
-          "action-row-surface grid min-h-[54px] min-w-0 grid-cols-[20px_28px_minmax(0,1fr)] items-center gap-x-1.5 py-2.5 transition-transform duration-150 will-change-transform max-[860px]:min-h-[54px] max-[860px]:grid-cols-[38px_minmax(0,1fr)] max-[860px]:py-[9px]",
+          "action-row-surface grid min-h-[54px] w-full min-w-0 grid-cols-[20px_28px_minmax(0,1fr)] items-center gap-x-1.5 py-2.5 transition-transform duration-150 will-change-transform max-[860px]:min-h-[54px] max-[860px]:grid-cols-[38px_minmax(0,1fr)] max-[860px]:py-[9px]",
           hasDragHandle && "has-drag-handle",
+          activeFocus && "pr-12 max-[860px]:pr-[50px]",
         )}
         {...mobileDragProps}
         onClick={openDetailsFromRow}
@@ -241,46 +242,51 @@ export function ActionRow({
           ) : null}
         </div>
       </div>
-      <button
-        type="button"
-        className={cx(
-          "action-focus-button group/focus-control grid min-h-[54px] w-11 place-items-center border-0 bg-transparent text-primary transition duration-150 hover:opacity-80 focus-visible:opacity-90 focus-visible:outline-0 max-[860px]:w-[46px]",
-          activeFocus
-            ? "visible pointer-events-auto scale-100 opacity-100"
-            : actionControlOpen
-              ? "visible pointer-events-auto scale-100 opacity-[0.55]"
+      <div className="action-row-controls pointer-events-none absolute inset-y-0 right-0 z-[1] flex items-stretch justify-end">
+        <button
+          type="button"
+          className={cx(
+            "action-delete-button grid min-h-[54px] w-0 min-w-0 place-items-center overflow-hidden border-0 bg-transparent transition-[width,opacity,transform] duration-150 hover:opacity-70 focus-visible:opacity-70 focus-visible:outline-0",
+            restoreControl ? "text-primary" : "text-destructive",
+            actionControlOpen
+              ? "visible pointer-events-auto w-11 scale-100 opacity-[0.42] max-[860px]:w-[46px]"
               : "invisible pointer-events-none scale-[0.96] opacity-0",
-          !activeFocus && "group-hover:visible group-hover:pointer-events-auto group-hover:scale-100 group-hover:opacity-[0.55] group-focus-within:visible group-focus-within:pointer-events-auto group-focus-within:scale-100 group-focus-within:opacity-[0.55]",
-        )}
-        data-action-row-control
-        data-action-focus
-        aria-label={activeFocus ? `Остановить фокус: ${title}` : `Фокусироваться: ${title}`}
-        title={activeFocus ? "Стоп" : "Фокус"}
-        onClick={(event) => void requestFocusAction(event)}
-      >
-        {activeFocus ? <ActionFocusTime armed={focusStopArmed} seconds={activeFocusElapsedSeconds} /> : <Timer className="size-4" aria-hidden="true" />}
-      </button>
-      <button
-        type="button"
-        className={cx(
-          "action-delete-button grid min-h-[54px] w-11 place-items-center border-0 bg-transparent transition duration-150 hover:opacity-70 focus-visible:opacity-70 focus-visible:outline-0 max-[860px]:w-[46px]",
-          restoreControl ? "text-primary" : "text-destructive",
-          actionControlOpen ? "visible pointer-events-auto scale-100 opacity-[0.42]" : "invisible pointer-events-none scale-[0.96] opacity-0",
-          "group-hover:visible group-hover:pointer-events-auto group-hover:scale-100 group-hover:opacity-[0.42] group-focus-within:visible group-focus-within:pointer-events-auto group-focus-within:scale-100 group-focus-within:opacity-[0.42]",
-        )}
-        data-action-row-control
-        data-action-delete
-        data-action-restore={restoreControl ? true : undefined}
-        aria-label={`${restoreControl ? "Восстановить" : "Удалить"}: ${title}`}
-        title={restoreControl ? "Восстановить" : "Удалить"}
-        disabled={removing}
-        onClick={(event) => {
-          event.stopPropagation();
-          void requestRowAction();
-        }}
-      >
-        {restoreControl ? <Undo2 aria-hidden="true" /> : <Trash2 aria-hidden="true" />}
-      </button>
+            "group-hover:visible group-hover:pointer-events-auto group-hover:w-11 group-hover:scale-100 group-hover:opacity-[0.42] min-[861px]:group-hover:w-11",
+            !activeFocus && "group-focus-within:visible group-focus-within:pointer-events-auto group-focus-within:w-11 group-focus-within:scale-100 group-focus-within:opacity-[0.42] min-[861px]:group-focus-within:w-11",
+          )}
+          data-action-row-control
+          data-action-delete
+          data-action-restore={restoreControl ? true : undefined}
+          aria-label={`${restoreControl ? "Восстановить" : "Удалить"}: ${title}`}
+          title={restoreControl ? "Восстановить" : "Удалить"}
+          disabled={removing}
+          onClick={(event) => {
+            event.stopPropagation();
+            void requestRowAction();
+          }}
+        >
+          {restoreControl ? <Undo2 className="size-5" aria-hidden="true" /> : <Trash2 className="size-5" aria-hidden="true" />}
+        </button>
+        <button
+          type="button"
+          className={cx(
+            "action-focus-button group/focus-control grid min-h-[54px] w-0 min-w-0 place-items-center overflow-hidden border-0 bg-transparent text-primary transition-[width,opacity,transform] duration-150 hover:opacity-80 focus-visible:opacity-90 focus-visible:outline-0",
+            activeFocus
+              ? "visible pointer-events-auto w-11 scale-100 opacity-100 max-[860px]:w-[46px]"
+              : actionControlOpen
+                ? "visible pointer-events-auto w-11 scale-100 opacity-[0.65] max-[860px]:w-[46px]"
+                : "invisible pointer-events-none scale-[0.96] opacity-0",
+            !activeFocus && "group-hover:visible group-hover:pointer-events-auto group-hover:w-11 group-hover:scale-100 group-hover:opacity-[0.65] group-focus-within:visible group-focus-within:pointer-events-auto group-focus-within:w-11 group-focus-within:scale-100 group-focus-within:opacity-[0.65] min-[861px]:group-hover:w-11 min-[861px]:group-focus-within:w-11",
+          )}
+          data-action-row-control
+          data-action-focus
+          aria-label={activeFocus ? `Остановить фокус: ${title}` : `Фокусироваться: ${title}`}
+          title={activeFocus ? "Стоп" : "Фокус"}
+          onClick={(event) => void requestFocusAction(event)}
+        >
+          {activeFocus ? <ActionFocusTime armed={focusStopArmed} seconds={activeFocusElapsedSeconds} /> : <Timer className="size-5" aria-hidden="true" />}
+        </button>
+      </div>
     </div>
   );
 }
@@ -288,16 +294,16 @@ export function ActionRow({
 function ActionFocusTime({ armed, seconds }: { armed: boolean; seconds: number }) {
   const value = formatHourMinute(seconds);
   const [hours, minutes] = value.split(":");
-  if (armed) return <span className="min-w-10 text-xs font-semibold leading-none">Стоп</span>;
+  if (armed) return <Square className="size-5 fill-current" aria-hidden="true" />;
   return (
-    <span className="relative grid min-w-10 text-xs font-semibold tabular-nums leading-none">
+    <span className="relative grid min-w-10 text-sm font-semibold tabular-nums leading-none">
       <span className="grid grid-cols-[1fr_auto_1fr] transition-opacity min-[861px]:group-hover/focus-control:opacity-0 min-[861px]:group-focus-visible/focus-control:opacity-0">
         <span className="text-right">{hours}</span>
         <span className="animate-pulse px-px">:</span>
         <span className="text-left">{minutes}</span>
       </span>
       <span className="pointer-events-none absolute inset-0 grid place-items-center opacity-0 transition-opacity min-[861px]:group-hover/focus-control:opacity-100 min-[861px]:group-focus-visible/focus-control:opacity-100">
-        Стоп
+        <Square className="size-5 fill-current" aria-hidden="true" />
       </span>
     </span>
   );

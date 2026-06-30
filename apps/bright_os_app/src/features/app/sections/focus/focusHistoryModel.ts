@@ -38,15 +38,17 @@ export function focusHistoryRows(sessions: TimerSession[]): FocusHistoryRow[] {
 
 function historyTitle(session: TimerSession, actionIntervals: FocusSessionInterval[]) {
   if (actionIntervals.length === 0) return "В фокусе";
-  const title = session.primary_activity_title ?? longestActionInterval(actionIntervals)?.activity_title ?? "Действие";
-  if (actionIntervals.length === 1) return title;
-  return `${title} +${actionIntervals.length - 1}`;
+  return longestActionTitle(actionIntervals) ?? session.primary_activity_title ?? "Действие";
 }
 
-function longestActionInterval(intervals: FocusSessionInterval[]) {
+function longestActionTitle(intervals: FocusSessionInterval[]) {
   return intervals
     .slice()
-    .sort((left, right) => (right.duration_seconds ?? 0) - (left.duration_seconds ?? 0))[0] ?? null;
+    .sort((left, right) => {
+      const titleDelta = (right.activity_title?.length ?? 0) - (left.activity_title?.length ?? 0);
+      if (titleDelta !== 0) return titleDelta;
+      return (right.duration_seconds ?? 0) - (left.duration_seconds ?? 0);
+    })[0]?.activity_title ?? null;
 }
 
 function formatCompactSessionDuration(seconds: number) {

@@ -263,6 +263,7 @@ export function FocusHistoryTable({
               const warned = warning?.rowId === row.id || row.intervals.some((interval) => interval.id === warning?.rowId);
               const warningMessage = warned ? warning?.message : null;
               const expanded = expandedRows.has(row.id);
+              const additionalActionCount = Math.max(0, row.actionIntervalCount - 1);
               const rowEditLabel = `Редактировать фокус: ${row.departureTime} - ${row.duration} - ${row.arrivalTime}`;
               const openCurrentRow = () => {
                 if (!warned) void openRow(row);
@@ -303,7 +304,7 @@ export function FocusHistoryTable({
                         <TableCell className="h-12 min-w-0 px-1.5 py-0">
                           <button
                             aria-label={rowEditLabel}
-                            className="block h-12 w-full min-w-0 overflow-hidden text-left font-medium outline-none [mask-image:linear-gradient(to_right,#000_calc(100%-1.25rem),transparent)] focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                            className="flex h-12 w-full min-w-0 items-center gap-1.5 overflow-hidden text-left font-medium outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
                             onClick={(event) => {
                               event.stopPropagation();
                               openCurrentRow();
@@ -311,7 +312,18 @@ export function FocusHistoryTable({
                             tabIndex={-1}
                             type="button"
                           >
-                            {row.destination}
+                            <span className="min-w-0 truncate">{row.destination}</span>
+                            {additionalActionCount > 0 ? (
+                              <Badge
+                                aria-label={`Дополнительных действий: ${additionalActionCount}`}
+                                className="h-5 shrink-0 px-1.5 text-xs font-medium tabular-nums"
+                                size="sm"
+                                title={`Еще действий: ${additionalActionCount}`}
+                                variant="outline"
+                              >
+                                +{additionalActionCount}
+                              </Badge>
+                            ) : null}
                             {row.pending ? <span className="ml-1 text-xs text-muted-foreground">...</span> : null}
                           </button>
                         </TableCell>

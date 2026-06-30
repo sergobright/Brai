@@ -251,7 +251,13 @@ describe("BrightOsApp actions", () => {
     expect(activeRow).toHaveClass("selected", "bg-primary/10");
     expect(activeRow).toHaveClass("rounded-lg", "border-b-transparent");
     expect(activeRow).toHaveClass("[&:has(+_.action-row.selected)]:border-b-transparent");
-    expect(activeRow).toContainElement(activeRow.querySelector(".action-delete-button") as HTMLElement);
+    expect(activeRow).not.toHaveClass("grid-cols-[minmax(0,1fr)_44px_44px]");
+    const deleteButton = activeRow.querySelector(".action-delete-button") as HTMLElement;
+    const focusButton = activeRow.querySelector(".action-focus-button") as HTMLElement;
+    expect(activeRow).toContainElement(deleteButton);
+    expect(activeRow.querySelector(".action-row-controls")).toContainElement(deleteButton);
+    expect(activeRow.querySelector(".action-row-controls")).toContainElement(focusButton);
+    expect(deleteButton.compareDocumentPosition(focusButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it("queues action focus from a desktop action row", async () => {
@@ -355,7 +361,8 @@ describe("BrightOsApp actions", () => {
     render(<BrightOsApp />);
 
     const stopButton = await screen.findByRole("button", { name: "Остановить фокус: Фокус" });
-    expect(within(stopButton).getByText("Стоп")).toBeInTheDocument();
+    expect(within(stopButton).queryByText("Стоп")).not.toBeInTheDocument();
+    expect(stopButton.querySelector("svg")).toBeInTheDocument();
     fireEvent.click(stopButton);
 
     await waitFor(async () =>

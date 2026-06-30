@@ -298,11 +298,12 @@ export function MainDock({
 }) {
   const dockItems = navItems.map((item) => {
     const Icon = item.icon;
-    const focusActive = item.id === "focus" && timer.active_session;
+    const focusActive = item.id === "focus" && Boolean(timer.active_session);
     return {
       title: item.label,
       href: navHref(item.id),
       active: isActiveNavItem(item.id, section),
+      fillIcon: focusActive,
       onClick: () => onSection(item.id),
       icon: focusActive ? <FocusDockIcon seconds={timer.elapsed_seconds} /> : <Icon className="h-full w-full" aria-hidden="true" />,
     };
@@ -331,8 +332,8 @@ export function MainDock({
 function FocusDockIcon({ seconds }: { seconds: number }) {
   return (
     <span className="relative grid h-full w-full place-items-center overflow-hidden rounded-full" aria-hidden="true">
-      <span className="absolute inset-0 rounded-full border border-primary/30 border-t-primary/80 animate-spin" />
-      <span className="relative scale-75 text-xs font-semibold leading-none tabular-nums">{formatHourMinute(seconds)}</span>
+      <span className="absolute inset-px rounded-full border-2 border-primary/25 border-t-primary animate-spin" />
+      <span className="relative text-sm font-bold leading-none tabular-nums">{formatHourMinute(seconds)}</span>
     </span>
   );
 }
