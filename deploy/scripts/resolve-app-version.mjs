@@ -38,7 +38,7 @@ export function resolveAppVersion({
   targetBranch = "",
   targetCommit = "",
 } = {}) {
-  if (explicit) return validVersion(explicit);
+  if (explicit && !mobileBundle) return validVersion(explicit);
 
   if (environment === "prod" && db) {
     const ledgerVersion = latestProductionVersion(db, { nextApk, targetBranch, targetCommit });
