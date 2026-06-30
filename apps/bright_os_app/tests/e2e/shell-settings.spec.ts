@@ -54,6 +54,97 @@ test("opens Engine from the profile menu", async ({ page }) => {
   await expect(page.getByRole("button", { name: "Проверить обновления" })).toBeVisible();
 });
 
+test("keeps Android Engine download progress compact on mobile", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "mobile", "mobile-only layout");
+
+  await page.addInitScript(() => {
+    const win = window as Window & {
+      androidBridge?: unknown;
+      Capacitor?: {
+        PluginHeaders?: Array<{ name: string; methods: Array<{ name: string; rtype: "promise" }> }>;
+        nativePromise?: (pluginName: string, methodName: string) => Promise<unknown>;
+      };
+    };
+    const state = {
+      activeBundleVersion: "0.11.51.1",
+      downloadProgressPercent: 42,
+      downloadProgressVersion: "0.11.52.1",
+      checkInProgress: true,
+      lastCheckStatus: "downloading",
+    };
+    win.androidBridge = {};
+    win.Capacitor = {
+      PluginHeaders: [
+        {
+          name: "BrightOta",
+          methods: [
+            { name: "getState", rtype: "promise" },
+            { name: "checkForUpdates", rtype: "promise" },
+            { name: "markReady", rtype: "promise" },
+          ],
+        },
+      ],
+      nativePromise: async (pluginName, methodName) => {
+        if (pluginName !== "BrightOta") throw new Error(`Unexpected plugin: ${pluginName}`);
+        return methodName === "markReady" ? { ...state, promoted: true } : state;
+      },
+    };
+  });
+  await page.route("**/v1/**", (route) => {
+    const now = "2026-06-29T12:00:00.000Z";
+    const path = new URL(route.request().url()).pathname;
+    const body =
+      path === "/v1/version" ? {
+        server_time_utc: now,
+        version: "0.11.52.1",
+        parts: { canon: 0, release: 11, build: 52, apk: 1 },
+        latest: { canon: null, release: null, build: null, apk: null },
+      } :
+      path === "/v1/timer/state" ? {
+        server_time_utc: now,
+        server_revision: 1,
+        timezone: "Europe/Moscow",
+        active_session: null,
+        elapsed_seconds: 0,
+      } :
+      path === "/v1/sessions" ? { sessions: [], groups: {} } :
+      path === "/v1/goals/challenge" ? {
+        timezone: "Europe/Moscow",
+        start_date: "2026-06-29",
+        end_date: "2026-06-29",
+        days_count: 1,
+        daily_goal_seconds: 0,
+        total_goal_seconds: 0,
+        completed_seconds: 0,
+        completed_hours: 0,
+        percentage: 0,
+        remaining_seconds: 0,
+        remaining_days: 0,
+        required_average_seconds_per_remaining_day: 0,
+        required_average_hours_per_remaining_day: 0,
+        achieved: false,
+        days: [],
+      } :
+      path === "/v1/activities" ? { server_time_utc: now, server_revision: 1, activities: [], archived_activities: [] } :
+      path === "/v1/inbox" ? { server_time_utc: now, server_revision: 1, inbox: [] } :
+      null;
+    if (!body) return route.continue();
+    return route.fulfill({ contentType: "application/json", body: JSON.stringify(body) });
+  });
+
+  await page.goto("/engine");
+
+  await expect(page.getByText("Загрузка версии v0.11.52.1")).toBeVisible();
+  const card = page.locator('[aria-label="Engine"] [data-slot="card"]').first();
+  const progressBlock = page.locator('[data-slot="field"]').filter({ has: page.locator("#engine-update-progress") });
+  await expect
+    .poll(async () => (await card.boundingBox())?.height ?? 0)
+    .toBeLessThan(260);
+  await expect
+    .poll(async () => (await progressBlock.boundingBox())?.height ?? 0)
+    .toBeLessThan(72);
+});
+
 test("keeps Engine text out of the collapsed desktop rail on load", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop", "desktop-only rail");
 
