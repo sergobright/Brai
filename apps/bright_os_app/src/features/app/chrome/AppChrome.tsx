@@ -25,11 +25,15 @@ const syncStatusIconToneClasses: Record<Tone, string> = {
   muted: "text-muted-foreground",
 } as const;
 
+export { syncStatusIconToneClasses };
+
 export function ScreenHeader({
   title,
   icon: Icon,
   syncStatus,
   pendingCount,
+  showEnvironmentBadge = true,
+  showSyncStatus = true,
   leading,
   trailing,
 }: {
@@ -37,6 +41,8 @@ export function ScreenHeader({
   icon: LucideIcon;
   syncStatus: SyncStatus;
   pendingCount: number;
+  showEnvironmentBadge?: boolean;
+  showSyncStatus?: boolean;
   leading?: ReactNode;
   trailing?: ReactNode;
 }) {
@@ -54,16 +60,16 @@ export function ScreenHeader({
       </div>
       <div className="topbar-actions flex shrink-0 items-center gap-2.5 max-[860px]:max-w-[min(184px,50vw)] max-[460px]:max-w-[min(174px,50vw)]" data-galaxy-interaction-block>
         {trailing}
-        {!isProductionEnvironment() && ENVIRONMENT_BADGE_LABEL ? <EnvironmentBadge label={ENVIRONMENT_BADGE_LABEL} /> : null}
-        <StatusPill status={syncStatus} pendingCount={pendingCount} />
+        {showEnvironmentBadge && !isProductionEnvironment() && ENVIRONMENT_BADGE_LABEL ? <EnvironmentBadge label={ENVIRONMENT_BADGE_LABEL} /> : null}
+        {showSyncStatus ? <StatusPill status={syncStatus} pendingCount={pendingCount} /> : null}
       </div>
     </header>
   );
 }
 
-function EnvironmentBadge({ label }: { label: string }) {
+export function EnvironmentBadge({ label, className }: { label: string; className?: string }) {
   return (
-    <span className="inline-grid h-[30px] min-w-[30px] place-items-center rounded-md border border-border bg-card px-2 text-xs font-semibold text-muted-foreground">
+    <span className={cx("inline-grid h-[30px] min-w-[30px] place-items-center rounded-md border border-border bg-card px-2 text-xs font-semibold text-muted-foreground", className)}>
       {label}
     </span>
   );
@@ -211,7 +217,7 @@ export function MobileContextSheet({
 }
 
 function StatusPill({ status, pendingCount }: { status: SyncStatus; pendingCount: number }) {
-  const { label, tone, icon: Icon, spinning } = statusMeta(status, pendingCount);
+  const { label, tone, icon: Icon, spinning } = syncStatusMeta(status, pendingCount);
 
   return (
     <span
@@ -228,7 +234,7 @@ function StatusPill({ status, pendingCount }: { status: SyncStatus; pendingCount
   );
 }
 
-function statusMeta(status: SyncStatus, pendingCount: number): { label: string; tone: Tone; icon: LucideIcon; spinning?: boolean } {
+export function syncStatusMeta(status: SyncStatus, pendingCount: number): { label: string; tone: Tone; icon: LucideIcon; spinning?: boolean } {
   if (status === "synced") return { label: "синхронизировано", tone: "ok", icon: CheckCircle2 };
   if (status === "pending_sync") {
     return {

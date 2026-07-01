@@ -3,19 +3,23 @@
 import { useCallback, useEffect, useRef, type TouchEventHandler } from "react";
 import { Archive, Cpu, Download, LogOut, Menu, PanelLeftClose, Settings, type LucideIcon } from "lucide-react";
 import type { AppVersionState } from "@/shared/api/brightOsApi";
-import { APP_VERSION } from "@/shared/config/runtime";
+import { APP_VERSION, ENVIRONMENT_BADGE_LABEL, isProductionEnvironment } from "@/shared/config/runtime";
 import { installAndroidBackHandler } from "@/shared/platform/platform";
 import type { BrightOtaState } from "@/shared/platform/ota";
 import { Avatar, AvatarFallback } from "@/shared/ui/avatar";
 import { FloatingDock } from "@/shared/ui/floating-dock";
 import { formatHourMinute } from "@/shared/time/format";
-import type { TimerState } from "@/shared/types/timer";
+import type { SyncStatus, TimerState } from "@/shared/types/timer";
 import { Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarGroupContent, SidebarGroupLabel, SidebarHeader, SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarRail, useSidebar } from "@/shared/ui/sidebar";
 import { cx } from "../appUtils";
+import { EnvironmentBadge, syncStatusIconToneClasses, syncStatusMeta } from "../chrome/AppChrome";
 import { useMobileSheetDrag } from "../hooks/useMobileSheetDrag";
 import type { PrimarySectionId, SectionId } from "../appModel";
 import { isPrimarySection, navHref, navItems, sectionTitle } from "../appModel";
 import { engineSectionView } from "../sections/engine/engineModel";
+
+const RAIL_FOOTER_ICON_ROW_CLASS = "flex h-8 w-full items-center rounded-md p-2 group-data-[collapsible=icon]:size-8! group-data-[collapsible=icon]:p-2!";
+const RAIL_FOOTER_ICON_SLOT_CLASS = "grid size-4 shrink-0 place-items-center";
 
 export function DesktopRail({
   expanded,
@@ -23,8 +27,10 @@ export function DesktopRail({
   appVersionState,
   otaRefreshing,
   otaState,
+  pendingCount,
   versionError,
   versionRefreshing,
+  syncStatus,
   onSettings,
   onEngine,
   onArchive,
@@ -35,8 +41,10 @@ export function DesktopRail({
   appVersionState: AppVersionState | null;
   otaRefreshing: boolean;
   otaState: BrightOtaState | null;
+  pendingCount: number;
   versionError: boolean;
   versionRefreshing: boolean;
+  syncStatus: SyncStatus;
   onSettings: () => void;
   onEngine: () => void;
   onArchive: () => void;
@@ -69,15 +77,19 @@ export function DesktopRail({
         />
       </SidebarContent>
       <SidebarFooter>
-        <EngineMenuItem
-          active={section === "engine"}
-          appVersionState={appVersionState}
-          otaRefreshing={otaRefreshing}
-          otaState={otaState}
-          versionError={versionError}
-          versionRefreshing={versionRefreshing}
-          onClick={onEngine}
-        />
+        <SidebarMenu className="gap-4">
+          <EnvironmentBadgeMenuItem />
+          <ConnectionStatusMenuItem status={syncStatus} pendingCount={pendingCount} />
+          <EngineMenuItem
+            active={section === "engine"}
+            appVersionState={appVersionState}
+            otaRefreshing={otaRefreshing}
+            otaState={otaState}
+            versionError={versionError}
+            versionRefreshing={versionRefreshing}
+            onClick={onEngine}
+          />
+        </SidebarMenu>
       </SidebarFooter>
       <SidebarRail />
     </Sidebar>
@@ -281,6 +293,42 @@ function PageMenu({
         </SidebarGroup>
       ) : null}
     </>
+  );
+}
+
+function EnvironmentBadgeMenuItem() {
+  if (isProductionEnvironment() || !ENVIRONMENT_BADGE_LABEL) return null;
+
+  return (
+    <SidebarMenuItem>
+      <span className={RAIL_FOOTER_ICON_ROW_CLASS} title={`Превью ${ENVIRONMENT_BADGE_LABEL}`} aria-label={`Превью ${ENVIRONMENT_BADGE_LABEL}`}>
+        <span className="relative size-4 shrink-0">
+          <EnvironmentBadge label={ENVIRONMENT_BADGE_LABEL} className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2" />
+        </span>
+      </span>
+    </SidebarMenuItem>
+  );
+}
+
+function ConnectionStatusMenuItem({ status, pendingCount }: { status: SyncStatus; pendingCount: number }) {
+  const { label, tone, icon: Icon, spinning } = syncStatusMeta(status, pendingCount);
+
+  return (
+    <SidebarMenuItem>
+      <span
+        className={cx(
+          RAIL_FOOTER_ICON_ROW_CLASS,
+          syncStatusIconToneClasses[tone],
+        )}
+        title={label}
+        aria-label={label}
+        role="status"
+      >
+        <span className={RAIL_FOOTER_ICON_SLOT_CLASS}>
+          <Icon className={cx("size-4", spinning && "animate-spin")} aria-hidden="true" />
+        </span>
+      </span>
+    </SidebarMenuItem>
   );
 }
 
