@@ -153,7 +153,7 @@ test("pins Engine to the bottom of the mobile profile drawer", async ({ page }, 
   test.skip(testInfo.project.name !== "mobile", "mobile-only layout");
 
   await page.goto("/");
-  await page.getByRole("button", { name: "Открыть меню" }).click();
+  await page.getByRole("button", { name: "Открыть левое меню" }).click();
 
   const drawer = page.locator(".mobile-profile-drawer");
   const engineButton = drawer.getByRole("button", { name: /^Engine(?: v.+)?$/ });

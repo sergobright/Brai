@@ -13,7 +13,7 @@ import { isPrimarySection, sectionIcon, sectionTitle } from "./appModel";
 import { cx } from "./appUtils";
 import { AuthPanel, IconButton, MobileContextSheet, ScreenHeader, ThemeButton } from "./chrome/AppChrome";
 import { useBrightOsAppState } from "./hooks/useBrightOsAppState";
-import { DesktopRail, MainDock, MobileMenuButton, MobileProfileDrawer } from "./navigation/AppNavigation";
+import { DesktopRail, MainDock, MobileMenuButton, MobileProfileDrawer, MobileRailMenuButton } from "./navigation/AppNavigation";
 import { isMobileNavigationViewport, sectionSwipePageStyle, useLeftEdgeMenuSwipe } from "./navigation/useSectionSwipeNavigation";
 import { ActionsSection } from "./sections/actions/ActionsSection";
 import { ActionsInfoPanel } from "./sections/actions/ActionsInfoPanel";
@@ -32,6 +32,7 @@ const INBOX_MOBILE_CREATE_DRAFT_STORAGE_KEY = "bright_os_inbox_mobile_create_dra
 
 export function BrightOsApp({ initialSection = "actions" }: { initialSection?: SectionId }) {
   const app = useBrightOsAppState(initialSection);
+  const [mobileMenuKind, setMobileMenuKind] = useState<"rail" | "burger">("burger");
   const [actionsMobileCreateDraft, setActionsMobileCreateDraft] = useStoredMobileCreateDraft(ACTIONS_MOBILE_CREATE_DRAFT_STORAGE_KEY);
   const [inboxMobileCreateDraft, setInboxMobileCreateDraft] = useStoredMobileCreateDraft(INBOX_MOBILE_CREATE_DRAFT_STORAGE_KEY);
   const mobileViewport = useMountedMobileNavigationViewport();
@@ -40,9 +41,14 @@ export function BrightOsApp({ initialSection = "actions" }: { initialSection?: S
   const adjacentSection = app.swipeNavigation.visual?.to;
   const apkBlocked = isDevPreviewApkIncompatible(app.otaState);
   const mobileMenuSwipe = useLeftEdgeMenuSwipe(
-    () => app.setMobileMenuOpen(true),
-    isPrimarySection(app.section) && !app.mobileMenuOpen && !app.mobileContextPanel && !app.actionOverlayOpen,
+    () => openMobileMenu("rail"),
+    !app.mobileMenuOpen && !app.mobileContextPanel && !app.actionOverlayOpen,
   );
+
+  function openMobileMenu(kind: "rail" | "burger") {
+    setMobileMenuKind(kind);
+    app.setMobileMenuOpen(true);
+  }
 
   useEffect(() => {
     sectionRef.current = app.section;
@@ -68,9 +74,7 @@ export function BrightOsApp({ initialSection = "actions" }: { initialSection?: S
           icon={sectionIcon(screenSection)}
           syncStatus={app.displaySyncStatus}
           pendingCount={app.totalPendingCount}
-          showEnvironmentBadge={mobileViewport}
-          showSyncStatus={mobileViewport}
-          leading={isPrimarySection(screenSection) ? <MobileMenuButton onClick={() => app.setMobileMenuOpen(true)} /> : null}
+          leading={isPrimarySection(screenSection) ? <MobileMenuButton onClick={() => openMobileMenu("burger")} /> : null}
           trailing={
             screenSection === "actions" && mobileViewport ? (
               <IconButton icon={Info} label="Информация о действиях" active={app.actionsInfoActive} onClick={app.toggleActionsInfoPanel} />
@@ -168,18 +172,15 @@ export function BrightOsApp({ initialSection = "actions" }: { initialSection?: S
 
   return (
     <SidebarProvider
-      open={app.desktopRailExpanded}
-      onOpenChange={app.setDesktopRailExpanded}
+      open={false}
       className={cx(
         "app-shell h-dvh min-h-0 overflow-hidden [--sticky-top-offset:0px] max-[860px]:grid max-[860px]:grid-rows-[minmax(0,1fr)_auto] max-[860px]:[--mobile-top-padding:env(safe-area-inset-top)]",
-        app.desktopRailExpanded && "is-rail-expanded",
         app.actionOverlayOpen && "has-mobile-action-overlay max-[860px]:pb-0",
         app.mobileMenuOpen && "has-mobile-menu",
       )}
       data-app-shell
     >
       <DesktopRail
-        expanded={app.desktopRailExpanded}
         section={app.section}
         appVersionState={app.versionState}
         otaRefreshing={app.otaRefreshing}
@@ -224,8 +225,13 @@ export function BrightOsApp({ initialSection = "actions" }: { initialSection?: S
         swipeHandlers={app.swipeNavigation.handlers}
         timer={app.timer}
       />
-      {app.mobileMenuOpen && isPrimarySection(app.section) ? (
+      <MobileRailMenuButton
+        hidden={app.actionOverlayOpen || app.mobileContextPanel != null || app.mobileMenuOpen}
+        onClick={() => openMobileMenu("rail")}
+      />
+      {app.mobileMenuOpen ? (
         <MobileProfileDrawer
+          mode={mobileMenuKind}
           section={app.section}
           appVersionState={app.versionState}
           otaRefreshing={app.otaRefreshing}

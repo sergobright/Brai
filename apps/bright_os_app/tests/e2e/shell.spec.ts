@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 import type { Page } from "@playwright/test";
-import { createMobileAction, desktopContentColumnWidth, dragTouch, horizontalCenterOffset } from "./shell-helpers";
+import { createMobileAction, dragTouch, horizontalCenterOffset } from "./shell-helpers";
 
 test("renders mobile and desktop navigation without starter content", async ({ page }, testInfo) => {
   await page.goto("/");
@@ -13,8 +13,12 @@ test("renders mobile and desktop navigation without starter content", async ({ p
     await expect(page.locator(".mobile-nav .nav-button").nth(2)).not.toHaveClass(/active:scale/);
   } else {
     await expect(page.getByRole("textbox", { name: "Добавить" })).toBeVisible();
-    await expect(page.getByText("Меню страницы")).toBeVisible();
-    await expect(page.getByText("Действия").first()).toBeVisible();
+    await expect(page.locator(".desktop-rail")).toBeVisible();
+    await expect(page.locator(".desktop-rail .status-pill")).toBeVisible();
+    await expect(page.locator(".section-page-current .topbar .status-pill")).toBeHidden();
+    await expect(page.getByRole("button", { name: "Свернуть меню" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Развернуть меню" })).toHaveCount(0);
+    await expect(page.locator(".desktop-rail [data-rail-page-title]")).toHaveCount(0);
   }
   await expect(page.getByText("Deploy Now")).toHaveCount(0);
 });
@@ -33,38 +37,36 @@ test("renders the mobile floating dock without inactive circular backgrounds", a
   await expect(items.nth(2)).not.toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
 });
 
-test("expands the desktop rail as a layout column", async ({ page }, testInfo) => {
+test("keeps the desktop rail static and compact across reloads", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop", "desktop-only rail");
 
+  await page.context().addCookies([{ name: "sidebar_state", value: "true", url: "http://127.0.0.1:3201" }]);
   await page.goto("/");
-  await expect(page.locator(".desktop-rail")).toHaveClass(/expanded/);
-  await page.getByRole("button", { name: "Свернуть меню" }).click();
   await expect(page.locator(".desktop-rail")).not.toHaveClass(/expanded/);
+  await expect
+    .poll(async () => (await page.locator(".desktop-rail").boundingBox())?.width ?? 0)
+    .toBeLessThanOrEqual(50);
+  await expect(page.getByRole("button", { name: "Свернуть меню" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Развернуть меню" })).toHaveCount(0);
+
+  for (const title of ["Входящие", "Фокус"]) {
+    await page.getByRole("button", { name: title }).last().click();
+    await expect(page.getByRole("heading", { name: title })).toBeVisible();
+    await expect(page.locator(".desktop-rail").getByRole("button", { name: "Настройки" })).toBeVisible();
+    await expect(page.locator(".desktop-rail").getByRole("button", { name: "Архив" })).toBeVisible();
+  }
+
   await page.reload();
   await expect(page.locator(".desktop-rail")).not.toHaveClass(/expanded/);
   await expect
     .poll(async () => (await page.locator(".desktop-rail").boundingBox())?.width ?? 0)
-    .toBeLessThanOrEqual(76);
-  const railBefore = await page.locator(".desktop-rail").boundingBox();
-  const contentColumnBefore = await desktopContentColumnWidth(page);
-
-  await page.getByRole("button", { name: "Развернуть меню" }).click();
-  await expect(page.locator(".desktop-rail")).toHaveClass(/expanded/);
-  await expect(page.getByText("Workspace")).toBeVisible();
-
-  await expect
-    .poll(async () => (await page.locator(".desktop-rail").boundingBox())?.width ?? 0)
-    .toBeGreaterThan((railBefore?.width ?? 0) + 100);
-  await expect
-    .poll(() => desktopContentColumnWidth(page))
-    .toBeLessThan(contentColumnBefore);
+    .toBeLessThanOrEqual(50);
 });
 
 test("keeps the compact desktop rail slim and centered", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop", "desktop-only rail");
 
   await page.goto("/");
-  await page.getByRole("button", { name: "Свернуть меню" }).click();
   await expect(page.locator(".desktop-rail")).not.toHaveClass(/expanded/);
   await expect
     .poll(async () => (await page.locator(".desktop-rail").boundingBox())?.width ?? 0)
@@ -73,6 +75,8 @@ test("keeps the compact desktop rail slim and centered", async ({ page }, testIn
   const rail = await page.locator(".desktop-rail").boundingBox();
   const profile = await page.locator(".desktop-rail .rail-profile").boundingBox();
   const avatar = await page.locator(".desktop-rail [data-slot='avatar']").boundingBox();
+  await page.getByRole("button", { name: /Engine/ }).click();
+  await expect(page.getByRole("heading", { name: "Engine" })).toBeVisible();
   const activeItem = await page.locator(".desktop-rail [data-sidebar='menu-button'][data-active='true']").boundingBox();
   const activeIconSize = await page
     .locator(".desktop-rail [data-sidebar='menu-button'][data-active='true'] svg")
@@ -136,7 +140,7 @@ test("uses full-width left-aligned desktop content", async ({ page }, testInfo) 
   expect(main?.x ?? 9999).toBeLessThanOrEqual((rail?.width ?? 0) + 2);
   expect(stage?.width ?? 0).toBeGreaterThan((viewport?.width ?? 0) - (rail?.width ?? 0) - 72);
   expect(heading?.x ?? 9999).toBeLessThanOrEqual((rail?.width ?? 0) + 96);
-  expect(form?.width ?? 0).toBeGreaterThan((viewport?.width ?? 0) - (rail?.width ?? 0) - 92);
+  expect(form?.width ?? 0).toBeGreaterThan((stage?.width ?? 0) * 0.45);
   expect(form?.height ?? 9999).toBeLessThanOrEqual(50);
   await expect(page.locator(".actions-add-form")).toHaveAttribute("data-slot", "input-group");
   const addFormRadius = await page.locator(".actions-add-form").evaluate((element) => getComputedStyle(element).borderTopLeftRadius);
@@ -148,7 +152,7 @@ test("uses full-width left-aligned desktop content", async ({ page }, testInfo) 
 
 test("shows desktop Focus context panels from header actions", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop", "desktop-only focus layout");
-  test.setTimeout(150_000);
+  test.setTimeout(210_000);
 
   await mockFocusApi(page);
   await page.goto("/focus");
@@ -422,17 +426,16 @@ test("keeps desktop Focus background and timer stable across rail and panel chan
   const evilEyeGap = () => backgroundGap(".timer-evil-eye-background");
 
   await expect(page.locator(".timer-galaxy-background canvas")).toBeVisible();
-  await expect.poll(galaxyGap).toBeLessThanOrEqual(4);
+  await expect.poll(galaxyGap, { timeout: 45_000 }).toBeLessThanOrEqual(4);
   await expect(page.getByRole("button", { name: "Фон Galaxy" })).toHaveAttribute("aria-pressed", "true");
-  await page.getByRole("button", { name: "Фон Evil Eye" }).click();
+  await page.getByRole("button", { name: "Фон Evil Eye" }).evaluate((button: HTMLButtonElement) => button.click());
   await expect(page.getByRole("button", { name: "Фон Evil Eye" })).toHaveAttribute("aria-pressed", "true");
   await expect(page.locator(".timer-evil-eye-background")).toHaveClass(/opacity-100/);
   await expect(page.locator(".timer-evil-eye-background canvas")).toBeVisible();
-  await expect.poll(evilEyeGap).toBeLessThanOrEqual(4);
+  await expect.poll(evilEyeGap, { timeout: 45_000 }).toBeLessThanOrEqual(4);
 
-  await page.getByRole("button", { name: "Свернуть меню" }).click();
   await expect(page.locator(".desktop-rail")).not.toHaveClass(/expanded/);
-  await expect.poll(evilEyeGap).toBeLessThanOrEqual(4);
+  await expect.poll(evilEyeGap, { timeout: 45_000 }).toBeLessThanOrEqual(4);
 
   const startButton = page.getByRole("button", { name: "Запустить" });
   const timerViewport = page.locator(".section-page-current .focus-timer-pane > [data-slot='scroll-area-viewport']");

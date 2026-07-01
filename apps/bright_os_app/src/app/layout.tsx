@@ -4,7 +4,7 @@ import { GeistSans } from "geist/font/sans";
 import { resolveBrightOsIconAssets } from "@/shared/config/appIcons";
 import "./globals.css";
 
-const appInitScript = `(function(){try{var root=document.documentElement;var theme=window.localStorage.getItem("bright_os_theme_mode");var systemDark=window.matchMedia&&window.matchMedia("(prefers-color-scheme: dark)").matches;root.dataset.theme=theme==="dark"||theme==="light"?theme:(systemDark?"dark":"light");root.dataset.sidebarState=/(^|; )sidebar_state=false(;|$)/.test(document.cookie)?"collapsed":"expanded";}catch(error){}})();`;
+const appInitScript = `(function(){try{var root=document.documentElement;var theme=window.localStorage.getItem("bright_os_theme_mode");var systemDark=window.matchMedia&&window.matchMedia("(prefers-color-scheme: dark)").matches;root.dataset.theme=theme==="dark"||theme==="light"?theme:(systemDark?"dark":"light");root.dataset.sidebarState="collapsed";}catch(error){}})();`;
 const iconAssets = resolveBrightOsIconAssets();
 
 export const metadata: Metadata = {

@@ -113,7 +113,7 @@ describe("BrightOsApp inbox", () => {
     expect(screen.getByLabelText("MD просмотр описания входящего")).toHaveTextContent("Источник");
     expect(screen.getByLabelText("MD просмотр описания входящего")).toHaveTextContent("важно");
     fireEvent.click(screen.getByRole("button", { name: "Закрыть редактор" }));
-    await waitFor(() => expect(screen.getByRole("status", { name: "сбой" })).toBeInTheDocument());
+    await waitFor(() => expect(screen.getAllByRole("status", { name: "сбой" }).length).toBeGreaterThan(0));
 
     await waitFor(async () => {
       expect(await pendingInboxEvents()).toEqual(

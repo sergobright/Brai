@@ -156,8 +156,7 @@ html[data-platform="android"] .app-shell {
   html[data-sidebar-state="collapsed"] [data-app-shell] .desktop-rail [data-sidebar="menu-button"] > span:not([data-slot="avatar"]),
   html[data-sidebar-state="collapsed"] [data-app-shell] .desktop-rail [data-sidebar="menu-button"] > svg.ml-auto,
   html[data-sidebar-state="collapsed"] [data-app-shell] .desktop-rail .rail-profile > div:not([data-slot="avatar"]),
-  html[data-sidebar-state="collapsed"] [data-app-shell] .desktop-rail .rail-profile > svg,
-  html[data-sidebar-state="collapsed"] [data-app-shell] .desktop-rail [aria-label="Свернуть меню"] {
+  html[data-sidebar-state="collapsed"] [data-app-shell] .desktop-rail .rail-profile > svg {
     display: none;
   }
 
@@ -169,10 +168,11 @@ html[data-platform="android"] .app-shell {
   }
 }
 
-/* External mobile debug consoles must not expose their floating launcher in the app UI. */
+/* External/dev debug consoles must not expose floating launchers in the app UI. */
 .eruda-entry-btn,
 .__vconsole .vc-switch,
-#vConsole .vc-switch {
+#vConsole .vc-switch,
+nextjs-portal {
   display: none !important;
   opacity: 0 !important;
   pointer-events: none !important;

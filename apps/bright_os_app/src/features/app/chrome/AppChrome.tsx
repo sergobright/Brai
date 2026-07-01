@@ -32,8 +32,6 @@ export function ScreenHeader({
   icon: Icon,
   syncStatus,
   pendingCount,
-  showEnvironmentBadge = true,
-  showSyncStatus = true,
   leading,
   trailing,
 }: {
@@ -41,8 +39,6 @@ export function ScreenHeader({
   icon: LucideIcon;
   syncStatus: SyncStatus;
   pendingCount: number;
-  showEnvironmentBadge?: boolean;
-  showSyncStatus?: boolean;
   leading?: ReactNode;
   trailing?: ReactNode;
 }) {
@@ -60,8 +56,8 @@ export function ScreenHeader({
       </div>
       <div className="topbar-actions flex shrink-0 items-center gap-2.5 max-[860px]:max-w-[min(184px,50vw)] max-[460px]:max-w-[min(174px,50vw)]" data-galaxy-interaction-block>
         {trailing}
-        {showEnvironmentBadge && !isProductionEnvironment() && ENVIRONMENT_BADGE_LABEL ? <EnvironmentBadge label={ENVIRONMENT_BADGE_LABEL} /> : null}
-        {showSyncStatus ? <StatusPill status={syncStatus} pendingCount={pendingCount} /> : null}
+        {!isProductionEnvironment() && ENVIRONMENT_BADGE_LABEL ? <EnvironmentBadge className="min-[861px]:hidden" label={ENVIRONMENT_BADGE_LABEL} /> : null}
+        <StatusPill className="min-[861px]:hidden" status={syncStatus} pendingCount={pendingCount} />
       </div>
     </header>
   );
@@ -106,7 +102,7 @@ export function IconButton({
     <button
       type="button"
       className={cx(
-        "theme-button inline-grid h-[42px] w-[42px] place-items-center rounded-lg border border-border bg-card text-muted-foreground hover:text-primary focus-visible:text-primary",
+        "theme-button inline-grid h-[42px] w-[42px] shrink-0 place-items-center rounded-lg border border-border bg-card text-muted-foreground hover:text-primary focus-visible:text-primary [&_svg]:pointer-events-none",
         active && "border-primary/40 bg-accent text-accent-foreground",
         className,
       )}
@@ -216,7 +212,7 @@ export function MobileContextSheet({
   );
 }
 
-function StatusPill({ status, pendingCount }: { status: SyncStatus; pendingCount: number }) {
+export function StatusPill({ className, status, pendingCount }: { className?: string; status: SyncStatus; pendingCount: number }) {
   const { label, tone, icon: Icon, spinning } = syncStatusMeta(status, pendingCount);
 
   return (
@@ -224,6 +220,7 @@ function StatusPill({ status, pendingCount }: { status: SyncStatus; pendingCount
       className={cx(
         "status-pill inline-grid h-[42px] w-[42px] shrink-0 place-items-center rounded-lg border-0 bg-transparent p-0",
         syncStatusIconToneClasses[tone],
+        className,
       )}
       title={label}
       aria-label={label}

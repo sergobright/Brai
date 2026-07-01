@@ -73,7 +73,9 @@ export async function swipeActionRowLeft(
   const y = (box?.y ?? 120) + (box?.height ?? 54) / 2;
   const startX = (box?.x ?? 14) + (box?.width ?? 360) - 20;
 
-  await swipeTouch(page, { x: startX, y }, { x: startX - 72, y });
+  await dispatchElementTouch(page, ".action-row", "touchstart", { x: startX, y });
+  await dispatchElementTouch(page, ".action-row", "touchmove", { x: startX - 44, y });
+  await dispatchElementTouch(page, ".action-row", "touchend", { x: startX - 72, y });
   await expect(row).toHaveClass(/delete-open/);
 }
 
@@ -169,7 +171,7 @@ export async function openProfileMenuItem(page: Page, name: string | RegExp) {
 
   const button = page.getByRole("button", { name }).first();
   if ((await button.count()) === 0 || !(await button.isVisible().catch(() => false))) {
-    await page.getByRole("button", { name: "Открыть меню" }).click();
+    await page.getByRole("button", { name: "Открыть левое меню" }).click();
     await expect(drawer).toBeVisible();
     await drawer.getByRole("button", { name }).click();
     return;

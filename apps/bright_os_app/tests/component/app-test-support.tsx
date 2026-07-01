@@ -100,7 +100,7 @@ export function stubAndroidCapacitor() {
 }
 
 export async function openProfileMenu() {
-  fireEvent.click(screen.getByRole("button", { name: "Открыть меню" }));
+  fireEvent.click(screen.getByRole("button", { name: "Открыть левое меню" }));
   return await waitFor(() => {
     const current = document.querySelector(".mobile-profile-drawer");
     expect(current).toBeInstanceOf(HTMLElement);

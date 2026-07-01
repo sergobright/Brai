@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { BrightOsApi } from "@/shared/api/brightOsApi";
 import { defaultApiBase } from "@/shared/config/runtime";
 import { consumeAndroidTimerStopRequest, startAndroidTimerNotification, stopAndroidTimerNotification } from "@/shared/platform/androidTimerNotification";
@@ -70,7 +70,6 @@ export function useBrightOsAppState(initialSection: SectionId) {
   const [focusBackground, setFocusBackgroundState] = useState<FocusBackgroundMode>(loadFocusBackgroundPreference);
   const [mobileContextPanel, setMobileContextPanel] = useState<MobileContextPanel | null>(null);
   const [mobileContextPanelClosing, setMobileContextPanelClosing] = useState(false);
-  const [desktopRailExpanded, setDesktopRailExpanded] = useState(true);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const mobileViewport = useMobileNavigationViewport();
 
@@ -523,16 +522,6 @@ export function useBrightOsAppState(initialSection: SectionId) {
     applyInboxStateRef.current = applyInboxState;
   });
 
-  useLayoutEffect(() => {
-    let cancelled = false;
-    queueMicrotask(() => {
-      if (!cancelled) setDesktopRailExpanded(loadDesktopRailExpandedPreference());
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
   useEffect(() => {
     let cancelled = false;
 
@@ -731,7 +720,7 @@ export function useBrightOsAppState(initialSection: SectionId) {
     setSyncStatus,
   });
 
-  return { actionOverlayOpen, actions, actionsInfoActive, active, bundlePublishedAt, busy, desktopRailExpanded, displaySyncStatus, focusBackground, focusContextPanel, focusGoalActive, focusHistoryActive, goal, history, inbox, inboxInfoActive, localSnapshotReady, markMobileContextPanelClosing, mobileContextPanel, mobileMenuOpen, ...actionCommands, ...inboxCommands, onDeleteFocusSession, onEditFocusInterval, onEditFocusSession, onLogin, onLogout, onStart, onStartActionFocus, onStop, onStopActionFocus, onSwitchActionFocus, openSettingsPage, otaCheckedAt, otaRefreshing, otaState, refreshEngineOnce, refreshOtaStateOnce, section, selectSection, setActionOverlayOpen, setDesktopRailExpanded, setFocusBackground, setMobileContextPanel: setMobileContextPanelState, setMobileMenuOpen, setTheme, swipeNavigation, theme, timer, timerBusy, todayKey, toggleActionsInfoPanel, toggleFocusContextPanel, toggleInboxInfoPanel, totalPendingCount, versionCheckedAt, versionError, versionRefreshing, versionState };
+  return { actionOverlayOpen, actions, actionsInfoActive, active, bundlePublishedAt, busy, displaySyncStatus, focusBackground, focusContextPanel, focusGoalActive, focusHistoryActive, goal, history, inbox, inboxInfoActive, localSnapshotReady, markMobileContextPanelClosing, mobileContextPanel, mobileMenuOpen, ...actionCommands, ...inboxCommands, onDeleteFocusSession, onEditFocusInterval, onEditFocusSession, onLogin, onLogout, onStart, onStartActionFocus, onStop, onStopActionFocus, onSwitchActionFocus, openSettingsPage, otaCheckedAt, otaRefreshing, otaState, refreshEngineOnce, refreshOtaStateOnce, section, selectSection, setActionOverlayOpen, setFocusBackground, setMobileContextPanel: setMobileContextPanelState, setMobileMenuOpen, setTheme, swipeNavigation, theme, timer, timerBusy, todayKey, toggleActionsInfoPanel, toggleFocusContextPanel, toggleInboxInfoPanel, totalPendingCount, versionCheckedAt, versionError, versionRefreshing, versionState };
 }
 
 function loadFocusContextPanelPreference(): FocusContextPanel {
@@ -754,9 +743,4 @@ function loadFocusBackgroundPreference(): FocusBackgroundMode {
 function saveFocusBackgroundPreference(background: FocusBackgroundMode) {
   if (typeof window === "undefined") return;
   window.localStorage.setItem(FOCUS_BACKGROUND_STORAGE_KEY, background);
-}
-
-function loadDesktopRailExpandedPreference(): boolean {
-  if (typeof document === "undefined") return true;
-  return !document.cookie.split("; ").some((cookie) => cookie === "sidebar_state=false");
 }

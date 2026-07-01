@@ -12,9 +12,7 @@ export {
   SidebarHeader,
   SidebarInput,
   SidebarInset,
-  SidebarRail,
   SidebarSeparator,
-  SidebarTrigger,
 } from "./sidebar-layout"
 export {
   SidebarMenu,
