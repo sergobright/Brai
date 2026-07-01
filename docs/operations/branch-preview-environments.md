@@ -14,7 +14,11 @@ Agents must not reuse an existing `codex/*` branch just because Codex Desktop se
 
 Follow-up branches keep the exact task base recorded by the starter in `.bright-task/task.json`. While the branch is not accepted, agents must not update it from a later `origin/main` with fetch/pull/merge/rebase commands. Background merges into `main` are handled by the eventual PR/merge queue or by starting a new task after acceptance, not by repeatedly rebasing an in-review preview branch.
 
+After the project owner accepts a preview, a dirty acceptance PR is resolved in the same branch with `node scripts/bright-task.mjs acceptance-reconcile <codex-branch>`. That command is the only approved exception to the frozen-base rule: it verifies the accepted PR, merges current `origin/main` into the same `codex/*` branch, and leaves any real conflicts for the agent to resolve before pushing the same branch again. Do not create a replacement branch or PR for accepted conflict resolution.
+
 A pushed preview-class `codex/*` branch allocates or reuses a preview slot through `deploy/scripts/preview-slots.sh`, deploys that slot, and reports the slot URL. If all slots `A` through `E` are occupied, the branch enters the preview queue until a slot is released. No push means no slot/deploy/queue.
+
+If a `codex/*` pull request is closed without merge, GitHub Actions releases that branch's preview slot through the same `release-preview-slot` job used for deleted branches and manual releases. This covers superseded preview branches: the accepted replacement branch releases its own slot through production promotion, and the abandoned branch releases its slot when its PR closes.
 
 If the preview branch changes the Android native boundary, deploy also builds a slot-specific APK and records the APK file plus Android `versionCode` in the preview slot registry/status page. Preview OTA manifests then require that exact `versionCode`, so stale slot APKs block with an APK update screen instead of silently running an incompatible web bundle.
 
@@ -31,6 +35,15 @@ scripts/bright-task-start.sh <task-slug>
 ```
 
 The starter fetches `origin/main`, refuses to reuse an existing remote `codex/<task-slug>`, creates a separate worktree under `.codex-worktrees/<task-slug>`, creates `codex/<task-slug>` with `--no-track`, writes ignored local task state under `.bright-task/` including the current Codex thread id, enables `.githooks`, and links existing ignored `node_modules` directories from the main checkout when present. In Codex Desktop run the starter with `sandbox_permissions=require_escalated` immediately because it updates Git worktree metadata. If that is unavailable, stop without project-file changes; do not create or switch to a manual fallback branch in the current checkout, `/srv/projects/bright-os-worktrees`, or `/tmp`. The main checkout and registered non-current worktrees are root-owned read-only because Codex internal file-change events can bypass lifecycle hooks; only ignored `.bright-task/` receipt files remain writable as local task state. After every accepted `main` push, GitHub Actions runs `/srv/opt/bright-os-main-sync.sh` on the VPS so `/srv/projects/bright-os` returns to a clean `origin/main` mirror for new threads and old registered worktrees become read-only.
+
+In Codex Desktop, staging from a task worktree can also need `sandbox_permissions=require_escalated`
+because the worktree index lock is stored under the main checkout's `.git/worktrees/` metadata.
+If an escalated command leaves the task worktree with unusable ownership, repair only that task
+worktree with:
+
+```bash
+scripts/bright-task-repair-permissions.sh <task-slug-or-worktree-path>
+```
 
 Repository Codex hooks are defined in `.codex/hooks.json`:
 
@@ -91,6 +104,7 @@ Acceptance trigger:
 
 - If the project owner says `Принято`, `принимаю`, `accepted`, or an equivalent acceptance phrase after a preview handoff, run `deploy/scripts/accept-preview.sh <codex-branch>` immediately. Negated phrases such as `пока не принято` or `не принято` are not acceptance triggers.
 - The script is the single local acceptance entrypoint. It first requires verified preview state for the exact `origin/<codex-branch>` head, then creates or reuses a GitHub PR into `main` and calls `gh pr merge --<method> --auto --match-head-commit <sha>`, defaulting to `squash` unless `BRIGHT_OS_ACCEPT_MERGE_METHOD` is set to `merge` or `rebase`, so branch protection, checks, merge queue, production deploy, metadata promotion, and preview-slot release stay in GitHub Actions.
+- If the acceptance PR is `mergeStateStatus: DIRTY` or `BEHIND`, `accept-preview.sh` writes `status=reconcile_required`. Run `node scripts/bright-task.mjs acceptance-reconcile <codex-branch>`, resolve conflicts if any, commit, push the same branch, rerun `scripts/bright-preview-handoff.sh`, and rerun `deploy/scripts/accept-preview.sh <codex-branch>`. The original preview slot remains leased to that branch until production promotion releases it.
 - After starting acceptance, monitor GitHub Actions until production deploy and preview-slot release finish, or report the exact PR/check/merge-queue/deploy/release blocker. Accepted preview slots are released only by the successful `deploy-prod` post-step, after metadata promotion and production deploy; that step requires a real slot release and fails if the accepted branch did not release one.
 
 ## Required GitHub Settings

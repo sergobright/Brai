@@ -72,6 +72,9 @@ function runCli([command, ...args]) {
       case "follow-up":
         markFollowUp(args[0]);
         break;
+      case "acceptance-reconcile":
+        acceptanceReconcile(args[0]);
+        break;
       case "pre-tool-use":
         preToolUse();
         break;
@@ -103,7 +106,7 @@ function runCli([command, ...args]) {
         doctor(args.includes("--strict"));
         break;
       default:
-        throw new Error("usage: bright-task.mjs start <slug>|follow-up [branch]|pre-tool-use|pre-commit|pre-push <remote>|stop|classify [--base <ref>] [--head <ref>] [--github-output]|handoff [branch]|preview [branch]|require-delivery [branch] [sha]|require-preview [branch] [sha]|doctor [--strict]");
+        throw new Error("usage: bright-task.mjs start <slug>|follow-up [branch]|acceptance-reconcile [branch]|pre-tool-use|pre-commit|pre-push <remote>|stop|classify [--base <ref>] [--head <ref>] [--github-output]|handoff [branch]|preview [branch]|require-delivery [branch] [sha]|require-preview [branch] [sha]|doctor [--strict]");
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -188,6 +191,63 @@ function markFollowUp(branchArg) {
   console.log(`Marked explicit follow-up for ${branch}`);
 }
 
+function acceptanceReconcile(branchArg) {
+  const branch = branchArg ?? currentBranch();
+  if (!CODEX_BRANCH_RE.test(branch)) throw new Error(`Acceptance reconcile requires codex/* branch, got: ${branch}`);
+  if (branch !== currentBranch()) throw new Error(`Current branch is ${currentBranch()}, not ${branch}`);
+  const validation = validateTaskBranch({ requireExpectedUpstream: false });
+  if (!validation.ok) throw new Error(validation.message);
+  const markerValidation = validateTaskMarker(readTaskMarker(), branch);
+  if (!markerValidation.ok) throw new Error(`${markerValidation.message}\n\n${taskStartGuidance()}`);
+  const threadValidation = validateTaskThread(readTaskMarker(), currentThreadId());
+  if (!threadValidation.ok) throw new Error(`${threadValidation.message}\n\n${taskStartGuidance()}`);
+  if (git("status", "--porcelain").trim()) throw new Error("Working tree must be clean before acceptance reconcile.");
+
+  fetchAcceptedBase();
+  fetchTaskBranch(branch);
+  const head = git("rev-parse", "HEAD");
+  const remoteHead = git("rev-parse", `origin/${branch}`);
+  if (head !== remoteHead) throw new Error(`HEAD ${head} is not origin/${branch} (${remoteHead}). Push or reset before acceptance reconcile.`);
+
+  const receipt = readAcceptanceReceipt();
+  if (receipt?.receiptType !== ACCEPTANCE_RECEIPT_VERSION || receipt.branch !== branch) {
+    throw new Error("Acceptance reconcile requires a local .bright-task/acceptance.json receipt for this branch.");
+  }
+  if (receipt.status !== "reconcile_required" && receipt.status !== "acceptance_started") {
+    throw new Error(`Acceptance receipt status is ${receipt.status || "(missing)"}, not reconcile_required.`);
+  }
+
+  const pr = findAcceptancePr(branch, head);
+  if (!pr) throw new Error(`No open acceptance PR into ${acceptedBaseBranch()} found for ${branch}@${head}.`);
+  if (receipt.prNumber && String(receipt.prNumber) !== String(pr.number)) {
+    throw new Error(`Acceptance receipt PR #${receipt.prNumber} does not match open PR #${pr.number}.`);
+  }
+  if (receipt.status === "acceptance_started" && pr.mergeStateStatus !== "DIRTY" && pr.mergeStateStatus !== "BEHIND") {
+    throw new Error(`Acceptance PR #${pr.number} mergeStateStatus is ${pr.mergeStateStatus || "(missing)"}, not DIRTY/BEHIND. Rerun accept-preview instead.`);
+  }
+
+  writeAcceptanceReceipt({
+    ...receipt,
+    branch,
+    commit: head,
+    baseBranch: acceptedBaseBranch(),
+    prNumber: pr.number,
+    prUrl: pr.url,
+    status: "reconcile_started",
+    reconcileStartedAt: new Date().toISOString(),
+  });
+
+  const result = spawnGit(["merge", "--no-ff", "--no-edit", acceptedBaseRef()], { stdio: "inherit" });
+  if (result.status !== 0 || result.error) {
+    throw new Error(
+      `Acceptance reconcile started for ${branch}, but merge conflicts remain.\n\n` +
+        `Resolve conflicts, commit the merge on ${branch}, push origin HEAD, rerun preview handoff, then rerun deploy/scripts/accept-preview.sh ${branch}.`,
+    );
+  }
+  console.log(`Acceptance reconcile merged ${acceptedBaseRef()} into ${branch}.`);
+  console.log("Push the same branch, rerun preview handoff, then rerun accept-preview.");
+}
+
 function preToolUse() {
   const analysis = analyzeHookInput(readStdin());
   if (!analysis.ok) return blockHook(analysis.reason);
@@ -200,6 +260,7 @@ function preToolUse() {
     return blockHook("Bright OS cannot verify the current Codex thread id; blocking project-file writes fail-closed.");
   }
   if (analysis.officialTaskStarter) return allowHook();
+  if (analysis.officialAcceptanceReconcile) return allowHook();
 
   const validation = validateTaskBranch({ requireExpectedUpstream: false });
   if (!validation.ok) {
@@ -306,7 +367,7 @@ function previewHandoff(branchArg) {
   console.log(`Branch: ${branch}`);
   console.log(`Commit: ${head}`);
   console.log(`Preview ${slot}: ${url}`);
-  console.log(`GitHub Actions run: ${run.url ?? `https://github.com/sergobright/Bright-OS/actions/runs/${run.databaseId}`}`);
+  console.log(`GitHub Actions run: ${run.url ?? `https://github.com/sergobright/Brai/actions/runs/${run.databaseId}`}`);
 }
 
 function deliveryHandoff(branchArg) {
@@ -355,7 +416,7 @@ function deliveryHandoff(branchArg) {
     prState: pr.state,
     mergedAt: pr.mergedAt,
     runId: run.databaseId,
-    runUrl: run.url ?? `https://github.com/sergobright/Bright-OS/actions/runs/${run.databaseId}`,
+    runUrl: run.url ?? `https://github.com/sergobright/Brai/actions/runs/${run.databaseId}`,
     verifiedAt: new Date().toISOString(),
     verifiedBy: "bright-task-delivery-v1",
   };
@@ -377,7 +438,7 @@ function infraDocsPrPendingMessage(pr, branch, head, run) {
   const mergeStateStatus = pr?.mergeStateStatus ?? "(missing)";
   const autoMerge = pr?.autoMergeRequest ? "enabled" : "disabled";
   const mergedAt = pr?.mergedAt ?? "(missing)";
-  const runUrl = run?.url ?? (run?.databaseId ? `https://github.com/sergobright/Bright-OS/actions/runs/${run.databaseId}` : "(missing)");
+  const runUrl = run?.url ?? (run?.databaseId ? `https://github.com/sergobright/Brai/actions/runs/${run.databaseId}` : "(missing)");
   return [
     "Infra/docs delivery is not complete until its PR is merged into main.",
     `Branch: ${branch}`,
@@ -820,15 +881,24 @@ function analyzeHookInput(source) {
 
   let write = false;
   let officialTaskStarter = false;
+  let officialAcceptanceReconcile = false;
   for (const call of calls) {
     const classified = classifyToolCall(call);
     if (!classified.ok) return { ...classified, write: true };
     if (classified.blockedReason) return { ok: true, write: true, blockedReason: classified.blockedReason };
     if (classified.manualCodexBranch) return { ok: true, write: true, manualCodexBranch: true };
     officialTaskStarter ||= Boolean(classified.officialTaskStarter);
+    officialAcceptanceReconcile ||= Boolean(classified.officialAcceptanceReconcile);
     write ||= Boolean(classified.write);
   }
-  return { ok: true, write, officialTaskStarter: officialTaskStarter && !write, manualCodexBranch: false };
+  const result = {
+    ok: true,
+    write,
+    officialTaskStarter: officialTaskStarter && !write,
+    manualCodexBranch: false,
+  };
+  if (officialAcceptanceReconcile && !officialTaskStarter) result.officialAcceptanceReconcile = true;
+  return result;
 }
 
 function collectToolCalls(input) {
@@ -876,6 +946,7 @@ function classifyToolCall({ tool, input }) {
     }
     if (isManualCodexBranchCommand(commandText)) return { ok: true, write: true, manualCodexBranch: true };
     if (isOfficialTaskStarterCommand(commandText)) return { ok: true, write: false, officialTaskStarter: true };
+    if (isOfficialAcceptanceReconcileCommand(commandText)) return { ok: true, write: true, officialAcceptanceReconcile: true };
     return { ok: true, write: isWriteLikeCommand(commandText) };
   }
   return { ok: false, reason: `Bright OS does not recognize hook tool ${tool}; blocking fail-closed.` };
@@ -890,7 +961,7 @@ function isShellTool(tool) {
 }
 
 function isWriteLikeCommand(commandText) {
-  return !isOfficialTaskStarterCommand(commandText) && !isReadOnlyShellCommand(commandText);
+  return !isOfficialTaskStarterCommand(commandText) && !isOfficialAcceptanceReconcileCommand(commandText) && !isReadOnlyShellCommand(commandText);
 }
 
 function isOfficialTaskStarterCommand(commandText) {
@@ -903,6 +974,14 @@ function isOfficialTaskStarterCommand(commandText) {
 
 function isUnsafeRepoTaskStarterCommand(commandText) {
   return splitShellSegments(commandText).some((segment) => isRepoTaskStarterSegment(segment) && !repoTaskStarterIsStable());
+}
+
+function isOfficialAcceptanceReconcileCommand(commandText) {
+  const branchPattern = "(?:\\s+codex/[a-z0-9][a-z0-9._-]*)?";
+  const segmentPattern = new RegExp(
+    `^(?:node\\s+scripts/bright-task\\.mjs|scripts/use-node22\\.sh\\s+node\\s+scripts/bright-task\\.mjs)\\s+acceptance-reconcile${branchPattern}$`,
+  );
+  return splitShellSegments(commandText).some((segment) => segmentPattern.test(segment));
 }
 
 function isInstalledTaskStarterSegment(segment) {
@@ -1163,9 +1242,17 @@ function diffFromAcceptedBase() {
 }
 
 function diffFromTaskBase() {
+  const acceptance = readAcceptanceReceipt();
+  if (acceptance?.receiptType === ACCEPTANCE_RECEIPT_VERSION && acceptance.status === "reconcile_started" && isAncestor(acceptedBaseRef(), "HEAD")) {
+    return diffNames(`${acceptedBaseRef()}...HEAD`);
+  }
   const marker = readTaskMarker();
   const base = marker?.base && gitMaybe("rev-parse", "--verify", `${marker.base}^{commit}`) ? marker.base : acceptedBaseRef();
-  return (gitMaybe("diff", "--name-only", `${base}...HEAD`) ?? "")
+  return diffNames(`${base}...HEAD`);
+}
+
+function diffNames(range) {
+  return (gitMaybe("diff", "--name-only", range) ?? "")
     .split("\n")
     .map((line) => line.trim())
     .filter(Boolean);
@@ -1268,7 +1355,16 @@ function readAcceptanceReceipt() {
 function isBlockingAcceptanceReceipt(receipt) {
   if (receipt?.receiptType !== ACCEPTANCE_RECEIPT_VERSION) return false;
   if (receipt.status === "already_in_base" || receipt.status === "merged") return true;
+  if (receipt.status === "reconcile_required") return true;
+  if (receipt.status === "reconcile_started") return false;
   return receipt.status === "acceptance_started" && receipt.deliveryClass === DELIVERY_CLASS.RUNTIME_PREVIEW;
+}
+
+function writeAcceptanceReceipt(receipt) {
+  const root = git("rev-parse", "--show-toplevel");
+  const dir = path.join(root, ".bright-task");
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, "acceptance.json"), `${JSON.stringify(receipt, null, 2)}\n`);
 }
 
 function writePreviewReceipt(receipt) {
@@ -1312,6 +1408,27 @@ function findInfraDocsPr(branch, head) {
     Array.isArray(pr.labels) &&
     pr.labels.some((label) => label?.name === "bright-delivery:infra-docs"),
   ) ?? null;
+}
+
+function findAcceptancePr(branch, head) {
+  if (process.env.BRIGHT_OS_TEST_ACCEPTANCE_PRS_JSON) {
+    const prs = JSON.parse(process.env.BRIGHT_OS_TEST_ACCEPTANCE_PRS_JSON);
+    return Array.isArray(prs) ? prs.find((pr) => pr?.headRefOid === head && pr?.state === "OPEN") ?? null : null;
+  }
+  const prs = runJson([
+    "gh",
+    "pr",
+    "list",
+    "--base",
+    acceptedBaseBranch(),
+    "--head",
+    branch,
+    "--state",
+    "open",
+    "--json",
+    "number,url,state,headRefOid,mergeStateStatus,autoMergeRequest",
+  ]);
+  return prs.find((pr) => pr.headRefOid === head) ?? null;
 }
 
 function runJson(args) {

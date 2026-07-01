@@ -23,8 +23,8 @@ test('version endpoint returns current build ledger counters', async () => {
     fixture.store.recordAcceptedBuildVersion({
       sourceBranch: 'codex/engine',
       sourceCommit: 'engine-source',
-      sourceShortChanges: 'Add Engine page.',
-      sourceDetails: 'Engine reads current version data.',
+      sourceShortChanges: 'Добавлена страница Engine.',
+      sourceDetails: 'Engine читает текущие данные версии.',
       targetBranch: 'main',
       targetCommit: 'engine-main',
       releasedAtUtc: '2026-06-29T12:05:00.000Z'
@@ -32,8 +32,8 @@ test('version endpoint returns current build ledger counters', async () => {
     fixture.store.recordReleaseVersion({
       sourceBranch: 'manual',
       sourceCommit: 'release-one',
-      sourceShortChanges: 'Release one.',
-      sourceDetails: 'Release details.',
+      sourceShortChanges: 'Первый релиз.',
+      sourceDetails: 'Детали релиза.',
       targetBranch: 'main',
       targetCommit: 'release-one',
       releasedAtUtc: '2026-06-29T12:10:00.000Z'
@@ -41,8 +41,8 @@ test('version endpoint returns current build ledger counters', async () => {
     fixture.store.recordAcceptedBuildVersion({
       sourceBranch: 'codex/engine-next',
       sourceCommit: 'engine-next-source',
-      sourceShortChanges: 'Ship next build.',
-      sourceDetails: 'Next build details.',
+      sourceShortChanges: 'Опубликована следующая сборка.',
+      sourceDetails: 'Детали следующей сборки.',
       targetBranch: 'main',
       targetCommit: 'engine-next-main',
       releasedAtUtc: '2026-06-29T12:15:00.000Z'
@@ -54,8 +54,8 @@ test('version endpoint returns current build ledger counters', async () => {
     assert.equal(response.body.version, '0.1.3.1');
     assert.deepEqual(response.body.parts, { canon: 0, release: 1, build: 3, apk: 1 });
     assert.equal(response.body.latest.canon, null);
-    assert.equal(response.body.latest.release.short_changes, 'Release one.');
-    assert.equal(response.body.latest.build.short_changes, 'Ship next build.');
+    assert.equal(response.body.latest.release.short_changes, 'Первый релиз.');
+    assert.equal(response.body.latest.build.short_changes, 'Опубликована следующая сборка.');
     assert.equal(response.body.latest.apk.version, 1);
     assert.deepEqual(response.body.apk_release, {
       file: 'bright-os-0.0.41.3-capacitor.apk',

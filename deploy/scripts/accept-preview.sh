@@ -99,6 +99,18 @@ fs.writeFileSync(path.join(dir, "acceptance.json"), `${JSON.stringify({
 ' "$ROOT" "$BRANCH" "$HEAD_SHA" "$BASE_BRANCH" "$pr_number" "$pr_url" "$MERGE_METHOD" "$status" "${DELIVERY_CLASS:-}" "$accepted_at"
 }
 
+mark_reconcile_required() {
+  local pr_number="$1"
+  local pr_url="$2"
+  local merge_state="$3"
+  write_acceptance_marker "reconcile_required" "$pr_number" "$pr_url"
+  echo "Acceptance requires same-branch reconcile for $BRANCH -> $BASE_BRANCH"
+  echo "PR: $pr_url"
+  echo "Head: $HEAD_SHA"
+  echo "mergeStateStatus: $merge_state"
+  echo "Run: node scripts/bright-task.mjs acceptance-reconcile $BRANCH"
+}
+
 if [[ -n "$(git status --porcelain)" ]]; then
   echo "Working tree must be clean before accepting preview work." >&2
   exit 1
@@ -199,7 +211,20 @@ if [[ "$PR_HEAD" != "$HEAD_SHA" ]]; then
   exit 1
 fi
 
-gh pr merge "$PR_NUMBER" "--$MERGE_METHOD" --auto --match-head-commit "$HEAD_SHA"
+PR_MERGE_STATE="$(gh pr view "$PR_NUMBER" --json mergeStateStatus --jq ".mergeStateStatus // \"\"")"
+if [[ "$PR_MERGE_STATE" == "DIRTY" || "$PR_MERGE_STATE" == "BEHIND" ]]; then
+  mark_reconcile_required "$PR_NUMBER" "$PR_URL" "$PR_MERGE_STATE"
+  exit 2
+fi
+
+if ! gh pr merge "$PR_NUMBER" "--$MERGE_METHOD" --auto --match-head-commit "$HEAD_SHA"; then
+  PR_MERGE_STATE="$(gh pr view "$PR_NUMBER" --json mergeStateStatus --jq ".mergeStateStatus // \"\"")"
+  if [[ "$PR_MERGE_STATE" == "DIRTY" || "$PR_MERGE_STATE" == "BEHIND" ]]; then
+    mark_reconcile_required "$PR_NUMBER" "$PR_URL" "$PR_MERGE_STATE"
+    exit 2
+  fi
+  exit 1
+fi
 write_acceptance_marker "acceptance_started" "$PR_NUMBER" "$PR_URL"
 
 echo "Acceptance started for $BRANCH -> $BASE_BRANCH"

@@ -23,10 +23,10 @@ export function DesktopRail({
   appVersionState,
   otaRefreshing,
   otaState,
+  pendingCount,
   versionError,
   versionRefreshing,
   syncStatus,
-  pendingCount,
   onSettings,
   onEngine,
   onArchive,
@@ -36,10 +36,10 @@ export function DesktopRail({
   appVersionState: AppVersionState | null;
   otaRefreshing: boolean;
   otaState: BrightOtaState | null;
+  pendingCount: number;
   versionError: boolean;
   versionRefreshing: boolean;
   syncStatus: SyncStatus;
-  pendingCount: number;
   onSettings: () => void;
   onEngine: () => void;
   onArchive: () => void;

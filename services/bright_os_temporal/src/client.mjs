@@ -108,6 +108,7 @@ function buildEvent(type, options, sha) {
     reason: options.reason ?? "",
     prNumber: options.prNumber ?? "",
     prUrl: options.prUrl ?? "",
+    mergedAt: options.mergedAt ?? "",
     source: options.source ?? process.env.GITHUB_JOB ?? "manual",
     at: options.at ?? new Date().toISOString(),
     github: {

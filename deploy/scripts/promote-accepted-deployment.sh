@@ -110,7 +110,7 @@ fi
   --target-domain "$TARGET_DOMAIN" \
   --source-commit "$SOURCE_COMMIT" \
   --source-slot "${SLOT:-}" \
-  --source-short-changes "${SOURCE_SHORT_CHANGES:-Accepted preview changes without authored release notes.}" \
-  --source-details "${SOURCE_DETAILS:-No authored preview release notes were available; audit metadata is stored separately.}" \
-  --reason "${BRIGHT_OS_PROMOTE_REASON:-Accepted branch promotion}" \
+  --source-short-changes "${SOURCE_SHORT_CHANGES:-Принята сборка Bright OS.}" \
+  --source-details "${SOURCE_DETAILS:-Сборка принята; технические branch/commit-данные сохранены отдельно.}" \
+  --reason "${BRIGHT_OS_PROMOTE_REASON:-Нужно перенести принятую preview-сборку в production.}" \
   --record-production-release "${BRIGHT_OS_RECORD_PRODUCTION_RELEASE:-false}"

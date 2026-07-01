@@ -111,9 +111,9 @@ Bright OS SHALL track public release versions in the server SQLite `build_versio
 
 The public app version SHALL be assembled as `canon.release.build.apk` from the latest counters. Missing `canon` or `release` counters SHALL be treated as `0`.
 
-`short_changes` and `detailed_changes` SHALL contain human-readable release notes about what changed in the product or delivery workflow.
+`short_changes` and `detailed_changes` SHALL contain Russian human-readable release notes about what changed in the product or delivery workflow.
 
-`reason` SHALL describe the human reason for the change: the problem, risk, or product/workflow need that made the change necessary. Branch names, commit SHAs, target commits, domains, and similar audit metadata SHALL NOT be stored in `reason`; it belongs in `build_version_refs` or deployment records.
+`reason` SHALL be written in Russian and describe the human reason for the change: the problem, risk, or product/workflow need that made the change necessary. Branch names, commit SHAs, target commits, domains, and similar audit metadata SHALL NOT be stored in `reason`; it belongs in `build_version_refs` or deployment records.
 
 #### Scenario: Task branch is prepared
 - **WHEN** a `codex/*` task branch is created or updated before acceptance

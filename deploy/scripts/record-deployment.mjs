@@ -13,9 +13,9 @@ try {
     domain: required(args, "domain"),
     webOtaVersion: args["web-ota-version"] || null,
     apkVersion: args["apk-version"] || null,
-    shortChanges: args["short-changes"] || "Branch deployment",
+    shortChanges: args["short-changes"] || "Деплой ветки",
     detailedChanges: args["detailed-changes"] || "",
-    reason: args.reason || "Automated branch delivery",
+    reason: args.reason || "Автоматическая доставка ветки",
     deployedAtUtc: args["deployed-at"] || new Date().toISOString(),
   });
 } finally {

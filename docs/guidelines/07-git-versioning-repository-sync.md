@@ -16,6 +16,14 @@ scripts/bright-task-start.sh <task-slug>
 
 In Codex Desktop this needs `sandbox_permissions=require_escalated`, because the starter fetches `origin/main`, writes Git worktree metadata, creates `.codex-worktrees/<task-slug>`, writes ignored `.bright-task/` state, enables `.githooks`, and links existing ignored dependency directories.
 
+Staging changes from a task worktree may also require `sandbox_permissions=require_escalated`,
+because Git writes the index lock under the main checkout's `.git/worktrees/` metadata. If an
+escalated command leaves the task worktree owned by the wrong user, run:
+
+```bash
+scripts/bright-task-repair-permissions.sh <task-slug-or-worktree-path>
+```
+
 Do not create or switch fallback branches manually with `git switch`, `git checkout`, `git branch`, or `git worktree`.
 
 ## Branch Reuse
@@ -29,6 +37,14 @@ node scripts/bright-task.mjs follow-up
 ```
 
 The task base is frozen at starter time in `.bright-task/task.json`. Before acceptance, do not refresh that branch from the later `origin/main`: no `git fetch origin main`, `git pull origin main`, `git merge origin/main`, `git rebase origin/main`, or equivalent base-update command. Continue follow-up work on the same branch and let the acceptance PR/merge surface any real conflict; if the branch was already accepted, start a new task branch from the then-current `origin/main`.
+
+After acceptance starts, merge conflict resolution is allowed only through:
+
+```bash
+node scripts/bright-task.mjs acceptance-reconcile <codex-branch>
+```
+
+This is the only approved path for updating an accepted preview branch from the current `origin/main`. It keeps the same branch, PR, and preview slot, then requires a new push, preview verification, and rerun of `deploy/scripts/accept-preview.sh`.
 
 After a branch is accepted through PR/merge into `main`, every new write starts a new `codex/*` branch, even inside the same thread.
 
@@ -55,6 +71,8 @@ deploy/scripts/accept-preview.sh <codex-branch>
 ```
 
 Then monitor the PR/merge queue, `deploy-prod`, metadata promotion, and preview-slot release until completion or a concrete blocker.
+
+If acceptance reports `mergeStateStatus: DIRTY` or `BEHIND`, run the same-branch `acceptance-reconcile` command, resolve conflicts if any, push the same branch, rerun preview handoff for the new head, and rerun `accept-preview.sh`. Do not create a replacement branch or PR for accepted conflict resolution.
 
 ## Checks
 

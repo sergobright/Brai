@@ -397,7 +397,7 @@ test('migration seeds unified build version ledger', async () => {
     assert.equal(baselineBuild.included_in_version_id, null);
     assert.equal(baselineBuild.released_at_utc, '2026-06-23T09:12:45Z');
     assert.match(baselineBuild.short_changes, /web\/OTA/);
-    assert.match(baselineBuild.detailed_changes, /min APK versionCode 1/);
+    assert.match(baselineBuild.detailed_changes, /versionCode 1/);
 
     fixture.store.migrate();
     assert.equal(fixture.store.db.prepare('SELECT COUNT(*) AS count FROM build_versions').get().count, 2);

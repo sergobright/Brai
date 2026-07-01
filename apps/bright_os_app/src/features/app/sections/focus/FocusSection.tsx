@@ -170,8 +170,8 @@ const TIMER_GALAXY_ACTIVE = {
   autoCenterRepulsion: 0,
   starSpeed: 1,
   speed: 1,
-  mouseRepulsion: true,
-  mouseInteraction: true,
+  mouseRepulsion: false,
+  mouseInteraction: false,
 };
 
 const TIMER_EVIL_EYE_IDLE = {

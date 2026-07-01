@@ -17,8 +17,8 @@ test('accepted preview promotion records one build counter idempotently', () => 
     const accepted = {
       sourceBranch: 'codex/example',
       sourceCommit: 'abc123',
-      sourceShortChanges: 'Fix version ledger descriptions.',
-      sourceDetails: 'Accepted build rows now store human-readable release notes.',
+      sourceShortChanges: 'Исправлены описания журнала версий.',
+      sourceDetails: 'Строки сборок теперь хранят человекочитаемые release notes.',
       targetBranch: 'main',
       targetCommit: 'def456',
       releasedAtUtc: '2026-06-24T22:10:00.000Z'
@@ -32,9 +32,9 @@ test('accepted preview promotion records one build counter idempotently', () => 
     assert.deepEqual(
       versions.map((row) => [row.version_type_id, row.version, row.included_in_version_id, row.short_changes]),
       [
-        ['apk', 1, null, 'Initial public APK baseline.'],
-        ['build', 1, null, 'Initial public web/OTA baseline.'],
-        ['build', 2, null, 'Fix version ledger descriptions.']
+        ['apk', 1, null, 'Первичная публичная APK-сборка.'],
+        ['build', 1, null, 'Первичная публичная web/OTA-сборка.'],
+        ['build', 2, null, 'Исправлены описания журнала версий.']
       ]
     );
     const ref = store.db
@@ -60,8 +60,8 @@ test('manual release links unlinked builds and current apk', () => {
     store.recordAcceptedBuildVersion({
       sourceBranch: 'codex/one',
       sourceCommit: 'one',
-      sourceShortChanges: 'First build.',
-      sourceDetails: 'First build details.',
+      sourceShortChanges: 'Первая сборка.',
+      sourceDetails: 'Детали первой сборки.',
       targetBranch: 'main',
       targetCommit: 'main-one',
       releasedAtUtc: '2026-06-24T22:10:00.000Z'
@@ -69,8 +69,8 @@ test('manual release links unlinked builds and current apk', () => {
     store.recordAcceptedBuildVersion({
       sourceBranch: 'codex/two',
       sourceCommit: 'two',
-      sourceShortChanges: 'Second build.',
-      sourceDetails: 'Second build details.',
+      sourceShortChanges: 'Вторая сборка.',
+      sourceDetails: 'Детали второй сборки.',
       targetBranch: 'main',
       targetCommit: 'main-two',
       releasedAtUtc: '2026-06-24T22:20:00.000Z'
@@ -79,8 +79,8 @@ test('manual release links unlinked builds and current apk', () => {
     const release = store.recordReleaseVersion({
       sourceBranch: 'manual',
       sourceCommit: 'release-one',
-      sourceShortChanges: 'Release collected builds.',
-      sourceDetails: 'Manual release.',
+      sourceShortChanges: 'Релиз собрал принятые сборки.',
+      sourceDetails: 'Ручной релиз.',
       targetBranch: 'main',
       targetCommit: 'release-one',
       releasedAtUtc: '2026-06-24T23:00:00.000Z'
@@ -113,8 +113,8 @@ test('manual canon links unlinked releases', () => {
     store.recordAcceptedBuildVersion({
       sourceBranch: 'codex/one',
       sourceCommit: 'one',
-      sourceShortChanges: 'First build.',
-      sourceDetails: 'First build details.',
+      sourceShortChanges: 'Первая сборка.',
+      sourceDetails: 'Детали первой сборки.',
       targetBranch: 'main',
       targetCommit: 'main-one',
       releasedAtUtc: '2026-06-24T22:10:00.000Z'
@@ -122,8 +122,8 @@ test('manual canon links unlinked releases', () => {
     store.recordReleaseVersion({
       sourceBranch: 'manual',
       sourceCommit: 'release-one',
-      sourceShortChanges: 'Release one.',
-      sourceDetails: 'Manual release one.',
+      sourceShortChanges: 'Первый релиз.',
+      sourceDetails: 'Первый ручной релиз.',
       targetBranch: 'main',
       targetCommit: 'release-one',
       releasedAtUtc: '2026-06-24T23:00:00.000Z'
@@ -131,8 +131,8 @@ test('manual canon links unlinked releases', () => {
     const canon = store.recordCanonVersion({
       sourceBranch: 'manual',
       sourceCommit: 'canon-one',
-      sourceShortChanges: 'Canon one.',
-      sourceDetails: 'Manual canon one.',
+      sourceShortChanges: 'Первый канон.',
+      sourceDetails: 'Первый ручной канон.',
       targetBranch: 'main',
       targetCommit: 'canon-one',
       releasedAtUtc: '2026-06-25T00:00:00.000Z'
@@ -158,9 +158,9 @@ test('accepted build recording does not create release automatically', () => {
     store.recordAcceptedBuildVersion({
       sourceBranch: 'codex/direct-prod',
       sourceCommit: 'source-direct',
-      sourceShortChanges: 'Ship direct production acceptance.',
-      sourceDetails: 'Accepted preview metadata is promoted straight into production ledger.',
-      sourceReason: 'Prototype delivery skips dev.',
+      sourceShortChanges: 'Принята production-сборка напрямую.',
+      sourceDetails: 'Метаданные preview сразу перенесены в production ledger.',
+      sourceReason: 'Нужно проверить delivery без dev-промежутка.',
       targetBranch: 'main',
       targetCommit: 'mainsha-direct',
       releasedAtUtc: '2026-06-27T00:00:00.000Z'
@@ -175,7 +175,33 @@ test('accepted build recording does not create release automatically', () => {
     assert.deepEqual(accepted, {
       version_type_id: 'build',
       version: 2,
-      short_changes: 'Ship direct production acceptance.'
+      short_changes: 'Принята production-сборка напрямую.'
+    });
+  } finally {
+    store.close();
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('ascii commit titles are not promoted as public release notes', () => {
+  const { tmp, store } = tempStore();
+  try {
+    store.recordAcceptedBuildVersion({
+      sourceBranch: 'codex/noisy-title',
+      sourceCommit: 'abc',
+      sourceShortChanges: 'Fix production OTA bundle version regression',
+      sourceDetails: 'Fix production OTA bundle version regression',
+      targetBranch: 'main',
+      targetCommit: 'def',
+      releasedAtUtc: '2026-06-27T00:00:00.000Z'
+    });
+    const accepted = store.db
+      .prepare("SELECT short_changes, detailed_changes, reason FROM build_versions WHERE version_type_id = 'build' AND version = 2")
+      .get();
+    assert.deepEqual(accepted, {
+      short_changes: 'Принята сборка Bright OS.',
+      detailed_changes: 'Сборка принята; технические branch/commit-данные сохранены отдельно.',
+      reason: 'Нужно зафиксировать принятую сборку без смешивания release notes с техническими метаданными.'
     });
   } finally {
     store.close();

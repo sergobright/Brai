@@ -83,7 +83,7 @@ export function BrightOsApp({ initialSection = "actions" }: { initialSection?: S
             ) : screenSection === "focus" ? (
               <>
                 <IconButton icon={Crown} label="Цели фокусировки" active={app.focusGoalActive} onClick={() => app.toggleFocusContextPanel("goal")} />
-                <IconButton icon={BookOpen} label="История фокуса" active={app.focusHistoryActive} onClick={() => app.toggleFocusContextPanel("history")} />
+                <IconButton icon={BookOpen} label="История фокуса" active={app.focusHistoryActive} className="min-[861px]:mr-5 max-[860px]:mr-1.5" onClick={() => app.toggleFocusContextPanel("history")} />
               </>
             ) : screenSection === "archive" ? (
               <IconButton icon={Settings} label="Назад к настройкам" onClick={app.openSettingsPage} />
@@ -185,10 +185,10 @@ export function BrightOsApp({ initialSection = "actions" }: { initialSection?: S
         appVersionState={app.versionState}
         otaRefreshing={app.otaRefreshing}
         otaState={app.otaState}
+        pendingCount={app.totalPendingCount}
         versionError={app.versionError}
         versionRefreshing={app.versionRefreshing}
         syncStatus={app.displaySyncStatus}
-        pendingCount={app.totalPendingCount}
         onSettings={app.openSettingsPage}
         onEngine={() => app.selectSection("engine")}
         onArchive={() => app.selectSection("archive")}

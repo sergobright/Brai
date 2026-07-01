@@ -67,9 +67,9 @@ export const deploymentMethods = {
   }) {
     const existing = this.findBuildVersionByTargetCommit({ targetBranch, targetCommit, versionTypeId: 'build' });
     const version = existing?.version ?? this.nextVersion('build');
-    const fallbackShortChanges = 'Accepted preview changes without authored release notes.';
-    const fallbackDetailedChanges = 'No authored preview release notes were available; audit metadata is stored separately.';
-    const fallbackReason = 'Needed because no authored preview release notes were available; audit metadata is stored separately.';
+    const fallbackShortChanges = 'Принята сборка Bright OS.';
+    const fallbackDetailedChanges = 'Сборка принята; технические branch/commit-данные сохранены отдельно.';
+    const fallbackReason = 'Нужно зафиксировать принятую сборку без смешивания release notes с техническими метаданными.';
     const shortChanges = usefulChanges(sourceShortChanges) || fallbackShortChanges;
     const detailedChanges = usefulChanges(sourceDetails) || (shortChanges === fallbackShortChanges ? fallbackDetailedChanges : shortChanges);
     this.upsertBuildVersion({
@@ -81,7 +81,7 @@ export const deploymentMethods = {
       reason: usefulReason(sourceReason)
         || (shortChanges === fallbackShortChanges ? fallbackReason : '')
         || reasonFromChanges(detailedChanges, shortChanges)
-        || `Needed to accept ${sourceBranch} into ${targetBranch}.`,
+        || 'Нужно зафиксировать принятую сборку.',
       releasedAtUtc,
       sourceBranch,
       sourceCommit,
@@ -106,9 +106,9 @@ export const deploymentMethods = {
       versionTypeId: 'apk',
       version,
       includedInVersionId: null,
-      shortChanges: `Android APK ${version}.`,
-      detailedChanges: `Shipped Android APK ${version} with versionCode ${versionCode}.`,
-      reason: 'Needed because a native Android APK was shipped.',
+      shortChanges: `APK-сборка ${version}.`,
+      detailedChanges: `Опубликована Android APK-сборка ${version} с versionCode ${versionCode}.`,
+      reason: 'Нужно зафиксировать публичную Android APK-сборку.',
       releasedAtUtc,
       sourceBranch,
       sourceCommit,
@@ -400,6 +400,7 @@ function usefulChanges(value) {
   if (/^Accepted \S+@\S+ without preview deployment metadata\.?$/i.test(oneLine)) return '';
   if (/^Accepted preview changes without authored release notes\.?$/i.test(oneLine)) return '';
   if (/^No authored preview release notes were available; audit metadata is stored separately\.?$/i.test(oneLine)) return '';
+  if (!/[А-Яа-яЁё]/.test(oneLine)) return '';
   return text;
 }
 
@@ -418,7 +419,7 @@ function usefulReason(value) {
 function reasonFromChanges(detailedChanges, shortChanges) {
   const text = usefulChanges(detailedChanges) || usefulChanges(shortChanges);
   if (!text) return '';
-  return `Needed because ${text.replace(/\.$/, '').replace(/^./, (letter) => letter.toLowerCase())}.`;
+  return `Нужно: ${text.replace(/\.$/, '')}.`;
 }
 
 function formatBuildVersionRow(row) {

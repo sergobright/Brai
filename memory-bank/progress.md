@@ -19,11 +19,11 @@
 - Future work starts from `origin/main` on `codex/*` branches.
 - Task branches do not add `build_versions` rows by themselves.
 - Accepted working-branch merges into `main` add one `build` row and increment only the `build` counter.
-- Build ledger `short_changes` and `detailed_changes` are human-readable release notes; `reason` explains the problem or need behind the change; branch/commit/deploy audit metadata belongs in `build_version_refs` or `deployment_records`.
+- Build ledger `short_changes`, `detailed_changes`, and `reason` are written in Russian; `short_changes` and `detailed_changes` are human-readable release notes; `reason` explains the problem or need behind the change; branch/commit/deploy audit metadata belongs in `build_version_refs` or `deployment_records`.
 - Production deploys do not create `release` or `canon` rows automatically.
 - `release` rows are created only by explicit command and link unlinked `build` rows plus the current `apk` row through `included_in_version_id`.
 - `canon` rows are created only by explicit command and link unlinked `release` rows through `included_in_version_id`.
-- Shipped APK releases add an `apk` row and increment only the `apk` counter.
+- Explicit public APK ledger releases add an `apk` row and increment only the `apk` counter; routine native rebuilds do not create APK ledger rows.
 - Implementation tasks must finish with clean tracked status, committed, pushed, and deployed to a preview slot with the preview letter and URL reported, unless explicitly local-only. If all preview slots are occupied, the pushed branch is queued and remains incomplete until a slot is assigned.
 - Branch/preview enforcement is implemented through `scripts/bright-task.mjs`, `.codex/hooks.json`, `.githooks/`, and `scripts/bright-preview-handoff.sh`. New project-file tasks should start through `scripts/bright-task-start.sh <task-slug>`, local Git hooks should be enabled with `git config core.hooksPath .githooks`, and changed Codex hooks must be trusted through `/hooks`.
 - After preview handoff, the project owner saying `Принято` or an equivalent acceptance phrase must run `deploy/scripts/accept-preview.sh <codex-branch>` and monitor PR/merge/deploy/release instead of replying with an acknowledgement. Negated phrases such as `пока не принято` do not trigger acceptance. Accepted preview slots are released by the successful `deploy-prod` post-step after metadata promotion and production deploy, and a missing slot release is a blocker.

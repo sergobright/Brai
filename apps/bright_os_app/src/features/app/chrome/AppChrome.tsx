@@ -25,6 +25,8 @@ const syncStatusIconToneClasses: Record<Tone, string> = {
   muted: "text-muted-foreground",
 } as const;
 
+export { syncStatusIconToneClasses };
+
 export function ScreenHeader({
   title,
   icon: Icon,
@@ -61,7 +63,7 @@ export function ScreenHeader({
   );
 }
 
-export function EnvironmentBadge({ className, label }: { className?: string; label: string }) {
+export function EnvironmentBadge({ label, className }: { label: string; className?: string }) {
   return (
     <span className={cx("inline-grid h-[30px] min-w-[30px] place-items-center rounded-md border border-border bg-card px-2 text-xs font-semibold text-muted-foreground", className)}>
       {label}
@@ -100,7 +102,7 @@ export function IconButton({
     <button
       type="button"
       className={cx(
-        "theme-button inline-grid h-[42px] w-[42px] place-items-center rounded-lg border border-border bg-card text-muted-foreground hover:text-primary focus-visible:text-primary",
+        "theme-button inline-grid h-[42px] w-[42px] shrink-0 place-items-center rounded-lg border border-border bg-card text-muted-foreground hover:text-primary focus-visible:text-primary [&_svg]:pointer-events-none",
         active && "border-primary/40 bg-accent text-accent-foreground",
         className,
       )}
@@ -211,7 +213,7 @@ export function MobileContextSheet({
 }
 
 export function StatusPill({ className, status, pendingCount }: { className?: string; status: SyncStatus; pendingCount: number }) {
-  const { label, tone, icon: Icon, spinning } = statusMeta(status, pendingCount);
+  const { label, tone, icon: Icon, spinning } = syncStatusMeta(status, pendingCount);
 
   return (
     <span
@@ -229,7 +231,7 @@ export function StatusPill({ className, status, pendingCount }: { className?: st
   );
 }
 
-function statusMeta(status: SyncStatus, pendingCount: number): { label: string; tone: Tone; icon: LucideIcon; spinning?: boolean } {
+export function syncStatusMeta(status: SyncStatus, pendingCount: number): { label: string; tone: Tone; icon: LucideIcon; spinning?: boolean } {
   if (status === "synced") return { label: "синхронизировано", tone: "ok", icon: CheckCircle2 };
   if (status === "pending_sync") {
     return {

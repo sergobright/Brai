@@ -42,7 +42,9 @@ Preview slots are still allocated and released by the existing slot scripts:
 9. GitHub Actions signals `preview_deploy_passed` or `preview_deploy_failed`.
 10. A failed classification, check, or preview deploy leaves workflow state at `waiting_for_fix`.
 11. Accepted preview completion signals `pr_merged`, `accepted_preview_started`, `accepted_preview_promoted` or `accepted_preview_failed`, `slot_release_started`, and `slot_released` or `slot_release_failed`.
-12. Manual release requires a real slot release. Delete-triggered release is idempotent: if the slot was already released, Temporal records `branch_deleted`.
+12. Manual release requires a real slot release. Delete-triggered release is idempotent: if the slot was already released, Temporal records `branch_deleted`. Closing a `codex/*` PR without merge also runs slot release; if no slot is found, Temporal still records `slot_released` so abandoned preview workflows do not stay in release-started state.
+
+Accepted PR conflict reconciliation does not add a separate Temporal gate. The agent resolves conflicts on the same `codex/*` branch and pushes a new head; the existing `branch_pushed`, `checks_*`, and `preview_deploy_*` events reset and reverify that head before `accept-preview.sh` enables auto-merge again.
 
 The preview slot registry remains `/srv/projects/bright-os-envs/preview-slots.json`; Temporal does not replace that lock or registry.
 
@@ -56,20 +58,23 @@ That class signals `no_preview_required`; Temporal marks `preview_deploy`,
 the branch in the same `BranchPreviewWorkflow` ledger. The state query exposes the
 `deliveryClass`, `handoff`, and `autoMerge` fields for this path.
 
-The no-preview path records delivery handoff with `delivery_handoff_started`,
-`delivery_handoff_passed`, or `delivery_handoff_failed`, and records PR auto-merge setup with
-`auto_merge_started`, `auto_merge_enabled`, or `auto_merge_failed`. Failed classification,
-handoff, or auto-merge events set `status=waiting_for_fix` and populate `blocker`.
+The no-preview path records the handoff attempt with `delivery_handoff_started` or
+`delivery_handoff_failed`, and records PR auto-merge setup with `auto_merge_started`,
+`auto_merge_enabled`, or `auto_merge_failed`. `auto_merge_enabled` is only an intermediate
+state. Successful handoff is complete only after the PR is actually merged: the
+`pull_request.closed` merge job sends `delivery_handoff_passed` with merged PR metadata, then
+`pr_merged` marks `accepted_for_target` as passed. Failed classification, handoff, or
+auto-merge events set `status=waiting_for_fix` and populate `blocker`.
 
 The agent-side `bright-task handoff` may pre-create the infra/docs PR with the agent's GitHub
 identity so CI can reuse it even when the repository keeps the default `GITHUB_TOKEN` unable to
 create pull requests. GitHub Actions still owns the `auto_merge_*` Temporal signals and must not
-push directly to `main`. `auto_merge_enabled` is an intermediate state: local `bright-task handoff`
-does not write a success receipt until the PR state is `MERGED` and the receipt includes PR number,
-URL, and `mergedAt`.
+push directly to `main`. Local `bright-task handoff` does not write a success receipt until the PR
+state is `MERGED` and the receipt includes PR number, URL, and `mergedAt`.
 
-For `infra-docs`, `pr_merged` marks the `accepted_for_target` (`Accepted for target`) task as passed and completes the preview
-lifecycle without requiring an accepted-preview metadata promotion or preview slot release.
+For `infra-docs`, `pr_merged` marks the `accepted_for_target` (`Accepted for target`) task as passed.
+The no-preview lifecycle completes only after all required gates are passed or not applicable, without
+requiring accepted-preview metadata promotion or preview slot release.
 
 ## BranchPreviewWorkflow
 
@@ -96,7 +101,7 @@ The `state` query exposes `deliveryClass`, `handoff`, `autoMerge`, `tasks`, `mis
 - Workflow ID for production deploy: `bright-os:promotion:prod:<sha>`.
 - Prod signals: `prod_deploy_started`, `prod_version_recorded`, `accepted_previews_started`, `accepted_previews_passed`, `accepted_previews_failed`, `prod_deploy_passed`, `prod_deploy_failed`.
 
-The production checklist requires accepted-preview metadata promotion, version/ledger recording, deployment, and preview-slot cleanup. `prod_deploy_passed` completes the promotion workflow only after prior required steps have succeeded in GitHub Actions. Human-readable `build_versions` release notes are part of the existing version/ledger recording step; changing their text source does not add a new Temporal gate.
+The production checklist requires accepted-preview metadata promotion, version/ledger recording, deployment, and preview-slot cleanup. `prod_deploy_passed` completes the promotion workflow only after prior required steps have succeeded in GitHub Actions. Russian human-readable `build_versions` release notes are part of the existing version/ledger recording step; changing their text source does not add a new Temporal gate.
 
 Deploy logic still lives in the existing scripts. Temporal is the required control ledger around those scripts; GitHub branch protection, merge queue, preview slot locking, and SQLite ledger writes remain the underlying authorities for their own data.
 

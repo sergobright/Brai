@@ -1238,26 +1238,26 @@ export const migrationMethods = {
     `);
     insertType.run(
       'build',
-      'Build версия',
-      'Accepted web/OTA build counter. Builds are linked to a release only by manual release recording.',
+      'Сборка',
+      'Принятая web/OTA сборка Bright OS. Увеличивает Z в версии X.Y.Z.S.',
       now
     );
     insertType.run(
       'apk',
-      'APK версия',
-      'Installable Android APK counter. The current APK row is linked when a release is recorded.',
+      'APK',
+      'Публичная Android APK-линия. Увеличивается только при осознанном выпуске нового APK.',
       now
     );
     insertType.run(
       'release',
-      'Release версия',
-      'Manual release counter. A release collects unlinked build rows and the current APK row.',
+      'Релиз',
+      'Ручной релиз, который группирует принятые сборки и текущую APK-запись.',
       now
     );
     insertType.run(
       'canon',
-      'Canon версия',
-      'Manual canon counter. A canon collects unlinked release rows.',
+      'Канон',
+      'Ручной канон, который группирует релизы для публичной линии.',
       now
     );
   }
@@ -1459,9 +1459,9 @@ export const migrationMethods = {
       'build',
       1,
       null,
-      'Initial public web/OTA baseline.',
-      'Published browser web and Android OTA baseline build 1 with min APK versionCode 1.',
-      'Initial public baseline.',
+      'Первичная публичная web/OTA-сборка.',
+      'Опубликована baseline web/OTA-сборка 1 с минимальным Android versionCode 1.',
+      'Нужно зафиксировать первую чистую публичную web/OTA-версию.',
       buildReleasedAt,
       now
     );
@@ -1469,9 +1469,9 @@ export const migrationMethods = {
       'apk',
       1,
       null,
-      'Initial public APK baseline.',
-      'APK baseline 1 uses Android versionCode 1. Release signing material is supplied outside the repository.',
-      'Initial public baseline.',
+      'Первичная публичная APK-сборка.',
+      'APK baseline 1 использует Android versionCode 1. Release signing material хранится вне репозитория.',
+      'Нужно зафиксировать первую публичную Android APK-сборку.',
       apkReleasedAt,
       now
     );

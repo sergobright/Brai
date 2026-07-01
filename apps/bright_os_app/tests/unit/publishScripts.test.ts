@@ -245,27 +245,27 @@ try {
     versionTypeId: "release",
     version: 5,
     includedInVersionId: null,
-    shortChanges: "Production release",
-    detailedChanges: "Production release",
-    reason: "Needed for test",
+    shortChanges: "Production-релиз",
+    detailedChanges: "Production-релиз",
+    reason: "Нужно для теста",
     releasedAtUtc: "2026-06-28T17:29:00.000Z",
   });
   store.upsertBuildVersion({
     versionTypeId: "build",
     version: 43,
     includedInVersionId: null,
-    shortChanges: "Production build",
-    detailedChanges: "Production build",
-    reason: "Needed for test",
+    shortChanges: "Production-сборка",
+    detailedChanges: "Production-сборка",
+    reason: "Нужно для теста",
     releasedAtUtc: "2026-06-28T17:29:00.000Z",
   });
   store.upsertBuildVersion({
     versionTypeId: "apk",
     version: 1,
     includedInVersionId: null,
-    shortChanges: "Production APK",
-    detailedChanges: "Production APK",
-    reason: "Needed for test",
+    shortChanges: "Production APK-сборка",
+    detailedChanges: "Production APK-сборка",
+    reason: "Нужно для теста",
     releasedAtUtc: "2026-06-28T17:29:00.000Z",
   });
 } finally {
@@ -303,6 +303,7 @@ await fs.writeFile(outputPath, JSON.stringify({
     expect(versions.preview).toBe("0.11.52.1");
     expect(deployBranch).toContain('--prod-db "${BRIGHT_OS_PROD_DB:-}"');
     expect(deployBranch).toContain('--mobile-target "$MOBILE_TARGET"');
+    expect(deployBranch).toContain('BRIGHT_OS_RECORD_PROD_BRANCH_DEPLOYMENT');
     expect(await readFile(path.join(workspaceRoot, "deploy/scripts/build-android-env-apk.sh"), "utf8")).toContain('--mobile-target "${BRIGHT_OS_MOBILE_TARGET:-${BRIGHT_OS_ENVS_ROOT:-/srv/projects/bright-os-envs}/$ENV_PATH/mobile-update}"');
     expect(ciDeploy).toContain('export BRIGHT_OS_PROD_DB="$DEPLOY_REPO/data/bright_os.sqlite"');
   });
@@ -391,7 +392,24 @@ try {
     expect(script.indexOf('find "$SOURCE_ROOT" -user "$(id -u)"')).toBeLessThan(script.indexOf('rm -rf "$SOURCE_ROOT"'));
   });
 
-  it("rebuilds all APK release rows from production native deploys", async () => {
+  it("keeps preview runtime SQLite writable by the deploy group", async () => {
+    const deploy = await readFile(path.join(workspaceRoot, "deploy/scripts/deploy-branch.sh"), "utf8");
+    const playbook = await readFile(path.join(workspaceRoot, "deploy/ansible/bright-os.yml"), "utf8");
+    const service = await readFile(path.join(workspaceRoot, "deploy/ansible/templates/brightos-api.service.j2"), "utf8");
+    const resetBlock = deploy.slice(deploy.indexOf('if [[ "$ENVIRONMENT" == preview-*'));
+
+    expect(service).toContain('Group={{ bright_os_deploy_user }}');
+    expect(service).toContain('UMask=0002');
+    expect(playbook).toContain("Ensure non-production data directories keep deploy setgid");
+    expect(playbook).toContain('group: "{{ bright_os_deploy_user }}"');
+    expect(playbook).toContain('mode: "2775"');
+    expect(resetBlock).toContain("Preview SQLite reset failed");
+    expect(resetBlock).toContain("bright-deploy:bright-deploy 2775");
+    expect(resetBlock).toContain("find \"$TARGET_ROOT/data\" -type d -exec chmod 2775 {} +");
+    expect(resetBlock.indexOf("Preview SQLite reset failed")).toBeLessThan(deploy.indexOf("record-deployment.mjs"));
+  });
+
+  it("rebuilds APK release rows without recording ledger rows by default", async () => {
     const deploy = await readFile(path.join(workspaceRoot, "deploy/scripts/ci-ssh-deploy.sh"), "utf8");
     const buildApk = await readFile(path.join(workspaceRoot, "deploy/scripts/build-android-env-apk.sh"), "utf8");
     const releaseSlot = await readFile(path.join(workspaceRoot, "deploy/scripts/ci-ssh-release-slot.sh"), "utf8");
@@ -401,6 +419,7 @@ try {
     expect(prodBlock).toContain('node deploy/scripts/resolve-app-version.mjs --environment prod --root "$SOURCE_ROOT" --db "${BRIGHT_OS_DB:-}"');
     expect(prodBlock).toContain('deploy/scripts/build-nonproduction-apks.sh');
     expect(prodBlock.indexOf('deploy/scripts/build-android-env-apk.sh production')).toBeLessThan(prodBlock.indexOf('deploy/scripts/build-nonproduction-apks.sh'));
+    expect(buildApk).toContain('"${BRIGHT_OS_RECORD_APK_LEDGER:-false}" == "true"');
     expect(buildApk).toContain('--next-apk true --target-branch "$BRIGHT_OS_BRANCH" --target-commit "$BRIGHT_OS_COMMIT"');
     expect(buildApk).toContain('record-shipped-apk-version.mjs');
     expect(releaseSlot).toContain('deploy/scripts/build-android-env-apk.sh "preview${SLOT_META[0]}" >&2');

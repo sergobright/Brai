@@ -128,6 +128,17 @@ test("hook analysis blocks base refresh inside an active task branch", () => {
   }
 });
 
+test("hook analysis allows official acceptance reconcile command", () => {
+  const result = analyzeHookInput(JSON.stringify({
+    tool_name: "functions.exec_command",
+    tool_input: { cmd: "node scripts/bright-task.mjs acceptance-reconcile codex/foo" },
+  }));
+  assert.equal(result.ok, true);
+  assert.equal(result.write, true);
+  assert.equal(result.officialAcceptanceReconcile, true);
+  assert.equal(result.blockedReason, undefined);
+});
+
 test("codex project pre-tool hook is unconditional and uses the installed guard", () => {
   const hooks = JSON.parse(fs.readFileSync(new URL("../.codex/hooks.json", import.meta.url), "utf8"));
   assert.equal(hooks.hooks.PreToolUse.length, 1);
@@ -293,6 +304,22 @@ test("production deploy resolves ledger version through the shared resolver", ()
   assert.doesNotMatch(script, /version_type_id = 'release'/);
   assert.doesNotMatch(script, /version_type_id = 'build'/);
   assert.doesNotMatch(script, /version_type_id = 'apk'/);
+});
+
+test("preview deploy reset reports permission recovery and preserves setgid", () => {
+  const script = fs.readFileSync(new URL("../deploy/scripts/deploy-branch.sh", import.meta.url), "utf8");
+  const playbook = fs.readFileSync(new URL("../deploy/ansible/bright-os.yml", import.meta.url), "utf8");
+  const unit = fs.readFileSync(new URL("../deploy/ansible/templates/brightos-api.service.j2", import.meta.url), "utf8");
+  assert.match(script, /umask 0002/);
+  assert.match(script, /Preview SQLite reset failed/);
+  assert.match(script, /bright-deploy:bright-deploy 2775/);
+  assert.ok(script.includes('find "$TARGET_ROOT" -type d -user "$(id -u)" -exec chmod g+s {} +'));
+  assert.match(playbook, /Ensure non-production data directories keep deploy setgid/);
+  assert.match(playbook, /Ensure nested non-production data directories keep deploy setgid/);
+  assert.match(playbook, /mode: "2775"/);
+  assert.match(unit, /Group={{ bright_os_deploy_user }}/);
+  assert.match(unit, /SupplementaryGroups={{ bright_os_deploy_user }}/);
+  assert.match(unit, /UMask=0002/);
 });
 
 test("pre-push ref updates must stay on matching codex ref", () => {
@@ -484,6 +511,16 @@ test("task start guidance requires escalation and forbids manual branch fallback
   assert.match(message, /bright-os-guard\.mjs start <task-slug>/);
   assert.match(message, /Do not create or switch to a manual fallback branch/);
   assert.match(message, /stale checkout/);
+});
+
+test("task permission repair script is scoped to one registered worktree", () => {
+  const script = fs.readFileSync(new URL("./bright-task-repair-permissions.sh", import.meta.url), "utf8");
+  assert.match(script, /usage: scripts\/bright-task-repair-permissions\.sh/);
+  assert.match(script, /Refusing to repair path outside/);
+  assert.match(script, /Refusing to repair git metadata outside/);
+  assert.ok(script.includes('sudo chown -R "$OWNER" "$TARGET_REAL" "$GIT_DIR_REAL"'));
+  assert.ok(script.includes('sudo chmod -R u=rwX,g=rwX,o= "$TARGET_REAL" "$GIT_DIR_REAL"'));
+  assert.ok(script.includes("sudo find \"$TASK_STATE\" -maxdepth 1 -type f -name '*.json' -exec chmod 0640 {} +"));
 });
 
 test("task starter creates writable nested worktrees from repo and supports legacy task roots", () => {
@@ -725,6 +762,8 @@ test("acceptance markers block preview acceptance but not infra docs CI fixes", 
   assert.equal(isBlockingAcceptanceReceipt({ ...base, status: "acceptance_started", deliveryClass: "runtime-preview" }), true);
   assert.equal(isBlockingAcceptanceReceipt({ ...base, status: "acceptance_started", deliveryClass: "infra-docs" }), false);
   assert.equal(isBlockingAcceptanceReceipt({ ...base, status: "acceptance_started" }), false);
+  assert.equal(isBlockingAcceptanceReceipt({ ...base, status: "reconcile_required", deliveryClass: "runtime-preview" }), true);
+  assert.equal(isBlockingAcceptanceReceipt({ ...base, status: "reconcile_started", deliveryClass: "runtime-preview" }), false);
   assert.equal(isBlockingAcceptanceReceipt({ ...base, status: "merged", deliveryClass: "infra-docs" }), true);
   assert.equal(isBlockingAcceptanceReceipt({ ...base, status: "already_in_base" }), true);
 });
@@ -896,6 +935,27 @@ test("delivery handoff does not write a receipt when a required delivery job fai
   assert.equal(fs.existsSync(path.join(fixture.repo, ".bright-task", "delivery-handoff.json")), false);
 });
 
+test("infra docs workflow marks handoff passed only from the PR merge job", () => {
+  const workflow = fs.readFileSync(new URL("../.github/workflows/bright-os-delivery.yml", import.meta.url), "utf8");
+  const autoMergeJob = workflow.slice(workflow.indexOf("auto-merge-infra-docs:"), workflow.indexOf("deploy-prod:"));
+  const recordMergeJob = workflow.slice(workflow.indexOf("record-infra-docs-merge:"), workflow.indexOf("release-preview-slot:"));
+  assert.doesNotMatch(autoMergeJob, /event delivery_handoff_passed/);
+  assert.match(recordMergeJob, /event delivery_handoff_passed/);
+  assert.match(recordMergeJob, /event pr_merged/);
+  assert.ok(recordMergeJob.indexOf("event delivery_handoff_passed") < recordMergeJob.indexOf("event pr_merged"));
+  assert.match(recordMergeJob, /BRIGHT_OS_PR_MERGED_AT/);
+});
+
+test("delivery workflow releases preview slots for unmerged closed codex PRs", () => {
+  const workflow = fs.readFileSync(new URL("../.github/workflows/bright-os-delivery.yml", import.meta.url), "utf8");
+  const releaseJob = workflow.slice(workflow.indexOf("release-preview-slot:"));
+
+  assert.match(releaseJob, /github\.event\.pull_request\.merged == false/);
+  assert.match(releaseJob, /github\.event\.pull_request\.head\.ref/);
+  assert.match(releaseJob, /github\.event\.pull_request\.head\.sha/);
+  assert.match(releaseJob, /steps\.release_slot\.outputs\.released == 'true' \|\| github\.event_name == 'pull_request'/);
+});
+
 test("delivery handoff writes infra-docs receipt only for merged PRs", () => {
   const fixture = setupInfraDocsHandoffFixture({ prState: "MERGED", mergedAt: "2026-06-26T00:00:00Z" });
   const result = runDeliveryHandoffFixture(fixture);
@@ -1024,8 +1084,120 @@ test("task state rejects same-thread writes after local acceptance marker", () =
     const state = deriveTaskState();
     assert.equal(state.reuse.ok, false);
     assert.match(state.reuse.message, /acceptance already started/);
+
+    const acceptancePath = path.join(repo, ".bright-task", "acceptance.json");
+    const receipt = JSON.parse(fs.readFileSync(acceptancePath, "utf8"));
+    fs.writeFileSync(acceptancePath, `${JSON.stringify({ ...receipt, status: "reconcile_required" })}\n`);
+    const requiredState = deriveTaskState();
+    assert.equal(requiredState.reuse.ok, false);
+
+    fs.writeFileSync(acceptancePath, `${JSON.stringify({ ...receipt, status: "reconcile_started" })}\n`);
+    const reconcileState = deriveTaskState();
+    assert.equal(reconcileState.reuse.ok, true);
+
+    fs.writeFileSync(acceptancePath, `${JSON.stringify({ ...receipt, status: "merged" })}\n`);
+    const mergedState = deriveTaskState();
+    assert.equal(mergedState.reuse.ok, false);
   } finally {
     process.chdir(previous);
+  }
+});
+
+test("acceptance reconcile merges current main into the same accepted branch", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "bright-task-reconcile-"));
+  const remote = path.join(root, "origin.git");
+  const repo = path.join(root, "repo");
+  const script = path.join(process.cwd(), "scripts/bright-task.mjs");
+  const previousPrs = process.env.BRIGHT_OS_TEST_ACCEPTANCE_PRS_JSON;
+  try {
+    git(["init", "--bare", remote], root);
+    fs.mkdirSync(repo);
+    git(["init"], repo);
+    git(["config", "user.email", "test@example.invalid"], repo);
+    git(["config", "user.name", "Bright Test"], repo);
+    fs.writeFileSync(path.join(repo, ".gitignore"), ".bright-task/\n");
+    fs.writeFileSync(path.join(repo, "base.txt"), "base\n");
+    git(["add", ".gitignore", "base.txt"], repo);
+    git(["commit", "-m", "base"], repo);
+    git(["branch", "-M", "main"], repo);
+    const base = git(["rev-parse", "HEAD"], repo).stdout.trim();
+    git(["remote", "add", "origin", remote], repo);
+    git(["push", "origin", "HEAD:main"], repo);
+
+    git(["checkout", "-b", "codex/foo"], repo);
+    fs.mkdirSync(path.join(repo, "docs"), { recursive: true });
+    fs.writeFileSync(path.join(repo, "docs/branch.md"), "branch\n");
+    git(["add", "docs/branch.md"], repo);
+    git(["commit", "-m", "branch change"], repo);
+    const branchHead = git(["rev-parse", "HEAD"], repo).stdout.trim();
+    git(["push", "origin", "HEAD:codex/foo"], repo);
+
+    git(["checkout", "main"], repo);
+    fs.mkdirSync(path.join(repo, "apps/bright_os_app/src/features/app"), { recursive: true });
+    fs.writeFileSync(path.join(repo, "apps/bright_os_app/src/features/app/BrightOsApp.tsx"), "main\n");
+    git(["add", "apps/bright_os_app/src/features/app/BrightOsApp.tsx"], repo);
+    git(["commit", "-m", "main change"], repo);
+    git(["push", "origin", "HEAD:main"], repo);
+    git(["checkout", "codex/foo"], repo);
+
+    fs.mkdirSync(path.join(repo, ".bright-task"));
+    fs.writeFileSync(
+      path.join(repo, ".bright-task", "task.json"),
+      `${JSON.stringify({
+        branch: "codex/foo",
+        mode: "new",
+        base,
+        createdAt: "2026-06-26T00:00:00.000Z",
+        ...(process.env.CODEX_THREAD_ID ? { threadId: process.env.CODEX_THREAD_ID } : {}),
+      })}\n`,
+    );
+    fs.writeFileSync(
+      path.join(repo, ".bright-task", "acceptance.json"),
+      `${JSON.stringify({
+        receiptType: "bright-acceptance-v1",
+        branch: "codex/foo",
+        commit: branchHead,
+        baseBranch: "main",
+        prNumber: 7,
+        prUrl: "https://github.example/pr/7",
+        mergeMethod: "squash",
+        status: "reconcile_required",
+        deliveryClass: "runtime-preview",
+        acceptedAt: "2026-06-26T00:00:00.000Z",
+      })}\n`,
+    );
+    process.env.BRIGHT_OS_TEST_ACCEPTANCE_PRS_JSON = JSON.stringify([
+      {
+        number: 7,
+        url: "https://github.example/pr/7",
+        state: "OPEN",
+        headRefOid: branchHead,
+        mergeStateStatus: "BEHIND",
+      },
+    ]);
+
+    const result = spawnSync(process.execPath, [script, "acceptance-reconcile", "codex/foo"], {
+      cwd: repo,
+      encoding: "utf8",
+      env: process.env,
+    });
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    assert.equal(gitStatus(["merge-base", "--is-ancestor", "origin/main", "HEAD"], repo), 0);
+    const receipt = JSON.parse(fs.readFileSync(path.join(repo, ".bright-task", "acceptance.json"), "utf8"));
+    assert.equal(receipt.status, "reconcile_started");
+    assert.equal(receipt.prNumber, 7);
+    const previousCwd = process.cwd();
+    try {
+      process.chdir(repo);
+      const state = deriveTaskState();
+      assert.equal(state.classification.deliveryClass, "infra-docs");
+      assert.deepEqual(state.changedFiles, ["docs/branch.md"]);
+    } finally {
+      process.chdir(previousCwd);
+    }
+  } finally {
+    if (previousPrs == null) delete process.env.BRIGHT_OS_TEST_ACCEPTANCE_PRS_JSON;
+    else process.env.BRIGHT_OS_TEST_ACCEPTANCE_PRS_JSON = previousPrs;
   }
 });
 
@@ -1084,6 +1256,10 @@ test("accept preview checks verified preview before PR actions", () => {
   assert.ok(acceptancePreflightCall > 0);
   assert.ok(acceptancePreflightCall < script.indexOf("gh pr list"));
   assert.ok(acceptancePreflightCall < script.indexOf("gh pr merge"));
+  assert.match(script, /mergeStateStatus/);
+  assert.match(script, /reconcile_required/);
+  assert.match(script, /acceptance-reconcile/);
+  assert.match(script, /BEHIND/);
   assert.match(script, /Bright OS task state must not be a symlink/);
   assert.match(script, /mktemp "\$dir\/\.acceptance-write\.XXXXXX"/);
   assert.match(script, /write_acceptance_marker/);

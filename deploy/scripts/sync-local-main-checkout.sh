@@ -4,7 +4,7 @@ set -euo pipefail
 BRANCH="${BRIGHT_OS_MAIN_BRANCH:-main}"
 EXPECTED_COMMIT="${1:-${BRIGHT_OS_COMMIT:-}}"
 REPO="/srv/projects/bright-os"
-REMOTE_URL="${BRIGHT_OS_MAIN_REMOTE_URL:-git@github.com:sergobright/Bright-OS.git}"
+REMOTE_URL="${BRIGHT_OS_MAIN_REMOTE_URL:-git@github.com:sergobright/Brai.git}"
 GIT_USER="${BRIGHT_OS_MAIN_GIT_USER:-mark}"
 RESCUE_ROOT="${BRIGHT_OS_MAIN_RESCUE_ROOT:-/srv/projects/bright-os-rescue}"
 LOCK_FILE="${BRIGHT_OS_MAIN_SYNC_LOCK:-/tmp/bright-os-main-checkout-sync.lock}"

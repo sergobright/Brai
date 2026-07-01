@@ -217,7 +217,6 @@ export function applyPreviewEvent(state, rawEvent) {
       state.status = "accepted_for_target";
       if (isNoPreviewRequired(state)) {
         state.slot = "";
-        state.terminal = true;
       }
       break;
     case "accepted_preview_started":
@@ -257,6 +256,7 @@ export function applyPreviewEvent(state, rawEvent) {
   }
 
   refreshGates(state, PREVIEW_TASKS);
+  if (isNoPreviewRequired(state) && state.tasks.accepted_for_target.status === "passed" && state.gates.complete) state.terminal = true;
   return state;
 }
 

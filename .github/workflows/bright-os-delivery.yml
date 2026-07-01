@@ -264,16 +264,6 @@ jobs:
           BRIGHT_DEPLOY_SSH_KEY: ${{ secrets.BRIGHT_DEPLOY_SSH_KEY }}
           BRIGHT_OS_BRANCH: ${{ github.ref_name }}
           BRIGHT_OS_COMMIT: ${{ github.sha }}
-      - name: Temporal infra/docs handoff passed
-        if: success()
-        run: deploy/scripts/ci-temporal-signal.sh preview --branch "$BRIGHT_OS_BRANCH" --sha "$BRIGHT_OS_COMMIT" --event delivery_handoff_passed --delivery-class infra-docs --source auto-merge-infra-docs
-        env:
-          BRIGHT_DEPLOY_HOST: ${{ vars.BRIGHT_DEPLOY_HOST }}
-          BRIGHT_DEPLOY_USER: ${{ vars.BRIGHT_DEPLOY_USER }}
-          BRIGHT_DEPLOY_SSH_PORT: ${{ vars.BRIGHT_DEPLOY_SSH_PORT || '22' }}
-          BRIGHT_DEPLOY_SSH_KEY: ${{ secrets.BRIGHT_DEPLOY_SSH_KEY }}
-          BRIGHT_OS_BRANCH: ${{ github.ref_name }}
-          BRIGHT_OS_COMMIT: ${{ github.sha }}
       - name: Temporal infra/docs handoff failed
         if: failure()
         run: deploy/scripts/ci-temporal-signal.sh preview --branch "$BRIGHT_OS_BRANCH" --sha "$BRIGHT_OS_COMMIT" --event delivery_handoff_failed --delivery-class infra-docs --source auto-merge-infra-docs
@@ -440,8 +430,10 @@ jobs:
           node-version: '22'
           cache: npm
           cache-dependency-path: services/bright_os_temporal/package-lock.json
-      - name: Temporal infra/docs PR merged
-        run: deploy/scripts/ci-temporal-signal.sh preview --branch "$BRIGHT_OS_BRANCH" --sha "$BRIGHT_OS_COMMIT" --event pr_merged --delivery-class infra-docs --pr-number "$BRIGHT_OS_PR_NUMBER" --pr-url "$BRIGHT_OS_PR_URL" --source record-infra-docs-merge
+      - name: Temporal infra/docs handoff passed
+        run: |
+          test -n "$BRIGHT_OS_PR_MERGED_AT"
+          deploy/scripts/ci-temporal-signal.sh preview --branch "$BRIGHT_OS_BRANCH" --sha "$BRIGHT_OS_COMMIT" --event delivery_handoff_passed --delivery-class infra-docs --pr-number "$BRIGHT_OS_PR_NUMBER" --pr-url "$BRIGHT_OS_PR_URL" --merged-at "$BRIGHT_OS_PR_MERGED_AT" --source record-infra-docs-merge
         env:
           BRIGHT_DEPLOY_HOST: ${{ vars.BRIGHT_DEPLOY_HOST }}
           BRIGHT_DEPLOY_USER: ${{ vars.BRIGHT_DEPLOY_USER }}
@@ -451,12 +443,29 @@ jobs:
           BRIGHT_OS_COMMIT: ${{ github.event.pull_request.head.sha }}
           BRIGHT_OS_PR_NUMBER: ${{ github.event.pull_request.number }}
           BRIGHT_OS_PR_URL: ${{ github.event.pull_request.html_url }}
+          BRIGHT_OS_PR_MERGED_AT: ${{ github.event.pull_request.merged_at }}
+      - name: Temporal infra/docs PR merged
+        run: deploy/scripts/ci-temporal-signal.sh preview --branch "$BRIGHT_OS_BRANCH" --sha "$BRIGHT_OS_COMMIT" --event pr_merged --delivery-class infra-docs --pr-number "$BRIGHT_OS_PR_NUMBER" --pr-url "$BRIGHT_OS_PR_URL" --merged-at "$BRIGHT_OS_PR_MERGED_AT" --source record-infra-docs-merge
+        env:
+          BRIGHT_DEPLOY_HOST: ${{ vars.BRIGHT_DEPLOY_HOST }}
+          BRIGHT_DEPLOY_USER: ${{ vars.BRIGHT_DEPLOY_USER }}
+          BRIGHT_DEPLOY_SSH_PORT: ${{ vars.BRIGHT_DEPLOY_SSH_PORT || '22' }}
+          BRIGHT_DEPLOY_SSH_KEY: ${{ secrets.BRIGHT_DEPLOY_SSH_KEY }}
+          BRIGHT_OS_BRANCH: ${{ github.event.pull_request.head.ref }}
+          BRIGHT_OS_COMMIT: ${{ github.event.pull_request.head.sha }}
+          BRIGHT_OS_PR_NUMBER: ${{ github.event.pull_request.number }}
+          BRIGHT_OS_PR_URL: ${{ github.event.pull_request.html_url }}
+          BRIGHT_OS_PR_MERGED_AT: ${{ github.event.pull_request.merged_at }}
 
   release-preview-slot:
     if: |
       (github.event_name == 'delete' && github.event.ref_type == 'branch' && startsWith(github.event.ref, 'codex/')) ||
+      (github.event_name == 'pull_request' && github.event.action == 'closed' && github.event.pull_request.merged == false && startsWith(github.event.pull_request.head.ref, 'codex/')) ||
       (github.event_name == 'workflow_dispatch' && startsWith(inputs.release_branch, 'codex/'))
     runs-on: ubuntu-latest
+    env:
+      BRIGHT_OS_RELEASE_BRANCH: ${{ inputs.release_branch || github.event.pull_request.head.ref || github.head_ref || github.event.ref }}
+      BRIGHT_OS_RELEASE_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -471,8 +480,8 @@ jobs:
           BRIGHT_DEPLOY_USER: ${{ vars.BRIGHT_DEPLOY_USER }}
           BRIGHT_DEPLOY_SSH_PORT: ${{ vars.BRIGHT_DEPLOY_SSH_PORT || '22' }}
           BRIGHT_DEPLOY_SSH_KEY: ${{ secrets.BRIGHT_DEPLOY_SSH_KEY }}
-          BRIGHT_OS_BRANCH: ${{ inputs.release_branch || github.head_ref || github.event.ref }}
-          BRIGHT_OS_COMMIT: ${{ github.sha }}
+          BRIGHT_OS_BRANCH: ${{ env.BRIGHT_OS_RELEASE_BRANCH }}
+          BRIGHT_OS_COMMIT: ${{ env.BRIGHT_OS_RELEASE_COMMIT }}
       - id: release_slot
         run: deploy/scripts/ci-ssh-release-slot.sh
         env:
@@ -481,18 +490,18 @@ jobs:
           BRIGHT_DEPLOY_SSH_PORT: ${{ vars.BRIGHT_DEPLOY_SSH_PORT || '22' }}
           BRIGHT_DEPLOY_REPO: ${{ vars.BRIGHT_DEPLOY_REPO || '/srv/projects/bright-os' }}
           BRIGHT_DEPLOY_SSH_KEY: ${{ secrets.BRIGHT_DEPLOY_SSH_KEY }}
-          BRIGHT_OS_BRANCH: ${{ inputs.release_branch || github.head_ref || github.event.ref }}
+          BRIGHT_OS_BRANCH: ${{ env.BRIGHT_OS_RELEASE_BRANCH }}
           BRIGHT_OS_REQUIRE_PREVIEW_SLOT_RELEASE: ${{ github.event_name == 'workflow_dispatch' && 'true' || 'false' }}
       - name: Temporal preview released
-        if: success() && steps.release_slot.outputs.released == 'true'
+        if: success() && (steps.release_slot.outputs.released == 'true' || github.event_name == 'pull_request')
         run: deploy/scripts/ci-temporal-signal.sh preview --branch "$BRIGHT_OS_BRANCH" --sha "$BRIGHT_OS_COMMIT" --event slot_released --source release-preview-slot
         env:
           BRIGHT_DEPLOY_HOST: ${{ vars.BRIGHT_DEPLOY_HOST }}
           BRIGHT_DEPLOY_USER: ${{ vars.BRIGHT_DEPLOY_USER }}
           BRIGHT_DEPLOY_SSH_PORT: ${{ vars.BRIGHT_DEPLOY_SSH_PORT || '22' }}
           BRIGHT_DEPLOY_SSH_KEY: ${{ secrets.BRIGHT_DEPLOY_SSH_KEY }}
-          BRIGHT_OS_BRANCH: ${{ inputs.release_branch || github.head_ref || github.event.ref }}
-          BRIGHT_OS_COMMIT: ${{ github.sha }}
+          BRIGHT_OS_BRANCH: ${{ env.BRIGHT_OS_RELEASE_BRANCH }}
+          BRIGHT_OS_COMMIT: ${{ env.BRIGHT_OS_RELEASE_COMMIT }}
       - name: Temporal preview branch deleted
         if: success() && github.event_name == 'delete' && steps.release_slot.outputs.released != 'true'
         run: deploy/scripts/ci-temporal-signal.sh preview --branch "$BRIGHT_OS_BRANCH" --sha "$BRIGHT_OS_COMMIT" --event branch_deleted --source release-preview-slot
@@ -501,8 +510,8 @@ jobs:
           BRIGHT_DEPLOY_USER: ${{ vars.BRIGHT_DEPLOY_USER }}
           BRIGHT_DEPLOY_SSH_PORT: ${{ vars.BRIGHT_DEPLOY_SSH_PORT || '22' }}
           BRIGHT_DEPLOY_SSH_KEY: ${{ secrets.BRIGHT_DEPLOY_SSH_KEY }}
-          BRIGHT_OS_BRANCH: ${{ inputs.release_branch || github.head_ref || github.event.ref }}
-          BRIGHT_OS_COMMIT: ${{ github.sha }}
+          BRIGHT_OS_BRANCH: ${{ env.BRIGHT_OS_RELEASE_BRANCH }}
+          BRIGHT_OS_COMMIT: ${{ env.BRIGHT_OS_RELEASE_COMMIT }}
       - name: Temporal preview release failed
         if: failure()
         run: deploy/scripts/ci-temporal-signal.sh preview --branch "$BRIGHT_OS_BRANCH" --sha "$BRIGHT_OS_COMMIT" --event slot_release_failed --source release-preview-slot
@@ -511,5 +520,5 @@ jobs:
           BRIGHT_DEPLOY_USER: ${{ vars.BRIGHT_DEPLOY_USER }}
           BRIGHT_DEPLOY_SSH_PORT: ${{ vars.BRIGHT_DEPLOY_SSH_PORT || '22' }}
           BRIGHT_DEPLOY_SSH_KEY: ${{ secrets.BRIGHT_DEPLOY_SSH_KEY }}
-          BRIGHT_OS_BRANCH: ${{ inputs.release_branch || github.head_ref || github.event.ref }}
-          BRIGHT_OS_COMMIT: ${{ github.sha }}
+          BRIGHT_OS_BRANCH: ${{ env.BRIGHT_OS_RELEASE_BRANCH }}
+          BRIGHT_OS_COMMIT: ${{ env.BRIGHT_OS_RELEASE_COMMIT }}

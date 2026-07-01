@@ -57,6 +57,7 @@ if [[ "$ENVIRONMENT" == "prod" ]]; then
   DB_PATH="${BRIGHT_OS_DB:-$ROOT/data/bright_os.sqlite}"
 else
   TARGET_ROOT="${BRIGHT_OS_ENV_ROOT:-$ENVS_ROOT/$ENV_PATH}"
+  umask 0002
   WEB_TARGET="$TARGET_ROOT/web"
   MOBILE_TARGET="$TARGET_ROOT/mobile-update"
   DB_PATH="$TARGET_ROOT/data/bright_os.sqlite"
@@ -67,7 +68,18 @@ if [[ "$ENVIRONMENT" == preview-* && "$ALLOCATED_NEW" == "true" && "${BRIGHT_OS_
   case "$TARGET_ROOT" in
     "$ENVS_ROOT"/preview-*)
       find "$TARGET_ROOT" -user "$(id -u)" -exec chmod u+rwX,g+rwX {} + || true
-      rm -f "$TARGET_ROOT/data/bright_os.sqlite" "$TARGET_ROOT/data/bright_os.sqlite-shm" "$TARGET_ROOT/data/bright_os.sqlite-wal"
+      if ! rm -f "$TARGET_ROOT/data/bright_os.sqlite" "$TARGET_ROOT/data/bright_os.sqlite-shm" "$TARGET_ROOT/data/bright_os.sqlite-wal"; then
+        cat >&2 <<RECOVERY
+Preview SQLite reset failed under $TARGET_ROOT/data.
+Expected: data directory bright-deploy:bright-deploy 2775, SQLite files group-writable 0664.
+Recovery: run the Bright OS Ansible playbook as an admin, or run:
+  chown -R bright-deploy:bright-deploy "$TARGET_ROOT/data"
+  chmod -R u+rwX,g+rwX,o=rX "$TARGET_ROOT/data"
+  find "$TARGET_ROOT/data" -type d -exec chmod 2775 {} +
+Then retry this same branch deploy so the preview slot is reused.
+RECOVERY
+        exit 1
+      fi
       ;;
     *)
       echo "Refusing to reset preview DB outside $ENVS_ROOT/preview-* path: $TARGET_ROOT" >&2
@@ -114,27 +126,31 @@ export NEXT_PUBLIC_BRIGHT_OS_ANDROID_API="$ANDROID_API"
 
 if [[ "$ENVIRONMENT" != "prod" ]]; then
   find "$TARGET_ROOT" -user "$(id -u)" -exec chmod u+rwX,g+rwX {} +
+  find "$TARGET_ROOT" -type d -user "$(id -u)" -exec chmod g+s {} +
 fi
 
-if ! "$NODE_BIN" "$SCRIPT_DIR/record-deployment.mjs" \
-  --db "$DB_PATH" \
-  --environment "$ENVIRONMENT" \
-  --slot "$SLOT" \
-  --branch "$BRANCH" \
-  --commit "$COMMIT" \
-  --domain "$DOMAIN" \
-  --web-ota-version "$BUNDLE_VERSION" \
-  --short-changes "$DEPLOY_SHORT_CHANGES" \
-  --detailed-changes "$DEPLOY_DETAILED_CHANGES" \
-  --reason "${BRIGHT_OS_DEPLOY_REASON:-Automated branch delivery}"; then
-  if [[ "$ENVIRONMENT" != preview-* ]]; then
-    exit 1
+if [[ "$ENVIRONMENT" != "prod" || "${BRIGHT_OS_RECORD_PROD_BRANCH_DEPLOYMENT:-false}" == "true" ]]; then
+  if ! "$NODE_BIN" "$SCRIPT_DIR/record-deployment.mjs" \
+    --db "$DB_PATH" \
+    --environment "$ENVIRONMENT" \
+    --slot "$SLOT" \
+    --branch "$BRANCH" \
+    --commit "$COMMIT" \
+    --domain "$DOMAIN" \
+    --web-ota-version "$BUNDLE_VERSION" \
+    --short-changes "$DEPLOY_SHORT_CHANGES" \
+    --detailed-changes "$DEPLOY_DETAILED_CHANGES" \
+    --reason "${BRIGHT_OS_DEPLOY_REASON:-Автоматическая доставка ветки}"; then
+    if [[ "$ENVIRONMENT" != preview-* ]]; then
+      exit 1
+    fi
+    echo "Warning: preview deployment metadata was not recorded; acceptance will use branch and commit fallback metadata." >&2
   fi
-  echo "Warning: preview deployment metadata was not recorded; acceptance will use branch and commit fallback metadata." >&2
 fi
 
 if [[ "$ENVIRONMENT" != "prod" ]]; then
   find "$TARGET_ROOT" -user "$(id -u)" -exec chmod u+rwX,g+rwX {} +
+  find "$TARGET_ROOT" -type d -user "$(id -u)" -exec chmod g+s {} +
 fi
 
 if [[ "$ENVIRONMENT" == preview-* ]]; then
