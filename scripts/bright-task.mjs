@@ -1242,9 +1242,17 @@ function diffFromAcceptedBase() {
 }
 
 function diffFromTaskBase() {
+  const acceptance = readAcceptanceReceipt();
+  if (acceptance?.receiptType === ACCEPTANCE_RECEIPT_VERSION && acceptance.status === "reconcile_started" && isAncestor(acceptedBaseRef(), "HEAD")) {
+    return diffNames(`${acceptedBaseRef()}...HEAD`);
+  }
   const marker = readTaskMarker();
   const base = marker?.base && gitMaybe("rev-parse", "--verify", `${marker.base}^{commit}`) ? marker.base : acceptedBaseRef();
-  return (gitMaybe("diff", "--name-only", `${base}...HEAD`) ?? "")
+  return diffNames(`${base}...HEAD`);
+}
+
+function diffNames(range) {
+  return (gitMaybe("diff", "--name-only", range) ?? "")
     .split("\n")
     .map((line) => line.trim())
     .filter(Boolean);

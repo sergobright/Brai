@@ -1125,15 +1125,17 @@ test("acceptance reconcile merges current main into the same accepted branch", (
     git(["push", "origin", "HEAD:main"], repo);
 
     git(["checkout", "-b", "codex/foo"], repo);
-    fs.writeFileSync(path.join(repo, "branch.txt"), "branch\n");
-    git(["add", "branch.txt"], repo);
+    fs.mkdirSync(path.join(repo, "docs"), { recursive: true });
+    fs.writeFileSync(path.join(repo, "docs/branch.md"), "branch\n");
+    git(["add", "docs/branch.md"], repo);
     git(["commit", "-m", "branch change"], repo);
     const branchHead = git(["rev-parse", "HEAD"], repo).stdout.trim();
     git(["push", "origin", "HEAD:codex/foo"], repo);
 
     git(["checkout", "main"], repo);
-    fs.writeFileSync(path.join(repo, "main.txt"), "main\n");
-    git(["add", "main.txt"], repo);
+    fs.mkdirSync(path.join(repo, "apps/bright_os_app/src/features/app"), { recursive: true });
+    fs.writeFileSync(path.join(repo, "apps/bright_os_app/src/features/app/BrightOsApp.tsx"), "main\n");
+    git(["add", "apps/bright_os_app/src/features/app/BrightOsApp.tsx"], repo);
     git(["commit", "-m", "main change"], repo);
     git(["push", "origin", "HEAD:main"], repo);
     git(["checkout", "codex/foo"], repo);
@@ -1184,6 +1186,15 @@ test("acceptance reconcile merges current main into the same accepted branch", (
     const receipt = JSON.parse(fs.readFileSync(path.join(repo, ".bright-task", "acceptance.json"), "utf8"));
     assert.equal(receipt.status, "reconcile_started");
     assert.equal(receipt.prNumber, 7);
+    const previousCwd = process.cwd();
+    try {
+      process.chdir(repo);
+      const state = deriveTaskState();
+      assert.equal(state.classification.deliveryClass, "infra-docs");
+      assert.deepEqual(state.changedFiles, ["docs/branch.md"]);
+    } finally {
+      process.chdir(previousCwd);
+    }
   } finally {
     if (previousPrs == null) delete process.env.BRIGHT_OS_TEST_ACCEPTANCE_PRS_JSON;
     else process.env.BRIGHT_OS_TEST_ACCEPTANCE_PRS_JSON = previousPrs;
