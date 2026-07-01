@@ -6,6 +6,8 @@
 
 ## Открытые записи
 
+- 2026-07-01 — escalated `scripts/bright-task-start.sh` создал task worktree файлами owner `nobody`, из-за чего `apply_patch` не мог писать; восстановить owner через `sudo chown -R mark:mark <task-worktree>` или исправить starter/runner ownership.
+- 2026-07-01 — `npm run app:build` с Next/Turbopack падает в Codex sandbox на `binding to a port`/`Operation not permitted`; повторять build с `sandbox_permissions=require_escalated` или исправить sandbox allowance для Turbopack worker.
 - 2026-07-01 — live SQLite backup в `/srv/projects/bright-os/data/backups` не создавался даже от владельца runtime DB `nobody`; держать verified `.backup` в `/tmp` и выполнять live SQL root-ом, затем отдельно чинить права backup-каталога.
 - 2026-07-01 — `deploy/scripts/classify-delivery.mjs` из Codex sandbox может падать на `spawnSync git EPERM`; повторять классификацию с `sandbox_permissions=require_escalated`.
 - 2026-07-01 — `npm run app:test` в task worktree падает на Vitest/Vite `EACCES`, когда linked `apps/bright_os_app/node_modules/.vite-temp` owned by `nobody:mark` с `750`; нужен owner/group-write fix для shared dependency dirs перед тестами, иначе фиксировать проверку как заблокированную окружением.
