@@ -295,6 +295,22 @@ test("production deploy resolves ledger version through the shared resolver", ()
   assert.doesNotMatch(script, /version_type_id = 'apk'/);
 });
 
+test("preview deploy reset reports permission recovery and preserves setgid", () => {
+  const script = fs.readFileSync(new URL("../deploy/scripts/deploy-branch.sh", import.meta.url), "utf8");
+  const playbook = fs.readFileSync(new URL("../deploy/ansible/bright-os.yml", import.meta.url), "utf8");
+  const unit = fs.readFileSync(new URL("../deploy/ansible/templates/brightos-api.service.j2", import.meta.url), "utf8");
+  assert.match(script, /umask 0002/);
+  assert.match(script, /Preview SQLite reset failed/);
+  assert.match(script, /bright-deploy:bright-deploy 2775/);
+  assert.ok(script.includes('find "$TARGET_ROOT" -type d -user "$(id -u)" -exec chmod g+s {} +'));
+  assert.match(playbook, /Ensure non-production data directories keep deploy setgid/);
+  assert.match(playbook, /Ensure nested non-production data directories keep deploy setgid/);
+  assert.match(playbook, /mode: "2775"/);
+  assert.match(unit, /Group={{ bright_os_deploy_user }}/);
+  assert.match(unit, /SupplementaryGroups={{ bright_os_deploy_user }}/);
+  assert.match(unit, /UMask=0002/);
+});
+
 test("pre-push ref updates must stay on matching codex ref", () => {
   assert.doesNotThrow(() =>
     validatePushUpdate("refs/heads/codex/foo 1111111111111111111111111111111111111111 refs/heads/codex/foo 0000000000000000000000000000000000000000"),
@@ -484,6 +500,16 @@ test("task start guidance requires escalation and forbids manual branch fallback
   assert.match(message, /bright-os-guard\.mjs start <task-slug>/);
   assert.match(message, /Do not create or switch to a manual fallback branch/);
   assert.match(message, /stale checkout/);
+});
+
+test("task permission repair script is scoped to one registered worktree", () => {
+  const script = fs.readFileSync(new URL("./bright-task-repair-permissions.sh", import.meta.url), "utf8");
+  assert.match(script, /usage: scripts\/bright-task-repair-permissions\.sh/);
+  assert.match(script, /Refusing to repair path outside/);
+  assert.match(script, /Refusing to repair git metadata outside/);
+  assert.ok(script.includes('sudo chown -R "$OWNER" "$TARGET_REAL" "$GIT_DIR_REAL"'));
+  assert.ok(script.includes('sudo chmod -R u=rwX,g=rwX,o= "$TARGET_REAL" "$GIT_DIR_REAL"'));
+  assert.ok(script.includes("sudo find \"$TASK_STATE\" -maxdepth 1 -type f -name '*.json' -exec chmod 0640 {} +"));
 });
 
 test("task starter creates writable nested worktrees from repo and supports legacy task roots", () => {
@@ -894,6 +920,17 @@ test("delivery handoff does not write a receipt when a required delivery job fai
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /Delivery job checks is failure/);
   assert.equal(fs.existsSync(path.join(fixture.repo, ".bright-task", "delivery-handoff.json")), false);
+});
+
+test("infra docs workflow marks handoff passed only from the PR merge job", () => {
+  const workflow = fs.readFileSync(new URL("../.github/workflows/bright-os-delivery.yml", import.meta.url), "utf8");
+  const autoMergeJob = workflow.slice(workflow.indexOf("auto-merge-infra-docs:"), workflow.indexOf("deploy-prod:"));
+  const recordMergeJob = workflow.slice(workflow.indexOf("record-infra-docs-merge:"), workflow.indexOf("release-preview-slot:"));
+  assert.doesNotMatch(autoMergeJob, /event delivery_handoff_passed/);
+  assert.match(recordMergeJob, /event delivery_handoff_passed/);
+  assert.match(recordMergeJob, /event pr_merged/);
+  assert.ok(recordMergeJob.indexOf("event delivery_handoff_passed") < recordMergeJob.indexOf("event pr_merged"));
+  assert.match(recordMergeJob, /BRIGHT_OS_PR_MERGED_AT/);
 });
 
 test("delivery handoff writes infra-docs receipt only for merged PRs", () => {

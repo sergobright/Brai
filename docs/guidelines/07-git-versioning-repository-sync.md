@@ -16,6 +16,14 @@ scripts/bright-task-start.sh <task-slug>
 
 In Codex Desktop this needs `sandbox_permissions=require_escalated`, because the starter fetches `origin/main`, writes Git worktree metadata, creates `.codex-worktrees/<task-slug>`, writes ignored `.bright-task/` state, enables `.githooks`, and links existing ignored dependency directories.
 
+Staging changes from a task worktree may also require `sandbox_permissions=require_escalated`,
+because Git writes the index lock under the main checkout's `.git/worktrees/` metadata. If an
+escalated command leaves the task worktree owned by the wrong user, run:
+
+```bash
+scripts/bright-task-repair-permissions.sh <task-slug-or-worktree-path>
+```
+
 Do not create or switch fallback branches manually with `git switch`, `git checkout`, `git branch`, or `git worktree`.
 
 ## Branch Reuse

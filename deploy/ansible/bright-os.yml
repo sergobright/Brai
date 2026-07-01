@@ -133,6 +133,35 @@
       loop_control:
         label: "{{ item.0.key }}/{{ item.1 }}"
 
+    - name: Ensure non-production data directories keep deploy setgid
+      ansible.builtin.file:
+        path: "{{ bright_os_env_root }}/{{ item.value.path }}/data"
+        state: directory
+        owner: "{{ bright_os_deploy_user }}"
+        group: "{{ bright_os_deploy_user }}"
+        mode: "2775"
+      loop: "{{ bright_os_envs | dict2items | rejectattr('key', 'equalto', 'prod') | list }}"
+      loop_control:
+        label: "{{ item.key }}/data"
+
+    - name: Ensure nested non-production data directories keep deploy setgid
+      ansible.builtin.command:
+        argv:
+          - find
+          - "{{ bright_os_env_root }}/{{ item.value.path }}/data"
+          - -type
+          - d
+          - -exec
+          - chmod
+          - "2775"
+          - "{}"
+          - "+"
+      loop: "{{ bright_os_envs | dict2items | rejectattr('key', 'equalto', 'prod') | list }}"
+      loop_control:
+        label: "{{ item.key }}/data"
+      changed_when: false
+      when: not ansible_check_mode
+
     - name: Create preview slot status directory
       ansible.builtin.file:
         path: "{{ bright_os_env_root }}/preview-status"

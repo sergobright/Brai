@@ -32,6 +32,15 @@ scripts/bright-task-start.sh <task-slug>
 
 The starter fetches `origin/main`, refuses to reuse an existing remote `codex/<task-slug>`, creates a separate worktree under `.codex-worktrees/<task-slug>`, creates `codex/<task-slug>` with `--no-track`, writes ignored local task state under `.bright-task/` including the current Codex thread id, enables `.githooks`, and links existing ignored `node_modules` directories from the main checkout when present. In Codex Desktop run the starter with `sandbox_permissions=require_escalated` immediately because it updates Git worktree metadata. If that is unavailable, stop without project-file changes; do not create or switch to a manual fallback branch in the current checkout, `/srv/projects/bright-os-worktrees`, or `/tmp`. The main checkout and registered non-current worktrees are root-owned read-only because Codex internal file-change events can bypass lifecycle hooks; only ignored `.bright-task/` receipt files remain writable as local task state. After every accepted `main` push, GitHub Actions runs `/srv/opt/bright-os-main-sync.sh` on the VPS so `/srv/projects/bright-os` returns to a clean `origin/main` mirror for new threads and old registered worktrees become read-only.
 
+In Codex Desktop, staging from a task worktree can also need `sandbox_permissions=require_escalated`
+because the worktree index lock is stored under the main checkout's `.git/worktrees/` metadata.
+If an escalated command leaves the task worktree with unusable ownership, repair only that task
+worktree with:
+
+```bash
+scripts/bright-task-repair-permissions.sh <task-slug-or-worktree-path>
+```
+
 Repository Codex hooks are defined in `.codex/hooks.json`:
 
 - `PreToolUse` recursively inspects namespaced, custom, and nested tool calls such as `functions.apply_patch`, `custom_tool_call`, and `multi_tool_use.parallel`. Before a valid task state exists, only explicitly read-only shell commands and the official task starter are allowed; unknown shell commands are treated as write-like and blocked.

@@ -15,7 +15,11 @@ ExecStart=/usr/bin/env PORT={{ item.value.api_port }} BRIGHT_OS_DB={{ bright_os_
 Restart=always
 RestartSec=3
 User={{ bright_os_service_user }}
+{% if item.key == 'prod' %}
 Group={{ bright_os_service_group }}
+{% else %}
+Group={{ bright_os_deploy_user }}
+{% endif %}
 SupplementaryGroups={{ bright_os_deploy_user }}
 UMask=0002
 NoNewPrivileges=true

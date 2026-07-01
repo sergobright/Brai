@@ -56,20 +56,23 @@ That class signals `no_preview_required`; Temporal marks `preview_deploy`,
 the branch in the same `BranchPreviewWorkflow` ledger. The state query exposes the
 `deliveryClass`, `handoff`, and `autoMerge` fields for this path.
 
-The no-preview path records delivery handoff with `delivery_handoff_started`,
-`delivery_handoff_passed`, or `delivery_handoff_failed`, and records PR auto-merge setup with
-`auto_merge_started`, `auto_merge_enabled`, or `auto_merge_failed`. Failed classification,
-handoff, or auto-merge events set `status=waiting_for_fix` and populate `blocker`.
+The no-preview path records the handoff attempt with `delivery_handoff_started` or
+`delivery_handoff_failed`, and records PR auto-merge setup with `auto_merge_started`,
+`auto_merge_enabled`, or `auto_merge_failed`. `auto_merge_enabled` is only an intermediate
+state. Successful handoff is complete only after the PR is actually merged: the
+`pull_request.closed` merge job sends `delivery_handoff_passed` with merged PR metadata, then
+`pr_merged` marks `accepted_for_target` as passed. Failed classification, handoff, or
+auto-merge events set `status=waiting_for_fix` and populate `blocker`.
 
 The agent-side `bright-task handoff` may pre-create the infra/docs PR with the agent's GitHub
 identity so CI can reuse it even when the repository keeps the default `GITHUB_TOKEN` unable to
 create pull requests. GitHub Actions still owns the `auto_merge_*` Temporal signals and must not
-push directly to `main`. `auto_merge_enabled` is an intermediate state: local `bright-task handoff`
-does not write a success receipt until the PR state is `MERGED` and the receipt includes PR number,
-URL, and `mergedAt`.
+push directly to `main`. Local `bright-task handoff` does not write a success receipt until the PR
+state is `MERGED` and the receipt includes PR number, URL, and `mergedAt`.
 
-For `infra-docs`, `pr_merged` marks the `accepted_for_target` (`Accepted for target`) task as passed and completes the preview
-lifecycle without requiring an accepted-preview metadata promotion or preview slot release.
+For `infra-docs`, `pr_merged` marks the `accepted_for_target` (`Accepted for target`) task as passed.
+The no-preview lifecycle completes only after all required gates are passed or not applicable, without
+requiring accepted-preview metadata promotion or preview slot release.
 
 ## BranchPreviewWorkflow
 

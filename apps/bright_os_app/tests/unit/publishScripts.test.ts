@@ -391,6 +391,23 @@ try {
     expect(script.indexOf('find "$SOURCE_ROOT" -user "$(id -u)"')).toBeLessThan(script.indexOf('rm -rf "$SOURCE_ROOT"'));
   });
 
+  it("keeps preview runtime SQLite writable by the deploy group", async () => {
+    const deploy = await readFile(path.join(workspaceRoot, "deploy/scripts/deploy-branch.sh"), "utf8");
+    const playbook = await readFile(path.join(workspaceRoot, "deploy/ansible/bright-os.yml"), "utf8");
+    const service = await readFile(path.join(workspaceRoot, "deploy/ansible/templates/brightos-api.service.j2"), "utf8");
+    const resetBlock = deploy.slice(deploy.indexOf('if [[ "$ENVIRONMENT" == preview-*'));
+
+    expect(service).toContain('Group={{ bright_os_deploy_user }}');
+    expect(service).toContain('UMask=0002');
+    expect(playbook).toContain("Ensure non-production data directories keep deploy setgid");
+    expect(playbook).toContain('group: "{{ bright_os_deploy_user }}"');
+    expect(playbook).toContain('mode: "2775"');
+    expect(resetBlock).toContain("Preview SQLite reset failed");
+    expect(resetBlock).toContain("bright-deploy:bright-deploy 2775");
+    expect(resetBlock).toContain("find \"$TARGET_ROOT/data\" -type d -exec chmod 2775 {} +");
+    expect(resetBlock.indexOf("Preview SQLite reset failed")).toBeLessThan(deploy.indexOf("record-deployment.mjs"));
+  });
+
   it("rebuilds all APK release rows from production native deploys", async () => {
     const deploy = await readFile(path.join(workspaceRoot, "deploy/scripts/ci-ssh-deploy.sh"), "utf8");
     const buildApk = await readFile(path.join(workspaceRoot, "deploy/scripts/build-android-env-apk.sh"), "utf8");
