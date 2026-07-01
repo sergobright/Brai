@@ -157,6 +157,9 @@ Production and preview services run from the source checkout uploaded into
 `/srv/projects/bright-os-envs/<environment>/source/services/bright_os_api` as the configured service user/group.
 The limited `bright-deploy` user owns `/srv/projects/bright-os-envs`, publishes only the deployment
 artifacts above, and uses sudo only for Caddy validation, Caddy reload, and matching Bright OS API service restarts.
+The Bright OS runtime user also belongs to the `bright-deploy` group and API units run with
+`SupplementaryGroups=bright-deploy`, so SQLite files created by the runtime stay writable by deploy scripts
+without broadening the sudo boundary.
 
 Preview Caddy routes keep the app shell protected with the unified Caddy Basic Auth login, but
 `/mobile-update/*` stays public for Android OTA and `/api/*` is proxied to the matching Bright OS API without

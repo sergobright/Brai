@@ -21,6 +21,12 @@
         create_home: false
         system: true
 
+    - name: Allow service user to write deploy-owned runtime files
+      ansible.builtin.user:
+        name: "{{ bright_os_service_user }}"
+        groups: "{{ bright_os_deploy_user }}"
+        append: true
+
     - name: Allow local deploy writers to update environment files
       ansible.builtin.user:
         name: "{{ item }}"

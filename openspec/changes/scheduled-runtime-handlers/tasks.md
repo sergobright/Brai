@@ -1,0 +1,8 @@
+- [x] 1.1 Add scheduled handler SQLite schema, metadata, migration marker, handler seed, and schedule seed.
+- [x] 1.2 Add a one-shot scheduler runner that claims due schedules and advances recurring intervals after success or failure.
+- [x] 1.3 Add the `TASKS.md` dedupe handler that creates a `codex/tasks-md-dedupe-*` branch, opens a PR, and enables auto-merge.
+- [x] 1.4 Add systemd service and timer units for five-minute wakeups.
+- [x] 1.5 Add focused API tests for migration, schedule execution, and handler output validation.
+- [x] 1.6 Run API, OpenSpec, public guard, and delivery checks before handoff.
+- [ ] 1.7 Verify live SQLite schedule rows and systemd timer after deployment.
+- [ ] 1.8 Archive this OpenSpec change after review/merge.

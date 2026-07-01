@@ -16,6 +16,7 @@ Restart=always
 RestartSec=3
 User={{ bright_os_service_user }}
 Group={{ bright_os_service_group }}
+SupplementaryGroups={{ bright_os_deploy_user }}
 UMask=0002
 NoNewPrivileges=true
 PrivateTmp=true

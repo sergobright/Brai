@@ -1,0 +1,12 @@
+[Unit]
+Description=Run Bright OS scheduled runtime handlers every five minutes
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=5min
+AccuracySec=1min
+Unit=brightos-scheduler.service
+
+[Install]
+WantedBy=timers.target
+

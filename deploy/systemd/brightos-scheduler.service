@@ -1,26 +1,22 @@
 [Unit]
-Description=Bright OS API
-After=network.target
+Description=Bright OS scheduled runtime handler runner
+After=network-online.target
+Wants=network-online.target
 
 [Service]
-Type=simple
+Type=oneshot
 User=bright-os
 Group=bright-os
 SupplementaryGroups=bright-deploy
 UMask=0002
 WorkingDirectory=/srv/projects/bright-os/services/bright_os_api
 EnvironmentFile=/etc/bright-os/bright-os-api.env
-Environment=BRIGHT_OS_INBOUND_STORAGE_ROOT=/srv/projects/bright-os/data/inbox-attachments
+Environment=BRIGHT_OS_ROOT=/srv/projects/bright-os
+Environment=BRIGHT_OS_DB=/srv/projects/bright-os/data/bright_os.sqlite
 Environment=BRIGHT_OS_CODEX_BIN=/srv/opt/codex-cli/bin/codex
-Environment=BRIGHT_OS_CODEX_MODEL=gpt-5.4-mini
-Environment=BRIGHT_OS_CODEX_TIMEOUT_MS=20000
+Environment=BRIGHT_OS_SCHEDULER_CODEX_TIMEOUT_MS=120000
 Environment=CODEX_HOME=/srv/opt/codex-runtime/bright-os
 Environment=HOME=/srv/opt/codex-runtime/bright-os
-ExecStart=/srv/opt/node-v22.16.0/bin/node src/index.js
-Restart=always
-RestartSec=3
+ExecStart=/srv/opt/node-v22.16.0/bin/node src/scheduler-runner.js
 NoNewPrivileges=true
 PrivateTmp=true
-
-[Install]
-WantedBy=multi-user.target

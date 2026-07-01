@@ -144,6 +144,7 @@ export const migrationMethods = {
     this.ensureBuildVersionRefs();
     this.ensureInboxSchema();
     this.ensureHandlerSchema();
+    this.ensureHandlerScheduleSchema();
     this.ensureTableDescriptions();
 
     if (!this.hasMigration(25)) {
@@ -218,6 +219,10 @@ export const migrationMethods = {
       this.dropLegacyFocusSessionVersions();
       this.ensureTableDescriptions();
       this.recordMigration(40, 'replace focus session versions with intervals');
+    }
+
+    if (!this.hasMigration(41)) {
+      this.recordMigration(41, 'add scheduled runtime handlers');
     }
   }
 ,
@@ -594,6 +599,7 @@ export const migrationMethods = {
       ['inbox_events', 'События входящих', 'Журнал изменений входящих.', 'Хранит клиентские события по входящим для offline-first синхронизации, аудита и восстановления текущей таблицы inbox.'],
       ['inbox_record_types', 'Типы входящих', 'Справочник типов входящих.', 'Хранит разрешённые типы записей Inbox: входящее от человека по API, входящее от агента по API, внутреннее входящее от агента и добавленное человеком из интерфейса.'],
       ['handlers', 'Обработчики', 'Реестр runtime-обработчиков.', 'Хранит полный реестр обработчиков Bright OS: stable id, target, тип, статус, подробное описание, условия срабатывания, входы, выходы, взаимодействия, side effects, используемый LLM provider/model, prompt template, timeout, fallback и source module. Каждое добавление или изменение обработчика должно обновлять соответствующую строку.'],
+      ['handler_schedules', 'Расписания обработчиков', 'Очередь scheduled runtime-обработчиков.', 'Хранит расписания runtime-обработчиков Bright OS: ссылку на handlers, статус, следующий запуск, повторяемый интервал, lock от параллельного запуска, последние timestamps и последнюю ошибку. Внешний systemd timer только будит scheduler-runner; due-логика хранится здесь.'],
       ['items', 'Сущности', 'Реестр рабочих сущностей.', 'Хранит главные рабочие сущности Bright OS как стабильные id для схемы, API и технических решений.'],
       ['schema_migrations', 'Миграции', 'Журнал изменений схемы.', 'Хранит версии уже примененных миграций SQLite, время применения и краткое описание.'],
       ['sqlite_sequence', 'Счётчики', 'Служебные счетчики SQLite.', 'Внутренняя таблица SQLite для AUTOINCREMENT-счетчиков. Это не бизнес-данные Bright OS.'],
@@ -786,7 +792,7 @@ export const migrationMethods = {
       ON handlers (target, status);
     `);
 
-    this.db.prepare(`
+    const upsertHandler = this.db.prepare(`
       INSERT INTO handlers (
         id, target, kind, status, title, summary, trigger_description,
         conditions_description, input_description, output_description,
@@ -807,11 +813,15 @@ export const migrationMethods = {
         interactions_description = excluded.interactions_description,
         side_effects_description = excluded.side_effects_description,
         llm_provider = excluded.llm_provider,
+        llm_model = excluded.llm_model,
         llm_prompt_template = excluded.llm_prompt_template,
+        llm_timeout_ms = excluded.llm_timeout_ms,
         fallback_description = excluded.fallback_description,
         source_module = excluded.source_module,
         updated_at_utc = excluded.updated_at_utc
-    `).run(
+    `);
+
+    upsertHandler.run(
       'inbound.inbox.title_generator',
       'inbox',
       'inbound_llm_title_generator',
@@ -835,6 +845,80 @@ export const migrationMethods = {
       3000,
       'Если Codex CLI падает, возвращает пустой ответ или превышает timeout, используется локальный fallback: первые семь слов text, очищенные и обрезанные до 80 символов; если они пустые, заголовок Входящее.',
       'services/bright_os_api/src/inbound.js',
+      now
+    );
+    upsertHandler.run(
+      'maintenance.tasks_md_deduper',
+      'repository',
+      'scheduled_llm_git_pr',
+      'active',
+      'Дедупликация TASKS.md',
+      'Раз в шесть часов проверяет корневой TASKS.md и удаляет только очевидные дубли или повторяющиеся записи.',
+      'Срабатывает из services/bright_os_api/src/scheduler-runner.js, когда handler_schedules.next_run_at_utc наступил и строка не заблокирована другим запуском.',
+      'Запускается только если нет открытого PR от codex/tasks-md-dedupe-* и Codex CLI вернул измененный полный TASKS.md. Если изменений нет, ветка и PR не создаются.',
+      'Получает текущий корневой TASKS.md из отдельного временного clone/worktree, prompt template из handlers и runtime git/Codex окружение сервера.',
+      'Создает codex/tasks-md-dedupe-* ветку с единственным изменением TASKS.md, коммитом Deduplicate TASKS.md entries и push в origin; существующий infra-docs workflow создает PR и включает auto-merge.',
+      'Читает handlers и handler_schedules из server SQLite, запускает Codex CLI read-only для получения полного обновленного TASKS.md, затем использует git CLI для clone, branch, commit и push.',
+      'Может создать временную директорию, codex/tasks-md-dedupe-* ветку, commit, push и GitHub PR через существующий CI auto-merge flow. Не меняет main checkout напрямую и abort, если diff выходит за TASKS.md.',
+      'codex-cli',
+      '',
+      [
+        'Ты обслуживаешь корневой TASKS.md проекта Bright OS.',
+        'Нужно убрать только очевидные дубли или почти одинаковые записи в разделе "## Записи".',
+        'Не добавляй новые факты, не переписывай стиль, не меняй смысл уникальных записей.',
+        'Если дубликатов нет, верни ровно: NO_CHANGES',
+        'Если изменения нужны, верни полный новый файл TASKS.md без Markdown fence и без пояснений.',
+        '',
+        '{{tasks_md}}'
+      ].join('\n'),
+      120000,
+      'Если Codex CLI падает, возвращает невалидный файл, меняет не только TASKS.md, git/gh недоступны или push не проходит, запуск записывает last_error и повторится только на следующем интервале.',
+      'services/bright_os_api/src/scheduler-runner.js',
+      now
+    );
+  }
+,
+
+  ensureHandlerScheduleSchema() {
+    const now = new Date().toISOString();
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS handler_schedules (
+        id TEXT PRIMARY KEY,
+        handler_id TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('active', 'paused', 'disabled')),
+        next_run_at_utc TEXT,
+        interval_seconds INTEGER CHECK (interval_seconds IS NULL OR interval_seconds > 0),
+        locked_until_utc TEXT,
+        last_started_at_utc TEXT,
+        last_finished_at_utc TEXT,
+        last_error TEXT NOT NULL DEFAULT '',
+        updated_at_utc TEXT NOT NULL,
+        FOREIGN KEY (handler_id) REFERENCES handlers(id)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_handler_schedules_due
+      ON handler_schedules (status, next_run_at_utc, locked_until_utc);
+
+      CREATE INDEX IF NOT EXISTS idx_handler_schedules_handler
+      ON handler_schedules (handler_id);
+    `);
+
+    this.db.prepare(`
+      INSERT INTO handler_schedules (
+        id, handler_id, status, next_run_at_utc, interval_seconds,
+        locked_until_utc, last_started_at_utc, last_finished_at_utc,
+        last_error, updated_at_utc
+      ) VALUES (?, ?, ?, ?, ?, NULL, NULL, NULL, '', ?)
+      ON CONFLICT(id) DO UPDATE SET
+        handler_id = excluded.handler_id,
+        interval_seconds = excluded.interval_seconds,
+        updated_at_utc = excluded.updated_at_utc
+    `).run(
+      'maintenance.tasks_md_deduper',
+      'maintenance.tasks_md_deduper',
+      'active',
+      now,
+      6 * 60 * 60,
       now
     );
   }
