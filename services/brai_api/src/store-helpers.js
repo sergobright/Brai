@@ -85,8 +85,11 @@ export function formatActivity(activity) {
   if (!activity) return null;
   return {
     id: activity.id,
+    activity_type_id: activity.activity_type_id ?? 'action',
     title: activity.title,
     description_md: activity.description_md ?? '',
+    author: activity.author ?? '',
+    reason: activity.reason ?? '',
     status: activity.status,
     created_at_utc: activity.created_at_utc,
     updated_at_utc: activity.updated_at_utc,

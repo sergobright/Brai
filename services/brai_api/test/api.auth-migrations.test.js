@@ -112,11 +112,18 @@ test('migration renames actions tables to activities and seeds items', async () 
     assert.equal(runtime.store.db.prepare('SELECT id FROM items').get().id, 'activities');
     const activityColumns = runtime.store.db.prepare("PRAGMA table_info(activities)").all().map((row) => row.name);
     assert.ok(activityColumns.includes('description_md'));
+    assert.ok(activityColumns.includes('activity_type_id'));
+    assert.ok(activityColumns.includes('author'));
+    assert.ok(activityColumns.includes('reason'));
     assert.ok(activityColumns.includes('deleted_at_utc'));
     assert.ok(activityColumns.includes('restored_at_utc'));
     assert.equal(
       runtime.store.db.prepare('SELECT activity_id FROM activity_events WHERE event_id = ?').get('create').activity_id,
       'action-1'
+    );
+    assert.equal(
+      runtime.store.db.prepare('SELECT change_type FROM activity_events WHERE event_id = ?').get('create').change_type,
+      'create'
     );
   } finally {
     await runtime.close();
@@ -172,6 +179,10 @@ test('migration adds inbox entity schema and metadata', async () => {
       .all()
       .map((row) => row.id);
     assert.deepEqual(items, ['activities', 'inbox']);
+    assert.deepEqual(
+      fixture.store.db.prepare('SELECT id FROM activity_types ORDER BY id').all().map((row) => row.id),
+      ['action', 'operation']
+    );
 
     const description = fixture.store.db
       .prepare("SELECT title, short_description FROM table_descriptions WHERE table_name = 'inbox'")
@@ -237,7 +248,7 @@ test('migration adds inbox entity schema and metadata', async () => {
     assert.equal(handler.source_module, 'services/brai_api/src/inbound.js');
     const scheduledHandler = fixture.store.db
       .prepare(`
-        SELECT target, kind, trigger_description, side_effects_description, llm_provider,
+        SELECT target, kind, status, trigger_description, side_effects_description, llm_provider,
           llm_prompt_template, llm_timeout_ms, source_module
         FROM handlers
         WHERE id = 'maintenance.tasks_md_deduper'
@@ -245,22 +256,37 @@ test('migration adds inbox entity schema and metadata', async () => {
       .get();
     assert.equal(scheduledHandler.target, 'repository');
     assert.equal(scheduledHandler.kind, 'scheduled_llm_git_pr');
+    assert.equal(scheduledHandler.status, 'disabled');
     assert.match(scheduledHandler.trigger_description, /handler_schedules/);
-    assert.match(scheduledHandler.side_effects_description, /codex\/tasks-md-dedupe/);
+    assert.match(scheduledHandler.side_effects_description, /Legacy side effects/);
     assert.equal(scheduledHandler.llm_provider, 'codex-cli');
     assert.match(scheduledHandler.llm_prompt_template, /{{tasks_md}}/);
     assert.equal(scheduledHandler.llm_timeout_ms, 120000);
     assert.equal(scheduledHandler.source_module, 'services/brai_api/src/scheduler-runner.js');
     const schedule = fixture.store.db
       .prepare(`
-        SELECT handler_id, status, interval_seconds
+        SELECT handler_id, status, next_run_at_utc, interval_seconds
         FROM handler_schedules
         WHERE id = 'maintenance.tasks_md_deduper'
       `)
       .get();
     assert.equal(schedule.handler_id, 'maintenance.tasks_md_deduper');
-    assert.equal(schedule.status, 'active');
-    assert.equal(schedule.interval_seconds, 21600);
+    assert.equal(schedule.status, 'disabled');
+    assert.equal(schedule.next_run_at_utc, null);
+    assert.equal(schedule.interval_seconds, null);
+
+    const operations = fixture.store.db
+      .prepare("SELECT status, COUNT(*) AS count FROM activities WHERE activity_type_id = 'operation' GROUP BY status ORDER BY status")
+      .all();
+    assert.deepEqual(operations, [
+      { status: 'Done', count: 7 },
+      { status: 'New', count: 7 }
+    ]);
+    const operation = fixture.store.db
+      .prepare("SELECT author, reason FROM activities WHERE id = 'operation:agent-task:worktree-owner-nobody'")
+      .get();
+    assert.equal(operation.author, 'Codex');
+    assert.match(operation.reason, /owner nobody/);
 
     fixture.store.migrate();
     assert.equal(fixture.store.db.prepare("SELECT COUNT(*) AS count FROM items WHERE id = 'inbox'").get().count, 1);

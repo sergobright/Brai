@@ -110,7 +110,7 @@ export class BraiApi {
         events: params.events.map((event) => ({
           event_id: event.eventId,
           client_sequence: event.clientSequence,
-          type: event.type,
+          change_type: event.type,
           occurred_at_utc: event.occurredAtUtc,
           activity_id: event.actionId,
           base_server_revision: event.baseServerRevision,

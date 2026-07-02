@@ -129,7 +129,7 @@ export function actionEvent(eventId, clientSequence, type, actionId, occurredAtU
   return {
     event_id: eventId,
     client_sequence: clientSequence,
-    type,
+    change_type: type,
     activity_id: actionId,
     occurred_at_utc: occurredAtUtc,
     payload
@@ -150,6 +150,12 @@ export function inboxEvent(eventId, clientSequence, type, inboxId, occurredAtUtc
 export function tableCount(fixture, table) {
   assert.match(table, /^[a-z_]+$/);
   return fixture.store.db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get().count;
+}
+
+export function activityTypeCount(fixture, activityTypeId) {
+  return fixture.store.db
+    .prepare('SELECT COUNT(*) AS count FROM activities WHERE activity_type_id = ?')
+    .get(activityTypeId).count;
 }
 
 export function seedLegacyDatabase(dbPath) {

@@ -224,6 +224,11 @@ export const migrationMethods = {
     if (!this.hasMigration(41)) {
       this.recordMigration(41, 'add scheduled runtime handlers');
     }
+
+    if (!this.hasMigration(42)) {
+      this.seedAgentTaskActivities();
+      this.recordMigration(42, 'move agent task ledger into operation activities');
+    }
   }
 ,
 
@@ -586,8 +591,9 @@ export const migrationMethods = {
 
     const now = new Date().toISOString();
     const descriptions = [
-      ['activities', 'Действия', 'Текущий список действий.', 'Хранит рабочее состояние действий Brai: название, статус, описание, сортировку, удаление и восстановление.'],
-      ['activity_events', 'События действий', 'Журнал изменений действий.', 'Хранит каждое клиентское событие по действиям для синхронизации, аудита и восстановления текущей таблицы activities.'],
+      ['activities', 'Действия', 'Текущий список действий и операций.', 'Хранит рабочее состояние действий Brai и внутренних операций агента: activity_type_id, название, описание, автора, причину, статус, сортировку, удаление и восстановление. Пользовательские записи имеют activity_type_id action, агентские задачи имеют activity_type_id operation.'],
+      ['activity_events', 'События действий', 'Журнал изменений действий.', 'Хранит каждое клиентское изменение по действиям для синхронизации, аудита и восстановления текущей таблицы activities. Поле change_type хранит тип изменения.'],
+      ['activity_types', 'Типы действий', 'Справочник типов activities.', 'Хранит разрешённые типы activities для поля activities.activity_type_id: action для пользовательских действий и operation для внутренних задач агента.'],
       ['app_settings', 'Настройки', 'Глобальные настройки приложения.', 'Хранит runtime-настройки в формате ключ-значение: дату старта цели, длительность цели, дневную норму фокуса и похожие параметры.'],
       ['build_version_refs', 'Связи версий', 'Технические связи версий.', 'Хранит source/target branch и commit для build_versions, чтобы audit-метаданные не подменяли короткое изменение, детальные изменения и причину выпуска.'],
       ['build_versions', 'Версии', 'Типизированный журнал версий.', 'Хранит версии типов apk, build, release и canon. Поле version является счётчиком внутри типа; included_in_version_id связывает build/APK с release и release с canon. Публичная строка версии собирается из последних счётчиков.'],
@@ -851,15 +857,15 @@ export const migrationMethods = {
       'maintenance.tasks_md_deduper',
       'repository',
       'scheduled_llm_git_pr',
-      'active',
+      'disabled',
       'Дедупликация TASKS.md',
-      'Раз в шесть часов проверяет корневой TASKS.md и удаляет только очевидные дубли или повторяющиеся записи.',
+      'Legacy handler выключен: агентские задачи перенесены из TASKS.md в activities как operation.',
       'Срабатывает из services/brai_api/src/scheduler-runner.js, когда handler_schedules.next_run_at_utc наступил и строка не заблокирована другим запуском.',
-      'Запускается только если нет открытого PR от codex/tasks-md-dedupe-* и Codex CLI вернул измененный полный TASKS.md. Если изменений нет, ветка и PR не создаются.',
-      'Получает текущий корневой TASKS.md из отдельного временного clone/worktree, prompt template из handlers и runtime git/Codex окружение сервера.',
-      'Создает codex/tasks-md-dedupe-* ветку с единственным изменением TASKS.md, коммитом Deduplicate TASKS.md entries и push в origin; существующий infra-docs workflow создает PR и включает auto-merge.',
+      'Не запускается после переноса агентских задач в activities.',
+      'Legacy input: корневой TASKS.md. Новый источник правды для агентских задач: activities rows с activity_type_id operation.',
+      'Ничего не создает, пока handler disabled.',
       'Читает handlers и handler_schedules из server SQLite, запускает Codex CLI read-only для получения полного обновленного TASKS.md, затем использует git CLI для clone, branch, commit и push.',
-      'Может создать временную директорию, codex/tasks-md-dedupe-* ветку, commit, push и GitHub PR через существующий CI auto-merge flow. Не меняет main checkout напрямую и abort, если diff выходит за TASKS.md.',
+      'Legacy side effects отключены: раньше мог создать временную директорию, codex/tasks-md-dedupe-* ветку, commit, push и GitHub PR.',
       'codex-cli',
       '',
       [
@@ -872,7 +878,7 @@ export const migrationMethods = {
         '{{tasks_md}}'
       ].join('\n'),
       120000,
-      'Если Codex CLI падает, возвращает невалидный файл, меняет не только TASKS.md, git/gh недоступны или push не проходит, запуск записывает last_error и повторится только на следующем интервале.',
+      'Не применяется, пока handler disabled.',
       'services/brai_api/src/scheduler-runner.js',
       now
     );
@@ -911,14 +917,16 @@ export const migrationMethods = {
       ) VALUES (?, ?, ?, ?, ?, NULL, NULL, NULL, '', ?)
       ON CONFLICT(id) DO UPDATE SET
         handler_id = excluded.handler_id,
+        status = excluded.status,
+        next_run_at_utc = excluded.next_run_at_utc,
         interval_seconds = excluded.interval_seconds,
         updated_at_utc = excluded.updated_at_utc
     `).run(
       'maintenance.tasks_md_deduper',
       'maintenance.tasks_md_deduper',
-      'active',
-      now,
-      6 * 60 * 60,
+      'disabled',
+      null,
+      null,
       now
     );
   }
@@ -932,10 +940,20 @@ export const migrationMethods = {
         created_at_utc TEXT NOT NULL
       );
 
-      CREATE TABLE IF NOT EXISTS activities (
+      CREATE TABLE IF NOT EXISTS activity_types (
         id TEXT PRIMARY KEY,
         title TEXT NOT NULL,
+        description TEXT NOT NULL,
+        created_at_utc TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS activities (
+        id TEXT PRIMARY KEY,
+        activity_type_id TEXT NOT NULL DEFAULT 'action',
+        title TEXT NOT NULL,
         description_md TEXT NOT NULL DEFAULT '',
+        author TEXT NOT NULL DEFAULT '',
+        reason TEXT NOT NULL DEFAULT '',
         status TEXT NOT NULL CHECK (status IN ('New', 'Done')),
         created_at_utc TEXT NOT NULL,
         updated_at_utc TEXT NOT NULL,
@@ -943,7 +961,8 @@ export const migrationMethods = {
         sort_order INTEGER,
         deleted_at_utc TEXT,
         restored_at_utc TEXT,
-        last_event_id TEXT
+        last_event_id TEXT,
+        FOREIGN KEY (activity_type_id) REFERENCES activity_types(id)
       );
 
       CREATE INDEX IF NOT EXISTS idx_activities_status_created
@@ -958,7 +977,7 @@ export const migrationMethods = {
         client_sequence INTEGER NOT NULL,
         server_sequence INTEGER NOT NULL UNIQUE,
         activity_id TEXT,
-        type TEXT NOT NULL CHECK (type IN ('create', 'update_title', 'update_description', 'set_status', 'reorder', 'delete', 'restore', 'invalid')),
+        change_type TEXT NOT NULL CHECK (change_type IN ('create', 'update_title', 'update_description', 'set_status', 'reorder', 'delete', 'restore', 'invalid')),
         occurred_at_utc TEXT NOT NULL,
         received_at_utc TEXT NOT NULL,
         payload_json TEXT,
@@ -983,16 +1002,42 @@ export const migrationMethods = {
       CREATE INDEX IF NOT EXISTS idx_activity_events_activity_occurred
       ON activity_events (activity_id, occurred_at_utc, server_sequence);
 
-      CREATE INDEX IF NOT EXISTS idx_activity_events_type_occurred
-      ON activity_events (type, occurred_at_utc, server_sequence);
-
     `);
+    const upsertActivityType = this.db.prepare(`
+      INSERT INTO activity_types (id, title, description, created_at_utc)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        title = excluded.title,
+        description = excluded.description
+    `);
+    for (const type of [
+      ['action', 'Действие', 'Пользовательская activity, созданная человеком в интерфейсе или синхронизированная с клиента.'],
+      ['operation', 'Операция агента', 'Внутренняя задача агента с автором и причиной выполнения.']
+    ]) {
+      upsertActivityType.run(...type, now);
+    }
     this.db
       .prepare('INSERT INTO items (id, created_at_utc) VALUES (?, ?) ON CONFLICT(id) DO NOTHING')
       .run('activities', now);
 
+    if (this.tableExists('activity_events') && this.columnExists('activity_events', 'type') && !this.columnExists('activity_events', 'change_type')) {
+      this.db.exec('ALTER TABLE activity_events RENAME COLUMN type TO change_type;');
+    }
+
     if (this.tableExists('activities') && !this.columnExists('activities', 'description_md')) {
       this.db.exec("ALTER TABLE activities ADD COLUMN description_md TEXT NOT NULL DEFAULT '';");
+    }
+    if (this.tableExists('activities') && this.columnExists('activities', 'type') && !this.columnExists('activities', 'activity_type_id')) {
+      this.db.exec('ALTER TABLE activities RENAME COLUMN type TO activity_type_id;');
+    }
+    if (this.tableExists('activities') && !this.columnExists('activities', 'activity_type_id')) {
+      this.db.exec("ALTER TABLE activities ADD COLUMN activity_type_id TEXT NOT NULL DEFAULT 'action';");
+    }
+    if (this.tableExists('activities') && !this.columnExists('activities', 'author')) {
+      this.db.exec("ALTER TABLE activities ADD COLUMN author TEXT NOT NULL DEFAULT '';");
+    }
+    if (this.tableExists('activities') && !this.columnExists('activities', 'reason')) {
+      this.db.exec("ALTER TABLE activities ADD COLUMN reason TEXT NOT NULL DEFAULT '';");
     }
     if (this.tableExists('activities') && !this.columnExists('activities', 'sort_order')) {
       this.db.exec('ALTER TABLE activities ADD COLUMN sort_order INTEGER;');
@@ -1007,6 +1052,14 @@ export const migrationMethods = {
       CREATE INDEX IF NOT EXISTS idx_activities_new_sort_order
       ON activities (status, sort_order)
       WHERE deleted_at_utc IS NULL AND sort_order IS NOT NULL;
+
+      CREATE INDEX IF NOT EXISTS idx_activities_type_status_updated
+      ON activities (activity_type_id, status, updated_at_utc);
+
+      DROP INDEX IF EXISTS idx_activity_events_type_occurred;
+
+      CREATE INDEX IF NOT EXISTS idx_activity_events_change_type_occurred
+      ON activity_events (change_type, occurred_at_utc, server_sequence);
     `);
   }
 ,
@@ -1048,7 +1101,7 @@ export const migrationMethods = {
         client_sequence INTEGER NOT NULL,
         server_sequence INTEGER NOT NULL UNIQUE,
         activity_id TEXT,
-        type TEXT NOT NULL CHECK (type IN ('create', 'update_title', 'update_description', 'set_status', 'reorder', 'delete', 'invalid')),
+        change_type TEXT NOT NULL CHECK (change_type IN ('create', 'update_title', 'update_description', 'set_status', 'reorder', 'delete', 'invalid')),
         occurred_at_utc TEXT NOT NULL,
         received_at_utc TEXT NOT NULL,
         payload_json TEXT,
@@ -1060,12 +1113,12 @@ export const migrationMethods = {
 
       INSERT INTO activity_events_next (
         event_id, device_id, client_sequence, server_sequence, activity_id,
-        type, occurred_at_utc, received_at_utc, payload_json,
+        change_type, occurred_at_utc, received_at_utc, payload_json,
         status, ignore_reason, payload_version
       )
       SELECT
         event_id, device_id, client_sequence, server_sequence, activity_id,
-        type, occurred_at_utc, received_at_utc, payload_json,
+        change_type, occurred_at_utc, received_at_utc, payload_json,
         status, ignore_reason, payload_version
       FROM activity_events;
 
@@ -1089,7 +1142,7 @@ export const migrationMethods = {
         client_sequence INTEGER NOT NULL,
         server_sequence INTEGER NOT NULL UNIQUE,
         activity_id TEXT,
-        type TEXT NOT NULL CHECK (type IN ('create', 'update_title', 'update_description', 'set_status', 'reorder', 'delete', 'invalid')),
+        change_type TEXT NOT NULL CHECK (change_type IN ('create', 'update_title', 'update_description', 'set_status', 'reorder', 'delete', 'invalid')),
         occurred_at_utc TEXT NOT NULL,
         received_at_utc TEXT NOT NULL,
         payload_json TEXT,
@@ -1101,12 +1154,12 @@ export const migrationMethods = {
 
       INSERT INTO activity_events_next (
         event_id, device_id, client_sequence, server_sequence, activity_id,
-        type, occurred_at_utc, received_at_utc, payload_json,
+        change_type, occurred_at_utc, received_at_utc, payload_json,
         status, ignore_reason, payload_version
       )
       SELECT
         event_id, device_id, client_sequence, server_sequence, activity_id,
-        type, occurred_at_utc, received_at_utc, payload_json,
+        change_type, occurred_at_utc, received_at_utc, payload_json,
         status, ignore_reason, payload_version
       FROM activity_events;
 
@@ -1130,7 +1183,7 @@ export const migrationMethods = {
         client_sequence INTEGER NOT NULL,
         server_sequence INTEGER NOT NULL UNIQUE,
         activity_id TEXT,
-        type TEXT NOT NULL CHECK (type IN ('create', 'update_title', 'update_description', 'set_status', 'reorder', 'delete', 'invalid')),
+        change_type TEXT NOT NULL CHECK (change_type IN ('create', 'update_title', 'update_description', 'set_status', 'reorder', 'delete', 'invalid')),
         occurred_at_utc TEXT NOT NULL,
         received_at_utc TEXT NOT NULL,
         payload_json TEXT,
@@ -1142,12 +1195,12 @@ export const migrationMethods = {
 
       INSERT INTO activity_events_next (
         event_id, device_id, client_sequence, server_sequence, activity_id,
-        type, occurred_at_utc, received_at_utc, payload_json,
+        change_type, occurred_at_utc, received_at_utc, payload_json,
         status, ignore_reason, payload_version
       )
       SELECT
         event_id, device_id, client_sequence, server_sequence, activity_id,
-        type, occurred_at_utc, received_at_utc, payload_json,
+        change_type, occurred_at_utc, received_at_utc, payload_json,
         status, ignore_reason, payload_version
       FROM activity_events;
 
@@ -1174,7 +1227,7 @@ export const migrationMethods = {
         client_sequence INTEGER NOT NULL,
         server_sequence INTEGER NOT NULL UNIQUE,
         activity_id TEXT,
-        type TEXT NOT NULL CHECK (type IN ('create', 'update_title', 'update_description', 'set_status', 'reorder', 'delete', 'restore', 'invalid')),
+        change_type TEXT NOT NULL CHECK (change_type IN ('create', 'update_title', 'update_description', 'set_status', 'reorder', 'delete', 'restore', 'invalid')),
         occurred_at_utc TEXT NOT NULL,
         received_at_utc TEXT NOT NULL,
         payload_json TEXT,
@@ -1186,12 +1239,12 @@ export const migrationMethods = {
 
       INSERT INTO activity_events_next (
         event_id, device_id, client_sequence, server_sequence, activity_id,
-        type, occurred_at_utc, received_at_utc, payload_json,
+        change_type, occurred_at_utc, received_at_utc, payload_json,
         status, ignore_reason, payload_version
       )
       SELECT
         event_id, device_id, client_sequence, server_sequence, activity_id,
-        type, occurred_at_utc, received_at_utc, payload_json,
+        change_type, occurred_at_utc, received_at_utc, payload_json,
         status, ignore_reason, payload_version
       FROM activity_events;
 
@@ -1505,6 +1558,39 @@ export const migrationMethods = {
   }
 ,
 
+  seedAgentTaskActivities() {
+    const insert = this.db.prepare(`
+      INSERT INTO activities (
+        id, activity_type_id, title, description_md, author, reason, status,
+        created_at_utc, updated_at_utc, completed_at_utc, sort_order,
+        deleted_at_utc, restored_at_utc, last_event_id
+      ) VALUES (?, 'operation', ?, '', 'Codex', ?, ?, ?, ?, ?, NULL, NULL, NULL, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        activity_type_id = 'operation',
+        title = excluded.title,
+        author = 'Codex',
+        reason = excluded.reason,
+        status = excluded.status,
+        updated_at_utc = excluded.updated_at_utc,
+        completed_at_utc = excluded.completed_at_utc,
+        last_event_id = excluded.last_event_id
+    `);
+    for (const task of AGENT_TASK_ACTIVITIES) {
+      const createdAt = `${task.date}T00:00:00.000Z`;
+      insert.run(
+        task.id,
+        task.title,
+        task.reason,
+        task.done ? 'Done' : 'New',
+        createdAt,
+        createdAt,
+        task.done ? createdAt : null,
+        `migration:42:${task.id}`
+      );
+    }
+  }
+,
+
   tableExists(name) {
     return Boolean(
       this.db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(name)
@@ -1536,3 +1622,104 @@ export const migrationMethods = {
   }
 
 };
+
+const AGENT_TASK_ACTIVITIES = [
+  {
+    id: 'operation:agent-task:worktree-owner-nobody',
+    date: '2026-07-01',
+    title: 'Task worktree ownership blocks apply_patch',
+    reason: 'escalated scripts/brai-task-start.sh создал task worktree файлами owner nobody, из-за чего apply_patch не мог писать; восстановить owner через sudo chown -R mark:mark <task-worktree> или исправить starter/runner ownership.',
+    done: false
+  },
+  {
+    id: 'operation:agent-task:turbopack-sandbox-port-binding',
+    date: '2026-07-01',
+    title: 'Next/Turbopack build needs sandbox allowance',
+    reason: 'npm run app:build с Next/Turbopack падает в Codex sandbox на binding to a port/Operation not permitted; повторять build с sandbox_permissions=require_escalated или исправить sandbox allowance для Turbopack worker.',
+    done: false
+  },
+  {
+    id: 'operation:agent-task:live-sqlite-backup-permissions',
+    date: '2026-07-01',
+    title: 'Live SQLite backup directory permissions block backup',
+    reason: 'live SQLite backup в /srv/projects/brai/data/backups не создавался даже от владельца runtime DB nobody; держать verified .backup в /tmp и выполнять live SQL root-ом, затем отдельно чинить права backup-каталога.',
+    done: false
+  },
+  {
+    id: 'operation:agent-task:classify-delivery-git-eperm',
+    date: '2026-07-01',
+    title: 'Delivery classification may need escalation',
+    reason: 'deploy/scripts/classify-delivery.mjs из Codex sandbox может падать на spawnSync git EPERM; повторять классификацию с sandbox_permissions=require_escalated.',
+    done: false
+  },
+  {
+    id: 'operation:agent-task:app-test-vite-temp-permissions',
+    date: '2026-07-01',
+    title: 'Shared Vite temp permissions can block app tests',
+    reason: 'npm run app:test в task worktree падает на Vitest/Vite EACCES, когда linked apps/brai_app/node_modules/.vite-temp owned by nobody:mark с 750; нужен owner/group-write fix для shared dependency dirs перед тестами, иначе фиксировать проверку как заблокированную окружением.',
+    done: false
+  },
+  {
+    id: 'operation:agent-task:turbopack-process-sandbox',
+    date: '2026-07-01',
+    title: 'Turbopack process creation can fail in sandbox',
+    reason: 'npm run app:build в Codex sandbox может падать Turbopack panic на creating new process/binding to a port с Operation not permitted; повторять build с sandbox_permissions=require_escalated.',
+    done: false
+  },
+  {
+    id: 'operation:agent-task:accept-preview-matching-worktree',
+    date: '2026-07-01',
+    title: 'Accept preview must run from matching worktree',
+    reason: 'deploy/scripts/accept-preview.sh читает receipt из текущего checkout; если основной checkout содержит receipt другой ветки, запускать accept из matching .codex-worktrees/<task-slug> и проверять .brai-task/preview-handoff.json.',
+    done: false
+  },
+  {
+    id: 'operation:agent-task:acceptance-conflict-resolution-flow',
+    date: '2026-07-01',
+    title: 'Acceptance conflict resolution was blocked by hooks',
+    reason: 'после acceptance_started Brai git hooks блокировали даже merge/push для разрешения конфликтного accepted PR. Закрыто: добавлен official acceptance-reconcile flow для same-branch conflict resolution.',
+    done: true
+  },
+  {
+    id: 'operation:agent-task:superseded-pr-preview-slot-release',
+    date: '2026-07-01',
+    title: 'Superseded PR left preview slot occupied',
+    reason: 'закрытый без merge superseded codex/* PR оставлял preview slot занятым. Закрыто в PR #102: pull_request.closed release job освобождает slot для unmerged codex/* PR.',
+    done: true
+  },
+  {
+    id: 'operation:agent-task:starter-escalation-rule',
+    date: '2026-06-30',
+    title: 'Task starter requires escalation in Codex Desktop',
+    reason: 'scripts/brai-task-start.sh в Codex Desktop нужно запускать с sandbox_permissions=require_escalated; без этого starter не сможет нормально сделать fetch и записать git/worktree metadata; использовать эскалацию сразу для этого starter. Закрыто в PR #98: правило закреплено в runbook.',
+    done: true
+  },
+  {
+    id: 'operation:agent-task:git-add-index-lock-escalation',
+    date: '2026-06-30',
+    title: 'git add in task worktree needs metadata escalation',
+    reason: 'git add в .codex-worktrees/<task-slug> из sandbox падает на создании .git/worktrees/<task-slug>/index.lock; повторять stage с sandbox_permissions=require_escalated, потому что git metadata лежит вне writable worktree. Закрыто в PR #98: правило закреплено в runbook.',
+    done: true
+  },
+  {
+    id: 'operation:agent-task:worktree-permission-repair-script',
+    date: '2026-06-30',
+    title: 'Task worktree ownership repair needed after escalated operations',
+    reason: 'после escalated операций task worktree может стать owned by nobody, обычный git падает с dubious ownership/not a git repository, а patch не может писать файлы; восстановить ownership worktree на mark:mark перед продолжением. Закрыто в PR #98: добавлен scripts/brai-task-repair-permissions.sh.',
+    done: true
+  },
+  {
+    id: 'operation:agent-task:infra-docs-handoff-merged-state',
+    date: '2026-07-01',
+    title: 'Infra-docs handoff needed merged-state verification',
+    reason: 'infra-docs PR может остаться OPEN/BEHIND после включения auto-merge, а старый handoff receipt всё равно выглядит успешным; считать delivery завершённой только после MERGED или делать replacement ветку от актуального origin/main. Закрыто в PR #98: handoff receipt пишется только после MERGED.',
+    done: true
+  },
+  {
+    id: 'operation:agent-task:preview-data-permissions',
+    date: '2026-07-01',
+    title: 'Preview data permissions blocked deploy reset',
+    reason: 'preview deploy может упасть на reset SQLite файлов в /srv/projects/brai-envs/preview-*/data, если runtime создал их без deploy-группы; закрепить общий group-write через Ansible/systemd и повторять деплой тем же branch, чтобы slot переиспользовался без нового reset. Закрыто в PR #98: закреплены preview data group-write/setgid и recovery-сообщение.',
+    done: true
+  }
+];

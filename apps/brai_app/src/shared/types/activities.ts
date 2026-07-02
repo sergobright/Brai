@@ -1,10 +1,14 @@
 export type ActivityStatus = "New" | "Done";
+export type ActivityType = "action" | "operation";
 export type ActivityEventType = "create" | "update_title" | "update_description" | "set_status" | "reorder" | "delete" | "restore";
 
 export interface ActivityItem {
   id: string;
+  activity_type_id?: ActivityType;
   title: string;
   description_md: string;
+  author?: string;
+  reason?: string;
   status: ActivityStatus;
   created_at_utc: string;
   updated_at_utc: string;
