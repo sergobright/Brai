@@ -279,14 +279,26 @@ test('migration adds inbox entity schema and metadata', async () => {
       .prepare("SELECT status, COUNT(*) AS count FROM activities WHERE activity_type_id = 'operation' GROUP BY status ORDER BY status")
       .all();
     assert.deepEqual(operations, [
-      { status: 'Done', count: 7 },
-      { status: 'New', count: 7 }
+      { status: 'Done', count: 8 },
+      { status: 'New', count: 8 }
     ]);
     const operation = fixture.store.db
-      .prepare("SELECT author, reason FROM activities WHERE id = 'operation:agent-task:worktree-owner-nobody'")
+      .prepare(`
+        SELECT title, description_md, author, reason
+        FROM activities
+        WHERE id = 'operation:agent-task:worktree-owner-nobody'
+      `)
       .get();
+    assert.equal(operation.title, 'Починить владельца task worktree');
+    assert.match(operation.description_md, /Результат:/);
     assert.equal(operation.author, 'Codex');
-    assert.match(operation.reason, /owner nobody/);
+    assert.match(operation.reason, /Задача появилась/);
+    assert.equal(
+      fixture.store.db
+        .prepare("SELECT COUNT(*) AS count FROM activities WHERE activity_type_id = 'operation' AND description_md = ''")
+        .get().count,
+      0
+    );
 
     fixture.store.migrate();
     assert.equal(fixture.store.db.prepare("SELECT COUNT(*) AS count FROM items WHERE id = 'inbox'").get().count, 1);
