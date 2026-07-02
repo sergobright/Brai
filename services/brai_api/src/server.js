@@ -377,11 +377,28 @@ export function activitiesState(store, nowDate) {
 }
 
 export function versionState(store, nowDate, releaseDir = null) {
+  const appVersion = store.currentAppVersion();
+  const targetApk = latestApkRelease(releaseDir);
+  const otaVersion = latestOtaVersion(releaseDir) ?? appVersion.version;
   return {
     server_time_utc: nowDate.toISOString(),
-    ...store.currentAppVersion(),
-    apk_release: latestApkRelease(releaseDir)
+    ...appVersion,
+    version: otaVersion,
+    ota_version: otaVersion,
+    target_apk: targetApk,
+    apk_release: targetApk
   };
+}
+
+function latestOtaVersion(releaseDir) {
+  if (!releaseDir) return null;
+  try {
+    const manifestPath = path.join(path.dirname(releaseDir), 'mobile-update', 'manifest.json');
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+    return normalizeOtaVersion(manifest.otaVersion);
+  } catch {
+    return null;
+  }
 }
 
 function latestApkRelease(releaseDir) {
@@ -389,16 +406,24 @@ function latestApkRelease(releaseDir) {
   try {
     const releaseIndex = JSON.parse(fs.readFileSync(path.join(releaseDir, 'releases.json'), 'utf8'));
     const production = releaseIndex.sections?.production;
-    if (!production?.file || !Number.isInteger(production.versionCode)) return null;
+    const apkVersion = Number(production?.apkVersion ?? production?.version);
+    if (!production?.file || !Number.isInteger(apkVersion) || apkVersion <= 0) return null;
     return {
       file: production.file,
-      version: production.version ?? null,
-      version_code: production.versionCode,
-      published_at: production.publishedAt ?? null
+      version: apkVersion,
+      version_code: Number.isInteger(production.versionCode) ? production.versionCode : apkVersion,
+      release_url: '/releases/',
+      published_at: production.publishedAt ?? null,
+      capabilities: Array.isArray(production.capabilities) ? production.capabilities : []
     };
   } catch {
     return null;
   }
+}
+
+function normalizeOtaVersion(value) {
+  const match = String(value ?? '').match(/^(\d+)\.(\d+)\.(\d+)(?:\.|\b|[+_-])/);
+  return match ? `${match[1]}.${match[2]}.${match[3]}` : null;
 }
 
 export function inboxState(store, nowDate) {

@@ -8,7 +8,7 @@ NPM_BIN="${NPM_BIN:-npm}"
 FLAVOR="${1:-}"
 
 if [[ -z "$FLAVOR" ]]; then
-  echo "usage: build-android-env-apk.sh production|previewA|previewB|previewC|previewD|previewE" >&2
+  echo "usage: build-android-env-apk.sh production|dev|previewA|previewB|previewC|previewD|previewE" >&2
   exit 1
 fi
 
@@ -26,23 +26,27 @@ if [[ "$ENVIRONMENT" == "prod" ]]; then
 fi
 
 export BRAI_ROOT="$ROOT"
-if [[ -z "${BRAI_ANDROID_VERSION_CODE:-}" ]]; then
-  export BRAI_ANDROID_VERSION_CODE="$("$SCRIPT_DIR/apk-version-code.sh" next "manual $FLAVOR APK")"
-fi
 APK_LEDGER_RECORD=false
-VERSION_ARGS=(
+MOBILE_TARGET="${BRAI_MOBILE_TARGET:-}"
+if [[ -z "$MOBILE_TARGET" && -n "$ENV_PATH" ]]; then
+  MOBILE_TARGET="${BRAI_ENVS_ROOT:-/srv/projects/brai-envs}/$ENV_PATH/mobile-update"
+fi
+OTA_VERSION_ARGS=(
   --environment "$ENVIRONMENT" \
   --root "$ROOT" \
   --db "${BRAI_DB:-}" \
   --prod-db "${BRAI_PROD_DB:-}" \
   --prod-web-version-json "${BRAI_PROD_WEB_VERSION_JSON:-}" \
-  --mobile-target "${BRAI_MOBILE_TARGET:-${BRAI_ENVS_ROOT:-/srv/projects/brai-envs}/$ENV_PATH/mobile-update}"
+  --mobile-target "$MOBILE_TARGET"
 )
+APK_VERSION_ARGS=(--kind apk --root "$ROOT" --db "${BRAI_DB:-${BRAI_PROD_DB:-}}")
 if [[ "$ENVIRONMENT" == "prod" && "${BRAI_RECORD_APK_LEDGER:-false}" == "true" && -n "${BRAI_DB:-}" && -z "${BRAI_APP_VERSION:-}" && -n "${BRAI_BRANCH:-}" && -n "${BRAI_COMMIT:-}" ]]; then
   APK_LEDGER_RECORD=true
-  VERSION_ARGS+=(--next-apk true --target-branch "$BRAI_BRANCH" --target-commit "$BRAI_COMMIT")
+  APK_VERSION_ARGS+=(--next-apk true --target-branch "$BRAI_BRANCH" --target-commit "$BRAI_COMMIT")
 fi
-export BRAI_APP_VERSION="${BRAI_APP_VERSION:-$("$NODE_BIN" "$SCRIPT_DIR/resolve-app-version.mjs" "${VERSION_ARGS[@]}")}"
+export BRAI_APP_VERSION="${BRAI_APP_VERSION:-$("$NODE_BIN" "$SCRIPT_DIR/resolve-app-version.mjs" "${OTA_VERSION_ARGS[@]}")}"
+export BRAI_APK_VERSION="${BRAI_APK_VERSION:-$("$NODE_BIN" "$SCRIPT_DIR/resolve-app-version.mjs" "${APK_VERSION_ARGS[@]}")}"
+export BRAI_ANDROID_VERSION_CODE="${BRAI_ANDROID_VERSION_CODE:-$BRAI_APK_VERSION}"
 export NEXT_PUBLIC_BRAI_ENVIRONMENT="$ENVIRONMENT"
 export NEXT_PUBLIC_BRAI_PREVIEW_SLOT="$SLOT"
 export NEXT_PUBLIC_BRAI_BRANCH="${BRAI_BRANCH:-}"
@@ -83,14 +87,14 @@ BRAI_RELEASE_ENV="$RELEASE_KEY" BRAI_APK_SOURCE="$APK" "$SCRIPT_DIR/publish-capa
 if [[ "$APK_LEDGER_RECORD" == "true" ]]; then
   "$NODE_BIN" "$SCRIPT_DIR/record-shipped-apk-version.mjs" \
     --db "$BRAI_DB" \
-    --version "$BRAI_APP_VERSION" \
+    --version "$BRAI_APK_VERSION" \
     --version-code "$BRAI_ANDROID_VERSION_CODE" \
     --target-branch "$BRAI_BRANCH" \
     --target-commit "$BRAI_COMMIT" \
     --released-at "$BRAI_PUBLISHED_AT"
-  LEDGER_VERSION="$("$NODE_BIN" "$SCRIPT_DIR/resolve-app-version.mjs" --environment prod --root "$ROOT" --db "$BRAI_DB")"
-  if [[ "$LEDGER_VERSION" != "$BRAI_APP_VERSION" ]]; then
-    echo "Published APK version $BRAI_APP_VERSION does not match ledger version $LEDGER_VERSION" >&2
+  LEDGER_VERSION="$("$NODE_BIN" "$SCRIPT_DIR/resolve-app-version.mjs" --kind apk --root "$ROOT" --db "$BRAI_DB")"
+  if [[ "$LEDGER_VERSION" != "$BRAI_APK_VERSION" ]]; then
+    echo "Published APK version $BRAI_APK_VERSION does not match ledger version $LEDGER_VERSION" >&2
     exit 1
   fi
 fi

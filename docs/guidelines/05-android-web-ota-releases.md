@@ -1,24 +1,45 @@
 # Android, Web, OTA, And Releases
 
-Brai version rows use four `version_type_id` values: `apk`, `build`, `release`, `canon`.
+Brai uses separate version lines for APK and OTA/web.
 
-- `build_versions.version` is an integer counter scoped to `version_type_id`.
-- The public app version is assembled as `canon.release.build.apk` from the latest counters; missing `canon` or `release` is `0`.
-- Accepted `codex/*` work records one `build` row only.
-- `release` rows are created only by explicit command; a release links all unlinked `build` rows and the current `apk` row through `included_in_version_id`.
-- `canon` rows are created only by explicit command; a canon links all unlinked `release` rows through `included_in_version_id`.
-- APK rows are created only by explicit APK ledger recording for an intentional public APK release; routine production/native rebuilds must not increment `apk`.
-- Visible `build_versions.short_changes`, `build_versions.detailed_changes`, and `build_versions.reason` text is written in Russian.
-- Branch names, commits, domains, and deploy metadata belong in `build_version_refs` or `deployment_records`, not visible release-note text.
-- Accepted preview promotion uses explicit release notes captured before handoff:
-  `node scripts/brai-task.mjs release-notes --short "..." --details "..." --reason "..."`.
-  Missing, non-Russian, or generic release-note metadata blocks handoff/promotion; Git commit subjects and placeholder text are not fallbacks.
+- APK uses the public integer counter `vN`, starting at `v1`.
+- Android `versionName` is `N`; Android `versionCode` defaults to the same `N`.
+- OTA/web uses `X.Y.Z`; the old fourth public digit is not shown or compared.
+- `build_versions` is an APK ledger only. Fresh and reset databases seed exactly one row: `version_type_id='apk', version=1`.
+- Accepted deploys and manual release/canon paths must not create `build`, `release`, or `canon` rows.
+- Deployment/build history stays in `deployment_records`, Git refs, and CI metadata.
+- Visible APK ledger text is written in Russian. Branch names, commits, domains, and deploy metadata belong in refs or deployment records, not release-note text.
 
 Build and publish a release APK only when native Android code, Capacitor config, permissions, signing, manifest values, application id, SDK versions, icons, splash assets, native plugins, or native compatibility boundaries change.
 
+## Release Page
+
+`/releases/` shows only APK artifacts:
+
+- Production: `Brai`, `brai-vN.apk`
+- Dev artifact: `Brai Dev`, `brai-dev-vN.apk`
+- Preview A-E: `Brai A`...`Brai E`, `brai-a-vN.apk`...`brai-e-vN.apk`
+
+The Dev APK is an artifact only while the Dev environment is disabled; do not restore Dev deploy paths just to publish it.
+
+## OTA Manifest
+
+The mobile OTA manifest uses schema version 2:
+
+- `otaVersion`: `X.Y.Z`
+- `targetApkVersion`: `N`
+- `publishedAt`
+- `archiveUrl`
+- `sha256`
+- `sizeBytes`
+- `entrypoint`
+- `mandatory`
+
+`minApkVersionCode` and `maxApkVersionCode` are retired. If `targetApkVersion` is greater than the installed native APK version, Android reports `apk_required` and the UI links to `/releases/`.
+
 ## Shipped APK Ledger Order
 
-For an intentional public APK ledger release, set `BRAI_RECORD_APK_LEDGER=true`, resolve the APK `versionName` from the production `build_versions` ledger as `canon.release.build.(apk + 1)` before the Gradle build, publish the APK with that exact `X.Y.Z.S`, then record the new `apk` row immediately after the APK is published. If the same target branch/commit is retried, reuse its existing `apk` row instead of incrementing again. Preview APKs, routine production/native rebuilds, and non-production baseline APK rebuilds must not create `apk` rows.
+For an intentional APK release, resolve `N` from the APK ledger, build all required APK artifacts with `versionName=N` and `versionCode=N`, publish the APK files and release index, then record or reset the single APK ledger row as required by the runbook. Do not use a separate lock-protected `versionCode` allocator.
 
 Release APK signing is env-only. Required variables:
 

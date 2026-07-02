@@ -15,14 +15,14 @@ import org.junit.Test;
 public class BraiOtaManagerTest {
     @Test
     public void pendingCandidateIsNotTheActiveVisibleBundle() {
-        assertFalse(BraiOtaManager.isActiveCandidate("0.0.1.2", "0.0.1.1"));
-        assertTrue(BraiOtaManager.isActiveCandidate("0.0.1.2", "0.0.1.2"));
+        assertFalse(BraiOtaManager.isActiveCandidate("0.0.2", "0.0.1"));
+        assertTrue(BraiOtaManager.isActiveCandidate("0.0.2", "0.0.2"));
     }
 
     @Test
     public void onlyLoadingCandidateIsFailedOnNextStartup() {
-        assertFalse(BraiOtaManager.wasCandidateLoading("0.0.1.2", "candidate_ready_for_next_start"));
-        assertTrue(BraiOtaManager.wasCandidateLoading("0.0.1.2", "candidate_loading"));
+        assertFalse(BraiOtaManager.wasCandidateLoading("0.0.2", "candidate_ready_for_next_start"));
+        assertTrue(BraiOtaManager.wasCandidateLoading("0.0.2", "candidate_loading"));
         assertFalse(BraiOtaManager.wasCandidateLoading(null, "candidate_loading"));
     }
 

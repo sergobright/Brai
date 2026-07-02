@@ -46,6 +46,7 @@ public final class BraiOtaManager {
     private static final String KEY_LAST_STATUS = "lastCheckStatus";
     private static final String KEY_LAST_ERROR = "lastUpdateError";
     private static final String KEY_LAST_READY_VERSION = "lastReadyBundleVersion";
+    private static final String KEY_LAST_TARGET_APK_VERSION = "lastTargetApkVersion";
     private static final int NETWORK_TIMEOUT_MS = 7000;
     private static final int READY_TIMEOUT_MS = 15000;
 
@@ -134,6 +135,7 @@ public final class BraiOtaManager {
         state.put("fallbackBundleVersion", fallbackBundleVersion());
         state.put("activeBundleVersion", activeBundleVersion);
         state.put("nativeVersionName", BuildConfig.VERSION_NAME);
+        state.put("nativeApkVersion", nativeApkVersion());
         state.put("nativeBuild", BuildConfig.BRAI_APP_BUILD);
         state.put("nativeVersionCode", installedVersionCodeOrZero());
         state.put("nativeEnvironment", BuildConfig.BRAI_ENVIRONMENT);
@@ -145,6 +147,8 @@ public final class BraiOtaManager {
         state.put("candidateBundleVersion", prefs.getString(KEY_CANDIDATE_VERSION, null));
         state.put("lastCheckStatus", prefs.getString(KEY_LAST_STATUS, "unknown"));
         state.put("lastUpdateError", prefs.getString(KEY_LAST_ERROR, null));
+        state.put("targetApkVersion", prefs.getString(KEY_LAST_TARGET_APK_VERSION, null));
+        state.put("targetApkReleaseUrl", apkReleaseUrl());
         state.put("failedBundleVersions", prefs.getString(KEY_FAILED_VERSIONS, ""));
         state.put("checkInProgress", checkInProgress);
         state.put("downloadProgressVersion", downloadProgressVersion);
@@ -215,11 +219,12 @@ public final class BraiOtaManager {
         recordStatus("checking", null);
         URL manifestUrl = new URL(BuildConfig.BRAI_OTA_MANIFEST_URL);
         BraiOtaManifest manifest = BraiOtaManifest.parse(readText(manifestUrl));
+        recordManifestApkVersions(manifest);
         try {
-            manifest.validate(manifestUrl, installedVersionCode());
+            manifest.validate(manifestUrl, nativeApkVersionNumber());
         } catch (BraiOtaException error) {
-            if ("bundle_incompatible".equals(error.getMessage())) {
-                recordStatus("incompatible", error.getMessage());
+            if ("apk_required".equals(error.getMessage())) {
+                recordStatus("apk_required", error.getMessage());
                 return;
             }
             throw error;
@@ -230,12 +235,12 @@ public final class BraiOtaManager {
                 recordStatus("up_to_date", null);
                 return;
             }
-            if (failedVersions().contains(manifest.bundleVersion)) {
-                recordStatus("skipped_failed_bundle", manifest.bundleVersion);
+            if (failedVersions().contains(manifest.otaVersion)) {
+                recordStatus("skipped_failed_bundle", manifest.otaVersion);
                 return;
             }
-            if (manifest.bundleVersion.equals(prefs.getString(KEY_CANDIDATE_VERSION, null))) {
-                recordStatus("candidate_already_pending", manifest.bundleVersion);
+            if (manifest.otaVersion.equals(prefs.getString(KEY_CANDIDATE_VERSION, null))) {
+                recordStatus("candidate_already_pending", manifest.otaVersion);
                 return;
             }
         }
@@ -243,11 +248,11 @@ public final class BraiOtaManager {
         File archive = null;
         try {
             recordStatus("downloading", null);
-            recordDownloadProgress(manifest.bundleVersion, 0, manifest.sizeBytes);
+            recordDownloadProgress(manifest.otaVersion, 0, manifest.sizeBytes);
             archive = downloadArchive(manifest);
             verifyArchive(manifest, archive);
 
-            File bundleDir = new File(bundlesDir(), safeVersion(manifest.bundleVersion));
+            File bundleDir = new File(bundlesDir(), safeVersion(manifest.otaVersion));
             BraiOtaArchive.extractZip(archive, bundleDir, manifest.entrypoint);
             if (!archive.delete() && archive.exists()) {
                 recordStatus("archive_cleanup_failed", archive.getAbsolutePath());
@@ -255,7 +260,7 @@ public final class BraiOtaManager {
 
             synchronized (this) {
                 prefs.edit()
-                    .putString(KEY_CANDIDATE_VERSION, manifest.bundleVersion)
+                    .putString(KEY_CANDIDATE_VERSION, manifest.otaVersion)
                     .putString(KEY_CANDIDATE_PATH, bundleDir.getAbsolutePath())
                     .putString(KEY_LAST_STATUS, "candidate_ready_for_next_start")
                     .remove(KEY_LAST_ERROR)
@@ -319,7 +324,7 @@ public final class BraiOtaManager {
         if (!downloadDir.mkdirs() && !downloadDir.isDirectory()) {
             throw new IOException("Unable to create download directory");
         }
-        String filename = safeVersion(manifest.bundleVersion) + ".zip";
+        String filename = safeVersion(manifest.otaVersion) + ".zip";
         File archive = new File(downloadDir, filename);
         File partial = new File(downloadDir, filename + ".part");
         if (partial.exists() && !partial.delete()) {
@@ -348,7 +353,7 @@ public final class BraiOtaManager {
                     if (downloadedBytes > manifest.sizeBytes || downloadedBytes > BraiOtaArchive.MAX_ARCHIVE_BYTES) {
                         throw new BraiOtaException("archive_download_size_exceeded");
                     }
-                    recordDownloadProgress(manifest.bundleVersion, downloadedBytes, manifest.sizeBytes);
+                    recordDownloadProgress(manifest.otaVersion, downloadedBytes, manifest.sizeBytes);
                     output.write(buffer, 0, read);
                 }
             } catch (Exception error) {
@@ -465,6 +470,31 @@ public final class BraiOtaManager {
 
     private static String fallbackBundleVersion() {
         return BuildConfig.BRAI_FALLBACK_BUNDLE_VERSION;
+    }
+
+    private static String nativeApkVersion() {
+        return BuildConfig.BRAI_APK_VERSION;
+    }
+
+    private synchronized void recordManifestApkVersions(BraiOtaManifest manifest) {
+        prefs.edit().putString(KEY_LAST_TARGET_APK_VERSION, String.valueOf(manifest.targetApkVersion)).apply();
+    }
+
+    private static int nativeApkVersionNumber() throws BraiOtaException {
+        try {
+            int version = Integer.parseInt(nativeApkVersion());
+            if (version > 0) return version;
+        } catch (NumberFormatException ignored) {
+            // Handled below with a stable OTA error code.
+        }
+        throw new BraiOtaException("invalid_native_apk_version");
+    }
+
+    private static String apkReleaseUrl() {
+        String channel = BuildConfig.BRAI_OTA_CHANNEL;
+        int slash = channel.indexOf('/');
+        String host = slash >= 0 ? channel.substring(0, slash) : channel;
+        return host.isEmpty() ? "/releases/" : "https://" + host + "/releases/";
     }
 
     static boolean wasCandidateLoading(String candidateVersion, String lastStatus) {

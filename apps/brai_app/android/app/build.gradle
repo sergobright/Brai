@@ -5,11 +5,12 @@ def androidStorePassword = System.getenv('BRAI_ANDROID_STORE_PASSWORD')
 def androidKeyAlias = System.getenv('BRAI_ANDROID_KEY_ALIAS')
 def androidKeyPassword = System.getenv('BRAI_ANDROID_KEY_PASSWORD') ?: androidStorePassword
 def androidReleaseKeystore = file(androidKeystorePath ?: 'missing-release-keystore.jks')
-def braiWebVersion = System.getenv('BRAI_APP_VERSION') ?: '0.0.10.1'
+def braiWebVersion = System.getenv('BRAI_APP_VERSION') ?: '0.0.10'
 def braiAndroidApi = System.getenv('NEXT_PUBLIC_BRAI_ANDROID_API') ?: 'https://api.brightos.world'
 def braiAndroidVersionCode = (System.getenv('BRAI_ANDROID_VERSION_CODE') ?: '1') as Integer
-def braiProductionFallbackBundleVersion = System.getenv('BRAI_PROD_FALLBACK_BUNDLE_VERSION') ?: '0.0.10.1'
-def braiNonProductionFallbackBundleVersion = System.getenv('BRAI_NON_PROD_FALLBACK_BUNDLE_VERSION') ?: "${braiWebVersion}.0"
+def braiApkVersion = System.getenv('BRAI_APK_VERSION') ?: "${braiAndroidVersionCode}"
+def braiProductionFallbackBundleVersion = System.getenv('BRAI_PROD_FALLBACK_BUNDLE_VERSION') ?: '0.0.10'
+def braiNonProductionFallbackBundleVersion = System.getenv('BRAI_NON_PROD_FALLBACK_BUNDLE_VERSION') ?: braiWebVersion
 
 android {
     namespace = "world.brightos.brai"
@@ -19,10 +20,11 @@ android {
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode braiAndroidVersionCode
-        versionName braiWebVersion
+        versionName braiApkVersion
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         manifestPlaceholders = [braiAppLabel: 'Brai']
         buildConfigField "String", "BRAI_ANDROID_API", "\"${braiAndroidApi}\""
+        buildConfigField "String", "BRAI_APK_VERSION", "\"${braiApkVersion}\""
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
              // Default: https://android.googlesource.com/platform/frameworks/base/+/282e181b58cf72b6ca770dc7ca5f91f135444502/tools/aapt/AaptAssets.cpp#61

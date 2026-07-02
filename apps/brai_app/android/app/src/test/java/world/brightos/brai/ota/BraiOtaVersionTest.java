@@ -14,15 +14,9 @@ public class BraiOtaVersionTest {
     }
 
     @Test
-    public void comparesUnifiedVersions() {
-        assertTrue(BraiOtaVersion.compare("0.0.2.1", "0.0.1.1") > 0);
-        assertTrue(BraiOtaVersion.compare("0.0.1.2", "0.0.1.1") > 0);
-        assertTrue(BraiOtaVersion.compare("0.0.1.1", "0.0.1.1") == 0);
-    }
-
-    @Test
-    public void treatsPreviewBundleSuffixAsNewerThanBaseUnifiedVersion() {
-        assertTrue(BraiOtaVersion.compare("0.0.10.1.20260628151556", "0.0.10.1") > 0);
-        assertTrue(BraiOtaVersion.compare("0.0.10.1", "0.0.10.1.20260628151556") < 0);
+    public void comparesOtaVersions() {
+        assertTrue(BraiOtaVersion.compare("0.0.2", "0.0.1") > 0);
+        assertTrue(BraiOtaVersion.compare("0.1.0", "0.0.9") > 0);
+        assertTrue(BraiOtaVersion.compare("0.0.1", "0.0.1") == 0);
     }
 }

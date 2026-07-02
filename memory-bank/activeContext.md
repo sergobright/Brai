@@ -13,7 +13,7 @@ Brai now uses the clean public repository baseline as its source of truth.
 - Keep public-safe project facts in `memory-bank/`.
 - Run `npm run public:guard` before publishing or merging public branches.
 - Start future project-file work from current `origin/main` on `codex/*` branches.
-- Keep public release versions aligned with the `build_versions` ledger.
+- Keep APK releases aligned with the `build_versions` APK ledger; keep OTA/web versions as separate `X.Y.Z`.
 - Implementation tasks should end with committed and pushed tracked changes unless explicitly local-only.
 
 ## Open Questions

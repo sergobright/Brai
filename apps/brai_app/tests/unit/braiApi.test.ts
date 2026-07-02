@@ -32,9 +32,10 @@ describe("BraiApi", () => {
       new Response(
         JSON.stringify({
           server_time_utc: "2026-06-29T12:00:00.000Z",
-          version: "0.11.52.1",
-          parts: { canon: 0, release: 11, build: 52, apk: 1 },
+          version: "0.11.52",
+          ota_version: "0.11.52",
           latest: { canon: null, release: null, build: null, apk: null },
+          target_apk: { version: 1, file: "brai-v1.apk", release_url: "/releases/", capabilities: [] },
         }),
         { status: 200, headers: { "content-type": "application/json" } },
       ),
@@ -43,7 +44,8 @@ describe("BraiApi", () => {
     const response = await new BraiApi("https://api.example.test").version();
 
     expect(fetchMock.mock.calls[0][0]).toBe("https://api.example.test/v1/version");
-    expect(response.version).toBe("0.11.52.1");
+    expect(response.ota_version).toBe("0.11.52");
+    expect(response.target_apk?.file).toBe("brai-v1.apk");
   });
 
   it("sends global stop metadata with synced timer events", async () => {

@@ -14,7 +14,7 @@
 - `apps/brai_app/public/icons/` - web/public иконки.
 - `assets/brand/` - исходные бренд-ассеты: `brai-logo-source.png` - мастер логотипа от Сергея; `brai-logo-black.png` - версия с чёрным фоном.
 - `apps/brai_app/android/app/src/main/` - Android native boundary, ресурсы, icons, generated assets.
-- `apps/brai_app/android/app/src/main/java/world/brightos/brai/` - native Android код приложения; `ota/` и `timer/` - частые точки входа.
+- `apps/brai_app/android/app/src/main/java/world/brightos/brai/` - native Android код приложения; `ota/`, `timer/`, and `capabilities/` - частые точки входа.
 - `services/brai_api/` - Node API, WebSocket/HTTP server и SQLite store.
 - `services/brai_temporal/` - Temporal worker/client для required CI/CD control ledger preview и promotion flows.
 - `admin/` - техническая admin-панель для protected admin subdomain.

@@ -27,42 +27,36 @@ Brai Android SHALL discover mobile web-layer updates from a self-hosted update m
 
 #### Scenario: Manifest describes a bundle
 - **WHEN** the manifest is valid
-- **THEN** it includes `schemaVersion`, `channel`, `bundleVersion`, `publishedAt`, `archiveUrl`, `sha256`, `sizeBytes`, `entrypoint`, `minApkVersionCode`, and `mandatory`
-- **AND** it may include `maxApkVersionCode`
-- **AND** `bundleVersion` uses the same `X.Y.Z.S` version as the browser web release, without a separate OTA suffix
+- **THEN** it includes `schemaVersion`, `otaVersion`, `targetApkVersion`, `publishedAt`, `archiveUrl`, `sha256`, `sizeBytes`, `entrypoint`, and `mandatory`
+- **AND** `otaVersion` uses the same `X.Y.Z` version as the browser web release
 
 #### Scenario: Non-production manifest is published
 - **WHEN** a Preview mobile OTA manifest is published
-- **THEN** its `bundleVersion` starts with the accepted public `X.Y.Z.S` version
-- **AND** it may include a non-production suffix for deploy identity
+- **THEN** its `otaVersion` is an `X.Y.Z` value
+- **AND** deploy identity may exist only in metadata or archive paths, not as a fourth public version digit
 
 ### Requirement: Android applies only compatible OTA bundles
 Brai Android SHALL apply only OTA bundles compatible with the installed APK.
 
-Native-boundary Preview OTA manifests SHALL require exact Android `versionCode` compatibility by setting both `minApkVersionCode` and `maxApkVersionCode` to the required technical APK code. Web-only Preview OTA manifests SHALL NOT force a new APK when the installed native shell is still compatible.
+OTA manifests SHALL require a new APK only when `targetApkVersion` is greater than the installed native APK version.
 
 #### Scenario: Bundle requires newer APK
-- **WHEN** the manifest `minApkVersionCode` is greater than the installed Android `versionCode`
+- **WHEN** the manifest `targetApkVersion` is greater than the installed native APK version
 - **THEN** the app skips the bundle
-- **AND** continues using the current stable local bundle or APK fallback
-
-#### Scenario: Bundle excludes installed APK
-- **WHEN** the manifest sets `maxApkVersionCode`
-- **AND** the installed Android `versionCode` is greater than `maxApkVersionCode`
-- **THEN** the app skips the bundle
-- **AND** records the update as incompatible for diagnostics
+- **AND** records the update as `apk_required`
+- **AND** shows an APK update action that links to the release page
 
 #### Scenario: Preview APK does not match
 - **WHEN** a Preview Android app checks an OTA manifest
 - **AND** the manifest was published for a native-boundary change
-- **AND** the installed Android `versionCode` is lower or higher than the manifest requirement
-- **THEN** the bundle is skipped as incompatible
+- **AND** the installed native APK version is lower than `targetApkVersion`
+- **THEN** the bundle is skipped as `apk_required`
 - **AND** the app blocks normal Preview use with an APK update screen
 
 #### Scenario: Web-only Preview update is published
 - **WHEN** a Preview mobile OTA manifest is published for a web-only change
 - **AND** the installed Preview APK is compatible with the existing native bridge
-- **THEN** the manifest does not set an exact APK `versionCode` gate
+- **THEN** the manifest keeps `targetApkVersion` at the current compatible APK version
 - **AND** the app may download and activate the web bundle without installing a new APK
 
 ### Requirement: Android verifies OTA bundle integrity before activation
@@ -95,7 +89,7 @@ Brai Android SHALL promote a downloaded OTA bundle to stable only after the web 
 
 #### Scenario: Candidate reports ready
 - **WHEN** the app loads a candidate bundle
-- **AND** the web layer sends a readiness signal for the same `bundleVersion`
+- **AND** the web layer sends a readiness signal for the same `otaVersion`
 - **THEN** the app promotes the candidate to the stable bundle
 
 #### Scenario: Candidate does not report ready
@@ -130,12 +124,12 @@ Brai SHALL reserve OTA updates for web-layer changes compatible with the install
 - **THEN** the change may ship through the mobile OTA bundle channel
 
 #### Scenario: Native change is released
-- **WHEN** a release changes Capacitor plugins, Android permissions, `AndroidManifest.xml`, Kotlin or Java code, application id, signing, `versionCode`, SDK versions, icons, splash screen, deep links, notification channels, or native bridge contracts
+- **WHEN** a release changes Capacitor plugins, Android permissions, `AndroidManifest.xml`, Kotlin or Java code, application id, signing, APK version, SDK versions, icons, splash screen, deep links, notification channels, or native bridge contracts
 - **THEN** the release requires a new APK
 
 #### Scenario: Native-boundary change is published
 - **WHEN** a change crosses the native Android boundary
-- **THEN** the Preview OTA manifest requires the newly published APK `versionCode`
+- **THEN** the Preview OTA manifest requires the newly published APK through `targetApkVersion`
 
 ### Requirement: OTA update failures are non-blocking for normal startup
 Brai Android SHALL continue to start from a known-good local web layer when OTA update checks or downloads fail.

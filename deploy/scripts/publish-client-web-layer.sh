@@ -24,13 +24,14 @@ if (!version && fs.existsSync(versionFile)) {
   const parsed = JSON.parse(fs.readFileSync(versionFile, "utf8"));
   version = String(parsed.version || "");
 }
-if (!/^\d+\.\d+\.\d+\.\d+$/.test(version)) {
-  throw new Error("Unable to resolve Brai X.Y.Z.S app version");
+const match = version.match(/^(\d+)\.(\d+)\.(\d+)(?:\.|$)/);
+if (!match) {
+  throw new Error("Unable to resolve Brai X.Y.Z app version");
 }
-console.log(version);
+console.log(match.slice(1, 4).join("."));
 ' "$ROOT")
 
-VERSION="${BRAI_APP_VERSION:-${APP_META[0]}}"
+VERSION="${APP_META[0]}"
 export BRAI_APP_VERSION="$VERSION"
 export BRAI_ROOT="$ROOT"
 export NODE_BIN="$NODE_BIN"
@@ -50,10 +51,10 @@ const outVersionFile = path.join(root, "apps/brai_app/out/version.json");
 const publicVersionFile = path.join(root, "apps/brai_app/public/version.json");
 const sourceFile = fs.existsSync(outVersionFile) ? outVersionFile : publicVersionFile;
 const parsed = fs.existsSync(sourceFile) ? JSON.parse(fs.readFileSync(sourceFile, "utf8")) : {};
-const [major, release, build, apk] = version.split(".").map(Number);
+const [major, release, build] = version.split(".").map(Number);
 Object.assign(parsed, {
   version,
-  versionParts: { major, release, build, apk },
+  versionParts: { major, release, build },
 });
 fs.writeFileSync(outVersionFile, `${JSON.stringify(parsed, null, 2)}\n`);
 ' "$ROOT" "$VERSION"
@@ -64,16 +65,7 @@ echo "Publishing browser web assets..."
 export BRAI_MOBILE_BUNDLE_VERSION="${BRAI_MOBILE_BUNDLE_VERSION:-$VERSION}"
 
 ENVIRONMENT="${NEXT_PUBLIC_BRAI_ENVIRONMENT:-${BRAI_ENVIRONMENT:-prod}}"
-if [[ "$ENVIRONMENT" != "prod" ]]; then
-  if [[ -n "${BRAI_REQUIRED_APK_VERSION_CODE:-}" ]]; then
-    export BRAI_MIN_APK_VERSION_CODE="${BRAI_MIN_APK_VERSION_CODE:-$BRAI_REQUIRED_APK_VERSION_CODE}"
-    export BRAI_MAX_APK_VERSION_CODE="${BRAI_MAX_APK_VERSION_CODE:-$BRAI_MIN_APK_VERSION_CODE}"
-  elif [[ "${BRAI_NATIVE_APK_CHANGE:-false}" == "true" ]]; then
-    REQUIRED_APK_VERSION_CODE="${BRAI_MIN_APK_VERSION_CODE:-$("$NODE_BIN" "$SCRIPT_DIR/resolve-required-apk-version-code.mjs" "$ENVIRONMENT")}"
-    export BRAI_MIN_APK_VERSION_CODE="${BRAI_MIN_APK_VERSION_CODE:-$REQUIRED_APK_VERSION_CODE}"
-    export BRAI_MAX_APK_VERSION_CODE="${BRAI_MAX_APK_VERSION_CODE:-$BRAI_MIN_APK_VERSION_CODE}"
-  fi
-fi
+export BRAI_TARGET_APK_VERSION="${BRAI_TARGET_APK_VERSION:-$("$NODE_BIN" "$SCRIPT_DIR/resolve-required-apk-version.mjs" "$ENVIRONMENT")}"
 
 echo "Publishing Android OTA bundle..."
 "$SCRIPT_DIR/publish-mobile-bundle.sh"

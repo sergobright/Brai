@@ -10,19 +10,23 @@ SOURCE="${BRAI_MOBILE_SOURCE:-$ROOT/apps/brai_app/out}"
 TARGET_ROOT="${BRAI_MOBILE_TARGET:-$ROOT/deploy/mobile-update}"
 NODE_BIN="${NODE_BIN:-node}"
 ZIP_BIN="${ZIP_BIN:-zip}"
-VERSION="${BRAI_APP_VERSION:-$("$NODE_BIN" -e '
+VERSION="$("$NODE_BIN" -e '
 const fs = require("node:fs");
 const path = require("node:path");
 const root = process.argv[1];
-const parsed = JSON.parse(fs.readFileSync(path.join(root, "apps/brai_app/public/version.json"), "utf8"));
-const version = String(parsed.version || "");
-if (!/^\d+\.\d+\.\d+\.\d+$/.test(version)) throw new Error("Unable to resolve Brai X.Y.Z.S app version");
-console.log(version);
-' "$ROOT")}"
-BUNDLE_VERSION="${BRAI_MOBILE_BUNDLE_VERSION:-$VERSION}"
+let version = process.env.BRAI_APP_VERSION || "";
+if (!version) {
+  const parsed = JSON.parse(fs.readFileSync(path.join(root, "apps/brai_app/public/version.json"), "utf8"));
+  version = String(parsed.version || "");
+}
+const match = version.match(/^(\d+)\.(\d+)\.(\d+)(?:\.|$)/);
+if (!match) throw new Error("Unable to resolve Brai X.Y.Z app version");
+console.log(match.slice(1, 4).join("."));
+' "$ROOT")"
+OTA_VERSION="${BRAI_OTA_VERSION:-$VERSION}"
+BUNDLE_ID="${BRAI_MOBILE_BUNDLE_VERSION:-$OTA_VERSION}"
 UPDATE_BASE_URL="${BRAI_UPDATE_BASE_URL:-https://app.brightos.world/mobile-update}"
-MIN_APK_VERSION_CODE="${BRAI_MIN_APK_VERSION_CODE:-1}"
-MAX_APK_VERSION_CODE="${BRAI_MAX_APK_VERSION_CODE:-}"
+TARGET_APK_VERSION="${BRAI_TARGET_APK_VERSION:-${BRAI_APK_VERSION:-1}}"
 MANDATORY="${BRAI_MOBILE_MANDATORY:-false}"
 RETAIN_PREVIOUS="${BRAI_MOBILE_RETAIN_PREVIOUS:-3}"
 ENTRYPOINT="${BRAI_MOBILE_ENTRYPOINT:-index.html}"
@@ -45,19 +49,13 @@ if ! command -v "$ZIP_BIN" >/dev/null 2>&1; then
   exit 1
 fi
 
-if [[ ! "$BUNDLE_VERSION" =~ ^[A-Za-z0-9._+-]+$ ]]; then
-  echo "Invalid bundle version: $BUNDLE_VERSION" >&2
+if [[ ! "$OTA_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+  echo "Invalid OTA version: $OTA_VERSION" >&2
   exit 1
 fi
 
-ENVIRONMENT="${NEXT_PUBLIC_BRAI_ENVIRONMENT:-${BRAI_ENVIRONMENT:-prod}}"
-if [[ "$ENVIRONMENT" == "prod" && ! "$BUNDLE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-  echo "Production bundle version must use Brai X.Y.Z.S format: $BUNDLE_VERSION" >&2
-  exit 1
-fi
-
-if [[ "$ENVIRONMENT" != "prod" && ! "$BUNDLE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+([._+-][A-Za-z0-9._+-]+)?$ ]]; then
-  echo "Non-production bundle version must start with Brai X.Y.Z.S: $BUNDLE_VERSION" >&2
+if [[ ! "$BUNDLE_ID" =~ ^[A-Za-z0-9._+-]+$ ]]; then
+  echo "Invalid bundle id: $BUNDLE_ID" >&2
   exit 1
 fi
 
@@ -66,16 +64,9 @@ if [[ "$MANDATORY" != "true" && "$MANDATORY" != "false" ]]; then
   exit 1
 fi
 
-if [[ ! "$MIN_APK_VERSION_CODE" =~ ^[0-9]+$ || "$MIN_APK_VERSION_CODE" -le 0 ]]; then
-  echo "BRAI_MIN_APK_VERSION_CODE must be a positive integer" >&2
+if [[ ! "$TARGET_APK_VERSION" =~ ^[0-9]+$ || "$TARGET_APK_VERSION" -le 0 ]]; then
+  echo "BRAI_TARGET_APK_VERSION must be a positive integer" >&2
   exit 1
-fi
-
-if [[ -n "$MAX_APK_VERSION_CODE" ]]; then
-  if [[ ! "$MAX_APK_VERSION_CODE" =~ ^[0-9]+$ || "$MAX_APK_VERSION_CODE" -le 0 ]]; then
-    echo "BRAI_MAX_APK_VERSION_CODE must be a positive integer when set" >&2
-    exit 1
-  fi
 fi
 
 TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/brai-mobile-bundle.XXXXXX")"
@@ -88,36 +79,36 @@ PAYLOAD_DIR="$TMP_DIR/payload"
 mkdir -p "$PAYLOAD_DIR"
 cp -R "$SOURCE"/. "$PAYLOAD_DIR"/
 
-ARCHIVE_URL="${UPDATE_BASE_URL%/}/bundles/$BUNDLE_VERSION/bundle.zip"
+ARCHIVE_URL="${UPDATE_BASE_URL%/}/bundles/$BUNDLE_ID/bundle.zip"
 PAYLOAD_METADATA="$PAYLOAD_DIR/metadata.json"
 
 "$NODE_BIN" -e '
 const fs = require("node:fs");
-const [file, bundleVersion, publishedAt, entrypoint, minApk, maxApk, mandatory, archiveUrl] = process.argv.slice(1);
+const [file, otaVersion, bundleId, publishedAt, entrypoint, targetApk, mandatory, archiveUrl] = process.argv.slice(1);
 const parsedUrl = new URL(archiveUrl);
 if (parsedUrl.protocol !== "https:") throw new Error("archive URL must use HTTPS");
 if (parsedUrl.username || parsedUrl.password) throw new Error("archive URL must not include credentials");
 const metadata = {
-  schemaVersion: 1,
+  schemaVersion: 2,
   type: "brai-mobile-web-bundle",
-  bundleVersion,
+  otaVersion,
+  bundleId,
   publishedAt,
   entrypoint,
-  minApkVersionCode: Number(minApk),
-  maxApkVersionCode: maxApk ? Number(maxApk) : null,
+  targetApkVersion: Number(targetApk),
   mandatory: mandatory === "true",
   archiveUrl,
   source: "next-static-export"
 };
 fs.writeFileSync(file, `${JSON.stringify(metadata, null, 2)}\n`);
-' "$PAYLOAD_METADATA" "$BUNDLE_VERSION" "$PUBLISHED_AT" "$ENTRYPOINT" "$MIN_APK_VERSION_CODE" "$MAX_APK_VERSION_CODE" "$MANDATORY" "$ARCHIVE_URL"
+' "$PAYLOAD_METADATA" "$OTA_VERSION" "$BUNDLE_ID" "$PUBLISHED_AT" "$ENTRYPOINT" "$TARGET_APK_VERSION" "$MANDATORY" "$ARCHIVE_URL"
 
 ARCHIVE_TMP="$TMP_DIR/bundle.zip"
 (cd "$PAYLOAD_DIR" && "$ZIP_BIN" -qry "$ARCHIVE_TMP" .)
 
 SIZE_BYTES="$(wc -c < "$ARCHIVE_TMP" | tr -d ' ')"
 SHA256="$(sha256sum "$ARCHIVE_TMP" | awk '{print $1}')"
-BUNDLE_DIR="$TARGET_ROOT/bundles/$BUNDLE_VERSION"
+BUNDLE_DIR="$TARGET_ROOT/bundles/$BUNDLE_ID"
 ARCHIVE_TARGET="$BUNDLE_DIR/bundle.zip"
 METADATA_TARGET="$BUNDLE_DIR/metadata.json"
 ARCHIVE_STAGE="$BUNDLE_DIR/.bundle.zip.$$"
@@ -131,26 +122,24 @@ chmod u=rw,go=r "$ARCHIVE_STAGE" "$METADATA_STAGE"
 
 "$NODE_BIN" -e '
 const fs = require("node:fs");
-const [metadataFile, manifestFile, bundleVersion, publishedAt, archiveUrl, sha256, sizeBytes, entrypoint, minApk, maxApk, mandatory] = process.argv.slice(1);
+const [metadataFile, manifestFile, otaVersion, publishedAt, archiveUrl, sha256, sizeBytes, entrypoint, targetApk, mandatory] = process.argv.slice(1);
 const metadata = JSON.parse(fs.readFileSync(metadataFile, "utf8"));
 metadata.sha256 = sha256;
 metadata.sizeBytes = Number(sizeBytes);
 fs.writeFileSync(metadataFile, `${JSON.stringify(metadata, null, 2)}\n`);
 const manifest = {
-  schemaVersion: 1,
-  channel: "stable",
-  bundleVersion,
+  schemaVersion: 2,
+  otaVersion,
+  targetApkVersion: Number(targetApk),
   publishedAt,
   archiveUrl,
   sha256,
   sizeBytes: Number(sizeBytes),
   entrypoint,
-  minApkVersionCode: Number(minApk),
-  maxApkVersionCode: maxApk ? Number(maxApk) : null,
   mandatory: mandatory === "true"
 };
 fs.writeFileSync(manifestFile, `${JSON.stringify(manifest, null, 2)}\n`);
-' "$METADATA_STAGE" "$MANIFEST_TMP" "$BUNDLE_VERSION" "$PUBLISHED_AT" "$ARCHIVE_URL" "$SHA256" "$SIZE_BYTES" "$ENTRYPOINT" "$MIN_APK_VERSION_CODE" "$MAX_APK_VERSION_CODE" "$MANDATORY"
+' "$METADATA_STAGE" "$MANIFEST_TMP" "$OTA_VERSION" "$PUBLISHED_AT" "$ARCHIVE_URL" "$SHA256" "$SIZE_BYTES" "$ENTRYPOINT" "$TARGET_APK_VERSION" "$MANDATORY"
 
 mv "$ARCHIVE_STAGE" "$ARCHIVE_TARGET"
 mv "$METADATA_STAGE" "$METADATA_TARGET"

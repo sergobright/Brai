@@ -2,65 +2,66 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
+import { apkReleaseTargetByKey, apkReleaseTargets } from "./apk-release-targets.mjs";
 
 const args = parseArgs(process.argv.slice(2));
 const root = process.env.BRAI_ROOT ?? path.resolve(import.meta.dirname, "../..");
 const releaseDir = process.env.BRAI_RELEASE_TARGET ?? path.join(root, "deploy/releases");
 const indexPath = path.join(releaseDir, "releases.json");
-const environments = JSON.parse(fs.readFileSync(path.join(root, "deploy/environments.json"), "utf8")).environments;
+const targets = apkReleaseTargets(root);
 const releaseKey = required(args, "release");
 const fileName = required(args, "file");
 const filePath = path.join(releaseDir, fileName);
-const env = Object.values(environments).find((candidate) => candidate.releaseKey === releaseKey);
+const target = apkReleaseTargetByKey(releaseKey, root);
 
-if (!env) throw new Error(`unknown release section: ${releaseKey}`);
+if (!target) throw new Error(`unknown release section: ${releaseKey}`);
 if (!fs.existsSync(filePath)) throw new Error(`missing APK file: ${fileName}`);
 
 const data = readIndex();
 data.sections[releaseKey] = {
-  title: env.displayName,
-  androidApp: env.androidApp,
-  applicationId: env.applicationId,
+  ...sectionDefaults(target),
   file: fileName,
-  version: required(args, "version"),
+  apkVersion: Number(required(args, "apk-version")),
   versionCode: Number(required(args, "version-code")),
   publishedAt: required(args, "published-at"),
   sizeBytes: fs.statSync(filePath).size,
   sha256: sha256(filePath),
+  capabilities: apkCapabilities(),
 };
 
 writeJson(indexPath, data);
 renderReleasePage(data, path.join(releaseDir, "index.html"));
 
 function readIndex() {
-  if (fs.existsSync(indexPath)) return JSON.parse(fs.readFileSync(indexPath, "utf8"));
+  const existing = fs.existsSync(indexPath) ? JSON.parse(fs.readFileSync(indexPath, "utf8")) : {};
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     sections: Object.fromEntries(
-      ["production", "a", "b", "c", "d", "e"].map((key) => {
-        const sectionEnv = Object.values(environments).find((candidate) => candidate.releaseKey === key);
-        return [
-          key,
-          {
-            title: sectionEnv.displayName,
-            androidApp: sectionEnv.androidApp,
-            applicationId: sectionEnv.applicationId,
-            file: null,
-            version: null,
-            versionCode: null,
-            publishedAt: null,
-            sizeBytes: null,
-            sha256: null,
-          },
-        ];
-      }),
+      targets.map((target) => [
+        target.releaseKey,
+        { ...sectionDefaults(target), ...(existing.sections?.[target.releaseKey] ?? {}) },
+      ]),
     ),
   };
 }
 
+function sectionDefaults(target) {
+  return {
+    title: target.androidApp,
+    androidApp: target.androidApp,
+    applicationId: target.applicationId,
+    file: null,
+    apkVersion: null,
+    versionCode: null,
+    publishedAt: null,
+    sizeBytes: null,
+    sha256: null,
+    capabilities: apkCapabilities(),
+  };
+}
+
 function renderReleasePage(data, htmlPath) {
-  const order = ["production", "a", "b", "c", "d", "e"];
-  const cards = order.map((key) => sectionCard(data.sections[key])).join("\n");
+  const cards = targets.map((target) => sectionCard(data.sections[target.releaseKey])).join("\n");
   fs.writeFileSync(
     htmlPath,
     `<!doctype html>
@@ -91,7 +92,7 @@ function renderReleasePage(data, htmlPath) {
   <body>
     <main>
       <h1>APK-релизы Brai</h1>
-      <p class="lead">Production и preview A-E устанавливаются как отдельные Android-приложения.</p>
+      <p class="lead">Production, Dev и preview A-E устанавливаются как отдельные Android-приложения.</p>
       <div class="grid">${cards}</div>
     </main>
   </body>
@@ -104,18 +105,32 @@ function sectionCard(section) {
   const download = section.file
     ? `<a href="./${escapeHtml(section.file)}">Скачать APK</a>`
     : `<span class="missing">APK ещё не опубликован</span>`;
+  const capabilities = (Array.isArray(section.capabilities) ? section.capabilities : [])
+    .map((capability) => `<li>${escapeHtml(capability)}</li>`)
+    .join("");
   return `<section>
   <h2>${escapeHtml(section.title)}</h2>
   <p class="app">${escapeHtml(section.androidApp)}</p>
   <dl>
-    <div><dt>APK version</dt><dd>${escapeHtml(section.version ?? "нет")}</dd></div>
+    <div><dt>APK</dt><dd>${section.apkVersion ? `v${escapeHtml(section.apkVersion)}` : "нет"}</dd></div>
     <div><dt>versionCode</dt><dd>${escapeHtml(section.versionCode ?? "нет")}</dd></div>
     <div><dt>applicationId</dt><dd>${escapeHtml(section.applicationId)}</dd></div>
     <div><dt>published</dt><dd>${escapeHtml(section.publishedAt ?? "нет")}</dd></div>
     <div><dt>file</dt><dd>${escapeHtml(section.file ?? "нет")}</dd></div>
   </dl>
+  ${capabilities ? `<ul>${capabilities}</ul>` : ""}
   ${download}
 </section>`;
+}
+
+function apkCapabilities() {
+  return [
+    "AccessibilityService для доступа к экрану и будущих сценариев скриншотов.",
+    "SYSTEM_ALERT_WINDOW для плавающих кнопок поверх других приложений.",
+    "Уведомления и foreground service для постоянных сценариев.",
+    "RECORD_AUDIO и foreground microphone service для будущей записи с микрофона.",
+    "MediaProjection foreground service для будущего захвата экрана и системного аудио там, где Android/ROM разрешает это.",
+  ];
 }
 
 function parseArgs(values) {

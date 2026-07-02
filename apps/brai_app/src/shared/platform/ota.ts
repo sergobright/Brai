@@ -4,6 +4,7 @@ import { isNativeShell, platformName } from "@/shared/platform/platform";
 export type BraiOtaState = {
   activeBundleVersion: string;
   fallbackBundleVersion?: string;
+  nativeApkVersion?: string;
   nativeVersionName?: string;
   nativeBuild?: string;
   nativeVersionCode?: number;
@@ -16,6 +17,8 @@ export type BraiOtaState = {
   candidateBundleVersion?: string | null;
   lastCheckStatus?: string;
   lastUpdateError?: string | null;
+  targetApkVersion?: string | null;
+  targetApkReleaseUrl?: string | null;
   failedBundleVersions?: string;
   checkInProgress?: boolean;
   downloadProgressVersion?: string | null;

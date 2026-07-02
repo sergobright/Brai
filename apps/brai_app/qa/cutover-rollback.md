@@ -2,12 +2,13 @@
 
 ## Public Baseline
 
-- Source baseline version: `0.0.1.1`.
+- OTA/web version format: `X.Y.Z`.
+- APK baseline: `v1`.
 - Web client: Next.js static export from `apps/brai_app/out`, published operationally to `deploy/web`.
 - Android client: Capacitor APK/AAB generated operationally under `deploy/releases`.
 - Mobile OTA channel: generated operationally under `deploy/mobile-update`.
 - Generated release artifacts are ignored source-control outputs, not repository history.
-- Android application id remains `world.brightos.brai`.
+- Android application id is `world.brightos.brai`.
 
 ## Web Publication
 
@@ -26,9 +27,9 @@
 
 ## Mobile OTA Publication
 
-- Public version format: `X.Y.Z.S`, for example `0.0.1.1`.
+- Public OTA version format: `X.Y.Z`.
 - The bundle archive root contains the static export entrypoint `index.html`, `_next/`, app assets, `version.json`, and non-secret `metadata.json`.
-- `deploy/scripts/publish-mobile-bundle.sh` writes `deploy/mobile-update/bundles/<bundleVersion>/bundle.zip`, writes adjacent `metadata.json`, and atomically replaces `deploy/mobile-update/manifest.json`.
+- `deploy/scripts/publish-mobile-bundle.sh` writes `deploy/mobile-update/bundles/<bundle-id>/bundle.zip`, writes adjacent `metadata.json`, and atomically replaces `deploy/mobile-update/manifest.json`.
 - The publish script retains the current bundle plus at least 3 previous bundle directories.
 - `/mobile-update/*` must be served by Caddy before the protected web catch-all.
 

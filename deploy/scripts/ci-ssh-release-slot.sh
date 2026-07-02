@@ -97,7 +97,6 @@ if [[ -n "${SLOT_META[0]:-}" ]]; then
   export BRAI_RELEASE_TARGET="$DEPLOY_REPO/deploy/releases"
   export BRAI_PROD_DB="$DEPLOY_REPO/data/brai.sqlite"
   export BRAI_PROD_WEB_VERSION_JSON="$DEPLOY_REPO/deploy/web/version.json"
-  export BRAI_ANDROID_VERSION_CODE="$(deploy/scripts/apk-version-code.sh next "released $RELEASE_BRANCH baseline preview ${SLOT_META[0]}")"
   deploy/scripts/build-android-env-apk.sh "preview${SLOT_META[0]}" >&2
   cd "$RELEASE_ROOT"
 fi

@@ -6,75 +6,64 @@ import java.util.Locale;
 import java.util.Map;
 
 final class BraiOtaManifest {
-    static final int SUPPORTED_SCHEMA_VERSION = 1;
+    static final int SUPPORTED_SCHEMA_VERSION = 2;
 
     final int schemaVersion;
-    final String channel;
-    final String bundleVersion;
+    final String otaVersion;
+    final int targetApkVersion;
     final String publishedAt;
     final String archiveUrl;
     final String sha256;
     final long sizeBytes;
     final String entrypoint;
-    final int minApkVersionCode;
-    final Integer maxApkVersionCode;
     final boolean mandatory;
 
     private BraiOtaManifest(
         int schemaVersion,
-        String channel,
-        String bundleVersion,
+        String otaVersion,
+        int targetApkVersion,
         String publishedAt,
         String archiveUrl,
         String sha256,
         long sizeBytes,
         String entrypoint,
-        int minApkVersionCode,
-        Integer maxApkVersionCode,
         boolean mandatory
     ) {
         this.schemaVersion = schemaVersion;
-        this.channel = channel;
-        this.bundleVersion = bundleVersion;
+        this.otaVersion = otaVersion;
+        this.targetApkVersion = targetApkVersion;
         this.publishedAt = publishedAt;
         this.archiveUrl = archiveUrl;
         this.sha256 = sha256;
         this.sizeBytes = sizeBytes;
         this.entrypoint = entrypoint;
-        this.minApkVersionCode = minApkVersionCode;
-        this.maxApkVersionCode = maxApkVersionCode;
         this.mandatory = mandatory;
     }
 
     static BraiOtaManifest parse(String json) throws BraiOtaException {
         Map<String, Object> object = BraiOtaJson.parseObject(json);
-        Integer maxApk = object.containsKey("maxApkVersionCode") && object.get("maxApkVersionCode") != null
-            ? intValue(object, "maxApkVersionCode")
-            : null;
         return new BraiOtaManifest(
             intValue(object, "schemaVersion"),
-            requiredString(object, "channel"),
-            requiredString(object, "bundleVersion"),
+            requiredString(object, "otaVersion"),
+            intValue(object, "targetApkVersion"),
             requiredString(object, "publishedAt"),
             requiredString(object, "archiveUrl"),
             requiredString(object, "sha256").toLowerCase(Locale.ROOT),
             longValue(object, "sizeBytes"),
             requiredString(object, "entrypoint"),
-            intValue(object, "minApkVersionCode"),
-            maxApk,
             booleanValue(object, "mandatory")
         );
     }
 
-    void validate(URL manifestUrl, int installedVersionCode) throws BraiOtaException {
+    void validate(URL manifestUrl, int installedApkVersion) throws BraiOtaException {
         if (schemaVersion != SUPPORTED_SCHEMA_VERSION) {
             throw new BraiOtaException("unsupported_manifest_schema");
         }
-        if (!"stable".equals(channel)) {
-            throw new BraiOtaException("unsupported_channel");
+        if (!otaVersion.matches("\\d+\\.\\d+\\.\\d+")) {
+            throw new BraiOtaException("invalid_ota_version");
         }
-        if (!bundleVersion.matches("[A-Za-z0-9._+\\-]+")) {
-            throw new BraiOtaException("invalid_bundle_version");
+        if (targetApkVersion <= 0) {
+            throw new BraiOtaException("manifest_invalid_targetApkVersion");
         }
         if (!sha256.matches("[0-9a-f]{64}")) {
             throw new BraiOtaException("invalid_sha256");
@@ -101,18 +90,17 @@ final class BraiOtaManifest {
         if (!archive.getPath().startsWith("/mobile-update/")) {
             throw new BraiOtaException("archive_url_untrusted_path");
         }
-        if (!isCompatibleWith(installedVersionCode)) {
-            throw new BraiOtaException("bundle_incompatible");
+        if (!isCompatibleWith(installedApkVersion)) {
+            throw new BraiOtaException("apk_required");
         }
     }
 
-    boolean isCompatibleWith(int installedVersionCode) {
-        if (minApkVersionCode > installedVersionCode) return false;
-        return maxApkVersionCode == null || installedVersionCode <= maxApkVersionCode;
+    boolean isCompatibleWith(int installedApkVersion) {
+        return installedApkVersion >= targetApkVersion;
     }
 
     boolean isNewerThan(String activeBundleVersion) {
-        return BraiOtaVersion.compare(bundleVersion, activeBundleVersion) > 0;
+        return BraiOtaVersion.compare(otaVersion, activeBundleVersion) > 0;
     }
 
     URL archiveUrl() throws BraiOtaException {

@@ -23,24 +23,25 @@ test("opens Engine from the profile menu", async ({ page }) => {
     contentType: "application/json",
     body: JSON.stringify({
       server_time_utc: "2026-06-29T12:00:00.000Z",
-      version: "0.11.52.1",
-      parts: { canon: 0, release: 11, build: 52, apk: 1 },
+      version: "0.11.52",
+      ota_version: "0.11.52",
       latest: {
         canon: null,
         release: null,
-        build: {
+        build: null,
+        apk: {
           id: 52,
-          version_type_id: "build",
-          version: 52,
+          version_type_id: "apk",
+          version: 1,
           included_in_version_id: null,
-          short_changes: "Fix single-line title editing",
-          detailed_changes: "Fix single-line title editing",
-          reason: "Fix single-line title editing",
+          short_changes: "Первичная публичная APK-сборка.",
+          detailed_changes: "APK v1.",
+          reason: "Начинаем APK-линейку заново.",
           released_at_utc: "2026-06-29T12:00:00.000Z",
           created_at_utc: "2026-06-29T12:00:00.000Z",
         },
-        apk: null,
       },
+      target_apk: { version: 1, file: "brai-v1.apk", release_url: "/releases/", capabilities: [] },
     }),
   }));
 
@@ -48,8 +49,8 @@ test("opens Engine from the profile menu", async ({ page }) => {
   await openEngineFromProfile(page);
 
   await expect(page.getByRole("heading", { name: "Engine", exact: true })).toBeVisible();
-  await expect(page.getByRole("heading", { name: /Текущая версия v/ })).toBeVisible();
-  await expect(page.getByText("Доступно обновление v0.11.52.1")).toBeVisible();
+  await expect(page.getByRole("heading", { name: /Текущая OTA-версия 0\.\d+\.\d+/ })).toBeVisible();
+  await expect(page.getByText("Доступна OTA-версия 0.11.52", { exact: true })).toBeVisible();
   await expect(page.getByText("Перезагрузите страницу, чтобы получить новую версию.")).toBeVisible();
   await expect(page.getByRole("button", { name: "Проверить обновления" })).toBeVisible();
 });
@@ -68,9 +69,9 @@ test("keeps Android Engine download progress compact on mobile", async ({ page }
       };
     };
     const state = {
-      activeBundleVersion: "0.11.51.1",
+      activeBundleVersion: "0.11.51",
       downloadProgressPercent: 42,
-      downloadProgressVersion: "0.11.52.1",
+      downloadProgressVersion: "0.11.52",
       checkInProgress: true,
       lastCheckStatus: "downloading",
     };
@@ -100,9 +101,10 @@ test("keeps Android Engine download progress compact on mobile", async ({ page }
     const body =
       path === "/v1/version" ? {
         server_time_utc: now,
-        version: "0.11.52.1",
-        parts: { canon: 0, release: 11, build: 52, apk: 1 },
+        version: "0.11.52",
+        ota_version: "0.11.52",
         latest: { canon: null, release: null, build: null, apk: null },
+        target_apk: { version: 1, file: "brai-v1.apk", release_url: "/releases/", capabilities: [] },
       } :
       path === "/v1/timer/state" ? {
         server_time_utc: now,
@@ -138,7 +140,7 @@ test("keeps Android Engine download progress compact on mobile", async ({ page }
 
   await page.goto("/engine");
 
-  await expect(page.getByText("Загрузка версии v0.11.52.1")).toBeVisible();
+  await expect(page.getByText("Загрузка OTA-версии 0.11.52")).toBeVisible();
   const card = page.locator('[aria-label="Engine"] [data-slot="card"]').first();
   const progressBlock = page.locator('[data-slot="field"]').filter({ has: page.locator("#engine-update-progress") });
   await expect
@@ -156,7 +158,7 @@ test("pins Engine to the bottom of the mobile profile drawer", async ({ page }, 
   await page.getByRole("button", { name: "Открыть левое меню" }).click();
 
   const drawer = page.locator(".mobile-profile-drawer");
-  const engineButton = drawer.getByRole("button", { name: /^Engine(?: v.+)?$/ });
+  const engineButton = drawer.getByRole("button", { name: "Engine" });
   await expect(drawer).toBeVisible();
   await expect(engineButton).toBeVisible();
   await expect

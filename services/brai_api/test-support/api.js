@@ -20,6 +20,13 @@ export async function createFixture(times, options = {}) {
       fs.writeFileSync(path.join(releaseDir, fileName), content);
     }
   }
+  if (options.mobileFiles) {
+    const mobileDir = path.join(tmp, 'mobile-update');
+    fs.mkdirSync(mobileDir);
+    for (const [fileName, content] of Object.entries(options.mobileFiles)) {
+      fs.writeFileSync(path.join(mobileDir, fileName), content);
+    }
+  }
   let index = 0;
   const runtime = createBraiServer({
     dbPath: path.join(tmp, 'brai.sqlite'),
@@ -27,7 +34,7 @@ export async function createFixture(times, options = {}) {
     webPassword: options.webPassword,
     releasePassword: options.releasePassword,
     sessionSecret: options.sessionSecret,
-    releaseDir: options.releaseFiles ? releaseDir : null,
+    releaseDir: options.releaseFiles || options.mobileFiles ? releaseDir : null,
     inboundApiKey: options.inboundApiKey ?? options.inboundToken ?? INBOUND_TOKEN,
     inboundStorageRoot: options.inboundStorageRoot ?? path.join(tmp, 'inbox-attachments'),
     codexBin: options.codexBin,

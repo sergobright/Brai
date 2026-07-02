@@ -150,13 +150,10 @@ export BRAI_PROD_WEB_VERSION_JSON="$DEPLOY_REPO/deploy/web/version.json"
 if [[ "$BRAI_NATIVE_APK_CHANGE" == "true" ]]; then
   if [[ "$ENVIRONMENT" == preview-* ]]; then
     FLAVOR="preview$BRAI_PREVIEW_SLOT"
-    export BRAI_ANDROID_VERSION_CODE="$(deploy/scripts/apk-version-code.sh next "$BRAI_BRANCH $BRAI_COMMIT $FLAVOR")"
     deploy/scripts/build-android-env-apk.sh "$FLAVOR"
   elif [[ "$ENVIRONMENT" == "prod" ]]; then
-    export BRAI_ANDROID_VERSION_CODE="$(deploy/scripts/apk-version-code.sh next "production APK $BRAI_COMMIT")"
     deploy/scripts/build-android-env-apk.sh production
     export BRAI_APP_VERSION="$(node deploy/scripts/resolve-app-version.mjs --environment prod --root "$SOURCE_ROOT" --db "${BRAI_DB:-}")"
-    export BRAI_ANDROID_VERSION_CODE="$(deploy/scripts/apk-version-code.sh next "production non-production APK baseline $BRAI_COMMIT")"
     deploy/scripts/build-nonproduction-apks.sh
   fi
 fi

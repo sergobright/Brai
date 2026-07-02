@@ -7,7 +7,7 @@ const nativePrefixes = [
   "apps/brai_app/android/",
   "apps/brai_app/capacitor.config",
   "deploy/environments.json",
-  "deploy/scripts/apk-version-code",
+  "deploy/scripts/apk-release-targets",
   "deploy/scripts/build-android-env-apk",
   "deploy/scripts/build-nonproduction-apks",
   "deploy/scripts/ci-ssh-deploy",

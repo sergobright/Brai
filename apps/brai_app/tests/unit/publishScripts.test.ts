@@ -15,14 +15,14 @@ describe("mobile OTA publish scripts", () => {
   it("publishes browser web and Android OTA from one web-layer command", async () => {
     const root = await fixtureRoot("brai-client-web-layer-");
     await writeStaticExport(root, "unified");
-    const previousVersion = "9.9.9.98";
+    const previousVersion = "9.9.8";
     const previousBundle = path.join(root, "deploy/mobile-update/bundles", previousVersion);
     await mkdir(previousBundle, { recursive: true });
     await writeFile(path.join(previousBundle, "bundle.zip"), "previous");
     await mkdir(path.join(root, "deploy/mobile-update"), { recursive: true });
     await writeFile(
       path.join(root, "deploy/mobile-update/manifest.json"),
-      JSON.stringify({ bundleVersion: previousVersion }),
+      JSON.stringify({ otaVersion: previousVersion }),
     );
 
     await execFileAsync("bash", [path.join(workspaceRoot, "deploy/scripts/publish-client-web-layer.sh")], {
@@ -30,13 +30,13 @@ describe("mobile OTA publish scripts", () => {
         ...process.env,
         BRAI_ROOT: root,
         BRAI_BUILD_CLIENT: "false",
-        BRAI_APP_VERSION: "9.9.9.99",
-        BRAI_MIN_APK_VERSION_CODE: "2999",
+        BRAI_APP_VERSION: "9.9.9",
+        BRAI_TARGET_APK_VERSION: "2999",
         BRAI_PUBLISHED_AT: "2026-06-15T00:00:00Z",
       },
     });
 
-    const bundleVersion = "9.9.9.99";
+    const bundleVersion = "9.9.9";
     const manifest = JSON.parse(
       await readFile(path.join(root, "deploy/mobile-update/manifest.json"), "utf8"),
     );
@@ -49,10 +49,11 @@ describe("mobile OTA publish scripts", () => {
     ).resolves.toBeInstanceOf(Buffer);
     const webVersion = JSON.parse(await readFile(path.join(root, "deploy/web/version.json"), "utf8"));
     expect(webVersion).toMatchObject({
-      version: "9.9.9.99",
-      versionParts: { major: 9, release: 9, build: 9, apk: 99 },
+      version: "9.9.9",
+      versionParts: { major: 9, release: 9, build: 9 },
     });
-    expect(manifest.bundleVersion).toBe(bundleVersion);
+    expect(manifest.otaVersion).toBe(bundleVersion);
+    expect(manifest.targetApkVersion).toBe(2999);
   });
 
   it("publishes browser web and Android OTA into environment-specific roots", async () => {
@@ -70,23 +71,22 @@ describe("mobile OTA publish scripts", () => {
         ...process.env,
         BRAI_ROOT: root,
         BRAI_BUILD_CLIENT: "false",
-        BRAI_APP_VERSION: "9.9.9.99",
+        BRAI_APP_VERSION: "9.9.9",
         BRAI_WEB_TARGET: path.join(envRoot, "web"),
         BRAI_MOBILE_TARGET: path.join(envRoot, "mobile-update"),
         BRAI_UPDATE_BASE_URL: "https://a.test.brightos.world/mobile-update",
-        BRAI_MOBILE_BUNDLE_VERSION: "9.9.9.99.42",
+        BRAI_MOBILE_BUNDLE_VERSION: "9.9.9-preview.42",
         BRAI_ENVIRONMENT: "preview-a",
-        BRAI_REQUIRED_APK_VERSION_CODE: "2999",
+        BRAI_TARGET_APK_VERSION: "2999",
         BRAI_PUBLISHED_AT: "2026-06-15T00:00:00Z",
       },
     });
 
     const manifest = JSON.parse(await readFile(path.join(envRoot, "mobile-update/manifest.json"), "utf8"));
     await expect(readFile(path.join(envRoot, "web/index.html"), "utf8")).resolves.toContain("env");
-    expect(manifest.bundleVersion).toBe("9.9.9.99.42");
-    expect(manifest.minApkVersionCode).toBe(2999);
-    expect(manifest.maxApkVersionCode).toBe(2999);
-    expect(manifest.archiveUrl).toBe("https://a.test.brightos.world/mobile-update/bundles/9.9.9.99.42/bundle.zip");
+    expect(manifest.otaVersion).toBe("9.9.9");
+    expect(manifest.targetApkVersion).toBe(2999);
+    expect(manifest.archiveUrl).toBe("https://a.test.brightos.world/mobile-update/bundles/9.9.9-preview.42/bundle.zip");
   });
 
   it("publishes a baseline web layer for a selected non-production environment", async () => {
@@ -104,8 +104,8 @@ describe("mobile OTA publish scripts", () => {
         BRAI_ROOT: root,
         BRAI_BUILD_CLIENT: "false",
         BRAI_ENVS_ROOT: path.join(root, "envs"),
-        BRAI_APP_VERSION: "9.9.9.99",
-        BRAI_REQUIRED_APK_VERSION_CODE: "2999",
+        BRAI_APP_VERSION: "9.9.9",
+        BRAI_TARGET_APK_VERSION: "2999",
         BRAI_PUBLISHED_AT: "2026-06-15T00:00:00Z",
       },
     });
@@ -113,10 +113,9 @@ describe("mobile OTA publish scripts", () => {
     const target = path.join(root, "envs/preview-b");
     const manifest = JSON.parse(await readFile(path.join(target, "mobile-update/manifest.json"), "utf8"));
     await expect(readFile(path.join(target, "web/index.html"), "utf8")).resolves.toContain("baseline");
-    expect(manifest.bundleVersion).toBe("9.9.9.99.0");
-    expect(manifest.minApkVersionCode).toBe(2999);
-    expect(manifest.maxApkVersionCode).toBe(2999);
-    expect(manifest.archiveUrl).toBe("https://b.test.brightos.world/mobile-update/bundles/9.9.9.99.0/bundle.zip");
+    expect(manifest.otaVersion).toBe("9.9.9");
+    expect(manifest.targetApkVersion).toBe(2999);
+    expect(manifest.archiveUrl).toBe("https://b.test.brightos.world/mobile-update/bundles/9.9.9/bundle.zip");
   });
 
   it("does not force a new Preview APK for web-only OTA bundles", async () => {
@@ -131,7 +130,7 @@ describe("mobile OTA publish scripts", () => {
     await mkdir(releaseDir, { recursive: true });
     await writeFile(
       path.join(releaseDir, "releases.json"),
-      JSON.stringify({ schemaVersion: 1, sections: { a: { versionCode: 20 } } }),
+      JSON.stringify({ schemaVersion: 2, sections: { a: { apkVersion: 20, versionCode: 20 } } }),
     );
     const envRoot = path.join(root, "envs/preview-a");
 
@@ -140,11 +139,11 @@ describe("mobile OTA publish scripts", () => {
         ...process.env,
         BRAI_ROOT: root,
         BRAI_BUILD_CLIENT: "false",
-        BRAI_APP_VERSION: "9.9.9.99",
+        BRAI_APP_VERSION: "9.9.9",
         BRAI_WEB_TARGET: path.join(envRoot, "web"),
         BRAI_MOBILE_TARGET: path.join(envRoot, "mobile-update"),
         BRAI_UPDATE_BASE_URL: "https://a.test.brightos.world/mobile-update",
-        BRAI_MOBILE_BUNDLE_VERSION: "9.9.9.99.42",
+        BRAI_MOBILE_BUNDLE_VERSION: "9.9.9-preview.42",
         BRAI_RELEASE_TARGET: releaseDir,
         BRAI_ENVIRONMENT: "preview-a",
         BRAI_PUBLISHED_AT: "2026-06-15T00:00:00Z",
@@ -152,8 +151,7 @@ describe("mobile OTA publish scripts", () => {
     });
 
     const manifest = JSON.parse(await readFile(path.join(envRoot, "mobile-update/manifest.json"), "utf8"));
-    expect(manifest.minApkVersionCode).toBe(1);
-    expect(manifest.maxApkVersionCode).toBeNull();
+    expect(manifest.targetApkVersion).toBe(20);
   });
 
   it("resolves native non-production OTA APK compatibility from the release index", async () => {
@@ -168,7 +166,7 @@ describe("mobile OTA publish scripts", () => {
     await mkdir(releaseDir, { recursive: true });
     await writeFile(
       path.join(releaseDir, "releases.json"),
-      JSON.stringify({ schemaVersion: 1, sections: { production: { versionCode: 7 }, a: { versionCode: 8 } } }),
+      JSON.stringify({ schemaVersion: 2, sections: { production: { apkVersion: 7 }, a: { apkVersion: 8 } } }),
     );
     const envRoot = path.join(root, "envs/preview-a");
 
@@ -177,11 +175,11 @@ describe("mobile OTA publish scripts", () => {
         ...process.env,
         BRAI_ROOT: root,
         BRAI_BUILD_CLIENT: "false",
-        BRAI_APP_VERSION: "9.9.9.99",
+        BRAI_APP_VERSION: "9.9.9",
         BRAI_WEB_TARGET: path.join(envRoot, "web"),
         BRAI_MOBILE_TARGET: path.join(envRoot, "mobile-update"),
         BRAI_UPDATE_BASE_URL: "https://a.test.brightos.world/mobile-update",
-        BRAI_MOBILE_BUNDLE_VERSION: "9.9.9.99.42",
+        BRAI_MOBILE_BUNDLE_VERSION: "9.9.9-preview.42",
         BRAI_RELEASE_TARGET: releaseDir,
         BRAI_ENVIRONMENT: "preview-a",
         BRAI_NATIVE_APK_CHANGE: "true",
@@ -190,8 +188,7 @@ describe("mobile OTA publish scripts", () => {
     });
 
     const manifest = JSON.parse(await readFile(path.join(envRoot, "mobile-update/manifest.json"), "utf8"));
-    expect(manifest.minApkVersionCode).toBe(8);
-    expect(manifest.maxApkVersionCode).toBe(8);
+    expect(manifest.targetApkVersion).toBe(8);
   });
 
   it("keeps non-production OTA public while protecting only the web shell in Caddy", async () => {
@@ -242,24 +239,6 @@ const { BraiStore } = await import(pathToFileURL(process.argv[1]));
 const store = new BraiStore(process.argv[2]);
 try {
   store.upsertBuildVersion({
-    versionTypeId: "release",
-    version: 5,
-    includedInVersionId: null,
-    shortChanges: "Production-релиз",
-    detailedChanges: "Production-релиз",
-    reason: "Нужно для теста",
-    releasedAtUtc: "2026-06-28T17:29:00.000Z",
-  });
-  store.upsertBuildVersion({
-    versionTypeId: "build",
-    version: 43,
-    includedInVersionId: null,
-    shortChanges: "Production-сборка",
-    detailedChanges: "Production-сборка",
-    reason: "Нужно для теста",
-    releasedAtUtc: "2026-06-28T17:29:00.000Z",
-  });
-  store.upsertBuildVersion({
     versionTypeId: "apk",
     version: 1,
     includedInVersionId: null,
@@ -274,12 +253,12 @@ try {
 `, path.join(workspaceRoot, "services/brai_api/src/store.js"), dbPath], { env: nodeCliEnv });
 
     await mkdir(path.join(root, "deploy/web"), { recursive: true });
-    await writeFile(path.join(root, "deploy/web/version.json"), JSON.stringify({ version: "0.0.38.1" }));
+    await writeFile(path.join(root, "deploy/web/version.json"), JSON.stringify({ version: "0.0.38" }));
     const mobileTarget = path.join(root, "envs/preview-a/mobile-update");
-    await mkdir(path.join(mobileTarget, "bundles/0.11.52.1.20260629202736"), { recursive: true });
+    await mkdir(path.join(mobileTarget, "bundles/0.11.52.20260629202736"), { recursive: true });
     await writeFile(
-      path.join(mobileTarget, "bundles/0.11.52.1.20260629202736/metadata.json"),
-      JSON.stringify({ bundleVersion: "0.11.52.1.20260629202736" }),
+      path.join(mobileTarget, "bundles/0.11.52.20260629202736/metadata.json"),
+      JSON.stringify({ otaVersion: "0.11.52" }),
     );
     const resolver = path.join(workspaceRoot, "deploy/scripts/resolve-app-version.mjs");
     const outputPath = path.join(root, "resolved-versions.json");
@@ -290,7 +269,7 @@ const [, resolver, root, db, prodWebVersionJson, mobileTarget, outputPath] = pro
 const { resolveAppVersion } = await import(pathToFileURL(resolver));
 await fs.writeFile(outputPath, JSON.stringify({
   production: resolveAppVersion({ environment: "prod", root, db, explicit: "" }),
-  nextProductionApk: resolveAppVersion({ environment: "prod", root, db, explicit: "", nextApk: true, targetBranch: "main", targetCommit: "abc" }),
+  nextProductionApk: resolveAppVersion({ kind: "apk", environment: "prod", root, db, explicit: "", nextApk: true, targetBranch: "main", targetCommit: "abc" }),
   preview: resolveAppVersion({ environment: "preview-a", root, prodDb: db, prodWebVersionJson, mobileTarget, explicit: "" }),
 }));
 `, "import-helper", resolver, root, dbPath, path.join(root, "deploy/web/version.json"), mobileTarget, outputPath], { env: nodeCliEnv });
@@ -298,13 +277,16 @@ await fs.writeFile(outputPath, JSON.stringify({
     const deployBranch = await readFile(path.join(workspaceRoot, "deploy/scripts/deploy-branch.sh"), "utf8");
     const ciDeploy = await readFile(path.join(workspaceRoot, "deploy/scripts/ci-ssh-deploy.sh"), "utf8");
 
-    expect(versions.production).toBe("0.5.43.1");
-    expect(versions.nextProductionApk).toBe("0.5.43.2");
-    expect(versions.preview).toBe("0.11.52.1");
+    expect(versions.production).toBe("9.9.9");
+    expect(versions.nextProductionApk).toBe("2");
+    expect(versions.preview).toBe("0.11.52");
     expect(deployBranch).toContain('--prod-db "${BRAI_PROD_DB:-}"');
     expect(deployBranch).toContain('--mobile-target "$MOBILE_TARGET"');
     expect(deployBranch).toContain('BRAI_RECORD_PROD_BRANCH_DEPLOYMENT');
-    expect(await readFile(path.join(workspaceRoot, "deploy/scripts/build-android-env-apk.sh"), "utf8")).toContain('--mobile-target "${BRAI_MOBILE_TARGET:-${BRAI_ENVS_ROOT:-/srv/projects/brai-envs}/$ENV_PATH/mobile-update}"');
+    const buildApk = await readFile(path.join(workspaceRoot, "deploy/scripts/build-android-env-apk.sh"), "utf8");
+    expect(buildApk).toContain('MOBILE_TARGET="${BRAI_MOBILE_TARGET:-}"');
+    expect(buildApk).toContain('if [[ -z "$MOBILE_TARGET" && -n "$ENV_PATH" ]]; then');
+    expect(buildApk).toContain('--mobile-target "$MOBILE_TARGET"');
     expect(ciDeploy).toContain('export BRAI_PROD_DB="$DEPLOY_REPO/data/brai.sqlite"');
   });
 
@@ -317,15 +299,6 @@ const { pathToFileURL } = await import("node:url");
 const { BraiStore } = await import(pathToFileURL(process.argv[1]));
 const store = new BraiStore(process.argv[2]);
 try {
-  store.upsertBuildVersion({
-    versionTypeId: "build",
-    version: 43,
-    includedInVersionId: null,
-    shortChanges: "Production build",
-    detailedChanges: "Production build",
-    reason: "Needed for test",
-    releasedAtUtc: "2026-06-28T17:29:00.000Z",
-  });
   store.upsertBuildVersion({
     versionTypeId: "apk",
     version: 1,
@@ -344,7 +317,7 @@ try {
     const recordArgs = [
       recordScript,
       "--db", dbPath,
-      "--version", "0.0.43.2",
+      "--version", "2",
       "--version-code", "3000",
       "--target-branch", "main",
       "--target-commit", "abc",
@@ -365,8 +338,8 @@ const store = new BraiStore(db);
 try {
   await fs.writeFile(outputPath, JSON.stringify({
     apkRows: store.db.prepare("SELECT version FROM build_versions WHERE version_type_id = 'apk' ORDER BY version").all(),
-    sameCommit: resolveAppVersion({ environment: "prod", db, explicit: "", nextApk: true, targetBranch: "main", targetCommit: "abc" }),
-    nextCommit: resolveAppVersion({ environment: "prod", db, explicit: "", nextApk: true, targetBranch: "main", targetCommit: "def" }),
+    sameCommit: resolveAppVersion({ kind: "apk", environment: "prod", db, explicit: "", nextApk: true, targetBranch: "main", targetCommit: "abc" }),
+    nextCommit: resolveAppVersion({ kind: "apk", environment: "prod", db, explicit: "", nextApk: true, targetBranch: "main", targetCommit: "def" }),
   }));
 } finally {
   store.close();
@@ -375,8 +348,8 @@ try {
     const ledger = JSON.parse(await readFile(outputPath, "utf8"));
 
     expect(ledger.apkRows).toEqual([{ version: 1 }, { version: 2 }]);
-    expect(ledger.sameCommit).toBe("0.0.43.2");
-    expect(ledger.nextCommit).toBe("0.0.43.3");
+    expect(ledger.sameCommit).toBe("2");
+    expect(ledger.nextCommit).toBe("3");
   });
 
   it("promotes production deployment metadata into the production database path", async () => {
@@ -412,6 +385,7 @@ try {
   it("rebuilds APK release rows without recording ledger rows by default", async () => {
     const deploy = await readFile(path.join(workspaceRoot, "deploy/scripts/ci-ssh-deploy.sh"), "utf8");
     const buildApk = await readFile(path.join(workspaceRoot, "deploy/scripts/build-android-env-apk.sh"), "utf8");
+    const buildNonproduction = await readFile(path.join(workspaceRoot, "deploy/scripts/build-nonproduction-apks.sh"), "utf8");
     const releaseSlot = await readFile(path.join(workspaceRoot, "deploy/scripts/ci-ssh-release-slot.sh"), "utf8");
     const prodBlock = deploy.slice(deploy.indexOf('elif [[ "$ENVIRONMENT" == "prod" ]]'));
 
@@ -422,6 +396,7 @@ try {
     expect(buildApk).toContain('"${BRAI_RECORD_APK_LEDGER:-false}" == "true"');
     expect(buildApk).toContain('--next-apk true --target-branch "$BRAI_BRANCH" --target-commit "$BRAI_COMMIT"');
     expect(buildApk).toContain('record-shipped-apk-version.mjs');
+    expect(buildNonproduction).toContain('for flavor in dev previewA previewB previewC previewD previewE; do');
     expect(releaseSlot).toContain('deploy/scripts/build-android-env-apk.sh "preview${SLOT_META[0]}" >&2');
   });
 
@@ -433,25 +408,23 @@ try {
       env: {
         ...process.env,
         BRAI_ROOT: root,
-        BRAI_MIN_APK_VERSION_CODE: "2999",
+        BRAI_TARGET_APK_VERSION: "2999",
         BRAI_PUBLISHED_AT: "2026-06-15T00:00:00Z",
       },
     });
 
-    const bundleVersion = "9.9.9.99";
+    const bundleVersion = "9.9.9";
     const archivePath = path.join(root, "deploy/mobile-update/bundles", bundleVersion, "bundle.zip");
     const manifestPath = path.join(root, "deploy/mobile-update/manifest.json");
     const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
     const archive = await readFile(archivePath);
 
     expect(manifest).toMatchObject({
-      schemaVersion: 1,
-      channel: "stable",
-      bundleVersion,
+      schemaVersion: 2,
+      otaVersion: bundleVersion,
       archiveUrl: `https://app.brightos.world/mobile-update/bundles/${bundleVersion}/bundle.zip`,
       entrypoint: "index.html",
-      minApkVersionCode: 2999,
-      maxApkVersionCode: null,
+      targetApkVersion: 2999,
       mandatory: false,
     });
     expect(manifest.sizeBytes).toBe((await stat(archivePath)).size);
@@ -479,7 +452,43 @@ try {
       },
     });
 
-    await expect(readFile(path.join(root, "deploy/releases/brai-9.9.9.99-capacitor.apk"), "utf8")).resolves.toBe("apk");
+    await expect(readFile(path.join(root, "deploy/releases/brai-v1.apk"), "utf8")).resolves.toBe("apk");
+  });
+
+  it("publishes a Dev APK card without restoring a Dev server path", async () => {
+    const root = await fixtureRoot("bright-dev-apk-publish-");
+    await writeStaticExport(root, "dev-apk");
+    await mkdir(path.join(root, "deploy"), { recursive: true });
+    await copyFile(
+      path.join(workspaceRoot, "deploy/environments.json"),
+      path.join(root, "deploy/environments.json"),
+    );
+    const devApk = path.join(root, "apps/brai_app/android/app/build/outputs/apk/dev/release/app-dev-release.apk");
+    await mkdir(path.dirname(devApk), { recursive: true });
+    await writeFile(devApk, "dev-apk");
+
+    await execFileAsync("bash", [path.join(workspaceRoot, "deploy/scripts/publish-capacitor-apk.sh")], {
+      env: {
+        ...process.env,
+        BRAI_ROOT: root,
+        BRAI_RELEASE_ENV: "dev",
+        BRAI_ANDROID_VERSION_CODE: "3001",
+        BRAI_PUBLISHED_AT: "2026-06-15T00:00:00Z",
+      },
+    });
+    const index = JSON.parse(await readFile(path.join(root, "deploy/releases/releases.json"), "utf8"));
+    const buildApk = await readFile(path.join(workspaceRoot, "deploy/scripts/build-android-env-apk.sh"), "utf8");
+    expect(index.sections.dev).toMatchObject({
+      title: "Brai Dev",
+      androidApp: "Brai Dev",
+      applicationId: "world.brightos.brai.dev",
+      file: "brai-dev-v1.apk",
+      apkVersion: 1,
+      versionCode: 3001,
+    });
+    await expect(readFile(path.join(root, "deploy/releases/brai-dev-v1.apk"), "utf8")).resolves.toBe("dev-apk");
+    expect(buildApk).toContain('if [[ -z "$MOBILE_TARGET" && -n "$ENV_PATH" ]]; then');
+    expect(buildApk).not.toContain("/dev/mobile-update");
   });
 
   it("replaces an existing APK instead of rewriting it in place", async () => {
@@ -493,7 +502,7 @@ try {
     const apkPath = path.join(root, "app-release.apk");
     await writeFile(apkPath, "new-apk");
     const releaseDir = path.join(root, "deploy/releases");
-    const releasePath = path.join(releaseDir, "brai-a-9.9.9.99-capacitor.apk");
+    const releasePath = path.join(releaseDir, "brai-a-v1.apk");
     await mkdir(releaseDir, { recursive: true });
     await writeFile(releasePath, "old-apk");
     await chmod(releasePath, 0o444);
@@ -518,75 +527,10 @@ try {
     await expect(readFile(releasePath, "utf8")).resolves.toBe("new-apk");
   });
 
-  it("allocates APK versionCode above existing release metadata", async () => {
-    const root = await fixtureRoot("brai-apk-code-");
-    const envsRoot = path.join(root, "envs");
-    const releaseDir = path.join(root, "releases");
-    await mkdir(releaseDir, { recursive: true });
-    await writeFile(
-      path.join(releaseDir, "releases.json"),
-      JSON.stringify({ schemaVersion: 1, sections: { production: { versionCode: 9 } } }),
-    );
-
-    await execFileAsync("node", [path.join(workspaceRoot, "deploy/scripts/apk-version-code.mjs"), "next", "test"], {
-      env: {
-        ...process.env,
-        BRAI_ROOT: root,
-        BRAI_ENVS_ROOT: envsRoot,
-        BRAI_RELEASE_TARGET: releaseDir,
-      },
-    });
-    let state = JSON.parse(await readFile(path.join(envsRoot, "apk-version-code.json"), "utf8"));
-    expect(state.lastVersionCode).toBe(10);
-
-    await execFileAsync("node", [path.join(workspaceRoot, "deploy/scripts/apk-version-code.mjs"), "next", "test"], {
-      env: {
-        ...process.env,
-        BRAI_ROOT: root,
-        BRAI_ENVS_ROOT: envsRoot,
-        BRAI_RELEASE_TARGET: releaseDir,
-      },
-    });
-    state = JSON.parse(await readFile(path.join(envsRoot, "apk-version-code.json"), "utf8"));
-    expect(state.lastVersionCode).toBe(11);
-  });
-
-  it("does not scan the production checkout when an APK release target is configured", async () => {
-    const root = await fixtureRoot("brai-apk-code-target-");
-    const envsRoot = path.join(root, "envs");
-    const releaseDir = path.join(root, "runtime-releases");
-    const blockedDir = path.join(root, "deploy/releases");
-    await mkdir(releaseDir, { recursive: true });
-    await mkdir(blockedDir, { recursive: true });
-    await writeFile(
-      path.join(releaseDir, "releases.json"),
-      JSON.stringify({ schemaVersion: 1, sections: { a: { versionCode: 41 } } }),
-    );
-    await writeFile(
-      path.join(blockedDir, "releases.json"),
-      JSON.stringify({ schemaVersion: 1, sections: { production: { versionCode: 9999 } } }),
-    );
-    await chmod(path.join(blockedDir, "releases.json"), 0);
-    try {
-      await execFileAsync("node", [path.join(workspaceRoot, "deploy/scripts/apk-version-code.mjs"), "next", "test"], {
-        env: {
-          ...process.env,
-          BRAI_ROOT: root,
-          BRAI_ENVS_ROOT: envsRoot,
-          BRAI_RELEASE_TARGET: releaseDir,
-        },
-      });
-    } finally {
-      await chmod(path.join(blockedDir, "releases.json"), 0o600);
-    }
-    const state = JSON.parse(await readFile(path.join(envsRoot, "apk-version-code.json"), "utf8"));
-    expect(state.lastVersionCode).toBe(42);
-  });
-
   it("replaces an existing OTA bundle instead of rewriting it in place", async () => {
     const root = await fixtureRoot("brai-mobile-replace-");
     await writeStaticExport(root, "ota-replace");
-    const bundleVersion = "9.9.9.99";
+    const bundleVersion = "9.9.9";
     const bundleDir = path.join(root, "deploy/mobile-update/bundles", bundleVersion);
     const archivePath = path.join(bundleDir, "bundle.zip");
     await mkdir(bundleDir, { recursive: true });
@@ -598,7 +542,7 @@ try {
         ...process.env,
         BRAI_ROOT: root,
         BRAI_APP_VERSION: bundleVersion,
-        BRAI_MIN_APK_VERSION_CODE: "2999",
+        BRAI_TARGET_APK_VERSION: "2999",
         BRAI_PUBLISHED_AT: "2026-06-15T00:00:00Z",
       },
     });
@@ -636,7 +580,7 @@ try {
 
     const slotScript = path.join(workspaceRoot, "deploy/scripts/preview-slots.mjs");
     await execFileAsync("node", [slotScript, "allocate", "codex/one", "abc"], { env });
-    await execFileAsync("node", [slotScript, "apk", "codex/one", "abc", "12", "brai-a.apk", "9.9.9.99"], { env });
+    await execFileAsync("node", [slotScript, "apk", "codex/one", "abc", "12", "brai-a.apk", "1"], { env });
     let registry = JSON.parse(await readFile(path.join(envsRoot, "preview-slots.json"), "utf8"));
     expect(registry.A.branch).toBe("codex/one");
     expect(registry.A.commit).toBe("abc");
@@ -703,18 +647,21 @@ try {
       path.join(workspaceRoot, "deploy/environments.json"),
       path.join(root, "deploy/environments.json"),
     );
-    await writeFile(path.join(releaseDir, "brai-0.0.1.1-capacitor.apk"), "apk");
+    await writeFile(path.join(releaseDir, "brai-v1.apk"), "apk");
 
-    await execFileAsync("node", [path.join(workspaceRoot, "deploy/scripts/update-release-index.mjs"), "--release", "production", "--file", "brai-0.0.1.1-capacitor.apk", "--version", "0.0.1.1", "--version-code", "1", "--published-at", "2026-06-23T09:13:50Z"], {
+    await execFileAsync("node", [path.join(workspaceRoot, "deploy/scripts/update-release-index.mjs"), "--release", "production", "--file", "brai-v1.apk", "--apk-version", "1", "--version-code", "1", "--published-at", "2026-06-23T09:13:50Z"], {
       env: { ...process.env, BRAI_ROOT: root },
     });
 
     const html = await readFile(path.join(releaseDir, "index.html"), "utf8");
-    expect(html.match(/<section>/g)?.length).toBe(6);
-    expect(html).toContain("<h2>Production</h2>");
+    const index = JSON.parse(await readFile(path.join(releaseDir, "releases.json"), "utf8"));
+    expect(Object.keys(index.sections)).toEqual(["production", "dev", "a", "b", "c", "d", "e"]);
+    expect(html.match(/<section>/g)?.length).toBe(7);
+    expect(html).toContain("<h2>Brai</h2>");
+    expect(html).toContain("<h2>Brai Dev</h2>");
     expect(html).toContain("Brai E");
     expect(html).toContain("APK ещё не опубликован");
-    expect(html).toContain("brai-0.0.1.1-capacitor.apk");
+    expect(html).toContain("brai-v1.apk");
   });
 });
 
@@ -729,5 +676,5 @@ async function writeStaticExport(root: string, marker: string) {
   await writeFile(path.join(out, "index.html"), `<main>${marker}</main>`);
   await writeFile(path.join(out, "_next/app.js"), "console.log('ok')");
   await writeFile(path.join(out, "version.json"), JSON.stringify({ marker }));
-  await writeFile(path.join(root, "apps/brai_app/public/version.json"), JSON.stringify({ version: "9.9.9.99" }));
+  await writeFile(path.join(root, "apps/brai_app/public/version.json"), JSON.stringify({ version: "9.9.9" }));
 }

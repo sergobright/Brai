@@ -30,31 +30,28 @@ export function setupBraiAppTest() {
     otaPlugin.checkForUpdates.mockReset();
     otaPlugin.markReady.mockReset();
     otaPlugin.getState.mockResolvedValue({
-      activeBundleVersion: "0.0.10.1",
-      nativeVersionName: "0.0.10.1",
-      nativeBuild: "1",
-      nativeVersionCode: 1,
+      activeBundleVersion: "0.0.10",
+      nativeApkVersion: "1",
+      nativeVersionName: "1",
       lastCheckStatus: "up_to_date",
     });
     otaPlugin.markReady.mockResolvedValue({
-      activeBundleVersion: "0.0.10.1",
-      nativeVersionName: "0.0.10.1",
-      nativeBuild: "1",
-      nativeVersionCode: 1,
+      activeBundleVersion: "0.0.10",
+      nativeApkVersion: "1",
+      nativeVersionName: "1",
       lastCheckStatus: "ready",
     });
     otaPlugin.checkForUpdates.mockResolvedValue({
-      activeBundleVersion: "0.0.10.1",
-      nativeVersionName: "0.0.10.1",
-      nativeBuild: "1",
-      nativeVersionCode: 1,
-      candidateBundleVersion: "0.0.11.1",
+      activeBundleVersion: "0.0.10",
+      nativeApkVersion: "1",
+      nativeVersionName: "1",
+      candidateBundleVersion: "0.0.11",
       lastCheckStatus: "candidate_ready_for_next_start",
     });
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
       if (url.endsWith("/v1/version")) {
-        return new Response(JSON.stringify(testVersionState("0.0.10.1")), {
+        return new Response(JSON.stringify(testVersionState("0.0.10")), {
           status: 200,
           headers: { "content-type": "application/json" },
         });
@@ -169,17 +166,20 @@ export function cachedActivitiesState(id: string, title: string, descriptionMd =
 }
 
 export function testVersionState(version: string) {
-  const [canon, release, build, apk] = version.split(".").map(Number);
+  const [canon, release, build] = version.split(".").map(Number);
   return {
     server_time_utc: "2026-06-29T12:00:00.000Z",
     version,
-    parts: { canon, release, build, apk },
+    ota_version: version,
+    parts: { canon, release, build, apk: 1 },
     latest: {
       canon: null,
-      release: release > 0 ? versionRow("release", release, "Release changes.") : null,
-      build: versionRow("build", build, "Build changes."),
-      apk: versionRow("apk", apk, "APK changes."),
+      release: null,
+      build: null,
+      apk: versionRow("apk", 1, "APK changes."),
     },
+    target_apk: null,
+    apk_release: null,
   };
 }
 

@@ -1,5 +1,6 @@
 package world.brightos.brai.ota;
 
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
@@ -18,38 +19,47 @@ public class BraiOtaManifestTest {
 
         manifest.validate(new URL("https://app.brightos.world/mobile-update/manifest.json"), 1);
 
+        assertEquals("0.0.1", manifest.otaVersion);
+        assertEquals(1, manifest.targetApkVersion);
         assertTrue(manifest.isCompatibleWith(1));
-        assertTrue(manifest.isNewerThan("0.0.1.0"));
+        assertTrue(manifest.isNewerThan("0.0.0"));
+    }
+
+    @Test
+    public void acceptsNewerInstalledApkVersion() throws Exception {
+        BraiOtaManifest manifest = BraiOtaManifest.parse(validManifest().replace("\"targetApkVersion\":1", "\"targetApkVersion\":2"));
+
+        manifest.validate(new URL("https://app.brightos.world/mobile-update/manifest.json"), 3);
+
+        assertTrue(manifest.isCompatibleWith(3));
     }
 
     @Test
     public void rejectsNewerApkRequirement() throws Exception {
-        BraiOtaManifest manifest = BraiOtaManifest.parse(validManifest().replace("\"minApkVersionCode\":1", "\"minApkVersionCode\":2"));
+        BraiOtaManifest manifest = BraiOtaManifest.parse(validManifest().replace("\"targetApkVersion\":1", "\"targetApkVersion\":2"));
 
         assertFalse(manifest.isCompatibleWith(1));
-        assertThrows(
+        BraiOtaException error = assertThrows(
             BraiOtaException.class,
             () -> manifest.validate(new URL("https://app.brightos.world/mobile-update/manifest.json"), 1)
+        );
+        assertTrue(error.getMessage().contains("apk_required"));
+    }
+
+    @Test
+    public void rejectsInvalidTargetApkVersion() {
+        assertThrows(
+            BraiOtaException.class,
+            () -> BraiOtaManifest.parse(validManifest().replace("\"targetApkVersion\":1", "\"targetApkVersion\":\"bad\""))
         );
     }
 
     @Test
-    public void acceptsExactApkRequirement() throws Exception {
-        BraiOtaManifest manifest = BraiOtaManifest.parse(validManifest().replace("\"maxApkVersionCode\":null", "\"maxApkVersionCode\":2"));
-
-        manifest.validate(new URL("https://app.brightos.world/mobile-update/manifest.json"), 2);
-
-        assertTrue(manifest.isCompatibleWith(2));
-    }
-
-    @Test
-    public void rejectsApkAboveMaxRequirement() throws Exception {
-        BraiOtaManifest manifest = BraiOtaManifest.parse(validManifest().replace("\"maxApkVersionCode\":null", "\"maxApkVersionCode\":1"));
-
-        assertFalse(manifest.isCompatibleWith(2));
+    public void rejectsLegacyManifestSchema() {
         assertThrows(
             BraiOtaException.class,
-            () -> manifest.validate(new URL("https://app.brightos.world/mobile-update/manifest.json"), 2)
+            () -> BraiOtaManifest.parse(validManifest().replace("\"schemaVersion\":2", "\"schemaVersion\":1"))
+                .validate(new URL("https://app.brightos.world/mobile-update/manifest.json"), 1)
         );
     }
 
@@ -57,8 +67,8 @@ public class BraiOtaManifestTest {
     public void rejectsCrossOriginArchiveUrl() throws Exception {
         BraiOtaManifest manifest = BraiOtaManifest.parse(
             validManifest().replace(
-                "https://app.brightos.world/mobile-update/bundles/0.0.1.1/bundle.zip",
-                "https://evil.example.test/mobile-update/bundles/0.0.1.1/bundle.zip"
+                "https://app.brightos.world/mobile-update/bundles/0.0.1/bundle.zip",
+                "https://evil.example.test/mobile-update/bundles/0.0.1/bundle.zip"
             )
         );
 
@@ -97,16 +107,14 @@ public class BraiOtaManifestTest {
 
     private static String validManifest() {
         return "{"
-            + "\"schemaVersion\":1,"
-            + "\"channel\":\"stable\","
-            + "\"bundleVersion\":\"0.0.1.1\","
+            + "\"schemaVersion\":2,"
+            + "\"otaVersion\":\"0.0.1\","
+            + "\"targetApkVersion\":1,"
             + "\"publishedAt\":\"2026-06-15T00:00:00Z\","
-            + "\"archiveUrl\":\"https://app.brightos.world/mobile-update/bundles/0.0.1.1/bundle.zip\","
+            + "\"archiveUrl\":\"https://app.brightos.world/mobile-update/bundles/0.0.1/bundle.zip\","
             + "\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\","
             + "\"sizeBytes\":1234,"
             + "\"entrypoint\":\"index.html\","
-            + "\"minApkVersionCode\":1,"
-            + "\"maxApkVersionCode\":null,"
             + "\"mandatory\":false"
             + "}";
     }

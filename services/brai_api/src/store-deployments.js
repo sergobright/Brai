@@ -55,35 +55,8 @@ export const deploymentMethods = {
     return this.db.prepare("SELECT * FROM deployment_records ORDER BY deployed_at_utc DESC, id DESC").all();
   },
 
-  recordAcceptedBuildVersion({
-    sourceBranch,
-    sourceCommit,
-    sourceShortChanges = null,
-    sourceReason = null,
-    sourceDetails,
-    targetBranch,
-    targetCommit,
-    releasedAtUtc,
-  }) {
-    const existing = this.findBuildVersionByTargetCommit({ targetBranch, targetCommit, versionTypeId: 'build' });
-    const version = existing?.version ?? this.nextVersion('build');
-    const shortChanges = requiredReleaseText(sourceShortChanges, 'sourceShortChanges');
-    const detailedChanges = requiredReleaseText(sourceDetails, 'sourceDetails');
-    const reason = requiredReleaseText(sourceReason, 'sourceReason');
-    this.upsertBuildVersion({
-      versionTypeId: 'build',
-      version,
-      includedInVersionId: null,
-      shortChanges,
-      detailedChanges,
-      reason,
-      releasedAtUtc,
-      sourceBranch,
-      sourceCommit,
-      targetBranch,
-      targetCommit,
-    });
-    return { versionTypeId: 'build', version };
+  recordAcceptedBuildVersion() {
+    return null;
   },
 
   recordShippedApkVersion({
@@ -113,93 +86,12 @@ export const deploymentMethods = {
     return { versionTypeId: 'apk', version };
   },
 
-  recordReleaseVersion({
-    sourceBranch,
-    sourceCommit,
-    sourceShortChanges = null,
-    sourceReason = null,
-    sourceDetails,
-    targetBranch,
-    targetCommit,
-    releasedAtUtc,
-  }) {
-    const existing = this.findBuildVersionByTargetCommit({ targetBranch, targetCommit, versionTypeId: 'release' });
-    if (existing) return { versionTypeId: 'release', version: existing.version };
-    const builds = this.db
-      .prepare(`
-        SELECT *
-        FROM build_versions
-        WHERE version_type_id = 'build' AND included_in_version_id IS NULL
-        ORDER BY version
-      `)
-      .all();
-    if (builds.length === 0) throw new Error('cannot create release without unlinked builds');
-    const version = this.nextVersion('release');
-
-    this.upsertBuildVersion({
-      versionTypeId: 'release',
-      version,
-      includedInVersionId: null,
-      shortChanges: requiredReleaseText(sourceShortChanges, 'sourceShortChanges'),
-      detailedChanges: requiredReleaseText(sourceDetails, 'sourceDetails'),
-      reason: requiredReleaseText(sourceReason, 'sourceReason'),
-      releasedAtUtc,
-      sourceBranch,
-      sourceCommit,
-      targetBranch,
-      targetCommit,
-    });
-    const release = this.db
-      .prepare("SELECT id FROM build_versions WHERE version_type_id = 'release' AND version = ?")
-      .get(version);
-    const link = this.db.prepare("UPDATE build_versions SET included_in_version_id = ? WHERE id = ?");
-    for (const build of builds) link.run(release.id, build.id);
-    const apk = this.latestVersion('apk');
-    if (apk) link.run(release.id, apk.id);
-    return { versionTypeId: 'release', version };
+  recordReleaseVersion() {
+    throw new Error('release version rows are disabled by APK-only versioning');
   },
 
-  recordCanonVersion({
-    sourceBranch,
-    sourceCommit,
-    sourceShortChanges = null,
-    sourceReason = null,
-    sourceDetails,
-    targetBranch,
-    targetCommit,
-    releasedAtUtc,
-  }) {
-    const existing = this.findBuildVersionByTargetCommit({ targetBranch, targetCommit, versionTypeId: 'canon' });
-    if (existing) return { versionTypeId: 'canon', version: existing.version };
-    const releases = this.db
-      .prepare(`
-        SELECT *
-        FROM build_versions
-        WHERE version_type_id = 'release' AND included_in_version_id IS NULL
-        ORDER BY version
-      `)
-      .all();
-    if (releases.length === 0) throw new Error('cannot create canon without unlinked releases');
-    const version = this.nextVersion('canon');
-    this.upsertBuildVersion({
-      versionTypeId: 'canon',
-      version,
-      includedInVersionId: null,
-      shortChanges: requiredReleaseText(sourceShortChanges, 'sourceShortChanges'),
-      detailedChanges: requiredReleaseText(sourceDetails, 'sourceDetails'),
-      reason: requiredReleaseText(sourceReason, 'sourceReason'),
-      releasedAtUtc,
-      sourceBranch,
-      sourceCommit,
-      targetBranch,
-      targetCommit,
-    });
-    const canon = this.db
-      .prepare("SELECT id FROM build_versions WHERE version_type_id = 'canon' AND version = ?")
-      .get(version);
-    const link = this.db.prepare("UPDATE build_versions SET included_in_version_id = ? WHERE id = ?");
-    for (const release of releases) link.run(canon.id, release.id);
-    return { versionTypeId: 'canon', version };
+  recordCanonVersion() {
+    throw new Error('canon version rows are disabled by APK-only versioning');
   },
 
   findBuildVersionByTargetCommit({ targetBranch, targetCommit, versionTypeId }) {
@@ -251,32 +143,17 @@ export const deploymentMethods = {
   },
 
   currentAppVersion() {
-    const rows = this.db
-      .prepare(`
-        SELECT build_versions.*
-        FROM build_versions
-        JOIN (
-          SELECT version_type_id, MAX(version) AS version
-          FROM build_versions
-          GROUP BY version_type_id
-        ) latest
-          ON latest.version_type_id = build_versions.version_type_id
-         AND latest.version = build_versions.version
-      `)
-      .all();
-    const latest = { canon: null, release: null, build: null, apk: null };
-    for (const row of rows) {
-      if (Object.hasOwn(latest, row.version_type_id)) latest[row.version_type_id] = formatBuildVersionRow(row);
-    }
+    const apk = this.latestVersion('apk');
+    const latest = { canon: null, release: null, build: null, apk: apk ? formatBuildVersionRow(apk) : null };
     const parts = {
-      canon: latest.canon?.version ?? 0,
-      release: latest.release?.version ?? 0,
-      build: latest.build?.version ?? 0,
-      apk: latest.apk?.version ?? 0,
+      canon: 0,
+      release: 0,
+      build: 0,
+      apk: apk?.version ?? 0,
     };
 
     return {
-      version: `${parts.canon}.${parts.release}.${parts.build}.${parts.apk}`,
+      version: '0.0.0',
       parts,
       latest,
     };
@@ -373,19 +250,6 @@ export const deploymentMethods = {
       );
   },
 };
-
-function requiredReleaseText(value, field) {
-  const text = String(value ?? '').trim();
-  if (!text) throw new Error(`accepted build ${field} is required`);
-  if (!/[А-Яа-яЁё]/.test(text)) throw new Error(`accepted build ${field} must be Russian human-readable text`);
-  if (isGenericReleaseText(text)) throw new Error(`accepted build ${field} must not be generic deployment text`);
-  return text;
-}
-
-function isGenericReleaseText(value) {
-  const oneLine = value.replace(/\s+/g, ' ');
-  return /^(Принята сборка|Сборка принята|Деплой ветки|Автоматическая доставка ветки|Нужно перенести принятую preview-сборку)/i.test(oneLine);
-}
 
 function formatBuildVersionRow(row) {
   return {

@@ -319,44 +319,22 @@ test('migration adds inbox entity schema and metadata', async () => {
   }
 });
 
-test('migration repairs generic version ledger release notes', async () => {
+test('migration keeps version ledger described as APK-only', async () => {
   const fixture = await createFixture(['2026-07-02T12:00:00.000Z']);
 
   try {
     fixture.store.db.prepare('DELETE FROM schema_migrations WHERE version = 44').run();
-    fixture.store.db.prepare(`
-      INSERT INTO build_versions (
-        version_type_id,
-        version,
-        included_in_version_id,
-        short_changes,
-        detailed_changes,
-        reason,
-        released_at_utc,
-        created_at_utc
-      ) VALUES ('build', 53, NULL, ?, ?, ?, ?, ?)
-      ON CONFLICT(version_type_id, version) DO UPDATE SET
-        short_changes = excluded.short_changes,
-        detailed_changes = excluded.detailed_changes,
-        reason = excluded.reason
-    `).run(
-      'Принята сборка Brai.',
-      'Сборка принята; технические branch/commit-данные сохранены отдельно.',
-      'Автоматическая доставка ветки',
-      '2026-07-01T15:29:17.988Z',
-      '2026-07-01T15:29:17.988Z'
-    );
 
     fixture.store.migrate();
 
-    const row = fixture.store.db
-      .prepare("SELECT short_changes, detailed_changes, reason FROM build_versions WHERE version_type_id = 'build' AND version = 53")
+    const description = fixture.store.db
+      .prepare("SELECT long_description FROM table_descriptions WHERE table_name = 'build_versions'")
       .get();
-    assert.deepEqual(row, {
-      short_changes: 'Очищена защита журнала версий.',
-      detailed_changes: 'Workflow журнала версий отделяет audit metadata от видимых описаний и не смешивает технические branch/commit-данные с release notes.',
-      reason: 'Нужно сохранить понятные описания принятых сборок без технического шума.'
-    });
+    assert.match(description.long_description, /APK-only ledger/);
+    assert.deepEqual(
+      fixture.store.db.prepare('SELECT version_type_id, version FROM build_versions ORDER BY version_type_id, version').all(),
+      [{ version_type_id: 'apk', version: 1 }]
+    );
   } finally {
     await fixture.close();
   }
@@ -450,7 +428,7 @@ test('migration upgrades legacy inbox table before metadata indexes', async () =
   }
 });
 
-test('migration seeds unified build version ledger', async () => {
+test('migration seeds APK-only version ledger', async () => {
   const fixture = await createFixture(['2026-06-22T00:00:00.000Z']);
 
   try {
@@ -458,12 +436,12 @@ test('migration seeds unified build version ledger', async () => {
       .prepare('SELECT id FROM version_types ORDER BY id')
       .all()
       .map((row) => row.id);
-    assert.deepEqual(versionTypes, ['apk', 'build', 'canon', 'release']);
+    assert.deepEqual(versionTypes, ['apk']);
 
     const versions = fixture.store.db
       .prepare('SELECT * FROM build_versions ORDER BY version_type_id, version')
       .all();
-    assert.equal(versions.length, 2);
+    assert.equal(versions.length, 1);
 
     const baselineApk = versions.find((version) => version.version_type_id === 'apk' && version.version === 1);
     assert.ok(baselineApk);
@@ -471,17 +449,10 @@ test('migration seeds unified build version ledger', async () => {
     assert.equal(baselineApk.released_at_utc, '2026-06-23T09:13:50Z');
     assert.match(baselineApk.short_changes, /APK/);
     assert.match(baselineApk.detailed_changes, /versionCode 1/);
-    assert.match(baselineApk.detailed_changes, /Release signing material/);
-
-    const baselineBuild = versions.find((version) => version.version_type_id === 'build' && version.version === 1);
-    assert.ok(baselineBuild);
-    assert.equal(baselineBuild.included_in_version_id, null);
-    assert.equal(baselineBuild.released_at_utc, '2026-06-23T09:12:45Z');
-    assert.match(baselineBuild.short_changes, /web\/OTA/);
-    assert.match(baselineBuild.detailed_changes, /versionCode 1/);
+    assert.match(baselineApk.detailed_changes, /AccessibilityService/);
 
     fixture.store.migrate();
-    assert.equal(fixture.store.db.prepare('SELECT COUNT(*) AS count FROM build_versions').get().count, 2);
+    assert.equal(fixture.store.db.prepare('SELECT COUNT(*) AS count FROM build_versions').get().count, 1);
   } finally {
     await fixture.close();
   }
@@ -497,7 +468,7 @@ test('migration adds environment deployment ledger', async () => {
       branch: 'codex/example',
       commit: 'abc123456789',
       domain: 'a.test.brightos.world',
-      webOtaVersion: '0.0.1.2.42',
+      webOtaVersion: '0.0.1',
       shortChanges: 'Preview deploy',
       detailedChanges: 'Automated preview deploy.',
       reason: 'Preview accepted',
@@ -508,7 +479,7 @@ test('migration adds environment deployment ledger', async () => {
     assert.equal(records.length, 1);
     assert.equal(records[0].slot, 'A');
     assert.equal(records[0].branch, 'codex/example');
-    assert.equal(records[0].web_ota_version, '0.0.1.2.42');
+    assert.equal(records[0].web_ota_version, '0.0.1');
   } finally {
     await fixture.close();
   }

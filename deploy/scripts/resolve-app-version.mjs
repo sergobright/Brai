@@ -8,9 +8,11 @@ import { fileURLToPath } from "node:url";
 const repoRoot = path.resolve(import.meta.dirname, "../..");
 const requireFromApi = createRequire(path.join(repoRoot, "services/brai_api/package.json"));
 const Database = requireFromApi("better-sqlite3");
+
 if (path.resolve(process.argv[1] ?? "") === fileURLToPath(import.meta.url)) {
   const args = parseArgs(process.argv.slice(2));
   console.log(resolveAppVersion({
+    kind: args.kind,
     root: args.root,
     environment: args.environment,
     db: args.db,
@@ -24,56 +26,34 @@ if (path.resolve(process.argv[1] ?? "") === fileURLToPath(import.meta.url)) {
 }
 
 export function resolveAppVersion({
+  kind = "ota",
   root = process.env.BRAI_ROOT || path.resolve(import.meta.dirname, "../.."),
   environment = process.env.NEXT_PUBLIC_BRAI_ENVIRONMENT || "",
   db = "",
   prodDb = process.env.BRAI_PROD_DB || "",
   prodWebVersionJson = "",
   mobileTarget = "",
-  explicit = process.env.BRAI_APP_VERSION || "",
+  explicit = kind === "apk" ? process.env.BRAI_APK_VERSION || "" : process.env.BRAI_APP_VERSION || "",
   nextApk = false,
   targetBranch = "",
   targetCommit = "",
 } = {}) {
-  if (explicit) return validVersion(explicit);
+  if (kind === "apk") return validApkVersion(explicit || resolveApkVersion(db || prodDb, { nextApk, targetBranch, targetCommit }));
+  if (explicit) return validOtaVersion(explicit);
 
-  if (environment === "prod" && db) {
-    const ledgerVersion = latestProductionVersion(db, { nextApk, targetBranch, targetCommit });
-    if (ledgerVersion) return validVersion(ledgerVersion);
-  }
-
-  const resolvedVersion = latestBraiVersion([
-    environment !== "prod" && prodDb && latestProductionVersion(prodDb),
-    environment !== "prod" && db && latestProductionVersion(db),
-    prodWebVersionJson && readVersionJson(prodWebVersionJson),
+  const deployedVersion = latestOtaVersion([
+    environment !== "prod" && prodWebVersionJson && readVersionJson(prodWebVersionJson),
     mobileTarget && latestMobileTargetVersion(mobileTarget),
   ]);
-  if (resolvedVersion) return validVersion(resolvedVersion);
-
-  return validVersion(readVersionJson(path.join(root, "apps/brai_app/public/version.json")));
+  if (deployedVersion) return validOtaVersion(deployedVersion);
+  return validOtaVersion(readVersionJson(path.join(root, "apps/brai_app/public/version.json")) || "0.0.0");
 }
 
-function validVersion(version) {
-  if (!/^\d+\.\d+\.\d+\.\d+$/.test(version)) throw new Error(`Invalid Brai X.Y.Z.S version: ${version}`);
-  return version;
-}
-
-function latestProductionVersion(dbPath, { nextApk = false, targetBranch = "", targetCommit = "" } = {}) {
-  if (!fs.existsSync(dbPath)) return "";
+function resolveApkVersion(dbPath, { nextApk = false, targetBranch = "", targetCommit = "" } = {}) {
+  if (!dbPath || !fs.existsSync(dbPath)) return "1";
   const db = new Database(dbPath, { readonly: true, fileMustExist: true });
   try {
-    const row = db
-      .prepare(`
-        SELECT
-          COALESCE(MAX(CASE WHEN version_type_id = 'canon' THEN version END), 0) AS canon,
-          COALESCE(MAX(CASE WHEN version_type_id = 'release' THEN version END), 0) AS release,
-          COALESCE(MAX(CASE WHEN version_type_id = 'build' THEN version END), 0) AS build,
-          COALESCE(MAX(CASE WHEN version_type_id = 'apk' THEN version END), 0) AS apk
-        FROM build_versions
-      `)
-      .get();
-    const parts = ["canon", "release", "build"].map((key) => numericPart(row?.[key]));
-    let apk = Number(row?.apk || 0);
+    let apk = Number(db.prepare("SELECT COALESCE(MAX(version), 0) AS apk FROM build_versions WHERE version_type_id = 'apk'").get()?.apk || 0);
     if (nextApk) {
       const existing = targetCommit
         ? db
@@ -88,10 +68,9 @@ function latestProductionVersion(dbPath, { nextApk = false, targetBranch = "", t
           `)
           .get(targetBranch || "", targetCommit)
         : null;
-      apk = numericPart(existing?.version) ?? apk + 1;
+      apk = Number(existing?.version || 0) || apk + 1;
     }
-    if (parts.some((part) => part == null) || !parts[2] || !apk) return "";
-    return `${parts[0]}.${parts[1]}.${parts[2]}.${apk}`;
+    return String(apk || 1);
   } finally {
     db.close();
   }
@@ -99,14 +78,16 @@ function latestProductionVersion(dbPath, { nextApk = false, targetBranch = "", t
 
 function readVersionJson(filePath) {
   if (!fs.existsSync(filePath)) return "";
-  return JSON.parse(fs.readFileSync(filePath, "utf8")).version || "";
+  const parsed = JSON.parse(fs.readFileSync(filePath, "utf8"));
+  return parsed.otaVersion || parsed.version || "";
 }
 
 function latestMobileTargetVersion(mobileTarget) {
   const versions = [];
   const manifestPath = path.join(mobileTarget, "manifest.json");
   if (fs.existsSync(manifestPath)) {
-    versions.push(JSON.parse(fs.readFileSync(manifestPath, "utf8")).bundleVersion || "");
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+    versions.push(manifest.otaVersion || "");
   }
 
   const bundlesPath = path.join(mobileTarget, "bundles");
@@ -116,39 +97,47 @@ function latestMobileTargetVersion(mobileTarget) {
       versions.push(entry.name);
       const metadataPath = path.join(bundlesPath, entry.name, "metadata.json");
       if (fs.existsSync(metadataPath)) {
-        versions.push(JSON.parse(fs.readFileSync(metadataPath, "utf8")).bundleVersion || "");
+        const metadata = JSON.parse(fs.readFileSync(metadataPath, "utf8"));
+        versions.push(metadata.otaVersion || "");
       }
     }
   }
 
-  return latestBraiVersion(versions);
+  return latestOtaVersion(versions);
 }
 
-function latestBraiVersion(values) {
+function latestOtaVersion(values) {
   return values.reduce((latest, value) => {
-    const version = normalizeBraiVersion(value);
+    const version = normalizeOtaVersion(value);
     if (!version) return latest;
-    return compareBraiVersions(version, latest) > 0 ? version : latest;
+    return compareOtaVersions(version, latest) > 0 ? version : latest;
   }, "");
 }
 
-function normalizeBraiVersion(value) {
-  const match = String(value || "").match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)(?:[._+-].*)?$/);
-  return match ? match.slice(1, 5).join(".") : "";
+function normalizeOtaVersion(value) {
+  const match = String(value || "").match(/^(\d+)\.(\d+)\.(\d+)(?:$|[._+-].*)/);
+  return match ? match.slice(1, 4).join(".") : "";
 }
 
-function compareBraiVersions(left, right) {
+function compareOtaVersions(left, right) {
   const leftParts = left.split(".").map(Number);
-  const rightParts = (right || "0.0.0.0").split(".").map(Number);
-  for (let index = 0; index < 4; index += 1) {
+  const rightParts = (right || "0.0.0").split(".").map(Number);
+  for (let index = 0; index < 3; index += 1) {
     if (leftParts[index] !== rightParts[index]) return leftParts[index] - rightParts[index];
   }
   return 0;
 }
 
-function numericPart(value) {
-  const number = Number(value);
-  return Number.isInteger(number) && number >= 0 ? number : null;
+function validOtaVersion(version) {
+  const normalized = normalizeOtaVersion(version);
+  if (!normalized) throw new Error(`Invalid Brai X.Y.Z OTA version: ${version}`);
+  return normalized;
+}
+
+function validApkVersion(version) {
+  const value = Number(version);
+  if (!Number.isInteger(value) || value <= 0) throw new Error(`Invalid Brai APK version: ${version}`);
+  return String(value);
 }
 
 function parseArgs(values) {
