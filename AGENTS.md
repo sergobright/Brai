@@ -20,12 +20,12 @@ This file routes agents to the project rules.
 - Если в процессе работы пришёл вопрос и пользователь не сказал остановиться/пауза/только ответь, ответить на вопрос, принять новые данные в контекст и продолжать задачу.
 - Если во время задачи обнаружена процедурная проблема, ошибочный шаг, sandbox/escalation trap, нехватка инструмента/документации или вынужденный обходной путь, мешающий качественной работе, добавить запись в server SQLite `activities` с `activity_type_id = 'operation'`, `author = 'Codex'` и статусом `New`; `title` — короткое русское название задачи, `description_md` — что нужно сделать и какой результат должен получиться, `reason` — почему задача появилась: что случилось и какие были предпосылки. Системные значения, команды, пути, API names и аббревиатуры можно оставлять как есть; секреты не записывать. Пользовательские записи остаются `activity_type_id = 'action'`.
 - Перед завершением классифицировать доставку по guard-классу: `runtime/product`, включая runtime bugfix, идёт через preview; `docs/infra` guard-fix идёт через no-preview PR/auto-merge в `main`.
-- Для preview-class финальный implementation response начинается строго с verified header из `scripts/bright-preview-handoff.sh`: `<slot emoji> Preview`, затем URL, branch, commit.
+- Для preview-class финальный implementation response начинается строго с verified header из `scripts/brai-preview-handoff.sh`: `<slot emoji> Preview`, затем URL, branch, commit.
 - Если пользователь после preview говорит `Принято`, `принимаю`, `accepted` или эквивалент без отрицания, запускать `deploy/scripts/accept-preview.sh <codex-branch>` и мониторить PR/merge/prod deploy/slot release.
 - Короткие ссылки: [docs/DEVELOPMENT_GUIDELINES.md](docs/DEVELOPMENT_GUIDELINES.md), [docs/guidelines/07-git-versioning-repository-sync.md](docs/guidelines/07-git-versioning-repository-sync.md), [docs/operations/branch-preview-environments.md](docs/operations/branch-preview-environments.md), [docs/operations/temporal-ci-cd.md](docs/operations/temporal-ci-cd.md), [docs/checklists/CHECKLIST_REPOSITORY_SYNC.md](docs/checklists/CHECKLIST_REPOSITORY_SYNC.md).
 - Исключение: работа внутри `admin/` следует `admin/AGENTS.md`; это standalone admin project, не обычный preview-slot flow.
 
 ## Final Preview Handoff
 
-- After `scripts/bright-preview-handoff.sh` succeeds, the final implementation response MUST start with that command's preview header: `<slot emoji> Preview`.
+- After `scripts/brai-preview-handoff.sh` succeeds, the final implementation response MUST start with that command's preview header: `<slot emoji> Preview`.
 - Put no text before that header. Then include the preview URL, branch, and commit before any summary.

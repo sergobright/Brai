@@ -81,14 +81,14 @@ git config core.hooksPath .githooks
 Before a final preview-class implementation handoff, run:
 
 ```bash
-scripts/bright-preview-handoff.sh
+scripts/brai-preview-handoff.sh
 ```
 
 The verifier requires a clean tree, pushed `origin/<codex-branch>` at `HEAD`, successful `Brai delivery` jobs including `deploy-preview`, and a ready preview slot from the slot registry or Temporal. It writes an ignored `.brai-task/preview-handoff.json` receipt that the Codex `Stop` hook checks.
 
 The final response format for preview-class work is the top-level handoff contract in `AGENTS.md`: after this command succeeds, the final implementation response starts with the command's `<slot emoji> Preview` header, then includes preview URL, branch, and commit before any summary. Do not print a preview emoji in intermediary updates, status replies, questions, acceptance monitoring, no-preview handoffs, or any reply where the slot or deployed commit is unverified. If the preview letter or URL is missing because every slot is occupied, the response must say the branch is queued and include queue position/source when available. If it is missing for any other reason, the response must say exactly which push, CI, or deploy step blocked it. Ordinary preview-class `codex/*` branch push/deploy is standing Brai CI/CD automation and must not be treated as an optional manual confirmation step.
 
-For `infra-docs` no-preview work, `node scripts/brai-task.mjs handoff` creates or reuses the PR through the agent's GitHub identity, then polls the CI auto-merge job for a bounded period. The CI job reuses that PR, labels it `bright-delivery:infra-docs`, and enables auto-merge without waiting for merge, so it cannot deadlock on required checks. Local handoff writes success only after the PR state is `MERGED` and the receipt includes the PR number, URL, merged timestamp, branch, commit, `deliveryClass=infra-docs`, `no_preview_required`, `handoff=passed`, and `autoMerge=enabled` when applicable. If CI is still running or the PR remains `OPEN`, `BEHIND`, `BLOCKED`, or `DIRTY`, rerun handoff after GitHub Actions or the merge queue advances.
+For `infra-docs` no-preview work, `node scripts/brai-task.mjs handoff` creates or reuses the PR through the agent's GitHub identity, then polls the CI auto-merge job for a bounded period. The CI job reuses that PR, labels it `brai-delivery:infra-docs`, and enables auto-merge without waiting for merge, so it cannot deadlock on required checks. Local handoff writes success only after the PR state is `MERGED` and the receipt includes the PR number, URL, merged timestamp, branch, commit, `deliveryClass=infra-docs`, `no_preview_required`, `handoff=passed`, and `autoMerge=enabled` when applicable. If CI is still running or the PR remains `OPEN`, `BEHIND`, `BLOCKED`, or `DIRTY`, rerun handoff after GitHub Actions or the merge queue advances.
 
 Preview acceptance flow:
 
@@ -104,7 +104,7 @@ Acceptance trigger:
 
 - If the project owner says `Принято`, `принимаю`, `accepted`, or an equivalent acceptance phrase after a preview handoff, run `deploy/scripts/accept-preview.sh <codex-branch>` immediately. Negated phrases such as `пока не принято` or `не принято` are not acceptance triggers.
 - The script is the single local acceptance entrypoint. It first requires verified preview state for the exact `origin/<codex-branch>` head, then creates or reuses a GitHub PR into `main` and calls `gh pr merge --<method> --auto --match-head-commit <sha>`, defaulting to `squash` unless `BRAI_ACCEPT_MERGE_METHOD` is set to `merge` or `rebase`, so branch protection, checks, merge queue, production deploy, metadata promotion, and preview-slot release stay in GitHub Actions.
-- If the acceptance PR is `mergeStateStatus: DIRTY` or `BEHIND`, `accept-preview.sh` writes `status=reconcile_required`. Run `node scripts/brai-task.mjs acceptance-reconcile <codex-branch>`, resolve conflicts if any, commit, push the same branch, rerun `scripts/bright-preview-handoff.sh`, and rerun `deploy/scripts/accept-preview.sh <codex-branch>`. The original preview slot remains leased to that branch until production promotion releases it.
+- If the acceptance PR is `mergeStateStatus: DIRTY` or `BEHIND`, `accept-preview.sh` writes `status=reconcile_required`. Run `node scripts/brai-task.mjs acceptance-reconcile <codex-branch>`, resolve conflicts if any, commit, push the same branch, rerun `scripts/brai-preview-handoff.sh`, and rerun `deploy/scripts/accept-preview.sh <codex-branch>`. The original preview slot remains leased to that branch until production promotion releases it.
 - After starting acceptance, monitor GitHub Actions until production deploy and preview-slot release finish, or report the exact PR/check/merge-queue/deploy/release blocker. Accepted preview slots are released only by the successful `deploy-prod` post-step, after metadata promotion and production deploy; that step requires a real slot release and fails if the accepted branch did not release one.
 
 ## Required GitHub Settings

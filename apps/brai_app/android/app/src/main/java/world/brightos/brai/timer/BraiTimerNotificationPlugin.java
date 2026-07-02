@@ -1,4 +1,4 @@
-package world.brightos.bright_os_client.timer;
+package world.brightos.brai.timer;
 
 import android.Manifest;
 import android.content.Intent;

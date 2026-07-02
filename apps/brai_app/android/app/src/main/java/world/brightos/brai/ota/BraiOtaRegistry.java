@@ -1,4 +1,4 @@
-package world.brightos.bright_os_client.ota;
+package world.brightos.brai.ota;
 
 public final class BraiOtaRegistry {
     private static BraiOtaManager manager;

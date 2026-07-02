@@ -1,4 +1,4 @@
-package world.brightos.bright_os_client.ota;
+package world.brightos.brai.ota;
 
 final class BraiOtaException extends Exception {
     BraiOtaException(String message) {

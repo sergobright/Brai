@@ -12,7 +12,7 @@ The failure chain was:
 - shell write detection relied on a deny-list regex instead of a read-only
   allow-list;
 - Git hooks did not help because the agent stopped before commit or push;
-- `bright-preview-handoff.sh` was strict but depended on being run manually;
+- `brai-preview-handoff.sh` was strict but depended on being run manually;
 - `Stop` and handoff enforcement could not rely only on `writeIntentAt`;
 - preview acceptance could proceed unless the exact branch head had verified
   preview state.

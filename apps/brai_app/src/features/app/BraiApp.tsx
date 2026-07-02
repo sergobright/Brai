@@ -57,7 +57,7 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
   }, [app.section, app.selectSection]);
 
   useEffect(() => installAndroidBackHandler(() => {
-    if (window.history.state?.brightMobileMenu || window.history.state?.brightMobileSheet || window.history.state?.brightActivityEditor || window.history.state?.brightMobileActionCreate || window.history.state?.brightInboxEditor || window.history.state?.brightMobileInboxCreate) return false;
+    if (window.history.state?.braiMobileMenu || window.history.state?.braiMobileSheet || window.history.state?.braiActivityEditor || window.history.state?.braiMobileActionCreate || window.history.state?.braiInboxEditor || window.history.state?.braiMobileInboxCreate) return false;
     if (sectionRef.current === "actions") return false;
     if (window.history.state?.braiSection === sectionRef.current) {
       window.history.back();

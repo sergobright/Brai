@@ -7,8 +7,8 @@ This specification defines the stable external inbound API shape for connector-s
 ### Requirement: Inbound API routes by target
 Brai SHALL expose a universal inbound API at `/v1/` where omitted
 destination defaults to `inbox`, and explicit destination can be selected by
-request body `target`/`destination`, header `X-Bright-Target`/
-`X-Bright-Destination`.
+request body `target`/`destination`, header `X-Brai-Target`/
+`X-Brai-Destination`.
 
 #### Scenario: Inbound target handshakes
 - **WHEN** an external app sends `GET /v1/` with the inbound API key

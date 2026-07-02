@@ -120,7 +120,7 @@ export async function ensureClientMeta(): Promise<{
   return db.transaction("rw", db.meta, async () => {
     let deviceId = await getMeta<string>("deviceId");
     if (!deviceId) {
-      deviceId = `bright-${randomId()}`;
+      deviceId = `brai-${randomId()}`;
       await setMeta("deviceId", deviceId);
     }
 

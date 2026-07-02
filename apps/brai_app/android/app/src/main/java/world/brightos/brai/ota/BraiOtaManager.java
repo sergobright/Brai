@@ -1,4 +1,4 @@
-package world.brightos.bright_os_client.ota;
+package world.brightos.brai.ota;
 
 import android.content.Context;
 import android.content.SharedPreferences;
@@ -32,7 +32,7 @@ import java.util.zip.ZipException;
 
 import javax.net.ssl.SSLException;
 
-import world.brightos.bright_os_client.BuildConfig;
+import world.brightos.brai.BuildConfig;
 
 public final class BraiOtaManager {
     private static final String PREFS_NAME = "brai_ota_state";

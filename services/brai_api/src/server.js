@@ -16,7 +16,7 @@ import { BraiStore, formatFocusInterval, formatSession } from './store.js';
 const BASE_JSON_HEADERS = {
   'content-type': 'application/json; charset=utf-8',
   'access-control-allow-methods': 'GET,POST,OPTIONS',
-  'access-control-allow-headers': 'authorization,content-type,x-api-key,x-bright-api-key,x-bright-target,x-bright-destination',
+  'access-control-allow-headers': 'authorization,content-type,x-api-key,x-brai-api-key,x-brai-target,x-brai-destination',
   'access-control-allow-credentials': 'true'
 };
 const SESSION_COOKIE = 'brai_session';

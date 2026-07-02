@@ -24,7 +24,7 @@ This folder is the Brai source-owned shadcn-compatible UI layer.
 - Allowed defaults: official shadcn/ui, Radix Primitives, Motion Primitives, shadcnblocks free, Magic UI free, coss free components, ShadcnSpace free items, React Bits free items with mobile/performance review, Aceternity free/source-accessible items, and Tremor Raw/free through manual source review when analytics needs it.
 - Tremor is not a configured registry until its shadcn registry endpoint is confirmed.
 - Do not add paid, Pro, All Access, API-key gated, private-token, or non-free blocks.
-- Do not use product screens directly from `imported`; move reusable neutral code into `blocks` or Brai-specific code into `bright`.
+- Do not use product screens directly from `imported`; move reusable neutral code into `blocks` or Brai-specific code into `brai`.
 - When the project owner asks to reproduce a selected component or block, copy the actual accepted source as the baseline. Do not rebuild it from a screenshot, description, registry metadata, memory, or a visually similar substitute.
 - Exact reproduction preserves source structure, classes, spacing, typography, radii, colors, animation, responsive behavior, and interactions. Only import/path compatibility, replacing source demo content with existing Brai content, explicitly requested content/copy/image/icon changes, data wiring, Brai actions, explicitly requested removals, and necessary size constraints may change.
 - If the project owner asks to replace an existing Brai area and does not request content changes, preserve existing Brai content, data bindings, order, meaning, visibility, and item count. Demo content from the copied source is only slot guidance.

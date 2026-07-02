@@ -1,4 +1,4 @@
-package world.brightos.bright_os_client.ota;
+package world.brightos.brai.ota;
 
 import java.math.BigInteger;
 import java.util.ArrayList;

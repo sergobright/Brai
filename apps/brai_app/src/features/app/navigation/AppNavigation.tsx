@@ -167,7 +167,7 @@ export function MobileProfileDrawer({
 
   const closeMenu = useCallback((afterClose?: () => void) => {
     afterCloseRef.current = afterClose ?? null;
-    if (window.history.state?.brightMobileMenu) {
+    if (window.history.state?.braiMobileMenu) {
       suppressPopRef.current = true;
       window.history.back();
     }
@@ -176,10 +176,10 @@ export function MobileProfileDrawer({
 
   useEffect(() => {
     resetOpen();
-    if (window.history.state?.brightMobileMenu) {
-      window.history.replaceState({ ...window.history.state, brightMobileMenu: true }, "", window.location.href);
+    if (window.history.state?.braiMobileMenu) {
+      window.history.replaceState({ ...window.history.state, braiMobileMenu: true }, "", window.location.href);
     } else {
-      window.history.pushState({ ...window.history.state, brightMobileMenu: true }, "", window.location.href);
+      window.history.pushState({ ...window.history.state, braiMobileMenu: true }, "", window.location.href);
     }
 
     function onPopState() {

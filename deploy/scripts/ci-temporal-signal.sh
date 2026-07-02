@@ -23,7 +23,7 @@ run() {
   local ssh_port="${BRAI_DEPLOY_SSH_PORT:-22}"
   local local_port="${BRAI_TEMPORAL_LOCAL_PORT:-7233}"
   local remote_port="${BRAI_TEMPORAL_REMOTE_PORT:-7233}"
-  KEY_FILE="$(mktemp "${TMPDIR:-/tmp}/bright-temporal-key.XXXXXX")"
+  KEY_FILE="$(mktemp "${TMPDIR:-/tmp}/brai-temporal-key.XXXXXX")"
 
   cleanup() {
     if [[ -n "${TUNNEL_PID:-}" ]]; then

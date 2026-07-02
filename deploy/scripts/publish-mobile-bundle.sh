@@ -78,7 +78,7 @@ if [[ -n "$MAX_APK_VERSION_CODE" ]]; then
   fi
 fi
 
-TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/bright-mobile-bundle.XXXXXX")"
+TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/brai-mobile-bundle.XXXXXX")"
 cleanup() {
   rm -rf "$TMP_DIR"
 }

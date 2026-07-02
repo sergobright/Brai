@@ -75,7 +75,7 @@ export async function inboundRequest(baseUrl, pathName, options = {}, authorized
       ...options,
       headers: authorized
         ? {
-            'x-bright-api-key': INBOUND_TOKEN,
+            'x-brai-api-key': INBOUND_TOKEN,
             ...(options.headers ?? {})
           }
         : options.headers

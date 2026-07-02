@@ -1,4 +1,4 @@
-package world.brightos.bright_os_client.ota;
+package world.brightos.brai.ota;
 
 import android.webkit.RenderProcessGoneDetail;
 import android.webkit.WebResourceError;

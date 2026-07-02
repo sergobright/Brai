@@ -1,4 +1,4 @@
-package world.brightos.bright_os_client.ota;
+package world.brightos.brai.ota;
 
 import java.util.LinkedHashMap;
 import java.util.Map;

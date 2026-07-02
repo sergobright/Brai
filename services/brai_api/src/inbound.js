@@ -41,13 +41,13 @@ const DEFAULT_TITLE_PROMPT_TEMPLATE = [
 
 export function inboundRequestTarget(req, body = {}) {
   return inboundTarget(body?.target ?? body?.destination)
-    ?? inboundTarget(req.headers['x-bright-target'] ?? req.headers['x-bright-destination'])
+    ?? inboundTarget(req.headers['x-brai-target'] ?? req.headers['x-brai-destination'])
     ?? 'inbox';
 }
 
 export function hasInboundApiKey(req, apiKey) {
   if (!apiKey) return false;
-  return req.headers['x-bright-api-key'] === apiKey
+  return req.headers['x-brai-api-key'] === apiKey
     || req.headers['x-api-key'] === apiKey
     || req.headers.authorization === `Bearer ${apiKey}`;
 }
@@ -317,7 +317,7 @@ function cleanTitle(value) {
 }
 
 function codexTitle(text, { codexBin = 'codex', codexModel = null, promptTemplate, timeoutMs = 3000 } = {}) {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bright-inbound-title-'));
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'brai-inbound-title-'));
   const outputPath = path.join(tmp, 'title.txt');
   const prompt = renderPrompt(promptTemplate ?? DEFAULT_TITLE_PROMPT_TEMPLATE, text);
   const timeout = Number.isFinite(timeoutMs) ? timeoutMs : 3000;

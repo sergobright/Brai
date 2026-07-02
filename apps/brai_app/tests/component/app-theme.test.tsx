@@ -72,7 +72,7 @@ describe("BraiApp theme", () => {
     });
   });
 
-  it("keeps retired Bright color tokens out of app source", () => {
+  it("keeps retired color tokens out of app source", () => {
     const retiredTokenPattern =
       /--(surface|line|ok|warn|danger|primary-ink|primary-soft|shadcn-|success|warning|info|sidebar-)/;
     const matches = collectSourceFiles(path.join(process.cwd(), "src"))

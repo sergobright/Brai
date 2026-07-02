@@ -69,6 +69,6 @@ The new source of truth is:
 ## Delivery Guard
 
 This is a `runtime/product` change. Implementation must start from the official
-Bright task starter, pass the required API/client/OpenSpec checks, and finish
+Brai task starter, pass the required API/client/OpenSpec checks, and finish
 through the preview handoff flow before acceptance.
 

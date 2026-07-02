@@ -140,10 +140,10 @@ export function MobileContextSheet({
 
   useEffect(() => {
     resetOpen();
-    if (window.history.state?.brightMobileSheet) {
-      window.history.replaceState({ ...window.history.state, brightMobileSheet: label }, "", window.location.href);
+    if (window.history.state?.braiMobileSheet) {
+      window.history.replaceState({ ...window.history.state, braiMobileSheet: label }, "", window.location.href);
     } else {
-      window.history.pushState({ ...window.history.state, brightMobileSheet: label }, "", window.location.href);
+      window.history.pushState({ ...window.history.state, braiMobileSheet: label }, "", window.location.href);
     }
 
     function onPopState() {
@@ -159,7 +159,7 @@ export function MobileContextSheet({
   }, [closeWithAnimation, label, resetOpen]);
 
   function closeSheet() {
-    if (window.history.state?.brightMobileSheet === label) {
+    if (window.history.state?.braiMobileSheet === label) {
       suppressPopRef.current = true;
       window.history.back();
     }
@@ -167,7 +167,7 @@ export function MobileContextSheet({
   }
 
   useEffect(() => installAndroidBackHandler(() => {
-    if (window.history.state?.brightMobileSheet === label) {
+    if (window.history.state?.braiMobileSheet === label) {
       suppressPopRef.current = true;
       window.history.back();
     }

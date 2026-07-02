@@ -7,7 +7,7 @@ import path from 'node:path';
 import { BraiStore } from '../src/store.js';
 
 function tempStore() {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bright-version-ledger-'));
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'brai-version-ledger-'));
   const store = new BraiStore(path.join(tmp, 'store.sqlite'));
   return { tmp, store };
 }
@@ -211,7 +211,7 @@ test('ascii commit titles are not promoted as public release notes', () => {
 });
 
 test('accepted preview promotion creates missing target database directory', () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bright-promote-missing-target-dir-'));
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'brai-promote-missing-target-dir-'));
   const sourceDb = path.join(tmp, 'missing', 'source.sqlite');
   const targetDb = path.join(tmp, 'target', 'nested', 'target.sqlite');
 

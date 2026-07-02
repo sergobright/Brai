@@ -114,7 +114,7 @@ export function ActivityDetailEditor({
   useEffect(() => {
     if (mode !== "mobile") return undefined;
     resetOpen();
-    window.history.pushState({ ...window.history.state, brightActivityEditor: action.id }, "", window.location.href);
+    window.history.pushState({ ...window.history.state, braiActivityEditor: action.id }, "", window.location.href);
 
     function onPopState() {
       autosave.flush();
@@ -141,7 +141,7 @@ export function ActivityDetailEditor({
 
   function closeEditor() {
     autosave.flush();
-    if (mode === "mobile" && window.history.state?.brightActivityEditor === action.id) {
+    if (mode === "mobile" && window.history.state?.braiActivityEditor === action.id) {
       suppressPopRef.current = true;
       window.history.back();
     }

@@ -421,7 +421,7 @@ jobs:
           BRAI_COMMIT: ${{ github.sha }}
 
   record-infra-docs-merge:
-    if: github.event_name == 'pull_request' && github.event.action == 'closed' && github.event.pull_request.merged == true && startsWith(github.event.pull_request.head.ref, 'codex/') && contains(toJson(github.event.pull_request.labels), 'bright-delivery:infra-docs')
+    if: github.event_name == 'pull_request' && github.event.action == 'closed' && github.event.pull_request.merged == true && startsWith(github.event.pull_request.head.ref, 'codex/') && contains(toJson(github.event.pull_request.labels), 'brai-delivery:infra-docs')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
