@@ -44,7 +44,7 @@ fi
 
 ROOT="$(git rev-parse --show-toplevel)"
 
-run_bright_node() {
+run_brai_node() {
   local node_prefix="${BRAI_NODE_PREFIX:-/srv/opt/node-v22.16.0/bin}"
   if [[ -x "$node_prefix/node" ]]; then
     "$ROOT/scripts/use-node22.sh" node "$@"
@@ -78,7 +78,7 @@ write_acceptance_marker() {
   local pr_url="${3:-}"
   local accepted_at
   accepted_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-  run_bright_node -e '
+  run_brai_node -e '
 const fs = require("node:fs");
 const path = require("node:path");
 const [root, branch, commit, baseBranch, prNumber, prUrl, mergeMethod, status, deliveryClass, acceptedAt] = process.argv.slice(1);
@@ -134,7 +134,7 @@ while IFS='=' read -r key value; do
     delivery_class) DELIVERY_CLASS="$value" ;;
     requires_preview) REQUIRES_PREVIEW="$value" ;;
   esac
-done < <(run_bright_node "$ROOT/deploy/scripts/classify-delivery.mjs" \
+done < <(run_brai_node "$ROOT/deploy/scripts/classify-delivery.mjs" \
   --base-ref "origin/$BASE_BRANCH" \
   --head-ref "origin/$BRANCH" \
   --event-name push \
@@ -146,7 +146,7 @@ if [[ "${BRAI_ACCEPT_INFRA_DOCS_ONLY:-false}" == "true" && "$DELIVERY_CLASS" != 
 fi
 
 if [[ "$REQUIRES_PREVIEW" == "true" ]]; then
-  run_bright_node "$ROOT/scripts/brai-task.mjs" require-preview "$BRANCH" "$HEAD_SHA"
+  run_brai_node "$ROOT/scripts/brai-task.mjs" require-preview "$BRANCH" "$HEAD_SHA"
 fi
 
 MERGED_PR_NUMBER="$(gh pr list --base "$BASE_BRANCH" --head "$BRANCH" --state merged --json number,headRefOid --jq "map(select(.headRefOid == \"$HEAD_SHA\"))[0].number // \"\"")"

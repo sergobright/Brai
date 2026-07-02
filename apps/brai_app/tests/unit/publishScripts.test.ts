@@ -13,7 +13,7 @@ const nodeCliEnv = { ...process.env, NODE_OPTIONS: "" };
 
 describe("mobile OTA publish scripts", () => {
   it("publishes browser web and Android OTA from one web-layer command", async () => {
-    const root = await fixtureRoot("bright-client-web-layer-");
+    const root = await fixtureRoot("brai-client-web-layer-");
     await writeStaticExport(root, "unified");
     const previousVersion = "9.9.9.98";
     const previousBundle = path.join(root, "deploy/mobile-update/bundles", previousVersion);
@@ -56,7 +56,7 @@ describe("mobile OTA publish scripts", () => {
   });
 
   it("publishes browser web and Android OTA into environment-specific roots", async () => {
-    const root = await fixtureRoot("bright-env-publish-");
+    const root = await fixtureRoot("brai-env-publish-");
     await writeStaticExport(root, "env");
     await mkdir(path.join(root, "deploy"), { recursive: true });
     await copyFile(
@@ -90,7 +90,7 @@ describe("mobile OTA publish scripts", () => {
   });
 
   it("publishes a baseline web layer for a selected non-production environment", async () => {
-    const root = await fixtureRoot("bright-env-baseline-");
+    const root = await fixtureRoot("brai-env-baseline-");
     await writeStaticExport(root, "baseline");
     await mkdir(path.join(root, "deploy"), { recursive: true });
     await copyFile(
@@ -120,7 +120,7 @@ describe("mobile OTA publish scripts", () => {
   });
 
   it("does not force a new Preview APK for web-only OTA bundles", async () => {
-    const root = await fixtureRoot("bright-web-only-apk-");
+    const root = await fixtureRoot("brai-web-only-apk-");
     await writeStaticExport(root, "web-only-apk");
     await mkdir(path.join(root, "deploy"), { recursive: true });
     await copyFile(
@@ -157,7 +157,7 @@ describe("mobile OTA publish scripts", () => {
   });
 
   it("resolves native non-production OTA APK compatibility from the release index", async () => {
-    const root = await fixtureRoot("bright-required-apk-");
+    const root = await fixtureRoot("brai-required-apk-");
     await writeStaticExport(root, "required-apk");
     await mkdir(path.join(root, "deploy"), { recursive: true });
     await copyFile(
@@ -233,9 +233,9 @@ describe("mobile OTA publish scripts", () => {
   });
 
   it("resolves Android APK app versions from deployment sources", async () => {
-    const root = await fixtureRoot("bright-apk-version-resolve-");
+    const root = await fixtureRoot("brai-apk-version-resolve-");
     await writeStaticExport(root, "stale-public-version");
-    const dbPath = path.join(root, "bright.sqlite");
+    const dbPath = path.join(root, "brai.sqlite");
     await execFileAsync("node", ["--input-type=module", "-e", `
 const { pathToFileURL } = await import("node:url");
 const { BraiStore } = await import(pathToFileURL(process.argv[1]));
@@ -309,9 +309,9 @@ await fs.writeFile(outputPath, JSON.stringify({
   });
 
   it("records shipped APK ledger rows idempotently by target commit", async () => {
-    const root = await fixtureRoot("bright-apk-ledger-");
+    const root = await fixtureRoot("brai-apk-ledger-");
     await writeStaticExport(root, "stale-public-version");
-    const dbPath = path.join(root, "bright.sqlite");
+    const dbPath = path.join(root, "brai.sqlite");
     await execFileAsync("node", ["--input-type=module", "-e", `
 const { pathToFileURL } = await import("node:url");
 const { BraiStore } = await import(pathToFileURL(process.argv[1]));
@@ -426,7 +426,7 @@ try {
   });
 
   it("publishes a versioned bundle and atomic manifest from a static export", async () => {
-    const root = await fixtureRoot("bright-mobile-publish-");
+    const root = await fixtureRoot("brai-mobile-publish-");
     await writeStaticExport(root, "ota");
 
     await execFileAsync("bash", [path.join(workspaceRoot, "deploy/scripts/publish-mobile-bundle.sh")], {
@@ -459,7 +459,7 @@ try {
   });
 
   it("publishes an APK using app version metadata when env version is unset", async () => {
-    const root = await fixtureRoot("bright-apk-publish-");
+    const root = await fixtureRoot("brai-apk-publish-");
     await writeStaticExport(root, "apk");
     await mkdir(path.join(root, "deploy"), { recursive: true });
     await copyFile(
@@ -483,7 +483,7 @@ try {
   });
 
   it("replaces an existing APK instead of rewriting it in place", async () => {
-    const root = await fixtureRoot("bright-apk-replace-");
+    const root = await fixtureRoot("brai-apk-replace-");
     await writeStaticExport(root, "apk-replace");
     await mkdir(path.join(root, "deploy"), { recursive: true });
     await copyFile(
@@ -519,7 +519,7 @@ try {
   });
 
   it("allocates APK versionCode above existing release metadata", async () => {
-    const root = await fixtureRoot("bright-apk-code-");
+    const root = await fixtureRoot("brai-apk-code-");
     const envsRoot = path.join(root, "envs");
     const releaseDir = path.join(root, "releases");
     await mkdir(releaseDir, { recursive: true });
@@ -552,7 +552,7 @@ try {
   });
 
   it("does not scan the production checkout when an APK release target is configured", async () => {
-    const root = await fixtureRoot("bright-apk-code-target-");
+    const root = await fixtureRoot("brai-apk-code-target-");
     const envsRoot = path.join(root, "envs");
     const releaseDir = path.join(root, "runtime-releases");
     const blockedDir = path.join(root, "deploy/releases");
@@ -584,7 +584,7 @@ try {
   });
 
   it("replaces an existing OTA bundle instead of rewriting it in place", async () => {
-    const root = await fixtureRoot("bright-mobile-replace-");
+    const root = await fixtureRoot("brai-mobile-replace-");
     await writeStaticExport(root, "ota-replace");
     const bundleVersion = "9.9.9.99";
     const bundleDir = path.join(root, "deploy/mobile-update/bundles", bundleVersion);
@@ -608,7 +608,7 @@ try {
   });
 
   it("keeps mobile OTA bundles outside browser web publication cleanup", async () => {
-    const root = await fixtureRoot("bright-web-publish-");
+    const root = await fixtureRoot("brai-web-publish-");
     await writeStaticExport(root, "web");
     const marker = path.join(root, "deploy/mobile-update/bundles/old.web.1/keep.txt");
     await mkdir(path.dirname(marker), { recursive: true });
@@ -626,7 +626,7 @@ try {
   });
 
   it("allocates, reuses, and releases preview slots with the lock wrapper", async () => {
-    const root = await fixtureRoot("bright-slots-");
+    const root = await fixtureRoot("brai-slots-");
     const envsRoot = path.join(root, "envs");
     const env = {
       ...process.env,
@@ -661,7 +661,7 @@ try {
   });
 
   it("queues preview branches when every slot is occupied", async () => {
-    const root = await fixtureRoot("bright-slots-queue-");
+    const root = await fixtureRoot("brai-slots-queue-");
     const envsRoot = path.join(root, "envs");
     const env = {
       ...process.env,
@@ -695,7 +695,7 @@ try {
   });
 
   it("renders production and preview APK release sections without stale missing links", async () => {
-    const root = await fixtureRoot("bright-release-page-");
+    const root = await fixtureRoot("brai-release-page-");
     const releaseDir = path.join(root, "deploy/releases");
     await mkdir(releaseDir, { recursive: true });
     await mkdir(path.join(root, "deploy"), { recursive: true });

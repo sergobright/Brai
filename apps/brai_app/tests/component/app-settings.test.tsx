@@ -97,7 +97,7 @@ describe("BraiApp settings", () => {
   it.each([
     ["Software caused connection abort", "Обновление не установилось. Связь оборвалась во время скачивания. Проверь интернет и попробуй еще раз."],
     [
-      "/data/user/0/world.brightos.bright_os_client/cache/brai-ota-downloads/0.0.11.1.zip: open failed: ENOENT (No such file or directory)",
+      "/data/user/0/world.brightos.brai/cache/brai-ota-downloads/0.0.11.1.zip: open failed: ENOENT (No such file or directory)",
       "Обновление не установилось. Скачанный файл обновления пропал из памяти телефона. Запусти проверку еще раз.",
     ],
   ])("shows a readable Android OTA error for %s", async (lastUpdateError, message) => {

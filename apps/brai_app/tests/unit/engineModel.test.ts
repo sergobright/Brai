@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { compareBrightVersions, engineSectionView } from "@/features/app/sections/engine/engineModel";
+import { compareBraiVersions, engineSectionView } from "@/features/app/sections/engine/engineModel";
 
 describe("engineSectionView", () => {
   it("does not treat stale Android OTA checking status as active work", () => {
@@ -21,9 +21,9 @@ describe("engineSectionView", () => {
   });
 
   it("detects newer ledger versions", () => {
-    expect(compareBrightVersions("0.11.52.1", "0.11.51.1")).toBeGreaterThan(0);
-    expect(compareBrightVersions("0.11.52.1", "0.11.52.1.42")).toBe(0);
-    expect(compareBrightVersions("0.10.52.1", "0.11.1.1")).toBeLessThan(0);
+    expect(compareBraiVersions("0.11.52.1", "0.11.51.1")).toBeGreaterThan(0);
+    expect(compareBraiVersions("0.11.52.1", "0.11.52.1.42")).toBe(0);
+    expect(compareBraiVersions("0.10.52.1", "0.11.1.1")).toBeLessThan(0);
   });
 
   it("does not let a stale ledger version hide the installed web build", () => {

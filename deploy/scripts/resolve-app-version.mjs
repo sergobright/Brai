@@ -42,7 +42,7 @@ export function resolveAppVersion({
     if (ledgerVersion) return validVersion(ledgerVersion);
   }
 
-  const resolvedVersion = latestBrightVersion([
+  const resolvedVersion = latestBraiVersion([
     environment !== "prod" && prodDb && latestProductionVersion(prodDb),
     environment !== "prod" && db && latestProductionVersion(db),
     prodWebVersionJson && readVersionJson(prodWebVersionJson),
@@ -121,23 +121,23 @@ function latestMobileTargetVersion(mobileTarget) {
     }
   }
 
-  return latestBrightVersion(versions);
+  return latestBraiVersion(versions);
 }
 
-function latestBrightVersion(values) {
+function latestBraiVersion(values) {
   return values.reduce((latest, value) => {
-    const version = normalizeBrightVersion(value);
+    const version = normalizeBraiVersion(value);
     if (!version) return latest;
-    return compareBrightVersions(version, latest) > 0 ? version : latest;
+    return compareBraiVersions(version, latest) > 0 ? version : latest;
   }, "");
 }
 
-function normalizeBrightVersion(value) {
+function normalizeBraiVersion(value) {
   const match = String(value || "").match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)(?:[._+-].*)?$/);
   return match ? match.slice(1, 5).join(".") : "";
 }
 
-function compareBrightVersions(left, right) {
+function compareBraiVersions(left, right) {
   const leftParts = left.split(".").map(Number);
   const rightParts = (right || "0.0.0.0").split(".").map(Number);
   for (let index = 0; index < 4; index += 1) {

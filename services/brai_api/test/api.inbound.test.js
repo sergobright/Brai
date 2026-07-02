@@ -56,7 +56,7 @@ test('inbound old URLs are not supported', async () => {
 });
 
 test('inbound inbox POST creates an inbox row with explanation and attachment link', async () => {
-  const storageRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'bright-inbound-files-'));
+  const storageRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'brai-inbound-files-'));
   const fixture = await createFixture(['2026-06-27T10:00:00.000Z'], {
     inboundStorageRoot: storageRoot,
     inboundTitleGenerator: async () => 'Снимок идеи'
@@ -119,14 +119,14 @@ test('inbound short POST accepts destination from body or header', async () => {
   try {
     const bodyTarget = await inboundRequest(fixture.url, '/v1/', {
       method: 'POST',
-      headers: { 'x-bright-target': 'inbox' },
+      headers: { 'x-brai-target': 'inbox' },
       body: JSON.stringify({
         target: 'finance',
         text: 'Пока не сохранять в неизвестное место'
       })
     });
     const headerTarget = await inboundRequest(fixture.url, '/v1/', {
-      headers: { 'x-bright-target': 'finance' }
+      headers: { 'x-brai-target': 'finance' }
     });
 
     assert.equal(bodyTarget.status, 404);
@@ -140,7 +140,7 @@ test('inbound short POST accepts destination from body or header', async () => {
 });
 
 test('inbound inbox accepts multiple attachments, description content, and metadata', async () => {
-  const storageRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'bright-inbound-files-'));
+  const storageRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'brai-inbound-files-'));
   const fixture = await createFixture(['2026-06-27T10:00:00.000Z'], {
     inboundStorageRoot: storageRoot,
     inboundTitleGenerator: async () => 'Пакет файлов'
@@ -249,7 +249,7 @@ test('inbound inbox rejects invalid api key without mutating inbox', async () =>
       '/v1/',
       {
         method: 'POST',
-        headers: { 'x-bright-api-key': 'wrong' },
+        headers: { 'x-brai-api-key': 'wrong' },
         body: JSON.stringify({
           text: 'Не сохранять',
           image_base64: IMAGE_BASE64,
@@ -287,7 +287,7 @@ test('inbound API returns unsupported target for unknown connectors', async () =
 
   try {
     const response = await inboundRequest(fixture.url, '/v1/', {
-      headers: { 'x-bright-target': 'finance' }
+      headers: { 'x-brai-target': 'finance' }
     });
 
     assert.equal(response.status, 404);
@@ -320,7 +320,7 @@ test('inbound inbox rejects invalid images without mutating inbox', async () => 
 });
 
 test('inbound inbox can use Codex CLI title generation', async () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bright-fake-codex-'));
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'brai-fake-codex-'));
   const fakeCodex = path.join(tmp, 'codex');
   fs.writeFileSync(fakeCodex, `#!/usr/bin/env node
 const fs = require('node:fs');

@@ -17,7 +17,7 @@ Brai использует короткий inbound endpoint:
 
 Если request не указывает точку назначения, API использует `inbox`. Явная точка
 назначения передается в JSON body через `target`/`destination` или в header
-`X-Bright-Target`/`X-Bright-Destination`.
+`X-Brai-Target`/`X-Brai-Destination`.
 
 Сейчас поддерживается:
 
@@ -48,13 +48,13 @@ routes.
 Все inbound-запросы требуют:
 
 ```http
-X-Bright-API-Key: <BRAI_INBOUND_API_KEY>
+X-Brai-API-Key: <BRAI_INBOUND_API_KEY>
 ```
 
 Значение API-ключа живет в env как `BRAI_INBOUND_API_KEY`. Legacy env
 `BRAI_INBOUND_TOKEN` и legacy `Authorization: Bearer <key>` пока
 принимаются для обратной совместимости. Новый caller должен использовать
-`X-Bright-API-Key`. Не коммить значение и не пиши его в документации.
+`X-Brai-API-Key`. Не коммить значение и не пиши его в документации.
 
 Неверная или отсутствующая inbound-авторизация возвращает HTTP `401`:
 
@@ -69,7 +69,7 @@ X-Bright-API-Key: <BRAI_INBOUND_API_KEY>
 
 ```http
 GET /v1/
-X-Bright-API-Key: <api-key>
+X-Brai-API-Key: <api-key>
 ```
 
 Успех:
@@ -91,8 +91,8 @@ X-Bright-API-Key: <api-key>
 
 ```http
 GET /v1/
-X-Bright-API-Key: <api-key>
-X-Bright-Target: finance
+X-Brai-API-Key: <api-key>
+X-Brai-Target: finance
 ```
 
 ## Прием Inbox

@@ -1,4 +1,4 @@
-package world.brightos.bright_os_client.timer;
+package world.brightos.brai.timer;
 
 import android.app.Notification;
 import android.app.NotificationChannel;
@@ -31,14 +31,14 @@ import java.util.concurrent.Executors;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-import world.brightos.bright_os_client.BuildConfig;
-import world.brightos.bright_os_client.MainActivity;
-import world.brightos.bright_os_client.R;
+import world.brightos.brai.BuildConfig;
+import world.brightos.brai.MainActivity;
+import world.brightos.brai.R;
 
 public class BraiTimerNotificationService extends Service {
-    public static final String ACTION_START = "world.brightos.bright_os_client.timer.START";
-    public static final String ACTION_REQUEST_STOP = "world.brightos.bright_os_client.timer.REQUEST_STOP";
-    public static final String ACTION_DISMISSED = "world.brightos.bright_os_client.timer.DISMISSED";
+    public static final String ACTION_START = "world.brightos.brai.timer.START";
+    public static final String ACTION_REQUEST_STOP = "world.brightos.brai.timer.REQUEST_STOP";
+    public static final String ACTION_DISMISSED = "world.brightos.brai.timer.DISMISSED";
     public static final String EXTRA_STARTED_AT_UTC = "startedAtUtc";
 
     private static final String CHANNEL_ID = "brai_focus_timer";

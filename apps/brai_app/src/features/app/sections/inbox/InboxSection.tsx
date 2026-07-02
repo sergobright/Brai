@@ -122,7 +122,7 @@ export function InboxSection({
   }
 
   const closeMobileCreate = useCallback(() => {
-    if (window.history.state?.brightMobileInboxCreate) {
+    if (window.history.state?.braiMobileInboxCreate) {
       suppressMobileCreatePopRef.current = true;
       window.history.back();
     }
@@ -163,10 +163,10 @@ export function InboxSection({
 
   useEffect(() => {
     if (!mobileCreateOpen) return undefined;
-    if (window.history.state?.brightMobileInboxCreate) {
-      window.history.replaceState({ ...window.history.state, brightMobileInboxCreate: true }, "", window.location.href);
+    if (window.history.state?.braiMobileInboxCreate) {
+      window.history.replaceState({ ...window.history.state, braiMobileInboxCreate: true }, "", window.location.href);
     } else {
-      window.history.pushState({ ...window.history.state, brightMobileInboxCreate: true }, "", window.location.href);
+      window.history.pushState({ ...window.history.state, braiMobileInboxCreate: true }, "", window.location.href);
     }
 
     function onPopState() {
@@ -759,7 +759,7 @@ function InboxDetailEditor({
   useEffect(() => {
     if (mode !== "mobile") return undefined;
     resetOpen();
-    window.history.pushState({ ...window.history.state, brightInboxEditor: item.id }, "", window.location.href);
+    window.history.pushState({ ...window.history.state, braiInboxEditor: item.id }, "", window.location.href);
 
     function onPopState() {
       flush();
@@ -799,7 +799,7 @@ function InboxDetailEditor({
 
   function closeEditor() {
     flush();
-    if (mode === "mobile" && window.history.state?.brightInboxEditor === item.id) {
+    if (mode === "mobile" && window.history.state?.braiInboxEditor === item.id) {
       suppressPopRef.current = true;
       window.history.back();
     }

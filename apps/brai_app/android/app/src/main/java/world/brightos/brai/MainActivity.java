@@ -1,4 +1,4 @@
-package world.brightos.bright_os_client;
+package world.brightos.brai;
 
 import android.content.Intent;
 import android.os.Bundle;
@@ -8,12 +8,12 @@ import androidx.activity.OnBackPressedCallback;
 import com.getcapacitor.BridgeActivity;
 import com.getcapacitor.ServerPath;
 
-import world.brightos.bright_os_client.ota.BraiOtaManager;
-import world.brightos.bright_os_client.ota.BraiOtaPlugin;
-import world.brightos.bright_os_client.ota.BraiOtaRegistry;
-import world.brightos.bright_os_client.ota.BraiOtaWebViewClient;
-import world.brightos.bright_os_client.timer.BraiTimerNotificationPlugin;
-import world.brightos.bright_os_client.timer.BraiTimerNotificationService;
+import world.brightos.brai.ota.BraiOtaManager;
+import world.brightos.brai.ota.BraiOtaPlugin;
+import world.brightos.brai.ota.BraiOtaRegistry;
+import world.brightos.brai.ota.BraiOtaWebViewClient;
+import world.brightos.brai.timer.BraiTimerNotificationPlugin;
+import world.brightos.brai.timer.BraiTimerNotificationService;
 
 public class MainActivity extends BridgeActivity {
     private static final String HANDLE_ANDROID_BACK_SCRIPT =

@@ -7,7 +7,7 @@
 - Android client: Capacitor APK/AAB generated operationally under `deploy/releases`.
 - Mobile OTA channel: generated operationally under `deploy/mobile-update`.
 - Generated release artifacts are ignored source-control outputs, not repository history.
-- Android application id remains `world.brightos.bright_os_client`.
+- Android application id remains `world.brightos.brai`.
 
 ## Web Publication
 

@@ -1,4 +1,4 @@
-package world.brightos.bright_os_client.timer;
+package world.brightos.brai.timer;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNull;

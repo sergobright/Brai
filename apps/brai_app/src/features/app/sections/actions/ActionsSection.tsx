@@ -119,7 +119,7 @@ export function ActionsSection({
   }
 
   const closeMobileCreate = useCallback(() => {
-    if (window.history.state?.brightMobileActionCreate) {
+    if (window.history.state?.braiMobileActionCreate) {
       suppressMobileCreatePopRef.current = true;
       window.history.back();
     }
@@ -160,10 +160,10 @@ export function ActionsSection({
 
   useEffect(() => {
     if (!mobileCreateOpen) return undefined;
-    if (window.history.state?.brightMobileActionCreate) {
-      window.history.replaceState({ ...window.history.state, brightMobileActionCreate: true }, "", window.location.href);
+    if (window.history.state?.braiMobileActionCreate) {
+      window.history.replaceState({ ...window.history.state, braiMobileActionCreate: true }, "", window.location.href);
     } else {
-      window.history.pushState({ ...window.history.state, brightMobileActionCreate: true }, "", window.location.href);
+      window.history.pushState({ ...window.history.state, braiMobileActionCreate: true }, "", window.location.href);
     }
 
     function onPopState() {

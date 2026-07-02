@@ -117,7 +117,7 @@ export function engineSectionView({
   const isChecking = otaRefreshing || versionRefreshing || Boolean(otaState?.checkInProgress);
   const visibleState =
     !isChecking && otaState?.lastCheckStatus === "checking" ? { ...otaState, lastCheckStatus: "unknown" } : otaState;
-  const hasUpdate = apkUpdateAvailable || compareBrightVersions(latestVersion, installedVersion) > 0 || hasReadyOtaUpdate(visibleState);
+  const hasUpdate = apkUpdateAvailable || compareBraiVersions(latestVersion, installedVersion) > 0 || hasReadyOtaUpdate(visibleState);
   const androidUpdateStage = androidStage(visibleState, hasUpdate);
   const updateStatus = engineStatusView({
     apkReleaseVersion: apkRelease?.version ?? null,
@@ -153,9 +153,9 @@ export function engineSectionView({
 /**
  * Compares Brai X.Y.Z.S versions and ignores non-production suffixes.
  */
-export function compareBrightVersions(left: string, right: string): number {
-  const leftParts = brightVersionParts(left);
-  const rightParts = brightVersionParts(right);
+export function compareBraiVersions(left: string, right: string): number {
+  const leftParts = braiVersionParts(left);
+  const rightParts = braiVersionParts(right);
   if (!leftParts || !rightParts) return 0;
   for (let index = 0; index < leftParts.length; index += 1) {
     if (leftParts[index] !== rightParts[index]) return leftParts[index] - rightParts[index];
@@ -291,7 +291,7 @@ function clampProgress(value: number): number {
 function latestKnownVersion(installedVersion: string, ...versions: Array<string | null | undefined>): string {
   return versions.reduce<string>((latest, version) => {
     if (!version) return latest;
-    return compareBrightVersions(version, latest) > 0 ? version : latest;
+    return compareBraiVersions(version, latest) > 0 ? version : latest;
   }, installedVersion);
 }
 
@@ -311,7 +311,7 @@ function ledgerRows(state: AppVersionState | null): EngineSectionView["ledgerRow
   });
 }
 
-function brightVersionParts(value: string | null | undefined): [number, number, number, number] | null {
+function braiVersionParts(value: string | null | undefined): [number, number, number, number] | null {
   const match = value?.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)/);
   if (!match) return null;
   return [Number(match[1]), Number(match[2]), Number(match[3]), Number(match[4])];

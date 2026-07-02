@@ -1,4 +1,4 @@
-package world.brightos.bright_os_client.ota;
+package world.brightos.brai.ota;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
