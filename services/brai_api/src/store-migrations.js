@@ -229,6 +229,12 @@ export const migrationMethods = {
       this.seedAgentTaskActivities();
       this.recordMigration(42, 'move agent task ledger into operation activities');
     }
+
+    if (!this.hasMigration(43)) {
+      this.ensureTableDescriptions();
+      this.seedAgentTaskActivities();
+      this.recordMigration(43, 'repair operation activity text fields');
+    }
   }
 ,
 
@@ -591,7 +597,7 @@ export const migrationMethods = {
 
     const now = new Date().toISOString();
     const descriptions = [
-      ['activities', 'Действия', 'Текущий список действий и операций.', 'Хранит рабочее состояние действий Brai и внутренних операций агента: activity_type_id, название, описание, автора, причину, статус, сортировку, удаление и восстановление. Пользовательские записи имеют activity_type_id action, агентские задачи имеют activity_type_id operation.'],
+      ['activities', 'Действия', 'Текущий список действий и операций.', 'Хранит рабочее состояние действий Brai и внутренних операций агента: activity_type_id, название, описание, автора, причину, статус, сортировку, удаление и восстановление. Пользовательские записи имеют activity_type_id action, агентские задачи имеют activity_type_id operation. Для operation поле title хранит короткое название задачи, description_md описывает что сделать и какой результат получить, reason объясняет почему задача появилась.'],
       ['activity_events', 'События действий', 'Журнал изменений действий.', 'Хранит каждое клиентское изменение по действиям для синхронизации, аудита и восстановления текущей таблицы activities. Поле change_type хранит тип изменения.'],
       ['activity_types', 'Типы действий', 'Справочник типов activities.', 'Хранит разрешённые типы activities для поля activities.activity_type_id: action для пользовательских действий и operation для внутренних задач агента.'],
       ['app_settings', 'Настройки', 'Глобальные настройки приложения.', 'Хранит runtime-настройки в формате ключ-значение: дату старта цели, длительность цели, дневную норму фокуса и похожие параметры.'],
@@ -1564,10 +1570,11 @@ export const migrationMethods = {
         id, activity_type_id, title, description_md, author, reason, status,
         created_at_utc, updated_at_utc, completed_at_utc, sort_order,
         deleted_at_utc, restored_at_utc, last_event_id
-      ) VALUES (?, 'operation', ?, '', 'Codex', ?, ?, ?, ?, ?, NULL, NULL, NULL, ?)
+      ) VALUES (?, 'operation', ?, ?, 'Codex', ?, ?, ?, ?, ?, NULL, NULL, NULL, ?)
       ON CONFLICT(id) DO UPDATE SET
         activity_type_id = 'operation',
         title = excluded.title,
+        description_md = excluded.description_md,
         author = 'Codex',
         reason = excluded.reason,
         status = excluded.status,
@@ -1580,6 +1587,7 @@ export const migrationMethods = {
       insert.run(
         task.id,
         task.title,
+        task.description,
         task.reason,
         task.done ? 'Done' : 'New',
         createdAt,
@@ -1627,99 +1635,129 @@ const AGENT_TASK_ACTIVITIES = [
   {
     id: 'operation:agent-task:worktree-owner-nobody',
     date: '2026-07-01',
-    title: 'Task worktree ownership blocks apply_patch',
-    reason: 'escalated scripts/brai-task-start.sh создал task worktree файлами owner nobody, из-за чего apply_patch не мог писать; восстановить owner через sudo chown -R mark:mark <task-worktree> или исправить starter/runner ownership.',
+    title: 'Починить владельца task worktree',
+    description: 'Сделать так, чтобы `scripts/brai-task-start.sh` создавал task worktree с владельцем, доступным обычному Codex-процессу. Результат: `apply_patch` может писать файлы без ручного `chown`.',
+    reason: 'Задача появилась после запуска `scripts/brai-task-start.sh` с escalation: файлы worktree получили owner `nobody`, и `apply_patch` не мог изменить проектные файлы.',
     done: false
   },
   {
     id: 'operation:agent-task:turbopack-sandbox-port-binding',
     date: '2026-07-01',
-    title: 'Next/Turbopack build needs sandbox allowance',
-    reason: 'npm run app:build с Next/Turbopack падает в Codex sandbox на binding to a port/Operation not permitted; повторять build с sandbox_permissions=require_escalated или исправить sandbox allowance для Turbopack worker.',
+    title: 'Разрешить сборку Next/Turbopack в sandbox',
+    description: 'Определить штатный способ запускать `npm run app:build` с Next/Turbopack в Codex sandbox. Результат: сборка проходит без ручного подбора escalation.',
+    reason: 'Задача появилась, потому что `npm run app:build` падал на попытке binding to a port с `Operation not permitted` внутри Codex sandbox.',
     done: false
   },
   {
     id: 'operation:agent-task:live-sqlite-backup-permissions',
     date: '2026-07-01',
-    title: 'Live SQLite backup directory permissions block backup',
-    reason: 'live SQLite backup в /srv/projects/brai/data/backups не создавался даже от владельца runtime DB nobody; держать verified .backup в /tmp и выполнять live SQL root-ом, затем отдельно чинить права backup-каталога.',
+    title: 'Починить права каталога SQLite backup',
+    description: 'Настроить права `/srv/projects/brai/data/backups` так, чтобы live SQLite backup создавался штатно. Результат: перед live SQL можно делать `.backup` в целевом backup-каталоге без обхода через `/tmp`.',
+    reason: 'Задача появилась, когда live backup не создавался в `/srv/projects/brai/data/backups` даже от владельца runtime DB; пришлось делать verified backup во временном каталоге.',
     done: false
   },
   {
     id: 'operation:agent-task:classify-delivery-git-eperm',
     date: '2026-07-01',
-    title: 'Delivery classification may need escalation',
-    reason: 'deploy/scripts/classify-delivery.mjs из Codex sandbox может падать на spawnSync git EPERM; повторять классификацию с sandbox_permissions=require_escalated.',
+    title: 'Стабилизировать delivery classification в sandbox',
+    description: 'Сделать запуск `deploy/scripts/classify-delivery.mjs` из Codex sandbox предсказуемым. Результат: classification не требует ручного повторного запуска с escalation.',
+    reason: 'Задача появилась, потому что classification иногда падал на `spawnSync git EPERM` из-за доступа к Git metadata вне writable worktree.',
     done: false
   },
   {
     id: 'operation:agent-task:app-test-vite-temp-permissions',
     date: '2026-07-01',
-    title: 'Shared Vite temp permissions can block app tests',
-    reason: 'npm run app:test в task worktree падает на Vitest/Vite EACCES, когда linked apps/brai_app/node_modules/.vite-temp owned by nobody:mark с 750; нужен owner/group-write fix для shared dependency dirs перед тестами, иначе фиксировать проверку как заблокированную окружением.',
+    title: 'Починить права общего Vite cache',
+    description: 'Настроить shared dependency dirs так, чтобы `npm run app:test` работал из task worktree. Результат: Vitest/Vite может читать и писать `.vite-temp` без ручной правки owner/group.',
+    reason: 'Задача появилась, когда `apps/brai_app/node_modules/.vite-temp` был owned by `nobody:mark` с mode `750`, и `npm run app:test` падал с `EACCES`.',
     done: false
   },
   {
     id: 'operation:agent-task:turbopack-process-sandbox',
     date: '2026-07-01',
-    title: 'Turbopack process creation can fail in sandbox',
-    reason: 'npm run app:build в Codex sandbox может падать Turbopack panic на creating new process/binding to a port с Operation not permitted; повторять build с sandbox_permissions=require_escalated.',
+    title: 'Стабилизировать запуск Turbopack workers',
+    description: 'Зафиксировать штатный режим запуска Next/Turbopack build в Codex окружении. Результат: `npm run app:build` не падает на создании worker process.',
+    reason: 'Задача появилась, потому что Turbopack иногда падал в sandbox с panic на creating new process/binding to a port и `Operation not permitted`.',
     done: false
   },
   {
     id: 'operation:agent-task:accept-preview-matching-worktree',
     date: '2026-07-01',
-    title: 'Accept preview must run from matching worktree',
-    reason: 'deploy/scripts/accept-preview.sh читает receipt из текущего checkout; если основной checkout содержит receipt другой ветки, запускать accept из matching .codex-worktrees/<task-slug> и проверять .brai-task/preview-handoff.json.',
+    title: 'Принимать preview из правильного worktree',
+    description: 'Сделать accept-flow устойчивым к запуску из неправильного checkout. Результат: `deploy/scripts/accept-preview.sh` использует receipt той же ветки, которую принимает.',
+    reason: 'Задача появилась, когда основной checkout содержал `.brai-task/preview-handoff.json` другой ветки, а accept-flow читал receipt из текущей директории.',
     done: false
   },
   {
     id: 'operation:agent-task:acceptance-conflict-resolution-flow',
     date: '2026-07-01',
-    title: 'Acceptance conflict resolution was blocked by hooks',
-    reason: 'после acceptance_started Brai git hooks блокировали даже merge/push для разрешения конфликтного accepted PR. Закрыто: добавлен official acceptance-reconcile flow для same-branch conflict resolution.',
+    title: 'Разрешить конфликты accepted PR',
+    description: 'Добавить официальный same-branch flow для conflict resolution после acceptance. Результат: accepted PR можно привести к актуальному `origin/main` без replacement branch.',
+    reason: 'Задача появилась, потому что после `acceptance_started` Git hooks блокировали merge/push, нужные для разрешения конфликтного accepted PR.',
     done: true
   },
   {
     id: 'operation:agent-task:superseded-pr-preview-slot-release',
     date: '2026-07-01',
-    title: 'Superseded PR left preview slot occupied',
-    reason: 'закрытый без merge superseded codex/* PR оставлял preview slot занятым. Закрыто в PR #102: pull_request.closed release job освобождает slot для unmerged codex/* PR.',
+    title: 'Освобождать slot закрытого superseded PR',
+    description: 'Освобождать preview slot при закрытии superseded `codex/*` PR без merge. Результат: slot не остаётся занятым после отказа от старой preview-ветки.',
+    reason: 'Задача появилась, когда закрытый без merge superseded PR оставил preview slot занятым и мешал новым preview deployments.',
     done: true
   },
   {
     id: 'operation:agent-task:starter-escalation-rule',
     date: '2026-06-30',
-    title: 'Task starter requires escalation in Codex Desktop',
-    reason: 'scripts/brai-task-start.sh в Codex Desktop нужно запускать с sandbox_permissions=require_escalated; без этого starter не сможет нормально сделать fetch и записать git/worktree metadata; использовать эскалацию сразу для этого starter. Закрыто в PR #98: правило закреплено в runbook.',
+    title: 'Закрепить escalation для task starter',
+    description: 'Задокументировать и поддержать запуск `scripts/brai-task-start.sh` с `sandbox_permissions=require_escalated`. Результат: starter может делать fetch и писать Git/worktree metadata без повторных ошибок.',
+    reason: 'Задача появилась, потому что task starter в Codex Desktop не мог надёжно выполнить fetch и записать `.git/worktrees` metadata внутри sandbox.',
     done: true
   },
   {
     id: 'operation:agent-task:git-add-index-lock-escalation',
     date: '2026-06-30',
-    title: 'git add in task worktree needs metadata escalation',
-    reason: 'git add в .codex-worktrees/<task-slug> из sandbox падает на создании .git/worktrees/<task-slug>/index.lock; повторять stage с sandbox_permissions=require_escalated, потому что git metadata лежит вне writable worktree. Закрыто в PR #98: правило закреплено в runbook.',
+    title: 'Закрепить escalation для git add',
+    description: 'Задокументировать штатный способ staging из `.codex-worktrees/<task-slug>`. Результат: `git add` не блокируется на создании `index.lock` вне writable worktree.',
+    reason: 'Задача появилась, когда `git add` из task worktree падал на создании `.git/worktrees/<task-slug>/index.lock` из-за sandbox permissions.',
     done: true
   },
   {
     id: 'operation:agent-task:worktree-permission-repair-script',
     date: '2026-06-30',
-    title: 'Task worktree ownership repair needed after escalated operations',
-    reason: 'после escalated операций task worktree может стать owned by nobody, обычный git падает с dubious ownership/not a git repository, а patch не может писать файлы; восстановить ownership worktree на mark:mark перед продолжением. Закрыто в PR #98: добавлен scripts/brai-task-repair-permissions.sh.',
+    title: 'Добавить repair для прав worktree',
+    description: 'Дать агенту штатную команду восстановления ownership task worktree. Результат: после escalated операций можно быстро вернуть worktree в рабочее состояние.',
+    reason: 'Задача появилась, потому что после escalated операций worktree мог стать owned by `nobody`, `git` выдавал `dubious ownership`, а patch-инструмент не мог писать файлы.',
     done: true
   },
   {
     id: 'operation:agent-task:infra-docs-handoff-merged-state',
     date: '2026-07-01',
-    title: 'Infra-docs handoff needed merged-state verification',
-    reason: 'infra-docs PR может остаться OPEN/BEHIND после включения auto-merge, а старый handoff receipt всё равно выглядит успешным; считать delivery завершённой только после MERGED или делать replacement ветку от актуального origin/main. Закрыто в PR #98: handoff receipt пишется только после MERGED.',
+    title: 'Проверять merge перед infra-docs handoff',
+    description: 'Считать infra-docs delivery завершённой только после фактического `MERGED`. Результат: handoff не сообщает успех, пока PR остаётся `OPEN` или `BEHIND`.',
+    reason: 'Задача появилась, когда auto-merge был включён, но PR ещё не был смержен, а старый handoff receipt выглядел как успешная доставка.',
     done: true
   },
   {
     id: 'operation:agent-task:preview-data-permissions',
     date: '2026-07-01',
-    title: 'Preview data permissions blocked deploy reset',
-    reason: 'preview deploy может упасть на reset SQLite файлов в /srv/projects/brai-envs/preview-*/data, если runtime создал их без deploy-группы; закрепить общий group-write через Ansible/systemd и повторять деплой тем же branch, чтобы slot переиспользовался без нового reset. Закрыто в PR #98: закреплены preview data group-write/setgid и recovery-сообщение.',
+    title: 'Закрепить group-write для preview data',
+    description: 'Настроить preview data directories так, чтобы deploy мог сбрасывать SQLite files без ручного вмешательства. Результат: повторный deploy той же ветки переиспользует slot и проходит reset.',
+    reason: 'Задача появилась, когда runtime создавал SQLite files в `/srv/projects/brai-envs/preview-*/data` без deploy group write, и preview deploy падал на reset.',
     done: true
+  },
+  {
+    id: 'operation:agent-task:accepted-preview-cleanup-idempotency',
+    date: '2026-07-02',
+    title: 'Сделать cleanup accepted previews устойчивым',
+    description: 'Ограничить cleanup старых accepted previews так, чтобы он не валил уже успешный production deploy. Результат: текущая accepted-ветка остаётся strict, а stale cleanup становится best-effort.',
+    reason: 'Задача появилась после acceptance PR #112: production deploy и slot release прошли, но `deploy-prod` остался failed из-за SSH reset и Temporal gRPC timeout при cleanup старых accepted previews.',
+    done: true
+  },
+  {
+    id: 'operation:agent-task:main-sync-current-worktree-ownership',
+    date: '2026-07-02',
+    title: 'Не ломать owner активного worktree при sync main',
+    description: 'Исправить `sync-local-main-checkout`, чтобы он не менял owner активных `.codex-worktrees/*`. Результат: после production sync текущий task worktree остаётся доступен обычному агенту.',
+    reason: 'Задача появилась после принятия PR #113: `sync-local-main-checkout` сделал активный worktree владельцем `root:mark`, и обычный `git` получил `dubious ownership`.',
+    done: false
   }
 ];
