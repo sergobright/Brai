@@ -1267,6 +1267,17 @@ test("accept preview checks verified preview before PR actions", () => {
   assert.match(script, /deliveryClass/);
 });
 
+test("accepted preview stale cleanup is best effort", () => {
+  const script = fs.readFileSync(path.join(process.cwd(), "deploy/scripts/ci-ssh-complete-accepted-previews.sh"), "utf8");
+  const requiredLoop = script.slice(script.indexOf('for index in "${!REQUIRED_BRANCHES[@]}"'), script.indexOf('if [[ "$MODE" == "promote" ]]'));
+  const cleanupLoop = script.slice(script.indexOf('for branch in "${CLEANUP_BRANCHES[@]}"'));
+
+  assert.match(requiredLoop, /exit 1/);
+  assert.match(cleanupLoop, /cleanup_previously_accepted_preview/);
+  assert.match(cleanupLoop, /Best-effort cleanup failed/);
+  assert.doesNotMatch(cleanupLoop, /exit 1/);
+});
+
 test("accepted preview branch lookup skips infra docs delivery PRs", () => {
   assert.deepEqual(acceptedPreviewBranches([
     {
