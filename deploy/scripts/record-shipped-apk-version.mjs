@@ -3,11 +3,10 @@ import process from "node:process";
 import { BraiStore } from "../../services/brai_api/src/store.js";
 
 const args = parseArgs(process.argv.slice(2));
-const appVersion = required(args, "version");
+const apkVersion = apkCounter(required(args, "version"));
 const versionCode = required(args, "version-code");
 const targetBranch = required(args, "target-branch");
 const targetCommit = required(args, "target-commit");
-const apkVersion = apkCounter(appVersion);
 const store = new BraiStore(required(args, "db"));
 
 try {
@@ -34,8 +33,9 @@ try {
 }
 
 function apkCounter(version) {
-  if (!/^\d+\.\d+\.\d+\.\d+$/.test(version)) throw new Error(`Invalid Brai X.Y.Z.S version: ${version}`);
-  return Number(version.split(".")[3]);
+  const value = Number(version);
+  if (!Number.isInteger(value) || value <= 0) throw new Error(`Invalid Brai APK version: ${version}`);
+  return value;
 }
 
 function parseArgs(values) {

@@ -73,7 +73,7 @@ Native-boundary preview branches SHALL publish a slot-specific APK before handof
 
 #### Scenario: Native preview branch is handed off
 - **WHEN** a `codex/*` branch changes native Android behavior
-- **THEN** the handoff includes the preview APK link and Android `versionCode`
+- **THEN** the handoff includes the preview APK link and APK `vN`
 
 #### Scenario: Native preview branch is accepted
 - **WHEN** a native preview branch is merged into `main`

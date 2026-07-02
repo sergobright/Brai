@@ -407,7 +407,7 @@ test('migration upgrades legacy inbox table before metadata indexes', async () =
   }
 });
 
-test('migration seeds unified build version ledger', async () => {
+test('migration seeds APK-only version ledger', async () => {
   const fixture = await createFixture(['2026-06-22T00:00:00.000Z']);
 
   try {
@@ -415,12 +415,12 @@ test('migration seeds unified build version ledger', async () => {
       .prepare('SELECT id FROM version_types ORDER BY id')
       .all()
       .map((row) => row.id);
-    assert.deepEqual(versionTypes, ['apk', 'build', 'canon', 'release']);
+    assert.deepEqual(versionTypes, ['apk']);
 
     const versions = fixture.store.db
       .prepare('SELECT * FROM build_versions ORDER BY version_type_id, version')
       .all();
-    assert.equal(versions.length, 2);
+    assert.equal(versions.length, 1);
 
     const baselineApk = versions.find((version) => version.version_type_id === 'apk' && version.version === 1);
     assert.ok(baselineApk);
@@ -428,17 +428,10 @@ test('migration seeds unified build version ledger', async () => {
     assert.equal(baselineApk.released_at_utc, '2026-06-23T09:13:50Z');
     assert.match(baselineApk.short_changes, /APK/);
     assert.match(baselineApk.detailed_changes, /versionCode 1/);
-    assert.match(baselineApk.detailed_changes, /Release signing material/);
-
-    const baselineBuild = versions.find((version) => version.version_type_id === 'build' && version.version === 1);
-    assert.ok(baselineBuild);
-    assert.equal(baselineBuild.included_in_version_id, null);
-    assert.equal(baselineBuild.released_at_utc, '2026-06-23T09:12:45Z');
-    assert.match(baselineBuild.short_changes, /web\/OTA/);
-    assert.match(baselineBuild.detailed_changes, /versionCode 1/);
+    assert.match(baselineApk.detailed_changes, /AccessibilityService/);
 
     fixture.store.migrate();
-    assert.equal(fixture.store.db.prepare('SELECT COUNT(*) AS count FROM build_versions').get().count, 2);
+    assert.equal(fixture.store.db.prepare('SELECT COUNT(*) AS count FROM build_versions').get().count, 1);
   } finally {
     await fixture.close();
   }
@@ -454,7 +447,7 @@ test('migration adds environment deployment ledger', async () => {
       branch: 'codex/example',
       commit: 'abc123456789',
       domain: 'a.test.brightos.world',
-      webOtaVersion: '0.0.1.2.42',
+      webOtaVersion: '0.0.1',
       shortChanges: 'Preview deploy',
       detailedChanges: 'Automated preview deploy.',
       reason: 'Preview accepted',
@@ -465,7 +458,7 @@ test('migration adds environment deployment ledger', async () => {
     assert.equal(records.length, 1);
     assert.equal(records[0].slot, 'A');
     assert.equal(records[0].branch, 'codex/example');
-    assert.equal(records[0].web_ota_version, '0.0.1.2.42');
+    assert.equal(records[0].web_ota_version, '0.0.1');
   } finally {
     await fixture.close();
   }

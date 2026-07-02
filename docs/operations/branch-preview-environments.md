@@ -20,7 +20,7 @@ A pushed preview-class `codex/*` branch allocates or reuses a preview slot throu
 
 If a `codex/*` pull request is closed without merge, GitHub Actions releases that branch's preview slot through the same `release-preview-slot` job used for deleted branches and manual releases. This covers superseded preview branches: the accepted replacement branch releases its own slot through production promotion, and the abandoned branch releases its slot when its PR closes.
 
-If the preview branch changes the Android native boundary, deploy also builds a slot-specific APK and records the APK file plus Android `versionCode` in the preview slot registry/status page. Preview OTA manifests then require that exact `versionCode`, so stale slot APKs block with an APK update screen instead of silently running an incompatible web bundle.
+If the preview branch changes the Android native boundary, deploy also builds a slot-specific APK and records the APK file plus APK `vN` in the preview slot registry/status page. Preview OTA manifests then require `targetApkVersion=N`, so stale slot APKs block with an APK update screen instead of silently running an incompatible web bundle.
 
 Infrastructure/documentation-only branches can use the Temporal no-preview path when the delivery class is `infra-docs`. That path records `delivery_classified`, `no_preview_required`, `delivery_handoff_*`, and `auto_merge_*` events instead of allocating a slot. Temporal then marks `preview_deploy`, `accepted_preview_promotion`, and `slot_release` as `not_applicable`; after `pr_merged`, the branch lifecycle is complete without a slot.
 
@@ -81,7 +81,7 @@ git config core.hooksPath .githooks
 Before a final preview-class implementation handoff, run:
 
 ```bash
-scripts/bright-preview-handoff.sh
+scripts/brai-preview-handoff.sh
 ```
 
 The verifier requires a clean tree, pushed `origin/<codex-branch>` at `HEAD`, successful `Brai delivery` jobs including `deploy-preview`, and a ready preview slot from the slot registry or Temporal. It writes an ignored `.brai-task/preview-handoff.json` receipt that the Codex `Stop` hook checks.
@@ -104,7 +104,7 @@ Acceptance trigger:
 
 - If the project owner says `Принято`, `принимаю`, `accepted`, or an equivalent acceptance phrase after a preview handoff, run `deploy/scripts/accept-preview.sh <codex-branch>` immediately. Negated phrases such as `пока не принято` or `не принято` are not acceptance triggers.
 - The script is the single local acceptance entrypoint. It first requires verified preview state for the exact `origin/<codex-branch>` head, then creates or reuses a GitHub PR into `main` and calls `gh pr merge --<method> --auto --match-head-commit <sha>`, defaulting to `squash` unless `BRAI_ACCEPT_MERGE_METHOD` is set to `merge` or `rebase`, so branch protection, checks, merge queue, production deploy, metadata promotion, and preview-slot release stay in GitHub Actions.
-- If the acceptance PR is `mergeStateStatus: DIRTY` or `BEHIND`, `accept-preview.sh` writes `status=reconcile_required`. Run `node scripts/brai-task.mjs acceptance-reconcile <codex-branch>`, resolve conflicts if any, commit, push the same branch, rerun `scripts/bright-preview-handoff.sh`, and rerun `deploy/scripts/accept-preview.sh <codex-branch>`. The original preview slot remains leased to that branch until production promotion releases it.
+- If the acceptance PR is `mergeStateStatus: DIRTY` or `BEHIND`, `accept-preview.sh` writes `status=reconcile_required`. Run `node scripts/brai-task.mjs acceptance-reconcile <codex-branch>`, resolve conflicts if any, commit, push the same branch, rerun `scripts/brai-preview-handoff.sh`, and rerun `deploy/scripts/accept-preview.sh <codex-branch>`. The original preview slot remains leased to that branch until production promotion releases it.
 - After starting acceptance, monitor GitHub Actions until production deploy and preview-slot release finish, or report the exact PR/check/merge-queue/deploy/release blocker. Accepted preview slots are released only by the successful `deploy-prod` post-step, after metadata promotion and production deploy; that step requires a real slot release and fails if the accepted branch did not release one.
 
 ## Required GitHub Settings
@@ -180,11 +180,10 @@ Preview Caddy routes keep the app shell protected with the unified Caddy Basic A
 Caddy Basic Auth or injected bearer headers. Brai API auth remains responsible for `/v1/*` data access,
 so newly installed Preview A-E apps may need their own in-app login session before sync turns green.
 
-If an environment exists before its first CI deploy, publish a baseline web/OTA layer without changing APK
-versions:
+If an environment exists before its first CI deploy, publish a baseline web/OTA layer without changing APK versions:
 
 ```bash
-BRAI_MIN_APK_VERSION_CODE=1 deploy/scripts/publish-environment-web-layer.sh preview-a preview-b preview-c preview-d preview-e
+BRAI_TARGET_APK_VERSION=1 deploy/scripts/publish-environment-web-layer.sh preview-a preview-b preview-c preview-d preview-e
 ```
 
 Ansible templates do not store passwords, Caddy auth hashes, deploy keys, Android signing secrets, or Brai API secrets. Per-environment Brai API secret env files live outside source under:

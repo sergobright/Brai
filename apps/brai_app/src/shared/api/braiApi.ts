@@ -228,17 +228,23 @@ export type AppVersionLedgerRow = {
   created_at_utc: string;
 };
 
+export type AppTargetApk = {
+  file: string;
+  version: number;
+  version_code: number;
+  release_url?: string | null;
+  published_at: string | null;
+  capabilities?: string[];
+};
+
 export type AppVersionState = {
   server_time_utc: string;
   version: string;
+  ota_version?: string | null;
   parts: Record<VersionTypeId, number>;
   latest: Record<VersionTypeId, AppVersionLedgerRow | null>;
-  apk_release: {
-    file: string;
-    version: string | null;
-    version_code: number;
-    published_at: string | null;
-  } | null;
+  target_apk: AppTargetApk | null;
+  apk_release?: AppTargetApk | null;
 };
 
 function fromActivitiesState(state: ActivitiesApiState): ActivitiesState {

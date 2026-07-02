@@ -1,8 +1,9 @@
-import type { AppVersionState, VersionTypeId } from "@/shared/api/braiApi";
+import type { AppVersionState } from "@/shared/api/braiApi";
 import type { BraiOtaState } from "@/shared/platform/ota";
 import type { Tone } from "../../appModel";
 
 const updateErrorMessages: Record<string, string> = {
+  apk_required: "Для этой OTA-версии нужно установить новый APK.",
   archive_checksum_mismatch: "Файл обновления скачался поврежденным. Запусти проверку еще раз.",
   archive_download_size_exceeded: "Файл обновления оказался больше ожидаемого. Установка остановлена.",
   archive_invalid_zip: "Архив обновления поврежден. Запусти проверку еще раз.",
@@ -16,11 +17,13 @@ const updateErrorMessages: Record<string, string> = {
   archive_url_not_https: "Адрес обновления небезопасный. Установка остановлена.",
   archive_url_untrusted_host: "Архив обновления находится не на сервере Brai. Установка остановлена.",
   archive_url_untrusted_path: "Архив обновления находится в неверном разделе сервера.",
-  bundle_incompatible: "Для этой web-версии нужно установить новый APK.",
+  bundle_incompatible: "Для этой OTA-версии нужно установить новый APK.",
   candidate_missing_entrypoint: "В обновлении нет стартового файла приложения. Нужна новая сборка.",
-  candidate_not_ready_before_restart: "Новая web-версия не подтвердила запуск. Оставлена стабильная версия.",
+  candidate_not_ready_before_restart: "Новая OTA-версия не подтвердила запуск. Оставлена стабильная версия.",
   duplicate_archive_entry: "Архив обновления содержит дубли файлов. Установка остановлена.",
   invalid_bundle_version: "Версия обновления записана неверно.",
+  invalid_native_apk_version: "Версия установленного APK записана неверно. Нужен новый APK.",
+  invalid_ota_version: "OTA-версия записана неверно.",
   invalid_entrypoint: "Стартовый файл обновления указан неверно.",
   invalid_sha256: "Контрольная сумма обновления указана неверно.",
   invalid_size: "Размер обновления указан неверно.",
@@ -33,8 +36,8 @@ const updateErrorMessages: Record<string, string> = {
   network_timeout: "Сервер обновлений не ответил вовремя. Попробуй еще раз.",
   network_tls_failed: "Не удалось установить защищенное соединение с сервером обновлений.",
   network_unavailable: "Телефон не видит сервер обновлений. Проверь интернет и попробуй еще раз.",
-  readiness_timeout: "Новая web-версия не успела запуститься. Оставлена стабильная версия.",
-  readiness_version_mismatch: "Запустилась не та web-версия. Оставлена стабильная версия.",
+  readiness_timeout: "Новая OTA-версия не успела запуститься. Оставлена стабильная версия.",
+  readiness_version_mismatch: "Запустилась не та OTA-версия. Оставлена стабильная версия.",
   unsafe_archive_entry: "Архив обновления выглядит небезопасно. Установка остановлена.",
   unsupported_channel: "Телефон не поддерживает канал этого обновления.",
   unsupported_manifest_schema: "Телефон не понимает формат этого обновления. Нужен новый APK.",
@@ -44,13 +47,7 @@ const updateErrorMessages: Record<string, string> = {
 
 const readyStatuses = new Set(["candidate_ready_for_next_start", "ready_candidate_pending", "candidate_already_pending"]);
 const downloadingStatuses = new Set(["checking", "downloading"]);
-const ledgerLabels: Record<VersionTypeId, string> = {
-  release: "Release",
-  build: "Build",
-  apk: "APK",
-  canon: "Canon",
-};
-const ledgerOrder: VersionTypeId[] = ["release", "build", "apk", "canon"];
+const apkRequiredStatuses = new Set(["apk_required", "incompatible"]);
 
 export type UpdateStatusView = {
   label: string;
@@ -68,22 +65,14 @@ export type EngineSectionView = {
   installedVersion: string;
   isChecking: boolean;
   apkUpdateAvailable: boolean;
-  apkReleaseVersion: string | null;
-  apkReleaseVersionCode: number | null;
+  requiredApkVersion: number | null;
+  apkReleaseUrl: string;
   latestVersion: string;
-  ledgerRows: Array<{
-    id: VersionTypeId;
-    label: string;
-    version: string;
-    shortChanges: string;
-    releasedAtUtc: string;
-  }>;
-  nativeApk: string | null;
   updateStatus: UpdateStatusView;
 };
 
 /**
- * Combines runtime ledger and native OTA state into the Engine page view.
+ * Combines API and native OTA state into the Engine page view.
  */
 export function engineSectionView({
   appBuild,
@@ -100,28 +89,28 @@ export function engineSectionView({
   versionError: boolean;
   versionRefreshing: boolean;
 }): EngineSectionView {
-  const activeWebVersion = otaState?.activeBundleVersion ?? appBuild;
-  const installedVersion = unifiedVersion(activeWebVersion) ?? appBuild;
+  const activeWebVersion = otaVersion(otaState?.activeBundleVersion) ?? otaVersion(appBuild) ?? "0.0.0";
+  const installedVersion = activeWebVersion;
   const latestVersion = latestKnownVersion(
     installedVersion,
-    appVersionState?.version,
-    unifiedVersion(otaState?.candidateBundleVersion),
-    unifiedVersion(otaState?.downloadProgressVersion),
+    appVersionState?.ota_version ?? appVersionState?.version,
+    otaState?.candidateBundleVersion,
+    otaState?.downloadProgressVersion,
   );
-  const nativeApk = nativeApkLabel(otaState) ?? (appVersionState?.latest.apk ? `${appVersionState.latest.apk.version}` : null);
-  const apkRelease = appVersionState?.apk_release ?? null;
-  const nativeVersionCode = otaState?.nativeVersionCode;
+  const nativeApkVersion = apkVersion(otaState?.nativeApkVersion ?? otaState?.nativeVersionName);
+  const targetApkVersion = apkVersion(otaState?.targetApkVersion);
+  const requiredApkVersion = targetApkVersion ?? appVersionState?.target_apk?.version ?? appVersionState?.apk_release?.version ?? null;
   const apkUpdateAvailable = Boolean(
-    apkRelease && typeof nativeVersionCode === "number" && apkRelease.version_code > nativeVersionCode,
+    (targetApkVersion && nativeApkVersion && targetApkVersion > nativeApkVersion) ||
+      (otaState?.lastCheckStatus && apkRequiredStatuses.has(otaState.lastCheckStatus)),
   );
   const isChecking = otaRefreshing || versionRefreshing || Boolean(otaState?.checkInProgress);
   const visibleState =
     !isChecking && otaState?.lastCheckStatus === "checking" ? { ...otaState, lastCheckStatus: "unknown" } : otaState;
   const hasUpdate = apkUpdateAvailable || compareBrightVersions(latestVersion, installedVersion) > 0 || hasReadyOtaUpdate(visibleState);
   const androidUpdateStage = androidStage(visibleState, hasUpdate);
+  const apkReleaseUrl = otaState?.targetApkReleaseUrl || appVersionState?.target_apk?.release_url || "/releases/";
   const updateStatus = engineStatusView({
-    apkReleaseVersion: apkRelease?.version ?? null,
-    apkReleaseVersionCode: apkRelease?.version_code ?? null,
     apkUpdateAvailable,
     hasUpdate,
     isChecking,
@@ -136,22 +125,20 @@ export function engineSectionView({
     androidUpdateStage,
     appBuild,
     apkUpdateAvailable,
-    apkReleaseVersion: apkRelease?.version ?? null,
-    apkReleaseVersionCode: apkRelease?.version_code ?? null,
-    downloadProgressVersion: visibleState?.downloadProgressVersion ?? null,
+    requiredApkVersion,
+    apkReleaseUrl,
+    downloadProgressVersion: otaVersion(visibleState?.downloadProgressVersion),
     downloadProgressPercent: progressPercent(visibleState),
     hasUpdate,
     installedVersion,
     isChecking,
     latestVersion,
-    ledgerRows: ledgerRows(appVersionState),
-    nativeApk,
     updateStatus,
   };
 }
 
 /**
- * Compares Brai X.Y.Z.S versions and ignores non-production suffixes.
+ * Compares Brai OTA X.Y.Z versions.
  */
 export function compareBrightVersions(left: string, right: string): number {
   const leftParts = brightVersionParts(left);
@@ -164,21 +151,7 @@ export function compareBrightVersions(left: string, right: string): number {
 }
 
 /**
- * Formats the native APK identity from the Android OTA bridge state.
- */
-export function nativeApkLabel(state: BraiOtaState | null): string | null {
-  if (state?.nativeVersionName) {
-    const version = isUnifiedVersion(state.nativeVersionName) || !state.nativeBuild ? state.nativeVersionName : `${state.nativeVersionName}+${state.nativeBuild}`;
-    return state.nativeVersionCode ? `${version} (${state.nativeVersionCode})` : version;
-  }
-  const fallbackUnified = unifiedVersion(state?.fallbackBundleVersion);
-  if (fallbackUnified) return fallbackUnified;
-  const match = state?.fallbackBundleVersion?.match(/^([0-9.]+)\+([0-9]+)\.web\./);
-  return match ? `${match[1]}+${match[2]}` : null;
-}
-
-/**
- * Converts native OTA error codes and legacy raw messages into user-facing text.
+ * Converts native OTA error codes into user-facing Russian copy.
  */
 export function humanUpdateError(raw: string | null | undefined): string {
   const value = raw?.trim();
@@ -209,8 +182,6 @@ export function humanUpdateError(raw: string | null | undefined): string {
 }
 
 function engineStatusView({
-  apkReleaseVersion,
-  apkReleaseVersionCode,
   apkUpdateAvailable,
   hasUpdate,
   isChecking,
@@ -219,8 +190,6 @@ function engineStatusView({
   versionError,
   versionKnown,
 }: {
-  apkReleaseVersion: string | null;
-  apkReleaseVersionCode: number | null;
   apkUpdateAvailable: boolean;
   hasUpdate: boolean;
   isChecking: boolean;
@@ -235,33 +204,31 @@ function engineStatusView({
     case "candidate_ready_for_next_start":
     case "ready_candidate_pending":
     case "candidate_already_pending":
-      return { label: "готово", body: "Закройте приложение, чтобы новая версия применилась.", tone: "warn" };
+      return { label: "готово", body: `OTA-версия ${latestVersion} загружена.`, tone: "warn" };
     case "downloading":
-      return { label: "загрузка", body: `Загружается версия ${latestVersion}.`, tone: "warn" };
+      return { label: "загрузка", body: `Загружается OTA-версия ${latestVersion}.`, tone: "warn" };
     case "candidate_loading":
-      return { label: "загрузка", body: "Запускается новая web-версия.", tone: "warn" };
+      return { label: "загрузка", body: "Запускается новая OTA-версия.", tone: "warn" };
     case "candidate_failed":
     case "check_failed":
       return { label: "ошибка", body: `Обновление не установилось. ${humanUpdateError(otaState.lastUpdateError)}`, tone: "bad" };
     case "skipped_failed_bundle":
       return {
         label: "пропущено",
-        body: "Эта web-версия уже не запустилась на телефоне. Дождись следующей версии или установи новый APK.",
+        body: "Эта OTA-версия уже не запустилась на телефоне. Дождись следующей версии или установи новый APK.",
         tone: "bad",
       };
+    case "apk_required":
     case "incompatible":
-      return { label: "нужен APK", body: "Для этой web-версии нужно установить новый APK.", tone: "bad" };
+      return { label: "нужен APK", body: "Нужен новый APK для этой OTA-версии.", tone: "bad" };
     default:
       break;
   }
 
-  if (apkUpdateAvailable) {
-    const code = apkReleaseVersionCode ? `, versionCode ${apkReleaseVersionCode}` : "";
-    return { label: "нужен APK", body: `Доступен новый APK v${apkReleaseVersion ?? latestVersion}${code}.`, tone: "warn" };
-  }
-  if (hasUpdate) return { label: "доступно", body: `Доступна версия ${latestVersion}.`, tone: "warn" };
+  if (apkUpdateAvailable) return { label: "нужен APK", body: "Нужен новый APK для этой OTA-версии.", tone: "warn" };
+  if (hasUpdate) return { label: "доступно", body: `Доступна OTA-версия ${latestVersion}.`, tone: "warn" };
   if (versionError && !versionKnown) return { label: "нет связи", body: "Не удалось проверить последнюю версию.", tone: "muted" };
-  return { label: "актуально", body: "Установлена текущая версия Brai.", tone: "ok" };
+  return { label: "актуально", body: "Установлена текущая OTA-версия Brai.", tone: "ok" };
 }
 
 function hasReadyOtaUpdate(state: BraiOtaState | null): boolean {
@@ -290,38 +257,24 @@ function clampProgress(value: number): number {
 
 function latestKnownVersion(installedVersion: string, ...versions: Array<string | null | undefined>): string {
   return versions.reduce<string>((latest, version) => {
-    if (!version) return latest;
-    return compareBrightVersions(version, latest) > 0 ? version : latest;
+    const normalized = otaVersion(version);
+    if (!normalized) return latest;
+    return compareBrightVersions(normalized, latest) > 0 ? normalized : latest;
   }, installedVersion);
 }
 
-function ledgerRows(state: AppVersionState | null): EngineSectionView["ledgerRows"] {
-  if (!state) return [];
-  return ledgerOrder.flatMap((id) => {
-    const row = state.latest[id];
-    return row
-      ? [{
-          id,
-          label: ledgerLabels[id],
-          version: `${row.version}`,
-          shortChanges: row.short_changes,
-          releasedAtUtc: row.released_at_utc,
-        }]
-      : [];
-  });
-}
-
-function brightVersionParts(value: string | null | undefined): [number, number, number, number] | null {
-  const match = value?.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)/);
+function brightVersionParts(value: string | null | undefined): [number, number, number] | null {
+  const match = value?.match(/^(\d+)\.(\d+)\.(\d+)/);
   if (!match) return null;
-  return [Number(match[1]), Number(match[2]), Number(match[3]), Number(match[4])];
+  return [Number(match[1]), Number(match[2]), Number(match[3])];
 }
 
-function isUnifiedVersion(value: string): boolean {
-  return /^\d+\.\d+\.\d+\.\d+$/.test(value);
+function otaVersion(value: string | null | undefined): string | null {
+  const match = value?.match(/^(\d+)\.(\d+)\.(\d+)(?:$|[.+_-])/);
+  return match ? `${match[1]}.${match[2]}.${match[3]}` : null;
 }
 
-function unifiedVersion(value: string | null | undefined): string | null {
-  const match = value?.match(/^(\d+\.\d+\.\d+\.\d+)(?:$|[.+-])/);
-  return match?.[1] ?? null;
+function apkVersion(value: string | number | null | undefined): number | null {
+  const version = Number(value);
+  return Number.isInteger(version) && version > 0 ? version : null;
 }

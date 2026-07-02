@@ -1,17 +1,15 @@
-import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
+import { apkReleaseTargetByFlavor } from "./apk-release-targets.mjs";
 
 const flavor = process.argv[2];
 const root = process.env.BRAI_ROOT ?? path.resolve(import.meta.dirname, "../..");
-const { environments } = JSON.parse(fs.readFileSync(path.join(root, "deploy/environments.json"), "utf8"));
-const entry = Object.entries(environments).find(([, env]) => env.androidFlavor === flavor);
+const entry = apkReleaseTargetByFlavor(flavor, root);
 if (!entry) throw new Error(`unknown Android flavor: ${flavor}`);
 
-const [environment, env] = entry;
-console.log(environment);
-console.log(environment.startsWith("preview-") ? env.displayLabel : "");
-console.log(env.domain);
+console.log(entry.environment);
+console.log(entry.environment.startsWith("preview-") ? entry.displayLabel : "");
+console.log(entry.domain);
 console.log(`assemble${flavor[0].toUpperCase()}${flavor.slice(1)}Release`);
-console.log(env.releaseKey);
-console.log(env.path);
+console.log(entry.releaseKey);
+console.log(entry.path);

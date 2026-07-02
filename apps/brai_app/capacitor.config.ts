@@ -1,7 +1,7 @@
 import type { CapacitorConfig } from "@capacitor/cli";
 
 const config: CapacitorConfig = {
-  appId: "world.brightos.bright_os_client",
+  appId: "world.brightos.brai",
   appName: "Brai",
   webDir: "out",
   android: {

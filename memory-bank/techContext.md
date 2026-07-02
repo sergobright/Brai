@@ -21,18 +21,16 @@ npm run app:test
 npm --prefix services/brai_api test
 ```
 
-Public version baseline:
+Version baseline after the APK reset:
 
-- Baseline version: `0.0.1.1`
+- OTA/web version format: `X.Y.Z`
+- APK version format: `vN`
+- Initial APK: `v1`
+- Android `versionName`: `1`
 - Android `versionCode`: `1`
 - Release ledger table: `build_versions`
-- Runtime `build_versions` is the source of truth for typed counters: `apk`, `build`, `release`, `canon`.
-- `build_versions.version` is an integer scoped to `version_type_id`.
-- Public app version is assembled as `canon.release.build.apk` from latest counters, using `0` for missing `canon` or `release`.
-- Accepted working-branch merge into `main`: add one `build` row.
-- Production deploy from `main`: no automatic `release` or `canon` row.
-- Explicit release command: add one `release` row and link unlinked `build` rows plus the current `apk`.
-- Explicit canon command: add one `canon` row and link unlinked `release` rows.
+- Runtime `build_versions` is the APK ledger only and should contain the `apk` counter.
+- Accepted working-branch merge into `main`: record deployment metadata without `build`, `release`, or `canon` rows.
 - GitHub PR numbers are review metadata and do not define version numbers.
 
 Do not commit SQLite files, APKs, OTA bundles, keystores, `.env` files, private keys, or generated deploy output such as `deploy/web` and `deploy/mobile-update`.

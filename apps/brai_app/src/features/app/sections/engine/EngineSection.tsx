@@ -49,7 +49,7 @@ export function EngineSection({
     <section className={cx(SECTION_GRID_CLASS, "content-start items-start xl:w-1/2")} aria-label="Engine">
       <Card className="grid w-full content-start gap-3 self-start p-4 sm:gap-4 sm:p-5">
         <div className="grid gap-1.5">
-          <h2 className="m-0 text-lg leading-tight tracking-normal sm:text-xl">Текущая версия v{view.installedVersion}</h2>
+          <h2 className="m-0 text-lg leading-tight tracking-normal sm:text-xl">Текущая OTA-версия {view.installedVersion}</h2>
           <p className="m-0 text-sm leading-5 text-muted-foreground">{view.updateStatus.body}</p>
           {checkedAt ? <p className="m-0 text-xs text-muted-foreground">Проверено {moscowTime(checkedAt)}</p> : null}
         </div>
@@ -69,7 +69,7 @@ export function EngineSection({
 function WebUpdateNotice({ latestVersion }: { latestVersion: string }) {
   return (
     <div className="grid gap-1 rounded-md border border-border bg-muted/50 px-3 py-2.5">
-      <p className="m-0 text-sm font-medium">Доступно обновление v{latestVersion}</p>
+      <p className="m-0 text-sm font-medium">Доступна OTA-версия {latestVersion}</p>
       <p className="m-0 text-sm text-muted-foreground">Перезагрузите страницу, чтобы получить новую версию.</p>
     </div>
   );
@@ -78,11 +78,12 @@ function WebUpdateNotice({ latestVersion }: { latestVersion: string }) {
 function AndroidUpdateNotice({ view }: { view: ReturnType<typeof engineSectionView> }) {
   if (view.apkUpdateAvailable) {
     return (
-      <div className="rounded-md border border-border bg-muted/50 px-3 py-2.5">
-        <p className="m-0 text-sm font-medium">Доступен новый APK v{view.apkReleaseVersion ?? view.latestVersion}</p>
-        <p className="m-0 text-sm text-muted-foreground">
-          Откройте APK-релизы и установите сборку versionCode {view.apkReleaseVersionCode ?? "новее"}.
-        </p>
+      <div className="grid gap-2 rounded-md border border-border bg-muted/50 px-3 py-2.5">
+        <p className="m-0 text-sm font-medium">Нужен новый APK</p>
+        <p className="m-0 text-sm text-muted-foreground">Требуется APK v{view.requiredApkVersion ?? "новее"}.</p>
+        <a className="text-sm font-semibold text-primary underline-offset-4 hover:underline" href={view.apkReleaseUrl}>
+          Открыть APK-релизы
+        </a>
       </div>
     );
   }
@@ -90,7 +91,7 @@ function AndroidUpdateNotice({ view }: { view: ReturnType<typeof engineSectionVi
   if (view.androidUpdateStage === "ready") {
     return (
       <div className="rounded-md border border-border bg-muted/50 px-3 py-2.5">
-        <p className="m-0 text-sm font-medium">Обновление v{view.latestVersion} загружено</p>
+        <p className="m-0 text-sm font-medium">OTA-версия {view.latestVersion} загружена</p>
         <p className="m-0 text-sm text-muted-foreground">Закройте приложение, чтобы новая версия применилась.</p>
       </div>
     );
@@ -102,7 +103,7 @@ function AndroidUpdateNotice({ view }: { view: ReturnType<typeof engineSectionVi
     return (
       <Field className="gap-2 rounded-md border border-border bg-muted/50 px-3 py-2.5">
         <FieldLabel htmlFor="engine-update-progress" className="flex w-full items-center gap-2 text-sm">
-          <span className="min-w-0 truncate">Загрузка версии v{version}</span>
+          <span className="min-w-0 truncate">Загрузка OTA-версии {version}</span>
           <span className="ml-auto tabular-nums">{progress}%</span>
         </FieldLabel>
         <Progress value={progress} id="engine-update-progress" className="h-1.5" />
@@ -112,7 +113,7 @@ function AndroidUpdateNotice({ view }: { view: ReturnType<typeof engineSectionVi
 
   return (
     <div className="rounded-md border border-border bg-muted/50 px-3 py-2.5">
-      <p className="m-0 text-sm font-medium">Доступна новая версия v{view.latestVersion}</p>
+      <p className="m-0 text-sm font-medium">Доступна OTA-версия {view.latestVersion}</p>
       <p className="m-0 text-sm text-muted-foreground">Нажмите «Проверить обновления», чтобы скачать её.</p>
     </div>
   );

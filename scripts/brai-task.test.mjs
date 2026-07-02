@@ -268,6 +268,7 @@ test("delivery classifier separates infra-docs from runtime preview", () => {
   assert.equal(deliveryClassForFile("apps/brai_app/tests/unit/publishScripts.test.ts"), "infra");
   assert.equal(deliveryClassForFile("deploy/environments.json"), "infra");
   assert.equal(deliveryClassForFile("deploy/ansible/brai.yml"), "infra");
+  assert.equal(deliveryClassForFile("deploy/scripts/apk-release-targets.mjs"), "infra");
   assert.equal(deliveryClassForFile("deploy/scripts/build-nonproduction-apks.sh"), "infra");
   assert.equal(deliveryClassForFile("deploy/scripts/resolve-deploy-env.mjs"), "infra");
   assert.equal(deliveryClassForFile("deploy/scripts/classify-delivery.mjs"), "infra");
@@ -292,6 +293,7 @@ test("native APK detector ignores OTA web-layer changes", () => {
   assert.equal(requiresNativeApkChange(["deploy/scripts/ci-ssh-deploy.sh"]), true);
   assert.equal(requiresNativeApkChange(["deploy/scripts/ci-ssh-release-slot.sh"]), true);
   assert.equal(requiresNativeApkChange(["deploy/scripts/detect-native-apk-change.mjs"]), true);
+  assert.equal(requiresNativeApkChange(["deploy/scripts/apk-release-targets.mjs"]), true);
   assert.equal(requiresNativeApkChange(["deploy/scripts/resolve-app-version.mjs"]), true);
   assert.equal(requiresNativeApkChange(["apps/brai_app/src/shared/platform/ota.ts"]), false);
   assert.equal(requiresNativeApkChange(["apps/brai_app/src/shared/platform/androidTimerNotification.ts"]), false);

@@ -93,7 +93,7 @@ Brai SHALL publish ordinary client web-layer releases to both the browser web ro
 - **AND** publishes that output to `deploy/web`
 - **AND** publishes an Android OTA bundle from that same output to `deploy/mobile-update`
 - **AND** does not require a new APK
-- **AND** uses the same `X.Y.Z.S` version for browser web and Android OTA
+- **AND** uses the same `X.Y.Z` version for browser web and Android OTA
 
 ### Requirement: Native Android changes publish release APK artifacts
 Brai SHALL publish a release APK whenever a change crosses the native Android release boundary.
@@ -104,44 +104,39 @@ Brai SHALL publish a release APK whenever a change crosses the native Android re
 - **AND** publishes the APK artifact to `deploy/releases`
 - **AND** updates and verifies the release page metadata
 
-### Requirement: Release versions use one build ledger
-Brai SHALL track public release versions in the server SQLite `build_versions` table with type metadata from `version_types`.
+### Requirement: APK and OTA versions are separate
+Brai SHALL track only APK public releases in the server SQLite `build_versions` table.
 
-`build_versions.version` SHALL be an integer counter scoped to `version_type_id`.
+`build_versions.version` SHALL be the integer APK counter for `version_type_id = apk`.
 
-The public app version SHALL be assembled as `canon.release.build.apk` from the latest counters. Missing `canon` or `release` counters SHALL be treated as `0`.
+The public APK version SHALL be `vN`. The browser web and Android OTA version SHALL be `X.Y.Z` and SHALL NOT be assembled from `build_versions`.
 
-`short_changes` and `detailed_changes` SHALL contain Russian human-readable release notes about what changed in the product or delivery workflow.
+`short_changes` and `detailed_changes` SHALL contain Russian human-readable notes about the APK capabilities.
 
-`reason` SHALL be written in Russian and describe the human reason for the change: the problem, risk, or product/workflow need that made the change necessary. Branch names, commit SHAs, target commits, domains, and similar audit metadata SHALL NOT be stored in `reason`; it belongs in `build_version_refs` or deployment records.
+`reason` SHALL be written in Russian and describe the human reason for the APK release. Branch names, commit SHAs, target commits, domains, and similar audit metadata SHALL NOT be stored in `reason`; it belongs in `build_version_refs` or deployment records.
+
+#### Scenario: Fresh or reset database is initialized
+- **WHEN** the runtime database is initialized or explicitly reset for APK-only versioning
+- **THEN** `build_versions` contains exactly one row with `version_type_id = apk` and `version = 1`
+- **AND** `version_types` does not require `build`, `release`, or `canon`
 
 #### Scenario: Task branch is prepared
 - **WHEN** a `codex/*` task branch is created or updated before acceptance
 - **THEN** it does not write a `build_versions` row by itself
-- **AND** defers the version ledger row until the task is accepted into `main`
 
 #### Scenario: Accepted task lands in main
 - **WHEN** a `codex/*` task branch is accepted and merged into `main`
-- **THEN** the workflow writes one `build_versions` row with `version_type_id = build`
-- **AND** sets `version` to the next build counter value
-- **AND** stores short changes, detailed changes, reason, and release time
-- **AND** stores branch and commit audit metadata in `build_version_refs`
-
-#### Scenario: Main is deployed to production
-- **WHEN** accepted `main` is deployed to production
-- **THEN** the workflow does not create `release` or `canon` rows automatically
-- **AND** does not increment the release or canon counters
+- **THEN** the workflow records deployment metadata without creating `build`, `release`, or `canon` version rows
 
 #### Scenario: APK release is prepared
 - **WHEN** the project owner asks to make or publish an APK release
-- **THEN** the workflow writes one `build_versions` row with `version_type_id = apk`
-- **AND** sets `version` to the next APK counter value
-- **AND** stores short changes, detailed changes, reason, and release time
+- **THEN** the workflow builds and publishes APK artifacts with the current APK counter `N`
+- **AND** Android `versionName` is `N`
+- **AND** Android `versionCode` is `N` unless a future APK release explicitly increments both together
 
 #### Scenario: Release or canon version is requested
-- **WHEN** the project owner explicitly asks to create a release or canon version
-- **THEN** the workflow writes the requested `release` or `canon` row with the next counter value for that type
-- **AND** links included versions through `included_in_version_id`
+- **WHEN** a request asks to create a `release` or `canon` version row
+- **THEN** the workflow stops with an explicit error because release/canon rows are disabled by APK-only versioning
 
 #### Scenario: Separate web or OTA version is requested
 - **WHEN** a request asks to publish or update only browser web, only OTA, or different browser web and Android OTA versions
@@ -190,13 +185,14 @@ Brai SHALL provide non-production Android flavors for preview slots `A` through 
 - **THEN** they use separate application ids, labels, icons, and OTA channels
 - **AND** they can be installed side-by-side with production
 
-### Requirement: Non-production APK builds use exact OTA compatibility
-Brai SHALL keep Preview APK artifacts aligned with their OTA manifests through a monotonic technical Android `versionCode`.
+### Requirement: Non-production APK builds use APK target compatibility
+Brai SHALL keep Preview APK artifacts aligned with their OTA manifests through the public APK counter `N`.
 
 #### Scenario: Native preview APK is published
 - **WHEN** a `codex/*` branch changes the native Android boundary
-- **THEN** the allocated preview slot APK is built with a new Android `versionCode`
-- **AND** the preview release metadata records that APK file and `versionCode`
+- **THEN** the allocated preview slot APK is built with Android `versionName=N` and `versionCode=N`
+- **AND** the preview release metadata records that APK file and APK version `N`
+- **AND** the Preview OTA manifest sets `targetApkVersion` to `N`
 
 #### Scenario: Accepted native work reaches production
 - **WHEN** native-boundary work is accepted into `main`

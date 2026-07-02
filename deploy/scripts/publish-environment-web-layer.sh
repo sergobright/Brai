@@ -11,13 +11,19 @@ if [[ "$#" -eq 0 ]]; then
   exit 1
 fi
 
-VERSION="${BRAI_APP_VERSION:-$("$NODE_BIN" -e '
+VERSION="$("$NODE_BIN" -e '
 const fs = require("node:fs");
 const path = require("node:path");
 const root = process.argv[1];
-const parsed = JSON.parse(fs.readFileSync(path.join(root, "apps/brai_app/public/version.json"), "utf8"));
-console.log(parsed.version);
-' "$ROOT")}"
+let version = process.env.BRAI_APP_VERSION || "";
+if (!version) {
+  const parsed = JSON.parse(fs.readFileSync(path.join(root, "apps/brai_app/public/version.json"), "utf8"));
+  version = String(parsed.version || "");
+}
+const match = version.match(/^(\d+)\.(\d+)\.(\d+)(?:\.|$)/);
+if (!match) throw new Error("Unable to resolve Brai X.Y.Z app version");
+console.log(match.slice(1, 4).join("."));
+' "$ROOT")"
 
 for ENVIRONMENT in "$@"; do
   mapfile -t META < <("$NODE_BIN" -e '
@@ -43,7 +49,7 @@ console.log(key.startsWith("preview-") ? env.displayLabel : "");
   BRAI_MOBILE_TARGET="$TARGET_ROOT/mobile-update" \
   BRAI_UPDATE_BASE_URL="https://$DOMAIN/mobile-update" \
   BRAI_APP_VERSION="$VERSION" \
-  BRAI_MOBILE_BUNDLE_VERSION="${BRAI_MOBILE_BUNDLE_VERSION:-$VERSION.0}" \
+  BRAI_MOBILE_BUNDLE_VERSION="${BRAI_MOBILE_BUNDLE_VERSION:-$VERSION}" \
   NEXT_PUBLIC_BRAI_ENVIRONMENT="$ENVIRONMENT" \
   NEXT_PUBLIC_BRAI_PREVIEW_SLOT="$SLOT" \
   NEXT_PUBLIC_BRAI_BRANCH="${BRAI_BRANCH:-}" \

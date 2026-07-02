@@ -2,11 +2,13 @@
 <resources>
     <string name="app_name">Brai</string>
     <string name="title_activity_main">Brai</string>
-    <string name="package_name">world.brightos.bright_os_client</string>
-    <string name="custom_url_scheme">world.brightos.bright_os_client</string>
+    <string name="package_name">world.brightos.brai</string>
+    <string name="custom_url_scheme">world.brightos.brai</string>
     <string name="focus_timer_notification_channel">Фокус</string>
     <string name="focus_timer_notification_channel_description">Активный таймер фокуса Brai</string>
     <string name="focus_timer_notification_title">Brai Focus</string>
     <string name="focus_timer_notification_text">Таймер фокуса запущен</string>
     <string name="focus_timer_notification_stop">Остановить</string>
+    <string name="brai_accessibility_service_label">Brai Accessibility</string>
+    <string name="brai_accessibility_service_description">Помогает Brai выполнять разрешенные пользователем действия на устройстве.</string>
 </resources>

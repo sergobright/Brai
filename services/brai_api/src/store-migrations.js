@@ -74,7 +74,7 @@ export const migrationMethods = {
     this.ensureVersionSchema();
     if (!this.hasMigration(9)) {
       this.seedInitialBuildVersion();
-      this.recordMigration(9, 'add unified build version ledger');
+      this.recordMigration(9, 'add APK-only version ledger');
     }
 
     this.ensureDeploymentSchema();
@@ -234,6 +234,11 @@ export const migrationMethods = {
       this.ensureTableDescriptions();
       this.seedAgentTaskActivities();
       this.recordMigration(43, 'repair operation activity text fields');
+    }
+
+    if (!this.hasMigration(44)) {
+      this.ensureTableDescriptions();
+      this.recordMigration(44, 'switch version ledger runtime to APK-only');
     }
   }
 ,
@@ -601,8 +606,8 @@ export const migrationMethods = {
       ['activity_events', 'События действий', 'Журнал изменений действий.', 'Хранит каждое клиентское изменение по действиям для синхронизации, аудита и восстановления текущей таблицы activities. Поле change_type хранит тип изменения.'],
       ['activity_types', 'Типы действий', 'Справочник типов activities.', 'Хранит разрешённые типы activities для поля activities.activity_type_id: action для пользовательских действий и operation для внутренних задач агента.'],
       ['app_settings', 'Настройки', 'Глобальные настройки приложения.', 'Хранит runtime-настройки в формате ключ-значение: дату старта цели, длительность цели, дневную норму фокуса и похожие параметры.'],
-      ['build_version_refs', 'Связи версий', 'Технические связи версий.', 'Хранит source/target branch и commit для build_versions, чтобы audit-метаданные не подменяли короткое изменение, детальные изменения и причину выпуска.'],
-      ['build_versions', 'Версии', 'Типизированный журнал версий.', 'Хранит версии типов apk, build, release и canon. Поле version является счётчиком внутри типа; included_in_version_id связывает build/APK с release и release с canon. Публичная строка версии собирается из последних счётчиков.'],
+      ['build_version_refs', 'Связи APK-версий', 'Технические связи APK-версий.', 'Хранит source/target branch и commit для APK-записей build_versions, чтобы audit-метаданные не подменяли короткое изменение, детальные изменения и причину выпуска.'],
+      ['build_versions', 'APK-версии', 'Журнал APK-версий.', 'Хранит активный APK-only ledger. Поле version является APK-счётчиком; build, release и canon строки больше не создаются runtime-кодом.'],
       ['deployment_records', 'Деплои', 'Журнал выкладок.', 'Хранит факты деплоя: окружение, ветку, commit, домен, web/OTA версию, APK версию и описание доставки.'],
       ['focus_sessions', 'Сессии фокуса', 'Стабильные Focus-сессии.', 'Хранит стабильные идентификаторы Focus-сессий, soft-delete метку, origin старта и activity, из которой сессия была начата. Время хранится в focus_session_intervals.'],
       ['focus_session_sources', 'Источники Focus-сессий', 'Связи Focus-сессий и событий.', 'Связывает итоговые Focus-сессии с timer_events, из которых они получились при deterministic replay.'],
@@ -618,7 +623,7 @@ export const migrationMethods = {
       ['table_descriptions', 'Описания таблиц', 'Справочник описаний таблиц.', 'Хранит читаемый русский заголовок и описание для каждой SQLite-таблицы, которые показывает admin-панель.'],
       ['timer_devices', 'Устройства', 'Устройства синхронизации.', 'Хранит устройства, которые отправляют события фокуса и действий: stable device_id, платформу, имя и параметры синхронизации.'],
       ['timer_events', 'События фокуса', 'Журнал событий фокуса.', 'Хранит start, stop, start_activity_focus, switch_activity_focus, stop_activity_focus, edit_session, edit_focus_interval и delete_session события фокуса с устройством, клиентской и серверной последовательностью.'],
-      ['version_types', 'Типы версий', 'Справочник типов версий.', 'Хранит типы записей для build_versions: apk, build, release и canon.']
+      ['version_types', 'Типы версий', 'Справочник типов версий.', 'Хранит активный тип записей build_versions: apk. Legacy-типы build, release и canon больше не создаются свежей базой.']
     ];
     const actualTables = new Set(
       this.db
@@ -1296,27 +1301,9 @@ export const migrationMethods = {
       ON CONFLICT(id) DO NOTHING
     `);
     insertType.run(
-      'build',
-      'Сборка',
-      'Принятая web/OTA сборка Brai. Увеличивает Z в версии X.Y.Z.S.',
-      now
-    );
-    insertType.run(
       'apk',
       'APK',
       'Публичная Android APK-линия. Увеличивается только при осознанном выпуске нового APK.',
-      now
-    );
-    insertType.run(
-      'release',
-      'Релиз',
-      'Ручной релиз, который группирует принятые сборки и текущую APK-запись.',
-      now
-    );
-    insertType.run(
-      'canon',
-      'Канон',
-      'Ручной канон, который группирует релизы для публичной линии.',
       now
     );
   }
@@ -1498,7 +1485,6 @@ export const migrationMethods = {
 
   seedInitialBuildVersion() {
     const now = new Date().toISOString();
-    const buildReleasedAt = '2026-06-23T09:12:45Z';
     const apkReleasedAt = '2026-06-23T09:13:50Z';
     const insertVersion = this.db.prepare(`
         INSERT INTO build_versions (
@@ -1515,22 +1501,12 @@ export const migrationMethods = {
         ON CONFLICT(version_type_id, version) DO NOTHING
       `);
     insertVersion.run(
-      'build',
-      1,
-      null,
-      'Первичная публичная web/OTA-сборка.',
-      'Опубликована baseline web/OTA-сборка 1 с минимальным Android versionCode 1.',
-      'Нужно зафиксировать первую чистую публичную web/OTA-версию.',
-      buildReleasedAt,
-      now
-    );
-    insertVersion.run(
       'apk',
       1,
       null,
       'Первичная публичная APK-сборка.',
-      'APK baseline 1 использует Android versionCode 1. Release signing material хранится вне репозитория.',
-      'Нужно зафиксировать первую публичную Android APK-сборку.',
+      'APK v1 использует Android versionName 1 и versionCode 1. В сборке объявлены AccessibilityService для доступа к экрану, overlay permission для плавающих кнопок, уведомления, микрофон и foreground service для MediaProjection/системного аудио там, где Android или ROM разрешает такие возможности.',
+      'Старые APK полностью удаляются, APK-линейка Brai начинается заново с v1.',
       apkReleasedAt,
       now
     );

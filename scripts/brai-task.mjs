@@ -1127,6 +1127,7 @@ function deliveryClassForFile(file) {
       "deploy/scripts/classify-delivery.mjs",
       "deploy/scripts/accept-preview.sh",
       "deploy/scripts/accepted-preview-branches.mjs",
+      "deploy/scripts/apk-release-targets.mjs",
       "deploy/scripts/build-android-env-apk.sh",
       "deploy/scripts/build-nonproduction-apks.sh",
       "deploy/scripts/ci-ssh-complete-accepted-previews.sh",
@@ -1141,7 +1142,7 @@ function deliveryClassForFile(file) {
       "deploy/scripts/promote-accepted-deployment.sh",
       "deploy/scripts/promote-deployment.mjs",
       "deploy/scripts/resolve-deploy-env.mjs",
-      "deploy/scripts/resolve-required-apk-version-code.mjs",
+      "deploy/scripts/resolve-required-apk-version.mjs",
       "deploy/scripts/sync-local-main-checkout.sh",
       "deploy/scripts/update-release-index.mjs",
     ].includes(file)

@@ -99,7 +99,7 @@ VERSION="${BRAI_APP_VERSION:-$("$NODE_BIN" "$SCRIPT_DIR/resolve-app-version.mjs"
 if [[ "$ENVIRONMENT" == "prod" ]]; then
   BUNDLE_VERSION="${BRAI_MOBILE_BUNDLE_VERSION:-$VERSION}"
 else
-  BUNDLE_VERSION="${BRAI_MOBILE_BUNDLE_VERSION:-$VERSION.$RUN_ID}"
+  BUNDLE_VERSION="${BRAI_MOBILE_BUNDLE_VERSION:-$VERSION}"
 fi
 
 ANDROID_API="https://$DOMAIN/api"
@@ -137,7 +137,7 @@ if [[ "$ENVIRONMENT" != "prod" || "${BRAI_RECORD_PROD_BRANCH_DEPLOYMENT:-false}"
     --branch "$BRANCH" \
     --commit "$COMMIT" \
     --domain "$DOMAIN" \
-    --web-ota-version "$BUNDLE_VERSION" \
+    --web-ota-version "$VERSION" \
     --short-changes "$DEPLOY_SHORT_CHANGES" \
     --detailed-changes "$DEPLOY_DETAILED_CHANGES" \
     --reason "${BRAI_DEPLOY_REASON:-Автоматическая доставка ветки}"; then

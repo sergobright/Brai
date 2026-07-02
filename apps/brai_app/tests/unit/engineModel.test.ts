@@ -4,11 +4,11 @@ import { compareBrightVersions, engineSectionView } from "@/features/app/section
 describe("engineSectionView", () => {
   it("does not treat stale Android OTA checking status as active work", () => {
     const view = engineSectionView({
-      appBuild: "0.0.10.1",
+      appBuild: "0.0.10",
       appVersionState: null,
       otaRefreshing: false,
       otaState: {
-        activeBundleVersion: "0.0.10.1",
+        activeBundleVersion: "0.0.10",
         lastCheckStatus: "checking",
         checkInProgress: false,
       },
@@ -21,19 +21,21 @@ describe("engineSectionView", () => {
   });
 
   it("detects newer ledger versions", () => {
-    expect(compareBrightVersions("0.11.52.1", "0.11.51.1")).toBeGreaterThan(0);
-    expect(compareBrightVersions("0.11.52.1", "0.11.52.1.42")).toBe(0);
-    expect(compareBrightVersions("0.10.52.1", "0.11.1.1")).toBeLessThan(0);
+    expect(compareBrightVersions("0.11.52", "0.11.51")).toBeGreaterThan(0);
+    expect(compareBrightVersions("0.11.52", "0.11.52.42")).toBe(0);
+    expect(compareBrightVersions("0.10.52", "0.11.1")).toBeLessThan(0);
   });
 
   it("does not let a stale ledger version hide the installed web build", () => {
     const view = engineSectionView({
-      appBuild: "0.11.52.1",
+      appBuild: "0.11.52",
       appVersionState: {
         server_time_utc: "2026-06-29T12:00:00.000Z",
-        version: "0.0.1.1",
+        version: "0.0.1",
+        ota_version: "0.0.1",
         parts: { canon: 0, release: 0, build: 1, apk: 1 },
         latest: { canon: null, release: null, build: null, apk: null },
+        target_apk: null,
         apk_release: null,
       },
       otaRefreshing: false,
@@ -42,22 +44,21 @@ describe("engineSectionView", () => {
       versionRefreshing: false,
     });
 
-    expect(view.latestVersion).toBe("0.11.52.1");
-    expect(view.nativeApk).toBeNull();
+    expect(view.latestVersion).toBe("0.11.52");
     expect(view.hasUpdate).toBe(false);
   });
 
   it("normalizes Android OTA download progress", () => {
     const view = engineSectionView({
-      appBuild: "0.0.10.1",
+      appBuild: "0.0.10",
       appVersionState: null,
       otaRefreshing: false,
       otaState: {
-        activeBundleVersion: "0.0.10.1",
+        activeBundleVersion: "0.0.10",
         checkInProgress: true,
         downloadProgressBytes: 2,
         downloadProgressTotalBytes: 3,
-        downloadProgressVersion: "0.0.11.1",
+        downloadProgressVersion: "0.0.11",
         lastCheckStatus: "downloading",
       },
       versionError: false,
@@ -66,28 +67,39 @@ describe("engineSectionView", () => {
 
     expect(view.androidUpdateStage).toBe("downloading");
     expect(view.downloadProgressPercent).toBe(67);
-    expect(view.downloadProgressVersion).toBe("0.0.11.1");
+    expect(view.downloadProgressVersion).toBe("0.0.11");
   });
 
-  it("flags stale Android APK even when the web bundle is current", () => {
+  it("flags APK target gate even when the OTA bundle is current", () => {
     const view = engineSectionView({
-      appBuild: "0.0.41.3",
+      appBuild: "0.0.41",
       appVersionState: {
         server_time_utc: "2026-06-30T20:26:24.000Z",
-        version: "0.0.41.3",
-        parts: { canon: 0, release: 0, build: 41, apk: 3 },
+        version: "0.0.41",
+        ota_version: "0.0.41",
+        parts: { canon: 0, release: 0, build: 41, apk: 1 },
         latest: { canon: null, release: null, build: null, apk: null },
+        target_apk: {
+          file: "brai-v2.apk",
+          version: 2,
+          version_code: 2,
+          release_url: "/releases/",
+          published_at: "2026-06-30T20:23:42Z",
+        },
         apk_release: {
-          file: "brai-0.0.41.3-capacitor.apk",
-          version: "0.0.41.3",
-          version_code: 47,
+          file: "brai-v2.apk",
+          version: 2,
+          version_code: 2,
+          release_url: "/releases/",
           published_at: "2026-06-30T20:23:42Z",
         },
       },
       otaRefreshing: false,
       otaState: {
-        activeBundleVersion: "0.0.41.3",
-        nativeVersionCode: 42,
+        activeBundleVersion: "0.0.41",
+        nativeApkVersion: "1",
+        targetApkVersion: "2",
+        lastCheckStatus: "apk_required",
       },
       versionError: false,
       versionRefreshing: false,

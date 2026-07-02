@@ -11,6 +11,7 @@ const targetCommit = required(args, "target-commit");
 const deployedAtUtc = args["deployed-at"] || new Date().toISOString();
 const ledgerOnly = args["ledger-only"] === "true";
 const recordProductionRelease = args["record-production-release"] === "true";
+if (recordProductionRelease) throw new Error("release/canon version rows are disabled by APK-only versioning");
 const targetDb = required(args, "target-db");
 fs.mkdirSync(path.dirname(targetDb), { recursive: true });
 const target = new BraiStore(targetDb);
@@ -40,28 +41,6 @@ try {
       deployedAtUtc,
     });
   }
-  recordAcceptedBuildVersion(target, {
-    sourceBranch,
-    sourceCommit: sourceRecord.commit_sha,
-    sourceShortChanges: sourceRecord.short_changes,
-    sourceReason: sourceRecord.reason || args["source-reason"] || args.reason,
-    sourceDetails: sourceRecord.detailed_changes,
-    targetBranch,
-    targetCommit,
-    targetEnvironment,
-    releasedAtUtc: deployedAtUtc,
-  });
-  if (recordProductionRelease) recordReleaseVersion(target, {
-    sourceBranch,
-    sourceCommit: sourceRecord.commit_sha,
-    sourceShortChanges: sourceRecord.short_changes,
-    sourceReason: sourceRecord.reason || args["source-reason"] || args.reason,
-    sourceDetails: sourceRecord.detailed_changes,
-    targetBranch,
-    targetCommit,
-    targetEnvironment,
-    releasedAtUtc: deployedAtUtc,
-  });
 } finally {
   source?.close();
   target.close();
@@ -126,44 +105,8 @@ function usefulChanges(value) {
   return text;
 }
 
-function recordAcceptedBuildVersion(
-  target,
-  { sourceBranch, sourceCommit, sourceShortChanges, sourceReason, sourceDetails, targetBranch, targetCommit, targetEnvironment, releasedAtUtc },
-) {
-  if (targetEnvironment !== "dev" && !(targetEnvironment === "prod" && sourceBranch.startsWith("codex/"))) return;
-  const acceptedTargetBranch = targetEnvironment === "prod" ? sourceBranch : targetBranch;
-  const acceptedTargetCommit = targetEnvironment === "prod" ? sourceCommit : targetCommit;
-  target.recordAcceptedBuildVersion({
-    sourceBranch,
-    sourceCommit,
-    sourceShortChanges,
-    sourceReason,
-    sourceDetails,
-    targetBranch: acceptedTargetBranch,
-    targetCommit: acceptedTargetCommit,
-    releasedAtUtc,
-  });
-}
-
 function canUseSourceFallback(values, targetEnvironment) {
   return Boolean(values["source-commit"] && (targetEnvironment === "dev" || (targetEnvironment === "prod" && values["source-branch"]?.startsWith("codex/"))));
-}
-
-function recordReleaseVersion(
-  target,
-  { sourceBranch, sourceCommit, sourceShortChanges, sourceReason, sourceDetails, targetBranch, targetCommit, targetEnvironment, releasedAtUtc },
-) {
-  if (targetEnvironment !== "prod") return;
-  target.recordReleaseVersion({
-    sourceBranch,
-    sourceCommit,
-    sourceShortChanges,
-    sourceReason,
-    sourceDetails,
-    targetBranch,
-    targetCommit,
-    releasedAtUtc,
-  });
 }
 
 function parseArgs(values) {
