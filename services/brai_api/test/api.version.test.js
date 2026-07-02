@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createFixture, request } from '../test-support/api.js';
 
-test('version endpoint returns APK-only ledger and release-index OTA target', async () => {
+test('version endpoint returns build ledger, APK line, and release-index OTA target', async () => {
   const fixture = await createFixture(['2026-06-29T12:00:00.000Z'], {
     releaseFiles: {
       'releases.json': JSON.stringify({
@@ -33,10 +33,10 @@ test('version endpoint returns APK-only ledger and release-index OTA target', as
     assert.equal(response.status, 200);
     assert.equal(response.body.version, '0.0.41');
     assert.equal(response.body.ota_version, '0.0.41');
-    assert.deepEqual(response.body.parts, { canon: 0, release: 0, build: 0, apk: 1 });
+    assert.deepEqual(response.body.parts, { canon: 0, release: 0, build: 1, apk: 1 });
     assert.equal(response.body.latest.canon, null);
     assert.equal(response.body.latest.release, null);
-    assert.equal(response.body.latest.build, null);
+    assert.equal(response.body.latest.build.version, 1);
     assert.equal(response.body.latest.apk.version, 1);
     assert.deepEqual(response.body.target_apk, {
       file: 'brai-v1.apk',

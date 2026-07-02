@@ -10,8 +10,6 @@ const targetBranch = required(args, "target-branch");
 const targetCommit = required(args, "target-commit");
 const deployedAtUtc = args["deployed-at"] || new Date().toISOString();
 const ledgerOnly = args["ledger-only"] === "true";
-const recordProductionRelease = args["record-production-release"] === "true";
-if (recordProductionRelease) throw new Error("release/canon version rows are disabled by APK-only versioning");
 const targetDb = required(args, "target-db");
 fs.mkdirSync(path.dirname(targetDb), { recursive: true });
 const target = new BraiStore(targetDb);
@@ -26,21 +24,33 @@ try {
   );
   if (!sourceRecord) throw new Error(`no deployment metadata for ${sourceBranch}`);
 
-  if (!ledgerOnly) {
-    target.recordDeployment({
-      environment: targetEnvironment,
-      slot: args["target-slot"] || null,
-      branch: targetBranch,
-      commit: targetCommit,
-      domain: required(args, "target-domain"),
-      webOtaVersion: args["web-ota-version"] || sourceRecord.web_ota_version,
-      apkVersion: args["apk-version"] || sourceRecord.apk_version,
-      shortChanges: sourceRecord.short_changes,
-      detailedChanges: `Повышено из ${sourceRecord.environment}${sourceRecord.slot ? ` ${sourceRecord.slot}` : ""} (${sourceRecord.branch}@${sourceRecord.commit_sha}). ${sourceRecord.detailed_changes}`,
-      reason: args.reason || 'Нужно перенести принятую preview-сборку в production.',
-      deployedAtUtc,
+  target.db.transaction(() => {
+    target.recordAcceptedBuildVersion({
+      sourceBranch,
+      sourceCommit: args["source-commit"] || sourceRecord.commit_sha,
+      sourceShortChanges: sourceRecord.short_changes,
+      sourceDetails: sourceRecord.detailed_changes,
+      sourceReason: sourceRecord.reason,
+      targetBranch,
+      targetCommit,
+      releasedAtUtc: deployedAtUtc,
     });
-  }
+    if (!ledgerOnly) {
+      target.recordDeployment({
+        environment: targetEnvironment,
+        slot: args["target-slot"] || null,
+        branch: targetBranch,
+        commit: targetCommit,
+        domain: required(args, "target-domain"),
+        webOtaVersion: args["web-ota-version"] || sourceRecord.web_ota_version,
+        apkVersion: args["apk-version"] || sourceRecord.apk_version,
+        shortChanges: sourceRecord.short_changes,
+        detailedChanges: `Повышено из ${sourceRecord.environment}${sourceRecord.slot ? ` ${sourceRecord.slot}` : ""} (${sourceRecord.branch}@${sourceRecord.commit_sha}). ${sourceRecord.detailed_changes}`,
+        reason: args.reason || sourceRecord.reason,
+        deployedAtUtc,
+      });
+    }
+  })();
 } finally {
   source?.close();
   target.close();
@@ -79,10 +89,15 @@ function normalizeSourceRecord(record, fallbackRecord) {
   if (!record) return null;
   const shortChanges = usefulChanges(record.short_changes) || usefulChanges(fallbackRecord?.short_changes);
   const detailedChanges = usefulChanges(record.detailed_changes) || usefulChanges(fallbackRecord?.detailed_changes) || shortChanges;
+  const reason = usefulChanges(record.reason) || usefulChanges(fallbackRecord?.reason);
+  if (!shortChanges) throw new Error('missing Russian source short_changes for accepted build version');
+  if (!detailedChanges) throw new Error('missing Russian source detailed_changes for accepted build version');
+  if (!reason) throw new Error('missing Russian source reason for accepted build version');
   return {
     ...record,
-    short_changes: shortChanges || 'Принята сборка Brai.',
-    detailed_changes: detailedChanges || shortChanges || 'Сборка принята; технические branch/commit-данные сохранены отдельно.',
+    short_changes: shortChanges,
+    detailed_changes: detailedChanges,
+    reason,
   };
 }
 

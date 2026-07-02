@@ -104,21 +104,28 @@ Brai SHALL publish a release APK whenever a change crosses the native Android re
 - **AND** publishes the APK artifact to `deploy/releases`
 - **AND** updates and verifies the release page metadata
 
-### Requirement: APK and OTA versions are separate
-Brai SHALL track only APK public releases in the server SQLite `build_versions` table.
+### Requirement: Build, APK, and OTA versions are separate
+Brai SHALL track accepted production builds and APK public releases in the server SQLite `build_versions` table.
 
 `build_versions.version` SHALL be the integer APK counter for `version_type_id = apk`.
 
-The public APK version SHALL be `vN`. The browser web and Android OTA version SHALL be `X.Y.Z` and SHALL NOT be assembled from `build_versions`.
+For `version_type_id = build`, `build_versions.version` SHALL be the monotonically increasing accepted production build counter.
 
-`short_changes` and `detailed_changes` SHALL contain Russian human-readable notes about the APK capabilities.
+The public APK version SHALL be `vN`. The browser web and Android OTA version SHALL be `X.Y.Z` and SHALL NOT be assembled from the APK counter.
 
-`reason` SHALL be written in Russian and describe the human reason for the APK release. Branch names, commit SHAs, target commits, domains, and similar audit metadata SHALL NOT be stored in `reason`; it belongs in `build_version_refs` or deployment records.
+`short_changes` and `detailed_changes` SHALL contain Russian human-readable notes about the accepted build or APK capabilities.
+
+`reason` SHALL be written in Russian and describe the human reason for the accepted build or APK release. Branch names, commit SHAs, target commits, domains, and similar audit metadata SHALL NOT be stored in `reason`; it belongs in `build_version_refs` or deployment records.
 
 #### Scenario: Fresh or reset database is initialized
-- **WHEN** the runtime database is initialized or explicitly reset for APK-only versioning
-- **THEN** `build_versions` contains exactly one row with `version_type_id = apk` and `version = 1`
-- **AND** `version_types` does not require `build`, `release`, or `canon`
+- **WHEN** the runtime database is initialized
+- **THEN** `version_types` contains `build` and `apk`
+- **AND** `build_versions` contains the initial `build` row and the initial `apk` row
+
+#### Scenario: APK line is reset
+- **WHEN** the APK version line is explicitly reset
+- **THEN** `build_versions` contains exactly one APK row with `version_type_id = apk` and `version = 1`
+- **AND** existing `build` rows remain available
 
 Accepted preview promotion SHALL take `short_changes`, `detailed_changes`, and `reason` from explicit release-note metadata captured during preview handoff and carried through the acceptance PR. The workflow SHALL fail when this metadata is missing, non-Russian, or generic deployment text; it SHALL NOT derive visible version text from Git commit subjects, branch names, deployment records, or placeholder fallback strings.
 
@@ -128,7 +135,10 @@ Accepted preview promotion SHALL take `short_changes`, `detailed_changes`, and `
 
 #### Scenario: Accepted task lands in main
 - **WHEN** a `codex/*` task branch is accepted and merged into `main`
-- **THEN** the workflow records deployment metadata without creating `build`, `release`, or `canon` version rows
+- **THEN** the workflow creates or reuses exactly one `build_versions` row for `version_type_id = build` and the target commit
+- **AND** the row stores `short_changes`, `detailed_changes`, and `reason`
+- **AND** the workflow is not considered complete until the row is written
+- **AND** the workflow records deployment metadata separately
 
 #### Scenario: APK release is prepared
 - **WHEN** the project owner asks to make or publish an APK release
@@ -138,7 +148,7 @@ Accepted preview promotion SHALL take `short_changes`, `detailed_changes`, and `
 
 #### Scenario: Release or canon version is requested
 - **WHEN** a request asks to create a `release` or `canon` version row
-- **THEN** the workflow stops with an explicit error because release/canon rows are disabled by APK-only versioning
+- **THEN** the workflow stops with an explicit error because release/canon rows are disabled
 
 #### Scenario: Separate web or OTA version is requested
 - **WHEN** a request asks to publish or update only browser web, only OTA, or different browser web and Android OTA versions

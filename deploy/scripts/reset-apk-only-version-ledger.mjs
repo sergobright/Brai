@@ -13,10 +13,11 @@ try {
   const releasedAtUtc = args["released-at"] || "2026-06-23T09:13:50Z";
   const backupPath = await backupSqlite(store, dbPath, args["backup-dir"]);
   store.db.transaction(() => {
-    store.db.prepare("DELETE FROM build_version_refs").run();
-    store.db.prepare("DELETE FROM build_versions").run();
-    store.db.prepare("DELETE FROM version_types WHERE id <> 'apk'").run();
-    store.db.prepare("DELETE FROM sqlite_sequence WHERE name IN ('build_version_refs', 'build_versions')").run();
+    store.db.prepare("DELETE FROM build_version_refs WHERE version_type_id = 'apk'").run();
+    store.db.prepare("DELETE FROM build_versions WHERE version_type_id = 'apk'").run();
+    store.db.prepare("DELETE FROM build_version_refs WHERE version_type_id IN ('release', 'canon')").run();
+    store.db.prepare("DELETE FROM build_versions WHERE version_type_id IN ('release', 'canon')").run();
+    store.db.prepare("DELETE FROM version_types WHERE id IN ('release', 'canon')").run();
     store.upsertBuildVersion({
       versionTypeId: "apk",
       version: 1,
