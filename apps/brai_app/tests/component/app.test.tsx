@@ -647,7 +647,7 @@ describe("BraiApp shell", () => {
 
     await waitFor(() => expect(stateRequests).toBeGreaterThan(stateRequestsBeforeFocus));
     await waitFor(() => expect(document.querySelector(".timer-digits")).toHaveAttribute("aria-label", "00:00:00"));
-    expect(screen.queryByRole("button", { name: /Завершить/ })).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole("button", { name: /Завершить/ })).not.toBeInTheDocument());
   });
 
   it("applies live activity updates to active Actions and Archive", async () => {
