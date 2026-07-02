@@ -355,6 +355,8 @@ describe("BraiApp shell", () => {
       "fetch",
       vi.fn(async (input: RequestInfo | URL) => {
         const url = requestUrl(input);
+        if (url.includes("/auth/session")) return authSessionResponse();
+        if (url.includes("/v1/inbox")) return emptyInboxResponse();
         if (url.includes("/v1/timer/state")) {
           return jsonResponse({
             server_time_utc: "2026-06-22T05:30:00.000Z",
@@ -434,6 +436,8 @@ describe("BraiApp shell", () => {
       "fetch",
       vi.fn(async (input: RequestInfo | URL) => {
         const url = requestUrl(input);
+        if (url.includes("/auth/session")) return authSessionResponse();
+        if (url.includes("/v1/inbox")) return emptyInboxResponse();
         if (url.includes("/v1/timer/state")) {
           return jsonResponse({
             server_time_utc: "2026-06-22T05:30:00.000Z",
@@ -519,6 +523,8 @@ describe("BraiApp shell", () => {
       "fetch",
       vi.fn(async (input: RequestInfo | URL) => {
         const url = requestUrl(input);
+        if (url.includes("/auth/session")) return authSessionResponse();
+        if (url.includes("/v1/inbox")) return emptyInboxResponse();
         if (url.includes("/v1/timer/state")) {
           stateRequests += 1;
           return jsonResponse({
@@ -592,6 +598,8 @@ describe("BraiApp shell", () => {
       "fetch",
       vi.fn(async (input: RequestInfo | URL) => {
         const url = requestUrl(input);
+        if (url.includes("/auth/session")) return authSessionResponse();
+        if (url.includes("/v1/inbox")) return emptyInboxResponse();
         if (url.includes("/v1/timer/state")) {
           stateRequests += 1;
           return jsonResponse({
@@ -656,6 +664,8 @@ describe("BraiApp shell", () => {
       "fetch",
       vi.fn(async (input: RequestInfo | URL) => {
         const url = requestUrl(input);
+        if (url.includes("/auth/session")) return authSessionResponse();
+        if (url.includes("/v1/inbox")) return emptyInboxResponse();
         if (url.includes("/v1/timer/state")) {
           return jsonResponse({
             server_time_utc: "2026-06-22T06:00:00.000Z",
@@ -733,6 +743,8 @@ describe("BraiApp shell", () => {
       "fetch",
       vi.fn(async (input: RequestInfo | URL) => {
         const url = requestUrl(input);
+        if (url.includes("/auth/session")) return authSessionResponse();
+        if (url.includes("/v1/inbox")) return emptyInboxResponse();
         if (url.includes("/v1/timer/state")) {
           return jsonResponse({
             server_time_utc: "2026-06-22T06:00:00.000Z",
@@ -912,6 +924,14 @@ function jsonResponse(body: unknown, status = 200): Response {
     status,
     headers: { "content-type": "application/json" },
   });
+}
+
+function authSessionResponse(): Response {
+  return jsonResponse({ authenticated: true, user: { id: "test-user", email: "test@example.com", name: "Test" } });
+}
+
+function emptyInboxResponse(): Response {
+  return jsonResponse({ server_time_utc: "2026-06-22T06:00:00.000Z", server_revision: 1, inbox: [] });
 }
 
 function stubWebSockets(): Array<{ sendMessage: (payload: unknown) => void }> {

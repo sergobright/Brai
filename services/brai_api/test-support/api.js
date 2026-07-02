@@ -10,6 +10,7 @@ export const INBOUND_TOKEN = 'test-inbound-token';
 export const WEB_PASSWORD = 'test-password';
 export const RELEASE_PASSWORD = 'release-password';
 export const SESSION_SECRET = 'test-session-secret';
+export const BETTER_AUTH_SECRET = 'test-better-auth-secret-with-enough-entropy-32';
 
 export async function createFixture(times, options = {}) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'brai-api-'));
@@ -34,6 +35,11 @@ export async function createFixture(times, options = {}) {
     webPassword: options.webPassword,
     releasePassword: options.releasePassword,
     sessionSecret: options.sessionSecret,
+    betterAuthSecret: options.betterAuthSecret ?? BETTER_AUTH_SECRET,
+    betterAuthUrl: options.betterAuthUrl,
+    resendApiKey: options.resendApiKey,
+    authFromEmail: options.authFromEmail,
+    sendOtp: options.sendOtp,
     releaseDir: options.releaseFiles || options.mobileFiles ? releaseDir : null,
     inboundApiKey: options.inboundApiKey ?? options.inboundToken ?? INBOUND_TOKEN,
     inboundStorageRoot: options.inboundStorageRoot ?? path.join(tmp, 'inbox-attachments'),

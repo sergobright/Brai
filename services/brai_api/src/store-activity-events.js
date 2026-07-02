@@ -12,15 +12,18 @@ import {
   parseJsonObject,
   sanitizeText
 } from './store-helpers.js';
+import { scopeSql, scopedUserId } from './user-scope.js';
 
 export const activityEventMethods = {
   listActivities() {
+    const scope = scopeSql();
     return this.db
       .prepare(
         `
           SELECT * FROM activities
           WHERE activity_type_id = 'action'
             AND deleted_at_utc IS NULL
+            ${scope.clause}
           ORDER BY
             CASE status WHEN 'New' THEN 0 ELSE 1 END ASC,
             CASE status WHEN 'New' THEN CASE WHEN sort_order IS NULL THEN 0 ELSE 1 END END ASC,
@@ -31,30 +34,33 @@ export const activityEventMethods = {
             id ASC
         `
       )
-      .all()
+      .all(...scope.params)
       .map(formatActivity);
   }
 ,
 
   listArchivedActivities() {
+    const scope = scopeSql();
     return this.db
       .prepare(
         `
           SELECT * FROM activities
           WHERE activity_type_id = 'action'
             AND deleted_at_utc IS NOT NULL
+            ${scope.clause}
           ORDER BY deleted_at_utc DESC, updated_at_utc DESC, id ASC
         `
       )
-      .all()
+      .all(...scope.params)
       .map(formatActivity);
   }
 ,
 
   getActivityServerRevision() {
+    const scope = scopeSql();
     const row = this.db
-      .prepare('SELECT COALESCE(MAX(server_sequence), 0) AS revision FROM activity_events')
-      .get();
+      .prepare(`SELECT COALESCE(MAX(server_sequence), 0) AS revision FROM activity_events WHERE ${scope.where}`)
+      .get(...scope.params);
     return row.revision;
   }
 ,
@@ -299,8 +305,8 @@ export const activityEventMethods = {
           INSERT INTO activity_events (
             event_id, device_id, client_sequence, server_sequence, activity_id,
             change_type, occurred_at_utc, received_at_utc, payload_json,
-            status, ignore_reason, payload_version
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            status, ignore_reason, payload_version, user_id
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT(event_id) DO NOTHING
         `
       )
@@ -316,7 +322,8 @@ export const activityEventMethods = {
         event.payload_json ?? null,
         event.status,
         event.ignore_reason ?? null,
-        event.payload_version
+        event.payload_version,
+        scopedUserId()
       );
     return result.changes > 0 ? serverSequence : null;
   }
@@ -358,6 +365,7 @@ export const activityEventMethods = {
 ,
 
   projectActivity(activityId, nowIso) {
+    const scope = scopeSql();
     const events = this.db
       .prepare(
         `
@@ -365,10 +373,11 @@ export const activityEventMethods = {
           WHERE status = 'accepted'
             AND activity_id = ?
             AND change_type != 'reorder'
+            ${scope.clause}
           ORDER BY occurred_at_utc ASC, server_sequence ASC
         `
       )
-      .all(activityId);
+      .all(activityId, ...scope.params);
 
     let activity = null;
     let sortResetEvent = null;
@@ -436,7 +445,9 @@ export const activityEventMethods = {
     }
 
     if (!activity) {
-      this.db.prepare("DELETE FROM activities WHERE id = ? AND activity_type_id = 'action'").run(activityId);
+      this.db
+        .prepare(`DELETE FROM activities WHERE id = ? AND activity_type_id = 'action'${scope.clause}`)
+        .run(activityId, ...scope.params);
       return;
     }
 
@@ -458,8 +469,8 @@ export const activityEventMethods = {
         `
           INSERT INTO activities (
             id, title, description_md, status, created_at_utc, updated_at_utc, completed_at_utc,
-            sort_order, deleted_at_utc, restored_at_utc, last_event_id, activity_type_id, author, reason
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'action', '', '')
+            sort_order, deleted_at_utc, restored_at_utc, last_event_id, activity_type_id, author, reason, user_id
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'action', '', '', ?)
           ON CONFLICT(id) DO UPDATE SET
             activity_type_id = 'action',
             title = excluded.title,
@@ -474,6 +485,9 @@ export const activityEventMethods = {
             deleted_at_utc = excluded.deleted_at_utc,
             restored_at_utc = excluded.restored_at_utc,
             last_event_id = excluded.last_event_id
+          WHERE activities.user_id IS excluded.user_id
+            OR activities.user_id IS NULL
+            OR excluded.user_id IS NULL
         `
       )
       .run(
@@ -487,26 +501,30 @@ export const activityEventMethods = {
         Number.isInteger(activity.sort_order) ? activity.sort_order : null,
         activity.deleted_at_utc ?? null,
         activity.restored_at_utc ?? null,
-        activity.last_event_id ?? null
+        activity.last_event_id ?? null,
+        scopedUserId()
       );
   }
 ,
 
   latestActivityReorderEvent() {
+    const scope = scopeSql();
     return this.db
       .prepare(
         `
           SELECT * FROM activity_events
           WHERE status = 'accepted' AND change_type = 'reorder'
+            ${scope.clause}
           ORDER BY occurred_at_utc DESC, server_sequence DESC
           LIMIT 1
         `
       )
-      .get();
+      .get(...scope.params);
   }
 ,
 
   latestActivityReorderAfter(event) {
+    const scope = scopeSql();
     return this.db
       .prepare(
         `
@@ -517,16 +535,18 @@ export const activityEventMethods = {
               occurred_at_utc > ?
               OR (occurred_at_utc = ? AND server_sequence > ?)
             )
+            ${scope.clause}
           ORDER BY occurred_at_utc DESC, server_sequence DESC
           LIMIT 1
         `
       )
-      .get(event.occurred_at_utc, event.occurred_at_utc, event.server_sequence);
+      .get(event.occurred_at_utc, event.occurred_at_utc, event.server_sequence, ...scope.params);
   }
 ,
 
   applyLatestActivityReorder(reorderEvent) {
     const orderedIds = normalizeOrderedIds(parseJsonObject(reorderEvent.payload_json).ordered_ids);
+    const scope = scopeSql();
     this.db
       .prepare(
         `
@@ -536,23 +556,26 @@ export const activityEventMethods = {
             AND status = 'New'
             AND sort_order IS NOT NULL
             AND id NOT IN (SELECT value FROM json_each(?))
+            ${scope.clause}
         `
       )
-      .run(JSON.stringify(orderedIds));
+      .run(JSON.stringify(orderedIds), ...scope.params);
     return orderedIds;
   }
 ,
 
   recomputeActivities(nowIso) {
+    const scope = scopeSql();
     const events = this.db
       .prepare(
         `
           SELECT * FROM activity_events
           WHERE status = 'accepted'
+            ${scope.clause}
           ORDER BY occurred_at_utc ASC, server_sequence ASC
         `
       )
-      .all();
+      .all(...scope.params);
     const activities = new Map();
 
     for (const event of events) {
@@ -623,12 +646,14 @@ export const activityEventMethods = {
       }
     }
 
-    this.db.prepare("DELETE FROM activities WHERE activity_type_id = 'action'").run();
+    this.db
+      .prepare(`DELETE FROM activities WHERE activity_type_id = 'action'${scope.clause}`)
+      .run(...scope.params);
     const insertActivity = this.db.prepare(`
       INSERT INTO activities (
         id, title, description_md, status, created_at_utc, updated_at_utc, completed_at_utc,
-        sort_order, deleted_at_utc, restored_at_utc, last_event_id, activity_type_id, author, reason
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'action', '', '')
+        sort_order, deleted_at_utc, restored_at_utc, last_event_id, activity_type_id, author, reason, user_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'action', '', '', ?)
     `);
 
     for (const activity of activities.values()) {
@@ -643,7 +668,8 @@ export const activityEventMethods = {
         Number.isInteger(activity.sort_order) ? activity.sort_order : null,
         activity.deleted_at_utc ?? null,
         activity.restored_at_utc ?? null,
-        activity.last_event_id ?? null
+        activity.last_event_id ?? null,
+        scopedUserId()
       );
     }
   }

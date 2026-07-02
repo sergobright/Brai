@@ -10,6 +10,10 @@ const token = process.env.BRAI_TOKEN;
 const webPassword = process.env.BRAI_WEB_PASSWORD;
 const releasePassword = process.env.BRAI_RELEASE_PASSWORD ?? webPassword;
 const sessionSecret = process.env.BRAI_SESSION_SECRET;
+const betterAuthSecret = process.env.BETTER_AUTH_SECRET ?? sessionSecret;
+const betterAuthUrl = process.env.BETTER_AUTH_URL ?? null;
+const resendApiKey = process.env.RESEND_API_KEY ?? null;
+const authFromEmail = process.env.BRAI_AUTH_FROM ?? 'Brai <auth@mail.brightos.world>';
 const inboundApiKey = process.env.BRAI_INBOUND_API_KEY ?? process.env.BRAI_INBOUND_TOKEN;
 const inboundStorageRoot =
   process.env.BRAI_INBOUND_STORAGE_ROOT ?? path.join(path.dirname(dbPath), 'inbox-attachments');
@@ -41,6 +45,10 @@ const runtime = createBraiServer({
   webPassword,
   releasePassword,
   sessionSecret,
+  betterAuthSecret,
+  betterAuthUrl,
+  resendApiKey,
+  authFromEmail,
   releaseDir,
   inboundApiKey,
   inboundStorageRoot,

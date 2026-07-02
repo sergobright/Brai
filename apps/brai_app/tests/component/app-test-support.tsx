@@ -50,6 +50,12 @@ export function setupBraiAppTest() {
     });
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      if (url.endsWith("/auth/session")) {
+        return new Response(JSON.stringify({ authenticated: true, user: { id: "test-user", email: "test@example.com", name: "Test" } }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
       if (url.endsWith("/v1/version")) {
         return new Response(JSON.stringify(testVersionState("0.0.10")), {
           status: 200,

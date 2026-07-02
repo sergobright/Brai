@@ -9,6 +9,7 @@ import {
   sanitizeText,
   toNullableInteger
 } from './store-helpers.js';
+import { scopeSql, scopedUserId } from './user-scope.js';
 
 const TIMER_EVENT_TYPES = new Set([
   'start',
@@ -85,6 +86,7 @@ export const timerEventMethods = {
 ,
 
   getActiveSession() {
+    const scope = scopeSql('s');
     const row = this.db
       .prepare(`
         SELECT s.id,
@@ -100,15 +102,17 @@ export const timerEventMethods = {
             WHERE active.focus_session_id = s.id AND active.ended_at_utc IS NULL
           )
           AND s.deleted_at_utc IS NULL
+          ${scope.clause}
         GROUP BY s.id
         LIMIT 1
       `)
-      .get();
+      .get(...scope.params);
     return this.sessionWithIntervals(row);
   }
 ,
 
   getSession(id) {
+    const scope = scopeSql('s');
     const row = this.db
       .prepare(`
         SELECT s.id,
@@ -122,14 +126,16 @@ export const timerEventMethods = {
         FROM focus_sessions s
         JOIN focus_session_intervals i ON i.focus_session_id = s.id
         WHERE s.id = ?
+          ${scope.clause}
         GROUP BY s.id
       `)
-      .get(id);
+      .get(id, ...scope.params);
     return this.sessionWithIntervals(row);
   }
 ,
 
   getLatestCompletedSession() {
+    const scope = scopeSql('s');
     const row = this.db
       .prepare(
         `
@@ -146,41 +152,46 @@ export const timerEventMethods = {
               WHERE active.focus_session_id = s.id AND active.ended_at_utc IS NULL
             )
             AND s.deleted_at_utc IS NULL
+            ${scope.clause}
           GROUP BY s.id
           ORDER BY ended_at_utc DESC, started_at_utc DESC
           LIMIT 1
         `
       )
-      .get();
+      .get(...scope.params);
     return this.sessionWithIntervals(row);
   }
 ,
 
   getActiveInterval() {
+    const scope = scopeSql('i');
     return this.db
       .prepare(`
         SELECT i.*, a.title AS activity_title
         FROM focus_session_intervals i
-        LEFT JOIN activities a ON a.id = i.activity_id
+        LEFT JOIN activities a ON a.id = i.activity_id AND (a.user_id IS i.user_id OR a.user_id IS NULL)
         JOIN focus_sessions s ON s.id = i.focus_session_id
         WHERE i.ended_at_utc IS NULL
           AND s.deleted_at_utc IS NULL
+          ${scope.clause}
         LIMIT 1
       `)
-      .get() ?? null;
+      .get(...scope.params) ?? null;
   }
 ,
 
   getSessionIntervals(sessionId) {
+    const scope = scopeSql('i');
     return this.db
       .prepare(`
         SELECT i.*, a.title AS activity_title
         FROM focus_session_intervals i
-        LEFT JOIN activities a ON a.id = i.activity_id
+        LEFT JOIN activities a ON a.id = i.activity_id AND (a.user_id IS i.user_id OR a.user_id IS NULL)
         WHERE i.focus_session_id = ?
+          ${scope.clause}
         ORDER BY i.started_at_utc ASC, i.id ASC
       `)
-      .all(sessionId);
+      .all(sessionId, ...scope.params);
   }
 ,
 
@@ -196,9 +207,10 @@ export const timerEventMethods = {
 ,
 
   getServerRevision() {
+    const scope = scopeSql();
     const row = this.db
-      .prepare('SELECT COALESCE(MAX(server_sequence), 0) AS revision FROM timer_events')
-      .get();
+      .prepare(`SELECT COALESCE(MAX(server_sequence), 0) AS revision FROM timer_events WHERE ${scope.where}`)
+      .get(...scope.params);
     return row.revision;
   }
 ,
@@ -507,8 +519,8 @@ export const timerEventMethods = {
           INSERT INTO timer_events (
             event_id, device_id, client_sequence, server_sequence, type,
             occurred_at_utc, received_at_utc, local_timer_id, base_server_revision,
-            status, ignore_reason, payload_version, metadata_json
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            status, ignore_reason, payload_version, metadata_json, user_id
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT(event_id) DO NOTHING
         `
       )
@@ -525,7 +537,8 @@ export const timerEventMethods = {
         event.status,
         event.ignore_reason ?? null,
         event.payload_version,
-        event.metadata_json ?? null
+        event.metadata_json ?? null,
+        scopedUserId()
       );
   }
 ,
@@ -549,34 +562,44 @@ export const timerEventMethods = {
 ,
 
   recomputeCanonicalSessions(nowIso) {
+    const scope = scopeSql();
     const events = this.db
       .prepare(
         `
           SELECT * FROM timer_events
           WHERE status = 'accepted'
+          ${scope.clause}
           ORDER BY occurred_at_utc ASC, server_sequence ASC, device_id ASC, event_id ASC
         `
       )
-      .all();
+      .all(...scope.params);
     const sessions = buildCanonicalSessions(events);
 
-    this.db.prepare('DELETE FROM focus_session_sources').run();
-    this.db.prepare('DELETE FROM focus_session_intervals').run();
-    this.db.prepare('DELETE FROM focus_sessions').run();
+    if (scope.userId) {
+      this.db
+        .prepare('DELETE FROM focus_session_sources WHERE session_id IN (SELECT id FROM focus_sessions WHERE user_id = ?)')
+        .run(scope.userId);
+      this.db.prepare('DELETE FROM focus_session_intervals WHERE user_id = ?').run(scope.userId);
+      this.db.prepare('DELETE FROM focus_sessions WHERE user_id = ?').run(scope.userId);
+    } else {
+      this.db.prepare('DELETE FROM focus_session_sources').run();
+      this.db.prepare('DELETE FROM focus_session_intervals').run();
+      this.db.prepare('DELETE FROM focus_sessions').run();
+    }
 
     const insertSession = this.db.prepare(`
       INSERT INTO focus_sessions (
         id, created_at_utc, updated_at_utc, deleted_at_utc, deleted_event_id,
-        start_origin, started_by_activity_id
+        start_origin, started_by_activity_id, user_id
       )
-      VALUES (?, ?, ?, NULL, NULL, ?, ?)
+      VALUES (?, ?, ?, NULL, NULL, ?, ?, ?)
     `);
     const insertInterval = this.db.prepare(`
       INSERT INTO focus_session_intervals (
         id, focus_session_id, activity_id, started_at_utc, ended_at_utc,
         duration_seconds, created_at_utc, updated_at_utc, created_event_id,
-        ended_event_id, created_by_device_id
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ended_event_id, created_by_device_id, user_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     const insertSource = this.db.prepare(`
       INSERT OR IGNORE INTO focus_session_sources (session_id, event_id, device_id, role)
@@ -589,7 +612,8 @@ export const timerEventMethods = {
         session.started_at_utc,
         session.ended_at_utc ?? nowIso,
         session.start_origin ?? 'focus',
-        session.started_by_activity_id ?? null
+        session.started_by_activity_id ?? null,
+        scope.userId
       );
       for (const interval of session.intervals) {
         insertInterval.run(
@@ -603,7 +627,8 @@ export const timerEventMethods = {
           interval.ended_at_utc ?? nowIso,
           interval.created_event_id,
           interval.ended_event_id,
-          interval.created_by_device_id
+          interval.created_by_device_id,
+          scope.userId
         );
       }
       for (const source of session.sourceEvents) {
@@ -723,18 +748,21 @@ export const timerEventMethods = {
 ,
 
   getFocusInterval(intervalId) {
+    const scope = scopeSql('i');
     return this.db
       .prepare(`
         SELECT i.*, s.deleted_at_utc
         FROM focus_session_intervals i
         JOIN focus_sessions s ON s.id = i.focus_session_id
         WHERE i.id = ?
+          ${scope.clause}
       `)
-      .get(intervalId) ?? null;
+      .get(intervalId, ...scope.params) ?? null;
   }
 ,
 
   hasFocusIntervalOverlap(intervalId, focusSessionId, startedMs, endedMs) {
+    const scope = scopeSql('s');
     const row = this.db
       .prepare(
         `
@@ -745,10 +773,11 @@ export const timerEventMethods = {
             AND s.deleted_at_utc IS NULL
             AND i.started_at_utc < ?
             AND COALESCE(i.ended_at_utc, '9999-12-31T23:59:59.999Z') > ?
+            ${scope.clause}
           LIMIT 1
         `
       )
-      .get(intervalId, new Date(endedMs).toISOString(), new Date(startedMs).toISOString());
+      .get(intervalId, new Date(endedMs).toISOString(), new Date(startedMs).toISOString(), ...scope.params);
     return Boolean(row);
   }
 ,
@@ -794,6 +823,7 @@ export const timerEventMethods = {
 ,
 
   updateFocusInterval(intervalId, event, startedMs, endedMs) {
+    const scope = scopeSql();
     this.db
       .prepare(
         `
@@ -801,6 +831,7 @@ export const timerEventMethods = {
           SET started_at_utc = ?, ended_at_utc = ?, duration_seconds = ?,
             updated_at_utc = ?, ended_event_id = ?
           WHERE id = ?
+            ${scope.clause}
         `
       )
       .run(
@@ -809,13 +840,14 @@ export const timerEventMethods = {
         Math.max(0, Math.floor((endedMs - startedMs) / 1000)),
         event.received_at_utc,
         event.event_id,
-        intervalId
+        intervalId,
+        ...scope.params
       );
     const interval = this.getFocusInterval(intervalId);
     if (!interval) return;
     this.db
-      .prepare('UPDATE focus_sessions SET updated_at_utc = ? WHERE id = ?')
-      .run(event.received_at_utc, interval.focus_session_id);
+      .prepare(`UPDATE focus_sessions SET updated_at_utc = ? WHERE id = ?${scope.clause}`)
+      .run(event.received_at_utc, interval.focus_session_id, ...scope.params);
   }
 ,
 
@@ -827,15 +859,17 @@ export const timerEventMethods = {
     const session = this.getSession(focusSessionId);
     if (!session || !session.ended_at_utc || session.deleted_at_utc) return;
 
+    const scope = scopeSql();
     this.db
       .prepare(
         `
           UPDATE focus_sessions
           SET deleted_at_utc = ?, deleted_event_id = ?, updated_at_utc = ?
           WHERE id = ? AND deleted_at_utc IS NULL
+          ${scope.clause}
         `
       )
-      .run(event.occurred_at_utc, event.event_id, event.received_at_utc, focusSessionId);
+      .run(event.occurred_at_utc, event.event_id, event.received_at_utc, focusSessionId, ...scope.params);
   }
 
 };

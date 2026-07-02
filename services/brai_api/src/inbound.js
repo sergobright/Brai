@@ -143,11 +143,15 @@ export async function receiveInboxInbound({
   };
 }
 
-export function serveInboxAttachment(req, res, url, storageRoot, sendJson) {
+export function serveInboxAttachment(req, res, url, storageRoot, sendJson, store = null) {
   const prefix = '/v1/inbox/attachments/';
   if (!url.pathname.startsWith(prefix)) return false;
   const name = decodeURIComponent(url.pathname.slice(prefix.length));
   if (!/^[a-zA-Z0-9_.-]+$/.test(name)) {
+    sendJson(req, res, 404, { error: 'not_found' });
+    return true;
+  }
+  if (store && !store.canReadInboxAttachment(name)) {
     sendJson(req, res, 404, { error: 'not_found' });
     return true;
   }

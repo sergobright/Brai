@@ -26,6 +26,8 @@ export const migrationMethods = {
     this.allowTimerDeleteSessionEvents();
     this.allowFocusActionTimerEvents();
     this.ensureFocusSessionSchema();
+    this.ensureAuthSchema();
+    this.ensureUserOwnershipSchema();
     if (!this.hasMigration(2)) {
       this.seedLegacyEvents();
       this.recomputeCanonicalSessions(now);
@@ -37,6 +39,7 @@ export const migrationMethods = {
     }
 
     this.ensureActivitySchema();
+    this.ensureUserOwnershipSchema();
     if (!this.hasMigration(3)) {
       this.recomputeActivities(new Date().toISOString());
       this.recordMigration(3, 'offline-first activities event log and canonical activities');
@@ -240,6 +243,13 @@ export const migrationMethods = {
       this.ensureTableDescriptions();
       this.recordMigration(44, 'switch version ledger runtime to APK-only');
     }
+
+    this.ensureAuthSchema();
+    this.ensureUserOwnershipSchema();
+    if (!this.hasMigration(45)) {
+      this.ensureTableDescriptions();
+      this.recordMigration(45, 'add Better Auth email OTP and user ownership');
+    }
   }
 ,
 
@@ -265,6 +275,100 @@ export const migrationMethods = {
     insertSetting.run('goal_days', String(CHALLENGE_DAYS), now);
     insertSetting.run('daily_goal_seconds', String(DAILY_GOAL_SECONDS), now);
     insertSetting.run('goal_timezone', 'Europe/Moscow', now);
+  }
+,
+
+  ensureAuthSchema() {
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS "user" (
+        "id" TEXT NOT NULL PRIMARY KEY,
+        "name" TEXT NOT NULL,
+        "email" TEXT NOT NULL UNIQUE,
+        "emailVerified" INTEGER NOT NULL,
+        "image" TEXT,
+        "createdAt" DATE NOT NULL,
+        "updatedAt" DATE NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS "session" (
+        "id" TEXT NOT NULL PRIMARY KEY,
+        "expiresAt" DATE NOT NULL,
+        "token" TEXT NOT NULL UNIQUE,
+        "createdAt" DATE NOT NULL,
+        "updatedAt" DATE NOT NULL,
+        "ipAddress" TEXT,
+        "userAgent" TEXT,
+        "userId" TEXT NOT NULL REFERENCES "user" ("id") ON DELETE CASCADE
+      );
+
+      CREATE TABLE IF NOT EXISTS "account" (
+        "id" TEXT NOT NULL PRIMARY KEY,
+        "accountId" TEXT NOT NULL,
+        "providerId" TEXT NOT NULL,
+        "userId" TEXT NOT NULL REFERENCES "user" ("id") ON DELETE CASCADE,
+        "accessToken" TEXT,
+        "refreshToken" TEXT,
+        "idToken" TEXT,
+        "accessTokenExpiresAt" DATE,
+        "refreshTokenExpiresAt" DATE,
+        "scope" TEXT,
+        "password" TEXT,
+        "createdAt" DATE NOT NULL,
+        "updatedAt" DATE NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS "verification" (
+        "id" TEXT NOT NULL PRIMARY KEY,
+        "identifier" TEXT NOT NULL,
+        "value" TEXT NOT NULL,
+        "expiresAt" DATE NOT NULL,
+        "createdAt" DATE NOT NULL,
+        "updatedAt" DATE NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS "session_userId_idx" ON "session" ("userId");
+      CREATE INDEX IF NOT EXISTS "account_userId_idx" ON "account" ("userId");
+      CREATE INDEX IF NOT EXISTS "verification_identifier_idx" ON "verification" ("identifier");
+    `);
+  }
+,
+
+  ensureUserOwnershipSchema() {
+    const tables = [
+      'activities',
+      'activity_events',
+      'inbox',
+      'inbox_events',
+      'timer_events',
+      'focus_sessions',
+      'focus_session_intervals'
+    ];
+    for (const table of tables) {
+      if (this.tableExists(table) && !this.columnExists(table, 'user_id')) {
+        this.db.exec(`ALTER TABLE ${table} ADD COLUMN user_id TEXT;`);
+      }
+    }
+    if (this.tableExists('activities')) {
+      this.db.exec('CREATE INDEX IF NOT EXISTS idx_activities_user_status_created ON activities (user_id, status, created_at_utc);');
+    }
+    if (this.tableExists('activity_events')) {
+      this.db.exec('CREATE INDEX IF NOT EXISTS idx_activity_events_user_sequence ON activity_events (user_id, server_sequence);');
+    }
+    if (this.tableExists('inbox')) {
+      this.db.exec('CREATE INDEX IF NOT EXISTS idx_inbox_user_created ON inbox (user_id, created_at_utc);');
+    }
+    if (this.tableExists('inbox_events')) {
+      this.db.exec('CREATE INDEX IF NOT EXISTS idx_inbox_events_user_sequence ON inbox_events (user_id, server_sequence);');
+    }
+    if (this.tableExists('timer_events')) {
+      this.db.exec('CREATE INDEX IF NOT EXISTS idx_timer_events_user_sequence ON timer_events (user_id, server_sequence);');
+    }
+    if (this.tableExists('focus_sessions')) {
+      this.db.exec('CREATE INDEX IF NOT EXISTS idx_focus_sessions_user_updated ON focus_sessions (user_id, updated_at_utc);');
+    }
+    if (this.tableExists('focus_session_intervals')) {
+      this.db.exec('CREATE INDEX IF NOT EXISTS idx_focus_intervals_user_started ON focus_session_intervals (user_id, started_at_utc);');
+    }
   }
 ,
 
@@ -602,27 +706,31 @@ export const migrationMethods = {
 
     const now = new Date().toISOString();
     const descriptions = [
-      ['activities', 'Действия', 'Текущий список действий и операций.', 'Хранит рабочее состояние действий Brai и внутренних операций агента: activity_type_id, название, описание, автора, причину, статус, сортировку, удаление и восстановление. Пользовательские записи имеют activity_type_id action, агентские задачи имеют activity_type_id operation. Для operation поле title хранит короткое название задачи, description_md описывает что сделать и какой результат получить, reason объясняет почему задача появилась.'],
-      ['activity_events', 'События действий', 'Журнал изменений действий.', 'Хранит каждое клиентское изменение по действиям для синхронизации, аудита и восстановления текущей таблицы activities. Поле change_type хранит тип изменения.'],
+      ['account', 'Auth-аккаунты', 'Better Auth account bindings.', 'Хранит Better Auth account записи для email OTP входа. Для текущей схемы providerId относится к email-OTP/credential связке, userId указывает на таблицу user.'],
+      ['activities', 'Действия', 'Текущий список действий и операций.', 'Хранит рабочее состояние действий Brai и внутренних операций агента: activity_type_id, user_id, название, описание, автора, причину, статус, сортировку, удаление и восстановление. Пользовательские записи имеют activity_type_id action, агентские задачи имеют activity_type_id operation. Для operation поле title хранит короткое название задачи, description_md описывает что сделать и какой результат получить, reason объясняет почему задача появилась.'],
+      ['activity_events', 'События действий', 'Журнал изменений действий.', 'Хранит каждое клиентское изменение по действиям для синхронизации, аудита и восстановления текущей таблицы activities. Поле user_id отделяет события разных пользователей, change_type хранит тип изменения.'],
       ['activity_types', 'Типы действий', 'Справочник типов activities.', 'Хранит разрешённые типы activities для поля activities.activity_type_id: action для пользовательских действий и operation для внутренних задач агента.'],
       ['app_settings', 'Настройки', 'Глобальные настройки приложения.', 'Хранит runtime-настройки в формате ключ-значение: дату старта цели, длительность цели, дневную норму фокуса и похожие параметры.'],
       ['build_version_refs', 'Связи APK-версий', 'Технические связи APK-версий.', 'Хранит source/target branch и commit для APK-записей build_versions, чтобы audit-метаданные не подменяли короткое изменение, детальные изменения и причину выпуска.'],
       ['build_versions', 'APK-версии', 'Журнал APK-версий.', 'Хранит активный APK-only ledger. Поле version является APK-счётчиком; build, release и canon строки больше не создаются runtime-кодом.'],
       ['deployment_records', 'Деплои', 'Журнал выкладок.', 'Хранит факты деплоя: окружение, ветку, commit, домен, web/OTA версию, APK версию и описание доставки.'],
-      ['focus_sessions', 'Сессии фокуса', 'Стабильные Focus-сессии.', 'Хранит стабильные идентификаторы Focus-сессий, soft-delete метку, origin старта и activity, из которой сессия была начата. Время хранится в focus_session_intervals.'],
+      ['focus_sessions', 'Сессии фокуса', 'Стабильные Focus-сессии.', 'Хранит стабильные идентификаторы Focus-сессий, user_id владельца, soft-delete метку, origin старта и activity, из которой сессия была начата. Время хранится в focus_session_intervals.'],
       ['focus_session_sources', 'Источники Focus-сессий', 'Связи Focus-сессий и событий.', 'Связывает итоговые Focus-сессии с timer_events, из которых они получились при deterministic replay.'],
-      ['focus_session_intervals', 'Интервалы Focus-сессий', 'Интервалы времени фокуса.', 'Хранит все временные интервалы Focus-сессий: обычный фокус с NULL activity_id, activity-linked интервалы, начало, конец, длительность и события, которыми интервал открыт или закрыт.'],
-      ['inbox', 'Входящие', 'Список входящих материалов.', 'Хранит входящие материалы Brai до нормализации: заголовок, описание, источник, ключ источника, требование ответа, связь с предыдущим входящим, тип записи, дату, автора, предварительный раздел, срочность, ссылки на вложения, пояснение, текст нормализации и признак нормализации.'],
-      ['inbox_events', 'События входящих', 'Журнал изменений входящих.', 'Хранит клиентские события по входящим для offline-first синхронизации, аудита и восстановления текущей таблицы inbox.'],
+      ['focus_session_intervals', 'Интервалы Focus-сессий', 'Интервалы времени фокуса.', 'Хранит все временные интервалы Focus-сессий: user_id владельца, обычный фокус с NULL activity_id, activity-linked интервалы, начало, конец, длительность и события, которыми интервал открыт или закрыт.'],
+      ['inbox', 'Входящие', 'Список входящих материалов.', 'Хранит входящие материалы Brai до нормализации: user_id владельца, заголовок, описание, источник, ключ источника, требование ответа, связь с предыдущим входящим, тип записи, дату, автора, предварительный раздел, срочность, ссылки на вложения, пояснение, текст нормализации и признак нормализации.'],
+      ['inbox_events', 'События входящих', 'Журнал изменений входящих.', 'Хранит клиентские события по входящим для offline-first синхронизации, аудита и восстановления текущей таблицы inbox. Поле user_id отделяет события разных пользователей.'],
       ['inbox_record_types', 'Типы входящих', 'Справочник типов входящих.', 'Хранит разрешённые типы записей Inbox: входящее от человека по API, входящее от агента по API, внутреннее входящее от агента и добавленное человеком из интерфейса.'],
       ['handlers', 'Обработчики', 'Реестр runtime-обработчиков.', 'Хранит полный реестр обработчиков Brai: stable id, target, тип, статус, подробное описание, условия срабатывания, входы, выходы, взаимодействия, side effects, используемый LLM provider/model, prompt template, timeout, fallback и source module. Каждое добавление или изменение обработчика должно обновлять соответствующую строку.'],
       ['handler_schedules', 'Расписания обработчиков', 'Очередь scheduled runtime-обработчиков.', 'Хранит расписания runtime-обработчиков Brai: ссылку на handlers, статус, следующий запуск, повторяемый интервал, lock от параллельного запуска, последние timestamps и последнюю ошибку. Внешний systemd timer только будит scheduler-runner; due-логика хранится здесь.'],
       ['items', 'Сущности', 'Реестр рабочих сущностей.', 'Хранит главные рабочие сущности Brai как стабильные id для схемы, API и технических решений.'],
       ['schema_migrations', 'Миграции', 'Журнал изменений схемы.', 'Хранит версии уже примененных миграций SQLite, время применения и краткое описание.'],
+      ['session', 'Auth-сессии', 'Better Auth sessions.', 'Хранит Better Auth web-сессии пользователей: token, срок действия, userId, ipAddress и userAgent.'],
       ['sqlite_sequence', 'Счётчики', 'Служебные счетчики SQLite.', 'Внутренняя таблица SQLite для AUTOINCREMENT-счетчиков. Это не бизнес-данные Brai.'],
       ['table_descriptions', 'Описания таблиц', 'Справочник описаний таблиц.', 'Хранит читаемый русский заголовок и описание для каждой SQLite-таблицы, которые показывает admin-панель.'],
       ['timer_devices', 'Устройства', 'Устройства синхронизации.', 'Хранит устройства, которые отправляют события фокуса и действий: stable device_id, платформу, имя и параметры синхронизации.'],
-      ['timer_events', 'События фокуса', 'Журнал событий фокуса.', 'Хранит start, stop, start_activity_focus, switch_activity_focus, stop_activity_focus, edit_session, edit_focus_interval и delete_session события фокуса с устройством, клиентской и серверной последовательностью.'],
+      ['timer_events', 'События фокуса', 'Журнал событий фокуса.', 'Хранит start, stop, start_activity_focus, switch_activity_focus, stop_activity_focus, edit_session, edit_focus_interval и delete_session события фокуса с user_id, устройством, клиентской и серверной последовательностью.'],
+      ['user', 'Пользователи', 'Better Auth users.', 'Хранит Better Auth пользователей Brai для email OTP входа: id, имя, email, emailVerified и timestamps. Первый подтвержденный пользователь записывается в app_settings.primary_user_id и получает существующие legacy-данные.'],
+      ['verification', 'Auth-коды', 'Better Auth verification records.', 'Хранит временные Better Auth verification записи для email OTP кодов и сроков их действия.'],
       ['version_types', 'Типы версий', 'Справочник типов версий.', 'Хранит активный тип записей build_versions: apk. Legacy-типы build, release и canon больше не создаются свежей базой.']
     ];
     const actualTables = new Set(

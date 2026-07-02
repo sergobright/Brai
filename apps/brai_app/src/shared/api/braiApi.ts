@@ -14,17 +14,42 @@ interface RequestOptions extends RequestInit {
 
 const REQUEST_TIMEOUT_MS = 8_000;
 
+export type AuthUser = {
+  id: string;
+  email: string;
+  name: string;
+};
+
+export type AuthSession = {
+  authenticated: boolean;
+  user?: AuthUser | null;
+};
+
 /**
  * Wraps the Brai HTTP API with typed client methods.
  */
 export class BraiApi {
   constructor(private readonly baseUrl: string) {}
 
-  async session(): Promise<{ authenticated: boolean }> {
+  async session(): Promise<AuthSession> {
     return this.request("/auth/session");
   }
 
-  async login(password: string): Promise<{ authenticated: boolean }> {
+  async requestOtp(email: string): Promise<{ sent?: boolean; success?: boolean }> {
+    return this.request("/auth/otp/send", {
+      method: "POST",
+      json: { email },
+    });
+  }
+
+  async verifyOtp(email: string, otp: string): Promise<AuthSession> {
+    return this.request("/auth/otp/verify", {
+      method: "POST",
+      json: { email, otp },
+    });
+  }
+
+  async login(password: string): Promise<AuthSession> {
     return this.request("/auth/login", {
       method: "POST",
       json: { password },
