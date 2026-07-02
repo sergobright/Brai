@@ -319,44 +319,22 @@ test('migration adds inbox entity schema and metadata', async () => {
   }
 });
 
-test('migration repairs generic version ledger release notes', async () => {
+test('migration keeps version ledger described as APK-only', async () => {
   const fixture = await createFixture(['2026-07-02T12:00:00.000Z']);
 
   try {
     fixture.store.db.prepare('DELETE FROM schema_migrations WHERE version = 44').run();
-    fixture.store.db.prepare(`
-      INSERT INTO build_versions (
-        version_type_id,
-        version,
-        included_in_version_id,
-        short_changes,
-        detailed_changes,
-        reason,
-        released_at_utc,
-        created_at_utc
-      ) VALUES ('build', 53, NULL, ?, ?, ?, ?, ?)
-      ON CONFLICT(version_type_id, version) DO UPDATE SET
-        short_changes = excluded.short_changes,
-        detailed_changes = excluded.detailed_changes,
-        reason = excluded.reason
-    `).run(
-      'Принята сборка Brai.',
-      'Сборка принята; технические branch/commit-данные сохранены отдельно.',
-      'Автоматическая доставка ветки',
-      '2026-07-01T15:29:17.988Z',
-      '2026-07-01T15:29:17.988Z'
-    );
 
     fixture.store.migrate();
 
-    const row = fixture.store.db
-      .prepare("SELECT short_changes, detailed_changes, reason FROM build_versions WHERE version_type_id = 'build' AND version = 53")
+    const description = fixture.store.db
+      .prepare("SELECT long_description FROM table_descriptions WHERE table_name = 'build_versions'")
       .get();
-    assert.deepEqual(row, {
-      short_changes: 'Очищена защита журнала версий.',
-      detailed_changes: 'Workflow журнала версий отделяет audit metadata от видимых описаний и не смешивает технические branch/commit-данные с release notes.',
-      reason: 'Нужно сохранить понятные описания принятых сборок без технического шума.'
-    });
+    assert.match(description.long_description, /APK-only ledger/);
+    assert.deepEqual(
+      fixture.store.db.prepare('SELECT version_type_id, version FROM build_versions ORDER BY version_type_id, version').all(),
+      [{ version_type_id: 'apk', version: 1 }]
+    );
   } finally {
     await fixture.close();
   }
