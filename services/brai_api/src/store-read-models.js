@@ -11,6 +11,7 @@ import {
   splitSessionByMoscowDay
 } from './time.js';
 import { formatSession, groupSessionsByDateHour } from './store-helpers.js';
+import { scopeSql } from './user-scope.js';
 
 export const readModelMethods = {
   getHandler(id) {
@@ -23,6 +24,7 @@ export const readModelMethods = {
   listSessions({ from, to } = {}) {
     const fromUtc = from ? new Date(moscowDateStartUtcMs(from)).toISOString() : null;
     const toUtc = to ? new Date(moscowDateStartUtcMs(addDays(to, 1))).toISOString() : null;
+    const scope = scopeSql('s');
 
     let sql = `
       SELECT s.id,
@@ -38,8 +40,9 @@ export const readModelMethods = {
           WHERE active.focus_session_id = s.id AND active.ended_at_utc IS NULL
         )
         AND s.deleted_at_utc IS NULL
+        ${scope.clause}
     `;
-    const params = [];
+    const params = [...scope.params];
     if (fromUtc) {
       sql += ' AND i.ended_at_utc >= ?';
       params.push(fromUtc);
@@ -58,6 +61,7 @@ export const readModelMethods = {
   challengeSummary(currentUtcMs = Date.now()) {
     const startUtc = new Date(moscowDateStartUtcMs(CHALLENGE_START_DATE)).toISOString();
     const endUtc = new Date(challengeEndExclusiveUtcMs()).toISOString();
+    const scope = scopeSql('s');
     const rows = this.db
       .prepare(`
         SELECT i.id, i.started_at_utc, i.ended_at_utc, i.duration_seconds
@@ -67,9 +71,10 @@ export const readModelMethods = {
           AND s.deleted_at_utc IS NULL
           AND i.ended_at_utc > ?
           AND i.started_at_utc < ?
+          ${scope.clause}
         ORDER BY i.started_at_utc ASC
       `)
-      .all(startUtc, endUtc);
+      .all(startUtc, endUtc, ...scope.params);
 
     const totals = new Map(challengeDates().map((date) => [date, 0]));
     for (const session of rows) {

@@ -11,8 +11,9 @@
     "test": "../../scripts/use-node22.sh node --test"
   },
   "dependencies": {
-    "better-sqlite3": "^11.10.0",
+    "better-auth": "^1.6.23",
+    "better-sqlite3": "^12.11.1",
+    "resend": "^6.16.0",
     "ws": "^8.18.0"
-  },
-  "devDependencies": {}
+  }
 }

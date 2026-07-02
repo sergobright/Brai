@@ -8,26 +8,30 @@ import {
   parseJsonObject,
   sanitizeText
 } from './store-helpers.js';
+import { scopeSql, scopedUserId } from './user-scope.js';
 
 export const inboxEventMethods = {
   listInbox() {
+    const scope = scopeSql();
     return this.db
       .prepare(
         `
           SELECT * FROM inbox
           WHERE deleted_at_utc IS NULL
+            ${scope.clause}
           ORDER BY created_at_utc DESC, updated_at_utc DESC, id ASC
         `
       )
-      .all()
+      .all(...scope.params)
       .map(formatInboxItem);
   }
 ,
 
   getInboxServerRevision() {
+    const scope = scopeSql();
     const row = this.db
-      .prepare('SELECT COALESCE(MAX(server_sequence), 0) AS revision FROM inbox_events')
-      .get();
+      .prepare(`SELECT COALESCE(MAX(server_sequence), 0) AS revision FROM inbox_events WHERE ${scope.where}`)
+      .get(...scope.params);
     return row.revision;
   }
 ,
@@ -35,26 +39,29 @@ export const inboxEventMethods = {
   inboxIdForEvent(eventId) {
     const id = sanitizeText(eventId);
     if (!id) return null;
+    const scope = scopeSql();
     return this.db
-      .prepare('SELECT inbox_id FROM inbox_events WHERE event_id = ?')
-      .get(id)?.inbox_id ?? null;
+      .prepare(`SELECT inbox_id FROM inbox_events WHERE event_id = ?${scope.clause}`)
+      .get(id, ...scope.params)?.inbox_id ?? null;
   }
 ,
 
   latestInboxIdForInbound({ source, sourceKey }) {
+    const scope = scopeSql();
     const cleanSourceKey = sanitizeText(sourceKey);
     if (cleanSourceKey) {
       return this.db
         .prepare(
           `
-            SELECT id FROM inbox
-            WHERE deleted_at_utc IS NULL
-              AND source_key = ?
-            ORDER BY created_at_utc DESC, updated_at_utc DESC
-            LIMIT 1
-          `
+          SELECT id FROM inbox
+          WHERE deleted_at_utc IS NULL
+            AND source_key = ?
+            ${scope.clause}
+          ORDER BY created_at_utc DESC, updated_at_utc DESC
+          LIMIT 1
+        `
         )
-        .get(cleanSourceKey)?.id ?? null;
+        .get(cleanSourceKey, ...scope.params)?.id ?? null;
     }
 
     const cleanSource = sanitizeText(source);
@@ -62,14 +69,15 @@ export const inboxEventMethods = {
       return this.db
         .prepare(
           `
-            SELECT id FROM inbox
-            WHERE deleted_at_utc IS NULL
-              AND source = ?
-            ORDER BY created_at_utc DESC, updated_at_utc DESC
-            LIMIT 1
-          `
+          SELECT id FROM inbox
+          WHERE deleted_at_utc IS NULL
+            AND source = ?
+            ${scope.clause}
+          ORDER BY created_at_utc DESC, updated_at_utc DESC
+          LIMIT 1
+        `
         )
-        .get(cleanSource)?.id ?? null;
+        .get(cleanSource, ...scope.params)?.id ?? null;
     }
 
     return this.db
@@ -77,11 +85,12 @@ export const inboxEventMethods = {
         `
           SELECT id FROM inbox
           WHERE deleted_at_utc IS NULL
+            ${scope.clause}
           ORDER BY created_at_utc DESC, updated_at_utc DESC
           LIMIT 1
         `
       )
-      .get()?.id ?? null;
+      .get(...scope.params)?.id ?? null;
   }
 ,
 
@@ -329,8 +338,8 @@ export const inboxEventMethods = {
           INSERT INTO inbox_events (
             event_id, device_id, client_sequence, server_sequence, inbox_id,
             type, occurred_at_utc, received_at_utc, payload_json,
-            status, ignore_reason, payload_version
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            status, ignore_reason, payload_version, user_id
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT(event_id) DO NOTHING
         `
       )
@@ -346,7 +355,8 @@ export const inboxEventMethods = {
         event.payload_json ?? null,
         event.status,
         event.ignore_reason ?? null,
-        event.payload_version
+        event.payload_version,
+        scopedUserId()
       );
     return result.changes > 0 ? serverSequence : null;
   }
@@ -375,16 +385,18 @@ export const inboxEventMethods = {
 ,
 
   projectInboxItem(inboxId, nowIso) {
+    const scope = scopeSql();
     const events = this.db
       .prepare(
         `
           SELECT * FROM inbox_events
           WHERE status = 'accepted'
             AND inbox_id = ?
+            ${scope.clause}
           ORDER BY occurred_at_utc ASC, server_sequence ASC
         `
       )
-      .all(inboxId);
+      .all(inboxId, ...scope.params);
 
     let item = null;
 
@@ -439,7 +451,7 @@ export const inboxEventMethods = {
     }
 
     if (!item) {
-      this.db.prepare('DELETE FROM inbox WHERE id = ?').run(inboxId);
+      this.db.prepare(`DELETE FROM inbox WHERE id = ?${scope.clause}`).run(inboxId, ...scope.params);
       return;
     }
 
@@ -450,8 +462,8 @@ export const inboxEventMethods = {
             id, title, description_text, source, source_key, response_required,
             related_inbox_id, record_type_id, item_date, author, preliminary_section,
             urgency, attachment_links_json, explanation_text, normalization_text,
-            is_normalized, created_at_utc, updated_at_utc, deleted_at_utc, last_event_id
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            is_normalized, created_at_utc, updated_at_utc, deleted_at_utc, last_event_id, user_id
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT(id) DO UPDATE SET
             title = excluded.title,
             description_text = excluded.description_text,
@@ -472,6 +484,9 @@ export const inboxEventMethods = {
             updated_at_utc = excluded.updated_at_utc,
             deleted_at_utc = excluded.deleted_at_utc,
             last_event_id = excluded.last_event_id
+          WHERE inbox.user_id IS excluded.user_id
+            OR inbox.user_id IS NULL
+            OR excluded.user_id IS NULL
         `
       )
       .run(
@@ -494,7 +509,8 @@ export const inboxEventMethods = {
         item.created_at_utc,
         item.updated_at_utc ?? nowIso,
         item.deleted_at_utc ?? null,
-        item.last_event_id ?? null
+        item.last_event_id ?? null,
+        scopedUserId()
       );
   }
 };

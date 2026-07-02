@@ -139,6 +139,49 @@ export async function ensureClientMeta(): Promise<{
   });
 }
 
+/**
+ * Clears user-owned local data when the authenticated server user changes.
+ */
+export async function ensureClientUser(userId: string | null): Promise<void> {
+  const db = clientDb();
+  await db.transaction(
+    "rw",
+    [
+      db.meta,
+      db.outbox_events,
+      db.action_outbox_events,
+      db.inbox_outbox_events,
+      db.canonical_state,
+      db.sessions_cache,
+      db.actions_cache,
+      db.inbox_cache,
+      db.goal_cache,
+      db.ignored_events,
+    ],
+    async () => {
+      const existing = await db.meta.get("currentUserId");
+      const currentUserId = (existing?.value as string | null | undefined) ?? null;
+      if (!existing || currentUserId === userId) {
+        await setMeta("currentUserId", userId);
+        return;
+      }
+
+      await Promise.all([
+        db.outbox_events.clear(),
+        db.action_outbox_events.clear(),
+        db.inbox_outbox_events.clear(),
+        db.canonical_state.clear(),
+        db.sessions_cache.clear(),
+        db.actions_cache.clear(),
+        db.inbox_cache.clear(),
+        db.goal_cache.clear(),
+        db.ignored_events.clear(),
+      ]);
+      await setMeta("currentUserId", userId);
+    },
+  );
+}
+
 export function randomId(): string {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) return crypto.randomUUID();
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;

@@ -2,7 +2,7 @@
 
 import type { CSSProperties, FormEvent, ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
-import { CheckCircle2, Loader2, Lock, TriangleAlert, WifiOff, type LucideIcon } from "lucide-react";
+import { CheckCircle2, KeyRound, Loader2, Lock, Mail, TriangleAlert, WifiOff, type LucideIcon } from "lucide-react";
 import { ENVIRONMENT_BADGE_LABEL, isProductionEnvironment } from "@/shared/config/runtime";
 import { installAndroidBackHandler } from "@/shared/platform/platform";
 import type { SyncStatus } from "@/shared/types/timer";
@@ -261,27 +261,97 @@ function IconGlyph({ emoji, className = "" }: { emoji: string; className?: strin
   );
 }
 
-export function AuthPanel({ busy, onLogin }: { busy: boolean; onLogin: (password: string) => Promise<void> }) {
+export function AuthPanel({
+  busy,
+  mode,
+  onLogin,
+  onRequestOtp,
+  onVerifyOtp,
+}: {
+  busy: boolean;
+  mode: "otp" | "password";
+  onLogin: (password: string) => Promise<void>;
+  onRequestOtp: (email: string) => Promise<void>;
+  onVerifyOtp: (email: string, otp: string) => Promise<void>;
+}) {
   const [password, setPassword] = useState("");
-  async function submit(event: FormEvent<HTMLFormElement>) {
+  const [email, setEmail] = useState("");
+  const [otp, setOtp] = useState("");
+  const [otpSent, setOtpSent] = useState(false);
+  const [error, setError] = useState("");
+
+  async function submitPassword(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     await onLogin(password);
   }
 
+  async function submitOtp(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError("");
+    try {
+      if (!otpSent) {
+        await onRequestOtp(email);
+        setOtpSent(true);
+        return;
+      }
+      await onVerifyOtp(email, otp);
+    } catch {
+      setError(otpSent ? "Код не подошел" : "Не удалось отправить код");
+    }
+  }
+
+  if (mode === "password") {
+    return (
+      <Card className="mt-[52px] grid w-[min(520px,100%)] justify-items-start gap-3 p-6" render={<form onSubmit={submitPassword} />}>
+        <Lock aria-hidden="true" className="size-5 text-muted-foreground" />
+        <h2 className="m-0 text-base leading-[1.2]">Вход</h2>
+        <Input
+          className="my-0.5 mb-1"
+          value={password}
+          type="password"
+          autoComplete="current-password"
+          aria-label="Пароль"
+          onChange={(event) => setPassword(event.target.value)}
+        />
+        <Button disabled={busy || !password}>
+          <Lock aria-hidden="true" />
+          Открыть
+        </Button>
+      </Card>
+    );
+  }
+
   return (
-    <Card className="mt-[52px] grid w-[min(520px,100%)] justify-items-start gap-3 p-6" render={<form onSubmit={submit} />}>
-      <Lock aria-hidden="true" className="size-5 text-muted-foreground" />
+    <Card className="mt-[52px] grid w-[min(520px,100%)] justify-items-start gap-3 p-6" render={<form onSubmit={submitOtp} />}>
+      <Mail aria-hidden="true" className="size-5 text-muted-foreground" />
       <h2 className="m-0 text-base leading-[1.2]">Вход</h2>
       <Input
         className="my-0.5 mb-1"
-        value={password}
-        type="password"
-        autoComplete="current-password"
-        onChange={(event) => setPassword(event.target.value)}
+        value={email}
+        type="email"
+        autoComplete="email"
+        inputMode="email"
+        placeholder="email"
+        aria-label="Email"
+        disabled={busy || otpSent}
+        onChange={(event) => setEmail(event.target.value)}
       />
-      <Button disabled={busy || !password}>
-        <Lock aria-hidden="true" />
-        Открыть
+      {otpSent ? (
+        <Input
+          className="my-0.5 mb-1"
+          value={otp}
+          type="text"
+          inputMode="numeric"
+          autoComplete="one-time-code"
+          placeholder="код"
+          aria-label="Код из письма"
+          onChange={(event) => setOtp(event.target.value)}
+        />
+      ) : null}
+      {error ? <p className="m-0 text-sm text-destructive">{error}</p> : null}
+      <Button disabled={busy || !email || (otpSent && !otp)}>
+        {otpSent ? <KeyRound aria-hidden="true" /> : <Mail aria-hidden="true" />}
+        {otpSent ? "Войти" : "Получить код"}
       </Button>
     </Card>
   );

@@ -94,7 +94,13 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
           }
         />
         {app.displaySyncStatus === "auth_required" ? (
-          <AuthPanel busy={app.busy} onLogin={app.onLogin} />
+          <AuthPanel
+            busy={app.busy}
+            mode={app.authMode}
+            onLogin={app.onLogin}
+            onRequestOtp={app.onRequestOtp}
+            onVerifyOtp={app.onVerifyOtp}
+          />
         ) : screenSection === "actions" ? (
           <ActionsSection
             state={app.actions}

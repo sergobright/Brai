@@ -10,8 +10,10 @@ import {
   receiveInboxInbound,
   serveInboxAttachment
 } from './inbound.js';
+import { createBraiAuth } from './auth.js';
 import { sendReleaseLoginPage, serveRelease } from './release-routes.js';
 import { BraiStore, formatFocusInterval, formatSession } from './store.js';
+import { scopedUserId, withUserScope } from './user-scope.js';
 
 const BASE_JSON_HEADERS = {
   'content-type': 'application/json; charset=utf-8',
@@ -31,6 +33,11 @@ export function createBraiServer({
   releaseDir = null,
   inboundApiKey = null,
   inboundToken = null,
+  betterAuthSecret = sessionSecret,
+  betterAuthUrl = null,
+  resendApiKey = null,
+  authFromEmail = null,
+  sendOtp = null,
   inboundStorageRoot = path.join(path.dirname(dbPath), 'inbox-attachments'),
   codexBin = 'codex',
   codexModel = null,
@@ -41,6 +48,15 @@ export function createBraiServer({
 }) {
   fs.mkdirSync(path.dirname(dbPath), { recursive: true });
   const store = new BraiStore(dbPath);
+  const authRuntime = createBraiAuth({
+    dbPath,
+    secret: betterAuthSecret ?? sessionSecret ?? 'brai-local-auth-secret-for-local-development-only',
+    baseURL: betterAuthUrl,
+    resendApiKey,
+    fromEmail: authFromEmail ?? undefined,
+    sendOtp
+  });
+  const { auth } = authRuntime;
   const sockets = new Set();
   const inboundHandlers = new Map([
     ['inbox', {
@@ -72,7 +88,54 @@ export function createBraiServer({
       }
 
       if (url.pathname === '/auth/session' && req.method === 'GET') {
-        sendJson(req, res, 200, { authenticated: hasValidSession(req, sessionSecret, now()) });
+        const session = await betterAuthSession(req, auth);
+        if (session?.user) {
+          sendJson(req, res, 200, { authenticated: true, user: publicAuthUser(session.user) });
+          return;
+        }
+        if (hasValidSession(req, sessionSecret, now())) {
+          sendJson(req, res, 200, { authenticated: true, user: publicAuthUser(store.primaryUser()) });
+          return;
+        }
+        sendJson(req, res, 200, { authenticated: false, user: null });
+        return;
+      }
+
+      if (url.pathname === '/auth/otp/send' && req.method === 'POST') {
+        const body = await readJson(req);
+        const email = cleanEmail(body.email);
+        if (!email) {
+          sendJson(req, res, 400, { error: 'email_required' });
+          return;
+        }
+        const response = await auth.api.sendVerificationOTP({
+          body: { email, type: 'sign-in' },
+          headers: requestHeaders(req),
+          asResponse: true
+        });
+        await relayAuthResponse(req, res, response);
+        return;
+      }
+
+      if (url.pathname === '/auth/otp/verify' && req.method === 'POST') {
+        const body = await readJson(req);
+        const email = cleanEmail(body.email);
+        const otp = typeof body.otp === 'string' ? body.otp.trim() : '';
+        if (!email || !otp) {
+          sendJson(req, res, 400, { error: 'email_otp_required' });
+          return;
+        }
+        const response = await auth.api.signInEmailOTP({
+          body: { email, otp, name: cleanName(body.name) ?? email },
+          headers: requestHeaders(req),
+          asResponse: true
+        });
+        const text = await response.text();
+        const payload = parseJson(text);
+        if (response.ok && payload?.user?.id) {
+          store.claimFirstUser(payload.user.id, now().toISOString());
+        }
+        relayAuthText(req, res, response, text, payload);
         return;
       }
 
@@ -84,14 +147,22 @@ export function createBraiServer({
         }
 
         const cookie = createSessionCookie(sessionSecret, now(), shouldUseSecureCookie(req));
-        sendJson(req, res, 200, { authenticated: true }, { 'set-cookie': cookie });
+        sendJson(req, res, 200, { authenticated: true, user: publicAuthUser(store.primaryUser()) }, { 'set-cookie': cookie });
         return;
       }
 
       if (url.pathname === '/auth/logout' && req.method === 'POST') {
-        sendJson(req, res, 200, { authenticated: false }, {
-          'set-cookie': clearSessionCookie(shouldUseSecureCookie(req))
-        });
+        const cookies = [clearSessionCookie(shouldUseSecureCookie(req))];
+        try {
+          const response = await auth.api.signOut({
+            headers: requestHeaders(req),
+            asResponse: true
+          });
+          cookies.push(...setCookieHeaders(response.headers));
+        } catch {
+          // Legacy cookie cleanup still completes logout for clients that never had Better Auth.
+        }
+        sendJson(req, res, 200, { authenticated: false, user: null }, { 'set-cookie': cookies });
         return;
       }
 
@@ -149,9 +220,10 @@ export function createBraiServer({
         }
 
         if (req.method === 'POST') {
-          const result = await inboundHandler.receive(body, requestNow);
-          const state = inboxState(store, requestNow);
-          broadcast(sockets, { type: 'inbox_synced', inbox_state: state });
+          const ownerUserId = store.primaryUserId();
+          const result = await withUserScope(ownerUserId, () => inboundHandler.receive(body, requestNow));
+          const state = await withUserScope(ownerUserId, () => inboxState(store, requestNow));
+          broadcast(sockets, { type: 'inbox_synced', inbox_state: state }, ownerUserId);
           sendJson(req, res, result.created ? 201 : 200, { ok: true, target, ...result, state });
           return;
         }
@@ -165,11 +237,13 @@ export function createBraiServer({
         return;
       }
 
-      if (!isAuthorized(req, token, url, sessionSecret, now)) {
+      const authContext = await authenticateRequest(req, token, url, sessionSecret, now, auth, store);
+      if (!authContext.authorized) {
         sendJson(req, res, 401, { error: 'unauthorized' });
         return;
       }
 
+      await withUserScope(authContext.userId, async () => {
       if (req.method === 'GET' && url.pathname === '/v1/timer/state') {
         sendJson(req, res, 200, timerState(store, now()));
         return;
@@ -191,7 +265,7 @@ export function createBraiServer({
         });
         const state = timerState(store, requestNow);
         const responseBody = { ...result, state };
-        broadcast(sockets, { type: 'timer_synced', state });
+        broadcast(sockets, { type: 'timer_synced', state }, scopedUserId());
         sendJson(req, res, 200, responseBody);
         return;
       }
@@ -202,7 +276,7 @@ export function createBraiServer({
         return;
       }
 
-      if (req.method === 'GET' && serveInboxAttachment(req, res, url, inboundStorageRoot, sendJson)) {
+      if (req.method === 'GET' && serveInboxAttachment(req, res, url, inboundStorageRoot, sendJson, store)) {
         return;
       }
 
@@ -232,7 +306,7 @@ export function createBraiServer({
           type: 'activities_synced',
           activities_state: state,
           actions_state: actionsCompatState(state)
-        });
+        }, scopedUserId());
         sendJson(req, res, 200, responseBody);
         return;
       }
@@ -248,7 +322,7 @@ export function createBraiServer({
         });
         const state = inboxState(store, requestNow);
         const responseBody = { ...result, state };
-        broadcast(sockets, { type: 'inbox_synced', inbox_state: state });
+        broadcast(sockets, { type: 'inbox_synced', inbox_state: state }, scopedUserId());
         sendJson(req, res, 200, responseBody);
         return;
       }
@@ -257,7 +331,7 @@ export function createBraiServer({
         const requestNow = now();
         const result = store.startTimer(requestNow.toISOString());
         const body = { ...timerState(store, requestNow), created: result.created };
-        broadcast(sockets, { type: 'timer_started', state: body });
+        broadcast(sockets, { type: 'timer_started', state: body }, scopedUserId());
         sendJson(req, res, result.created ? 201 : 200, body);
         return;
       }
@@ -271,7 +345,7 @@ export function createBraiServer({
           completed_session: formatSession(result.session)
         };
         if (result.stopped) {
-          broadcast(sockets, { type: 'timer_stopped', state: body });
+          broadcast(sockets, { type: 'timer_stopped', state: body }, scopedUserId());
         }
         sendJson(req, res, result.stopped ? 200 : 409, body);
         return;
@@ -293,6 +367,8 @@ export function createBraiServer({
       }
 
       sendJson(req, res, 404, { error: 'not_found' });
+      });
+      return;
     } catch (error) {
       logger.error(error);
       if (Number.isInteger(error.status)) {
@@ -305,25 +381,34 @@ export function createBraiServer({
 
   const wss = new WebSocketServer({ noServer: true });
   server.on('upgrade', (req, socket, head) => {
-    const url = new URL(req.url ?? '/', 'http://localhost');
-    if (url.pathname !== '/v1/live' || !isAuthorized(req, token, url, sessionSecret, now)) {
+    void (async () => {
+      const url = new URL(req.url ?? '/', 'http://localhost');
+      const authContext = await authenticateRequest(req, token, url, sessionSecret, now, auth, store);
+      if (url.pathname !== '/v1/live' || !authContext.authorized) {
+        socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+        socket.destroy();
+        return;
+      }
+
+      wss.handleUpgrade(req, socket, head, (ws) => {
+        ws.userId = authContext.userId;
+        sockets.add(ws);
+        withUserScope(authContext.userId, () => {
+          const currentActivitiesState = activitiesState(store, now());
+          ws.send(JSON.stringify({
+            type: 'connected',
+            state: timerState(store, now()),
+            activities_state: currentActivitiesState,
+            actions_state: actionsCompatState(currentActivitiesState),
+            inbox_state: inboxState(store, now())
+          }));
+        });
+        ws.on('close', () => sockets.delete(ws));
+        ws.on('error', () => sockets.delete(ws));
+      });
+    })().catch(() => {
       socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
       socket.destroy();
-      return;
-    }
-
-    wss.handleUpgrade(req, socket, head, (ws) => {
-      sockets.add(ws);
-      const currentActivitiesState = activitiesState(store, now());
-      ws.send(JSON.stringify({
-        type: 'connected',
-        state: timerState(store, now()),
-        activities_state: currentActivitiesState,
-        actions_state: actionsCompatState(currentActivitiesState),
-        inbox_state: inboxState(store, now())
-      }));
-      ws.on('close', () => sockets.delete(ws));
-      ws.on('error', () => sockets.delete(ws));
     });
   });
 
@@ -335,6 +420,7 @@ export function createBraiServer({
         for (const socket of sockets) socket.close();
         wss.close(() => {
           server.close(() => {
+            authRuntime.close();
             store.close();
             resolve();
           });
@@ -442,14 +528,104 @@ function actionsCompatState(state) {
   };
 }
 
-function isAuthorized(req, token, parsedUrl = null, sessionSecret = null, now = () => new Date()) {
+async function authenticateRequest(req, token, parsedUrl, sessionSecret, now, auth, store) {
+  const session = await betterAuthSession(req, auth);
+  if (session?.user?.id) {
+    return { authorized: true, userId: session.user.id, user: publicAuthUser(session.user) };
+  }
+
+  if (hasLegacyToken(req, token, parsedUrl)) {
+    const primary = store.primaryUser();
+    return { authorized: true, userId: primary?.id ?? null, user: publicAuthUser(primary) };
+  }
+
+  if (hasValidSession(req, sessionSecret, now())) {
+    const primary = store.primaryUser();
+    return { authorized: true, userId: primary?.id ?? null, user: publicAuthUser(primary) };
+  }
+
+  return { authorized: false, userId: null, user: null };
+}
+
+async function betterAuthSession(req, auth) {
+  try {
+    const response = await auth.api.getSession({
+      headers: requestHeaders(req),
+      asResponse: true
+    });
+    if (!response.ok) return null;
+    return parseJson(await response.text());
+  } catch {
+    return null;
+  }
+}
+
+function hasLegacyToken(req, token, parsedUrl = null) {
+  if (!token) return false;
   const header = req.headers.authorization ?? '';
   if (header === `Bearer ${token}`) return true;
 
   const url = parsedUrl ?? new URL(req.url ?? '/', 'http://localhost');
-  if (url.searchParams.get('token') === token) return true;
+  return url.searchParams.get('token') === token;
+}
 
-  return hasValidSession(req, sessionSecret, now());
+function publicAuthUser(user) {
+  if (!user) return null;
+  return {
+    id: user.id,
+    email: user.email,
+    name: user.name ?? user.email ?? ''
+  };
+}
+
+function requestHeaders(req) {
+  const headers = new Headers();
+  for (const [key, value] of Object.entries(req.headers)) {
+    if (Array.isArray(value)) {
+      for (const item of value) headers.append(key, item);
+    } else if (value != null) {
+      headers.set(key, value);
+    }
+  }
+  return headers;
+}
+
+async function relayAuthResponse(req, res, response) {
+  relayAuthText(req, res, response, await response.text());
+}
+
+function relayAuthText(req, res, response, text, parsed = parseJson(text)) {
+  const cookies = setCookieHeaders(response.headers);
+  const extraHeaders = cookies.length > 0 ? { 'set-cookie': cookies } : {};
+  if (response.ok && parsed?.user?.id) {
+    sendJson(req, res, response.status, { authenticated: true, user: publicAuthUser(parsed.user) }, extraHeaders);
+    return;
+  }
+  const contentType = response.headers.get('content-type') ?? 'application/json; charset=utf-8';
+  res.writeHead(response.status, { ...jsonHeaders(req), ...extraHeaders, 'content-type': contentType });
+  res.end(text || JSON.stringify({ ok: response.ok }));
+}
+
+function setCookieHeaders(headers) {
+  if (typeof headers.getSetCookie === 'function') return headers.getSetCookie();
+  const cookie = headers.get('set-cookie');
+  return cookie ? [cookie] : [];
+}
+
+function parseJson(text) {
+  try {
+    return text ? JSON.parse(text) : null;
+  } catch {
+    return null;
+  }
+}
+
+function cleanEmail(value) {
+  return typeof value === 'string' && value.trim().includes('@') ? value.trim().toLowerCase() : null;
+}
+
+function cleanName(value) {
+  return typeof value === 'string' && value.trim() ? value.trim().slice(0, 120) : null;
 }
 
 function sendJson(req, res, status, body, extraHeaders = {}) {
@@ -487,9 +663,10 @@ function redirect(res, location, extraHeaders = {}) {
   res.end();
 }
 
-function broadcast(sockets, payload) {
+function broadcast(sockets, payload, targetUserId = null) {
   const message = JSON.stringify(payload);
   for (const socket of sockets) {
+    if (targetUserId && socket.userId !== targetUserId) continue;
     if (socket.readyState === 1) {
       socket.send(message);
     }
