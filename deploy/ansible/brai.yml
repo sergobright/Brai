@@ -281,7 +281,7 @@
     - name: Install Brai Caddy routes
       ansible.builtin.blockinfile:
         path: "{{ brai_caddyfile }}"
-        marker: "# {mark} BRIGHT OS DEV/PREVIEW ENVIRONMENTS"
+        marker: "# {mark} BRAI DEV/PREVIEW ENVIRONMENTS"
         block: "{{ lookup('template', 'templates/Caddyfile.j2') }}"
         validate: "caddy validate --adapter caddyfile --config %s"
       notify:
