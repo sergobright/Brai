@@ -7,7 +7,7 @@ After=network-online.target brai-temporal.service
 Type=simple
 User=brai
 Group=brai
-SupplementaryGroups=brai-deploy
+SupplementaryGroups=brai-deploy mark
 WorkingDirectory=/srv/projects/brai/services/brai_temporal
 Environment=TEMPORAL_ADDRESS=127.0.0.1:7233
 Environment=TEMPORAL_NAMESPACE=default

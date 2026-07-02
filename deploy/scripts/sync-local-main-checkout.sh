@@ -6,6 +6,7 @@ EXPECTED_COMMIT="${1:-${BRAI_COMMIT:-}}"
 REPO="/srv/projects/brai"
 REMOTE_URL="${BRAI_MAIN_REMOTE_URL:-git@github.com:sergobright/Brai.git}"
 GIT_USER="${BRAI_MAIN_GIT_USER:-mark}"
+SOURCE_GROUP="${BRAI_MAIN_SOURCE_GROUP:-mark}"
 RESCUE_ROOT="${BRAI_MAIN_RESCUE_ROOT:-/srv/projects/brai-rescue}"
 LOCK_FILE="${BRAI_MAIN_SYNC_LOCK:-/tmp/brai-main-checkout-sync.lock}"
 
@@ -30,6 +31,9 @@ fi
 if ! id "$GIT_USER" >/dev/null 2>&1; then
   echo "Git user does not exist: $GIT_USER" >&2
   exit 1
+fi
+if ! getent group "$SOURCE_GROUP" >/dev/null 2>&1; then
+  SOURCE_GROUP="mark"
 fi
 
 git_cmd() {
@@ -92,7 +96,7 @@ find "$REPO" \
   -path "$REPO/deploy/web" -prune -o \
   -path "$REPO/deploy/mobile-update" -prune -o \
   -path "$REPO/deploy/releases" -prune -o \
-  -exec chown "$GIT_USER:mark" {} +
+  -exec chown "$GIT_USER:$SOURCE_GROUP" {} +
 
 find "$REPO" \
   -path "$REPO/.git" -prune -o \
@@ -121,9 +125,10 @@ git_cmd config core.hooksPath .githooks
 
 if [ "${BRAI_MAIN_SYNC_LOCK_CHECKOUT:-1}" = "1" ]; then
   mkdir -p .codex-worktrees
-  chown root:mark "$REPO"
+  chown "root:$SOURCE_GROUP" "$REPO"
   chmod 0751 "$REPO"
-  chown -R mark:mark .git .codex-worktrees
+  chown -R mark:mark .git
+  chown mark:mark .codex-worktrees
   chmod 0700 .codex-worktrees
 
   find "$REPO" \
@@ -134,7 +139,7 @@ if [ "${BRAI_MAIN_SYNC_LOCK_CHECKOUT:-1}" = "1" ]; then
     -path "$REPO/deploy/web" -prune -o \
     -path "$REPO/deploy/mobile-update" -prune -o \
     -path "$REPO/deploy/releases" -prune -o \
-    -exec chown root:mark {} +
+    -exec chown "root:$SOURCE_GROUP" {} +
 
   find "$REPO" \
     -path "$REPO/.git" -prune -o \

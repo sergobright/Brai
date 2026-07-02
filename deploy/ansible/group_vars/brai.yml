@@ -7,6 +7,7 @@ brai_public_site_domain: brightos.world
 brai_public_site_root: "{{ brai_repo }}/landing/public"
 brai_deploy_user: brai-deploy
 brai_deploy_writers: []
+brai_source_group: mark
 brai_service_user: brai
 brai_service_group: brai
 brai_api_env_source: /etc/brai/brai-api.env

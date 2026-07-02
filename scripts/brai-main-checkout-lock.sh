@@ -19,6 +19,10 @@ runtime_paths=(
   "$root/deploy/mobile-update"
   "$root/deploy/releases"
 )
+source_group="${BRAI_MAIN_SOURCE_GROUP:-mark}"
+if ! getent group "$source_group" >/dev/null 2>&1; then
+  source_group="mark"
+fi
 
 restore_task_state_access() {
   local task_state="$1/.brai-task"
@@ -33,10 +37,11 @@ restore_task_state_access() {
 
 mkdir -p "$worktrees"
 
-sudo chown root:mark "$root"
+sudo chown "root:$source_group" "$root"
 sudo chmod 0751 "$root"
 
-sudo chown -R mark:mark "$root/.git" "$worktrees"
+sudo chown -R mark:mark "$root/.git"
+sudo chown mark:mark "$worktrees"
 sudo chmod 0700 "$worktrees"
 
 if ! git config --global --get-all safe.directory | grep -Fxq "$root"; then
@@ -51,7 +56,7 @@ sudo find "$root" \
   -path "$root/deploy/web" -prune -o \
   -path "$root/deploy/mobile-update" -prune -o \
   -path "$root/deploy/releases" -prune -o \
-  -exec chown root:mark {} +
+  -exec chown "root:$source_group" {} +
 
 sudo find "$root" \
   -path "$root/.git" -prune -o \

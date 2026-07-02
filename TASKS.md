@@ -13,6 +13,7 @@
 - 2026-07-01 — `npm run app:test` в task worktree падает на Vitest/Vite `EACCES`, когда linked `apps/brai_app/node_modules/.vite-temp` owned by `nobody:mark` с `750`; нужен owner/group-write fix для shared dependency dirs перед тестами, иначе фиксировать проверку как заблокированную окружением.
 - 2026-07-01 — `npm run app:build` в Codex sandbox может падать Turbopack panic на `creating new process`/`binding to a port` с `Operation not permitted`; повторять build с `sandbox_permissions=require_escalated`.
 - 2026-07-01 — `deploy/scripts/accept-preview.sh` читает receipt из текущего checkout; если основной checkout содержит receipt другой ветки, запускать accept из matching `.codex-worktrees/<task-slug>` и проверять `.brai-task/preview-handoff.json`.
+- 2026-07-02 — live systemd unit group updates для чтения `root:mark` main checkout требуют явного approval из-за security impact; держать repo/templates исправленными, а live `/etc/systemd/system/brai-*` применять отдельным подтвержденным ops-шагом.
 
 ## Закрыто
 

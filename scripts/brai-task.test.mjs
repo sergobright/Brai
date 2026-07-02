@@ -157,6 +157,10 @@ test("main checkout lock locks non-current worktrees by default", () => {
   assert.match(script, /restore_task_state_access "\$worktree_path"/);
   assert.match(script, /sudo chown mark:mark "\$task_state"/);
   assert.match(script, /sudo chmod 0770 "\$task_state"/);
+  assert.match(script, /source_group="\$\{BRAI_MAIN_SOURCE_GROUP:-mark\}"/);
+  assert.match(script, /sudo chown "root:\$source_group" "\$root"/);
+  assert.match(script, /sudo chown -R mark:mark "\$root\/\.git"/);
+  assert.match(script, /sudo chown mark:mark "\$worktrees"/);
   assert.match(script, /-maxdepth 1 -type f -name '\*\.json'/);
   assert.match(script, /sudo chmod 0751 "\$root"/);
   assert.match(script, /sudo chmod u=rwx,g=rx,o=x "\$root\/deploy"/);
@@ -168,6 +172,7 @@ test("local main sync preserves runtime dirs and hard resets to origin main", ()
   const ciScript = fs.readFileSync(new URL("../deploy/scripts/ci-ssh-sync-main-checkout.sh", import.meta.url), "utf8");
   const playbook = fs.readFileSync(new URL("../deploy/ansible/brai.yml", import.meta.url), "utf8");
   assert.match(script, /REPO="\/srv\/projects\/brai"/);
+  assert.match(script, /SOURCE_GROUP="\$\{BRAI_MAIN_SOURCE_GROUP:-mark\}"/);
   assert.match(script, /Usage: \$0 \[expected-main-commit\]/);
   assert.match(script, /runuser -u "\$GIT_USER"/);
   assert.match(script, /core\.hooksPath=\/dev\/null/);
@@ -178,6 +183,9 @@ test("local main sync preserves runtime dirs and hard resets to origin main", ()
   assert.match(script, /-e deploy\/releases\//);
   assert.match(script, /brai-rescue/);
   assert.match(script, /chmod 0751 "\$REPO"/);
+  assert.match(script, /chown "root:\$SOURCE_GROUP" "\$REPO"/);
+  assert.match(script, /chown -R mark:mark \.git/);
+  assert.match(script, /chown mark:mark \.codex-worktrees/);
   assert.match(script, /chmod u=rwx,g=rx,o=x deploy/);
   assert.match(script, /BRAI_LOCK_STALE_WORKTREES:-1/);
   assert.match(script, /git_cmd worktree list --porcelain/);
