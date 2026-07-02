@@ -4,18 +4,19 @@
 
 Add a small server-side scheduler for runtime handlers. A systemd timer wakes a
 Node runner every five minutes; SQLite decides which registered handler is due.
-The first scheduled handler deduplicates root `TASKS.md` every six hours by
-opening a `codex/tasks-md-dedupe-*` infra/docs PR and enabling auto-merge.
+The previously planned `TASKS.md` dedupe handler is now disabled because agent
+task tracking moved from `TASKS.md` into `activities` operation rows.
 
 ## Capabilities
 
 - Add `handler_schedules` as the source of truth for scheduled runtime handler
   due time, interval, lock state, and last run status.
-- Register `maintenance.tasks_md_deduper` in `handlers`.
+- Register `maintenance.tasks_md_deduper` in `handlers` as disabled legacy
+  documentation.
 - Run scheduled handlers through `brai-scheduler.timer` and
   `brai-scheduler.service`.
-- Keep `TASKS.md` changes in Git branch/PR flow instead of dirtying the main
-  server checkout, with branch protection/auto-merge landing the PR.
+- Keep scheduled runtime handler state in SQLite without running obsolete
+  `TASKS.md` maintenance.
 
 ## Rationale
 

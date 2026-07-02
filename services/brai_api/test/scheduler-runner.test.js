@@ -112,6 +112,10 @@ test('TASKS.md candidate output is strict', () => {
 function createStore() {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'brai-scheduler-test-'));
   const store = new BraiStore(path.join(tmp, 'brai.sqlite'));
+  store.db.prepare('UPDATE handlers SET status = ? WHERE id = ?').run('active', HANDLER_ID);
+  store.db
+    .prepare('UPDATE handler_schedules SET status = ?, interval_seconds = ? WHERE id = ?')
+    .run('active', 21600, HANDLER_ID);
   return {
     store,
     close() {

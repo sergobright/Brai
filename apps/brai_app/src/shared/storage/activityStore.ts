@@ -168,8 +168,11 @@ export function projectActivitiesState(
       if (!title) continue;
       actions.set(event.actionId, {
         id: event.actionId,
+        activity_type_id: "action",
         title,
         description_md: normalizeDescription(event.payload.description_md),
+        author: "",
+        reason: "",
         status: "New",
         created_at_utc: occurredAtUtc,
         updated_at_utc: occurredAtUtc,
@@ -342,6 +345,9 @@ function normalizedPayload(payload: ActivityEventPayload): ActivityEventPayload 
 function normalizeActivityItem(action: ActivityItem): ActivityItem {
   return {
     ...action,
+    activity_type_id: action.activity_type_id ?? "action",
+    author: action.author ?? "",
+    reason: action.reason ?? "",
     description_md: normalizeDescription(action.description_md),
     sort_order: Number.isInteger(action.sort_order) ? action.sort_order : null,
     deleted_at_utc: action.deleted_at_utc ?? null,

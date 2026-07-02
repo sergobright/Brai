@@ -6,6 +6,10 @@ TBD - created by archiving change add-actions-task-list. Update Purpose after ar
 ### Requirement: Activities are synced tasks
 Brai SHALL provide an Activities module for task records synchronized between Web and Android.
 
+Activity records SHALL reference `activity_types` through `activity_type_id`.
+User-created records SHALL use `activity_type_id = action`. Agent-created task
+records SHALL use `activity_type_id = operation`.
+
 #### Scenario: Activity is deleted
 - **WHEN** the user deletes an activity
 - **THEN** the activity is removed from the active Activities list
@@ -17,6 +21,16 @@ Brai SHALL provide an Activities module for task records synchronized between We
 - **THEN** the activity is removed from the archived list
 - **AND** the activity returns to the active Activities list as `New`
 - **AND** it appears above older active activities without manual order
+
+#### Scenario: Agent operation is recorded
+- **WHEN** the agent decides that a follow-up task or procedural blocker must be tracked
+- **THEN** it is stored in `activities` with `activity_type_id = operation`
+- **AND** `author` records the agent name as text
+- **AND** `reason` records the context for why the agent decided the operation is needed
+
+#### Scenario: User activity is recorded
+- **WHEN** a user creates an activity from the product interface
+- **THEN** it is stored with `activity_type_id = action`
 
 ### Requirement: Activities use two statuses
 Activity records SHALL store status directly on the record as either `New` or `Done`.

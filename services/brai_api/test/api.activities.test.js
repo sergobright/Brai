@@ -4,6 +4,7 @@ import { WebSocket } from 'ws';
 import {
   TOKEN,
   actionEvent,
+  activityTypeCount,
   createFixture,
   jsonRequest,
   onceOpen,
@@ -86,7 +87,7 @@ test('actions sync deletes activities idempotently', async () => {
     assert.equal(second.body.state.activities.length, 0);
     assert.equal(second.body.state.archived_activities.length, 1);
     assert.equal(tableCount(fixture, 'activity_events'), 2);
-    assert.equal(tableCount(fixture, 'activities'), 1);
+    assert.equal(activityTypeCount(fixture, 'action'), 1);
 
     const legacy = await request(fixture.url, '/v1/actions');
     assert.equal(legacy.body.actions.length, 0);
@@ -233,7 +234,7 @@ test('actions sync replays previously orphaned updates after a late create', asy
         ]
       })
     });
-    assert.equal(tableCount(fixture, 'activities'), 0);
+    assert.equal(activityTypeCount(fixture, 'action'), 0);
 
     const response = await request(fixture.url, '/v1/activities/events/sync', {
       method: 'POST',
@@ -469,7 +470,7 @@ test('future and malformed action events are stored as ignored', async () => {
     ]);
     assert.equal(response.body.state.activities.length, 0);
     assert.equal(tableCount(fixture, 'activity_events'), 3);
-    assert.equal(tableCount(fixture, 'activities'), 0);
+    assert.equal(activityTypeCount(fixture, 'action'), 0);
   } finally {
     await fixture.close();
   }
@@ -488,7 +489,7 @@ test('unauthorized action sync stores no actions or action events', async () => 
     });
     assert.equal(response.status, 401);
     assert.equal(tableCount(fixture, 'activity_events'), 0);
-    assert.equal(tableCount(fixture, 'activities'), 0);
+    assert.equal(activityTypeCount(fixture, 'action'), 0);
   } finally {
     await fixture.close();
   }
@@ -543,7 +544,7 @@ test('legacy actions endpoints remain compatibility aliases', async () => {
 
     const state = await request(fixture.url, '/v1/actions');
     assert.equal(state.body.actions[0].title, 'Фокус');
-    assert.equal(tableCount(fixture, 'activities'), 1);
+    assert.equal(activityTypeCount(fixture, 'action'), 1);
   } finally {
     await fixture.close();
   }

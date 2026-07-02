@@ -196,7 +196,7 @@ describe("BraiApi", () => {
     expect(body.events[0]).toMatchObject({
       event_id: "device:action:1",
       activity_id: "action-1",
-      type: "create",
+      change_type: "create",
       payload: { title: "Фокус" },
     });
   });
@@ -248,7 +248,7 @@ describe("BraiApi", () => {
     expect(body.events[0]).toMatchObject({
       event_id: "device:action:2",
       activity_id: "action-1",
-      type: "delete",
+      change_type: "delete",
       payload: {},
     });
   });
@@ -301,7 +301,7 @@ describe("BraiApi", () => {
     expect(body.events[0]).toMatchObject({
       event_id: "device:action:restore",
       activity_id: "action-1",
-      type: "restore",
+      change_type: "restore",
       payload: {},
     });
   });
@@ -350,7 +350,7 @@ describe("BraiApi", () => {
     const [, init] = fetchMock.mock.calls[0];
     const body = JSON.parse(String(init?.body));
     expect(body.events[0]).toMatchObject({
-      type: "update_description",
+      change_type: "update_description",
       payload: { description_md: "**важно**" },
     });
   });
@@ -399,7 +399,7 @@ describe("BraiApi", () => {
     const [, init] = fetchMock.mock.calls[0];
     const body = JSON.parse(String(init?.body));
     expect(body.events[0]).toMatchObject({
-      type: "reorder",
+      change_type: "reorder",
       payload: { ordered_ids: ["action-2", "action-1"] },
     });
   });

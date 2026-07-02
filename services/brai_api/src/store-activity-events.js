@@ -19,7 +19,8 @@ export const activityEventMethods = {
       .prepare(
         `
           SELECT * FROM activities
-          WHERE deleted_at_utc IS NULL
+          WHERE activity_type_id = 'action'
+            AND deleted_at_utc IS NULL
           ORDER BY
             CASE status WHEN 'New' THEN 0 ELSE 1 END ASC,
             CASE status WHEN 'New' THEN CASE WHEN sort_order IS NULL THEN 0 ELSE 1 END END ASC,
@@ -40,7 +41,8 @@ export const activityEventMethods = {
       .prepare(
         `
           SELECT * FROM activities
-          WHERE deleted_at_utc IS NOT NULL
+          WHERE activity_type_id = 'action'
+            AND deleted_at_utc IS NOT NULL
           ORDER BY deleted_at_utc DESC, updated_at_utc DESC, id ASC
         `
       )
@@ -109,7 +111,7 @@ export const activityEventMethods = {
 
   stopDeletedActiveActivityFocus(acceptedEvents, receivedAt) {
     for (const event of acceptedEvents) {
-      if (event.type !== 'delete') continue;
+      if (event.change_type !== 'delete') continue;
       const activeInterval = this.getActiveInterval?.();
       if (!activeInterval || activeInterval.activity_id !== event.activity_id) continue;
       this.upsertDevice(
@@ -185,17 +187,17 @@ export const activityEventMethods = {
       };
     }
 
-    const rawType = sanitizeText(rawEvent?.type);
+    const rawType = sanitizeText(rawEvent?.change_type) ?? sanitizeText(rawEvent?.type);
     const activityId = sanitizeText(rawEvent?.activity_id) ?? sanitizeText(rawEvent?.action_id);
     const occurredMs = Date.parse(rawEvent?.occurred_at_utc);
     const payload = normalizeActionPayload(rawEvent?.payload);
-    let type = rawType;
+    let changeType = rawType;
     let status = 'accepted';
     let ignoreReason = null;
     let occurredAt = rawEvent?.occurred_at_utc;
 
     if (!ACTIVITY_EVENT_TYPES.has(rawType)) {
-      type = 'invalid';
+      changeType = 'invalid';
       status = 'ignored';
       ignoreReason = 'invalid_type';
       occurredAt = receivedAt;
@@ -245,7 +247,7 @@ export const activityEventMethods = {
       device_id: deviceId,
       client_sequence: clientSequence,
       activity_id: activityId,
-      type,
+      change_type: changeType,
       occurred_at_utc: occurredAt,
       received_at_utc: receivedAt,
       payload_json: JSON.stringify(payload),
@@ -262,7 +264,7 @@ export const activityEventMethods = {
           ? {
               event_id: eventId,
               activity_id: activityId,
-              type,
+              change_type: changeType,
               occurred_at_utc: occurredAt,
               server_sequence: serverSequence,
               payload_json: JSON.stringify(payload)
@@ -278,7 +280,7 @@ export const activityEventMethods = {
       device_id: deviceId,
       client_sequence: clientSequence,
       activity_id: sanitizeText(rawEvent?.activity_id) ?? sanitizeText(rawEvent?.action_id),
-      type: 'invalid',
+      change_type: 'invalid',
       occurred_at_utc: receivedAt,
       received_at_utc: receivedAt,
       payload_json: JSON.stringify({ raw_event: rawEvent }),
@@ -296,7 +298,7 @@ export const activityEventMethods = {
         `
           INSERT INTO activity_events (
             event_id, device_id, client_sequence, server_sequence, activity_id,
-            type, occurred_at_utc, received_at_utc, payload_json,
+            change_type, occurred_at_utc, received_at_utc, payload_json,
             status, ignore_reason, payload_version
           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT(event_id) DO NOTHING
@@ -308,7 +310,7 @@ export const activityEventMethods = {
         event.client_sequence,
         serverSequence,
         event.activity_id ?? null,
-        event.type,
+        event.change_type,
         event.occurred_at_utc,
         event.received_at_utc,
         event.payload_json ?? null,
@@ -335,7 +337,7 @@ export const activityEventMethods = {
     const insertedReorderIds = new Set();
 
     for (const event of events) {
-      if (event.type === 'reorder') {
+      if (event.change_type === 'reorder') {
         insertedReorderIds.add(event.event_id);
       } else if (event.activity_id) {
         activityIds.add(event.activity_id);
@@ -362,7 +364,7 @@ export const activityEventMethods = {
           SELECT * FROM activity_events
           WHERE status = 'accepted'
             AND activity_id = ?
-            AND type != 'reorder'
+            AND change_type != 'reorder'
           ORDER BY occurred_at_utc ASC, server_sequence ASC
         `
       )
@@ -375,7 +377,7 @@ export const activityEventMethods = {
     for (const event of events) {
       const payload = parseJsonObject(event.payload_json);
 
-      if (event.type === 'create') {
+      if (event.change_type === 'create') {
         const title = sanitizeText(payload.title);
         if (!title) continue;
         if (!activity) sortResetEvent = event;
@@ -393,19 +395,19 @@ export const activityEventMethods = {
           last_event_id: event.event_id
         };
         lastOwnEvent = event;
-      } else if (event.type === 'update_title' && activity) {
+      } else if (event.change_type === 'update_title' && activity) {
         const title = sanitizeText(payload.title);
         if (!title) continue;
         activity.title = title;
         activity.updated_at_utc = event.occurred_at_utc;
         activity.last_event_id = event.event_id;
         lastOwnEvent = event;
-      } else if (event.type === 'update_description' && activity) {
+      } else if (event.change_type === 'update_description' && activity) {
         activity.description_md = normalizeMarkdownSource(payload.description_md ?? '');
         activity.updated_at_utc = event.occurred_at_utc;
         activity.last_event_id = event.event_id;
         lastOwnEvent = event;
-      } else if (event.type === 'set_status' && activity && ACTIVITY_STATUSES.has(payload.status)) {
+      } else if (event.change_type === 'set_status' && activity && ACTIVITY_STATUSES.has(payload.status)) {
         activity.status = payload.status;
         activity.updated_at_utc = event.occurred_at_utc;
         activity.completed_at_utc = payload.status === 'Done' ? event.occurred_at_utc : null;
@@ -413,14 +415,14 @@ export const activityEventMethods = {
         activity.last_event_id = event.event_id;
         sortResetEvent = event;
         lastOwnEvent = event;
-      } else if (event.type === 'delete' && activity) {
+      } else if (event.change_type === 'delete' && activity) {
         activity.deleted_at_utc = event.occurred_at_utc;
         activity.updated_at_utc = event.occurred_at_utc;
         activity.sort_order = null;
         activity.last_event_id = event.event_id;
         sortResetEvent = event;
         lastOwnEvent = event;
-      } else if (event.type === 'restore' && activity) {
+      } else if (event.change_type === 'restore' && activity) {
         activity.deleted_at_utc = null;
         activity.restored_at_utc = event.occurred_at_utc;
         activity.status = 'New';
@@ -434,7 +436,7 @@ export const activityEventMethods = {
     }
 
     if (!activity) {
-      this.db.prepare('DELETE FROM activities WHERE id = ?').run(activityId);
+      this.db.prepare("DELETE FROM activities WHERE id = ? AND activity_type_id = 'action'").run(activityId);
       return;
     }
 
@@ -456,11 +458,14 @@ export const activityEventMethods = {
         `
           INSERT INTO activities (
             id, title, description_md, status, created_at_utc, updated_at_utc, completed_at_utc,
-            sort_order, deleted_at_utc, restored_at_utc, last_event_id
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            sort_order, deleted_at_utc, restored_at_utc, last_event_id, activity_type_id, author, reason
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'action', '', '')
           ON CONFLICT(id) DO UPDATE SET
+            activity_type_id = 'action',
             title = excluded.title,
             description_md = excluded.description_md,
+            author = '',
+            reason = '',
             status = excluded.status,
             created_at_utc = excluded.created_at_utc,
             updated_at_utc = excluded.updated_at_utc,
@@ -492,7 +497,7 @@ export const activityEventMethods = {
       .prepare(
         `
           SELECT * FROM activity_events
-          WHERE status = 'accepted' AND type = 'reorder'
+          WHERE status = 'accepted' AND change_type = 'reorder'
           ORDER BY occurred_at_utc DESC, server_sequence DESC
           LIMIT 1
         `
@@ -507,7 +512,7 @@ export const activityEventMethods = {
         `
           SELECT * FROM activity_events
           WHERE status = 'accepted'
-            AND type = 'reorder'
+            AND change_type = 'reorder'
             AND (
               occurred_at_utc > ?
               OR (occurred_at_utc = ? AND server_sequence > ?)
@@ -556,7 +561,7 @@ export const activityEventMethods = {
       const payload = parseJsonObject(event.payload_json);
       const existing = activities.get(activityId);
 
-      if (event.type === 'create') {
+      if (event.change_type === 'create') {
         const title = sanitizeText(payload.title);
         if (!title) continue;
         activities.set(activityId, {
@@ -572,23 +577,23 @@ export const activityEventMethods = {
           restored_at_utc: existing?.restored_at_utc ?? null,
           last_event_id: event.event_id
         });
-      } else if (event.type === 'update_title' && existing) {
+      } else if (event.change_type === 'update_title' && existing) {
         const title = sanitizeText(payload.title);
         if (!title) continue;
         existing.title = title;
         existing.updated_at_utc = event.occurred_at_utc;
         existing.last_event_id = event.event_id;
-      } else if (event.type === 'update_description' && existing) {
+      } else if (event.change_type === 'update_description' && existing) {
         existing.description_md = normalizeMarkdownSource(payload.description_md ?? '');
         existing.updated_at_utc = event.occurred_at_utc;
         existing.last_event_id = event.event_id;
-      } else if (event.type === 'set_status' && existing && ACTIVITY_STATUSES.has(payload.status)) {
+      } else if (event.change_type === 'set_status' && existing && ACTIVITY_STATUSES.has(payload.status)) {
         existing.status = payload.status;
         existing.updated_at_utc = event.occurred_at_utc;
         existing.completed_at_utc = payload.status === 'Done' ? event.occurred_at_utc : null;
         existing.sort_order = null;
         existing.last_event_id = event.event_id;
-      } else if (event.type === 'reorder') {
+      } else if (event.change_type === 'reorder') {
         const orderedIds = normalizeOrderedIds(payload.ordered_ids);
         const ordered = new Set(orderedIds);
         for (const activity of activities.values()) {
@@ -600,13 +605,13 @@ export const activityEventMethods = {
             activity.sort_order = null;
           }
         }
-      } else if (event.type === 'delete') {
+      } else if (event.change_type === 'delete') {
         if (!existing) continue;
         existing.deleted_at_utc = event.occurred_at_utc;
         existing.updated_at_utc = event.occurred_at_utc;
         existing.sort_order = null;
         existing.last_event_id = event.event_id;
-      } else if (event.type === 'restore') {
+      } else if (event.change_type === 'restore') {
         if (!existing) continue;
         existing.deleted_at_utc = null;
         existing.restored_at_utc = event.occurred_at_utc;
@@ -618,12 +623,12 @@ export const activityEventMethods = {
       }
     }
 
-    this.db.prepare('DELETE FROM activities').run();
+    this.db.prepare("DELETE FROM activities WHERE activity_type_id = 'action'").run();
     const insertActivity = this.db.prepare(`
       INSERT INTO activities (
         id, title, description_md, status, created_at_utc, updated_at_utc, completed_at_utc,
-        sort_order, deleted_at_utc, restored_at_utc, last_event_id
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        sort_order, deleted_at_utc, restored_at_utc, last_event_id, activity_type_id, author, reason
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'action', '', '')
     `);
 
     for (const activity of activities.values()) {

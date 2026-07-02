@@ -8,8 +8,8 @@ SHALL keep handler descriptions in the existing `handlers` registry.
 - **WHEN** the Brai API store migrates
 - **THEN** `handler_schedules` exists
 - **AND** `table_descriptions` describes `handler_schedules`
-- **AND** `maintenance.tasks_md_deduper` is registered in `handlers`
-- **AND** its schedule runs every six hours
+- **AND** `maintenance.tasks_md_deduper` is registered in `handlers` as disabled legacy documentation
+- **AND** its schedule is disabled because agent tasks now live in `activities` operation rows
 
 #### Scenario: A recurring handler is due
 - **WHEN** the scheduler runner sees an active schedule whose `next_run_at_utc`
@@ -29,20 +29,12 @@ runner every five minutes.
 - **AND** the service runs `services/brai_api/src/scheduler-runner.js`
 - **AND** application ports remain unexposed
 
-### Requirement: TASKS.md dedupe changes go through Git PR flow
-Brai SHALL deduplicate root `TASKS.md` through a `codex/*` branch and PR,
-not by directly mutating the production main checkout.
+### Requirement: Legacy TASKS.md dedupe handler stays disabled
+Brai SHALL NOT run the legacy `TASKS.md` dedupe handler after agent task tracking
+moves into `activities` operation rows.
 
-#### Scenario: TASKS.md has duplicate entries
-- **WHEN** `maintenance.tasks_md_deduper` finds duplicate or redundant
-  `TASKS.md` entries
-- **THEN** it creates a `codex/tasks-md-dedupe-*` branch
-- **AND** commits only `TASKS.md`
-- **AND** pushes the branch
-- **AND** opens a PR to `main`
-- **AND** enables PR auto-merge with the branch head SHA
-
-#### Scenario: TASKS.md has no duplicate entries
-- **WHEN** the handler finds no required change
-- **THEN** it creates no branch
-- **AND** the schedule is still advanced to the next interval
+#### Scenario: Scheduler sees the legacy handler
+- **WHEN** `maintenance.tasks_md_deduper` exists in `handlers`
+- **THEN** its handler status is `disabled`
+- **AND** its schedule status is `disabled`
+- **AND** no `codex/tasks-md-dedupe-*` branch is created
