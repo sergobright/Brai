@@ -41,6 +41,12 @@ export function resolveAppVersion({
   if (kind === "apk") return validApkVersion(explicit || resolveApkVersion(db || prodDb, { nextApk, targetBranch, targetCommit }));
   if (explicit) return validOtaVersion(explicit);
 
+  const ledgerVersion = latestOtaVersion([
+    db && latestBuildOtaVersion(db),
+    prodDb && latestBuildOtaVersion(prodDb),
+  ]);
+  if (ledgerVersion) return validOtaVersion(ledgerVersion);
+
   const deployedVersion = latestOtaVersion([
     environment !== "prod" && prodWebVersionJson && readVersionJson(prodWebVersionJson),
     mobileTarget && latestMobileTargetVersion(mobileTarget),
@@ -71,6 +77,17 @@ function resolveApkVersion(dbPath, { nextApk = false, targetBranch = "", targetC
       apk = Number(existing?.version || 0) || apk + 1;
     }
     return String(apk || 1);
+  } finally {
+    db.close();
+  }
+}
+
+function latestBuildOtaVersion(dbPath) {
+  if (!dbPath || !fs.existsSync(dbPath)) return "";
+  const db = new Database(dbPath, { readonly: true, fileMustExist: true });
+  try {
+    const build = Number(db.prepare("SELECT COALESCE(MAX(version), 0) AS build FROM build_versions WHERE version_type_id = 'build'").get()?.build || 0);
+    return build > 0 ? `0.0.${build}` : "";
   } finally {
     db.close();
   }

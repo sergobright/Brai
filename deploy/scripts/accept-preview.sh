@@ -42,7 +42,35 @@ if ! command -v gh >/dev/null 2>&1; then
   exit 1
 fi
 
-ROOT="$(git rev-parse --show-toplevel)"
+CALL_ROOT="$(git rev-parse --show-toplevel)"
+
+find_acceptance_root() {
+  local current_branch
+  current_branch="$(git -C "$CALL_ROOT" branch --show-current)"
+  if [[ "$current_branch" == "$BRANCH" ]]; then
+    echo "$CALL_ROOT"
+    return
+  fi
+
+  local path=""
+  local line
+  while IFS= read -r line; do
+    if [[ "$line" == worktree\ * ]]; then
+      path="${line#worktree }"
+      continue
+    fi
+    if [[ "$line" == branch\ refs/heads/* && "${line#branch refs/heads/}" == "$BRANCH" ]]; then
+      echo "$path"
+      return
+    fi
+  done < <(git -C "$CALL_ROOT" worktree list --porcelain)
+
+  echo "Cannot find local worktree for $BRANCH. Run accept-preview from that task worktree or keep the official task worktree available." >&2
+  exit 1
+}
+
+ROOT="$(find_acceptance_root)"
+cd "$ROOT"
 
 run_brai_node() {
   local node_prefix="${BRAI_NODE_PREFIX:-/srv/opt/node-v22.16.0/bin}"
