@@ -166,6 +166,9 @@ test("main checkout lock locks non-current worktrees by default", () => {
   assert.match(script, /-maxdepth 1 -type f -name '\*\.json'/);
   assert.match(script, /sudo chmod 0751 "\$root"/);
   assert.match(script, /sudo chmod u=rwx,g=rx,o=x "\$root\/deploy"/);
+  assert.match(script, /production-sqlite-maintenance\.sh/);
+  assert.match(script, /sudo chmod u=rwx,g=rx,o=x "\$root\/deploy\/scripts"/);
+  assert.match(script, /sudo chgrp brai-deploy "\$maintenance_tool"/);
   assert.match(script, /Writable task worktree parent/);
 });
 
@@ -189,6 +192,9 @@ test("local main sync preserves runtime dirs and hard resets to origin main", ()
   assert.match(script, /chown -R mark:mark \.git/);
   assert.match(script, /chown mark:mark \.codex-worktrees/);
   assert.match(script, /chmod u=rwx,g=rx,o=x deploy/);
+  assert.match(script, /production-sqlite-maintenance\.sh/);
+  assert.match(script, /chmod u=rwx,g=rx,o=x deploy\/scripts/);
+  assert.match(script, /chgrp brai-deploy deploy\/scripts\/production-sqlite-maintenance\.sh/);
   assert.match(script, /BRAI_LOCK_STALE_WORKTREES:-1/);
   assert.match(script, /git_cmd worktree list --porcelain/);
   assert.match(script, /chown -R root:mark "\$worktree_path"/);
