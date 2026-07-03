@@ -8,6 +8,7 @@
 - [ ] Найден релевантный guideline в `docs/guidelines/`.
 - [ ] Найден релевантный OpenSpec spec/change.
 - [ ] Проверено реальное состояние кода через `rg` или file reads.
+- [ ] Перед тяжёлыми проверками сверена sandbox/escalation policy в `docs/guidelines/06-testing-security-qa.md` или через `scripts/brai-sandbox-check-mode.mjs -- <command>`.
 - [ ] Если задача касается runtime DB/service/deploy фактов, проверены реальные target environment, path/schema/data; если доступа нет, это blocker, а не допущение.
 - [ ] Проверен `git status --short`.
 - [ ] Если работа read-only или меняет только внешнее окружение без project-file changes, новая ветка не нужна.

@@ -32,6 +32,7 @@ import {
   validatePreviewReceipt,
   validatePushUpdate,
   validateReleaseNotes,
+  workspacePreflight,
 } from "./brai-task.mjs";
 import { acceptedPreviewBranches } from "../deploy/scripts/accepted-preview-branches.mjs";
 import { requiresNativeApkChange } from "../deploy/scripts/detect-native-apk-change.mjs";
@@ -276,7 +277,11 @@ test("delivery classifier separates infra-docs from runtime preview", () => {
   assert.equal(deliveryClassForFile("deploy/scripts/build-nonproduction-apks.sh"), "infra");
   assert.equal(deliveryClassForFile("deploy/scripts/resolve-deploy-env.mjs"), "infra");
   assert.equal(deliveryClassForFile("deploy/scripts/classify-delivery.mjs"), "infra");
+  assert.equal(deliveryClassForFile("deploy/scripts/preview-slots.mjs"), "infra");
+  assert.equal(deliveryClassForFile("deploy/scripts/preview-slots.sh"), "infra");
+  assert.equal(deliveryClassForFile("deploy/scripts/production-sqlite-maintenance.sh"), "infra");
   assert.equal(deliveryClassForFile("deploy/scripts/sync-local-main-checkout.sh"), "infra");
+  assert.equal(deliveryClassForFile("deploy/scripts/sync-occupied-preview-ota-manifests.sh"), "infra");
   assert.equal(deliveryClassForFile("deploy/scripts/ci-ssh-sync-main-checkout.sh"), "infra");
   assert.equal(deliveryClassForFile("scripts/brai-task.mjs"), "infra");
   assert.equal(deliveryClassForFile("scripts/check-open-openspec-changes.mjs"), "infra");
@@ -578,12 +583,22 @@ test("task start guidance requires escalation and forbids manual branch fallback
 
 test("task permission repair script is scoped to one registered worktree", () => {
   const script = fs.readFileSync(new URL("./brai-task-repair-permissions.sh", import.meta.url), "utf8");
-  assert.match(script, /usage: scripts\/brai-task-repair-permissions\.sh/);
+  assert.match(script, /usage: scripts\/brai-task-repair-permissions\.sh \[--workspace\]/);
   assert.match(script, /Refusing to repair path outside/);
   assert.match(script, /Refusing to repair git metadata outside/);
+  assert.match(script, /Refusing to repair workspace path outside/);
+  assert.match(script, /apps\/brai_app\/node_modules\/@capacitor\/android\/capacitor\/build/);
+  assert.match(script, /apps\/brai_app\/android\/\*\/build/);
   assert.ok(script.includes('sudo chown -R "$OWNER" "$TARGET_REAL" "$GIT_DIR_REAL"'));
   assert.ok(script.includes('sudo chmod -R u=rwX,g=rwX,o= "$TARGET_REAL" "$GIT_DIR_REAL"'));
-  assert.ok(script.includes("sudo find \"$TASK_STATE\" -maxdepth 1 -type f -name '*.json' -exec chmod 0640 {} +"));
+  assert.ok(script.includes("sudo find \"$task_state\" -maxdepth 1 -type f -name '*.json' -exec chmod 0640 {} +"));
+});
+
+test("task starter runs scoped repair and preflight after installed guard", () => {
+  const script = fs.readFileSync(new URL("./brai-task-start.sh", import.meta.url), "utf8");
+  assert.match(script, /brai-guard\.mjs start "\$@"/);
+  assert.match(script, /brai-task-repair-permissions\.sh" --workspace "\$TASK"/);
+  assert.match(script, /brai-task\.mjs" preflight --strict/);
 });
 
 test("task starter creates writable nested worktrees from repo and supports legacy task roots", () => {
@@ -762,6 +777,43 @@ test("task starter links existing dependency dirs into new worktrees", () => {
 
   assert.deepEqual(linkDependencyDirs(source, target, ["services/brai_api/node_modules"]), ["services/brai_api/node_modules"]);
   assert.equal(fs.lstatSync(path.join(target, "services/brai_api/node_modules")).isSymbolicLink(), true);
+});
+
+test("workspace preflight checks allowlisted dirs and rejects symlink escapes", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "brai-preflight-"));
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), "brai-preflight-outside-"));
+  fs.mkdirSync(path.join(root, ".brai-task"));
+  fs.mkdirSync(path.join(root, "apps/brai_app/android/app/build"), { recursive: true });
+  fs.symlinkSync(outside, path.join(root, "node_modules"), "dir");
+
+  const result = workspacePreflight(root);
+  assert.equal(result.ok, false);
+  assert.ok(result.checked.some((entry) => entry.path === ".brai-task"));
+  assert.ok(result.checked.some((entry) => entry.path === "apps/brai_app/android/app/build"));
+  assert.match(result.failed.find((entry) => entry.path === "node_modules")?.reason ?? "", /outside workspace roots/);
+});
+
+test("preview slot status is shared-lock read-only", () => {
+  const envRoot = fs.mkdtempSync(path.join(os.tmpdir(), "brai-preview-slots-"));
+  const registry = path.join(envRoot, "preview-slots.json");
+  const statusDir = path.join(envRoot, "preview-status");
+  const result = spawnSync("bash", ["deploy/scripts/preview-slots.sh", "status"], {
+    cwd: process.cwd(),
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      NODE_BIN: process.execPath,
+      BRAI_ENVS_ROOT: envRoot,
+      BRAI_PREVIEW_REGISTRY: registry,
+      BRAI_PREVIEW_LOCK: path.join(envRoot, "preview-slots.lock"),
+      BRAI_PREVIEW_STATUS_DIR: statusDir,
+    },
+  });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.equal(fs.existsSync(registry), false);
+  assert.equal(fs.existsSync(path.join(envRoot, "preview-slots.lock")), false);
+  assert.equal(fs.existsSync(path.join(statusDir, "index.html")), false);
+  assert.match(fs.readFileSync(new URL("../deploy/scripts/preview-slots.sh", import.meta.url), "utf8"), /flock -s 9/);
 });
 
 test("task starter can enable checked-in git hooks", () => {

@@ -103,7 +103,7 @@ The `state` query exposes `deliveryClass`, `handoff`, `autoMerge`, `tasks`, `mis
 - Workflow ID for production deploy: `brai:promotion:prod:<sha>`.
 - Prod signals: `prod_deploy_started`, `prod_version_recorded`, `accepted_previews_started`, `accepted_previews_passed`, `accepted_previews_failed`, `prod_deploy_passed`, `prod_deploy_failed`.
 
-The production checklist requires accepted-preview metadata promotion, version/ledger recording, deployment, and preview-slot cleanup. `prod_deploy_passed` completes the promotion workflow only after prior required steps have succeeded in GitHub Actions. Russian human-readable `build_versions` release notes are part of the existing version/ledger recording step; changing their text source does not add a new Temporal gate.
+The production checklist requires accepted-preview metadata promotion, version/ledger recording, deployment, and preview-slot cleanup. During the post-deploy accepted-preview release step, occupied preview OTA manifests are republished from each preview slot's own source checkout so their `otaVersion` follows the production build ledger without replacing preview content with production content. `prod_deploy_passed` completes the promotion workflow only after prior required steps have succeeded in GitHub Actions. Russian human-readable `build_versions` release notes are part of the existing version/ledger recording step; changing their text source does not add a new Temporal gate.
 
 Deploy logic still lives in the existing scripts. Temporal is the required control ledger around those scripts; GitHub branch protection, merge queue, preview slot locking, and SQLite ledger writes remain the underlying authorities for their own data.
 

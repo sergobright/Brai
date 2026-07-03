@@ -11,6 +11,7 @@
 - [ ] Do not continue project-file work on a `codex/*` branch that is already included in `origin/main`; create a new task branch even if the UI selected the old branch.
 - [ ] Confirm local Git hooks are enabled with `git config core.hooksPath .githooks`.
 - [ ] For suspicious guard state, run `node scripts/brai-task.mjs doctor --strict`; nonzero means the task is not ready for handoff.
+- [ ] For suspicious workspace/cache/output permissions, run `node scripts/brai-task.mjs preflight --strict`; use `scripts/brai-task-repair-permissions.sh --workspace <task>` only for allowlisted ignored paths.
 - [ ] Stage only intended files.
 - [ ] Do not revert unrelated changes.
 - [ ] Run or report relevant checks.

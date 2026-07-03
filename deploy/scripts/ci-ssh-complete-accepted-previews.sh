@@ -45,6 +45,12 @@ signal_temporal_preview() {
   fi
 }
 
+sync_occupied_preview_ota_manifests() {
+  if [[ "$MODE" == "release" && "$TARGET_ENVIRONMENT" == "prod" ]]; then
+    "$SCRIPT_DIR/sync-occupied-preview-ota-manifests.sh"
+  fi
+}
+
 REQUIRED_PREVIEWS_JSON="$(
   cd "$ROOT"
   BRAI_TARGET_BRANCH="$TARGET_BRANCH" "$NODE_BIN" "$SCRIPT_DIR/accepted-preview-branches.mjs" --json "$TARGET_COMMIT"
@@ -94,6 +100,7 @@ done <<<"$CLEANUP_BRANCH_LIST"
 
 if [[ "${#REQUIRED_BRANCHES[@]}" -eq 0 && "${#CLEANUP_BRANCHES[@]}" -eq 0 ]]; then
   echo "No accepted codex/* preview branches associated with $TARGET_BRANCH@$TARGET_COMMIT."
+  sync_occupied_preview_ota_manifests
   exit 0
 fi
 
@@ -160,3 +167,5 @@ for branch in "${CLEANUP_BRANCHES[@]}"; do
     echo "Best-effort cleanup failed for previously accepted preview $branch; continuing." >&2
   fi
 done
+
+sync_occupied_preview_ota_manifests

@@ -14,6 +14,24 @@ const DEPENDENCY_DIRS = [
   "services/brai_api/node_modules",
   "services/brai_temporal/node_modules",
 ];
+const WORKSPACE_WRITABLE_DIRS = [
+  ".brai-task",
+  ...DEPENDENCY_DIRS,
+  ".vite-temp",
+  ".next",
+  "out",
+  "output",
+  "output/playwright",
+  "test-results",
+  "landing",
+  "apps/brai_app/.next",
+  "apps/brai_app/out",
+  "apps/brai_app/output",
+  "apps/brai_app/output/playwright",
+  "apps/brai_app/test-results",
+  "apps/brai_app/node_modules/@capacitor/android/capacitor/build",
+  "apps/brai_app/android/.gradle",
+];
 
 const ZERO_SHA = "0000000000000000000000000000000000000000";
 const PREVIEW_SLOT_EMOJI = { A: "🅰️", B: "🅱️", C: "🅲", D: "🅳", E: "🅴" };
@@ -65,6 +83,7 @@ export {
   validateReleaseNotes,
   validatePushUpdate,
   validatePreviewReceipt,
+  workspacePreflight,
 };
 
 function runCli([command, ...args]) {
@@ -112,8 +131,11 @@ function runCli([command, ...args]) {
       case "doctor":
         doctor(args.includes("--strict"));
         break;
+      case "preflight":
+        preflight(args.includes("--strict"));
+        break;
       default:
-        throw new Error("usage: brai-task.mjs start <slug>|follow-up [branch]|acceptance-reconcile [branch]|pre-tool-use|pre-commit|pre-push <remote>|stop|classify [--base <ref>] [--head <ref>] [--github-output]|handoff [branch]|preview [branch]|release-notes --short <text> --details <text> --reason <text>|require-delivery [branch] [sha]|require-preview [branch] [sha]|doctor [--strict]");
+        throw new Error("usage: brai-task.mjs start <slug>|follow-up [branch]|acceptance-reconcile [branch]|pre-tool-use|pre-commit|pre-push <remote>|stop|classify [--base <ref>] [--head <ref>] [--github-output]|handoff [branch]|preview [branch]|release-notes --short <text> --details <text> --reason <text>|require-delivery [branch] [sha]|require-preview [branch] [sha]|doctor [--strict]|preflight [--strict]");
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -511,6 +533,54 @@ function doctor(strict = false) {
   const state = deriveTaskState();
   console.log(JSON.stringify(state, null, 2));
   if (strict && !state.ok) process.exit(1);
+}
+
+function preflight(strict = false) {
+  const result = workspacePreflight();
+  console.log(JSON.stringify(result, null, 2));
+  if (strict && !result.ok) process.exit(1);
+}
+
+function workspacePreflight(root = git("rev-parse", "--show-toplevel")) {
+  const sourceRoot = dependencySourceRoot(root);
+  const checked = [];
+  const failed = [];
+  for (const relativePath of collectWorkspaceWritableDirs(root)) {
+    const absolutePath = path.join(root, relativePath);
+    if (!fs.existsSync(absolutePath)) continue;
+    const check = checkWorkspaceWritablePath(absolutePath, root, sourceRoot);
+    const item = { path: relativePath, ...check };
+    if (check.ok) checked.push(item);
+    else failed.push(item);
+  }
+  return { ok: failed.length === 0, root, checked, failed };
+}
+
+function collectWorkspaceWritableDirs(root) {
+  const paths = new Set(WORKSPACE_WRITABLE_DIRS);
+  const androidRoot = path.join(root, "apps/brai_app/android");
+  if (fs.existsSync(androidRoot)) {
+    for (const entry of fs.readdirSync(androidRoot, { withFileTypes: true })) {
+      if (entry.isDirectory()) paths.add(`apps/brai_app/android/${entry.name}/build`);
+    }
+  }
+  return [...paths].sort();
+}
+
+function checkWorkspaceWritablePath(absolutePath, root, sourceRoot) {
+  const stats = fs.lstatSync(absolutePath);
+  if (!stats.isDirectory() && !stats.isSymbolicLink()) return { ok: false, reason: "not a directory" };
+  const real = fs.realpathSync(absolutePath);
+  const allowedRoots = [root, sourceRoot].map((candidate) => fs.realpathSync(candidate));
+  if (!allowedRoots.some((candidate) => real === candidate || real.startsWith(`${candidate}${path.sep}`))) {
+    return { ok: false, real, reason: "outside workspace roots" };
+  }
+  try {
+    fs.accessSync(real, fs.constants.W_OK);
+    return { ok: true, real };
+  } catch (error) {
+    return { ok: false, real, reason: error?.code || "not writable" };
+  }
 }
 
 function deriveTaskState() {
@@ -1250,12 +1320,16 @@ function deliveryClassForFile(file) {
       "deploy/scripts/deploy-branch.sh",
       "deploy/scripts/detect-native-apk-change.mjs",
       "deploy/scripts/generate-android-preview-icons.sh",
+      "deploy/scripts/preview-slots.mjs",
+      "deploy/scripts/preview-slots.sh",
+      "deploy/scripts/production-sqlite-maintenance.sh",
       "deploy/scripts/publish-environment-web-layer.sh",
       "deploy/scripts/promote-accepted-deployment.sh",
       "deploy/scripts/promote-deployment.mjs",
       "deploy/scripts/resolve-deploy-env.mjs",
       "deploy/scripts/resolve-required-apk-version.mjs",
       "deploy/scripts/sync-local-main-checkout.sh",
+      "deploy/scripts/sync-occupied-preview-ota-manifests.sh",
       "deploy/scripts/update-release-index.mjs",
     ].includes(file)
   ) {

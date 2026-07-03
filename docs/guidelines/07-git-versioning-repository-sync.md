@@ -24,6 +24,13 @@ escalated command leaves the task worktree owned by the wrong user, run:
 scripts/brai-task-repair-permissions.sh <task-slug-or-worktree-path>
 ```
 
+For ignored workspace/cache/output paths only, use the narrower repair and preflight:
+
+```bash
+scripts/brai-task-repair-permissions.sh --workspace <task-slug-or-worktree-path>
+node scripts/brai-task.mjs preflight --strict
+```
+
 Do not create or switch fallback branches manually with `git switch`, `git checkout`, `git branch`, or `git worktree`.
 
 ## Branch Reuse

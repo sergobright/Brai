@@ -143,6 +143,7 @@ test('accepted preview promotion records deployment and required build ledger ro
       assert.equal(records.length, 1);
       assert.equal(records[0].branch, 'main');
       assert.equal(records[0].commit_sha, 'merge-target-dir');
+      assert.equal(records[0].web_ota_version, '0.0.2');
       assert.match(records[0].detailed_changes, /codex\/build-ledger@abc-target-dir/);
     } finally {
       promoted.close();

@@ -44,8 +44,10 @@ try {
       throw new Error("usage: preview-slots.sh init|status|allocate <branch> <commit>|ready <branch> <commit>|failed <branch> <commit>|apk <branch> <commit> <versionCode> <file> <version>|release <branch-or-slot>|dequeue <branch>");
   }
 
-  writeRegistry(registry);
-  renderStatusPage(registry);
+  if (command !== "status") {
+    writeRegistry(registry);
+    renderStatusPage(registry);
+  }
   console.log(JSON.stringify(result, null, 2));
 } catch (error) {
   console.error(error instanceof Error ? error.message : String(error));

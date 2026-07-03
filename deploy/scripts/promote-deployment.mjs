@@ -25,7 +25,7 @@ try {
   if (!sourceRecord) throw new Error(`no deployment metadata for ${sourceBranch}`);
 
   target.db.transaction(() => {
-    target.recordAcceptedBuildVersion({
+    const acceptedBuild = target.recordAcceptedBuildVersion({
       sourceBranch,
       sourceCommit: args["source-commit"] || sourceRecord.commit_sha,
       sourceShortChanges: sourceRecord.short_changes,
@@ -42,7 +42,7 @@ try {
         branch: targetBranch,
         commit: targetCommit,
         domain: required(args, "target-domain"),
-        webOtaVersion: args["web-ota-version"] || sourceRecord.web_ota_version,
+        webOtaVersion: args["web-ota-version"] || `0.0.${acceptedBuild.version}`,
         apkVersion: args["apk-version"] || sourceRecord.apk_version,
         shortChanges: sourceRecord.short_changes,
         detailedChanges: `Повышено из ${sourceRecord.environment}${sourceRecord.slot ? ` ${sourceRecord.slot}` : ""} (${sourceRecord.branch}@${sourceRecord.commit_sha}). ${sourceRecord.detailed_changes}`,

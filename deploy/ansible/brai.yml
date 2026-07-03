@@ -188,17 +188,22 @@
         - "{{ brai_repo }}/deploy/mobile-update"
         - "{{ brai_repo }}/deploy/releases"
 
-    - name: Allow deploy user to update production Brai database ledger
+    - name: Ensure production Brai SQLite directories
       ansible.builtin.file:
-        path: "{{ brai_repo }}/data"
+        path: "{{ item }}"
         state: directory
+        owner: "{{ brai_service_user }}"
         group: "{{ brai_deploy_user }}"
         mode: "2775"
+      loop:
+        - "{{ brai_repo }}/data"
+        - "{{ brai_repo }}/data/backups"
 
-    - name: Allow deploy user to update production Brai database file
+    - name: Ensure production Brai database file ownership
       ansible.builtin.file:
         path: "{{ brai_repo }}/data/brai.sqlite"
         state: file
+        owner: "{{ brai_service_user }}"
         group: "{{ brai_deploy_user }}"
         mode: "0664"
 
@@ -210,10 +215,11 @@
         - "{{ brai_repo }}/data/brai.sqlite-shm"
       register: brai_prod_db_sidecars
 
-    - name: Allow deploy user to update existing production Brai database sidecars
+    - name: Ensure existing production Brai database sidecar ownership
       ansible.builtin.file:
         path: "{{ item.stat.path }}"
         state: file
+        owner: "{{ brai_service_user }}"
         group: "{{ brai_deploy_user }}"
         mode: "0664"
       loop: "{{ brai_prod_db_sidecars.results }}"
