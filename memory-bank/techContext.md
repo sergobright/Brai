@@ -29,8 +29,8 @@ Version baseline after the APK reset:
 - Android `versionName`: `1`
 - Android `versionCode`: `1`
 - Release ledger table: `build_versions`
-- Runtime `build_versions` is the APK ledger only and should contain the `apk` counter.
-- Accepted working-branch merge into `main`: record deployment metadata without `build`, `release`, or `canon` rows.
+- Runtime `build_versions` contains accepted `build` rows and the separate `apk` counter.
+- Accepted working-branch promotion into `main`: write the `build` row first, then record deployment metadata.
 - GitHub PR numbers are review metadata and do not define version numbers.
 
 Do not commit SQLite files, APKs, OTA bundles, keystores, `.env` files, private keys, or generated deploy output such as `deploy/web` and `deploy/mobile-update`.

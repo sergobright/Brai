@@ -55,8 +55,33 @@ export const deploymentMethods = {
     return this.db.prepare("SELECT * FROM deployment_records ORDER BY deployed_at_utc DESC, id DESC").all();
   },
 
-  recordAcceptedBuildVersion() {
-    return null;
+  recordAcceptedBuildVersion({
+    sourceBranch = null,
+    sourceCommit = null,
+    sourceShortChanges,
+    sourceDetails,
+    sourceReason,
+    targetBranch,
+    targetCommit,
+    releasedAtUtc,
+  }) {
+    const existing = this.findBuildVersionByTargetCommit({ targetBranch, targetCommit, versionTypeId: 'build' });
+    if (existing) return { versionTypeId: 'build', version: existing.version };
+    const version = this.nextVersion('build');
+    this.upsertBuildVersion({
+      versionTypeId: 'build',
+      version,
+      includedInVersionId: null,
+      shortChanges: requireLedgerText(sourceShortChanges, 'short_changes'),
+      detailedChanges: requireLedgerText(sourceDetails, 'detailed_changes'),
+      reason: requireLedgerText(sourceReason, 'reason'),
+      releasedAtUtc,
+      sourceBranch,
+      sourceCommit,
+      targetBranch,
+      targetCommit,
+    });
+    return { versionTypeId: 'build', version };
   },
 
   recordShippedApkVersion({
@@ -87,11 +112,11 @@ export const deploymentMethods = {
   },
 
   recordReleaseVersion() {
-    throw new Error('release version rows are disabled by APK-only versioning');
+    throw new Error('release version rows are disabled');
   },
 
   recordCanonVersion() {
-    throw new Error('canon version rows are disabled by APK-only versioning');
+    throw new Error('canon version rows are disabled');
   },
 
   findBuildVersionByTargetCommit({ targetBranch, targetCommit, versionTypeId }) {
@@ -144,16 +169,17 @@ export const deploymentMethods = {
 
   currentAppVersion() {
     const apk = this.latestVersion('apk');
-    const latest = { canon: null, release: null, build: null, apk: apk ? formatBuildVersionRow(apk) : null };
+    const build = this.latestVersion('build');
+    const latest = { canon: null, release: null, build: build ? formatBuildVersionRow(build) : null, apk: apk ? formatBuildVersionRow(apk) : null };
     const parts = {
       canon: 0,
       release: 0,
-      build: 0,
+      build: build?.version ?? 0,
       apk: apk?.version ?? 0,
     };
 
     return {
-      version: '0.0.0',
+      version: `0.0.${parts.build}`,
       parts,
       latest,
     };
@@ -263,4 +289,10 @@ function formatBuildVersionRow(row) {
     released_at_utc: row.released_at_utc,
     created_at_utc: row.created_at_utc,
   };
+}
+
+function requireLedgerText(value, field) {
+  const text = String(value ?? '').trim();
+  if (!text) throw new Error(`missing accepted build ${field}`);
+  return text;
 }

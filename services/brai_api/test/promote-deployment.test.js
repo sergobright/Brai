@@ -13,7 +13,7 @@ function tempStore() {
   return { tmp, dbPath, store };
 }
 
-test('accepted preview version recording is APK-only no-op', () => {
+test('accepted preview version recording creates idempotent build row with authored notes', () => {
   const { tmp, store } = tempStore();
   try {
     const accepted = {
@@ -27,37 +27,46 @@ test('accepted preview version recording is APK-only no-op', () => {
       releasedAtUtc: '2026-06-24T22:10:00.000Z'
     };
 
-    assert.equal(store.recordAcceptedBuildVersion(accepted), null);
-    assert.equal(store.recordAcceptedBuildVersion(accepted), null);
+    assert.deepEqual(store.recordAcceptedBuildVersion(accepted), { versionTypeId: 'build', version: 2 });
+    assert.deepEqual(store.recordAcceptedBuildVersion(accepted), { versionTypeId: 'build', version: 2 });
 
     const versions = store.db
-      .prepare("SELECT version_type_id, version, included_in_version_id, short_changes FROM build_versions ORDER BY version_type_id, version")
+      .prepare("SELECT version_type_id, version, included_in_version_id, short_changes, detailed_changes, reason FROM build_versions ORDER BY version_type_id, version")
       .all();
     assert.deepEqual(
       versions.map((row) => [row.version_type_id, row.version, row.included_in_version_id, row.short_changes]),
-      [['apk', 1, null, 'Первичная публичная APK-сборка.']]
+      [
+        ['apk', 1, null, 'Первичная публичная APK-сборка.'],
+        ['build', 1, null, 'Первичная публичная web/OTA-сборка.'],
+        ['build', 2, null, accepted.sourceShortChanges],
+      ]
     );
-    assert.equal(store.db.prepare('SELECT COUNT(*) AS count FROM build_version_refs').get().count, 0);
+    assert.equal(versions.find((row) => row.version_type_id === 'build' && row.version === 2).detailed_changes, accepted.sourceDetails);
+    assert.equal(versions.find((row) => row.version_type_id === 'build' && row.version === 2).reason, accepted.sourceReason);
+    assert.equal(store.db.prepare('SELECT COUNT(*) AS count FROM build_version_refs').get().count, 1);
   } finally {
     store.close();
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
 
-test('release and canon version creation are disabled', () => {
+test('release and canon version creation remain disabled', () => {
   const { tmp, store } = tempStore();
   try {
     assert.throws(
       () => store.recordReleaseVersion({}),
-      /release version rows are disabled by APK-only versioning/
+      /release version rows are disabled/
     );
     assert.throws(
       () => store.recordCanonVersion({}),
-      /canon version rows are disabled by APK-only versioning/
+      /canon version rows are disabled/
     );
     assert.deepEqual(
       store.db.prepare('SELECT version_type_id, version FROM build_versions ORDER BY version_type_id, version').all(),
-      [{ version_type_id: 'apk', version: 1 }]
+      [
+        { version_type_id: 'apk', version: 1 },
+        { version_type_id: 'build', version: 1 },
+      ]
     );
   } finally {
     store.close();
@@ -65,7 +74,7 @@ test('release and canon version creation are disabled', () => {
   }
 });
 
-test('accepted preview promotion records deployment but no build, release, or canon rows', () => {
+test('accepted preview promotion records deployment and required build ledger row', () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'brai-promote-apk-only-'));
   const sourceDb = path.join(tmp, 'source', 'source.sqlite');
   const targetDb = path.join(tmp, 'target', 'nested', 'target.sqlite');
@@ -77,13 +86,13 @@ test('accepted preview promotion records deployment but no build, release, or ca
     source.recordDeployment({
       environment: 'preview-a',
       slot: 'A',
-      branch: 'codex/apk-only',
+      branch: 'codex/build-ledger',
       commit: 'abc-target-dir',
       domain: 'a.test.brightos.world',
       webOtaVersion: '0.0.41',
-      shortChanges: 'Принята APK-only доставка.',
-      detailedChanges: 'Promotion переносит deployment metadata без build/release/canon ledger.',
-      reason: 'Нужно не писать build/release/canon строки при accepted deploy.',
+      shortChanges: 'Восстановлена запись версий сборок.',
+      detailedChanges: 'Promotion переносит deployment metadata и обязательно пишет build ledger.',
+      reason: 'Нужно завершать деплой только после записи версии сборки.',
       deployedAtUtc: '2026-07-02T12:00:00.000Z'
     });
     source.close();
@@ -95,15 +104,15 @@ test('accepted preview promotion records deployment but no build, release, or ca
       '--target-db',
       targetDb,
       '--source-branch',
-      'codex/apk-only',
+      'codex/build-ledger',
       '--source-commit',
       'abc-target-dir',
       '--source-short-changes',
-      'Принята APK-only доставка.',
+      'Восстановлена запись версий сборок.',
       '--source-details',
-      'Promotion переносит deployment metadata без build/release/canon ledger.',
+      'Promotion переносит deployment metadata и обязательно пишет build ledger.',
       '--source-reason',
-      'Нужно не писать build/release/canon строки при accepted deploy.',
+      'Нужно завершать деплой только после записи версии сборки.',
       '--target-environment',
       'prod',
       '--target-branch',
@@ -113,20 +122,28 @@ test('accepted preview promotion records deployment but no build, release, or ca
       '--target-domain',
       'app.brightos.world',
       '--reason',
-      'Нужно не писать build/release/canon строки при accepted deploy.'
+      'Нужно завершать деплой только после записи версии сборки.'
     ], { cwd: repoRoot });
 
     const promoted = new BraiStore(targetDb);
     try {
       assert.deepEqual(
         promoted.db.prepare('SELECT version_type_id, version FROM build_versions ORDER BY version_type_id, version').all(),
-        [{ version_type_id: 'apk', version: 1 }]
+        [
+          { version_type_id: 'apk', version: 1 },
+          { version_type_id: 'build', version: 1 },
+          { version_type_id: 'build', version: 2 },
+        ]
       );
+      const build = promoted.db.prepare("SELECT * FROM build_versions WHERE version_type_id = 'build' AND version = 2").get();
+      assert.equal(build.short_changes, 'Восстановлена запись версий сборок.');
+      assert.equal(build.detailed_changes, 'Promotion переносит deployment metadata и обязательно пишет build ledger.');
+      assert.equal(build.reason, 'Нужно завершать деплой только после записи версии сборки.');
       const records = promoted.listDeploymentRecords({ environment: 'prod' });
       assert.equal(records.length, 1);
       assert.equal(records[0].branch, 'main');
       assert.equal(records[0].commit_sha, 'merge-target-dir');
-      assert.match(records[0].detailed_changes, /codex\/apk-only@abc-target-dir/);
+      assert.match(records[0].detailed_changes, /codex\/build-ledger@abc-target-dir/);
     } finally {
       promoted.close();
     }
@@ -135,7 +152,7 @@ test('accepted preview promotion records deployment but no build, release, or ca
   }
 });
 
-test('accepted promotion rejects legacy production release recording flag', () => {
+test('accepted promotion rejects missing authored source notes before deployment record', () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bright-promote-release-disabled-'));
   const targetDb = path.join(tmp, 'target.sqlite');
   const repoRoot = path.resolve(import.meta.dirname, '../../..');
@@ -148,29 +165,39 @@ test('accepted promotion rejects legacy production release recording flag', () =
       '--target-db',
       targetDb,
       '--source-branch',
-      'codex/release-disabled',
+      'codex/missing-notes',
       '--source-commit',
-      'abc-release-disabled',
+      'abc-missing-notes',
       '--target-environment',
       'prod',
       '--target-branch',
       'main',
       '--target-commit',
-      'merge-release-disabled',
+      'merge-missing-notes',
       '--target-domain',
       'app.brightos.world',
-      '--record-production-release',
-      'true'
+      '--source-short-changes',
+      'Branch deployment',
+      '--source-details',
+      'Automated deployment from codex/missing-notes@abc-missing-notes to prod.',
+      '--source-reason',
+      'Accepted codex/missing-notes.'
     ], { cwd: repoRoot, encoding: 'utf8' });
 
     assert.notEqual(result.status, 0);
-    assert.match(result.stderr, /release\/canon version rows are disabled by APK-only versioning/);
+    assert.match(result.stderr, /missing Russian source short_changes/);
+    const store = new BraiStore(targetDb);
+    try {
+      assert.equal(store.listDeploymentRecords({ environment: 'prod' }).length, 0);
+    } finally {
+      store.close();
+    }
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
 
-test('reset script clears legacy version rows back to apk baseline', () => {
+test('reset script resets APK row without deleting build history', () => {
   const { tmp, dbPath, store } = tempStore();
   const repoRoot = path.resolve(import.meta.dirname, '../../..');
   try {
@@ -180,7 +207,7 @@ test('reset script clears legacy version rows back to apk baseline', () => {
       VALUES (?, ?, ?, ?)
       ON CONFLICT(id) DO NOTHING
     `);
-    for (const id of ['build', 'release', 'canon']) {
+    for (const id of ['release', 'canon']) {
       insertType.run(id, id, `legacy ${id}`, now);
       store.upsertBuildVersion({
         versionTypeId: id,
@@ -194,6 +221,17 @@ test('reset script clears legacy version rows back to apk baseline', () => {
         targetCommit: `legacy-${id}`,
       });
     }
+    store.upsertBuildVersion({
+      versionTypeId: 'build',
+      version: 2,
+      includedInVersionId: null,
+      shortChanges: 'Accepted build.',
+      detailedChanges: 'Accepted build.',
+      reason: 'Accepted build.',
+      releasedAtUtc: now,
+      targetBranch: 'main',
+      targetCommit: 'accepted-build',
+    });
     store.upsertBuildVersion({
       versionTypeId: 'apk',
       version: 2,
@@ -217,13 +255,18 @@ test('reset script clears legacy version rows back to apk baseline', () => {
     try {
       assert.deepEqual(
         reset.db.prepare('SELECT id FROM version_types ORDER BY id').all().map((row) => row.id),
-        ['apk']
+        ['apk', 'build']
       );
       assert.deepEqual(
         reset.db.prepare('SELECT version_type_id, version, short_changes FROM build_versions ORDER BY version_type_id, version').all(),
-        [{ version_type_id: 'apk', version: 1, short_changes: 'Первичная публичная APK-сборка.' }]
+        [
+          { version_type_id: 'apk', version: 1, short_changes: 'Первичная публичная APK-сборка.' },
+          { version_type_id: 'build', version: 1, short_changes: 'Первичная публичная web/OTA-сборка.' },
+          { version_type_id: 'build', version: 2, short_changes: 'Accepted build.' },
+        ]
       );
-      assert.equal(reset.db.prepare('SELECT COUNT(*) AS count FROM build_version_refs').get().count, 0);
+      assert.equal(reset.db.prepare("SELECT COUNT(*) AS count FROM build_version_refs WHERE version_type_id = 'apk'").get().count, 0);
+      assert.equal(reset.db.prepare("SELECT COUNT(*) AS count FROM build_version_refs WHERE version_type_id = 'build'").get().count, 1);
     } finally {
       reset.close();
     }

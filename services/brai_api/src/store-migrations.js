@@ -250,6 +250,12 @@ export const migrationMethods = {
       this.ensureTableDescriptions();
       this.recordMigration(45, 'add Better Auth email OTP and user ownership');
     }
+
+    if (!this.hasMigration(46)) {
+      this.ensureVersionSchema();
+      this.ensureTableDescriptions();
+      this.recordMigration(46, 'restore accepted build version ledger');
+    }
   }
 ,
 
@@ -711,8 +717,8 @@ export const migrationMethods = {
       ['activity_events', 'События действий', 'Журнал изменений действий.', 'Хранит каждое клиентское изменение по действиям для синхронизации, аудита и восстановления текущей таблицы activities. Поле user_id отделяет события разных пользователей, change_type хранит тип изменения.'],
       ['activity_types', 'Типы действий', 'Справочник типов activities.', 'Хранит разрешённые типы activities для поля activities.activity_type_id: action для пользовательских действий и operation для внутренних задач агента.'],
       ['app_settings', 'Настройки', 'Глобальные настройки приложения.', 'Хранит runtime-настройки в формате ключ-значение: дату старта цели, длительность цели, дневную норму фокуса и похожие параметры.'],
-      ['build_version_refs', 'Связи APK-версий', 'Технические связи APK-версий.', 'Хранит source/target branch и commit для APK-записей build_versions, чтобы audit-метаданные не подменяли короткое изменение, детальные изменения и причину выпуска.'],
-      ['build_versions', 'APK-версии', 'Журнал APK-версий.', 'Хранит активный APK-only ledger. Поле version является APK-счётчиком; build, release и canon строки больше не создаются runtime-кодом.'],
+      ['build_version_refs', 'Связи версий', 'Технические связи версий.', 'Хранит source/target branch и commit для записей build_versions, чтобы audit-метаданные не подменяли короткое изменение, детальные изменения и причину выпуска.'],
+      ['build_versions', 'Версии сборок', 'Журнал версий сборок и APK.', 'Хранит accepted build ledger и отдельную APK-линию. Accepted production promotion создаёт build-строку с short_changes, detailed_changes и reason; APK остаётся отдельной публичной Android-линейкой.'],
       ['deployment_records', 'Деплои', 'Журнал выкладок.', 'Хранит факты деплоя: окружение, ветку, commit, домен, web/OTA версию, APK версию и описание доставки.'],
       ['focus_sessions', 'Сессии фокуса', 'Стабильные Focus-сессии.', 'Хранит стабильные идентификаторы Focus-сессий, user_id владельца, soft-delete метку, origin старта и activity, из которой сессия была начата. Время хранится в focus_session_intervals.'],
       ['focus_session_sources', 'Источники Focus-сессий', 'Связи Focus-сессий и событий.', 'Связывает итоговые Focus-сессии с timer_events, из которых они получились при deterministic replay.'],
@@ -731,7 +737,7 @@ export const migrationMethods = {
       ['timer_events', 'События фокуса', 'Журнал событий фокуса.', 'Хранит start, stop, start_activity_focus, switch_activity_focus, stop_activity_focus, edit_session, edit_focus_interval и delete_session события фокуса с user_id, устройством, клиентской и серверной последовательностью.'],
       ['user', 'Пользователи', 'Better Auth users.', 'Хранит Better Auth пользователей Brai для email OTP входа: id, имя, email, emailVerified и timestamps. Первый подтвержденный пользователь записывается в app_settings.primary_user_id и получает существующие legacy-данные.'],
       ['verification', 'Auth-коды', 'Better Auth verification records.', 'Хранит временные Better Auth verification записи для email OTP кодов и сроков их действия.'],
-      ['version_types', 'Типы версий', 'Справочник типов версий.', 'Хранит активный тип записей build_versions: apk. Legacy-типы build, release и canon больше не создаются свежей базой.']
+      ['version_types', 'Типы версий', 'Справочник типов версий.', 'Хранит активные типы записей build_versions: build для accepted production сборок и apk для публичной Android APK-линии.']
     ];
     const actualTables = new Set(
       this.db
@@ -1414,6 +1420,12 @@ export const migrationMethods = {
       'Публичная Android APK-линия. Увеличивается только при осознанном выпуске нового APK.',
       now
     );
+    insertType.run(
+      'build',
+      'Сборка',
+      'Принятая web/OTA сборка Brai. Обязательная запись production promotion.',
+      now
+    );
   }
 ,
 
@@ -1593,6 +1605,7 @@ export const migrationMethods = {
 
   seedInitialBuildVersion() {
     const now = new Date().toISOString();
+    const buildReleasedAt = '2026-06-23T09:12:45Z';
     const apkReleasedAt = '2026-06-23T09:13:50Z';
     const insertVersion = this.db.prepare(`
         INSERT INTO build_versions (
@@ -1608,6 +1621,16 @@ export const migrationMethods = {
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(version_type_id, version) DO NOTHING
       `);
+    insertVersion.run(
+      'build',
+      1,
+      null,
+      'Первичная публичная web/OTA-сборка.',
+      'Начальная production-сборка Brai для web и OTA-линии.',
+      'Нужно зафиксировать стартовую accepted build-версию.',
+      buildReleasedAt,
+      now
+    );
     insertVersion.run(
       'apk',
       1,

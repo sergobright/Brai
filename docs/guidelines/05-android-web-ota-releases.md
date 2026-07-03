@@ -5,10 +5,12 @@ Brai uses separate version lines for APK and OTA/web.
 - APK uses the public integer counter `vN`, starting at `v1`.
 - Android `versionName` is `N`; Android `versionCode` defaults to the same `N`.
 - OTA/web uses `X.Y.Z`; the old fourth public digit is not shown or compared.
-- `build_versions` is an APK ledger only. Fresh and reset databases seed exactly one row: `version_type_id='apk', version=1`.
-- Accepted deploys and manual release/canon paths must not create `build`, `release`, or `canon` rows.
-- Deployment/build history stays in `deployment_records`, Git refs, and CI metadata.
-- Visible APK ledger text is written in Russian. Branch names, commits, domains, and deploy metadata belong in refs or deployment records, not release-note text.
+- `build_versions` stores accepted production build rows (`version_type_id='build'`) and a separate APK row (`version_type_id='apk'`).
+- APK reset affects only the APK line: after reset there is one APK row, `version_type_id='apk', version=1`; existing `build` rows remain.
+- Accepted production promotion must create or reuse one `build_versions` build row before the workflow is considered complete.
+- Each accepted build row must store Russian `short_changes`, `detailed_changes`, and `reason` from explicit preview/release-note metadata.
+- Branch names, commits, domains, and deploy metadata belong in `build_version_refs` or `deployment_records`, not release-note text.
+- Manual `release` and `canon` rows are disabled unless a future explicit requirement restores them.
 
 Build and publish a release APK only when native Android code, Capacitor config, permissions, signing, manifest values, application id, SDK versions, icons, splash assets, native plugins, or native compatibility boundaries change.
 

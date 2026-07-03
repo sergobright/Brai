@@ -11,14 +11,14 @@
 - Branch protection requires `public-guard` and `checks`.
 - APK versioning is reset to `v1`; OTA/web versioning uses `X.Y.Z`.
 - Versioning is no longer coupled to GitHub PR numbers.
-- Runtime `build_versions` is the source of truth only for APK versions.
+- Runtime `build_versions` is the source of truth for accepted build rows and the separate APK line.
 
 ## Current State
 
 - Future work starts from `origin/main` on `codex/*` branches.
 - Task branches do not add `build_versions` rows by themselves.
-- Accepted working-branch merges into `main` do not add `build`, `release`, or `canon` rows.
-- APK ledger `short_changes`, `detailed_changes`, and `reason` are written in Russian; branch/commit/deploy audit metadata belongs in `build_version_refs` or `deployment_records`.
+- Accepted working-branch promotion into `main` must create or reuse one `build` row with Russian `short_changes`, `detailed_changes`, and `reason`.
+- APK and build ledger `short_changes`, `detailed_changes`, and `reason` are written in Russian; branch/commit/deploy audit metadata belongs in `build_version_refs` or `deployment_records`.
 - Production deploys do not create `release` or `canon` rows.
 - Explicit public APK releases use APK `vN`; Android `versionName` and `versionCode` move together with `N`.
 - Implementation tasks must finish with clean tracked status, committed, pushed, and deployed to a preview slot with the preview letter and URL reported, unless explicitly local-only. If all preview slots are occupied, the pushed branch is queued and remains incomplete until a slot is assigned.
