@@ -58,7 +58,7 @@
 - `npm run android:build:env-apk -- <flavor>` - сборка и публикация Android APK flavor (`production`, `previewA`-`previewE`) with matching web fallback.
 - `deploy/scripts/preview-slots.sh` - lock-protected preview slot registry commands.
 - `deploy/scripts/accept-preview.sh <codex-branch>` - deterministic acceptance entrypoint when the project owner accepts a preview; creates/reuses PR into `main` and enables merge/auto-merge.
-- `deploy/scripts/complete-operation-activities.sh <operation:agent-task:id>...` - host/deploy-context helper that runs from deploy-owned prod source, re-enters as `brai`, backs up live SQLite, and marks Codex operation activities as `Done`.
+- `deploy/scripts/complete-operation-activities.sh <operation-activity-id>...` - host/deploy-context helper that runs from deploy-owned prod source, re-enters as `brai`, backs up live SQLite, and marks Codex operation activities as `Done`.
 - `npm --prefix services/brai_api test` - тесты Brai API.
 - `npm --prefix services/brai_api start` - запуск Brai API.
 - `npm --prefix services/brai_temporal test` - state tests для Temporal CI/CD workflow package.

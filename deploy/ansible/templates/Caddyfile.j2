@@ -15,6 +15,39 @@ http://{{ brai_public_site_domain }} {
   file_server
 }
 
+http://{{ brai_envs.prod.domain }} {
+  redir https://{{ brai_envs.prod.domain }}{uri} permanent
+}
+
+{{ brai_envs.prod.domain }} {
+  encode zstd gzip
+  tls {
+    issuer acme {
+      disable_http_challenge
+    }
+  }
+
+  handle_path /api/* {
+    reverse_proxy 127.0.0.1:{{ brai_envs.prod.api_port }}
+  }
+
+  handle /releases* {
+    reverse_proxy 127.0.0.1:{{ brai_envs.prod.api_port }}
+  }
+
+  handle_path /mobile-update/* {
+    header /manifest.json Cache-Control "no-store"
+    root * {{ brai_repo }}/deploy/mobile-update
+    file_server
+  }
+
+  handle {
+    root * {{ brai_repo }}/deploy/web
+    try_files {path} {path}.html {path}/ /index.html
+    file_server
+  }
+}
+
 {% for name, env in brai_envs.items() if name != 'prod' %}
 http://{{ env.domain }} {
   redir https://{{ env.domain }}{uri} permanent

@@ -62,6 +62,27 @@ export function sandboxCheckMode(command, env = process.env) {
     };
   }
 
+  if (/\bnode scripts\/brai-task\.mjs access-contract --server\b/.test(text)) {
+    return {
+      mode: "require_escalated",
+      reason: "Server access-contract checks host ownership and localhost deploy access; sandbox uid/network remap is not authoritative.",
+    };
+  }
+
+  if (/\bdeploy\/scripts\/production-sqlite-maintenance\.sh\b/.test(text)) {
+    const dbPath = env.BRAI_DB?.trim();
+    if (dbPath && dbPath !== "/srv/projects/brai/data/brai.sqlite") {
+      return {
+        mode: "sandbox",
+        reason: "production-sqlite-maintenance uses a non-production BRAI_DB path.",
+      };
+    }
+    return {
+      mode: "require_escalated",
+      reason: "Production SQLite ownership checks must run in the host namespace, not Codex sandbox uid remap.",
+    };
+  }
+
   if (/\bdeploy\/scripts\/complete-operation-activities\.sh\b/.test(text)) {
     const dbPath = env.BRAI_DB?.trim();
     if (dbPath && dbPath !== "/srv/projects/brai/data/brai.sqlite") {

@@ -18,7 +18,7 @@
 - Перед правилом, миграцией, утверждением или handoff про runtime SQLite таблицу проверь реальное целевое окружение: DB path, наличие таблицы, `.schema`, `PRAGMA table_info`, индексы и релевантные строки.
 - Не выводи состояние preview/prod из кода, миграций, скриншота или слов Сергея. Если не проверил живую базу, так и скажи.
 - Для live SQLite в WAL mode используй обычный read-only connection (`mode=ro`), а не `immutable=1`, иначе свежие данные из `-wal` можно не увидеть.
-- Для live SQLite writes следуй production SQLite maintenance runbook. Codex namespace подходит для read-only проверок, но не является источником правды по write-доступу к runtime `data/`; Codex operation-задачи закрывай через `deploy/scripts/complete-operation-activities.sh operation:agent-task:*`, который пишет только undeleted `activity_type_id='operation'` rows с `author='Codex'`.
+- Для live SQLite writes следуй production SQLite maintenance runbook. Codex namespace подходит для read-only проверок, но не является источником правды по write-доступу к runtime `data/`; Codex operation-задачи закрывай через `deploy/scripts/complete-operation-activities.sh <operation-activity-id>`, который пишет только undeleted `activity_type_id='operation'` rows с `author='Codex'`.
 - В невизуальном handoff укажи проверенные environment, DB path, SQL/команду и ключевые строки результата.
 
 ## Main entities

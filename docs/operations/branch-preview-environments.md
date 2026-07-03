@@ -191,7 +191,7 @@ Ansible keeps `data`, `data/backups`, `brai.sqlite`, and existing WAL/SHM sideca
 by `brai:brai-deploy` with group-write modes so the runtime and deploy scripts share the
 same narrow maintenance boundary.
 
-Use `deploy/scripts/complete-operation-activities.sh <operation:agent-task:id>...` to
+Use `deploy/scripts/complete-operation-activities.sh <operation-activity-id>...` to
 mark Codex operation activities as `Done`. The default mode SSHes through
 `brai-deploy@localhost` and executes the helper from deploy-owned
 `/srv/projects/brai-envs/prod/source`, then re-enters as the `brai` service user
@@ -202,6 +202,8 @@ updates only `New` rows, and prints the verified rows. Reruns over already `Done
 are read-only. Read-only SQLite checks from the Codex execution namespace are fine, but
 live SQLite writes must use the host deploy context; remapped `nobody:nogroup` ownership
 in the Codex namespace is not authoritative for runtime write permissions.
+For same-host maintenance without a deploy SSH key, use `--host-local`; it still re-enters
+only through the narrow sudoers command as `brai`.
 
 ## Server Setup
 
@@ -227,6 +229,14 @@ artifacts above, and uses sudo only for Caddy validation, Caddy reload, and matc
 The Brai runtime user also belongs to the `brai-deploy` group and API units run with
 `SupplementaryGroups=brai-deploy`, so SQLite files created by the runtime stay writable by deploy scripts
 without broadening the sudo boundary.
+
+Production Caddy routes keep `app.brightos.world` public: the app shell is not protected by
+Caddy Basic Auth, `/api/*` is proxied to the production Brai API without injected Bearer
+headers, and `/mobile-update/*` remains public for Android OTA. Application auth owns browser
+sessions and `/v1/*` data access.
+Before applying the Ansible Caddy template on a host that already has unmanaged
+`app.brightos.world` or `api.brightos.world` site blocks, remove or migrate those blocks first and
+run `caddy validate`; duplicate site blocks are a rollout blocker.
 
 Preview Caddy routes keep the app shell protected with the unified Caddy Basic Auth login, but
 `/mobile-update/*` stays public for Android OTA and `/api/*` is proxied to the matching Brai API without

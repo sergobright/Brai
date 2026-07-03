@@ -191,11 +191,20 @@ describe("mobile OTA publish scripts", () => {
     expect(manifest.targetApkVersion).toBe(8);
   });
 
-  it("keeps non-production OTA public while protecting only the web shell in Caddy", async () => {
+  it("keeps production app public and protects only preview web shells in Caddy", async () => {
     const template = await readFile(path.join(workspaceRoot, "deploy/ansible/templates/Caddyfile.j2"), "utf8");
     const nonProductionStart = template.indexOf("{% for name, env in brai_envs.items() if name != 'prod' %}");
     expect(nonProductionStart).toBeGreaterThanOrEqual(0);
+    const productionTemplate = template.slice(template.indexOf("{{ brai_envs.prod.domain }} {"), nonProductionStart);
     const nonProductionTemplate = template.slice(nonProductionStart);
+    const productionApiBlock = productionTemplate.slice(
+      productionTemplate.indexOf("handle_path /api/*"),
+      productionTemplate.indexOf("handle /releases*"),
+    );
+    const productionShellBlock = productionTemplate.slice(
+      productionTemplate.indexOf("handle {"),
+      productionTemplate.indexOf("try_files"),
+    );
     const apiBlock = nonProductionTemplate.slice(
       nonProductionTemplate.indexOf("handle_path /api/*"),
       nonProductionTemplate.indexOf("handle /releases*"),
@@ -207,6 +216,10 @@ describe("mobile OTA publish scripts", () => {
       nonProductionTemplate.indexOf("try_files"),
     );
 
+    expect(productionTemplate).toContain("{{ brai_envs.prod.domain }}");
+    expect(productionApiBlock).not.toContain("brai_basic_auth_directive");
+    expect(productionApiBlock).not.toContain("header_up Authorization");
+    expect(productionShellBlock).not.toContain("brai_basic_auth_directive");
     expect(nonProductionTemplate).not.toMatch(/\{\{ env\.domain \}\} \{\n\s+\{\{ brai_basic_auth_directive \}\}/);
     expect(apiBlock).not.toContain("brai_basic_auth_directive");
     expect(apiBlock).not.toContain("header_up Authorization");

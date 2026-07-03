@@ -98,17 +98,13 @@
       loop_control:
         label: "{{ item.key }}"
 
-    - name: Check production source checkout path
-      ansible.builtin.stat:
-        path: "{{ brai_env_root }}/{{ brai_envs.prod.path }}/source"
-      register: brai_prod_source
-
-    - name: Seed production source checkout path from the current live repository
+    - name: Create production source checkout path
       ansible.builtin.file:
-        src: "{{ brai_repo }}"
-        dest: "{{ brai_env_root }}/{{ brai_envs.prod.path }}/source"
-        state: link
-      when: not brai_prod_source.stat.exists
+        path: "{{ brai_env_root }}/{{ brai_envs.prod.path }}/source"
+        state: directory
+        owner: "{{ brai_deploy_user }}"
+        group: "{{ brai_deploy_user }}"
+        mode: "2775"
 
     - name: Create environment directories
       ansible.builtin.file:
@@ -168,7 +164,7 @@
         state: directory
         owner: "{{ brai_deploy_user }}"
         group: "{{ brai_deploy_user }}"
-        mode: "0775"
+        mode: "2775"
 
     - name: Ensure public landing root exists
       ansible.builtin.file:

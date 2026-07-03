@@ -15,6 +15,4 @@ fi
 mkdir -p "$TARGET"
 find "$TARGET" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
 cp -R "$SOURCE"/. "$TARGET"/
-if [[ -O "$TARGET" ]]; then
-  normalize_public_tree "$TARGET"
-fi
+normalize_public_tree "$TARGET"

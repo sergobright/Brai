@@ -53,6 +53,8 @@ deploy/scripts/preview-slots.sh status
 ```
 
 Manual permission repair is only a break-glass operation through Ansible, `/srv/opt/brai-main-sync.sh`, `scripts/brai-task-repair-permissions.sh`, or deploy helpers such as `deploy/scripts/permissions.sh`. Do not make one-off `chmod/chown` commands part of normal delivery.
+Same-host operation cleanup uses `deploy/scripts/complete-operation-activities.sh --host-local ...`;
+it still writes SQLite only as the `brai` service user through the narrow sudoers command.
 
 ## Branch Reuse
 

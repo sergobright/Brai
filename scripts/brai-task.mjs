@@ -578,10 +578,10 @@ function serverAccessContract(root = process.env.BRAI_ROOT ?? "/srv/projects/bra
   const deployUser = process.env.BRAI_DEPLOY_USER ?? deployOwner;
   const deployHost = process.env.BRAI_DEPLOY_HOST ?? "localhost";
   const deploySshPort = process.env.BRAI_DEPLOY_SSH_PORT ?? "22";
-  const deployIdentityFile = process.env.BRAI_DEPLOY_IDENTITY_FILE;
+  const deployIdentityFile = process.env.BRAI_DEPLOY_IDENTITY_FILE ?? process.env.BRAI_DEPLOY_SSH_KEY_FILE;
   const serviceUser = process.env.BRAI_SQLITE_SERVICE_USER ?? "brai";
   const mainSyncScript = process.env.BRAI_MAIN_SYNC_SCRIPT ?? "/srv/opt/brai-main-sync.sh";
-  const operationHelper = path.join(envsRoot, "prod/source/deploy/scripts/complete-operation-activities.sh");
+  const localOperationHelper = path.join(root, "deploy/scripts/complete-operation-activities.sh");
   const checks = [
     commandCheck("guard sync", [path.join(root, "scripts/brai-guard-sync-check.sh"), "--check"], { cwd: root }),
     commandCheck("preview slots", [path.join(root, "deploy/scripts/preview-slots.sh"), "status"], {
@@ -606,31 +606,54 @@ function serverAccessContract(root = process.env.BRAI_ROOT ?? "/srv/projects/bra
       group: deployGroup,
       requiredModeBits: 0o660,
     }),
-    commandCheck("operation helper sudo", [
-      "ssh",
-      ...(deployIdentityFile ? ["-i", deployIdentityFile] : []),
-      "-p",
+    commandCheck("operation helper host-local sudo", [localOperationHelper, "--host-local", "--check-access"], { cwd: root }),
+    operationHelperRemoteAccessCheck({
+      deployIdentityFile,
       deploySshPort,
-      "-o",
-      "BatchMode=yes",
-      "-o",
-      "StrictHostKeyChecking=accept-new",
-      `${deployUser}@${deployHost}`,
-      "sudo",
-      "-n",
-      "-l",
-      "-u",
-      serviceUser,
-      operationHelper,
-      "--local",
-      "operation:agent-task:access-contract-probe",
-    ]),
+      deployUser,
+      deployHost,
+      localOperationHelper,
+      root,
+    }),
     pathCheck("deploy artifacts", path.join(deployRepo, "deploy"), { requireRead: true, expectDirectory: true }),
     pathCheck("main sync script", mainSyncScript, { requireRead: true }),
     commandCheck("node", ["node", "--version"], { cwd: root }),
     commandCheck("npm", ["npm", "--version"], { cwd: root }),
   ];
   return summarizeAccessContract("server", root, checks);
+}
+
+function operationHelperRemoteAccessCheck({
+  deployIdentityFile,
+  deploySshPort,
+  deployUser,
+  deployHost,
+  localOperationHelper,
+  root,
+}) {
+  const hasDeploySshSecret = Boolean(
+    process.env.BRAI_DEPLOY_SSH_KEY?.trim() ||
+      process.env.BRAI_DEPLOY_SSH_KEY_FILE?.trim() ||
+      deployIdentityFile?.trim(),
+  );
+  if (!hasDeploySshSecret) {
+    return {
+      name: "operation helper remote ssh",
+      ok: true,
+      skipped: true,
+      reason: "deploy SSH key is not configured in this shell; host-local sudo check covers same-host maintenance.",
+    };
+  }
+  return commandCheck("operation helper remote ssh", [localOperationHelper, "--check-access"], {
+    cwd: root,
+    env: {
+      ...process.env,
+      BRAI_DEPLOY_SSH_PORT: deploySshPort,
+      BRAI_DEPLOY_USER: deployUser,
+      BRAI_DEPLOY_HOST: deployHost,
+      ...(deployIdentityFile ? { BRAI_DEPLOY_SSH_KEY_FILE: deployIdentityFile } : {}),
+    },
+  });
 }
 
 function summarizeAccessContract(mode, root, checks) {
@@ -723,6 +746,11 @@ function workspacePreflight(root = git("rev-parse", "--show-toplevel")) {
   const sourceRoot = dependencySourceRoot(root);
   const checked = [];
   const failed = [];
+  const sourceCheck = checkTaskSourceWritable(root);
+  if (sourceCheck) {
+    if (sourceCheck.ok) checked.push(sourceCheck);
+    else failed.push(sourceCheck);
+  }
   for (const relativePath of collectWorkspaceWritableDirs(root)) {
     const absolutePath = path.join(root, relativePath);
     if (!fs.existsSync(absolutePath)) continue;
@@ -732,6 +760,21 @@ function workspacePreflight(root = git("rev-parse", "--show-toplevel")) {
     else failed.push(item);
   }
   return { ok: failed.length === 0, root, checked, failed };
+}
+
+function checkTaskSourceWritable(root) {
+  if (!fs.existsSync(path.join(root, ".brai-task", "task.json"))) return null;
+  for (const relativePath of ["package.json", "AGENTS.md", "scripts/brai-task.mjs"]) {
+    const absolutePath = path.join(root, relativePath);
+    if (!fs.existsSync(absolutePath)) continue;
+    try {
+      fs.accessSync(absolutePath, fs.constants.W_OK);
+      return { path: "tracked source", ok: true, real: absolutePath };
+    } catch (error) {
+      return { path: "tracked source", ok: false, real: absolutePath, reason: error?.code || "not writable" };
+    }
+  }
+  return null;
 }
 
 function collectWorkspaceWritableDirs(root) {

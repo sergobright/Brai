@@ -4,9 +4,11 @@ brai_node_root: /srv/opt/node-v22.16.0
 brai_node_bin: /srv/opt/node-v22.16.0/bin/node
 brai_caddyfile: /etc/caddy/Caddyfile
 brai_public_site_domain: brightos.world
-brai_public_site_root: "{{ brai_repo }}/landing/public"
+brai_public_site_root: "{{ brai_repo }}/deploy/site"
 brai_deploy_user: brai-deploy
 brai_deploy_writers: []
+brai_operation_maintainers:
+  - mark
 brai_source_group: mark
 brai_service_user: brai
 brai_service_group: brai

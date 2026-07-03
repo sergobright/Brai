@@ -95,11 +95,12 @@ test("server access contract checks deploy ownership instead of agent write acce
 test("server access contract checks operation helper sudo boundary", () => {
   const script = fs.readFileSync(new URL("./brai-task.mjs", import.meta.url), "utf8");
   const sudoers = fs.readFileSync(new URL("../deploy/ansible/templates/brai-deploy-sudoers.j2", import.meta.url), "utf8");
-  assert.match(script, /commandCheck\("operation helper sudo"/);
-  assert.match(script, /"sudo",\s+"-n",\s+"-l",\s+"-u",\s+serviceUser/s);
-  assert.match(script, /operation:agent-task:access-contract-probe/);
+  assert.match(script, /commandCheck\("operation helper host-local sudo"/);
+  assert.match(script, /operationHelperRemoteAccessCheck/);
+  assert.match(script, /BRAI_DEPLOY_SSH_KEY_FILE/);
   assert.match(sudoers, /ALL=\(\{\{ brai_service_user \}\}\) NOPASSWD:/);
   assert.match(sudoers, /complete-operation-activities\.sh --local \*/);
+  assert.match(sudoers, /brai_operation_maintainers/);
 });
 
 test("task base refresh commands are hard blocked", () => {
@@ -201,6 +202,7 @@ test("main checkout lock locks non-current worktrees by default", () => {
   assert.match(script, /sudo chmod 0751 "\$root"/);
   assert.match(script, /sudo chmod u=rwx,g=rx,o=x "\$root\/deploy"/);
   assert.match(script, /production-sqlite-maintenance\.sh/);
+  assert.match(script, /complete-operation-activities\.sh/);
   assert.match(script, /sync-occupied-preview-ota-manifests\.sh/);
   assert.match(script, /sudo chmod u=rwx,g=rx,o=x "\$root\/deploy\/scripts"/);
   assert.match(script, /sudo chgrp brai-deploy "\$deploy_tool"/);
@@ -229,6 +231,7 @@ test("local main sync preserves runtime dirs and hard resets to origin main", ()
   assert.match(script, /chown mark:mark \.codex-worktrees/);
   assert.match(script, /chmod u=rwx,g=rx,o=x deploy/);
   assert.match(script, /production-sqlite-maintenance\.sh/);
+  assert.match(script, /complete-operation-activities\.sh/);
   assert.match(script, /sync-occupied-preview-ota-manifests\.sh/);
   assert.match(script, /chmod u=rwx,g=rx,o=x deploy\/scripts/);
   assert.match(script, /chgrp brai-deploy "\$deploy_tool"/);
@@ -241,6 +244,8 @@ test("local main sync preserves runtime dirs and hard resets to origin main", ()
   assert.match(script, /chown "\$GIT_USER:mark" "\$task_state"/);
   assert.match(script, /chmod 0770 "\$task_state"/);
   assert.match(ciScript, /sudo -n \/srv\/opt\/brai-main-sync\.sh "\$BRAI_COMMIT"/);
+  assert.match(playbook, /Create production source checkout path/);
+  assert.doesNotMatch(playbook, /state: link/);
   assert.doesNotMatch(ciScript, /DEPLOY_REPO/);
   assert.doesNotMatch(ciScript, /sudo BRAI_DEPLOY_REPO=/);
   assert.match(playbook, /brai_repo }}\/deploy\/releases/);
@@ -409,9 +414,10 @@ test("operation activity completion helper has a narrow shell contract", () => {
   const helper = fs.readFileSync(path.resolve(import.meta.dirname, "../deploy/scripts/complete-operation-activities.sh"), "utf8");
   assert.match(helper, /set -euo pipefail/);
   assert.match(helper, /DEPLOY_REPO="\$\{BRAI_DEPLOY_REPO:-\/srv\/projects\/brai-envs\/prod\/source\}"/);
+  assert.match(helper, /--host-local/);
   assert.match(helper, /sudo -n -u "\$SERVICE_USER"/);
   assert.match(helper, /Refusing live SQLite write as \$user/);
-  assert.match(helper, /\^operation:agent-task:/);
+  assert.match(helper, /\^operation\[:\._-\]/);
   assert.match(helper, /activity_type_id = 'operation'/);
   assert.match(helper, /author = 'Codex'/);
   assert.match(helper, /deleted_at_utc IS NULL/);
@@ -452,6 +458,8 @@ test("operation activity completion helper backs up and verifies exact rows", { 
       INSERT INTO activities VALUES
         ('operation:agent-task:test-one', 'operation', 'One', 'Codex', 'New', '2026-07-03T00:00:00.000Z', NULL, NULL),
         ('operation:agent-task:test-two', 'operation', 'Two', 'Codex', 'New', '2026-07-03T00:00:00.000Z', NULL, NULL),
+        ('operation:codex:test-three', 'operation', 'Three', 'Codex', 'New', '2026-07-03T00:00:00.000Z', NULL, NULL),
+        ('operation-fea2f5d003a9803f', 'operation', 'Four', 'Codex', 'New', '2026-07-03T00:00:00.000Z', NULL, NULL),
         ('action-1', 'action', 'Action', 'User', 'New', '2026-07-03T00:00:00.000Z', NULL, NULL);
     `], { stdio: "inherit" });
 
@@ -460,6 +468,8 @@ test("operation activity completion helper backs up and verifies exact rows", { 
       "--local",
       "operation:agent-task:test-one",
       "operation:agent-task:test-two",
+      "operation:codex:test-three",
+      "operation-fea2f5d003a9803f",
     ], {
       cwd: path.resolve(import.meta.dirname, ".."),
       env: {
@@ -473,15 +483,19 @@ test("operation activity completion helper backs up and verifies exact rows", { 
 
     assert.equal(result.status, 0, result.stderr || result.stdout);
     assert.match(result.stdout, /backup=.*brai-before-complete-operation-activities-/);
-    assert.match(result.stdout, /updated=2/);
+    assert.match(result.stdout, /updated=4/);
     assert.match(result.stdout, /operation:agent-task:test-one/);
     assert.match(result.stdout, /operation:agent-task:test-two/);
+    assert.match(result.stdout, /operation:codex:test-three/);
+    assert.match(result.stdout, /operation-fea2f5d003a9803f/);
     const rows = spawnSync(sqlite, [db, "SELECT id || ':' || status FROM activities ORDER BY id;"], { encoding: "utf8" });
     assert.equal(rows.status, 0, rows.stderr);
     assert.deepEqual(rows.stdout.trim().split("\n"), [
       "action-1:New",
+      "operation-fea2f5d003a9803f:Done",
       "operation:agent-task:test-one:Done",
       "operation:agent-task:test-two:Done",
+      "operation:codex:test-three:Done",
     ]);
     assert.equal(fs.readdirSync(backups).filter((name) => name.endsWith(".sqlite")).length, 1);
 
@@ -490,6 +504,8 @@ test("operation activity completion helper backs up and verifies exact rows", { 
       "--local",
       "operation:agent-task:test-one",
       "operation:agent-task:test-two",
+      "operation:codex:test-three",
+      "operation-fea2f5d003a9803f",
     ], {
       cwd: path.resolve(import.meta.dirname, ".."),
       env: {
@@ -774,6 +790,7 @@ test("task permission repair script is scoped to one registered worktree", () =>
   assert.match(script, /Refusing to repair git metadata outside/);
   assert.match(script, /Refusing to repair workspace path outside/);
   assert.match(script, /apps\/brai_app\/node_modules\/@capacitor\/android\/capacitor\/build/);
+  assert.match(script, /\.playwright-browsers/);
   assert.match(script, /apps\/brai_app\/android\/\*\/build/);
   assert.ok(script.includes('sudo chown -R "$OWNER" "$TARGET_REAL" "$GIT_DIR_REAL"'));
   assert.ok(script.includes('sudo chmod -R u=rwX,g=rwX,o= "$TARGET_REAL" "$GIT_DIR_REAL"'));
@@ -783,7 +800,7 @@ test("task permission repair script is scoped to one registered worktree", () =>
 test("task starter runs scoped repair and preflight after installed guard", () => {
   const script = fs.readFileSync(new URL("./brai-task-start.sh", import.meta.url), "utf8");
   assert.match(script, /brai-guard\.mjs start "\$@"/);
-  assert.match(script, /brai-task-repair-permissions\.sh" --workspace "\$TASK"/);
+  assert.match(script, /brai-task-repair-permissions\.sh" "\$TASK"/);
   assert.match(script, /brai-task\.mjs" preflight --strict/);
 });
 
@@ -977,6 +994,22 @@ test("workspace preflight checks allowlisted dirs and rejects symlink escapes", 
   assert.ok(result.checked.some((entry) => entry.path === ".brai-task"));
   assert.ok(result.checked.some((entry) => entry.path === "apps/brai_app/android/app/build"));
   assert.match(result.failed.find((entry) => entry.path === "node_modules")?.reason ?? "", /outside workspace roots/);
+});
+
+test("workspace preflight fails task worktrees with non-writable tracked source", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "brai-preflight-source-"));
+  fs.mkdirSync(path.join(root, ".brai-task"));
+  fs.writeFileSync(path.join(root, ".brai-task", "task.json"), "{}\n");
+  fs.writeFileSync(path.join(root, "package.json"), "{}\n", { mode: 0o444 });
+  try {
+    fs.chmodSync(root, 0o555);
+    const result = workspacePreflight(root);
+    assert.equal(result.ok, false);
+    assert.equal(result.failed.find((entry) => entry.path === "tracked source")?.reason, "EACCES");
+  } finally {
+    fs.chmodSync(root, 0o755);
+    fs.chmodSync(path.join(root, "package.json"), 0o644);
+  }
 });
 
 test("preview slot status is shared-lock read-only", () => {

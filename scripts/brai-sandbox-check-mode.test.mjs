@@ -27,6 +27,17 @@ test("sandbox helper marks live operation completion as requiring escalation", (
   );
 });
 
+test("sandbox helper marks host access checks as requiring escalation", () => {
+  assert.equal(sandboxCheckMode(["node", "scripts/brai-task.mjs", "access-contract", "--server"]).mode, "require_escalated");
+  assert.equal(sandboxCheckMode(["deploy/scripts/production-sqlite-maintenance.sh", "check"]).mode, "require_escalated");
+  assert.equal(
+    sandboxCheckMode(["deploy/scripts/production-sqlite-maintenance.sh", "check"], {
+      BRAI_DB: "/tmp/brai-test.sqlite",
+    }).mode,
+    "sandbox",
+  );
+});
+
 test("sandbox helper marks browser and Android commands", () => {
   assert.equal(sandboxCheckMode(["npm", "run", "app:e2e"]).mode, "require_escalated");
   assert.equal(sandboxCheckMode(["agent-browser", "open", "https://brightos.world"]).mode, "agent_browser");

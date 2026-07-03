@@ -130,6 +130,9 @@ if [ "$WORKSPACE_ONLY" -eq 1 ]; then
 
   for relative_path in \
     ".brai-task" \
+    ".cache" \
+    ".config" \
+    ".npm" \
     "node_modules" \
     "apps/brai_app/node_modules" \
     "services/brai_api/node_modules" \
@@ -139,6 +142,8 @@ if [ "$WORKSPACE_ONLY" -eq 1 ]; then
     "out" \
     "output" \
     "output/playwright" \
+    ".playwright" \
+    ".playwright-browsers" \
     "test-results" \
     "landing" \
     "apps/brai_app/.next" \

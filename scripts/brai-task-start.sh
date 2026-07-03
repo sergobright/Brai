@@ -14,7 +14,7 @@ if [ -n "$TASK" ] && [ "${TASK#-}" = "$TASK" ]; then
     *) TARGET="$WORKTREES/$TASK" ;;
   esac
 
-  "$SCRIPT_DIR/brai-task-repair-permissions.sh" --workspace "$TASK"
+  "$SCRIPT_DIR/brai-task-repair-permissions.sh" "$TASK"
   cd "$TARGET"
   /srv/opt/node-v22.16.0/bin/node "$SCRIPT_DIR/brai-task.mjs" preflight --strict
 fi

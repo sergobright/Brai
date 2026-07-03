@@ -99,6 +99,7 @@ function renderReleasePage(data, htmlPath) {
 </html>
 `,
   );
+  chmodPublicFile(htmlPath);
 }
 
 function sectionCard(section) {
@@ -155,6 +156,11 @@ function sha256(filePath) {
 
 function writeJson(filePath, value) {
   fs.writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`);
+  chmodPublicFile(filePath);
+}
+
+function chmodPublicFile(filePath) {
+  fs.chmodSync(filePath, 0o664);
 }
 
 function escapeHtml(value) {

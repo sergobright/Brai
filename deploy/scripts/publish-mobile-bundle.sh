@@ -148,9 +148,7 @@ normalize_public_file "$MANIFEST_TMP"
 mv "$ARCHIVE_STAGE" "$ARCHIVE_TARGET"
 mv "$METADATA_STAGE" "$METADATA_TARGET"
 mv "$MANIFEST_TMP" "$TARGET_ROOT/manifest.json"
-if [[ -O "$TARGET_ROOT" ]]; then
-  normalize_public_tree "$TARGET_ROOT"
-fi
+normalize_public_tree "$TARGET_ROOT"
 
 if [[ "$RETAIN_PREVIOUS" =~ ^[0-9]+$ ]]; then
   KEEP_COUNT=$((RETAIN_PREVIOUS + 1))

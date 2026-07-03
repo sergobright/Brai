@@ -52,8 +52,6 @@ if [[ "$RELEASE_ENV" =~ ^[a-e]$ && "${BRAI_BRANCH:-}" == codex/* ]]; then
   "$SCRIPT_DIR/preview-slots.sh" apk "$BRAI_BRANCH" "${BRAI_COMMIT:-}" "${BRAI_ANDROID_VERSION_CODE:-$APK_VERSION}" "$FILENAME" "$APK_VERSION" >/dev/null
 fi
 
-if [[ -O "$TARGET_DIR" ]]; then
-  normalize_public_tree "$TARGET_DIR"
-fi
+normalize_public_tree "$TARGET_DIR"
 
 sha256sum "$PRIMARY"

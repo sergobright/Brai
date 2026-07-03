@@ -18,10 +18,14 @@ usage() {
   cat >&2 <<USAGE
 Usage:
   $0 <operation-activity-id>...
+  $0 --host-local <operation-activity-id>...
   $0 --local <operation-activity-id>...
+  $0 --check-access
+  $0 --host-local --check-access
 
 Completes operation activities in live SQLite after creating a backup.
 Default mode uses the host deploy SSH boundary and the deploy-owned prod source;
+--host-local uses local sudo to enter the service user without SSH.
 --local is for the host-side script invocation or tests with BRAI_DB outside $PROD_DB.
 USAGE
 }
@@ -30,12 +34,27 @@ if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
   usage
   exit 0
 fi
-if [[ "${1:-}" == "--local" ]]; then
-  MODE="local"
+CHECK_ACCESS=0
+while [[ "${1:-}" == "--local" || "${1:-}" == "--host-local" || "${1:-}" == "--check-access" ]]; do
+  case "$1" in
+    --local)
+      MODE="local"
+      ;;
+    --host-local)
+      MODE="host-local"
+      ;;
+    --check-access)
+      CHECK_ACCESS=1
+      ;;
+  esac
   shift
-fi
+done
 
-if [[ "$#" -eq 0 ]]; then
+if [[ "$CHECK_ACCESS" -eq 0 && "$#" -eq 0 ]]; then
+  usage
+  exit 1
+fi
+if [[ "$CHECK_ACCESS" -eq 1 && "$#" -ne 0 ]]; then
   usage
   exit 1
 fi
@@ -44,7 +63,7 @@ validate_ids() {
   local id
   declare -A seen=()
   for id in "$@"; do
-    if [[ ! "$id" =~ ^operation:agent-task:[A-Za-z0-9._:-]+$ ]]; then
+    if [[ ! "$id" =~ ^operation[:._-][A-Za-z0-9._:-]+$ ]]; then
       echo "Invalid operation activity id: $id" >&2
       exit 1
     fi
@@ -56,7 +75,9 @@ validate_ids() {
   done
 }
 
-validate_ids "$@"
+if [[ "$CHECK_ACCESS" -eq 0 ]]; then
+  validate_ids "$@"
+fi
 
 cleanup_key() {
   if [[ -n "${KEY_FILE_TMP:-}" ]]; then
@@ -92,6 +113,35 @@ SERVICE_USER="$2"
 shift 2
 exec sudo -n -u "$SERVICE_USER" "$DEPLOY_REPO/deploy/scripts/complete-operation-activities.sh" --local "$@"
 REMOTE
+}
+
+complete_host_local() {
+  exec sudo -n -u "$SERVICE_USER" "$DEPLOY_REPO/deploy/scripts/complete-operation-activities.sh" --local "$@"
+}
+
+check_remote_access() {
+  local key_file
+  key_file="$(ssh_key)"
+  ssh -i "$key_file" -p "$SSH_PORT" -o BatchMode=yes -o StrictHostKeyChecking=accept-new "$DEPLOY_USER@$DEPLOY_HOST" \
+    bash -s -- "$DEPLOY_REPO" "$SERVICE_USER" <<'REMOTE'
+set -euo pipefail
+DEPLOY_REPO="$1"
+SERVICE_USER="$2"
+HELPER="$DEPLOY_REPO/deploy/scripts/complete-operation-activities.sh"
+test -x "$HELPER"
+sudo -n -l -u "$SERVICE_USER" "$HELPER" --local operation:agent-task:access-contract-probe >/dev/null
+echo "operation-helper-access=ok remote"
+REMOTE
+}
+
+check_host_local_access() {
+  local helper="$DEPLOY_REPO/deploy/scripts/complete-operation-activities.sh"
+  if [[ ! -x "$helper" ]]; then
+    echo "operation helper is not executable: $helper" >&2
+    exit 1
+  fi
+  sudo -n -l -u "$SERVICE_USER" "$helper" --local operation:agent-task:access-contract-probe >/dev/null
+  echo "operation-helper-access=ok host-local"
 }
 
 require_sqlite() {
@@ -244,8 +294,19 @@ complete_local() {
   "
 }
 
-if [[ "$MODE" == "remote" ]]; then
+if [[ "$CHECK_ACCESS" -eq 1 ]]; then
+  if [[ "$MODE" == "remote" ]]; then
+    check_remote_access
+  elif [[ "$MODE" == "host-local" ]]; then
+    check_host_local_access
+  else
+    require_sqlite
+    echo "operation-helper-access=ok local"
+  fi
+elif [[ "$MODE" == "remote" ]]; then
   complete_remote "$@"
+elif [[ "$MODE" == "host-local" ]]; then
+  complete_host_local "$@"
 else
   complete_local "$@"
 fi
