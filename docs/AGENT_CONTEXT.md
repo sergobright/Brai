@@ -12,7 +12,7 @@
 - `apps/brai_app/src/features/` - пользовательские модули: `app`, `goal`, `history`, `settings`, `timer`.
 - `apps/brai_app/src/shared/` - общие API, config, hooks, platform, storage, theme, time, types, UI.
 - `apps/brai_app/public/icons/` - web/public иконки.
-- `assets/brand/` - исходные бренд-ассеты: `brai-logo-source.png` - мастер логотипа от Сергея; `brai-logo-black.png` - версия с чёрным фоном.
+- `assets/brand/` - исходные бренд-ассеты и актуальная пачка логотипов Brai.
 - `apps/brai_app/android/app/src/main/` - Android native boundary, ресурсы, icons, generated assets.
 - `apps/brai_app/android/app/src/main/java/world/brightos/brai/` - native Android код приложения; `ota/`, `timer/`, and `capabilities/` - частые точки входа.
 - `services/brai_api/` - Node API, WebSocket/HTTP server и SQLite store.
@@ -24,6 +24,18 @@
 - `openspec/` - accepted/planned requirements.
 - `memory-bank/` - фактический контекст и решения.
 - `.socraticodecontextartifacts.json` - SocratiCode context artifact registry for agent rules, docs, OpenSpec, and Memory Bank.
+
+## Бренд-логотипы
+
+Актуальные логотипы лежат в `assets/brand/` парами PNG/SVG. PNG имеют размер `2596x1390`; SVG-файлы являются SVG-обёртками со встроенным PNG, а не чистым вектором.
+
+| Файл | Когда использовать |
+| --- | --- |
+| `brai-logo-transparent.png` / `brai-logo-transparent.svg` | Основной вариант для UI, сайта и макетов, где фон задаёт контейнер. Подходит для тёмных, цветных и фото-фонов; не ставить на светлый фон без проверки контраста, потому что `Br` белые. |
+| `brai-logo-white-bg.png` / `brai-logo-white-bg.svg` | Для белых и светлых поверхностей, документов, писем, презентаций и экспортов, где логотип должен нести белую подложку сам. |
+| `brai-logo-black-bg.png` / `brai-logo-black-bg.svg` | Для тёмных блоков, заставок и экспортов, где нужна встроенная чёрная подложка и предсказуемый контраст. |
+
+`brai-logo-source.png` и `brai-logo-black.png` - прежние исходники; новые размещения по умолчанию берут один из трёх вариантов выше.
 
 ## Команды
 
