@@ -4,6 +4,7 @@ set -euo pipefail
 BASE_BRANCH="${BRAI_ACCEPT_BASE:-main}"
 BRANCH="${1:-}"
 INFRA_DOCS_LABEL="brai-delivery:infra-docs"
+TECHNICAL_NO_PREVIEW_LABEL="brai-delivery:technical-no-preview"
 MERGE_METHOD="${BRAI_ACCEPT_MERGE_METHOD:-squash}"
 
 usage() {
@@ -127,12 +128,26 @@ fs.writeFileSync(path.join(dir, "acceptance.json"), `${JSON.stringify({
 ' "$ROOT" "$BRANCH" "$HEAD_SHA" "$BASE_BRANCH" "$pr_number" "$pr_url" "$MERGE_METHOD" "$status" "${DELIVERY_CLASS:-}" "$accepted_at"
 }
 
-build_acceptance_pr_body() {
-  if [[ "${DELIVERY_CLASS:-}" == "infra-docs" ]]; then
-    cat <<BODY
-Accepted infra/docs branch ${BRANCH}.
+is_no_preview_delivery() {
+  [[ "${REQUIRES_PREVIEW:-}" == "false" && ( "${DELIVERY_CLASS:-}" == "infra-docs" || "${DELIVERY_CLASS:-}" == "technical-no-preview" ) ]]
+}
 
-This PR was opened by deploy/scripts/accept-preview.sh after CI classified the branch as infra/docs delivery.
+delivery_label() {
+  case "${DELIVERY_CLASS:-}" in
+    infra-docs) echo "$INFRA_DOCS_LABEL" ;;
+    technical-no-preview) echo "$TECHNICAL_NO_PREVIEW_LABEL" ;;
+    *) echo "" ;;
+  esac
+}
+
+build_acceptance_pr_body() {
+  if is_no_preview_delivery; then
+    cat <<BODY
+Accepted no-preview branch ${BRANCH}.
+
+Delivery class: ${DELIVERY_CLASS}.
+
+This PR was opened by deploy/scripts/accept-preview.sh after CI classified the branch as not requiring a browser preview.
 BODY
     return
   fi
@@ -216,6 +231,11 @@ if [[ "${BRAI_ACCEPT_INFRA_DOCS_ONLY:-false}" == "true" && "$DELIVERY_CLASS" != 
   exit 1
 fi
 
+if [[ "${BRAI_ACCEPT_NO_PREVIEW_ONLY:-false}" == "true" ]] && ! is_no_preview_delivery; then
+  echo "Expected no-preview delivery branch, got: $DELIVERY_CLASS" >&2
+  exit 1
+fi
+
 if [[ "$REQUIRES_PREVIEW" == "true" ]]; then
   run_brai_node "$ROOT/scripts/brai-task.mjs" require-preview "$BRANCH" "$HEAD_SHA"
 fi
@@ -232,8 +252,8 @@ PR_NUMBER="$(gh pr list --base "$BASE_BRANCH" --head "$BRANCH" --state open --js
 PR_BODY="$(build_acceptance_pr_body)"
 
 if [[ -z "$PR_NUMBER" ]]; then
-  if [[ "$DELIVERY_CLASS" == "infra-docs" ]]; then
-    PR_TITLE="Accept infra/docs ${BRANCH#codex/}"
+  if is_no_preview_delivery; then
+    PR_TITLE="Accept no-preview ${BRANCH#codex/}"
   else
     PR_TITLE="Accept ${BRANCH#codex/}"
   fi
@@ -243,9 +263,10 @@ else
   gh pr edit "$PR_NUMBER" --body "$PR_BODY" >/dev/null
 fi
 
-if [[ "$DELIVERY_CLASS" == "infra-docs" ]]; then
-  gh label create "$INFRA_DOCS_LABEL" --color "6f42c1" --description "Infra/docs delivery path without preview cleanup" --force >/dev/null
-  gh pr edit "$PR_NUMBER" --add-label "$INFRA_DOCS_LABEL" >/dev/null
+NO_PREVIEW_LABEL="$(delivery_label)"
+if [[ -n "$NO_PREVIEW_LABEL" ]]; then
+  gh label create "$NO_PREVIEW_LABEL" --color "6f42c1" --description "Delivery path without browser preview" --force >/dev/null
+  gh pr edit "$PR_NUMBER" --add-label "$NO_PREVIEW_LABEL" >/dev/null
 fi
 
 PR_STATE="$(gh pr view "$PR_NUMBER" --json state --jq ".state")"

@@ -27,7 +27,9 @@ const DELIVERY_CLASS = {
   INFRA_DOCS: "infra-docs",
   NONE: "none",
   RUNTIME_PREVIEW: "runtime-preview",
+  TECHNICAL_NO_PREVIEW: "technical-no-preview",
 };
+const NO_PREVIEW_DELIVERY_LABELS = new Set(["brai-delivery:infra-docs", "brai-delivery:technical-no-preview"]);
 const DEFAULT_ACCEPT_BASE_BRANCH = "main";
 
 if (isMainModule()) {
@@ -344,8 +346,8 @@ function stopHook() {
 
 function previewHandoff(branchArg) {
   const classification = classifyDelivery(diffFromTaskBase());
-  if (classification.deliveryClass === DELIVERY_CLASS.INFRA_DOCS) {
-    throw new Error("This branch is infra-docs and does not use preview handoff. Run: node scripts/brai-task.mjs handoff");
+  if (isNoPreviewDeliveryClass(classification.deliveryClass)) {
+    throw new Error(`This branch is ${classification.deliveryClass} and does not use preview handoff. Run: node scripts/brai-task.mjs handoff`);
   }
   if (classification.deliveryClass === DELIVERY_CLASS.BLOCKED) {
     throw new Error(`Blocked delivery paths cannot be handed off:\n${classification.paths.blocked.map((file) => `- ${file}`).join("\n")}`);
@@ -436,7 +438,7 @@ function deliveryHandoff(branchArg) {
   };
   writeDeliveryReceipt(receipt);
 
-  console.log("Infra/docs delivery");
+  console.log("No-preview delivery");
   console.log(`Branch: ${branch}`);
   console.log(`Commit: ${head}`);
   console.log(`Delivery class: ${receipt.deliveryClass}`);
@@ -454,7 +456,7 @@ function infraDocsPrPendingMessage(pr, branch, head, run) {
   const mergedAt = pr?.mergedAt ?? "(missing)";
   const runUrl = run?.url ?? (run?.databaseId ? `https://github.com/sergobright/Brai/actions/runs/${run.databaseId}` : "(missing)");
   return [
-    "Infra/docs delivery is not complete until its PR is merged into main.",
+    "No-preview delivery is not complete until its PR is merged into main.",
     `Branch: ${branch}`,
     `Commit: ${head}`,
     `PR: ${prUrl}`,
@@ -546,7 +548,7 @@ function deriveTaskState() {
     marker,
     markerValid,
     classification,
-    receipt: classification.deliveryClass === DELIVERY_CLASS.INFRA_DOCS ? deliveryReceipt : previewReceipt,
+    receipt: isNoPreviewDeliveryClass(classification.deliveryClass) ? deliveryReceipt : previewReceipt,
     receiptValidation,
     status,
     changedFiles,
@@ -678,7 +680,7 @@ function writeReleaseNotes(notes) {
 
 function validateHandoffReceipt({ classification, previewReceipt, deliveryReceipt, branch, head }) {
   if (classification.deliveryClass === DELIVERY_CLASS.NONE) return { ok: true };
-  if (classification.deliveryClass === DELIVERY_CLASS.INFRA_DOCS) {
+  if (isNoPreviewDeliveryClass(classification.deliveryClass)) {
     return validateDeliveryReceipt(deliveryReceipt, branch, head, classification.deliveryClass);
   }
   return validatePreviewReceipt(previewReceipt, branch, head);
@@ -1155,9 +1157,12 @@ function isSensitivePath(file) {
   return PROTECTED_PATH_RE.test(file);
 }
 
-function classifyDelivery(files, { base = acceptedBaseRef(), head = "HEAD", branch = currentBranch() } = {}) {
-  const paths = { blocked: [], docs: [], infra: [], runtime: [], unknown: [] };
-  for (const file of files) paths[deliveryClassForFile(file)].push(file);
+function classifyDelivery(files, { base = acceptedBaseRef(), head = "HEAD", branch = currentBranch(), diffs = null } = {}) {
+  const paths = { blocked: [], docs: [], infra: [], technical: [], runtime: [], unknown: [] };
+  for (const file of files) {
+    const category = deliveryClassForFile(file);
+    paths[category === "runtime" && isTechnicalRuntimeChange(file, { base, head, diffs }) ? "technical" : category].push(file);
+  }
 
   const deliveryClass = paths.blocked.length
     ? DELIVERY_CLASS.BLOCKED
@@ -1165,10 +1170,12 @@ function classifyDelivery(files, { base = acceptedBaseRef(), head = "HEAD", bran
       ? DELIVERY_CLASS.NONE
       : paths.runtime.length || paths.unknown.length
         ? DELIVERY_CLASS.RUNTIME_PREVIEW
-        : DELIVERY_CLASS.INFRA_DOCS;
+        : paths.technical.length
+          ? DELIVERY_CLASS.TECHNICAL_NO_PREVIEW
+          : DELIVERY_CLASS.INFRA_DOCS;
   const requiresPreview = deliveryClass === DELIVERY_CLASS.RUNTIME_PREVIEW;
   const requiresDevDeploy = false;
-  const autoMerge = deliveryClass === DELIVERY_CLASS.INFRA_DOCS;
+  const autoMerge = isNoPreviewDeliveryClass(deliveryClass);
 
   return {
     schemaVersion: 1,
@@ -1238,6 +1245,16 @@ function deliveryClassForFile(file) {
     return "infra";
   }
   if (
+    file.startsWith("apps/brai_app/tests/") ||
+    file.startsWith("services/brai_api/test/") ||
+    file.startsWith("services/brai_api/test-support/") ||
+    /^apps\/brai_app\/vitest\.config\.[cm]?[jt]s$/.test(file) ||
+    /^apps\/brai_app\/playwright\.config\.[cm]?[jt]s$/.test(file) ||
+    /^apps\/brai_app\/eslint\.config\.[cm]?[jt]s$/.test(file)
+  ) {
+    return "technical";
+  }
+  if (
     file.startsWith("apps/brai_app/") ||
     file.startsWith("services/brai_api/") ||
     file.startsWith("assets/brand/")
@@ -1245,6 +1262,47 @@ function deliveryClassForFile(file) {
     return "runtime";
   }
   return "unknown";
+}
+
+function isNoPreviewDeliveryClass(deliveryClass) {
+  return deliveryClass === DELIVERY_CLASS.INFRA_DOCS || deliveryClass === DELIVERY_CLASS.TECHNICAL_NO_PREVIEW;
+}
+
+function isTechnicalRuntimeChange(file, context) {
+  if (file === "apps/brai_app/package.json") return isClientPackageTestScriptDiff(diffForFile(file, context));
+  if (file === "services/brai_api/src/store-migrations.js") return isAgentOperationDoneDiff(diffForFile(file, context));
+  return false;
+}
+
+function diffForFile(file, { base = acceptedBaseRef(), head = "HEAD", diffs = null } = {}) {
+  if (diffs && Object.hasOwn(diffs, file)) return String(diffs[file] ?? "");
+  return gitMaybe("diff", "--unified=5", `${base}...${head}`, "--", file) ?? "";
+}
+
+function changedDiffLines(diff) {
+  return String(diff)
+    .split("\n")
+    .filter((line) => /^[+-](?![+-])/.test(line));
+}
+
+function isClientPackageTestScriptDiff(diff) {
+  const keys = changedDiffLines(diff)
+    .map((line) => line.match(/^[+-]\s*"([^"]+)":/)?.[1])
+    .filter(Boolean);
+  return keys.length > 0 && keys.every((key) => key === "test" || key === "test:watch");
+}
+
+function isAgentOperationDoneDiff(diff) {
+  if (!String(diff).includes("operation:agent-task:")) return false;
+  const changes = changedDiffLines(diff);
+  const removed = changes.filter((line) => line.startsWith("-"));
+  const added = changes.filter((line) => line.startsWith("+"));
+  return (
+    removed.length > 0 &&
+    removed.length === added.length &&
+    removed.every((line) => /^-\s*done:\s*false,?\s*$/.test(line)) &&
+    added.every((line) => /^\+\s*done:\s*true,?\s*$/.test(line))
+  );
 }
 
 function writeGithubOutput(classification) {
@@ -1485,9 +1543,9 @@ function ensureInfraDocsPr(branch) {
   const result = spawnSync("bash", [path.join(root, "deploy/scripts/accept-preview.sh"), branch], {
     cwd: root,
     stdio: "inherit",
-    env: { ...process.env, BRAI_ACCEPT_BASE: acceptedBaseBranch(), BRAI_ACCEPT_INFRA_DOCS_ONLY: "true" },
+    env: { ...process.env, BRAI_ACCEPT_BASE: acceptedBaseBranch(), BRAI_ACCEPT_NO_PREVIEW_ONLY: "true" },
   });
-  if (result.status !== 0 || result.error) throw new Error(`Failed to create or enable infra/docs PR for ${branch}: ${result.error?.message ?? `exit ${result.status}`}.`);
+  if (result.status !== 0 || result.error) throw new Error(`Failed to create or enable no-preview PR for ${branch}: ${result.error?.message ?? `exit ${result.status}`}.`);
 }
 
 function findInfraDocsPr(branch, head) {
@@ -1495,7 +1553,7 @@ function findInfraDocsPr(branch, head) {
   return prs.find((pr) =>
     pr.headRefOid === head &&
     Array.isArray(pr.labels) &&
-    pr.labels.some((label) => label?.name === "brai-delivery:infra-docs"),
+    pr.labels.some((label) => NO_PREVIEW_DELIVERY_LABELS.has(label?.name)),
   ) ?? null;
 }
 

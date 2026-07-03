@@ -53,7 +53,9 @@ Native-boundary preview deploys may build a slot-specific APK inside the existin
 ## Infra Docs No-preview Path
 
 Infrastructure/documentation-only branches can be classified as `deliveryClass=infra-docs`.
-That class signals `no_preview_required`; Temporal marks `preview_deploy`,
+Strict technical-only branches that are proven by CI rather than browser review can be classified
+as `deliveryClass=technical-no-preview`. These no-preview classes signal `no_preview_required`;
+Temporal marks `preview_deploy`,
 `accepted_preview_promotion`, and `slot_release` as `not_applicable`, clears `slot`, and keeps
 the branch in the same `BranchPreviewWorkflow` ledger. The state query exposes the
 `deliveryClass`, `handoff`, and `autoMerge` fields for this path.
@@ -72,7 +74,7 @@ create pull requests. GitHub Actions still owns the `auto_merge_*` Temporal sign
 push directly to `main`. Local `brai-task handoff` does not write a success receipt until the PR
 state is `MERGED` and the receipt includes PR number, URL, and `mergedAt`.
 
-For `infra-docs`, `pr_merged` marks the `accepted_for_target` (`Accepted for target`) task as passed.
+For no-preview classes, `pr_merged` marks the `accepted_for_target` (`Accepted for target`) task as passed.
 The no-preview lifecycle completes only after all required gates are passed or not applicable, without
 requiring accepted-preview metadata promotion or preview slot release.
 

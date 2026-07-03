@@ -3,6 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 export const INFRA_DOCS_LABEL = "brai-delivery:infra-docs";
+export const TECHNICAL_NO_PREVIEW_LABEL = "brai-delivery:technical-no-preview";
 
 if (path.resolve(process.argv[1] ?? "") === fileURLToPath(import.meta.url)) {
   const args = process.argv.slice(2);
@@ -44,7 +45,7 @@ function acceptedPreviewPulls(pulls, targetBranch = "main") {
     const base = pull?.base?.ref ?? pull?.baseRefName ?? pull?.base_ref;
     const head = pull?.head?.ref ?? pull?.headRefName ?? pull?.head_ref;
     const merged = Boolean(pull?.merged_at ?? pull?.mergedAt) || pull?.merged === true || pull?.state === "MERGED";
-    if (base !== targetBranch || !merged || !head?.startsWith("codex/") || hasLabel(pull, INFRA_DOCS_LABEL) || seen.has(head)) continue;
+    if (base !== targetBranch || !merged || !head?.startsWith("codex/") || hasNoPreviewLabel(pull) || seen.has(head)) continue;
     seen.add(head);
     accepted.push({ branch: head, pull });
   }
@@ -72,6 +73,10 @@ export function requiredReleaseNotesFromPull(pull, branch = pull?.head?.ref ?? p
 function hasLabel(pull, labelName) {
   const labels = Array.isArray(pull?.labels?.nodes) ? pull.labels.nodes : Array.isArray(pull?.labels) ? pull.labels : [];
   return labels.some((label) => (typeof label === "string" ? label : label?.name) === labelName);
+}
+
+function hasNoPreviewLabel(pull) {
+  return hasLabel(pull, INFRA_DOCS_LABEL) || hasLabel(pull, TECHNICAL_NO_PREVIEW_LABEL);
 }
 
 async function fetchAssociatedPulls(commitSha) {

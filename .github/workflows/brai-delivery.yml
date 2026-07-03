@@ -67,8 +67,8 @@ jobs:
           BRAI_COMMIT: ${{ github.sha }}
           BRAI_DELIVERY_CLASS: ${{ steps.classify.outputs.delivery_class }}
       - name: Temporal no preview required
-        if: github.event_name == 'push' && startsWith(github.ref, 'refs/heads/codex/') && steps.classify.outputs.delivery_class == 'infra-docs'
-        run: deploy/scripts/ci-temporal-signal.sh preview --branch "$BRAI_BRANCH" --sha "$BRAI_COMMIT" --event no_preview_required --delivery-class infra-docs --source classify-delivery
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/heads/codex/') && steps.classify.outputs.auto_merge == 'true' && steps.classify.outputs.requires_preview == 'false'
+        run: deploy/scripts/ci-temporal-signal.sh preview --branch "$BRAI_BRANCH" --sha "$BRAI_COMMIT" --event no_preview_required --delivery-class "$BRAI_DELIVERY_CLASS" --source classify-delivery
         env:
           BRAI_DEPLOY_HOST: ${{ vars.BRAI_DEPLOY_HOST }}
           BRAI_DEPLOY_USER: ${{ vars.BRAI_DEPLOY_USER }}
@@ -76,6 +76,7 @@ jobs:
           BRAI_DEPLOY_SSH_KEY: ${{ secrets.BRAI_DEPLOY_SSH_KEY }}
           BRAI_BRANCH: ${{ github.ref_name }}
           BRAI_COMMIT: ${{ github.sha }}
+          BRAI_DELIVERY_CLASS: ${{ steps.classify.outputs.delivery_class }}
 
   checks:
     needs:
@@ -231,8 +232,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Temporal infra/docs handoff started
-        run: deploy/scripts/ci-temporal-signal.sh preview --branch "$BRAI_BRANCH" --sha "$BRAI_COMMIT" --event delivery_handoff_started --delivery-class infra-docs --source auto-merge-infra-docs
+      - name: Temporal no-preview handoff started
+        run: deploy/scripts/ci-temporal-signal.sh preview --branch "$BRAI_BRANCH" --sha "$BRAI_COMMIT" --event delivery_handoff_started --delivery-class "$BRAI_DELIVERY_CLASS" --source auto-merge-infra-docs
         env:
           BRAI_DEPLOY_HOST: ${{ vars.BRAI_DEPLOY_HOST }}
           BRAI_DEPLOY_USER: ${{ vars.BRAI_DEPLOY_USER }}
@@ -240,8 +241,9 @@ jobs:
           BRAI_DEPLOY_SSH_KEY: ${{ secrets.BRAI_DEPLOY_SSH_KEY }}
           BRAI_BRANCH: ${{ github.ref_name }}
           BRAI_COMMIT: ${{ github.sha }}
-      - name: Temporal infra/docs auto-merge started
-        run: deploy/scripts/ci-temporal-signal.sh preview --branch "$BRAI_BRANCH" --sha "$BRAI_COMMIT" --event auto_merge_started --delivery-class infra-docs --source auto-merge-infra-docs
+          BRAI_DELIVERY_CLASS: ${{ needs.classify-delivery.outputs.delivery_class }}
+      - name: Temporal no-preview auto-merge started
+        run: deploy/scripts/ci-temporal-signal.sh preview --branch "$BRAI_BRANCH" --sha "$BRAI_COMMIT" --event auto_merge_started --delivery-class "$BRAI_DELIVERY_CLASS" --source auto-merge-infra-docs
         env:
           BRAI_DEPLOY_HOST: ${{ vars.BRAI_DEPLOY_HOST }}
           BRAI_DEPLOY_USER: ${{ vars.BRAI_DEPLOY_USER }}
@@ -249,14 +251,15 @@ jobs:
           BRAI_DEPLOY_SSH_KEY: ${{ secrets.BRAI_DEPLOY_SSH_KEY }}
           BRAI_BRANCH: ${{ github.ref_name }}
           BRAI_COMMIT: ${{ github.sha }}
+          BRAI_DELIVERY_CLASS: ${{ needs.classify-delivery.outputs.delivery_class }}
       - run: deploy/scripts/accept-preview.sh "$BRAI_BRANCH"
         env:
           GH_TOKEN: ${{ github.token }}
           BRAI_BRANCH: ${{ github.ref_name }}
-          BRAI_ACCEPT_INFRA_DOCS_ONLY: 'true'
-      - name: Temporal infra/docs auto-merge enabled
+          BRAI_ACCEPT_NO_PREVIEW_ONLY: 'true'
+      - name: Temporal no-preview auto-merge enabled
         if: success()
-        run: deploy/scripts/ci-temporal-signal.sh preview --branch "$BRAI_BRANCH" --sha "$BRAI_COMMIT" --event auto_merge_enabled --delivery-class infra-docs --source auto-merge-infra-docs
+        run: deploy/scripts/ci-temporal-signal.sh preview --branch "$BRAI_BRANCH" --sha "$BRAI_COMMIT" --event auto_merge_enabled --delivery-class "$BRAI_DELIVERY_CLASS" --source auto-merge-infra-docs
         env:
           BRAI_DEPLOY_HOST: ${{ vars.BRAI_DEPLOY_HOST }}
           BRAI_DEPLOY_USER: ${{ vars.BRAI_DEPLOY_USER }}
@@ -264,9 +267,10 @@ jobs:
           BRAI_DEPLOY_SSH_KEY: ${{ secrets.BRAI_DEPLOY_SSH_KEY }}
           BRAI_BRANCH: ${{ github.ref_name }}
           BRAI_COMMIT: ${{ github.sha }}
-      - name: Temporal infra/docs handoff failed
+          BRAI_DELIVERY_CLASS: ${{ needs.classify-delivery.outputs.delivery_class }}
+      - name: Temporal no-preview handoff failed
         if: failure()
-        run: deploy/scripts/ci-temporal-signal.sh preview --branch "$BRAI_BRANCH" --sha "$BRAI_COMMIT" --event delivery_handoff_failed --delivery-class infra-docs --source auto-merge-infra-docs
+        run: deploy/scripts/ci-temporal-signal.sh preview --branch "$BRAI_BRANCH" --sha "$BRAI_COMMIT" --event delivery_handoff_failed --delivery-class "$BRAI_DELIVERY_CLASS" --source auto-merge-infra-docs
         env:
           BRAI_DEPLOY_HOST: ${{ vars.BRAI_DEPLOY_HOST }}
           BRAI_DEPLOY_USER: ${{ vars.BRAI_DEPLOY_USER }}
@@ -274,15 +278,17 @@ jobs:
           BRAI_DEPLOY_SSH_KEY: ${{ secrets.BRAI_DEPLOY_SSH_KEY }}
           BRAI_BRANCH: ${{ github.ref_name }}
           BRAI_COMMIT: ${{ github.sha }}
-      - name: Temporal infra/docs auto-merge failed
+          BRAI_DELIVERY_CLASS: ${{ needs.classify-delivery.outputs.delivery_class }}
+      - name: Temporal no-preview auto-merge failed
         if: failure()
-        run: deploy/scripts/ci-temporal-signal.sh preview --branch "$BRAI_BRANCH" --sha "$BRAI_COMMIT" --event auto_merge_failed --delivery-class infra-docs --source auto-merge-infra-docs
+        run: deploy/scripts/ci-temporal-signal.sh preview --branch "$BRAI_BRANCH" --sha "$BRAI_COMMIT" --event auto_merge_failed --delivery-class "$BRAI_DELIVERY_CLASS" --source auto-merge-infra-docs
         env:
           BRAI_DEPLOY_HOST: ${{ vars.BRAI_DEPLOY_HOST }}
           BRAI_DEPLOY_USER: ${{ vars.BRAI_DEPLOY_USER }}
           BRAI_DEPLOY_SSH_PORT: ${{ vars.BRAI_DEPLOY_SSH_PORT || '22' }}
           BRAI_DEPLOY_SSH_KEY: ${{ secrets.BRAI_DEPLOY_SSH_KEY }}
           BRAI_BRANCH: ${{ github.ref_name }}
+          BRAI_DELIVERY_CLASS: ${{ needs.classify-delivery.outputs.delivery_class }}
           BRAI_COMMIT: ${{ github.sha }}
 
   deploy-prod:
@@ -421,7 +427,7 @@ jobs:
           BRAI_COMMIT: ${{ github.sha }}
 
   record-infra-docs-merge:
-    if: github.event_name == 'pull_request' && github.event.action == 'closed' && github.event.pull_request.merged == true && startsWith(github.event.pull_request.head.ref, 'codex/') && contains(toJson(github.event.pull_request.labels), 'brai-delivery:infra-docs')
+    if: github.event_name == 'pull_request' && github.event.action == 'closed' && github.event.pull_request.merged == true && startsWith(github.event.pull_request.head.ref, 'codex/') && (contains(toJson(github.event.pull_request.labels), 'brai-delivery:infra-docs') || contains(toJson(github.event.pull_request.labels), 'brai-delivery:technical-no-preview'))
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -430,10 +436,10 @@ jobs:
           node-version: '22'
           cache: npm
           cache-dependency-path: services/brai_temporal/package-lock.json
-      - name: Temporal infra/docs handoff passed
+      - name: Temporal no-preview handoff passed
         run: |
           test -n "$BRAI_PR_MERGED_AT"
-          deploy/scripts/ci-temporal-signal.sh preview --branch "$BRAI_BRANCH" --sha "$BRAI_COMMIT" --event delivery_handoff_passed --delivery-class infra-docs --pr-number "$BRAI_PR_NUMBER" --pr-url "$BRAI_PR_URL" --merged-at "$BRAI_PR_MERGED_AT" --source record-infra-docs-merge
+          deploy/scripts/ci-temporal-signal.sh preview --branch "$BRAI_BRANCH" --sha "$BRAI_COMMIT" --event delivery_handoff_passed --delivery-class "$BRAI_DELIVERY_CLASS" --pr-number "$BRAI_PR_NUMBER" --pr-url "$BRAI_PR_URL" --merged-at "$BRAI_PR_MERGED_AT" --source record-infra-docs-merge
         env:
           BRAI_DEPLOY_HOST: ${{ vars.BRAI_DEPLOY_HOST }}
           BRAI_DEPLOY_USER: ${{ vars.BRAI_DEPLOY_USER }}
@@ -444,8 +450,9 @@ jobs:
           BRAI_PR_NUMBER: ${{ github.event.pull_request.number }}
           BRAI_PR_URL: ${{ github.event.pull_request.html_url }}
           BRAI_PR_MERGED_AT: ${{ github.event.pull_request.merged_at }}
-      - name: Temporal infra/docs PR merged
-        run: deploy/scripts/ci-temporal-signal.sh preview --branch "$BRAI_BRANCH" --sha "$BRAI_COMMIT" --event pr_merged --delivery-class infra-docs --pr-number "$BRAI_PR_NUMBER" --pr-url "$BRAI_PR_URL" --merged-at "$BRAI_PR_MERGED_AT" --source record-infra-docs-merge
+          BRAI_DELIVERY_CLASS: ${{ contains(toJson(github.event.pull_request.labels), 'brai-delivery:technical-no-preview') && 'technical-no-preview' || 'infra-docs' }}
+      - name: Temporal no-preview PR merged
+        run: deploy/scripts/ci-temporal-signal.sh preview --branch "$BRAI_BRANCH" --sha "$BRAI_COMMIT" --event pr_merged --delivery-class "$BRAI_DELIVERY_CLASS" --pr-number "$BRAI_PR_NUMBER" --pr-url "$BRAI_PR_URL" --merged-at "$BRAI_PR_MERGED_AT" --source record-infra-docs-merge
         env:
           BRAI_DEPLOY_HOST: ${{ vars.BRAI_DEPLOY_HOST }}
           BRAI_DEPLOY_USER: ${{ vars.BRAI_DEPLOY_USER }}
@@ -456,6 +463,7 @@ jobs:
           BRAI_PR_NUMBER: ${{ github.event.pull_request.number }}
           BRAI_PR_URL: ${{ github.event.pull_request.html_url }}
           BRAI_PR_MERGED_AT: ${{ github.event.pull_request.merged_at }}
+          BRAI_DELIVERY_CLASS: ${{ contains(toJson(github.event.pull_request.labels), 'brai-delivery:technical-no-preview') && 'technical-no-preview' || 'infra-docs' }}
 
   release-preview-slot:
     if: |

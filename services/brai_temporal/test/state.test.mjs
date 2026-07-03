@@ -110,6 +110,25 @@ test("infra docs delivery completes without preview slot release", () => {
   assert.equal(state.gates.complete, true);
 });
 
+test("technical no-preview delivery completes without preview slot release", () => {
+  const state = createPreviewState({ branch: "codex/technical", sha: "t1" });
+  applyPreviewEvent(state, { type: "delivery_classified", sha: "t1", deliveryClass: "technical-no-preview" });
+  applyPreviewEvent(state, { type: "no_preview_required", sha: "t1", deliveryClass: "technical-no-preview" });
+  applyPreviewEvent(state, { type: "checks_passed", sha: "t1" });
+  applyPreviewEvent(state, { type: "auto_merge_started", sha: "t1" });
+  applyPreviewEvent(state, { type: "auto_merge_enabled", sha: "t1" });
+  applyPreviewEvent(state, { type: "delivery_handoff_passed", sha: "t1", mergedAt: "2026-07-01T00:00:00Z" });
+  applyPreviewEvent(state, { type: "pr_merged", sha: "t1", mergedAt: "2026-07-01T00:00:00Z" });
+
+  assert.equal(state.deliveryClass, "technical-no-preview");
+  assert.equal(state.previewDeploy, "not_applicable");
+  assert.equal(state.tasks.preview_deploy.status, "not_applicable");
+  assert.equal(state.tasks.accepted_preview_promotion.status, "not_applicable");
+  assert.equal(state.tasks.slot_release.status, "not_applicable");
+  assert.equal(state.tasks.accepted_for_target.status, "passed");
+  assert.equal(state.terminal, true);
+});
+
 test("infra docs PR merge does not complete without handoff passed", () => {
   const state = createPreviewState({ branch: "codex/infra-docs", sha: "d2" });
   applyPreviewEvent(state, { type: "delivery_classified", sha: "d2", deliveryClass: "infra-docs" });

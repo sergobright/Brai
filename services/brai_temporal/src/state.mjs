@@ -10,8 +10,8 @@ const PREVIEW_TASKS = {
   delivery_classification: "Delivery path classification",
   checks: "GitHub checks",
   preview_deploy: "Preview deploy",
-  delivery_handoff: "Infra/docs delivery handoff",
-  auto_merge: "Infra/docs auto-merge",
+  delivery_handoff: "No-preview delivery handoff",
+  auto_merge: "No-preview auto-merge",
   accepted_for_target: "Accepted for target",
   accepted_preview_promotion: "Accepted preview metadata promotion",
   slot_release: "Preview slot release"
@@ -136,7 +136,7 @@ export function applyPreviewEvent(state, rawEvent) {
       state.deliveryClass = event.deliveryClass || state.deliveryClass;
       state.status = "delivery_classified";
       setTask(state, "delivery_classification", "passed", event);
-      if (state.deliveryClass === "infra-docs") {
+      if (isNoPreviewDeliveryClass(state.deliveryClass)) {
         markNoPreviewRequired(state, event);
       } else {
         setTask(state, "delivery_handoff", "not_applicable", event);
@@ -379,6 +379,10 @@ function markNoPreviewRequired(state, event) {
 
 function isNoPreviewRequired(state) {
   return state.tasks.preview_deploy?.status === "not_applicable";
+}
+
+function isNoPreviewDeliveryClass(deliveryClass) {
+  return deliveryClass === "infra-docs" || deliveryClass === "technical-no-preview";
 }
 
 function resetTask(state, name, event) {

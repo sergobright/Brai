@@ -18,11 +18,12 @@ if (path.resolve(process.argv[1] ?? "") === fileURLToPath(import.meta.url)) {
 export function classifyDeployDelivery(files, context = {}) {
   const result = classifyBraiDelivery(files, context);
   const isCodexPush = context.eventName === "push" && context.ref?.startsWith("refs/heads/codex/");
+  const isNoPreview = result.deliveryClass === "infra-docs" || result.deliveryClass === "technical-no-preview";
   return {
     delivery_class: result.deliveryClass,
     requires_preview: result.deliveryClass === "runtime-preview" && isCodexPush,
     requires_dev_deploy: false,
-    auto_merge: result.deliveryClass === "infra-docs" && isCodexPush,
+    auto_merge: isNoPreview && isCodexPush,
   };
 }
 

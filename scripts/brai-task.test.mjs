@@ -267,6 +267,9 @@ test("delivery classifier separates infra-docs from runtime preview", () => {
   assert.equal(deliveryClassForFile(".github/workflows/brai-delivery.yml"), "infra");
   assert.equal(deliveryClassForFile(".gitignore"), "infra");
   assert.equal(deliveryClassForFile("apps/brai_app/tests/unit/publishScripts.test.ts"), "infra");
+  assert.equal(deliveryClassForFile("apps/brai_app/tests/unit/activityStore.test.ts"), "technical");
+  assert.equal(deliveryClassForFile("apps/brai_app/vitest.config.mts"), "technical");
+  assert.equal(deliveryClassForFile("services/brai_api/test/api.auth-migrations.test.js"), "technical");
   assert.equal(deliveryClassForFile("deploy/environments.json"), "infra");
   assert.equal(deliveryClassForFile("deploy/ansible/brai.yml"), "infra");
   assert.equal(deliveryClassForFile("deploy/scripts/apk-release-targets.mjs"), "infra");
@@ -283,6 +286,55 @@ test("delivery classifier separates infra-docs from runtime preview", () => {
 
   assert.equal(classifyDelivery(["docs/foo.md"]).deliveryClass, "infra-docs");
   assert.equal(classifyDelivery([".github/workflows/brai-delivery.yml"]).deliveryClass, "infra-docs");
+  assert.equal(classifyDelivery(["apps/brai_app/vitest.config.mts"]).deliveryClass, "technical-no-preview");
+  assert.equal(classifyDelivery(["services/brai_api/test/api.auth-migrations.test.js"]).deliveryClass, "technical-no-preview");
+  assert.equal(
+    classifyDelivery(["apps/brai_app/package.json"], {
+      diffs: {
+        "apps/brai_app/package.json": [
+          '-    "test": "vitest run",',
+          '+    "test": "vitest run --configLoader runner",',
+          '-    "test:watch": "vitest",',
+          '+    "test:watch": "vitest --configLoader runner",',
+        ].join("\n"),
+      },
+    }).deliveryClass,
+    "technical-no-preview",
+  );
+  assert.equal(
+    classifyDelivery(["apps/brai_app/package.json"], {
+      diffs: {
+        "apps/brai_app/package.json": [
+          '-    "next": "16.2.9",',
+          '+    "next": "16.2.10",',
+        ].join("\n"),
+      },
+    }).deliveryClass,
+    "runtime-preview",
+  );
+  assert.equal(
+    classifyDelivery(["services/brai_api/src/store-migrations.js"], {
+      diffs: {
+        "services/brai_api/src/store-migrations.js": [
+          "    id: 'operation:agent-task:app-test-vite-temp-permissions',",
+          "-    done: false",
+          "+    done: true",
+        ].join("\n"),
+      },
+    }).deliveryClass,
+    "technical-no-preview",
+  );
+  assert.equal(
+    classifyDelivery(["services/brai_api/src/store-migrations.js"], {
+      diffs: {
+        "services/brai_api/src/store-migrations.js": [
+          "-    this.recordMigration(42, 'seed agent task activities');",
+          "+    this.recordMigration(42, 'seed operation activities');",
+        ].join("\n"),
+      },
+    }).deliveryClass,
+    "runtime-preview",
+  );
   assert.equal(classifyDelivery(["apps/brai_app/src/app/page.tsx"]).deliveryClass, "runtime-preview");
   assert.equal(classifyDelivery(["docs/foo.md", "apps/brai_app/src/app/page.tsx"]).deliveryClass, "runtime-preview");
   assert.equal(classifyDelivery(["package.json"]).fallback, "unknown_path");
@@ -961,8 +1013,10 @@ test("infra docs workflow marks handoff passed only from the PR merge job", () =
   const autoMergeJob = workflow.slice(workflow.indexOf("auto-merge-infra-docs:"), workflow.indexOf("deploy-prod:"));
   const recordMergeJob = workflow.slice(workflow.indexOf("record-infra-docs-merge:"), workflow.indexOf("release-preview-slot:"));
   assert.doesNotMatch(autoMergeJob, /event delivery_handoff_passed/);
+  assert.match(autoMergeJob, /BRAI_ACCEPT_NO_PREVIEW_ONLY/);
   assert.match(recordMergeJob, /event delivery_handoff_passed/);
   assert.match(recordMergeJob, /event pr_merged/);
+  assert.match(recordMergeJob, /brai-delivery:technical-no-preview/);
   assert.ok(recordMergeJob.indexOf("event delivery_handoff_passed") < recordMergeJob.indexOf("event pr_merged"));
   assert.match(recordMergeJob, /BRAI_PR_MERGED_AT/);
 });
@@ -1305,13 +1359,19 @@ test("accepted preview stale cleanup is best effort", () => {
   assert.doesNotMatch(cleanupLoop, /exit 1/);
 });
 
-test("accepted preview branch lookup skips infra docs delivery PRs", () => {
+test("accepted preview branch lookup skips no-preview delivery PRs", () => {
   assert.deepEqual(acceptedPreviewBranches([
     {
       base: { ref: "main" },
       head: { ref: "codex/infra-docs" },
       merged_at: "2026-06-25T10:00:00Z",
       labels: [{ name: "brai-delivery:infra-docs" }],
+    },
+    {
+      base: { ref: "main" },
+      head: { ref: "codex/technical" },
+      merged_at: "2026-06-25T10:00:00Z",
+      labels: [{ name: "brai-delivery:technical-no-preview" }],
     },
     {
       base: { ref: "main" },
