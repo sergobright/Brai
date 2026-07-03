@@ -1286,6 +1286,12 @@ test("accept preview checks verified preview before PR actions", () => {
   assert.match(script, /write_acceptance_marker/);
   assert.match(script, /acceptance\.json/);
   assert.match(script, /deliveryClass/);
+  assert.match(script, /CALL_ROOT="\$\(git rev-parse --show-toplevel\)"/);
+  assert.match(script, /git -C "\$CALL_ROOT" worktree list --porcelain/);
+  assert.match(script, /ROOT="\$\(find_acceptance_root\)"/);
+  assert.match(script, /cd "\$ROOT"/);
+  assert.ok(script.indexOf('ROOT="$(find_acceptance_root)"') < script.indexOf("ensure_acceptance_marker_writable"));
+  assert.ok(script.indexOf('cd "$ROOT"') < script.indexOf("ensure_acceptance_marker_writable"));
 });
 
 test("accepted preview stale cleanup is best effort", () => {
