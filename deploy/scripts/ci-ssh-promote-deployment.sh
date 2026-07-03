@@ -45,6 +45,33 @@ if [[ -d "$NODE_PREFIX" ]]; then
   export PATH="$NODE_PREFIX:$PATH"
 fi
 
+accepted_build_recorded() {
+  local source_root="$1"
+  local target_db="$DEPLOY_REPO/data/brai.sqlite"
+  [[ -r "$source_root/services/brai_api/src/store.js" && -f "$target_db" ]] || return 1
+  node --input-type=module - "$source_root" "$target_db" "$BRAI_SOURCE_BRANCH" "$BRAI_TARGET_BRANCH" "$BRAI_TARGET_COMMIT" <<'NODE'
+const { createRequire } = await import("node:module");
+const [sourceRoot, dbPath, sourceBranch, targetBranch, targetCommit] = process.argv.slice(2);
+const require = createRequire(`${sourceRoot}/services/brai_api/src/store.js`);
+const Database = require("better-sqlite3");
+const db = new Database(dbPath, { readonly: true, fileMustExist: true });
+try {
+  const row = db.prepare(`
+    SELECT 1
+    FROM build_version_refs
+    WHERE version_type_id = 'build'
+      AND source_branch = ?
+      AND target_branch = ?
+      AND target_commit = ?
+    LIMIT 1
+  `).get(sourceBranch, targetBranch, targetCommit);
+  process.exit(row ? 0 : 1);
+} finally {
+  db.close();
+}
+NODE
+}
+
 RUN_ROOT="$DEPLOY_REPO"
 if [[ "$BRAI_SOURCE_BRANCH" == codex/* && "$BRAI_TARGET_ENVIRONMENT" == "prod" ]]; then
   if ! SLOT="$(node -e '
@@ -60,6 +87,14 @@ for (const slot of ["A", "B", "C", "D", "E"]) {
 }
 process.exit(1);
 ' "$BRAI_SOURCE_BRANCH")"; then
+    CHECK_ROOT="$ENVS_ROOT/prod/source"
+    if [[ ! -r "$CHECK_ROOT/services/brai_api/src/store.js" ]]; then
+      CHECK_ROOT="$DEPLOY_REPO"
+    fi
+    if accepted_build_recorded "$CHECK_ROOT"; then
+      echo "Accepted production branch $BRAI_SOURCE_BRANCH is already promoted for $BRAI_TARGET_BRANCH@$BRAI_TARGET_COMMIT; no preview slot remains."
+      exit 0
+    fi
     echo "No preview slot found for accepted production branch $BRAI_SOURCE_BRANCH." >&2
     exit 1
   fi

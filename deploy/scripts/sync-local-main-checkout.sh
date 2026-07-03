@@ -164,11 +164,16 @@ if [ "${BRAI_MAIN_SYNC_LOCK_CHECKOUT:-1}" = "1" ]; then
         find "$runtime_path" -type d -exec chmod g+s {} +
       fi
     done
-    if [ -f deploy/scripts/production-sqlite-maintenance.sh ]; then
-      chmod u=rwx,g=rx,o=x deploy/scripts
-      chgrp brai-deploy deploy/scripts/production-sqlite-maintenance.sh
-      chmod u=rwx,g=rx,o=rx deploy/scripts/production-sqlite-maintenance.sh
-    fi
+    for deploy_tool in \
+      deploy/scripts/production-sqlite-maintenance.sh \
+      deploy/scripts/sync-occupied-preview-ota-manifests.sh
+    do
+      if [ -f "$deploy_tool" ]; then
+        chmod u=rwx,g=rx,o=x deploy/scripts
+        chgrp brai-deploy "$deploy_tool"
+        chmod u=rwx,g=rx,o=rx "$deploy_tool"
+      fi
+    done
   fi
 
   if [ "${BRAI_LOCK_STALE_WORKTREES:-1}" = "1" ]; then

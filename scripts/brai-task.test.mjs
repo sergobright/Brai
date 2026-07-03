@@ -167,9 +167,10 @@ test("main checkout lock locks non-current worktrees by default", () => {
   assert.match(script, /sudo chmod 0751 "\$root"/);
   assert.match(script, /sudo chmod u=rwx,g=rx,o=x "\$root\/deploy"/);
   assert.match(script, /production-sqlite-maintenance\.sh/);
+  assert.match(script, /sync-occupied-preview-ota-manifests\.sh/);
   assert.match(script, /sudo chmod u=rwx,g=rx,o=x "\$root\/deploy\/scripts"/);
-  assert.match(script, /sudo chgrp brai-deploy "\$maintenance_tool"/);
-  assert.match(script, /sudo chmod u=rwx,g=rx,o=rx "\$maintenance_tool"/);
+  assert.match(script, /sudo chgrp brai-deploy "\$deploy_tool"/);
+  assert.match(script, /sudo chmod u=rwx,g=rx,o=rx "\$deploy_tool"/);
   assert.match(script, /Writable task worktree parent/);
 });
 
@@ -194,9 +195,10 @@ test("local main sync preserves runtime dirs and hard resets to origin main", ()
   assert.match(script, /chown mark:mark \.codex-worktrees/);
   assert.match(script, /chmod u=rwx,g=rx,o=x deploy/);
   assert.match(script, /production-sqlite-maintenance\.sh/);
+  assert.match(script, /sync-occupied-preview-ota-manifests\.sh/);
   assert.match(script, /chmod u=rwx,g=rx,o=x deploy\/scripts/);
-  assert.match(script, /chgrp brai-deploy deploy\/scripts\/production-sqlite-maintenance\.sh/);
-  assert.match(script, /chmod u=rwx,g=rx,o=rx deploy\/scripts\/production-sqlite-maintenance\.sh/);
+  assert.match(script, /chgrp brai-deploy "\$deploy_tool"/);
+  assert.match(script, /chmod u=rwx,g=rx,o=rx "\$deploy_tool"/);
   assert.match(script, /BRAI_LOCK_STALE_WORKTREES:-1/);
   assert.match(script, /git_cmd worktree list --porcelain/);
   assert.match(script, /chown -R root:mark "\$worktree_path"/);
@@ -1513,10 +1515,16 @@ test("accept preview checks verified preview before PR actions", () => {
 
 test("accepted preview stale cleanup is best effort", () => {
   const script = fs.readFileSync(path.join(process.cwd(), "deploy/scripts/ci-ssh-complete-accepted-previews.sh"), "utf8");
+  const promoteScript = fs.readFileSync(path.join(process.cwd(), "deploy/scripts/ci-ssh-promote-deployment.sh"), "utf8");
   const requiredLoop = script.slice(script.indexOf('for index in "${!REQUIRED_BRANCHES[@]}"'), script.indexOf('if [[ "$MODE" == "promote" ]]'));
   const cleanupLoop = script.slice(script.indexOf('for branch in "${CLEANUP_BRANCHES[@]}"'));
 
+  assert.match(promoteScript, /accepted_build_recorded\(\)/);
+  assert.match(promoteScript, /target_commit = \?/);
+  assert.match(promoteScript, /already promoted for/);
   assert.match(requiredLoop, /exit 1/);
+  assert.doesNotMatch(requiredLoop, /BRAI_REQUIRE_PREVIEW_SLOT_RELEASE=true/);
+  assert.match(requiredLoop, /slot_released/);
   assert.match(cleanupLoop, /cleanup_previously_accepted_preview/);
   assert.match(cleanupLoop, /Best-effort cleanup failed/);
   assert.doesNotMatch(cleanupLoop, /exit 1/);

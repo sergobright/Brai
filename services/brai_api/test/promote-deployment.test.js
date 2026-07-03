@@ -258,6 +258,57 @@ test('accepted promotion rejects missing authored source notes before deployment
   }
 });
 
+test('accepted promotion rerun skips missing slot after build ledger was recorded', () => {
+  const { tmp, dbPath, store } = tempStore();
+  const repoRoot = path.resolve(import.meta.dirname, '../../..');
+  const registry = path.join(tmp, 'preview-slots.json');
+  try {
+    fs.writeFileSync(registry, JSON.stringify({
+      A: { status: 'free', branch: null },
+      B: { status: 'free', branch: null },
+      C: { status: 'free', branch: null },
+      D: { status: 'free', branch: null },
+      E: { status: 'free', branch: null },
+      queue: [],
+    }));
+    store.recordAcceptedBuildVersion({
+      sourceBranch: 'codex/rerun',
+      sourceCommit: 'abc-rerun',
+      sourceShortChanges: 'Повторный запуск принят.',
+      sourceDetails: 'Повторный promotion видит уже записанную build-версию.',
+      sourceReason: 'Нужно не падать после уже освобождённого preview slot.',
+      targetBranch: 'main',
+      targetCommit: 'merge-rerun',
+      releasedAtUtc: '2026-07-03T10:40:00.000Z'
+    });
+    store.close();
+
+    const output = execFileSync('bash', [path.join(repoRoot, 'deploy/scripts/promote-accepted-deployment.sh')], {
+      cwd: repoRoot,
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        NODE_BIN: process.execPath,
+        BRAI_ROOT: repoRoot,
+        BRAI_DB: dbPath,
+        BRAI_ENVS_ROOT: tmp,
+        BRAI_PREVIEW_REGISTRY: registry,
+        BRAI_SOURCE_BRANCH: 'codex/rerun',
+        BRAI_TARGET_ENVIRONMENT: 'prod',
+        BRAI_TARGET_BRANCH: 'main',
+        BRAI_TARGET_COMMIT: 'merge-rerun',
+        BRAI_SOURCE_SHORT_CHANGES: 'Повторный запуск принят.',
+        BRAI_SOURCE_DETAILED_CHANGES: 'Повторный promotion видит уже записанную build-версию.',
+        BRAI_SOURCE_REASON: 'Нужно не падать после уже освобождённого preview slot.',
+      },
+    });
+
+    assert.match(output, /already promoted for main@merge-rerun/);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test('reset script resets APK row without deleting build history', () => {
   const { tmp, dbPath, store } = tempStore();
   const repoRoot = path.resolve(import.meta.dirname, '../../..');

@@ -50,6 +50,8 @@ The preview slot registry remains `/srv/projects/brai-envs/preview-slots.json`; 
 
 Native-boundary preview deploys may build a slot-specific APK inside the existing `preview_deploy_started` to `preview_deploy_passed` gate. Accepted native work rebuilds the Preview A-E APK baseline during preview slot release after production deploy. These APK builds are required deploy/release substeps, not separate Temporal state transitions; failure still reports through `preview_deploy_failed`, `prod_deploy_failed`, or `slot_release_failed`.
 
+Accepted `deploy-prod` reruns are idempotent after a partial success: if the preview slot was already released, promotion may pass only when the production build ledger already records the accepted branch for the target commit, and the release rerun records `slot_released` for the already-free slot instead of leaving the workflow blocked.
+
 ## Infra Docs No-preview Path
 
 Infrastructure/documentation-only branches can be classified as `deliveryClass=infra-docs`.

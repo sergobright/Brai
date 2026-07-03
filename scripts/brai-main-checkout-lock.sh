@@ -81,12 +81,16 @@ if getent group brai-deploy >/dev/null 2>&1; then
       sudo find "$runtime_path" -type d -exec chmod g+s {} +
     fi
   done
-  maintenance_tool="$root/deploy/scripts/production-sqlite-maintenance.sh"
-  if [ -f "$maintenance_tool" ]; then
-    sudo chmod u=rwx,g=rx,o=x "$root/deploy/scripts"
-    sudo chgrp brai-deploy "$maintenance_tool"
-    sudo chmod u=rwx,g=rx,o=rx "$maintenance_tool"
-  fi
+  for deploy_tool in \
+    "$root/deploy/scripts/production-sqlite-maintenance.sh" \
+    "$root/deploy/scripts/sync-occupied-preview-ota-manifests.sh"
+  do
+    if [ -f "$deploy_tool" ]; then
+      sudo chmod u=rwx,g=rx,o=x "$root/deploy/scripts"
+      sudo chgrp brai-deploy "$deploy_tool"
+      sudo chmod u=rwx,g=rx,o=rx "$deploy_tool"
+    fi
+  done
 fi
 
 if [ "${BRAI_LOCK_STALE_WORKTREES:-1}" = "1" ]; then
