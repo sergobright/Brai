@@ -598,6 +598,113 @@ test('preview origins are credential-compatible CORS origins', async () => {
   }
 });
 
+test('public landing can check auth session but cannot get credential CORS for v1 writes', async () => {
+  const fixture = await createFixture(['2026-07-03T10:00:00.000Z'], {
+    webPassword: WEB_PASSWORD,
+    sessionSecret: SESSION_SECRET
+  });
+
+  try {
+    const sessionPreflight = await fetch(`${fixture.url}/auth/session`, {
+      method: 'OPTIONS',
+      headers: {
+        origin: 'https://brightos.world',
+        'access-control-request-method': 'GET'
+      }
+    });
+    assert.equal(sessionPreflight.status, 204);
+    assert.equal(sessionPreflight.headers.get('access-control-allow-origin'), 'https://brightos.world');
+    assert.equal(sessionPreflight.headers.get('access-control-allow-credentials'), 'true');
+
+    const session = await jsonRequest(fixture.url, '/auth/session', {
+      headers: { origin: 'https://brightos.world' }
+    });
+    assert.equal(session.status, 200);
+    assert.equal(session.headers.get('access-control-allow-origin'), 'https://brightos.world');
+    assert.equal(session.body.authenticated, false);
+
+    const writePreflight = await fetch(`${fixture.url}/v1/timer/start`, {
+      method: 'OPTIONS',
+      headers: {
+        origin: 'https://brightos.world',
+        'access-control-request-method': 'POST'
+      }
+    });
+    assert.equal(writePreflight.status, 204);
+    assert.notEqual(writePreflight.headers.get('access-control-allow-origin'), 'https://brightos.world');
+  } finally {
+    await fixture.close();
+  }
+});
+
+test('cookie-auth v1 writes reject untrusted browser origins', async () => {
+  const fixture = await createFixture([
+    '2026-07-03T10:00:00.000Z',
+    '2026-07-03T10:00:01.000Z',
+    '2026-07-03T10:00:02.000Z',
+    '2026-07-03T10:00:03.000Z'
+  ], {
+    webPassword: WEB_PASSWORD,
+    sessionSecret: SESSION_SECRET
+  });
+
+  try {
+    const login = await jsonRequest(fixture.url, '/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ password: WEB_PASSWORD })
+    });
+    const cookie = login.headers.get('set-cookie');
+    assert.match(cookie, /brai_session=/);
+
+    const evil = await jsonRequest(fixture.url, '/v1/timer/start', {
+      method: 'POST',
+      headers: {
+        origin: 'https://evil.example',
+        cookie
+      }
+    });
+    assert.equal(evil.status, 403);
+    assert.equal(evil.body.error, 'forbidden_origin');
+
+    const landing = await jsonRequest(fixture.url, '/v1/timer/start', {
+      method: 'POST',
+      headers: {
+        origin: 'https://brightos.world',
+        cookie
+      }
+    });
+    assert.equal(landing.status, 403);
+    assert.equal(landing.body.error, 'forbidden_origin');
+
+    const state = await request(fixture.url, '/v1/timer/state');
+    assert.equal(state.body.active_session, null);
+
+    const trusted = await jsonRequest(fixture.url, '/v1/timer/start', {
+      method: 'POST',
+      headers: {
+        origin: 'https://app.brightos.world',
+        cookie
+      }
+    });
+    assert.equal(trusted.status, 201);
+    assert.ok(trusted.body.active_session);
+  } finally {
+    await fixture.close();
+  }
+});
+
+test('bearer-auth v1 writes still work without browser origin', async () => {
+  const fixture = await createFixture(['2026-07-03T10:20:00.000Z']);
+
+  try {
+    const started = await request(fixture.url, '/v1/timer/start', { method: 'POST' });
+    assert.equal(started.status, 201);
+    assert.ok(started.body.active_session);
+  } finally {
+    await fixture.close();
+  }
+});
+
 test('release files require cookie session', async () => {
   const fixture = await createFixture(['2026-06-12T06:00:00.000Z'], {
     webPassword: WEB_PASSWORD,

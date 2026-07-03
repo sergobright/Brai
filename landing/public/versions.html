@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Brai Versions</title>
+    <meta
+      name="description"
+      content="Brai web, OTA, and Android APK version timeline."
+    />
+    <link rel="icon" href="/brai-logo.png" />
+    <link rel="stylesheet" href="/styles.css" />
+    <script src="/auth-link.js" defer></script>
+  </head>
+  <body>
+    <header class="site-nav" aria-label="Primary">
+      <a class="brand-link" href="/">
+        <img src="/brai-logo.png" alt="" width="40" height="40" />
+        <span>Brai</span>
+      </a>
+      <nav>
+        <a aria-current="page" href="/versions.html">Versions</a>
+        <a class="button" data-auth-link href="https://app.brightos.world/">Sign In</a>
+      </nav>
+      <button class="theme-toggle" type="button" aria-label="Toggle theme">☾</button>
+    </header>
+
+    <main class="changelog-shell">
+      <section class="changelog-header" aria-labelledby="versions-title">
+        <h1 id="versions-title">Versions</h1>
+        <p>
+          Product delivery notes for the public web layer, Android OTA bundle, and APK baseline.
+        </p>
+      </section>
+
+      <section class="timeline" aria-label="Version timeline">
+        <article class="timeline-item">
+          <div class="timeline-meta">
+            <time datetime="2026-07-02">July 2, 2026</time>
+            <span>0.0.63</span>
+          </div>
+          <div class="timeline-card">
+            <span class="timeline-dot" aria-hidden="true"></span>
+            <h2>Web and OTA bundle 0.0.63</h2>
+            <div class="tag-list" aria-label="Tags">
+              <span>Web</span>
+              <span>OTA</span>
+              <span>Android target v1</span>
+            </div>
+            <ul>
+              <li>Current public web layer version is 0.0.63.</li>
+              <li>Mobile OTA bundle targets APK v1 and is marked non-mandatory.</li>
+              <li>Published bundle entrypoint remains <code>index.html</code>.</li>
+            </ul>
+            <pre><code>{
+  "otaVersion": "0.0.63",
+  "targetApkVersion": 1,
+  "mandatory": false
+}</code></pre>
+          </div>
+        </article>
+
+        <article class="timeline-item">
+          <div class="timeline-meta">
+            <time datetime="2026-07-02">July 2, 2026</time>
+            <span>v1</span>
+          </div>
+          <div class="timeline-card">
+            <span class="timeline-dot" aria-hidden="true"></span>
+            <h2>APK baseline reset to v1</h2>
+            <div class="tag-list" aria-label="Tags">
+              <span>APK</span>
+              <span>Version code 1</span>
+              <span>Release ledger</span>
+            </div>
+            <ul>
+              <li>Production package is <code>world.brightos.brai</code>.</li>
+              <li>Preview APKs A through E use the same APK version baseline.</li>
+              <li>Runtime <code>build_versions</code> is now the APK ledger only.</li>
+            </ul>
+          </div>
+        </article>
+
+        <article class="timeline-item">
+          <div class="timeline-meta">
+            <time datetime="2026-07-02">July 2, 2026</time>
+            <span>Policy</span>
+          </div>
+          <div class="timeline-card">
+            <span class="timeline-dot" aria-hidden="true"></span>
+            <h2>Version streams separated</h2>
+            <div class="tag-list" aria-label="Tags">
+              <span>Web</span>
+              <span>APK</span>
+              <span>Delivery</span>
+            </div>
+            <ul>
+              <li>Web and OTA versions use the <code>X.Y.Z</code> format.</li>
+              <li>Android APK releases use <code>vN</code>.</li>
+              <li>GitHub PR numbers are review metadata, not product versions.</li>
+            </ul>
+          </div>
+        </article>
+      </section>
+    </main>
+
+    <script>
+      const button = document.querySelector(".theme-toggle");
+      const key = "brai-landing-theme";
+      const storedTheme = localStorage.getItem(key);
+      if (storedTheme === "dark") {
+        document.documentElement.dataset.theme = "dark";
+        button.textContent = "☀";
+      }
+      button?.addEventListener("click", () => {
+        const dark = document.documentElement.dataset.theme !== "dark";
+        document.documentElement.dataset.theme = dark ? "dark" : "";
+        localStorage.setItem(key, dark ? "dark" : "light");
+        button.textContent = dark ? "☀" : "☾";
+      });
+    </script>
+  </body>
+</html>
