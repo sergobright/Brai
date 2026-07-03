@@ -20,6 +20,14 @@ if [[ "$MODE" == "--check-access" ]]; then
   MODE="--local"
 fi
 
+check_access() {
+  local check_root="$1"
+  test -x "$check_root/deploy/scripts/sync-occupied-preview-ota-manifests.sh"
+  test -r "$REGISTRY"
+  "$NODE_BIN" "$check_root/deploy/scripts/resolve-app-version.mjs" --environment prod --root "$check_root" --db "$PROD_DB" >/dev/null
+  echo "accepted preview OTA sync access ok: $check_root"
+}
+
 if [[ ( "$MODE" != "--local" || "$CHECK_ACCESS" == "true" ) && -n "${BRAI_DEPLOY_HOST:-}" ]]; then
   : "${BRAI_DEPLOY_USER:?BRAI_DEPLOY_USER is required}"
   : "${BRAI_DEPLOY_SSH_KEY:?BRAI_DEPLOY_SSH_KEY is required}"
@@ -67,10 +75,11 @@ if [[ "$ROOT" == "$DEPLOY_REPO" && "$ROOT" != "$PROD_SOURCE_ROOT" && ( "$MODE" =
     echo "Refusing to sync occupied preview OTA manifests from locked checkout; deploy-owned source is missing: $PROD_SOURCE_ROOT" >&2
     exit 1
   fi
-  LOCAL_MODE_ARG="--local"
   if [[ "$CHECK_ACCESS" == "true" ]]; then
-    LOCAL_MODE_ARG="--check-access"
+    check_access "$PROD_SOURCE_ROOT"
+    exit 0
   fi
+  LOCAL_MODE_ARG="--local"
   exec env \
     BRAI_ROOT="$PROD_SOURCE_ROOT" \
     BRAI_ENVS_ROOT="$ENVS_ROOT" \
@@ -83,9 +92,7 @@ if [[ "$ROOT" == "$DEPLOY_REPO" && "$ROOT" != "$PROD_SOURCE_ROOT" && ( "$MODE" =
 fi
 
 if [[ "$CHECK_ACCESS" == "true" ]]; then
-  test -r "$REGISTRY"
-  "$NODE_BIN" "$ROOT/deploy/scripts/resolve-app-version.mjs" --environment prod --root "$ROOT" --db "$PROD_DB" >/dev/null
-  echo "accepted preview OTA sync access ok: $ROOT"
+  check_access "$ROOT"
   exit 0
 fi
 

@@ -1760,9 +1760,11 @@ test("accepted preview stale cleanup is best effort", () => {
   assert.match(cleanupLoop, /Best-effort cleanup failed/);
   assert.doesNotMatch(cleanupLoop, /exit 1/);
   assert.match(otaSyncScript, /PROD_SOURCE_ROOT="\$\{BRAI_PROD_SOURCE_ROOT:-\$ENVS_ROOT\/prod\/source\}"/);
+  assert.match(otaSyncScript, /check_access\(\) \{/);
   assert.match(otaSyncScript, /\( "\$MODE" != "--local" \|\| "\$CHECK_ACCESS" == "true" \) && -n "\$\{BRAI_DEPLOY_HOST:-\}"/);
   assert.match(otaSyncScript, /BRAI_SKIP_DEPLOY_USER_REENTRY/);
   assert.match(otaSyncScript, /sudo -n -u "\$deploy_user"/);
+  assert.match(otaSyncScript, /check_access "\$PROD_SOURCE_ROOT"/);
   assert.match(otaSyncScript, /\$PROD_SOURCE_ROOT\/deploy\/scripts\/sync-occupied-preview-ota-manifests\.sh/);
   assert.match(otaSyncScript, /--check-access/);
   assert.match(otaSyncScript, /resolve-app-version\.mjs/);
