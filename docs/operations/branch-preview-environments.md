@@ -177,6 +177,9 @@ Deploy scripts normalize public web, OTA, release, and preview slot files throug
 equivalent logic so they preserve group-write instead of resetting trees to `go=rX`.
 Accepted-preview release and OTA sync must execute from `/srv/projects/brai-envs/*/source`;
 the live checkout `/srv/projects/brai` is only the locked main mirror and public artifact root.
+Ansible must preserve this same permission contract: `/srv/projects/brai` source paths stay in the
+`mark` source group under the main-sync lock, Node runtime entrypoints stay executable as `0755`,
+and deploy/preview artifact roots stay `2775` so future files inherit `brai-deploy`.
 
 ### Production SQLite maintenance
 
