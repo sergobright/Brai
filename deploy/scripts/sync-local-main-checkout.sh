@@ -167,7 +167,7 @@ if [ "${BRAI_MAIN_SYNC_LOCK_CHECKOUT:-1}" = "1" ]; then
     if [ -f deploy/scripts/production-sqlite-maintenance.sh ]; then
       chmod u=rwx,g=rx,o=x deploy/scripts
       chgrp brai-deploy deploy/scripts/production-sqlite-maintenance.sh
-      chmod u=rwx,g=rx,o= deploy/scripts/production-sqlite-maintenance.sh
+      chmod u=rwx,g=rx,o=rx deploy/scripts/production-sqlite-maintenance.sh
     fi
   fi
 

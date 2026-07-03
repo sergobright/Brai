@@ -85,7 +85,7 @@ if getent group brai-deploy >/dev/null 2>&1; then
   if [ -f "$maintenance_tool" ]; then
     sudo chmod u=rwx,g=rx,o=x "$root/deploy/scripts"
     sudo chgrp brai-deploy "$maintenance_tool"
-    sudo chmod u=rwx,g=rx,o= "$maintenance_tool"
+    sudo chmod u=rwx,g=rx,o=rx "$maintenance_tool"
   fi
 fi
 
