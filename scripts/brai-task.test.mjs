@@ -92,6 +92,16 @@ test("server access contract checks deploy ownership instead of agent write acce
   assert.doesNotMatch(script, /pathCheck\("env roots", envsRoot, \{ requireWrite: true/);
 });
 
+test("server access contract checks operation helper sudo boundary", () => {
+  const script = fs.readFileSync(new URL("./brai-task.mjs", import.meta.url), "utf8");
+  const sudoers = fs.readFileSync(new URL("../deploy/ansible/templates/brai-deploy-sudoers.j2", import.meta.url), "utf8");
+  assert.match(script, /commandCheck\("operation helper sudo"/);
+  assert.match(script, /"sudo",\s+"-n",\s+"-l",\s+"-u",\s+serviceUser/s);
+  assert.match(script, /operation:agent-task:access-contract-probe/);
+  assert.match(sudoers, /ALL=\(\{\{ brai_service_user \}\}\) NOPASSWD:/);
+  assert.match(sudoers, /complete-operation-activities\.sh --local \*/);
+});
+
 test("task base refresh commands are hard blocked", () => {
   assert.equal(isTaskBaseRefreshCommand("git fetch origin"), true);
   assert.equal(isTaskBaseRefreshCommand("git fetch origin --prune"), true);

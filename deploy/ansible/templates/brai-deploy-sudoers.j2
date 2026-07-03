@@ -1,6 +1,7 @@
 {{ brai_deploy_user }} ALL=(root) NOPASSWD: /usr/bin/caddy validate --config {{ brai_caddyfile }}
 {{ brai_deploy_user }} ALL=(root) NOPASSWD: /bin/systemctl reload caddy
 {{ brai_deploy_user }} ALL=(root) NOPASSWD: /srv/opt/brai-main-sync.sh *
+{{ brai_deploy_user }} ALL=({{ brai_service_user }}) NOPASSWD: {{ brai_env_root }}/{{ brai_envs.prod.path }}/source/deploy/scripts/complete-operation-activities.sh --local *
 {% for name, env in brai_envs.items() %}
 {{ brai_deploy_user }} ALL=(root) NOPASSWD: /bin/systemctl restart {{ env.service }}
 {% endfor %}

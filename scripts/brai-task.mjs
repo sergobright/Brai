@@ -575,7 +575,13 @@ function serverAccessContract(root = process.env.BRAI_ROOT ?? "/srv/projects/bra
   const deployRepo = process.env.BRAI_DEPLOY_REPO ?? root;
   const deployOwner = process.env.BRAI_DEPLOY_OWNER ?? "brai-deploy";
   const deployGroup = process.env.BRAI_DEPLOY_GROUP ?? "brai-deploy";
+  const deployUser = process.env.BRAI_DEPLOY_USER ?? deployOwner;
+  const deployHost = process.env.BRAI_DEPLOY_HOST ?? "localhost";
+  const deploySshPort = process.env.BRAI_DEPLOY_SSH_PORT ?? "22";
+  const deployIdentityFile = process.env.BRAI_DEPLOY_IDENTITY_FILE;
+  const serviceUser = process.env.BRAI_SQLITE_SERVICE_USER ?? "brai";
   const mainSyncScript = process.env.BRAI_MAIN_SYNC_SCRIPT ?? "/srv/opt/brai-main-sync.sh";
+  const operationHelper = path.join(envsRoot, "prod/source/deploy/scripts/complete-operation-activities.sh");
   const checks = [
     commandCheck("guard sync", [path.join(root, "scripts/brai-guard-sync-check.sh"), "--check"], { cwd: root }),
     commandCheck("preview slots", [path.join(root, "deploy/scripts/preview-slots.sh"), "status"], {
@@ -600,6 +606,25 @@ function serverAccessContract(root = process.env.BRAI_ROOT ?? "/srv/projects/bra
       group: deployGroup,
       requiredModeBits: 0o660,
     }),
+    commandCheck("operation helper sudo", [
+      "ssh",
+      ...(deployIdentityFile ? ["-i", deployIdentityFile] : []),
+      "-p",
+      deploySshPort,
+      "-o",
+      "BatchMode=yes",
+      "-o",
+      "StrictHostKeyChecking=accept-new",
+      `${deployUser}@${deployHost}`,
+      "sudo",
+      "-n",
+      "-l",
+      "-u",
+      serviceUser,
+      operationHelper,
+      "--local",
+      "operation:agent-task:access-contract-probe",
+    ]),
     pathCheck("deploy artifacts", path.join(deployRepo, "deploy"), { requireRead: true, expectDirectory: true }),
     pathCheck("main sync script", mainSyncScript, { requireRead: true }),
     commandCheck("node", ["node", "--version"], { cwd: root }),

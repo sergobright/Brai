@@ -161,6 +161,7 @@ The deploy user must not need read or write access to `/srv/projects/brai/.git`.
 ```text
 caddy validate --config /etc/caddy/Caddyfile
 systemctl reload caddy
+sudo -u brai /srv/projects/brai-envs/prod/source/deploy/scripts/complete-operation-activities.sh --local operation:agent-task:*
 systemctl restart brai-api.service
 systemctl restart brai-api-preview-a.service
 systemctl restart brai-api-preview-b.service
