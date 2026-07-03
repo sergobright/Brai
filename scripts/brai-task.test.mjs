@@ -184,11 +184,11 @@ test("codex project pre-tool hook is unconditional and uses the installed guard"
   assert.match(hooks.hooks.Stop[0].hooks[0].command, /\/srv\/opt\/brai-codex-plugins\/plugins\/brai-guard\/hooks\/brai-guard\.mjs stop/);
 });
 
-test("main checkout lock locks non-current worktrees by default", () => {
+test("main checkout lock preserves agent worktrees by default", () => {
   const script = fs.readFileSync(new URL("./brai-main-checkout-lock.sh", import.meta.url), "utf8");
   assert.match(script, /git -C "\$root" worktree list --porcelain/);
   assert.match(script, /brai-worktrees/);
-  assert.match(script, /BRAI_LOCK_STALE_WORKTREES:-1/);
+  assert.match(script, /BRAI_LOCK_STALE_WORKTREES:-0/);
   assert.match(script, /BRAI_LOCK_CURRENT_WORKTREE/);
   assert.match(script, /restore_task_state_access\(\)/);
   assert.match(script, /restore_task_state_access "\$worktree_path"/);
@@ -207,6 +207,8 @@ test("main checkout lock locks non-current worktrees by default", () => {
   assert.match(script, /sudo chmod u=rwx,g=rx,o=x "\$root\/deploy\/scripts"/);
   assert.match(script, /sudo chgrp brai-deploy "\$deploy_tool"/);
   assert.match(script, /sudo chmod u=rwx,g=rx,o=rx "\$deploy_tool"/);
+  assert.match(script, /preserve_agent_dependency_paths/);
+  assert.match(script, /apps\/brai_app\/node_modules/);
   assert.match(script, /Writable task worktree parent/);
 });
 
@@ -229,14 +231,17 @@ test("local main sync preserves runtime dirs and hard resets to origin main", ()
   assert.match(script, /chown "root:\$SOURCE_GROUP" "\$REPO"/);
   assert.match(script, /chown -R mark:mark \.git/);
   assert.match(script, /chown mark:mark \.codex-worktrees/);
+  assert.match(script, /BRAI_LOCK_STALE_WORKTREES:-0/);
   assert.match(script, /chmod u=rwx,g=rx,o=x deploy/);
   assert.match(script, /production-sqlite-maintenance\.sh/);
   assert.match(script, /complete-operation-activities\.sh/);
   assert.match(script, /sync-occupied-preview-ota-manifests\.sh/);
+  assert.match(script, /preserve_agent_dependency_paths/);
+  assert.match(script, /apps\/brai_app\/node_modules/);
   assert.match(script, /chmod u=rwx,g=rx,o=x deploy\/scripts/);
   assert.match(script, /chgrp brai-deploy "\$deploy_tool"/);
   assert.match(script, /chmod u=rwx,g=rx,o=rx "\$deploy_tool"/);
-  assert.match(script, /BRAI_LOCK_STALE_WORKTREES:-1/);
+  assert.doesNotMatch(script, /BRAI_LOCK_STALE_WORKTREES:-1/);
   assert.match(script, /git_cmd worktree list --porcelain/);
   assert.match(script, /chown -R root:mark "\$worktree_path"/);
   assert.match(script, /restore_task_state_access\(\)/);
