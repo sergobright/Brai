@@ -9,23 +9,83 @@ if [[ -d "$NODE_PREFIX" ]]; then
 fi
 NODE_BIN="${NODE_BIN:-node}"
 ENVS_ROOT="${BRAI_ENVS_ROOT:-/srv/projects/brai-envs}"
+DEPLOY_REPO="${BRAI_DEPLOY_REPO:-/srv/projects/brai}"
+PROD_SOURCE_ROOT="${BRAI_PROD_SOURCE_ROOT:-$ENVS_ROOT/prod/source}"
 PROD_DB="${BRAI_PROD_DB:-${BRAI_DB:-$ROOT/data/brai.sqlite}}"
 REGISTRY="${BRAI_PREVIEW_REGISTRY:-$ENVS_ROOT/preview-slots.json}"
 MODE="${1:-}"
+CHECK_ACCESS=false
+if [[ "$MODE" == "--check-access" ]]; then
+  CHECK_ACCESS=true
+  MODE="--local"
+fi
 
-if [[ "$MODE" != "--local" && -n "${BRAI_DEPLOY_HOST:-}" ]]; then
+if [[ ( "$MODE" != "--local" || "$CHECK_ACCESS" == "true" ) && -n "${BRAI_DEPLOY_HOST:-}" ]]; then
   : "${BRAI_DEPLOY_USER:?BRAI_DEPLOY_USER is required}"
   : "${BRAI_DEPLOY_SSH_KEY:?BRAI_DEPLOY_SSH_KEY is required}"
-  DEPLOY_REPO="${BRAI_DEPLOY_REPO:-/srv/projects/brai}"
   SSH_PORT="${BRAI_DEPLOY_SSH_PORT:-22}"
   REMOTE_PROD_DB="${BRAI_PROD_DB:-${BRAI_DB:-$DEPLOY_REPO/data/brai.sqlite}}"
-  REMOTE_ROOT="${BRAI_REMOTE_ROOT:-$ENVS_ROOT/prod/source}"
+  REMOTE_ROOT="${BRAI_REMOTE_ROOT:-$PROD_SOURCE_ROOT}"
+  LOCAL_MODE_ARG="--local"
+  if [[ "$CHECK_ACCESS" == "true" ]]; then
+    LOCAL_MODE_ARG="--check-access"
+  fi
   KEY_FILE="$(mktemp "${TMPDIR:-/tmp}/brai-deploy-key.XXXXXX")"
   trap 'rm -f "$KEY_FILE"' EXIT
   printf '%s\n' "$BRAI_DEPLOY_SSH_KEY" >"$KEY_FILE"
   chmod 600 "$KEY_FILE"
   ssh -i "$KEY_FILE" -p "$SSH_PORT" -o StrictHostKeyChecking=accept-new "$BRAI_DEPLOY_USER@$BRAI_DEPLOY_HOST" \
-    "if [ ! -x '$REMOTE_ROOT/deploy/scripts/sync-occupied-preview-ota-manifests.sh' ]; then echo 'Cannot run OTA sync from deploy-owned source: $REMOTE_ROOT' >&2; exit 1; fi; BRAI_ROOT='$REMOTE_ROOT' BRAI_ENVS_ROOT='$ENVS_ROOT' BRAI_PROD_DB='$REMOTE_PROD_DB' BRAI_PROD_WEB_VERSION_JSON='$DEPLOY_REPO/deploy/web/version.json' BRAI_RELEASE_TARGET='$DEPLOY_REPO/deploy/releases' '$REMOTE_ROOT/deploy/scripts/sync-occupied-preview-ota-manifests.sh' --local"
+    "if [ ! -x '$REMOTE_ROOT/deploy/scripts/sync-occupied-preview-ota-manifests.sh' ]; then echo 'Cannot run OTA sync from deploy-owned source: $REMOTE_ROOT' >&2; exit 1; fi; BRAI_ROOT='$REMOTE_ROOT' BRAI_ENVS_ROOT='$ENVS_ROOT' BRAI_PROD_DB='$REMOTE_PROD_DB' BRAI_PROD_WEB_VERSION_JSON='$DEPLOY_REPO/deploy/web/version.json' BRAI_RELEASE_TARGET='$DEPLOY_REPO/deploy/releases' '$REMOTE_ROOT/deploy/scripts/sync-occupied-preview-ota-manifests.sh' '$LOCAL_MODE_ARG'"
+  exit 0
+fi
+
+if [[ "${BRAI_SKIP_DEPLOY_USER_REENTRY:-false}" != "true" ]]; then
+  current_user="$(id -un 2>/dev/null || true)"
+  deploy_user="${BRAI_DEPLOY_USER:-brai-deploy}"
+  if [[ -z "${BRAI_DEPLOY_HOST:-}" && "$current_user" != "$deploy_user" && "$ROOT" == "$DEPLOY_REPO" ]] && command -v sudo >/dev/null 2>&1; then
+    REENTRY_MODE_ARGS=()
+    if [[ "$CHECK_ACCESS" == "true" ]]; then
+      REENTRY_MODE_ARGS=(--check-access)
+    elif [[ -n "$MODE" ]]; then
+      REENTRY_MODE_ARGS=("$MODE")
+    fi
+    exec sudo -n -u "$deploy_user" env \
+      BRAI_SKIP_DEPLOY_USER_REENTRY=true \
+      BRAI_ROOT="$ROOT" \
+      BRAI_ENVS_ROOT="$ENVS_ROOT" \
+      BRAI_DEPLOY_REPO="$DEPLOY_REPO" \
+      BRAI_PROD_SOURCE_ROOT="$PROD_SOURCE_ROOT" \
+      BRAI_PROD_DB="$PROD_DB" \
+      BRAI_PROD_WEB_VERSION_JSON="${BRAI_PROD_WEB_VERSION_JSON:-$DEPLOY_REPO/deploy/web/version.json}" \
+      BRAI_RELEASE_TARGET="${BRAI_RELEASE_TARGET:-$DEPLOY_REPO/deploy/releases}" \
+      "$ROOT/deploy/scripts/sync-occupied-preview-ota-manifests.sh" "${REENTRY_MODE_ARGS[@]}"
+  fi
+fi
+
+if [[ "$ROOT" == "$DEPLOY_REPO" && "$ROOT" != "$PROD_SOURCE_ROOT" && ( "$MODE" == "" || "$MODE" == "--local" ) ]]; then
+  if [[ ! -x "$PROD_SOURCE_ROOT/deploy/scripts/sync-occupied-preview-ota-manifests.sh" ]]; then
+    echo "Refusing to sync occupied preview OTA manifests from locked checkout; deploy-owned source is missing: $PROD_SOURCE_ROOT" >&2
+    exit 1
+  fi
+  LOCAL_MODE_ARG="--local"
+  if [[ "$CHECK_ACCESS" == "true" ]]; then
+    LOCAL_MODE_ARG="--check-access"
+  fi
+  exec env \
+    BRAI_ROOT="$PROD_SOURCE_ROOT" \
+    BRAI_ENVS_ROOT="$ENVS_ROOT" \
+    BRAI_DEPLOY_REPO="$DEPLOY_REPO" \
+    BRAI_PROD_SOURCE_ROOT="$PROD_SOURCE_ROOT" \
+    BRAI_PROD_DB="$PROD_DB" \
+    BRAI_PROD_WEB_VERSION_JSON="${BRAI_PROD_WEB_VERSION_JSON:-$DEPLOY_REPO/deploy/web/version.json}" \
+    BRAI_RELEASE_TARGET="${BRAI_RELEASE_TARGET:-$DEPLOY_REPO/deploy/releases}" \
+    "$PROD_SOURCE_ROOT/deploy/scripts/sync-occupied-preview-ota-manifests.sh" "$LOCAL_MODE_ARG"
+fi
+
+if [[ "$CHECK_ACCESS" == "true" ]]; then
+  test -r "$REGISTRY"
+  "$NODE_BIN" "$ROOT/deploy/scripts/resolve-app-version.mjs" --environment prod --root "$ROOT" --db "$PROD_DB" >/dev/null
+  echo "accepted preview OTA sync access ok: $ROOT"
   exit 0
 fi
 

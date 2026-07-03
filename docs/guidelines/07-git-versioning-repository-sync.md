@@ -44,6 +44,7 @@ Use one permission contract instead of ad hoc `chmod`/`chown` fixes:
 - production SQLite is owned by `brai:brai-deploy`; the DB, WAL, and SHM files are group-writable;
 - public web, OTA, and release artifacts are group-writable and public-readable;
 - accepted-preview promotion, OTA sync, preview slot release, and baseline APK rebuilds run from deploy-owned source roots under `/srv/projects/brai-envs/*/source`, not from the locked live checkout.
+- checkout-local CI/agent entrypoints for those operations must self-route into the deploy-owned source before reading runtime dependencies.
 
 The canonical checks are:
 
