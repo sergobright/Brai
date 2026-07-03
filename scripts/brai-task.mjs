@@ -387,7 +387,13 @@ function previewHandoff(branchArg) {
 }
 
 function deliveryHandoff(branchArg) {
-  const classification = classifyDelivery(diffFromTaskBase());
+  const branch = branchArg ?? currentBranch();
+  if (!CODEX_BRANCH_RE.test(branch)) throw new Error(`Delivery handoff requires codex/* branch, got: ${branch}`);
+  if (branch !== currentBranch()) throw new Error(`Current branch is ${currentBranch()}, not ${branch}`);
+  const head = git("rev-parse", "HEAD");
+  const acceptance = readAcceptanceReceipt();
+  let classification = classifyDelivery(diffFromTaskBase(), { branch, head });
+  classification = classifyAcceptedNoPreviewDelivery(classification, acceptance, branch, head);
   if (classification.deliveryClass === DELIVERY_CLASS.RUNTIME_PREVIEW) {
     previewHandoff(branchArg);
     return;
@@ -399,11 +405,6 @@ function deliveryHandoff(branchArg) {
     console.log("No Brai delivery work to hand off.");
     return;
   }
-
-  const branch = branchArg ?? currentBranch();
-  if (!CODEX_BRANCH_RE.test(branch)) throw new Error(`Delivery handoff requires codex/* branch, got: ${branch}`);
-  if (branch !== currentBranch()) throw new Error(`Current branch is ${currentBranch()}, not ${branch}`);
-  const head = git("rev-parse", "HEAD");
 
   fetchTaskBranch(branch);
   const remoteSha = git("rev-parse", `origin/${branch}`);
@@ -686,12 +687,28 @@ function validateHandoffReceipt({ classification, previewReceipt, deliveryReceip
   return validatePreviewReceipt(previewReceipt, branch, head);
 }
 
-function validateDeliveryReceipt(receipt, branch, head, deliveryClass = DELIVERY_CLASS.INFRA_DOCS) {
+function classifyAcceptedNoPreviewDelivery(classification, acceptance, branch, head) {
+  if (classification.deliveryClass !== DELIVERY_CLASS.NONE) return classification;
+  if (!isNoPreviewAcceptanceForHead(acceptance, branch, head)) return classification;
+  return {
+    ...classification,
+    deliveryClass: acceptance.deliveryClass,
+    requires: {
+      preview: false,
+      devDeploy: false,
+      autoMerge: true,
+    },
+  };
+}
+
+function validateDeliveryReceipt(receipt, branch, head, deliveryClass = null) {
   if (!receipt) return { ok: false, message: "Delivery handoff receipt is missing." };
   if (receipt.receiptType !== DELIVERY_RECEIPT_VERSION) return { ok: false, message: "Delivery receipt type is not valid." };
   if (receipt.branch !== branch) return { ok: false, message: `Delivery receipt is for ${receipt.branch || "(missing)"}, not ${branch}.` };
   if (receipt.commit !== head) return { ok: false, message: `Delivery receipt is for ${receipt.commit || "(missing)"}, not ${head}.` };
-  if (receipt.deliveryClass !== deliveryClass) return { ok: false, message: `Delivery receipt class is ${receipt.deliveryClass || "(missing)"}, not ${deliveryClass}.` };
+  const expectedClass = deliveryClass ?? receipt.deliveryClass;
+  if (!isNoPreviewDeliveryClass(expectedClass)) return { ok: false, message: `Delivery receipt class is ${receipt.deliveryClass || "(missing)"}, not a no-preview class.` };
+  if (receipt.deliveryClass !== expectedClass) return { ok: false, message: `Delivery receipt class is ${receipt.deliveryClass || "(missing)"}, not ${expectedClass}.` };
   if (!receipt.prNumber) return { ok: false, message: "Delivery receipt has no merged PR number." };
   if (!receipt.prUrl || !String(receipt.prUrl).startsWith("https://")) return { ok: false, message: "Delivery receipt has no merged PR URL." };
   if (receipt.prState !== "MERGED") return { ok: false, message: `Delivery receipt PR state is ${receipt.prState || "(missing)"}, not MERGED.` };
@@ -1268,6 +1285,16 @@ function isNoPreviewDeliveryClass(deliveryClass) {
   return deliveryClass === DELIVERY_CLASS.INFRA_DOCS || deliveryClass === DELIVERY_CLASS.TECHNICAL_NO_PREVIEW;
 }
 
+function isNoPreviewAcceptanceForHead(acceptance, branch, head) {
+  return (
+    acceptance?.receiptType === ACCEPTANCE_RECEIPT_VERSION &&
+    acceptance.branch === branch &&
+    acceptance.commit === head &&
+    ["acceptance_started", "reconcile_started"].includes(acceptance.status) &&
+    isNoPreviewDeliveryClass(acceptance.deliveryClass)
+  );
+}
+
 function isTechnicalRuntimeChange(file, context) {
   if (file === "apps/brai_app/package.json") return isClientPackageTestScriptDiff(diffForFile(file, context));
   if (file === "services/brai_api/src/store-migrations.js") return isAgentOperationDoneDiff(diffForFile(file, context));
@@ -1390,6 +1417,13 @@ function diffFromAcceptedBase() {
 
 function diffFromTaskBase() {
   const acceptance = readAcceptanceReceipt();
+  const branch = currentBranch();
+  const head = gitMaybe("rev-parse", "HEAD");
+  if (isNoPreviewAcceptanceForHead(acceptance, branch, head)) {
+    if (isAncestor(acceptedBaseRef(), "HEAD")) return diffNames(`${acceptedBaseRef()}...HEAD`);
+    const acceptedDiff = diffNames(`${acceptedBaseRef()}..HEAD`);
+    if (acceptedDiff.length === 0 || remoteBranchMergedPr(branch, head)) return acceptedDiff;
+  }
   if (acceptance?.receiptType === ACCEPTANCE_RECEIPT_VERSION && acceptance.status === "reconcile_started" && isAncestor(acceptedBaseRef(), "HEAD")) {
     return diffNames(`${acceptedBaseRef()}...HEAD`);
   }

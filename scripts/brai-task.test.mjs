@@ -815,6 +815,7 @@ test("delivery receipts must match exact branch, head, and class", () => {
     verifiedAt: "2026-06-26T00:00:00.000Z",
   };
   assert.deepEqual(validateDeliveryReceipt(receipt, "codex/foo", receipt.commit), { ok: true });
+  assert.deepEqual(validateDeliveryReceipt({ ...receipt, deliveryClass: "technical-no-preview" }, "codex/foo", receipt.commit), { ok: true });
   assert.match(validateDeliveryReceipt(null, "codex/foo", receipt.commit).message, /missing/);
   assert.match(validateDeliveryReceipt({ ...receipt, branch: "codex/bar" }, "codex/foo", receipt.commit).message, /codex\/bar/);
   assert.match(validateDeliveryReceipt({ ...receipt, commit: "2222" }, "codex/foo", receipt.commit).message, /2222/);
@@ -1046,6 +1047,108 @@ test("delivery handoff writes infra-docs receipt only for merged PRs", () => {
   assert.equal(receipt.prState, "MERGED");
   assert.equal(receipt.mergedAt, "2026-06-26T00:00:00Z");
   assert.equal(receipt.runId, 42);
+});
+
+test("no-preview acceptance diffs ignore reconciled main-only runtime paths", () => {
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), "brai-task-no-preview-reconcile-"));
+  const previous = process.cwd();
+  try {
+    git(["init"], repo);
+    git(["config", "user.email", "test@example.invalid"], repo);
+    git(["config", "user.name", "Brai Test"], repo);
+    fs.writeFileSync(path.join(repo, ".gitignore"), ".brai-task/\n");
+    fs.writeFileSync(path.join(repo, "base.txt"), "base\n");
+    git(["add", ".gitignore", "base.txt"], repo);
+    git(["commit", "-m", "base"], repo);
+    git(["branch", "-M", "main"], repo);
+    const base = git(["rev-parse", "HEAD"], repo).stdout.trim();
+    git(["update-ref", "refs/remotes/origin/main", base], repo);
+
+    git(["checkout", "-b", "codex/foo"], repo);
+    fs.mkdirSync(path.join(repo, "apps/brai_app"), { recursive: true });
+    fs.writeFileSync(path.join(repo, "apps/brai_app/vitest.config.mts"), "export default {};\n");
+    git(["add", "apps/brai_app/vitest.config.mts"], repo);
+    git(["commit", "-m", "technical change"], repo);
+
+    git(["checkout", "main"], repo);
+    fs.mkdirSync(path.join(repo, "assets/brand"), { recursive: true });
+    fs.writeFileSync(path.join(repo, "assets/brand/logo.png"), "png\n");
+    git(["add", "assets/brand/logo.png"], repo);
+    git(["commit", "-m", "main asset"], repo);
+    git(["update-ref", "refs/remotes/origin/main", "HEAD"], repo);
+
+    git(["checkout", "codex/foo"], repo);
+    git(["merge", "--no-edit", "origin/main"], repo);
+    const head = git(["rev-parse", "HEAD"], repo).stdout.trim();
+    git(["update-ref", "refs/remotes/origin/codex/foo", head], repo);
+
+    fs.mkdirSync(path.join(repo, ".brai-task"));
+    fs.writeFileSync(
+      path.join(repo, ".brai-task", "task.json"),
+      `${JSON.stringify({
+        branch: "codex/foo",
+        mode: "new",
+        base,
+        createdAt: "2026-06-26T00:00:00.000Z",
+        ...(process.env.CODEX_THREAD_ID ? { threadId: process.env.CODEX_THREAD_ID } : {}),
+      })}\n`,
+    );
+    fs.writeFileSync(
+      path.join(repo, ".brai-task", "acceptance.json"),
+      `${JSON.stringify({
+        receiptType: "brai-acceptance-v1",
+        branch: "codex/foo",
+        commit: head,
+        baseBranch: "main",
+        status: "acceptance_started",
+        deliveryClass: "technical-no-preview",
+        acceptedAt: "2026-06-26T00:00:00.000Z",
+      })}\n`,
+    );
+
+    process.chdir(repo);
+    const state = deriveTaskState();
+    assert.equal(state.classification.deliveryClass, "technical-no-preview");
+    assert.deepEqual(state.changedFiles, ["apps/brai_app/vitest.config.mts"]);
+  } finally {
+    process.chdir(previous);
+  }
+});
+
+test("delivery handoff preserves accepted no-preview class after squash merge", () => {
+  const fixture = setupInfraDocsHandoffFixture({
+    prState: "MERGED",
+    mergedAt: "2026-06-26T00:00:00Z",
+    label: "brai-delivery:technical-no-preview",
+  });
+  const head = git(["rev-parse", "HEAD"], fixture.repo).stdout.trim();
+  git(["checkout", "--detach", "origin/main"], fixture.repo);
+  fs.mkdirSync(path.join(fixture.repo, "docs"), { recursive: true });
+  fs.writeFileSync(path.join(fixture.repo, "docs/change.md"), "change\n");
+  git(["add", "docs/change.md"], fixture.repo);
+  git(["commit", "-m", "squash no-preview"], fixture.repo);
+  git(["update-ref", "refs/remotes/origin/main", "HEAD"], fixture.repo);
+  git(["checkout", "codex/foo"], fixture.repo);
+  git(["update-ref", "refs/remotes/origin/codex/foo", head], fixture.repo);
+  fs.writeFileSync(
+    path.join(fixture.repo, ".brai-task", "acceptance.json"),
+    `${JSON.stringify({
+      receiptType: "brai-acceptance-v1",
+      branch: "codex/foo",
+      commit: head,
+      baseBranch: "main",
+      status: "acceptance_started",
+      deliveryClass: "technical-no-preview",
+      acceptedAt: "2026-06-26T00:00:00.000Z",
+    })}\n`,
+  );
+
+  const result = runDeliveryHandoffFixture(fixture);
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.match(result.stdout, /Delivery class: technical-no-preview/);
+  const receipt = JSON.parse(fs.readFileSync(path.join(fixture.repo, ".brai-task", "delivery-handoff.json"), "utf8"));
+  assert.equal(receipt.deliveryClass, "technical-no-preview");
 });
 
 test("task state allows exact delivery receipt after infra-docs branch was squash-merged", () => {
@@ -1382,7 +1485,7 @@ test("accepted preview branch lookup skips no-preview delivery PRs", () => {
   ]), ["codex/runtime"]);
 });
 
-function setupInfraDocsHandoffFixture({ prState, mergeStateStatus = "CLEAN", autoMerge = false, mergedAt = null, jobConclusions = {} }) {
+function setupInfraDocsHandoffFixture({ prState, mergeStateStatus = "CLEAN", autoMerge = false, mergedAt = null, jobConclusions = {}, label = "brai-delivery:infra-docs" }) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "brai-task-handoff-"));
   const remote = path.join(root, "origin.git");
   const repo = path.join(root, "repo");
@@ -1428,7 +1531,7 @@ function setupInfraDocsHandoffFixture({ prState, mergeStateStatus = "CLEAN", aut
     url: "https://github.example/pr/7",
     state: prState,
     headRefOid: head,
-    labels: [{ name: "brai-delivery:infra-docs" }],
+    labels: [{ name: label }],
     mergedAt,
     mergeStateStatus,
     autoMergeRequest: autoMerge ? { enabledAt: "2026-06-26T00:00:00Z" } : null,
