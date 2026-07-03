@@ -8,6 +8,23 @@ import {
   jsonRequest,
   request
 } from '../test-support/api.js';
+import { renderOtpEmail } from '../src/auth.js';
+
+test('email OTP message renders the reusable responsive card', () => {
+  const message = renderOtpEmail({ otp: '<123456>' });
+
+  assert.match(message.html, /Ваш одноразовый код/);
+  assert.match(message.html, /Введите этот код в Brai, чтобы завершить вход\./);
+  assert.match(message.html, /Код действует 5 минут\./);
+  assert.match(message.html, /max-width:600px/);
+  assert.match(message.html, /@media only screen and \(max-width: 620px\)/);
+  assert.match(message.html, /<span style="color:#000000;">Br<\/span><span style="color:#ef3b2f;">ai<\/span>/);
+  assert.doesNotMatch(message.html, /<img/);
+  assert.match(message.html, /&lt;123456&gt;/);
+  assert.doesNotMatch(message.html, /<123456>/);
+  assert.match(message.text, /<123456>/);
+  assert.match(message.text, /Brai · brightos\.world/);
+});
 
 test('email OTP signs in, claims legacy data, and isolates the next user', async () => {
   const sentOtps = new Map();
