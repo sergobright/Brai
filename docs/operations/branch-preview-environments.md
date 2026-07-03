@@ -53,6 +53,17 @@ scripts/brai-task-repair-permissions.sh --workspace <task-slug-or-worktree-path>
 node scripts/brai-task.mjs preflight --strict
 ```
 
+For broader drift, run the access contract instead of chasing individual modes:
+
+```bash
+node scripts/brai-task.mjs access-contract --local
+node scripts/brai-task.mjs access-contract --server
+deploy/scripts/preview-slots.sh status
+deploy/scripts/production-sqlite-maintenance.sh check
+```
+
+`access-contract --local` checks guard sync, task metadata, writable caches, and Node/npm availability from the current checkout. `access-contract --server` also checks deploy-owned env roots, preview slot registry, prod source, deploy artifacts, main-sync tooling, and production SQLite permissions. A failed contract is a delivery blocker until fixed by Ansible, main-sync, or the official repair/helper scripts.
+
 Repository Codex hooks are defined in `.codex/hooks.json`:
 
 - `PreToolUse` recursively inspects namespaced, custom, and nested tool calls such as `functions.apply_patch`, `custom_tool_call`, and `multi_tool_use.parallel`. Before a valid task state exists, only explicitly read-only shell commands and the official task starter are allowed; unknown shell commands are treated as write-like and blocked.
@@ -160,6 +171,12 @@ systemctl restart brai-api-preview-e.service
 
 The Ansible sudoers template is `deploy/ansible/templates/brai-deploy-sudoers.j2`.
 
+Deploy scripts normalize public web, OTA, release, and preview slot files through
+`deploy/scripts/permissions.sh`. New publish paths must use that helper or Ansible-owned
+equivalent logic so they preserve group-write instead of resetting trees to `go=rX`.
+Accepted-preview release and OTA sync must execute from `/srv/projects/brai-envs/*/source`;
+the live checkout `/srv/projects/brai` is only the locked main mirror and public artifact root.
+
 ### Production SQLite maintenance
 
 Production SQLite maintenance goes through `deploy/scripts/production-sqlite-maintenance.sh`.
@@ -167,6 +184,7 @@ It defaults to `/srv/projects/brai/data/brai.sqlite`, uses backups under
 `/srv/projects/brai/data/backups`, and uses `/srv/opt/android-sdk/platform-tools/sqlite3`.
 Run `check` for read-only inspection. Run write commands such as `backup` and `exec-sql`
 as the `brai` service user; the wrapper rejects `root`, `mark`, and other users.
+`check` is a validator: wrong owner, group, or mode is a failing result, not just diagnostic output.
 Ansible keeps `data`, `data/backups`, `brai.sqlite`, and existing WAL/SHM sidecars owned
 by `brai:brai-deploy` with group-write modes so the runtime and deploy scripts share the
 same narrow maintenance boundary.

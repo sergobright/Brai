@@ -30,6 +30,7 @@ ssh -i "$KEY_FILE" -p "$SSH_PORT" -o StrictHostKeyChecking=accept-new "$BRAI_DEP
 set -euo pipefail
 REMOTE_UPLOAD="$1"
 UPLOAD_ROOT="$2"
+umask 0002
 case "$REMOTE_UPLOAD" in
   "$UPLOAD_ROOT"/*) ;;
   *)
@@ -39,6 +40,7 @@ case "$REMOTE_UPLOAD" in
 esac
 rm -rf "$REMOTE_UPLOAD"
 mkdir -p "$REMOTE_UPLOAD"
+find "$REMOTE_UPLOAD" -type d -exec chmod 2775 {} +
 REMOTE
 
 tar \
@@ -136,6 +138,8 @@ fi
 rm -rf "$SOURCE_ROOT" || { sleep 2; rm -rf "$SOURCE_ROOT"; }
 mkdir -p "$(dirname "$SOURCE_ROOT")"
 mv "$REMOTE_UPLOAD" "$SOURCE_ROOT"
+find "$SOURCE_ROOT" -user "$(id -u)" -exec chmod u+rwX,g+rwX {} +
+find "$SOURCE_ROOT" -type d -user "$(id -u)" -exec chmod g+s {} +
 
 cd "$SOURCE_ROOT"
 umask 0002

@@ -132,6 +132,27 @@ Brai SHALL block project-file writes, commits, pushes, and final handoff when lo
 - **THEN** final handoff is blocked
 - **AND** the agent reports the missing delivery evidence as incomplete or blocked
 
+### Requirement: Access permissions follow one deploy contract
+Brai SHALL validate repository, deploy, preview slot, and SQLite permissions through `node scripts/brai-task.mjs access-contract --local|--server` instead of relying on one-off manual permission repairs.
+
+#### Scenario: Local agent access is validated
+- **WHEN** an agent investigates or changes guard, task starter, workspace permission, or deploy permission behavior
+- **THEN** `access-contract --local` checks guard sync, task metadata, writable workspace caches, and Node/npm availability
+- **AND** read-only diagnostics such as `find`, `stat`, `git worktree list`, guard sync check, preflight, and access-contract commands are allowed by the guard
+- **AND** disguised write flags such as `git diff --output`, `rg --pre`, and writable `sed` forms are rejected as write-like commands
+
+#### Scenario: Server deploy access is validated
+- **WHEN** server deployment permissions are checked after Ansible, main-sync, or deploy helper changes
+- **THEN** `access-contract --server` checks deploy-owned env roots, prod source, preview slot state, public deploy artifacts, main-sync tooling, Node/npm availability, and production SQLite maintenance
+- **AND** `deploy/scripts/production-sqlite-maintenance.sh check` fails on wrong owner, group, or mode for production SQLite files and directories
+- **AND** `deploy/scripts/preview-slots.sh status` remains read-only and reports lock permission drift explicitly
+
+#### Scenario: Accepted preview release uses deploy-owned source
+- **WHEN** accepted preview metadata, OTA manifests, slot release, or preview APK baseline rebuilds run during `deploy-prod`
+- **THEN** they execute from `/srv/projects/brai-envs/*/source`
+- **AND** they do not use the locked live checkout `/srv/projects/brai` as their runtime source path
+- **AND** public web, OTA, release, and slot state writes preserve group-write through the shared deploy permissions helper
+
 ### Requirement: OpenSpec CLI is pinned as project tooling
 The project SHALL pin `@fission-ai/openspec` as development tooling and require the supported Brai Node 22 runtime for OpenSpec CLI usage.
 

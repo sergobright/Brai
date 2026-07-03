@@ -100,25 +100,32 @@ async function queryWorkflow(client, workflowId) {
 }
 
 function buildEvent(type, options, sha) {
+  const github = {
+    ref: process.env.GITHUB_REF ?? "",
+    runAttempt: process.env.GITHUB_RUN_ATTEMPT ?? "",
+    runId: process.env.GITHUB_RUN_ID ?? "",
+    serverUrl: process.env.GITHUB_SERVER_URL ?? "",
+    repository: process.env.GITHUB_REPOSITORY ?? "",
+    workflow: process.env.GITHUB_WORKFLOW ?? ""
+  };
+  const runUrl = options.runUrl ?? (
+    github.serverUrl && github.repository && github.runId
+      ? `${github.serverUrl}/${github.repository}/actions/runs/${github.runId}`
+      : ""
+  );
   return {
     type,
     sha,
     slot: options.slot ?? "",
     deliveryClass: options.deliveryClass ?? "",
     reason: options.reason ?? "",
+    runUrl,
     prNumber: options.prNumber ?? "",
     prUrl: options.prUrl ?? "",
     mergedAt: options.mergedAt ?? "",
     source: options.source ?? process.env.GITHUB_JOB ?? "manual",
     at: options.at ?? new Date().toISOString(),
-    github: {
-      ref: process.env.GITHUB_REF ?? "",
-      runAttempt: process.env.GITHUB_RUN_ATTEMPT ?? "",
-      runId: process.env.GITHUB_RUN_ID ?? "",
-      serverUrl: process.env.GITHUB_SERVER_URL ?? "",
-      repository: process.env.GITHUB_REPOSITORY ?? "",
-      workflow: process.env.GITHUB_WORKFLOW ?? ""
-    }
+    github
   };
 }
 

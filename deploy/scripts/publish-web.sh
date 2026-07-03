@@ -2,6 +2,8 @@
 set -euo pipefail
 
 ROOT="${BRAI_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/permissions.sh"
 SOURCE="$ROOT/apps/brai_app/out"
 TARGET="${BRAI_WEB_TARGET:-$ROOT/deploy/web}"
 
@@ -14,5 +16,5 @@ mkdir -p "$TARGET"
 find "$TARGET" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
 cp -R "$SOURCE"/. "$TARGET"/
 if [[ -O "$TARGET" ]]; then
-  chmod -R u=rwX,go=rX "$TARGET"
+  normalize_public_tree "$TARGET"
 fi

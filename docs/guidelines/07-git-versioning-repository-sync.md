@@ -33,6 +33,27 @@ node scripts/brai-task.mjs preflight --strict
 
 Do not create or switch fallback branches manually with `git switch`, `git checkout`, `git branch`, or `git worktree`.
 
+## Access Contract
+
+Use one permission contract instead of ad hoc `chmod`/`chown` fixes:
+
+- source checkouts and Git metadata are locked for agents and are not runtime toolboxes for `brai-deploy`;
+- deploy-owned env roots under `/srv/projects/brai-envs/*` are `brai-deploy:brai-deploy`, group-writable, and setgid;
+- production SQLite is owned by `brai:brai-deploy`; the DB, WAL, and SHM files are group-writable;
+- public web, OTA, and release artifacts are group-writable and public-readable;
+- accepted-preview promotion, OTA sync, preview slot release, and baseline APK rebuilds run from deploy-owned source roots under `/srv/projects/brai-envs/*/source`, not from the locked live checkout.
+
+The canonical checks are:
+
+```bash
+node scripts/brai-task.mjs access-contract --local
+node scripts/brai-task.mjs access-contract --server
+deploy/scripts/production-sqlite-maintenance.sh check
+deploy/scripts/preview-slots.sh status
+```
+
+Manual permission repair is only a break-glass operation through Ansible, `/srv/opt/brai-main-sync.sh`, `scripts/brai-task-repair-permissions.sh`, or deploy helpers such as `deploy/scripts/permissions.sh`. Do not make one-off `chmod/chown` commands part of normal delivery.
+
 ## Branch Reuse
 
 The branch selected by Codex Desktop is not permission to continue that branch. A new thread that will change project files starts a new `codex/*` branch from `origin/main`.
@@ -92,6 +113,7 @@ Relevant checks:
 - OpenSpec: `npm run openspec:validate`
 - guard/hooks: `npm run task:test`
 - Temporal-sensitive changes: `npm run temporal:test`
+- access contract-sensitive changes: `node scripts/brai-task.mjs access-contract --local` locally, then `--server` after server remediation
 - client/API checks when those surfaces change
 
 Use [CHECKLIST_REPOSITORY_SYNC.md](../checklists/CHECKLIST_REPOSITORY_SYNC.md) before commit/push and [branch-preview-environments.md](../operations/branch-preview-environments.md) for the full runbook.

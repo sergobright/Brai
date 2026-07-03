@@ -238,8 +238,13 @@ export function applyPreviewEvent(state, rawEvent) {
     case "slot_released":
     case "released":
       setTask(state, "slot_release", "passed", event);
-      state.status = "released";
-      state.terminal = true;
+      if (event.source === "complete-accepted-previews") {
+        state.status = "slot_released";
+        state.terminal = false;
+      } else {
+        state.status = "released";
+        state.terminal = true;
+      }
       break;
     case "slot_release_failed":
     case "release_failed":
@@ -257,6 +262,16 @@ export function applyPreviewEvent(state, rawEvent) {
 
   refreshGates(state, PREVIEW_TASKS);
   if (isNoPreviewRequired(state) && state.tasks.accepted_for_target.status === "passed" && state.gates.complete) state.terminal = true;
+  if (
+    event.source === "complete-accepted-previews" &&
+    state.tasks.accepted_for_target.status === "passed" &&
+    state.tasks.accepted_preview_promotion.status === "passed" &&
+    state.tasks.slot_release.status === "passed" &&
+    state.gates.complete
+  ) {
+    state.status = "released";
+    state.terminal = true;
+  }
   return state;
 }
 
@@ -417,25 +432,39 @@ function taskFor(state, name) {
 }
 
 function setBlocker(state, task, event) {
-  taskFor(state, task).blocker = {
-    task,
-    event: event.type,
-    at: event.at,
-    sha: event.sha ?? "",
-    source: event.source ?? ""
-  };
+  const blocker = blockerFromEvent(task, event);
+  const currentTask = taskFor(state, task);
+  currentTask.blocker = blocker;
+  currentTask.lastFailure = blocker;
   refreshBlockers(state);
 }
 
 function setUnknownBlocker(state, event) {
-  state.blocker = {
-    task: "unknown_event",
+  state.blocker = blockerFromEvent("unknown_event", event);
+  state.blockers = [state.blocker];
+}
+
+function blockerFromEvent(task, event) {
+  return stripEmpty({
+    task,
     event: event.type,
     at: event.at,
     sha: event.sha ?? "",
-    source: event.source ?? ""
-  };
-  state.blockers = [state.blocker];
+    source: event.source ?? "",
+    reason: event.reason ?? "",
+    runUrl: event.runUrl ?? "",
+    attempt: event.github?.runAttempt ?? "",
+    runId: event.github?.runId ?? "",
+    slot: event.slot ?? "",
+    deliveryClass: event.deliveryClass ?? "",
+    prNumber: event.prNumber ?? "",
+    prUrl: event.prUrl ?? "",
+    mergedAt: event.mergedAt ?? ""
+  });
+}
+
+function stripEmpty(value) {
+  return Object.fromEntries(Object.entries(value).filter(([, field]) => field !== "" && field != null));
 }
 
 function refreshBlockers(state) {

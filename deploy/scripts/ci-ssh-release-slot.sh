@@ -34,7 +34,7 @@ if [[ -d "$NODE_PREFIX" ]]; then
   export PATH="$NODE_PREFIX:$PATH"
 fi
 
-RELEASE_ROOT="$DEPLOY_REPO"
+RELEASE_ROOT=""
 REGISTRY="${BRAI_PREVIEW_REGISTRY:-$ENVS_ROOT/preview-slots.json}"
 if [[ -f "$REGISTRY" ]]; then
   SLOT_SOURCE="$(node - "$REGISTRY" "$BRAI_BRANCH" <<'NODE' || true
@@ -54,12 +54,12 @@ NODE
     RELEASE_ROOT="$ENVS_ROOT/$SLOT_SOURCE"
   fi
 fi
-if [[ ! -r "$RELEASE_ROOT/deploy/scripts/preview-slots.mjs" && -r "$ENVS_ROOT/prod/source/deploy/scripts/preview-slots.mjs" ]]; then
+if [[ -z "$RELEASE_ROOT" && -r "$ENVS_ROOT/prod/source/deploy/scripts/preview-slots.mjs" ]]; then
   RELEASE_ROOT="$ENVS_ROOT/prod/source"
 fi
 
-if [[ ! -r "$RELEASE_ROOT/deploy/scripts/preview-slots.mjs" ]]; then
-  echo "Cannot read preview slot tooling from $RELEASE_ROOT" >&2
+if [[ -z "$RELEASE_ROOT" || ! -r "$RELEASE_ROOT/deploy/scripts/preview-slots.mjs" ]]; then
+  echo "Cannot read preview slot tooling from deploy-owned source under $ENVS_ROOT" >&2
   exit 1
 fi
 
@@ -81,11 +81,6 @@ process.stdin.on("end", () => {
 ' "$BRAI_BRANCH")
 if [[ -n "${SLOT_META[0]:-}" ]]; then
   BASELINE_SOURCE="$ENVS_ROOT/prod/source"
-  if [[ -d "$ENVS_ROOT/prod/source" ]]; then
-    BASELINE_SOURCE="$ENVS_ROOT/prod/source"
-  elif [[ -d "$DEPLOY_REPO/.git" ]]; then
-    BASELINE_SOURCE="$DEPLOY_REPO"
-  fi
   if [[ ! -d "$BASELINE_SOURCE" ]]; then
     echo "Cannot rebuild baseline preview APK without source: $BASELINE_SOURCE" >&2
     exit 1

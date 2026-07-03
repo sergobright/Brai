@@ -16,12 +16,17 @@ const DEPENDENCY_DIRS = [
 ];
 const WORKSPACE_WRITABLE_DIRS = [
   ".brai-task",
+  ".cache",
+  ".config",
+  ".npm",
   ...DEPENDENCY_DIRS,
   ".vite-temp",
   ".next",
   "out",
   "output",
   "output/playwright",
+  ".playwright",
+  ".playwright-browsers",
   "test-results",
   "landing",
   "apps/brai_app/.next",
@@ -83,6 +88,7 @@ export {
   validateReleaseNotes,
   validatePushUpdate,
   validatePreviewReceipt,
+  accessContract,
   workspacePreflight,
 };
 
@@ -134,8 +140,11 @@ function runCli([command, ...args]) {
       case "preflight":
         preflight(args.includes("--strict"));
         break;
+      case "access-contract":
+        accessContract(args);
+        break;
       default:
-        throw new Error("usage: brai-task.mjs start <slug>|follow-up [branch]|acceptance-reconcile [branch]|pre-tool-use|pre-commit|pre-push <remote>|stop|classify [--base <ref>] [--head <ref>] [--github-output]|handoff [branch]|preview [branch]|release-notes --short <text> --details <text> --reason <text>|require-delivery [branch] [sha]|require-preview [branch] [sha]|doctor [--strict]|preflight [--strict]");
+        throw new Error("usage: brai-task.mjs start <slug>|follow-up [branch]|acceptance-reconcile [branch]|pre-tool-use|pre-commit|pre-push <remote>|stop|classify [--base <ref>] [--head <ref>] [--github-output]|handoff [branch]|preview [branch]|release-notes --short <text> --details <text> --reason <text>|require-delivery [branch] [sha]|require-preview [branch] [sha]|doctor [--strict]|preflight [--strict]|access-contract --local|--server");
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -296,7 +305,7 @@ function preToolUse() {
     return blockHook(`Brai blocks project-file writes before a valid task branch exists.\n\n${validation.message}\n\n${taskStartGuidance()}`);
   }
 
-  const reuse = validateBranchReuse();
+  const reuse = validateBranchReuse({ allowRemote: false });
   if (!reuse.ok) return blockHook(reuse.message);
 
   markWriteIntent();
@@ -539,6 +548,85 @@ function preflight(strict = false) {
   const result = workspacePreflight();
   console.log(JSON.stringify(result, null, 2));
   if (strict && !result.ok) process.exit(1);
+}
+
+function accessContract(args = []) {
+  const mode = args.includes("--server") ? "server" : "local";
+  const result = mode === "server" ? serverAccessContract() : localAccessContract();
+  console.log(JSON.stringify(result, null, 2));
+  if (!result.ok) process.exit(1);
+  return result;
+}
+
+function localAccessContract(root = git("rev-parse", "--show-toplevel")) {
+  const checks = [
+    commandCheck("guard sync", [path.join(root, "scripts/brai-guard-sync-check.sh"), "--check"], { cwd: root }),
+    jsonCheck("workspace preflight", workspacePreflight(root)),
+    pathCheck(".git metadata", path.join(root, ".git"), { requireRead: true }),
+    pathCheck(".brai-task", path.join(root, ".brai-task"), { requireWrite: fs.existsSync(path.join(root, ".brai-task")) }),
+    commandCheck("node", ["node", "--version"], { cwd: root }),
+    commandCheck("npm", ["npm", "--version"], { cwd: root }),
+  ];
+  return summarizeAccessContract("local", root, checks);
+}
+
+function serverAccessContract(root = process.env.BRAI_ROOT ?? "/srv/projects/brai") {
+  const envsRoot = process.env.BRAI_ENVS_ROOT ?? "/srv/projects/brai-envs";
+  const deployRepo = process.env.BRAI_DEPLOY_REPO ?? root;
+  const checks = [
+    commandCheck("guard sync", [path.join(root, "scripts/brai-guard-sync-check.sh"), "--check"], { cwd: root }),
+    commandCheck("preview slots", [path.join(root, "deploy/scripts/preview-slots.sh"), "status"], {
+      cwd: root,
+      env: { ...process.env, BRAI_ENVS_ROOT: envsRoot },
+    }),
+    commandCheck("sqlite maintenance", [path.join(root, "deploy/scripts/production-sqlite-maintenance.sh"), "check"], { cwd: root }),
+    pathCheck("env roots", envsRoot, { requireWrite: true, expectDirectory: true }),
+    pathCheck("prod source", path.join(envsRoot, "prod/source"), { requireRead: true, expectDirectory: true }),
+    pathCheck("preview slot registry", path.join(envsRoot, "preview-slots.json"), { requireRead: true }),
+    pathCheck("deploy artifacts", path.join(deployRepo, "deploy"), { requireRead: true, expectDirectory: true }),
+    pathCheck("main sync script", "/srv/opt/brai-main-sync.sh", { requireRead: true }),
+    commandCheck("node", ["node", "--version"], { cwd: root }),
+    commandCheck("npm", ["npm", "--version"], { cwd: root }),
+  ];
+  return summarizeAccessContract("server", root, checks);
+}
+
+function summarizeAccessContract(mode, root, checks) {
+  const failed = checks.filter((check) => !check.ok);
+  return { ok: failed.length === 0, mode, root, checkedAt: new Date().toISOString(), checks, failed };
+}
+
+function jsonCheck(name, result) {
+  return { name, ok: Boolean(result?.ok), result };
+}
+
+function commandCheck(name, command, { cwd, env = process.env } = {}) {
+  const result = spawnSync(command[0], command.slice(1), { cwd, env, encoding: "utf8" });
+  return {
+    name,
+    ok: result.status === 0,
+    command: command.join(" "),
+    status: result.status,
+    stdout: String(result.stdout ?? "").trim(),
+    stderr: String(result.stderr ?? "").trim(),
+  };
+}
+
+function pathCheck(name, target, { requireRead = false, requireWrite = false, expectDirectory = false } = {}) {
+  const check = { name, ok: true, path: target };
+  if (!fs.existsSync(target)) return { ...check, ok: false, reason: "missing" };
+  const stats = fs.statSync(target);
+  check.mode = (stats.mode & 0o7777).toString(8);
+  check.uid = stats.uid;
+  check.gid = stats.gid;
+  if (expectDirectory && !stats.isDirectory()) return { ...check, ok: false, reason: "not a directory" };
+  try {
+    if (requireRead) fs.accessSync(target, fs.constants.R_OK);
+    if (requireWrite) fs.accessSync(target, fs.constants.W_OK);
+  } catch (error) {
+    return { ...check, ok: false, reason: error?.code || "access denied" };
+  }
+  return check;
 }
 
 function workspacePreflight(root = git("rev-parse", "--show-toplevel")) {
@@ -813,7 +901,7 @@ function validateTaskBranch({ requireExpectedUpstream }) {
   return { ok: true };
 }
 
-function validateBranchReuse() {
+function validateBranchReuse({ allowRemote = true } = {}) {
   const branch = currentBranch();
   const upstream = gitMaybe("rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}");
   const marker = readTaskMarker();
@@ -858,7 +946,7 @@ function validateBranchReuse() {
     isAncestor(marker.base, currentAcceptedBase) &&
     !upstream &&
     !remoteBranchKnown(branch);
-  const acceptedPr = remoteBranchMergedPr(branch, branchHead);
+  const acceptedPr = allowRemote ? remoteBranchMergedPr(branch, branchHead) : null;
   if (acceptedPr || remoteBranchAccepted(branch) || (isAncestor("HEAD", acceptedBaseRef()) && !freshStartedBranch)) {
     return {
       ok: false,
@@ -929,9 +1017,9 @@ function validatePushUpdate(line, currentBranchName = "", { isAcceptedRemote = (
 
 function taskStartGuidance(parent = ".codex-worktrees") {
   return (
-    `Run the installed starter with escalation: /srv/opt/node-v22.16.0/bin/node /srv/opt/brai-codex-plugins/plugins/brai-guard/hooks/brai-guard.mjs start <task-slug>\n` +
+    `Run the repo starter with escalation: scripts/brai-task-start.sh <task-slug>\n` +
     `In Codex Desktop, request sandbox_permissions=require_escalated because the starter updates Git worktree metadata and creates an isolated worktree under ${parent}.\n` +
-    `Do not create or switch to a manual fallback branch, and do not use a repo-local starter from a stale checkout.`
+    `Do not create or switch to a manual fallback branch, and do not use the installed guard starter as a workaround.`
   );
 }
 
@@ -1194,19 +1282,28 @@ function splitShellSegments(commandText) {
 
 function isReadOnlyShellSegment(segment) {
   if (/[<>`$]/.test(segment)) return false;
+  if (/^rg\b/.test(segment) && /(?:^|\s)--pre(?:=|\s|$)/.test(segment)) return false;
+  if (/^git\s+diff\b/.test(segment) && /(?:^|\s)--(?:output|ext-diff)(?:=|\s|$)/.test(segment)) return false;
+  if (/^find\b/.test(segment) && /(?:^|\s)-(?:exec|delete|ok|fprint)(?:\s|$)/.test(segment)) return false;
   return [
     /^pwd$/,
     /^ls(?:\s+[-A-Za-z0-9_./*=:@]+)*$/,
     /^rg(?:\s+[-A-Za-z0-9_./*=:@]+)*(?:\s+"[^"]*")?(?:\s+'[^']*')?$/,
     /^(?:cat|nl|wc|head|tail)(?:\s+[-A-Za-z0-9_./*=:@]+)*$/,
-    /^sed\s+-n\b.+$/,
+    /^sed\s+-n\s+(?:"[0-9,$]+p"|'[0-9,$]+p'|[0-9,$]+p)(?:\s+[-A-Za-z0-9_./:=@]+)+$/,
+    /^find(?:\s+[-A-Za-z0-9_./*=:@' "%]+)*$/,
+    /^stat(?:\s+[-A-Za-z0-9_./%=:@]+)*$/,
     /^git\s+(?:status|diff|log|show|rev-parse|ls-files|merge-base)(?:\s+.+)?$/,
     /^git\s+branch\s+--show-current$/,
+    /^git\s+worktree\s+list(?:\s+--porcelain)?$/,
     /^git\s+config\s+(?:--get|get)\s+[A-Za-z0-9_.-]+$/,
     /^node\s+scripts\/brai-task\.mjs\s+classify(?:\s+--(?:base|head)\s+[-A-Za-z0-9_./:@]+|\s+--github-output)*$/,
+    /^node\s+scripts\/brai-task\.mjs\s+(?:preflight|access-contract)(?:\s+--(?:strict|local|server))*$/,
     /^scripts\/use-node22\.sh\s+node\s+scripts\/brai-task\.mjs\s+classify(?:\s+--(?:base|head)\s+[-A-Za-z0-9_./:@]+|\s+--github-output)*$/,
     /^node\s+scripts\/brai-task\.mjs\s+doctor(?:\s+--strict)?$/,
+    /^scripts\/use-node22\.sh\s+node\s+scripts\/brai-task\.mjs\s+(?:preflight|access-contract)(?:\s+--(?:strict|local|server))*$/,
     /^scripts\/use-node22\.sh\s+node\s+scripts\/brai-task\.mjs\s+doctor(?:\s+--strict)?$/,
+    /^scripts\/brai-guard-sync-check\.sh\s+--check$/,
   ].some((pattern) => pattern.test(segment));
 }
 
@@ -1236,7 +1333,7 @@ function isManualBranchCommand(commandText) {
   return splitShellSegments(commandText).some((segment) =>
     /^git\s+(?:switch|checkout)\b/.test(segment) ||
     /^git\s+branch\b(?!\s+--show-current$)/.test(segment) ||
-    /^git\s+worktree\b/.test(segment),
+    /^git\s+worktree\b(?!\s+list(?:\s+--porcelain)?$)/.test(segment),
   );
 }
 
@@ -1324,7 +1421,11 @@ function deliveryClassForFile(file) {
       "deploy/scripts/preview-slots.mjs",
       "deploy/scripts/preview-slots.sh",
       "deploy/scripts/production-sqlite-maintenance.sh",
+      "deploy/scripts/permissions.sh",
+      "deploy/scripts/publish-capacitor-apk.sh",
+      "deploy/scripts/publish-mobile-bundle.sh",
       "deploy/scripts/publish-environment-web-layer.sh",
+      "deploy/scripts/publish-web.sh",
       "deploy/scripts/promote-accepted-deployment.sh",
       "deploy/scripts/promote-deployment.mjs",
       "deploy/scripts/resolve-deploy-env.mjs",

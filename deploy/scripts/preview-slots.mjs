@@ -161,9 +161,12 @@ function readRegistry() {
 
 function writeRegistry(registry) {
   fs.mkdirSync(path.dirname(registryPath), { recursive: true });
+  chmodIfPossible(path.dirname(registryPath), 0o2775);
   const tmp = `${registryPath}.${process.pid}.tmp`;
   fs.writeFileSync(tmp, `${JSON.stringify(registry, null, 2)}\n`);
+  chmodIfPossible(tmp, 0o664);
   fs.renameSync(tmp, registryPath);
+  chmodIfPossible(registryPath, 0o664);
 }
 
 function defaultSlot(slot) {
@@ -186,6 +189,7 @@ function defaultSlot(slot) {
 
 function renderStatusPage(registry) {
   fs.mkdirSync(statusDir, { recursive: true });
+  chmodIfPossible(statusDir, 0o2775);
   const cards = slots
     .map((slot) => {
       const entry = registry[slot];
@@ -215,8 +219,9 @@ function renderStatusPage(registry) {
         )
         .join("")}</ol>`
     : "<p>No queued preview branches.</p>";
+  const statusPage = path.join(statusDir, "index.html");
   fs.writeFileSync(
-    path.join(statusDir, "index.html"),
+    statusPage,
     `<!doctype html>
 <html lang="en">
 <head>
@@ -256,6 +261,15 @@ function renderStatusPage(registry) {
 </html>
 `,
   );
+  chmodIfPossible(statusPage, 0o664);
+}
+
+function chmodIfPossible(target, mode) {
+  try {
+    fs.chmodSync(target, mode);
+  } catch {
+    // Ownership is enforced by Ansible/main-sync/access-contract; local runs may not own these paths.
+  }
 }
 
 function requireBranch(branch) {

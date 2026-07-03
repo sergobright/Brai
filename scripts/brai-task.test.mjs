@@ -66,7 +66,19 @@ test("manual branch commands are hard blocked", () => {
   assert.equal(isManualBranchCommand("git switch -c feature/foo origin/main"), true);
   assert.equal(isManualBranchCommand("git checkout main"), true);
   assert.equal(isManualBranchCommand("git branch"), true);
-  assert.equal(isManualBranchCommand("git worktree list"), true);
+  assert.equal(isManualBranchCommand("git worktree list"), false);
+  assert.equal(isManualBranchCommand("git worktree list --porcelain"), false);
+});
+
+test("read-only classifier allows diagnostics and rejects disguised writes", () => {
+  assert.equal(isReadOnlyShellCommand("find . -maxdepth 1 -type f -print"), true);
+  assert.equal(isReadOnlyShellCommand("stat -c %U:%G:%a deploy/scripts/preview-slots.sh"), true);
+  assert.equal(isReadOnlyShellCommand("git worktree list --porcelain"), true);
+  assert.equal(isReadOnlyShellCommand("node scripts/brai-task.mjs access-contract --local"), true);
+  assert.equal(isReadOnlyShellCommand("scripts/brai-guard-sync-check.sh --check"), true);
+  assert.equal(isReadOnlyShellCommand("git diff --output=/tmp/diff.txt"), false);
+  assert.equal(isReadOnlyShellCommand("rg --pre cat TODO"), false);
+  assert.equal(isReadOnlyShellCommand("find . -exec chmod 755 {} +"), false);
 });
 
 test("task base refresh commands are hard blocked", () => {
@@ -291,6 +303,10 @@ test("delivery classifier separates infra-docs from runtime preview", () => {
   assert.equal(deliveryClassForFile("deploy/scripts/preview-slots.mjs"), "infra");
   assert.equal(deliveryClassForFile("deploy/scripts/preview-slots.sh"), "infra");
   assert.equal(deliveryClassForFile("deploy/scripts/production-sqlite-maintenance.sh"), "infra");
+  assert.equal(deliveryClassForFile("deploy/scripts/permissions.sh"), "infra");
+  assert.equal(deliveryClassForFile("deploy/scripts/publish-web.sh"), "infra");
+  assert.equal(deliveryClassForFile("deploy/scripts/publish-mobile-bundle.sh"), "infra");
+  assert.equal(deliveryClassForFile("deploy/scripts/publish-capacitor-apk.sh"), "infra");
   assert.equal(deliveryClassForFile("deploy/scripts/complete-operation-activities.sh"), "infra");
   assert.equal(deliveryClassForFile("deploy/scripts/sync-local-main-checkout.sh"), "infra");
   assert.equal(deliveryClassForFile("deploy/scripts/sync-occupied-preview-ota-manifests.sh"), "infra");
@@ -518,7 +534,7 @@ test("preview deploy reset reports permission recovery and preserves setgid", ()
   assert.match(script, /umask 0002/);
   assert.match(script, /Preview SQLite reset failed/);
   assert.match(script, /brai-deploy:brai-deploy 2775/);
-  assert.ok(script.includes('find "$TARGET_ROOT" -type d -user "$(id -u)" -exec chmod g+s {} +'));
+  assert.ok(script.includes('normalize_public_tree "$TARGET_ROOT"'));
   assert.match(playbook, /Ensure non-production data directories keep deploy setgid/);
   assert.match(playbook, /Ensure nested non-production data directories keep deploy setgid/);
   assert.match(playbook, /mode: "2775"/);
@@ -713,9 +729,9 @@ test("task state keeps the original task base when origin-main advances", () => 
 test("task start guidance requires escalation and forbids manual branch fallback", () => {
   const message = taskStartGuidance("/srv/projects/brai/.codex-worktrees");
   assert.match(message, /sandbox_permissions=require_escalated/);
-  assert.match(message, /brai-guard\.mjs start <task-slug>/);
+  assert.match(message, /scripts\/brai-task-start\.sh <task-slug>/);
   assert.match(message, /Do not create or switch to a manual fallback branch/);
-  assert.match(message, /stale checkout/);
+  assert.match(message, /installed guard starter/);
 });
 
 test("task permission repair script is scoped to one registered worktree", () => {
@@ -1209,6 +1225,16 @@ test("infra docs workflow marks handoff passed only from the PR merge job", () =
   assert.match(recordMergeJob, /brai-delivery:technical-no-preview/);
   assert.ok(recordMergeJob.indexOf("event delivery_handoff_passed") < recordMergeJob.indexOf("event pr_merged"));
   assert.match(recordMergeJob, /BRAI_PR_MERGED_AT/);
+});
+
+test("delivery workflow serializes main sync after prod deploy", () => {
+  const workflow = fs.readFileSync(new URL("../.github/workflows/brai-delivery.yml", import.meta.url), "utf8");
+  const deployProdJob = workflow.slice(workflow.indexOf("deploy-prod:"), workflow.indexOf("sync-local-main-checkout:"));
+  const syncJob = workflow.slice(workflow.indexOf("sync-local-main-checkout:"), workflow.indexOf("record-infra-docs-merge:"));
+
+  assert.match(deployProdJob, /id: deploy_prod/);
+  assert.match(deployProdJob, /Temporal prod deploy failed\n\s+if: failure\(\) && steps\.deploy_prod\.outcome == 'failure'/);
+  assert.match(syncJob, /needs: deploy-prod/);
 });
 
 test("delivery workflow releases preview slots for unmerged closed codex PRs", () => {

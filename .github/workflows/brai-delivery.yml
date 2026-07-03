@@ -353,7 +353,8 @@ jobs:
           BRAI_DEPLOY_SSH_PORT: ${{ vars.BRAI_DEPLOY_SSH_PORT || '22' }}
           BRAI_DEPLOY_SSH_KEY: ${{ secrets.BRAI_DEPLOY_SSH_KEY }}
           BRAI_COMMIT: ${{ github.sha }}
-      - run: deploy/scripts/ci-ssh-deploy.sh
+      - id: deploy_prod
+        run: deploy/scripts/ci-ssh-deploy.sh
         env:
           BRAI_DEPLOY_HOST: ${{ vars.BRAI_DEPLOY_HOST }}
           BRAI_DEPLOY_USER: ${{ vars.BRAI_DEPLOY_USER }}
@@ -404,7 +405,7 @@ jobs:
           BRAI_DEPLOY_SSH_KEY: ${{ secrets.BRAI_DEPLOY_SSH_KEY }}
           BRAI_COMMIT: ${{ github.sha }}
       - name: Temporal prod deploy failed
-        if: failure()
+        if: failure() && steps.deploy_prod.outcome == 'failure'
         run: deploy/scripts/ci-temporal-signal.sh promotion --target prod --sha "$BRAI_COMMIT" --event prod_deploy_failed --source deploy-prod
         env:
           BRAI_DEPLOY_HOST: ${{ vars.BRAI_DEPLOY_HOST }}
@@ -414,6 +415,7 @@ jobs:
           BRAI_COMMIT: ${{ github.sha }}
 
   sync-local-main-checkout:
+    needs: deploy-prod
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:

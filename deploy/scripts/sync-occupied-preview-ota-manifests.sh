@@ -19,12 +19,13 @@ if [[ "$MODE" != "--local" && -n "${BRAI_DEPLOY_HOST:-}" ]]; then
   DEPLOY_REPO="${BRAI_DEPLOY_REPO:-/srv/projects/brai}"
   SSH_PORT="${BRAI_DEPLOY_SSH_PORT:-22}"
   REMOTE_PROD_DB="${BRAI_PROD_DB:-${BRAI_DB:-$DEPLOY_REPO/data/brai.sqlite}}"
+  REMOTE_ROOT="${BRAI_REMOTE_ROOT:-$ENVS_ROOT/prod/source}"
   KEY_FILE="$(mktemp "${TMPDIR:-/tmp}/brai-deploy-key.XXXXXX")"
   trap 'rm -f "$KEY_FILE"' EXIT
   printf '%s\n' "$BRAI_DEPLOY_SSH_KEY" >"$KEY_FILE"
   chmod 600 "$KEY_FILE"
   ssh -i "$KEY_FILE" -p "$SSH_PORT" -o StrictHostKeyChecking=accept-new "$BRAI_DEPLOY_USER@$BRAI_DEPLOY_HOST" \
-    "BRAI_ROOT='$DEPLOY_REPO' BRAI_ENVS_ROOT='$ENVS_ROOT' BRAI_PROD_DB='$REMOTE_PROD_DB' '$DEPLOY_REPO/deploy/scripts/sync-occupied-preview-ota-manifests.sh' --local"
+    "if [ ! -x '$REMOTE_ROOT/deploy/scripts/sync-occupied-preview-ota-manifests.sh' ]; then echo 'Cannot run OTA sync from deploy-owned source: $REMOTE_ROOT' >&2; exit 1; fi; BRAI_ROOT='$REMOTE_ROOT' BRAI_ENVS_ROOT='$ENVS_ROOT' BRAI_PROD_DB='$REMOTE_PROD_DB' BRAI_PROD_WEB_VERSION_JSON='$DEPLOY_REPO/deploy/web/version.json' BRAI_RELEASE_TARGET='$DEPLOY_REPO/deploy/releases' '$REMOTE_ROOT/deploy/scripts/sync-occupied-preview-ota-manifests.sh' --local"
   exit 0
 fi
 
@@ -65,6 +66,6 @@ for slot in "${OCCUPIED_SLOTS[@]}"; do
     BRAI_PROD_DB="$PROD_DB" \
     BRAI_PROD_WEB_VERSION_JSON="${BRAI_PROD_WEB_VERSION_JSON:-$ROOT/deploy/web/version.json}" \
     BRAI_RELEASE_TARGET="${BRAI_RELEASE_TARGET:-$ROOT/deploy/releases}" \
-      "$ROOT/deploy/scripts/publish-environment-web-layer.sh" "preview-$slot_lower"
+      "$source_root/deploy/scripts/publish-environment-web-layer.sh" "preview-$slot_lower"
   )
 done

@@ -11,12 +11,19 @@ COMMAND="${1:-}"
 
 if [ "$COMMAND" = "status" ]; then
   if [ -e "$LOCK" ]; then
+    if [ ! -r "$LOCK" ]; then
+      echo "Preview slot lock is not readable: $LOCK" >&2
+      echo "Expected deploy-owned env roots to be group-readable and setgid." >&2
+      exit 1
+    fi
     exec 9<"$LOCK"
     flock -s 9
   fi
 else
+  umask 0002
   mkdir -p "$(dirname "$REGISTRY")" "$(dirname "$LOCK")"
   exec 9>"$LOCK"
+  chmod 0664 "$LOCK" 2>/dev/null || true
   flock 9
 fi
 

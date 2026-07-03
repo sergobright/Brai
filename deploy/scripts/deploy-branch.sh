@@ -2,6 +2,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/permissions.sh"
 ROOT="${BRAI_ROOT:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
 NODE_BIN="${NODE_BIN:-node}"
 ENVS_ROOT="${BRAI_ENVS_ROOT:-/srv/projects/brai-envs}"
@@ -125,8 +126,7 @@ export NEXT_PUBLIC_BRAI_ANDROID_API="$ANDROID_API"
 "$SCRIPT_DIR/publish-client-web-layer.sh"
 
 if [[ "$ENVIRONMENT" != "prod" ]]; then
-  find "$TARGET_ROOT" -user "$(id -u)" -exec chmod u+rwX,g+rwX {} +
-  find "$TARGET_ROOT" -type d -user "$(id -u)" -exec chmod g+s {} +
+  normalize_public_tree "$TARGET_ROOT"
 fi
 
 if [[ "$ENVIRONMENT" != "prod" || "${BRAI_RECORD_PROD_BRANCH_DEPLOYMENT:-false}" == "true" ]]; then
@@ -149,8 +149,7 @@ if [[ "$ENVIRONMENT" != "prod" || "${BRAI_RECORD_PROD_BRANCH_DEPLOYMENT:-false}"
 fi
 
 if [[ "$ENVIRONMENT" != "prod" ]]; then
-  find "$TARGET_ROOT" -user "$(id -u)" -exec chmod u+rwX,g+rwX {} +
-  find "$TARGET_ROOT" -type d -user "$(id -u)" -exec chmod g+s {} +
+  normalize_public_tree "$TARGET_ROOT"
 fi
 
 if [[ "$ENVIRONMENT" == preview-* ]]; then

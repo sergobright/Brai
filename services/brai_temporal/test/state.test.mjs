@@ -17,6 +17,26 @@ test("preview deploy failure is retained as waiting_for_fix", () => {
   assert.equal(state.blocker.task, "preview_deploy");
 });
 
+test("failure blockers retain run metadata", () => {
+  const state = createPreviewState({ branch: "codex/fake", sha: "a1" });
+  applyPreviewEvent(state, {
+    type: "preview_deploy_failed",
+    sha: "a1",
+    slot: "B",
+    reason: "remote publish permissions denied",
+    runUrl: "https://github.com/sergobright/Brai/actions/runs/123",
+    github: { runAttempt: "2", runId: "123" },
+    source: "deploy-preview"
+  });
+
+  assert.equal(state.blocker.task, "preview_deploy");
+  assert.equal(state.blocker.reason, "remote publish permissions denied");
+  assert.equal(state.blocker.runUrl, "https://github.com/sergobright/Brai/actions/runs/123");
+  assert.equal(state.blocker.attempt, "2");
+  assert.equal(state.blocker.runId, "123");
+  assert.equal(state.blocker.slot, "B");
+});
+
 test("promotion failure does not complete workflow", () => {
   const state = createPromotionState({ target: "dev", sha: "b1" });
   applyPromotionEvent(state, { type: "dev_deploy_started", sha: "b1" });
@@ -56,6 +76,24 @@ test("slot release failure remains visible as a preview blocker", () => {
   assert.equal(state.status, "waiting_for_fix");
   assert.equal(state.tasks.slot_release.status, "failed");
   assert.equal(state.blocker.task, "slot_release");
+});
+
+test("accepted preview release is not terminal before promotion metadata passed", () => {
+  const state = createPreviewState({ branch: "codex/fake", sha: "a1" });
+  applyPreviewEvent(state, { type: "delivery_classified", sha: "a1", deliveryClass: "runtime-preview" });
+  applyPreviewEvent(state, { type: "checks_passed", sha: "a1" });
+  applyPreviewEvent(state, { type: "preview_deploy_passed", sha: "a1", slot: "A" });
+  applyPreviewEvent(state, { type: "pr_merged", sha: "a1" });
+  applyPreviewEvent(state, { type: "slot_release_started", sha: "a1", source: "complete-accepted-previews" });
+  applyPreviewEvent(state, { type: "slot_released", sha: "a1", source: "complete-accepted-previews" });
+
+  assert.equal(state.tasks.slot_release.status, "passed");
+  assert.equal(state.tasks.accepted_preview_promotion.status, "pending");
+  assert.equal(state.terminal, false);
+
+  applyPreviewEvent(state, { type: "accepted_preview_promoted", sha: "a1", source: "complete-accepted-previews" });
+  assert.equal(state.terminal, true);
+  assert.equal(state.status, "released");
 });
 
 test("preview deploy retry clears stale task blocker", () => {

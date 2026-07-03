@@ -5,6 +5,7 @@ DB_PATH="${BRAI_DB:-/srv/projects/brai/data/brai.sqlite}"
 BACKUP_DIR="${BRAI_SQLITE_BACKUP_DIR:-/srv/projects/brai/data/backups}"
 SQLITE_BIN="${BRAI_SQLITE_BIN:-/srv/opt/android-sdk/platform-tools/sqlite3}"
 SERVICE_USER="${BRAI_SQLITE_SERVICE_USER:-brai}"
+SERVICE_GROUP="${BRAI_SQLITE_SERVICE_GROUP:-brai-deploy}"
 
 usage() {
   cat >&2 <<USAGE
@@ -48,6 +49,37 @@ stat_path() {
   fi
 }
 
+assert_owner_mode() {
+  local path="$1"
+  local expected_owner="$2"
+  local expected_group="$3"
+  local expected_mode="$4"
+  local actual_owner actual_group actual_mode
+  [[ -e "$path" ]] || return 0
+  actual_owner="$(stat -c '%U' "$path")"
+  actual_group="$(stat -c '%G' "$path")"
+  actual_mode="$(stat -c '%a' "$path")"
+  if [[ "$actual_owner" != "$expected_owner" || "$actual_group" != "$expected_group" || "$actual_mode" != "$expected_mode" ]]; then
+    echo "wrong SQLite permissions: $path is $actual_owner:$actual_group $actual_mode, expected $expected_owner:$expected_group $expected_mode" >&2
+    return 1
+  fi
+}
+
+assert_directory_contract() {
+  local path="$1"
+  local owner="$2"
+  local group="$3"
+  [[ -d "$path" ]] || return 0
+  local actual_owner actual_group actual_mode
+  actual_owner="$(stat -c '%U' "$path")"
+  actual_group="$(stat -c '%G' "$path")"
+  actual_mode="$(stat -c '%a' "$path")"
+  if [[ "$actual_owner" != "$owner" || "$actual_group" != "$group" || ! "$actual_mode" =~ ^2[0-7]7[0-7]$ ]]; then
+    echo "wrong SQLite directory permissions: $path is $actual_owner:$actual_group $actual_mode, expected $owner:$group setgid group-writable" >&2
+    return 1
+  fi
+}
+
 check() {
   require_sqlite
   stat_path "$(dirname "$DB_PATH")"
@@ -56,6 +88,11 @@ check() {
   stat_path "$DB_PATH-wal"
   stat_path "$DB_PATH-shm"
   require_db
+  assert_directory_contract "$(dirname "$DB_PATH")" "$SERVICE_USER" "$SERVICE_GROUP"
+  assert_directory_contract "$BACKUP_DIR" "$SERVICE_USER" "$SERVICE_GROUP"
+  assert_owner_mode "$DB_PATH" "$SERVICE_USER" "$SERVICE_GROUP" "664"
+  assert_owner_mode "$DB_PATH-wal" "$SERVICE_USER" "$SERVICE_GROUP" "664"
+  assert_owner_mode "$DB_PATH-shm" "$SERVICE_USER" "$SERVICE_GROUP" "664"
   "$SQLITE_BIN" "file:$DB_PATH?mode=ro" 'PRAGMA journal_mode;'
 }
 

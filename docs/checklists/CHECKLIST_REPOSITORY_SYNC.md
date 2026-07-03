@@ -12,6 +12,7 @@
 - [ ] Confirm local Git hooks are enabled with `git config core.hooksPath .githooks`.
 - [ ] For suspicious guard state, run `node scripts/brai-task.mjs doctor --strict`; nonzero means the task is not ready for handoff.
 - [ ] For suspicious workspace/cache/output permissions, run `node scripts/brai-task.mjs preflight --strict`; use `scripts/brai-task-repair-permissions.sh --workspace <task>` only for allowlisted ignored paths.
+- [ ] For permissions/ownership/access changes, run `node scripts/brai-task.mjs access-contract --local`; after server remediation, run `node scripts/brai-task.mjs access-contract --server`, `deploy/scripts/preview-slots.sh status`, and `deploy/scripts/production-sqlite-maintenance.sh check`.
 - [ ] Stage only intended files.
 - [ ] Do not revert unrelated changes.
 - [ ] Run or report relevant checks.
@@ -24,4 +25,5 @@
 - [ ] If all preview slots are occupied, report queued status and queue position/source when available.
 - [ ] If the project owner accepts the preview (`Принято`, `принимаю`, `accepted`, or equivalent, but not negated phrases like `пока не принято`), run `deploy/scripts/accept-preview.sh <codex-branch>` instead of replying with an acknowledgement; the script must verify the exact branch head before PR or merge actions.
 - [ ] For accepted preview work, verify the successful `deploy-prod` post-step promoted metadata and released the preview slot; treat a missing release as a blocker.
+- [ ] Do not close permission operation tasks until the access contract is green; otherwise keep one open epic `operation:agent-task:codex-access-contract-guard`.
 - [ ] End with clean tracked `git status --short` and report preview letter + URL, or report queued/blocker status explicitly.

@@ -566,6 +566,7 @@ try {
 
     await expect(readFile(marker, "utf8")).resolves.toBe("keep");
     await expect(readFile(path.join(root, "deploy/web/index.html"), "utf8")).resolves.toContain("web");
+    expect((await stat(path.join(root, "deploy/web/index.html"))).mode & 0o020).toBe(0o020);
     await expect(readFile(path.join(root, "deploy/web/old.txt"), "utf8")).rejects.toThrow();
   });
 
@@ -580,6 +581,18 @@ try {
       path.join(workspaceRoot, "deploy/environments.json"),
       path.join(sourceRoot, "deploy/environments.json"),
     );
+    await mkdir(path.join(sourceRoot, "deploy/scripts"), { recursive: true });
+    for (const file of [
+      "permissions.sh",
+      "publish-client-web-layer.sh",
+      "publish-environment-web-layer.sh",
+      "publish-mobile-bundle.sh",
+      "publish-web.sh",
+      "resolve-required-apk-version.mjs",
+    ]) {
+      await copyFile(path.join(workspaceRoot, "deploy/scripts", file), path.join(sourceRoot, "deploy/scripts", file));
+      if (file.endsWith(".sh")) await chmod(path.join(sourceRoot, "deploy/scripts", file), 0o755);
+    }
     await mkdir(path.join(envsRoot, "preview-b/mobile-update"), { recursive: true });
     await writeFile(
       path.join(envsRoot, "preview-slots.json"),

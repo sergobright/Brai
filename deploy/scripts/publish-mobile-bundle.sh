@@ -2,6 +2,8 @@
 set -euo pipefail
 
 ROOT="${BRAI_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/permissions.sh"
 NODE_PREFIX="${BRAI_NODE_PREFIX:-/srv/opt/node-v22.16.0/bin}"
 if [[ -d "$NODE_PREFIX" ]]; then
   export PATH="$NODE_PREFIX:$PATH"
@@ -118,7 +120,8 @@ MANIFEST_TMP="$TARGET_ROOT/.manifest.json.$$"
 mkdir -p "$BUNDLE_DIR"
 cp "$ARCHIVE_TMP" "$ARCHIVE_STAGE"
 cp "$PAYLOAD_METADATA" "$METADATA_STAGE"
-chmod u=rw,go=r "$ARCHIVE_STAGE" "$METADATA_STAGE"
+normalize_public_file "$ARCHIVE_STAGE"
+normalize_public_file "$METADATA_STAGE"
 
 "$NODE_BIN" -e '
 const fs = require("node:fs");
@@ -141,11 +144,12 @@ const manifest = {
 fs.writeFileSync(manifestFile, `${JSON.stringify(manifest, null, 2)}\n`);
 ' "$METADATA_STAGE" "$MANIFEST_TMP" "$OTA_VERSION" "$PUBLISHED_AT" "$ARCHIVE_URL" "$SHA256" "$SIZE_BYTES" "$ENTRYPOINT" "$TARGET_APK_VERSION" "$MANDATORY"
 
+normalize_public_file "$MANIFEST_TMP"
 mv "$ARCHIVE_STAGE" "$ARCHIVE_TARGET"
 mv "$METADATA_STAGE" "$METADATA_TARGET"
 mv "$MANIFEST_TMP" "$TARGET_ROOT/manifest.json"
 if [[ -O "$TARGET_ROOT" ]]; then
-  find "$TARGET_ROOT" -user "$(id -u)" -exec chmod u=rwX,go=rX {} +
+  normalize_public_tree "$TARGET_ROOT"
 fi
 
 if [[ "$RETAIN_PREVIOUS" =~ ^[0-9]+$ ]]; then

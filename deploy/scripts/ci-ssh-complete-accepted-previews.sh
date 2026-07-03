@@ -22,6 +22,11 @@ esac
 signal_temporal_preview() {
   local branch="$1"
   local event="$2"
+  local reason="${3:-}"
+  local args=(preview --branch "$branch" --sha "$TARGET_COMMIT" --event "$event" --source complete-accepted-previews)
+  if [[ -n "$reason" ]]; then
+    args+=(--reason "$reason")
+  fi
   if [[ ! -x "$SCRIPT_DIR/ci-temporal-signal.sh" ]]; then
     if [[ "${BRAI_TEMPORAL_REQUIRED:-false}" == "true" ]]; then
       echo "deploy/scripts/ci-temporal-signal.sh is required but not executable." >&2
@@ -31,17 +36,9 @@ signal_temporal_preview() {
   fi
 
   if [[ "${BRAI_TEMPORAL_REQUIRED:-false}" == "true" ]]; then
-    "$SCRIPT_DIR/ci-temporal-signal.sh" preview \
-      --branch "$branch" \
-      --sha "$TARGET_COMMIT" \
-      --event "$event" \
-      --source complete-accepted-previews
+    "$SCRIPT_DIR/ci-temporal-signal.sh" "${args[@]}"
   else
-    "$SCRIPT_DIR/ci-temporal-signal.sh" preview \
-      --branch "$branch" \
-      --sha "$TARGET_COMMIT" \
-      --event "$event" \
-      --source complete-accepted-previews || true
+    "$SCRIPT_DIR/ci-temporal-signal.sh" "${args[@]}" || true
   fi
 }
 
@@ -122,7 +119,7 @@ for index in "${!REQUIRED_BRANCHES[@]}"; do
         "$SCRIPT_DIR/ci-ssh-promote-deployment.sh"; then
       signal_temporal_preview "$branch" accepted_preview_promoted
     else
-      signal_temporal_preview "$branch" accepted_preview_failed
+      signal_temporal_preview "$branch" accepted_preview_failed "accepted preview promotion failed"
       exit 1
     fi
   fi
@@ -134,7 +131,7 @@ for index in "${!REQUIRED_BRANCHES[@]}"; do
         "$SCRIPT_DIR/ci-ssh-release-slot.sh"; then
       signal_temporal_preview "$branch" slot_released
     else
-      signal_temporal_preview "$branch" slot_release_failed
+      signal_temporal_preview "$branch" slot_release_failed "accepted preview slot release failed"
       exit 1
     fi
   fi
@@ -156,7 +153,7 @@ cleanup_previously_accepted_preview() {
   if BRAI_BRANCH="$branch" BRAI_ACCEPTED_PREVIEW=true "$SCRIPT_DIR/ci-ssh-release-slot.sh"; then
     signal_temporal_preview "$branch" slot_released || return 1
   else
-    signal_temporal_preview "$branch" slot_release_failed || true
+    signal_temporal_preview "$branch" slot_release_failed "accepted preview cleanup release failed" || true
     return 1
   fi
 }

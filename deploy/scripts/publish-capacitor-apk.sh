@@ -2,6 +2,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/permissions.sh"
 ROOT="${BRAI_ROOT:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
 NODE_BIN="${NODE_BIN:-node}"
 APK_VERSION="${BRAI_APK_VERSION:-$("$NODE_BIN" "$SCRIPT_DIR/resolve-app-version.mjs" --kind apk --root "$ROOT" --db "${BRAI_DB:-}")}"
@@ -36,7 +37,7 @@ cleanup() {
 }
 trap cleanup EXIT
 cp "$SOURCE" "$TMP"
-chmod u=rw,go=r "$TMP"
+normalize_public_file "$TMP"
 mv -f "$TMP" "$PRIMARY"
 trap - EXIT
 
@@ -49,6 +50,10 @@ trap - EXIT
 
 if [[ "$RELEASE_ENV" =~ ^[a-e]$ && "${BRAI_BRANCH:-}" == codex/* ]]; then
   "$SCRIPT_DIR/preview-slots.sh" apk "$BRAI_BRANCH" "${BRAI_COMMIT:-}" "${BRAI_ANDROID_VERSION_CODE:-$APK_VERSION}" "$FILENAME" "$APK_VERSION" >/dev/null
+fi
+
+if [[ -O "$TARGET_DIR" ]]; then
+  normalize_public_tree "$TARGET_DIR"
 fi
 
 sha256sum "$PRIMARY"
