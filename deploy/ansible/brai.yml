@@ -42,30 +42,37 @@
         group: "{{ brai_deploy_user }}"
         mode: "2775"
 
-    - name: Allow deploy user to run deployment scripts
+    - name: Keep locked main deployment scripts in source checkout group
       ansible.builtin.file:
         path: "{{ brai_repo }}/deploy/scripts"
         state: directory
-        group: "{{ brai_deploy_user }}"
-        mode: "u=rwX,g=rX,o="
-        recurse: true
+        group: "{{ brai_source_group }}"
+        mode: "0751"
 
-    - name: Allow deploy user to read environment map
+    - name: Keep locked main environment map in source checkout group
       ansible.builtin.file:
         path: "{{ brai_repo }}/deploy/environments.json"
         state: file
-        group: "{{ brai_deploy_user }}"
-        mode: "u=rw,g=r,o="
+        group: "{{ brai_source_group }}"
+        mode: "0640"
 
     - name: Allow deploy user to enter Node.js runtime directories
       ansible.builtin.file:
         path: "{{ item }}"
         state: directory
         group: "{{ brai_deploy_user }}"
-        mode: "u=rwx,g=rx,o="
+        mode: "0755"
       loop:
         - "{{ brai_node_root }}"
         - "{{ brai_node_root }}/bin"
+
+    - name: Keep Node.js library directories private to deploy group
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        group: "{{ brai_deploy_user }}"
+        mode: "0750"
+      loop:
         - "{{ brai_node_root }}/lib"
         - "{{ brai_node_root }}/lib/node_modules"
 
@@ -74,7 +81,7 @@
         path: "{{ brai_node_bin }}"
         state: file
         group: "{{ brai_deploy_user }}"
-        mode: "u=rwx,g=rx,o="
+        mode: "0755"
 
     - name: Allow deploy user to read Node.js package manager files
       ansible.builtin.file:
@@ -123,8 +130,7 @@
         state: directory
         owner: "{{ brai_deploy_user }}"
         group: "{{ brai_deploy_user }}"
-        mode: "u=rwX,g=rwX,o=rX"
-        recurse: true
+        mode: "2775"
       loop: "{{ brai_envs | dict2items | rejectattr('key', 'equalto', 'prod') | list | product(['web', 'mobile-update', 'data', 'source']) | list }}"
       loop_control:
         label: "{{ item.0.key }}/{{ item.1 }}"
@@ -170,15 +176,15 @@
       ansible.builtin.file:
         path: "{{ brai_public_site_root }}"
         state: directory
-        mode: "0755"
+        group: "{{ brai_deploy_user }}"
+        mode: "2775"
 
     - name: Allow deploy user to publish production web and OTA assets
       ansible.builtin.file:
         path: "{{ item }}"
         state: directory
         group: "{{ brai_deploy_user }}"
-        mode: "u=rwX,g=rwX,o=rX"
-        recurse: true
+        mode: "2775"
       loop:
         - "{{ brai_repo }}/deploy/web"
         - "{{ brai_repo }}/deploy/mobile-update"
