@@ -96,6 +96,10 @@ test("server access contract checks operation helper sudo boundary", () => {
   const script = fs.readFileSync(new URL("./brai-task.mjs", import.meta.url), "utf8");
   const sudoers = fs.readFileSync(new URL("../deploy/ansible/templates/brai-deploy-sudoers.j2", import.meta.url), "utf8");
   assert.match(script, /commandCheck\("operation helper host-local sudo"/);
+  assert.match(script, /commandCheck\("accepted preview OTA sync access"/);
+  assert.match(script, /sync-occupied-preview-ota-manifests\.sh/);
+  assert.match(script, /BRAI_PROD_SOURCE_ROOT: path\.join\(envsRoot, "prod\/source"\)/);
+  assert.match(script, /BRAI_PROD_DB: path\.join\(deployRepo, "data\/brai\.sqlite"\)/);
   assert.match(script, /operationHelperRemoteAccessCheck/);
   assert.match(script, /BRAI_DEPLOY_SSH_KEY_FILE/);
   assert.match(sudoers, /ALL=\(\{\{ brai_service_user \}\}\) NOPASSWD:/);
@@ -1742,6 +1746,7 @@ test("accept preview checks verified preview before PR actions", () => {
 test("accepted preview stale cleanup is best effort", () => {
   const script = fs.readFileSync(path.join(process.cwd(), "deploy/scripts/ci-ssh-complete-accepted-previews.sh"), "utf8");
   const promoteScript = fs.readFileSync(path.join(process.cwd(), "deploy/scripts/ci-ssh-promote-deployment.sh"), "utf8");
+  const otaSyncScript = fs.readFileSync(path.join(process.cwd(), "deploy/scripts/sync-occupied-preview-ota-manifests.sh"), "utf8");
   const requiredLoop = script.slice(script.indexOf('for index in "${!REQUIRED_BRANCHES[@]}"'), script.indexOf('if [[ "$MODE" == "promote" ]]'));
   const cleanupLoop = script.slice(script.indexOf('for branch in "${CLEANUP_BRANCHES[@]}"'));
 
@@ -1754,6 +1759,14 @@ test("accepted preview stale cleanup is best effort", () => {
   assert.match(cleanupLoop, /cleanup_previously_accepted_preview/);
   assert.match(cleanupLoop, /Best-effort cleanup failed/);
   assert.doesNotMatch(cleanupLoop, /exit 1/);
+  assert.match(otaSyncScript, /PROD_SOURCE_ROOT="\$\{BRAI_PROD_SOURCE_ROOT:-\$ENVS_ROOT\/prod\/source\}"/);
+  assert.match(otaSyncScript, /\( "\$MODE" != "--local" \|\| "\$CHECK_ACCESS" == "true" \) && -n "\$\{BRAI_DEPLOY_HOST:-\}"/);
+  assert.match(otaSyncScript, /BRAI_SKIP_DEPLOY_USER_REENTRY/);
+  assert.match(otaSyncScript, /sudo -n -u "\$deploy_user"/);
+  assert.match(otaSyncScript, /\$PROD_SOURCE_ROOT\/deploy\/scripts\/sync-occupied-preview-ota-manifests\.sh/);
+  assert.match(otaSyncScript, /--check-access/);
+  assert.match(otaSyncScript, /resolve-app-version\.mjs/);
+  assert.match(otaSyncScript, /accepted preview OTA sync access ok/);
 });
 
 test("accepted preview branch lookup skips no-preview delivery PRs", () => {

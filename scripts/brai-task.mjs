@@ -582,6 +582,7 @@ function serverAccessContract(root = process.env.BRAI_ROOT ?? "/srv/projects/bra
   const serviceUser = process.env.BRAI_SQLITE_SERVICE_USER ?? "brai";
   const mainSyncScript = process.env.BRAI_MAIN_SYNC_SCRIPT ?? "/srv/opt/brai-main-sync.sh";
   const localOperationHelper = path.join(root, "deploy/scripts/complete-operation-activities.sh");
+  const acceptedPreviewOtaHelper = path.join(root, "deploy/scripts/sync-occupied-preview-ota-manifests.sh");
   const checks = [
     commandCheck("guard sync", [path.join(root, "scripts/brai-guard-sync-check.sh"), "--check"], { cwd: root }),
     commandCheck("preview slots", [path.join(root, "deploy/scripts/preview-slots.sh"), "status"], {
@@ -607,6 +608,17 @@ function serverAccessContract(root = process.env.BRAI_ROOT ?? "/srv/projects/bra
       requiredModeBits: 0o660,
     }),
     commandCheck("operation helper host-local sudo", [localOperationHelper, "--host-local", "--check-access"], { cwd: root }),
+    commandCheck("accepted preview OTA sync access", [acceptedPreviewOtaHelper, "--check-access"], {
+      cwd: root,
+      env: {
+        ...process.env,
+        BRAI_DEPLOY_HOST: "",
+        BRAI_DEPLOY_USER: deployUser,
+        BRAI_DEPLOY_REPO: deployRepo,
+        BRAI_PROD_SOURCE_ROOT: path.join(envsRoot, "prod/source"),
+        BRAI_PROD_DB: path.join(deployRepo, "data/brai.sqlite"),
+      },
+    }),
     operationHelperRemoteAccessCheck({
       deployIdentityFile,
       deploySshPort,
