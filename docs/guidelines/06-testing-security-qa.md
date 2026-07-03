@@ -32,6 +32,25 @@ Release:
 npm run publish:client-web-layer
 ```
 
+## Режим запуска в Codex sandbox
+
+Перед тяжёлыми проверками можно сверить режим:
+
+```bash
+scripts/use-node22.sh node scripts/brai-sandbox-check-mode.mjs -- <command>
+```
+
+| Команда | Режим | Причина |
+| --- | --- | --- |
+| `npm run app:lint`, `npm run app:test`, `npm run task:test`, `npm run openspec:validate`, `npm run public:guard`, `npm run temporal:test` | `sandbox` | Обычные repo checks без известных sandbox EPERM. |
+| `npm run app:build`, `npm run app:dev`, `npm --prefix apps/brai_app run build`, `npm --prefix apps/brai_app run dev` | `require_escalated` | Next/Turbopack открывает local workers/servers. |
+| `npm --prefix services/brai_api test` | `require_escalated` | API suite слушает `127.0.0.1`. |
+| `deploy/scripts/classify-delivery.mjs --file <path>` или `BRAI_CHANGED_FILES=... deploy/scripts/classify-delivery.mjs` | `sandbox` | Changed files переданы явно, Git metadata не нужен. |
+| `deploy/scripts/classify-delivery.mjs` без `--file`/`BRAI_CHANGED_FILES` | `require_escalated` | Скрипт читает Git metadata. |
+| `npm run app:e2e`, `playwright test` | `require_escalated` | Playwright поднимает browser/dev-server runtime. |
+| `agent-browser ...` | `agent_browser` | Использовать штатный dedicated browser runtime. |
+| `npm run app:cap:sync`, `npm run android:build:release`, `deploy/scripts/build-android-env-apk.sh`, `gradle`/`gradlew` | `require_escalated` | Android/Gradle/Capacitor пишут shared build caches и используют shared toolchain. |
+
 ## UI QA
 
 - Визуальные изменения проверяй на desktop и mobile.

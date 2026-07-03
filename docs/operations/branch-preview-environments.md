@@ -17,6 +17,7 @@ Follow-up branches keep the exact task base recorded by the starter in `.brai-ta
 After the project owner accepts a preview, a dirty acceptance PR is resolved in the same branch with `node scripts/brai-task.mjs acceptance-reconcile <codex-branch>`. That command is the only approved exception to the frozen-base rule: it verifies the accepted PR, merges current `origin/main` into the same `codex/*` branch, and leaves any real conflicts for the agent to resolve before pushing the same branch again. Do not create a replacement branch or PR for accepted conflict resolution.
 
 A pushed preview-class `codex/*` branch allocates or reuses a preview slot through `deploy/scripts/preview-slots.sh`, deploys that slot, and reports the slot URL. If all slots `A` through `E` are occupied, the branch enters the preview queue until a slot is released. No push means no slot/deploy/queue.
+`deploy/scripts/preview-slots.sh status` is read-only: it takes a shared lock and must not rewrite the slot registry or status page.
 
 If a `codex/*` pull request is closed without merge, GitHub Actions releases that branch's preview slot through the same `release-preview-slot` job used for deleted branches and manual releases. This covers superseded preview branches: the accepted replacement branch releases its own slot through production promotion, and the abandoned branch releases its slot when its PR closes.
 
@@ -43,6 +44,13 @@ worktree with:
 
 ```bash
 scripts/brai-task-repair-permissions.sh <task-slug-or-worktree-path>
+```
+
+The repo-local starter runs the narrower workspace repair and `node scripts/brai-task.mjs preflight --strict` after a task worktree is created. For later cache/output permission drift, prefer:
+
+```bash
+scripts/brai-task-repair-permissions.sh --workspace <task-slug-or-worktree-path>
+node scripts/brai-task.mjs preflight --strict
 ```
 
 Repository Codex hooks are defined in `.codex/hooks.json`:
@@ -106,7 +114,7 @@ Acceptance trigger:
 - If the project owner says `Принято`, `принимаю`, `accepted`, or an equivalent acceptance phrase after a preview handoff, run `deploy/scripts/accept-preview.sh <codex-branch>` immediately. Negated phrases such as `пока не принято` or `не принято` are not acceptance triggers.
 - The script is the single local acceptance entrypoint. It first requires verified preview state for the exact `origin/<codex-branch>` head, then creates or reuses a GitHub PR into `main` and calls `gh pr merge --<method> --auto --match-head-commit <sha>`, defaulting to `squash` unless `BRAI_ACCEPT_MERGE_METHOD` is set to `merge` or `rebase`, so branch protection, checks, merge queue, production deploy, metadata promotion, and preview-slot release stay in GitHub Actions.
 - If the acceptance PR is `mergeStateStatus: DIRTY` or `BEHIND`, `accept-preview.sh` writes `status=reconcile_required`. Run `node scripts/brai-task.mjs acceptance-reconcile <codex-branch>`, resolve conflicts if any, commit, push the same branch, rerun `node scripts/brai-task.mjs release-notes ...`, rerun `scripts/brai-preview-handoff.sh`, and rerun `deploy/scripts/accept-preview.sh <codex-branch>`. The original preview slot remains leased to that branch until production promotion releases it.
-- After starting acceptance, monitor GitHub Actions until production deploy and preview-slot release finish, or report the exact PR/check/merge-queue/deploy/release blocker. Accepted preview slots are released only by the successful `deploy-prod` post-step, after metadata promotion and production deploy; that step requires a real slot release and fails if the accepted branch did not release one.
+- After starting acceptance, monitor GitHub Actions until production deploy and preview-slot release finish, or report the exact PR/check/merge-queue/deploy/release blocker. Accepted preview slots are released only by the successful `deploy-prod` post-step, after metadata promotion and production deploy; that step also republishes occupied preview OTA manifests from their own preview source checkouts so slot content stays preview-specific while `otaVersion` catches up to the production build ledger. The step requires a real slot release and fails if the accepted branch did not release one.
 
 ## Required GitHub Settings
 
@@ -150,6 +158,17 @@ systemctl restart brai-api-preview-e.service
 ```
 
 The Ansible sudoers template is `deploy/ansible/templates/brai-deploy-sudoers.j2`.
+
+### Production SQLite maintenance
+
+Production SQLite maintenance goes through `deploy/scripts/production-sqlite-maintenance.sh`.
+It defaults to `/srv/projects/brai/data/brai.sqlite`, uses backups under
+`/srv/projects/brai/data/backups`, and uses `/srv/opt/android-sdk/platform-tools/sqlite3`.
+Run `check` for read-only inspection. Run write commands such as `backup` and `exec-sql`
+as the `brai` service user; the wrapper rejects `root`, `mark`, and other users.
+Ansible keeps `data`, `data/backups`, `brai.sqlite`, and existing WAL/SHM sidecars owned
+by `brai:brai-deploy` with group-write modes so the runtime and deploy scripts share the
+same narrow maintenance boundary.
 
 ## Server Setup
 

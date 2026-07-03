@@ -569,6 +569,66 @@ try {
     await expect(readFile(path.join(root, "deploy/web/old.txt"), "utf8")).rejects.toThrow();
   });
 
+  it("syncs occupied preview OTA manifests from each preview source", async () => {
+    const root = await fixtureRoot("brai-preview-ota-sync-");
+    const envsRoot = path.join(root, "envs");
+    const sourceRoot = path.join(envsRoot, "preview-b/source");
+    const dbPath = path.join(root, "brai.sqlite");
+    await writeStaticExport(sourceRoot, "preview-b-content");
+    await mkdir(path.join(sourceRoot, "deploy"), { recursive: true });
+    await copyFile(
+      path.join(workspaceRoot, "deploy/environments.json"),
+      path.join(sourceRoot, "deploy/environments.json"),
+    );
+    await mkdir(path.join(envsRoot, "preview-b/mobile-update"), { recursive: true });
+    await writeFile(
+      path.join(envsRoot, "preview-slots.json"),
+      JSON.stringify({ B: { status: "ready", branch: "codex/preview-b", commit: "abc" }, queue: [] }),
+    );
+    await writeFile(
+      path.join(envsRoot, "preview-b/mobile-update/manifest.json"),
+      JSON.stringify({
+        otaVersion: "0.0.67",
+        archiveUrl: "https://b.test.brightos.world/mobile-update/bundles/0.0.67/bundle.zip",
+      }),
+    );
+    await execFileAsync("node", ["--input-type=module", "-e", `
+const { pathToFileURL } = await import("node:url");
+const { BraiStore } = await import(pathToFileURL(process.argv[1]));
+const store = new BraiStore(process.argv[2]);
+try {
+  store.upsertBuildVersion({
+    versionTypeId: "build",
+    version: 68,
+    includedInVersionId: null,
+    shortChanges: "Production build",
+    detailedChanges: "Production build",
+    reason: "Test",
+    releasedAtUtc: "2026-07-03T00:00:00.000Z",
+  });
+} finally {
+  store.close();
+}
+`, path.join(workspaceRoot, "services/brai_api/src/store.js"), dbPath], { env: nodeCliEnv });
+
+    await execFileAsync("bash", [path.join(workspaceRoot, "deploy/scripts/sync-occupied-preview-ota-manifests.sh"), "--local"], {
+      env: {
+        ...process.env,
+        BRAI_ROOT: workspaceRoot,
+        BRAI_ENVS_ROOT: envsRoot,
+        BRAI_PROD_DB: dbPath,
+        BRAI_BUILD_CLIENT: "false",
+        BRAI_TARGET_APK_VERSION: "2999",
+        BRAI_PUBLISHED_AT: "2026-07-03T00:00:00Z",
+      },
+    });
+
+    const manifest = JSON.parse(await readFile(path.join(envsRoot, "preview-b/mobile-update/manifest.json"), "utf8"));
+    await expect(readFile(path.join(envsRoot, "preview-b/web/index.html"), "utf8")).resolves.toContain("preview-b-content");
+    expect(manifest.otaVersion).toBe("0.0.68");
+    expect(manifest.archiveUrl).toBe("https://b.test.brightos.world/mobile-update/bundles/0.0.68/bundle.zip");
+  });
+
   it("allocates, reuses, and releases preview slots with the lock wrapper", async () => {
     const root = await fixtureRoot("brai-slots-");
     const envsRoot = path.join(root, "envs");
