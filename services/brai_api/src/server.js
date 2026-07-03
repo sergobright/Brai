@@ -23,6 +23,7 @@ const BASE_JSON_HEADERS = {
 };
 const SESSION_COOKIE = 'brai_session';
 const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 30;
+const STATE_CHANGING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
 export function createBraiServer({
   dbPath,
@@ -240,6 +241,10 @@ export function createBraiServer({
       const authContext = await authenticateRequest(req, token, url, sessionSecret, now, auth, store);
       if (!authContext.authorized) {
         sendJson(req, res, 401, { error: 'unauthorized' });
+        return;
+      }
+      if (requiresTrustedOrigin(req, authContext) && !isTrustedAppOrigin(req.headers.origin)) {
+        sendJson(req, res, 403, { error: 'forbidden_origin' });
         return;
       }
 
@@ -531,20 +536,20 @@ function actionsCompatState(state) {
 async function authenticateRequest(req, token, parsedUrl, sessionSecret, now, auth, store) {
   const session = await betterAuthSession(req, auth);
   if (session?.user?.id) {
-    return { authorized: true, userId: session.user.id, user: publicAuthUser(session.user) };
+    return { authorized: true, sessionBased: true, userId: session.user.id, user: publicAuthUser(session.user) };
   }
 
   if (hasLegacyToken(req, token, parsedUrl)) {
     const primary = store.primaryUser();
-    return { authorized: true, userId: primary?.id ?? null, user: publicAuthUser(primary) };
+    return { authorized: true, sessionBased: false, userId: primary?.id ?? null, user: publicAuthUser(primary) };
   }
 
   if (hasValidSession(req, sessionSecret, now())) {
     const primary = store.primaryUser();
-    return { authorized: true, userId: primary?.id ?? null, user: publicAuthUser(primary) };
+    return { authorized: true, sessionBased: true, userId: primary?.id ?? null, user: publicAuthUser(primary) };
   }
 
-  return { authorized: false, userId: null, user: null };
+  return { authorized: false, sessionBased: false, userId: null, user: null };
 }
 
 async function betterAuthSession(req, auth) {
@@ -635,7 +640,8 @@ function sendJson(req, res, status, body, extraHeaders = {}) {
 
 function jsonHeaders(req) {
   const origin = req?.headers?.origin;
-  if (typeof origin === 'string' && isAllowedCorsOrigin(origin)) {
+  const pathname = requestPathname(req);
+  if (typeof origin === 'string' && isAllowedCorsOrigin(origin, pathname)) {
     return {
       ...BASE_JSON_HEADERS,
       'access-control-allow-origin': origin,
@@ -648,14 +654,32 @@ function jsonHeaders(req) {
   };
 }
 
-function isAllowedCorsOrigin(origin) {
+function requestPathname(req) {
+  try {
+    return new URL(req?.url ?? '/', 'http://localhost').pathname;
+  } catch {
+    return '/';
+  }
+}
+
+function isAllowedCorsOrigin(origin, pathname = '/') {
+  if (origin === 'https://brightos.world') return pathname === '/auth/session';
+  if (isTrustedAppOrigin(origin)) return true;
+  if (origin === 'https://previews.brightos.world') return true;
+  return false;
+}
+
+function isTrustedAppOrigin(origin) {
   if (origin === 'https://app.brightos.world') return true;
   if (origin === 'https://dev.brightos.world') return true;
   if (/^https:\/\/[a-e]\.test\.brightos\.world$/.test(origin)) return true;
-  if (origin === 'https://previews.brightos.world') return true;
   if (origin === 'capacitor://localhost') return true;
   if (origin === 'https://localhost' || origin === 'http://localhost') return true;
   return /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin);
+}
+
+function requiresTrustedOrigin(req, authContext) {
+  return authContext.sessionBased && STATE_CHANGING_METHODS.has(req.method ?? '');
 }
 
 function redirect(res, location, extraHeaders = {}) {

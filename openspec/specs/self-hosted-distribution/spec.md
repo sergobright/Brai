@@ -38,10 +38,10 @@ Brai SHALL distinguish open-source/self-hostable dependencies from managed propr
 ### Requirement: Client uses deployment-controlled server configuration
 Brai SHALL select its API base URL from deployment/runtime configuration rather than exposing an in-app user-editable server URL setting.
 
-#### Scenario: Private production web deployment runs
-- **WHEN** the client runs as the protected `app.brightos.world` web app
+#### Scenario: Production web deployment runs
+- **WHEN** the client runs as the `app.brightos.world` web app
 - **THEN** it uses same-origin `/api/*`
-- **AND** Caddy injects upstream authorization outside the browser bundle
+- **AND** Brai API authorizes data requests using session cookies or explicit Bearer auth without exposing private tokens in the browser bundle
 
 #### Scenario: Production Android app runs
 - **WHEN** the client runs inside the production Android shell
