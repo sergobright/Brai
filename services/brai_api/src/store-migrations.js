@@ -1856,7 +1856,7 @@ const AGENT_TASK_ACTIVITIES = [
     title: 'Починить права общего Vite cache',
     description: 'Настроить shared dependency dirs так, чтобы `npm run app:test` работал из task worktree. Результат: Vitest/Vite может читать и писать `.vite-temp` без ручной правки owner/group.',
     reason: 'Задача появилась, когда `apps/brai_app/node_modules/.vite-temp` был owned by `nobody:mark` с mode `750`, и `npm run app:test` падал с `EACCES`.',
-    done: false
+    done: true
   },
   {
     id: 'operation:agent-task:turbopack-process-sandbox',

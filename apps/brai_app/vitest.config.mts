@@ -3,6 +3,7 @@ import { defineConfig } from "vitest/config";
 import tsconfigPaths from "vite-tsconfig-paths";
 
 export default defineConfig({
+  cacheDir: ".cache/vite",
   plugins: [tsconfigPaths(), react()],
   test: {
     environment: "jsdom",
