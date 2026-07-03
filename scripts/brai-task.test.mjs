@@ -81,6 +81,17 @@ test("read-only classifier allows diagnostics and rejects disguised writes", () 
   assert.equal(isReadOnlyShellCommand("find . -exec chmod 755 {} +"), false);
 });
 
+test("server access contract checks deploy ownership instead of agent write access", () => {
+  const script = fs.readFileSync(new URL("./brai-task.mjs", import.meta.url), "utf8");
+  assert.match(script, /contractPathCheck\("env roots", envsRoot, \{/);
+  assert.match(script, /owner: deployOwner/);
+  assert.match(script, /group: deployGroup/);
+  assert.match(script, /requiredModeBits: 0o2770/);
+  assert.match(script, /contractPathCheck\("preview slot registry", path\.join\(envsRoot, "preview-slots\.json"\), \{/);
+  assert.match(script, /requiredModeBits: 0o660/);
+  assert.doesNotMatch(script, /pathCheck\("env roots", envsRoot, \{ requireWrite: true/);
+});
+
 test("task base refresh commands are hard blocked", () => {
   assert.equal(isTaskBaseRefreshCommand("git fetch origin"), true);
   assert.equal(isTaskBaseRefreshCommand("git fetch origin --prune"), true);

@@ -573,6 +573,9 @@ function localAccessContract(root = git("rev-parse", "--show-toplevel")) {
 function serverAccessContract(root = process.env.BRAI_ROOT ?? "/srv/projects/brai") {
   const envsRoot = process.env.BRAI_ENVS_ROOT ?? "/srv/projects/brai-envs";
   const deployRepo = process.env.BRAI_DEPLOY_REPO ?? root;
+  const deployOwner = process.env.BRAI_DEPLOY_OWNER ?? "brai-deploy";
+  const deployGroup = process.env.BRAI_DEPLOY_GROUP ?? "brai-deploy";
+  const mainSyncScript = process.env.BRAI_MAIN_SYNC_SCRIPT ?? "/srv/opt/brai-main-sync.sh";
   const checks = [
     commandCheck("guard sync", [path.join(root, "scripts/brai-guard-sync-check.sh"), "--check"], { cwd: root }),
     commandCheck("preview slots", [path.join(root, "deploy/scripts/preview-slots.sh"), "status"], {
@@ -580,11 +583,25 @@ function serverAccessContract(root = process.env.BRAI_ROOT ?? "/srv/projects/bra
       env: { ...process.env, BRAI_ENVS_ROOT: envsRoot },
     }),
     commandCheck("sqlite maintenance", [path.join(root, "deploy/scripts/production-sqlite-maintenance.sh"), "check"], { cwd: root }),
-    pathCheck("env roots", envsRoot, { requireWrite: true, expectDirectory: true }),
-    pathCheck("prod source", path.join(envsRoot, "prod/source"), { requireRead: true, expectDirectory: true }),
-    pathCheck("preview slot registry", path.join(envsRoot, "preview-slots.json"), { requireRead: true }),
+    contractPathCheck("env roots", envsRoot, {
+      owner: deployOwner,
+      group: deployGroup,
+      expectDirectory: true,
+      requiredModeBits: 0o2770,
+    }),
+    contractPathCheck("prod source", path.join(envsRoot, "prod/source"), {
+      owner: deployOwner,
+      group: deployGroup,
+      expectDirectory: true,
+      requiredModeBits: 0o2770,
+    }),
+    contractPathCheck("preview slot registry", path.join(envsRoot, "preview-slots.json"), {
+      owner: deployOwner,
+      group: deployGroup,
+      requiredModeBits: 0o660,
+    }),
     pathCheck("deploy artifacts", path.join(deployRepo, "deploy"), { requireRead: true, expectDirectory: true }),
-    pathCheck("main sync script", "/srv/opt/brai-main-sync.sh", { requireRead: true }),
+    pathCheck("main sync script", mainSyncScript, { requireRead: true }),
     commandCheck("node", ["node", "--version"], { cwd: root }),
     commandCheck("npm", ["npm", "--version"], { cwd: root }),
   ];
@@ -627,6 +644,54 @@ function pathCheck(name, target, { requireRead = false, requireWrite = false, ex
     return { ...check, ok: false, reason: error?.code || "access denied" };
   }
   return check;
+}
+
+function contractPathCheck(name, target, { owner, group, requiredModeBits = 0, expectDirectory = false } = {}) {
+  const check = pathCheck(name, target, { expectDirectory });
+  if (!check.ok) return check;
+  if (owner) {
+    check.expectedOwner = owner;
+    const user = resolveUserId(owner);
+    if (!user.ok) return { ...check, ok: false, reason: user.reason };
+    if (check.uid !== user.id) return { ...check, ok: false, reason: `owner ${check.uid} != ${owner} (${user.id})` };
+  }
+  if (group) {
+    check.expectedGroup = group;
+    const resolvedGroup = resolveGroupId(group);
+    if (!resolvedGroup.ok) return { ...check, ok: false, reason: resolvedGroup.reason };
+    if (check.gid !== resolvedGroup.id) return { ...check, ok: false, reason: `group ${check.gid} != ${group} (${resolvedGroup.id})` };
+  }
+  if (requiredModeBits) {
+    const mode = Number.parseInt(check.mode, 8);
+    check.requiredModeBits = requiredModeBits.toString(8);
+    if ((mode & requiredModeBits) !== requiredModeBits) {
+      const missing = (requiredModeBits & ~mode).toString(8);
+      return { ...check, ok: false, reason: `mode ${check.mode} missing ${missing}` };
+    }
+  }
+  return check;
+}
+
+function resolveUserId(name) {
+  const result = spawnSync("id", ["-u", name], { encoding: "utf8" });
+  if (result.status !== 0) return { ok: false, reason: `user ${name} not found` };
+  const id = Number(result.stdout.trim());
+  return Number.isInteger(id) ? { ok: true, id } : { ok: false, reason: `user ${name} has invalid uid` };
+}
+
+function resolveGroupId(name) {
+  try {
+    const groupFile = fs.readFileSync("/etc/group", "utf8");
+    const line = groupFile.split("\n").find((entry) => entry.split(":")[0] === name);
+    const id = Number(line?.split(":")[2]);
+    if (Number.isInteger(id)) return { ok: true, id };
+  } catch {
+    // Fall through to getent for systems where /etc/group is not directly readable.
+  }
+  const result = spawnSync("getent", ["group", name], { encoding: "utf8" });
+  if (result.status !== 0) return { ok: false, reason: `group ${name} not found` };
+  const id = Number(result.stdout.trim().split(":")[2]);
+  return Number.isInteger(id) ? { ok: true, id } : { ok: false, reason: `group ${name} has invalid gid` };
 }
 
 function workspacePreflight(root = git("rev-parse", "--show-toplevel")) {
