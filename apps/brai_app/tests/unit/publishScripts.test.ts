@@ -229,7 +229,7 @@ describe("mobile OTA publish scripts", () => {
     expect(buildApk).toContain('/srv/opt/android-build-env/build-android.sh "$ROOT/apps/brai_app/android" "$GRADLE_TASK"');
   });
 
-  it("resolves Android APK app versions from deployment sources", async () => {
+  it("resolves OTA app versions from the build ledger before deployed files", async () => {
     const root = await fixtureRoot("brai-apk-version-resolve-");
     await writeStaticExport(root, "stale-public-version");
     const dbPath = path.join(root, "brai.sqlite");
@@ -277,9 +277,9 @@ await fs.writeFile(outputPath, JSON.stringify({
     const deployBranch = await readFile(path.join(workspaceRoot, "deploy/scripts/deploy-branch.sh"), "utf8");
     const ciDeploy = await readFile(path.join(workspaceRoot, "deploy/scripts/ci-ssh-deploy.sh"), "utf8");
 
-    expect(versions.production).toBe("9.9.9");
+    expect(versions.production).toBe("0.0.1");
     expect(versions.nextProductionApk).toBe("2");
-    expect(versions.preview).toBe("0.11.52");
+    expect(versions.preview).toBe("0.0.1");
     expect(deployBranch).toContain('--prod-db "${BRAI_PROD_DB:-}"');
     expect(deployBranch).toContain('--mobile-target "$MOBILE_TARGET"');
     expect(deployBranch).toContain('BRAI_RECORD_PROD_BRANCH_DEPLOYMENT');
