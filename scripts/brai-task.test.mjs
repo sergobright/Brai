@@ -335,6 +335,7 @@ test("delivery classifier separates infra-docs from runtime preview", () => {
   assert.equal(deliveryClassForFile("deploy/scripts/preview-slots.sh"), "infra");
   assert.equal(deliveryClassForFile("deploy/scripts/production-sqlite-maintenance.sh"), "infra");
   assert.equal(deliveryClassForFile("deploy/scripts/permissions.sh"), "infra");
+  assert.equal(deliveryClassForFile("deploy/scripts/prune-caddy-site-blocks.mjs"), "infra");
   assert.equal(deliveryClassForFile("deploy/scripts/publish-web.sh"), "infra");
   assert.equal(deliveryClassForFile("deploy/scripts/publish-mobile-bundle.sh"), "infra");
   assert.equal(deliveryClassForFile("deploy/scripts/publish-capacitor-apk.sh"), "infra");
@@ -342,6 +343,7 @@ test("delivery classifier separates infra-docs from runtime preview", () => {
   assert.equal(deliveryClassForFile("deploy/scripts/sync-local-main-checkout.sh"), "infra");
   assert.equal(deliveryClassForFile("deploy/scripts/sync-occupied-preview-ota-manifests.sh"), "infra");
   assert.equal(deliveryClassForFile("deploy/scripts/ci-ssh-sync-main-checkout.sh"), "infra");
+  assert.equal(deliveryClassForFile("scripts/caddy-prune-managed-sites.test.mjs"), "infra");
   assert.equal(deliveryClassForFile("scripts/brai-task.mjs"), "infra");
   assert.equal(deliveryClassForFile("scripts/check-open-openspec-changes.mjs"), "infra");
   assert.equal(deliveryClassForFile("services/brai_temporal/src/state.mjs"), "infra");

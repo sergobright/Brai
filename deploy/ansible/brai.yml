@@ -286,6 +286,106 @@
         group: root
         mode: "0755"
 
+    - name: Validate generated Brai Caddy routes against current host config
+      block:
+        - name: Create temporary Caddy validation file
+          ansible.builtin.tempfile:
+            state: file
+            suffix: .Caddyfile
+          register: brai_caddy_validate_file
+          changed_when: false
+
+        - name: Copy current Caddyfile for managed block validation
+          ansible.builtin.copy:
+            src: "{{ brai_caddyfile }}"
+            dest: "{{ brai_caddy_validate_file.path }}"
+            remote_src: true
+            mode: "0600"
+          changed_when: false
+
+        - name: Prune unmanaged Brai production Caddy routes in validation file
+          ansible.builtin.command:
+            argv:
+              - "{{ brai_node_bin }}"
+              - "{{ playbook_dir }}/../scripts/prune-caddy-site-blocks.mjs"
+              - "--file"
+              - "{{ brai_caddy_validate_file.path }}"
+              - "--managed-marker"
+              - "BRAI DEV/PREVIEW ENVIRONMENTS"
+              - "--site"
+              - "http://{{ brai_public_site_domain }}"
+              - "--site"
+              - "{{ brai_public_site_domain }}"
+              - "--site"
+              - "http://{{ brai_envs.prod.domain }}"
+              - "--site"
+              - "{{ brai_envs.prod.domain }}"
+          changed_when: false
+
+        - name: Validate generated Brai managed Caddy block
+          ansible.builtin.blockinfile:
+            path: "{{ brai_caddy_validate_file.path }}"
+            marker: "# {mark} BRAI DEV/PREVIEW ENVIRONMENTS"
+            block: "{{ lookup('template', 'templates/Caddyfile.j2') }}"
+            validate: "caddy validate --adapter caddyfile --config %s"
+          changed_when: false
+      always:
+        - name: Remove temporary Caddy validation file
+          ansible.builtin.file:
+            path: "{{ brai_caddy_validate_file.path }}"
+            state: absent
+          changed_when: false
+          when: brai_caddy_validate_file.path is defined
+      check_mode: false
+
+    - name: Check unmanaged Brai production Caddy routes before managed install
+      ansible.builtin.command:
+        argv:
+          - "{{ brai_node_bin }}"
+          - "{{ playbook_dir }}/../scripts/prune-caddy-site-blocks.mjs"
+          - "--file"
+          - "{{ brai_caddyfile }}"
+          - "--managed-marker"
+          - "BRAI DEV/PREVIEW ENVIRONMENTS"
+          - "--site"
+          - "http://{{ brai_public_site_domain }}"
+          - "--site"
+          - "{{ brai_public_site_domain }}"
+          - "--site"
+          - "http://{{ brai_envs.prod.domain }}"
+          - "--site"
+          - "{{ brai_envs.prod.domain }}"
+          - "--check"
+      register: brai_caddy_prune_check
+      changed_when: (brai_caddy_prune_check.stdout | from_json).changed
+      check_mode: false
+      when: ansible_check_mode
+
+    - name: Remove unmanaged Brai production Caddy routes before managed install
+      ansible.builtin.command:
+        argv:
+          - "{{ brai_node_bin }}"
+          - "{{ playbook_dir }}/../scripts/prune-caddy-site-blocks.mjs"
+          - "--file"
+          - "{{ brai_caddyfile }}"
+          - "--managed-marker"
+          - "BRAI DEV/PREVIEW ENVIRONMENTS"
+          - "--site"
+          - "http://{{ brai_public_site_domain }}"
+          - "--site"
+          - "{{ brai_public_site_domain }}"
+          - "--site"
+          - "http://{{ brai_envs.prod.domain }}"
+          - "--site"
+          - "{{ brai_envs.prod.domain }}"
+      register: brai_caddy_prune
+      changed_when: (brai_caddy_prune.stdout | from_json).changed
+      check_mode: false
+      when: not ansible_check_mode
+      notify:
+        - Validate Caddy
+        - Reload Caddy
+
     - name: Install Brai Caddy routes
       ansible.builtin.blockinfile:
         path: "{{ brai_caddyfile }}"

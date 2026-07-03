@@ -27,11 +27,21 @@ http://{{ brai_envs.prod.domain }} {
     }
   }
 
-  handle_path /api/* {
+  handle /releases* {
     reverse_proxy 127.0.0.1:{{ brai_envs.prod.api_port }}
   }
 
-  handle /releases* {
+  handle /favicon.ico {
+    root * {{ brai_repo }}/deploy/web
+    file_server
+  }
+
+  handle /apple-touch-icon* {
+    root * {{ brai_repo }}/deploy/web
+    file_server
+  }
+
+  handle_path /api/* {
     reverse_proxy 127.0.0.1:{{ brai_envs.prod.api_port }}
   }
 
@@ -39,6 +49,14 @@ http://{{ brai_envs.prod.domain }} {
     header /manifest.json Cache-Control "no-store"
     root * {{ brai_repo }}/deploy/mobile-update
     file_server
+  }
+
+  handle /timer* {
+    respond "Not found" 404
+  }
+
+  handle /history* {
+    respond "Not found" 404
   }
 
   handle {

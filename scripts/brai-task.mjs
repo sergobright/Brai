@@ -1555,6 +1555,7 @@ function deliveryClassForFile(file) {
       "deploy/scripts/preview-slots.sh",
       "deploy/scripts/production-sqlite-maintenance.sh",
       "deploy/scripts/permissions.sh",
+      "deploy/scripts/prune-caddy-site-blocks.mjs",
       "deploy/scripts/publish-capacitor-apk.sh",
       "deploy/scripts/publish-mobile-bundle.sh",
       "deploy/scripts/publish-environment-web-layer.sh",
@@ -1566,6 +1567,7 @@ function deliveryClassForFile(file) {
       "deploy/scripts/sync-local-main-checkout.sh",
       "deploy/scripts/sync-occupied-preview-ota-manifests.sh",
       "deploy/scripts/update-release-index.mjs",
+      "scripts/caddy-prune-managed-sites.test.mjs",
     ].includes(file)
   ) {
     return "infra";

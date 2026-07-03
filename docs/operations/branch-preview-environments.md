@@ -235,11 +235,12 @@ without broadening the sudo boundary.
 
 Production Caddy routes keep `app.brightos.world` public: the app shell is not protected by
 Caddy Basic Auth, `/api/*` is proxied to the production Brai API without injected Bearer
-headers, and `/mobile-update/*` remains public for Android OTA. Application auth owns browser
-sessions and `/v1/*` data access.
-Before applying the Ansible Caddy template on a host that already has unmanaged
-`app.brightos.world` or `api.brightos.world` site blocks, remove or migrate those blocks first and
-run `caddy validate`; duplicate site blocks are a rollout blocker.
+headers, `/mobile-update/*` remains public for Android OTA, and retired live URLs
+`/timer*` and `/history*` stay 404 unless a later accepted requirement brings them back.
+Application auth owns browser sessions and `/v1/*` data access. Before installing the
+managed Brai block, Ansible prunes unmanaged top-level `brightos.world` and
+`app.brightos.world` blocks from `/etc/caddy/Caddyfile`; the separate `api.brightos.world`
+block remains outside this managed block because Android direct API traffic still uses it.
 
 Preview Caddy routes keep the app shell protected with the unified Caddy Basic Auth login, but
 `/mobile-update/*` stays public for Android OTA and `/api/*` is proxied to the matching Brai API without
