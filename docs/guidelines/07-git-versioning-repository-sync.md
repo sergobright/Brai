@@ -38,6 +38,8 @@ Do not create or switch fallback branches manually with `git switch`, `git check
 Use one permission contract instead of ad hoc `chmod`/`chown` fixes:
 
 - source checkouts and Git metadata are locked for agents and are not runtime toolboxes for `brai-deploy`;
+- ignored dependency directories (`node_modules` in the repo root, app, API, and Temporal packages) are generated agent workspace support, not source; main sync keeps them writable for `mark` so new task worktrees can link and use them without `EACCES`;
+- registered task worktrees under `.codex-worktrees/*` are agent workspaces and main sync does not change their ownership in normal flow;
 - deploy-owned env roots under `/srv/projects/brai-envs/*` are `brai-deploy:brai-deploy`, group-writable, and setgid;
 - production SQLite is owned by `brai:brai-deploy`; the DB, WAL, and SHM files are group-writable;
 - public web, OTA, and release artifacts are group-writable and public-readable;
@@ -52,7 +54,7 @@ deploy/scripts/production-sqlite-maintenance.sh check
 deploy/scripts/preview-slots.sh status
 ```
 
-Manual permission repair is only a break-glass operation through Ansible, `/srv/opt/brai-main-sync.sh`, `scripts/brai-task-repair-permissions.sh`, or deploy helpers such as `deploy/scripts/permissions.sh`. Do not make one-off `chmod/chown` commands part of normal delivery.
+Manual permission repair is only a break-glass operation through Ansible, `/srv/opt/brai-main-sync.sh`, `scripts/brai-task-repair-permissions.sh`, or deploy helpers such as `deploy/scripts/permissions.sh`. Do not make one-off `chmod/chown` commands part of normal delivery. Stale worktree root-locking is opt-in only with `BRAI_LOCK_STALE_WORKTREES=1`; do not use it in normal main sync or while an agent thread can still resume that worktree.
 Same-host operation cleanup uses `deploy/scripts/complete-operation-activities.sh --host-local ...`;
 it still writes SQLite only as the `brai` service user through the narrow sudoers command.
 

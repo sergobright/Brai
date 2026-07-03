@@ -58,6 +58,20 @@ restore_task_state_access() {
   find "$task_state" -maxdepth 1 -type f -name '*.json' -exec chmod 0640 {} +
 }
 
+preserve_agent_dependency_paths() {
+  for dependency_path in \
+    node_modules \
+    apps/brai_app/node_modules \
+    services/brai_api/node_modules \
+    services/brai_temporal/node_modules
+  do
+    if [ -d "$dependency_path" ] && [ ! -L "$dependency_path" ]; then
+      chown -R "$GIT_USER:$SOURCE_GROUP" "$dependency_path"
+      chmod -R u=rwX,g=rwX,o= "$dependency_path"
+    fi
+  done
+}
+
 exec 9>"$LOCK_FILE"
 flock 9
 
@@ -96,6 +110,10 @@ find "$REPO" \
   -path "$REPO/deploy/web" -prune -o \
   -path "$REPO/deploy/mobile-update" -prune -o \
   -path "$REPO/deploy/releases" -prune -o \
+  -path "$REPO/node_modules" -prune -o \
+  -path "$REPO/apps/brai_app/node_modules" -prune -o \
+  -path "$REPO/services/brai_api/node_modules" -prune -o \
+  -path "$REPO/services/brai_temporal/node_modules" -prune -o \
   -exec chown "$GIT_USER:$SOURCE_GROUP" {} +
 
 find "$REPO" \
@@ -106,6 +124,10 @@ find "$REPO" \
   -path "$REPO/deploy/web" -prune -o \
   -path "$REPO/deploy/mobile-update" -prune -o \
   -path "$REPO/deploy/releases" -prune -o \
+  -path "$REPO/node_modules" -prune -o \
+  -path "$REPO/apps/brai_app/node_modules" -prune -o \
+  -path "$REPO/services/brai_api/node_modules" -prune -o \
+  -path "$REPO/services/brai_temporal/node_modules" -prune -o \
   -exec chmod u=rwX,g=rX,o= {} +
 
 git_cmd checkout -f -B "$BRANCH" "origin/$BRANCH"
@@ -139,6 +161,10 @@ if [ "${BRAI_MAIN_SYNC_LOCK_CHECKOUT:-1}" = "1" ]; then
     -path "$REPO/deploy/web" -prune -o \
     -path "$REPO/deploy/mobile-update" -prune -o \
     -path "$REPO/deploy/releases" -prune -o \
+    -path "$REPO/node_modules" -prune -o \
+    -path "$REPO/apps/brai_app/node_modules" -prune -o \
+    -path "$REPO/services/brai_api/node_modules" -prune -o \
+    -path "$REPO/services/brai_temporal/node_modules" -prune -o \
     -exec chown "root:$SOURCE_GROUP" {} +
 
   find "$REPO" \
@@ -149,6 +175,10 @@ if [ "${BRAI_MAIN_SYNC_LOCK_CHECKOUT:-1}" = "1" ]; then
     -path "$REPO/deploy/web" -prune -o \
     -path "$REPO/deploy/mobile-update" -prune -o \
     -path "$REPO/deploy/releases" -prune -o \
+    -path "$REPO/node_modules" -prune -o \
+    -path "$REPO/apps/brai_app/node_modules" -prune -o \
+    -path "$REPO/services/brai_api/node_modules" -prune -o \
+    -path "$REPO/services/brai_temporal/node_modules" -prune -o \
     -exec chmod u=rwX,g=rX,o= {} +
 
   chmod 0751 "$REPO"
@@ -177,7 +207,9 @@ if [ "${BRAI_MAIN_SYNC_LOCK_CHECKOUT:-1}" = "1" ]; then
     done
   fi
 
-  if [ "${BRAI_LOCK_STALE_WORKTREES:-1}" = "1" ]; then
+  preserve_agent_dependency_paths
+
+  if [ "${BRAI_LOCK_STALE_WORKTREES:-0}" = "1" ]; then
     while IFS= read -r line; do
       case "$line" in
         "worktree "*)

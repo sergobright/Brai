@@ -19,6 +19,12 @@ runtime_paths=(
   "$root/deploy/mobile-update"
   "$root/deploy/releases"
 )
+dependency_paths=(
+  "$root/node_modules"
+  "$root/apps/brai_app/node_modules"
+  "$root/services/brai_api/node_modules"
+  "$root/services/brai_temporal/node_modules"
+)
 source_group="${BRAI_MAIN_SOURCE_GROUP:-mark}"
 if ! getent group "$source_group" >/dev/null 2>&1; then
   source_group="mark"
@@ -33,6 +39,15 @@ restore_task_state_access() {
   sudo chmod 0770 "$task_state"
   sudo find "$task_state" -maxdepth 1 -type f -name '*.json' -exec chown mark:mark {} +
   sudo find "$task_state" -maxdepth 1 -type f -name '*.json' -exec chmod 0640 {} +
+}
+
+preserve_agent_dependency_paths() {
+  for dependency_path in "${dependency_paths[@]}"; do
+    if [ -d "$dependency_path" ] && [ ! -L "$dependency_path" ]; then
+      sudo chown -R "mark:$source_group" "$dependency_path"
+      sudo chmod -R u=rwX,g=rwX,o= "$dependency_path"
+    fi
+  done
 }
 
 mkdir -p "$worktrees"
@@ -56,6 +71,10 @@ sudo find "$root" \
   -path "$root/deploy/web" -prune -o \
   -path "$root/deploy/mobile-update" -prune -o \
   -path "$root/deploy/releases" -prune -o \
+  -path "$root/node_modules" -prune -o \
+  -path "$root/apps/brai_app/node_modules" -prune -o \
+  -path "$root/services/brai_api/node_modules" -prune -o \
+  -path "$root/services/brai_temporal/node_modules" -prune -o \
   -exec chown "root:$source_group" {} +
 
 sudo find "$root" \
@@ -66,6 +85,10 @@ sudo find "$root" \
   -path "$root/deploy/web" -prune -o \
   -path "$root/deploy/mobile-update" -prune -o \
   -path "$root/deploy/releases" -prune -o \
+  -path "$root/node_modules" -prune -o \
+  -path "$root/apps/brai_app/node_modules" -prune -o \
+  -path "$root/services/brai_api/node_modules" -prune -o \
+  -path "$root/services/brai_temporal/node_modules" -prune -o \
   -exec chmod u=rwX,g=rX,o= {} +
 
 sudo chmod 0751 "$root"
@@ -94,7 +117,9 @@ if getent group brai-deploy >/dev/null 2>&1; then
   done
 fi
 
-if [ "${BRAI_LOCK_STALE_WORKTREES:-1}" = "1" ]; then
+preserve_agent_dependency_paths
+
+if [ "${BRAI_LOCK_STALE_WORKTREES:-0}" = "1" ]; then
 while IFS= read -r line; do
   case "$line" in
     "worktree "*)
