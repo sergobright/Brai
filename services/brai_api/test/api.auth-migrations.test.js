@@ -279,8 +279,8 @@ test('migration adds inbox entity schema and metadata', async () => {
       .prepare("SELECT status, COUNT(*) AS count FROM activities WHERE activity_type_id = 'operation' GROUP BY status ORDER BY status")
       .all();
     assert.deepEqual(operations, [
-      { status: 'Done', count: 8 },
-      { status: 'New', count: 8 }
+      { status: 'Done', count: 9 },
+      { status: 'New', count: 7 }
     ]);
     const operation = fixture.store.db
       .prepare(`

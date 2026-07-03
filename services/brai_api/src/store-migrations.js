@@ -1801,7 +1801,7 @@ const AGENT_TASK_ACTIVITIES = [
     title: 'Починить владельца task worktree',
     description: 'Сделать так, чтобы `scripts/brai-task-start.sh` создавал task worktree с владельцем, доступным обычному Codex-процессу. Результат: `apply_patch` может писать файлы без ручного `chown`.',
     reason: 'Задача появилась после запуска `scripts/brai-task-start.sh` с escalation: файлы worktree получили owner `nobody`, и `apply_patch` не мог изменить проектные файлы.',
-    done: false
+    done: true
   },
   {
     id: 'operation:agent-task:turbopack-sandbox-port-binding',
