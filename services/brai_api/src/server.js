@@ -503,6 +503,9 @@ function latestApkRelease(releaseDir) {
       file: production.file,
       version: apkVersion,
       version_code: Number.isInteger(production.versionCode) ? production.versionCode : apkVersion,
+      release_key: production.releaseKey ?? 'production',
+      apk_build_kind: production.apkBuildKind ?? 'stable',
+      preview_iteration: Number.isInteger(production.previewIteration) ? production.previewIteration : null,
       release_url: '/releases/',
       published_at: production.publishedAt ?? null,
       capabilities: Array.isArray(production.capabilities) ? production.capabilities : []

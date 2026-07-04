@@ -29,6 +29,10 @@ OTA_VERSION="${BRAI_OTA_VERSION:-$VERSION}"
 BUNDLE_ID="${BRAI_MOBILE_BUNDLE_VERSION:-$OTA_VERSION}"
 UPDATE_BASE_URL="${BRAI_UPDATE_BASE_URL:-https://app.brightos.world/mobile-update}"
 TARGET_APK_VERSION="${BRAI_TARGET_APK_VERSION:-${BRAI_APK_VERSION:-1}}"
+TARGET_APK_RELEASE_KEY="${BRAI_TARGET_APK_RELEASE_KEY:-production}"
+TARGET_APK_BUILD_KIND="${BRAI_TARGET_APK_BUILD_KIND:-stable}"
+TARGET_APK_PREVIEW_ITERATION="${BRAI_TARGET_APK_PREVIEW_ITERATION:-0}"
+TARGET_APK_VERSION_CODE="${BRAI_TARGET_APK_VERSION_CODE:-$TARGET_APK_VERSION}"
 MANDATORY="${BRAI_MOBILE_MANDATORY:-false}"
 RETAIN_PREVIOUS="${BRAI_MOBILE_RETAIN_PREVIOUS:-3}"
 ENTRYPOINT="${BRAI_MOBILE_ENTRYPOINT:-index.html}"
@@ -71,6 +75,31 @@ if [[ ! "$TARGET_APK_VERSION" =~ ^[0-9]+$ || "$TARGET_APK_VERSION" -le 0 ]]; the
   exit 1
 fi
 
+if [[ ! "$TARGET_APK_RELEASE_KEY" =~ ^[A-Za-z0-9._-]+$ ]]; then
+  echo "BRAI_TARGET_APK_RELEASE_KEY must contain only letters, numbers, dot, underscore, or dash" >&2
+  exit 1
+fi
+
+if [[ "$TARGET_APK_BUILD_KIND" != "stable" && "$TARGET_APK_BUILD_KIND" != "preview" ]]; then
+  echo "BRAI_TARGET_APK_BUILD_KIND must be stable or preview" >&2
+  exit 1
+fi
+
+if [[ ! "$TARGET_APK_PREVIEW_ITERATION" =~ ^[0-9]+$ ]]; then
+  echo "BRAI_TARGET_APK_PREVIEW_ITERATION must be a non-negative integer" >&2
+  exit 1
+fi
+
+if [[ "$TARGET_APK_BUILD_KIND" == "preview" && "$TARGET_APK_PREVIEW_ITERATION" -le 0 ]]; then
+  echo "Preview OTA targets must include a positive BRAI_TARGET_APK_PREVIEW_ITERATION" >&2
+  exit 1
+fi
+
+if [[ ! "$TARGET_APK_VERSION_CODE" =~ ^[0-9]+$ || "$TARGET_APK_VERSION_CODE" -le 0 ]]; then
+  echo "BRAI_TARGET_APK_VERSION_CODE must be a positive integer" >&2
+  exit 1
+fi
+
 TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/brai-mobile-bundle.XXXXXX")"
 cleanup() {
   rm -rf "$TMP_DIR"
@@ -86,7 +115,7 @@ PAYLOAD_METADATA="$PAYLOAD_DIR/metadata.json"
 
 "$NODE_BIN" -e '
 const fs = require("node:fs");
-const [file, otaVersion, bundleId, publishedAt, entrypoint, targetApk, mandatory, archiveUrl] = process.argv.slice(1);
+const [file, otaVersion, bundleId, publishedAt, entrypoint, targetApk, targetReleaseKey, targetBuildKind, targetPreviewIteration, targetVersionCode, mandatory, archiveUrl] = process.argv.slice(1);
 const parsedUrl = new URL(archiveUrl);
 if (parsedUrl.protocol !== "https:") throw new Error("archive URL must use HTTPS");
 if (parsedUrl.username || parsedUrl.password) throw new Error("archive URL must not include credentials");
@@ -98,12 +127,16 @@ const metadata = {
   publishedAt,
   entrypoint,
   targetApkVersion: Number(targetApk),
+  targetApkReleaseKey: targetReleaseKey,
+  targetApkBuildKind: targetBuildKind,
+  targetApkPreviewIteration: Number(targetPreviewIteration),
+  targetApkVersionCode: Number(targetVersionCode),
   mandatory: mandatory === "true",
   archiveUrl,
   source: "next-static-export"
 };
 fs.writeFileSync(file, `${JSON.stringify(metadata, null, 2)}\n`);
-' "$PAYLOAD_METADATA" "$OTA_VERSION" "$BUNDLE_ID" "$PUBLISHED_AT" "$ENTRYPOINT" "$TARGET_APK_VERSION" "$MANDATORY" "$ARCHIVE_URL"
+' "$PAYLOAD_METADATA" "$OTA_VERSION" "$BUNDLE_ID" "$PUBLISHED_AT" "$ENTRYPOINT" "$TARGET_APK_VERSION" "$TARGET_APK_RELEASE_KEY" "$TARGET_APK_BUILD_KIND" "$TARGET_APK_PREVIEW_ITERATION" "$TARGET_APK_VERSION_CODE" "$MANDATORY" "$ARCHIVE_URL"
 
 ARCHIVE_TMP="$TMP_DIR/bundle.zip"
 (cd "$PAYLOAD_DIR" && "$ZIP_BIN" -qry "$ARCHIVE_TMP" .)
@@ -125,7 +158,7 @@ normalize_public_file "$METADATA_STAGE"
 
 "$NODE_BIN" -e '
 const fs = require("node:fs");
-const [metadataFile, manifestFile, otaVersion, publishedAt, archiveUrl, sha256, sizeBytes, entrypoint, targetApk, mandatory] = process.argv.slice(1);
+const [metadataFile, manifestFile, otaVersion, publishedAt, archiveUrl, sha256, sizeBytes, entrypoint, targetApk, targetReleaseKey, targetBuildKind, targetPreviewIteration, targetVersionCode, mandatory] = process.argv.slice(1);
 const metadata = JSON.parse(fs.readFileSync(metadataFile, "utf8"));
 metadata.sha256 = sha256;
 metadata.sizeBytes = Number(sizeBytes);
@@ -134,6 +167,10 @@ const manifest = {
   schemaVersion: 2,
   otaVersion,
   targetApkVersion: Number(targetApk),
+  targetApkReleaseKey: targetReleaseKey,
+  targetApkBuildKind: targetBuildKind,
+  targetApkPreviewIteration: Number(targetPreviewIteration),
+  targetApkVersionCode: Number(targetVersionCode),
   publishedAt,
   archiveUrl,
   sha256,
@@ -142,7 +179,7 @@ const manifest = {
   mandatory: mandatory === "true"
 };
 fs.writeFileSync(manifestFile, `${JSON.stringify(manifest, null, 2)}\n`);
-' "$METADATA_STAGE" "$MANIFEST_TMP" "$OTA_VERSION" "$PUBLISHED_AT" "$ARCHIVE_URL" "$SHA256" "$SIZE_BYTES" "$ENTRYPOINT" "$TARGET_APK_VERSION" "$MANDATORY"
+' "$METADATA_STAGE" "$MANIFEST_TMP" "$OTA_VERSION" "$PUBLISHED_AT" "$ARCHIVE_URL" "$SHA256" "$SIZE_BYTES" "$ENTRYPOINT" "$TARGET_APK_VERSION" "$TARGET_APK_RELEASE_KEY" "$TARGET_APK_BUILD_KIND" "$TARGET_APK_PREVIEW_ITERATION" "$TARGET_APK_VERSION_CODE" "$MANDATORY"
 
 normalize_public_file "$MANIFEST_TMP"
 mv "$ARCHIVE_STAGE" "$ARCHIVE_TARGET"

@@ -29,7 +29,10 @@ try {
       result = updateOwnedSlot(registry, args[0], args[1], now, "failed");
       break;
     case "apk":
-      result = updateOwnedApk(registry, args[0], args[1], args[2], args[3], args[4], now);
+      result = updateOwnedApk(registry, args[0], args[1], args[2], args[3], args[4], args[5], args[6], now);
+      break;
+    case "next-apk-preview":
+      result = nextApkPreview(registry, args[0], args[1], args[2], now);
       break;
     case "release":
       result = release(registry, args[0], now);
@@ -41,7 +44,7 @@ try {
       result = { ok: true, registry };
       break;
     default:
-      throw new Error("usage: preview-slots.sh init|status|allocate <branch> <commit>|ready <branch> <commit>|failed <branch> <commit>|apk <branch> <commit> <versionCode> <file> <version>|release <branch-or-slot>|dequeue <branch>");
+      throw new Error("usage: preview-slots.sh init|status|allocate <branch> <commit>|ready <branch> <commit>|failed <branch> <commit>|apk <branch> <commit> <versionCode> <file> <version> [previewIteration] [buildKind]|next-apk-preview <branch> <commit> <stableVersion>|release <branch-or-slot>|dequeue <branch>");
   }
 
   if (command !== "status") {
@@ -97,19 +100,39 @@ function updateOwnedSlot(registry, branch, commit, now, status) {
   return { ok: true, slot: existing.slot, entry: existing.entry };
 }
 
-function updateOwnedApk(registry, branch, commit, versionCode, file, version, now) {
+function nextApkPreview(registry, branch, commit, stableVersion, now) {
   requireBranch(branch);
   const existing = findByBranch(registry, branch);
   if (!existing) throw new Error(`branch has no preview slot: ${branch}`);
-  const numericVersionCode = Number(versionCode);
-  if (!Number.isInteger(numericVersionCode) || numericVersionCode <= 0) {
-    throw new Error(`invalid APK versionCode: ${versionCode}`);
-  }
+  const version = positiveInteger(stableVersion, "stable APK version");
+  const iteration = positiveInteger((registry.apk_preview_counter ?? 0) + 1, "APK preview iteration");
+  const versionCode = version * 10000 + iteration;
+  registry.apk_preview_counter = iteration;
+  Object.assign(existing.entry, {
+    commit: commit ?? existing.entry.commit,
+    apk_version: String(version),
+    apk_preview_iteration: iteration,
+    apk_version_code: versionCode,
+    apk_build_kind: "preview",
+    apk_updated_at: now,
+    updated_at: now,
+  });
+  return { ok: true, slot: existing.slot, version, previewIteration: iteration, versionCode, entry: existing.entry };
+}
+
+function updateOwnedApk(registry, branch, commit, versionCode, file, version, previewIteration, buildKind, now) {
+  requireBranch(branch);
+  const existing = findByBranch(registry, branch);
+  if (!existing) throw new Error(`branch has no preview slot: ${branch}`);
+  const numericVersionCode = positiveInteger(versionCode, "APK versionCode");
+  const iteration = previewIteration ? positiveInteger(previewIteration, "APK preview iteration") : null;
   Object.assign(existing.entry, {
     commit: commit ?? existing.entry.commit,
     apk_version_code: numericVersionCode,
     apk_file: file ?? null,
     apk_version: version ?? null,
+    apk_preview_iteration: iteration,
+    apk_build_kind: buildKind || (iteration ? "preview" : "stable"),
     apk_updated_at: now,
     updated_at: now,
   });
@@ -147,7 +170,7 @@ function findByBranch(registry, branch) {
 }
 
 function readRegistry() {
-  const initial = { ...Object.fromEntries(slots.map((slot) => [slot, defaultSlot(slot)])), queue: [] };
+  const initial = { ...Object.fromEntries(slots.map((slot) => [slot, defaultSlot(slot)])), queue: [], apk_preview_counter: 0 };
   if (!fs.existsSync(registryPath)) return initial;
   const parsed = JSON.parse(fs.readFileSync(registryPath, "utf8"));
   for (const slot of slots) {
@@ -156,6 +179,7 @@ function readRegistry() {
   return {
     ...Object.fromEntries(slots.map((slot) => [slot, parsed[slot]])),
     queue: normalizeQueue(parsed.queue),
+    apk_preview_counter: Number.isInteger(Number(parsed.apk_preview_counter)) ? Number(parsed.apk_preview_counter) : 0,
   };
 }
 
@@ -181,6 +205,8 @@ function defaultSlot(slot) {
     apk_version_code: null,
     apk_file: null,
     apk_version: null,
+    apk_preview_iteration: null,
+    apk_build_kind: "stable",
     apk_updated_at: null,
     assigned_at: null,
     updated_at: null,
@@ -207,6 +233,7 @@ function renderStatusPage(registry) {
           <div><dt>Android</dt><dd>${escapeHtml(entry.android_app)}</dd></div>
           <div><dt>APK</dt><dd>${apkUrl ? `<a href="${escapeHtml(apkUrl)}">${escapeHtml(entry.apk_file)}</a>` : escapeHtml(apkStatus)}</dd></div>
           <div><dt>APK versionCode</dt><dd>${escapeHtml(entry.apk_version_code ?? "none")}</dd></div>
+          <div><dt>APK kind</dt><dd>${escapeHtml(entry.apk_build_kind ?? "stable")}</dd></div>
         </dl>
       </section>`;
     })
@@ -275,6 +302,14 @@ function chmodIfPossible(target, mode) {
 function requireBranch(branch) {
   if (!branch) throw new Error("branch is required");
   if (!branch.startsWith("codex/")) throw new Error(`preview branches must start with codex/: ${branch}`);
+}
+
+function positiveInteger(value, label) {
+  const number = Number(value);
+  if (!Number.isInteger(number) || number <= 0) {
+    throw new Error(`invalid ${label}: ${value}`);
+  }
+  return number;
 }
 
 function upsertQueuedBranch(registry, branch, commit, now) {

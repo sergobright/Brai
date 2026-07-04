@@ -13,16 +13,25 @@ const releaseKey = required(args, "release");
 const fileName = required(args, "file");
 const filePath = path.join(releaseDir, fileName);
 const target = apkReleaseTargetByKey(releaseKey, root);
+const apkBuildKind = args["build-kind"] === "preview" ? "preview" : "stable";
+const previewIteration = Number(args["preview-iteration"] ?? 0);
 
 if (!target) throw new Error(`unknown release section: ${releaseKey}`);
 if (!fs.existsSync(filePath)) throw new Error(`missing APK file: ${fileName}`);
+if (apkBuildKind === "preview" && (!Number.isInteger(previewIteration) || previewIteration <= 0)) {
+  throw new Error("preview APK release requires --preview-iteration");
+}
 
 const data = readIndex();
 data.sections[releaseKey] = {
   ...sectionDefaults(target),
+  title: apkBuildKind === "preview" ? previewTitle(target) : target.androidApp,
   file: fileName,
   apkVersion: Number(required(args, "apk-version")),
   versionCode: Number(required(args, "version-code")),
+  releaseKey,
+  apkBuildKind,
+  previewIteration: apkBuildKind === "preview" ? previewIteration : null,
   publishedAt: required(args, "published-at"),
   sizeBytes: fs.statSync(filePath).size,
   sha256: sha256(filePath),
@@ -50,9 +59,12 @@ function sectionDefaults(target) {
     title: target.androidApp,
     androidApp: target.androidApp,
     applicationId: target.applicationId,
+    releaseKey: target.releaseKey,
     file: null,
     apkVersion: null,
     versionCode: null,
+    apkBuildKind: "stable",
+    previewIteration: null,
     publishedAt: null,
     sizeBytes: null,
     sha256: null,
@@ -104,12 +116,20 @@ function sectionCard(section) {
     ? `<a class="download" href="./${escapeHtml(section.file)}">Скачать</a>`
     : `<span class="download" aria-disabled="true">Скачать</span>`;
   const published = formatPublishedAt(section.publishedAt);
+  const version = section.apkBuildKind === "preview" && section.previewIteration
+    ? `v${section.apkVersion}-preview${section.previewIteration}`
+    : section.apkVersion ? `v${section.apkVersion}` : "";
   return `<section>
   <h2>${escapeHtml(section.title)}</h2>
-  ${section.apkVersion ? `<p class="version">v${escapeHtml(section.apkVersion)}</p>` : ""}
+  ${version ? `<p class="version">${escapeHtml(version)}</p>` : ""}
   ${section.publishedAt ? `<time datetime="${escapeHtml(section.publishedAt)}">${escapeHtml(published)}</time>` : `<span class="unpublished">${escapeHtml(published)}</span>`}
   ${download}
 </section>`;
+}
+
+function previewTitle(target) {
+  const key = String(target.releaseKey ?? "").toUpperCase();
+  return key.length === 1 ? `Preview ${key}` : target.androidApp;
 }
 
 function formatPublishedAt(value) {

@@ -109,4 +109,102 @@ describe("engineSectionView", () => {
     expect(view.apkUpdateAvailable).toBe(true);
     expect(view.updateStatus.label).toBe("нужен APK");
   });
+
+  it("flags APK-only releases from the version API", () => {
+    const view = engineSectionView({
+      appBuild: "0.0.41",
+      appVersionState: {
+        server_time_utc: "2026-06-30T20:26:24.000Z",
+        version: "0.0.41",
+        ota_version: "0.0.41",
+        parts: { canon: 0, release: 0, build: 41, apk: 2 },
+        latest: { canon: null, release: null, build: null, apk: null },
+        target_apk: {
+          file: "brai-v2.apk",
+          version: 2,
+          version_code: 2,
+          release_key: "production",
+          apk_build_kind: "stable",
+          preview_iteration: null,
+          release_url: "/releases/",
+          published_at: "2026-06-30T20:23:42Z",
+        },
+        apk_release: null,
+      },
+      otaRefreshing: false,
+      otaState: {
+        activeBundleVersion: "0.0.41",
+        nativeApkVersion: "1",
+        nativeApkReleaseKey: "production",
+        nativeApkBuildKind: "stable",
+        lastCheckStatus: "up_to_date",
+      },
+      versionError: false,
+      versionRefreshing: false,
+    });
+
+    expect(view.hasUpdate).toBe(true);
+    expect(view.apkUpdateAvailable).toBe(true);
+    expect(view.requiredApkLabel).toBe("v2");
+  });
+
+  it("keeps legacy stable APK state compatible without native release key metadata", () => {
+    const view = engineSectionView({
+      appBuild: "0.0.41",
+      appVersionState: {
+        server_time_utc: "2026-06-30T20:26:24.000Z",
+        version: "0.0.41",
+        ota_version: "0.0.41",
+        parts: { canon: 0, release: 0, build: 41, apk: 1 },
+        latest: { canon: null, release: null, build: null, apk: null },
+        target_apk: {
+          file: "brai-v1.apk",
+          version: 1,
+          version_code: 1,
+          release_key: "production",
+          apk_build_kind: "stable",
+          preview_iteration: null,
+          release_url: "/releases/",
+          published_at: "2026-06-30T20:23:42Z",
+        },
+        apk_release: null,
+      },
+      otaRefreshing: false,
+      otaState: {
+        activeBundleVersion: "0.0.41",
+        nativeApkVersion: "1",
+        lastCheckStatus: "up_to_date",
+      },
+      versionError: false,
+      versionRefreshing: false,
+    });
+
+    expect(view.hasUpdate).toBe(false);
+    expect(view.apkUpdateAvailable).toBe(false);
+  });
+
+  it("flags stale preview APK iterations", () => {
+    const view = engineSectionView({
+      appBuild: "0.0.41",
+      appVersionState: null,
+      otaRefreshing: false,
+      otaState: {
+        activeBundleVersion: "0.0.41",
+        nativeApkVersion: "2",
+        nativeApkReleaseKey: "a",
+        nativeApkBuildKind: "preview",
+        nativeApkPreviewIteration: 5,
+        targetApkVersion: "2",
+        targetApkReleaseKey: "a",
+        targetApkBuildKind: "preview",
+        targetApkPreviewIteration: "6",
+        lastCheckStatus: "up_to_date",
+      },
+      versionError: false,
+      versionRefreshing: false,
+    });
+
+    expect(view.apkUpdateAvailable).toBe(true);
+    expect(view.requiredApkLabel).toBe("v2-preview6");
+  });
 });

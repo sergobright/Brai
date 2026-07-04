@@ -395,7 +395,7 @@ try {
     expect(resetBlock.indexOf("Preview SQLite reset failed")).toBeLessThan(deploy.indexOf("record-deployment.mjs"));
   });
 
-  it("rebuilds APK release rows without recording ledger rows by default", async () => {
+  it("rebuilds APK release rows and records production ledger rows by default", async () => {
     const deploy = await readFile(path.join(workspaceRoot, "deploy/scripts/ci-ssh-deploy.sh"), "utf8");
     const buildApk = await readFile(path.join(workspaceRoot, "deploy/scripts/build-android-env-apk.sh"), "utf8");
     const buildNonproduction = await readFile(path.join(workspaceRoot, "deploy/scripts/build-nonproduction-apks.sh"), "utf8");
@@ -406,8 +406,10 @@ try {
     expect(prodBlock).toContain('node deploy/scripts/resolve-app-version.mjs --environment prod --root "$SOURCE_ROOT" --db "${BRAI_DB:-}"');
     expect(prodBlock).toContain('deploy/scripts/build-nonproduction-apks.sh');
     expect(prodBlock.indexOf('deploy/scripts/build-android-env-apk.sh production')).toBeLessThan(prodBlock.indexOf('deploy/scripts/build-nonproduction-apks.sh'));
-    expect(buildApk).toContain('"${BRAI_RECORD_APK_LEDGER:-false}" == "true"');
+    expect(buildApk).toContain('"${BRAI_RECORD_APK_LEDGER:-true}" != "false"');
     expect(buildApk).toContain('--next-apk true --target-branch "$BRAI_BRANCH" --target-commit "$BRAI_COMMIT"');
+    expect(buildApk).toContain('preview-slots.sh" next-apk-preview "$BRAI_BRANCH" "$BRAI_COMMIT" "$BRAI_APK_VERSION"');
+    expect(buildApk.indexOf('if [[ "$ENVIRONMENT" == preview-*')).toBeLessThan(buildApk.indexOf('export BRAI_APK_VERSION='));
     expect(buildApk).toContain('record-shipped-apk-version.mjs');
     expect(buildNonproduction).toContain('for flavor in dev previewA previewB previewC previewD previewE; do');
     expect(releaseSlot).toContain('deploy/scripts/build-android-env-apk.sh "preview${SLOT_META[0]}" >&2');
@@ -438,10 +440,41 @@ try {
       archiveUrl: `https://app.brightos.world/mobile-update/bundles/${bundleVersion}/bundle.zip`,
       entrypoint: "index.html",
       targetApkVersion: 2999,
+      targetApkReleaseKey: "production",
+      targetApkBuildKind: "stable",
+      targetApkPreviewIteration: 0,
+      targetApkVersionCode: 2999,
       mandatory: false,
     });
     expect(manifest.sizeBytes).toBe((await stat(archivePath)).size);
     expect(manifest.sha256).toBe(createHash("sha256").update(archive).digest("hex"));
+  });
+
+  it("publishes preview APK target metadata into OTA manifests", async () => {
+    const root = await fixtureRoot("brai-mobile-preview-target-");
+    await writeStaticExport(root, "ota-preview");
+
+    await execFileAsync("bash", [path.join(workspaceRoot, "deploy/scripts/publish-mobile-bundle.sh")], {
+      env: {
+        ...process.env,
+        BRAI_ROOT: root,
+        BRAI_TARGET_APK_VERSION: "2",
+        BRAI_TARGET_APK_RELEASE_KEY: "a",
+        BRAI_TARGET_APK_BUILD_KIND: "preview",
+        BRAI_TARGET_APK_PREVIEW_ITERATION: "6",
+        BRAI_TARGET_APK_VERSION_CODE: "20006",
+        BRAI_PUBLISHED_AT: "2026-06-15T00:00:00Z",
+      },
+    });
+
+    const manifest = JSON.parse(await readFile(path.join(root, "deploy/mobile-update/manifest.json"), "utf8"));
+    expect(manifest).toMatchObject({
+      targetApkVersion: 2,
+      targetApkReleaseKey: "a",
+      targetApkBuildKind: "preview",
+      targetApkPreviewIteration: 6,
+      targetApkVersionCode: 20006,
+    });
   });
 
   it("publishes an APK using app version metadata when env version is unset", async () => {
@@ -502,6 +535,48 @@ try {
     await expect(readFile(path.join(root, "deploy/releases/brai-dev-v1.apk"), "utf8")).resolves.toBe("dev-apk");
     expect(buildApk).toContain('if [[ -z "$MOBILE_TARGET" && -n "$ENV_PATH" ]]; then');
     expect(buildApk).not.toContain("/dev/mobile-update");
+  });
+
+  it("publishes a Preview APK over the selected release slot", async () => {
+    const root = await fixtureRoot("brai-preview-apk-publish-");
+    await writeStaticExport(root, "preview-apk");
+    await mkdir(path.join(root, "deploy"), { recursive: true });
+    await copyFile(
+      path.join(workspaceRoot, "deploy/environments.json"),
+      path.join(root, "deploy/environments.json"),
+    );
+    const apkPath = path.join(root, "app-preview.apk");
+    await writeFile(apkPath, "preview-apk");
+
+    await execFileAsync("bash", [path.join(workspaceRoot, "deploy/scripts/publish-capacitor-apk.sh")], {
+      env: {
+        ...process.env,
+        BRAI_ROOT: root,
+        BRAI_APK_SOURCE: apkPath,
+        BRAI_RELEASE_ENV: "a",
+        BRAI_APK_VERSION: "2",
+        BRAI_ANDROID_VERSION_CODE: "20006",
+        BRAI_APK_BUILD_KIND: "preview",
+        BRAI_APK_PREVIEW_ITERATION: "6",
+        BRAI_PUBLISHED_AT: "2026-06-15T00:00:00Z",
+      },
+    });
+
+    const index = JSON.parse(await readFile(path.join(root, "deploy/releases/releases.json"), "utf8"));
+    const html = await readFile(path.join(root, "deploy/releases/index.html"), "utf8");
+    expect(index.sections.a).toMatchObject({
+      title: "Preview A",
+      file: "brai-v2-preview6.apk",
+      apkVersion: 2,
+      versionCode: 20006,
+      releaseKey: "a",
+      apkBuildKind: "preview",
+      previewIteration: 6,
+    });
+    expect(html).toContain("<h2>Preview A</h2>");
+    expect(html).toContain('<p class="version">v2-preview6</p>');
+    expect(html).toContain('<a class="download" href="./brai-v2-preview6.apk">Скачать</a>');
+    await expect(readFile(path.join(root, "deploy/releases/brai-v2-preview6.apk"), "utf8")).resolves.toBe("preview-apk");
   });
 
   it("replaces an existing APK instead of rewriting it in place", async () => {
@@ -688,6 +763,30 @@ try {
     const statusHtml = await readFile(path.join(envsRoot, "preview-status/index.html"), "utf8");
     expect(statusHtml).toContain("Brai Preview Slots");
     expect(statusHtml).toContain("APK versionCode");
+  });
+
+  it("increments the global preview APK counter across released slots", async () => {
+    const root = await fixtureRoot("brai-slots-apk-counter-");
+    const envsRoot = path.join(root, "envs");
+    const env = {
+      ...process.env,
+      BRAI_ROOT: workspaceRoot,
+      BRAI_ENVS_ROOT: envsRoot,
+    };
+    const slotScript = path.join(workspaceRoot, "deploy/scripts/preview-slots.mjs");
+
+    await execFileAsync("node", [slotScript, "allocate", "codex/one", "abc"], { env });
+    await execFileAsync("node", [slotScript, "next-apk-preview", "codex/one", "abc", "2"], { env });
+    let registry = JSON.parse(await readFile(path.join(envsRoot, "preview-slots.json"), "utf8"));
+    expect(registry.A).toMatchObject({ apk_preview_iteration: 1, apk_version_code: 20001 });
+
+    await execFileAsync("node", [slotScript, "release", "codex/one"], { env });
+    await execFileAsync("node", [slotScript, "allocate", "codex/two", "def"], { env });
+    await execFileAsync("node", [slotScript, "next-apk-preview", "codex/two", "def", "2"], { env });
+    registry = JSON.parse(await readFile(path.join(envsRoot, "preview-slots.json"), "utf8"));
+
+    expect(registry.A).toMatchObject({ apk_preview_iteration: 2, apk_version_code: 20002 });
+    expect(registry.apk_preview_counter).toBe(2);
   });
 
   it("queues preview branches when every slot is occupied", async () => {

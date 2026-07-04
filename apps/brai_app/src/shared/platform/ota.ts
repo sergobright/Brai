@@ -10,6 +10,9 @@ export type BraiOtaState = {
   nativeVersionCode?: number;
   nativeEnvironment?: string;
   nativePreviewSlot?: string | null;
+  nativeApkReleaseKey?: string | null;
+  nativeApkBuildKind?: string | null;
+  nativeApkPreviewIteration?: number | string | null;
   nativeOtaChannel?: string;
   nativeAppLabel?: string;
   previousStableBundleVersion?: string | null;
@@ -18,6 +21,10 @@ export type BraiOtaState = {
   lastCheckStatus?: string;
   lastUpdateError?: string | null;
   targetApkVersion?: string | null;
+  targetApkReleaseKey?: string | null;
+  targetApkBuildKind?: string | null;
+  targetApkPreviewIteration?: string | number | null;
+  targetApkVersionCode?: string | number | null;
   targetApkReleaseUrl?: string | null;
   failedBundleVersions?: string;
   checkInProgress?: boolean;

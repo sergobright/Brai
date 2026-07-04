@@ -28,6 +28,7 @@ Brai Android SHALL discover mobile web-layer updates from a self-hosted update m
 #### Scenario: Manifest describes a bundle
 - **WHEN** the manifest is valid
 - **THEN** it includes `schemaVersion`, `otaVersion`, `targetApkVersion`, `publishedAt`, `archiveUrl`, `sha256`, `sizeBytes`, `entrypoint`, and `mandatory`
+- **AND** it may include `targetApkReleaseKey`, `targetApkBuildKind`, `targetApkPreviewIteration`, and `targetApkVersionCode` for APK line compatibility
 - **AND** `otaVersion` uses the same `X.Y.Z` version as the browser web release
 
 #### Scenario: Non-production manifest is published
@@ -38,7 +39,7 @@ Brai Android SHALL discover mobile web-layer updates from a self-hosted update m
 ### Requirement: Android applies only compatible OTA bundles
 Brai Android SHALL apply only OTA bundles compatible with the installed APK.
 
-OTA manifests SHALL require a new APK only when `targetApkVersion` is greater than the installed native APK version.
+OTA manifests SHALL keep backward-compatible numeric `targetApkVersion` checks and SHALL use APK release key, build kind, stable `N`, and preview iteration `M` when those fields are present.
 
 #### Scenario: Bundle requires newer APK
 - **WHEN** the manifest `targetApkVersion` is greater than the installed native APK version
@@ -49,7 +50,7 @@ OTA manifests SHALL require a new APK only when `targetApkVersion` is greater th
 #### Scenario: Preview APK does not match
 - **WHEN** a Preview Android app checks an OTA manifest
 - **AND** the manifest was published for a native-boundary change
-- **AND** the installed native APK version is lower than `targetApkVersion`
+- **AND** the installed APK release key, build kind, stable `N`, or preview `M` does not satisfy the manifest target
 - **THEN** the bundle is skipped as `apk_required`
 - **AND** the app blocks normal Preview use with an APK update screen
 
@@ -129,7 +130,7 @@ Brai SHALL reserve OTA updates for web-layer changes compatible with the install
 
 #### Scenario: Native-boundary change is published
 - **WHEN** a change crosses the native Android boundary
-- **THEN** the Preview OTA manifest requires the newly published APK through `targetApkVersion`
+- **THEN** the Preview OTA manifest requires the newly published APK through target APK release key, build kind, stable `N`, and preview `M`
 
 ### Requirement: OTA update failures are non-blocking for normal startup
 Brai Android SHALL continue to start from a known-good local web layer when OTA update checks or downloads fail.

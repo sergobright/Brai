@@ -21,6 +21,7 @@ import { ActionsInfoPanel } from "./sections/actions/ActionsInfoPanel";
 import { ArchiveSection } from "./sections/actions/ArchiveSection";
 import { EvilEyeSection } from "./sections/EvilEyeSection";
 import { EngineSection } from "./sections/engine/EngineSection";
+import { formatApkTargetLabel } from "./sections/engine/engineModel";
 import { FocusBackground, FocusContextPanelSheet, FocusSection } from "./sections/focus/FocusSection";
 import { InboxSection } from "./sections/inbox/InboxSection";
 import { SettingsSection } from "./sections/settings/SettingsSection";
@@ -338,7 +339,8 @@ function ApkCompatibilityBlocker({
   onRefresh: () => Promise<void>;
 }) {
   const releaseUrl = apkReleaseUrl(otaState);
-  const requiredApk = otaState?.targetApkVersion ? `Требуется APK v${otaState.targetApkVersion}.` : "Требуется более новый APK.";
+  const requiredApkLabel = formatApkTargetLabel(otaState?.targetApkVersion, otaState?.targetApkBuildKind, otaState?.targetApkPreviewIteration);
+  const requiredApk = requiredApkLabel ? `Требуется APK ${requiredApkLabel}.` : "Требуется более новый APK.";
 
   return (
     <main className="grid min-h-dvh place-items-center bg-background px-4 py-8 text-foreground">

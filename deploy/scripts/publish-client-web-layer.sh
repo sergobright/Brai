@@ -66,6 +66,10 @@ export BRAI_MOBILE_BUNDLE_VERSION="${BRAI_MOBILE_BUNDLE_VERSION:-$VERSION}"
 
 ENVIRONMENT="${NEXT_PUBLIC_BRAI_ENVIRONMENT:-${BRAI_ENVIRONMENT:-prod}}"
 export BRAI_TARGET_APK_VERSION="${BRAI_TARGET_APK_VERSION:-$("$NODE_BIN" "$SCRIPT_DIR/resolve-required-apk-version.mjs" "$ENVIRONMENT")}"
+export BRAI_TARGET_APK_RELEASE_KEY="${BRAI_TARGET_APK_RELEASE_KEY:-$("$NODE_BIN" "$SCRIPT_DIR/resolve-required-apk-version.mjs" "$ENVIRONMENT" releaseKey)}"
+export BRAI_TARGET_APK_BUILD_KIND="${BRAI_TARGET_APK_BUILD_KIND:-$("$NODE_BIN" "$SCRIPT_DIR/resolve-required-apk-version.mjs" "$ENVIRONMENT" buildKind)}"
+export BRAI_TARGET_APK_PREVIEW_ITERATION="${BRAI_TARGET_APK_PREVIEW_ITERATION:-$("$NODE_BIN" "$SCRIPT_DIR/resolve-required-apk-version.mjs" "$ENVIRONMENT" previewIteration)}"
+export BRAI_TARGET_APK_VERSION_CODE="${BRAI_TARGET_APK_VERSION_CODE:-$("$NODE_BIN" "$SCRIPT_DIR/resolve-required-apk-version.mjs" "$ENVIRONMENT" versionCode)}"
 
 echo "Publishing Android OTA bundle..."
 "$SCRIPT_DIR/publish-mobile-bundle.sh"

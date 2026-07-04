@@ -47,6 +47,10 @@ public final class BraiOtaManager {
     private static final String KEY_LAST_ERROR = "lastUpdateError";
     private static final String KEY_LAST_READY_VERSION = "lastReadyBundleVersion";
     private static final String KEY_LAST_TARGET_APK_VERSION = "lastTargetApkVersion";
+    private static final String KEY_LAST_TARGET_APK_RELEASE_KEY = "lastTargetApkReleaseKey";
+    private static final String KEY_LAST_TARGET_APK_BUILD_KIND = "lastTargetApkBuildKind";
+    private static final String KEY_LAST_TARGET_APK_PREVIEW_ITERATION = "lastTargetApkPreviewIteration";
+    private static final String KEY_LAST_TARGET_APK_VERSION_CODE = "lastTargetApkVersionCode";
     private static final int NETWORK_TIMEOUT_MS = 7000;
     private static final int READY_TIMEOUT_MS = 15000;
 
@@ -140,6 +144,9 @@ public final class BraiOtaManager {
         state.put("nativeVersionCode", installedVersionCodeOrZero());
         state.put("nativeEnvironment", BuildConfig.BRAI_ENVIRONMENT);
         state.put("nativePreviewSlot", BuildConfig.BRAI_PREVIEW_SLOT);
+        state.put("nativeApkReleaseKey", BuildConfig.BRAI_APK_RELEASE_KEY);
+        state.put("nativeApkBuildKind", BuildConfig.BRAI_APK_BUILD_KIND);
+        state.put("nativeApkPreviewIteration", BuildConfig.BRAI_APK_PREVIEW_ITERATION);
         state.put("nativeOtaChannel", BuildConfig.BRAI_OTA_CHANNEL);
         state.put("nativeAppLabel", BuildConfig.BRAI_APP_LABEL);
         state.put("stableBundleVersion", prefs.getString(KEY_STABLE_VERSION, null));
@@ -148,6 +155,10 @@ public final class BraiOtaManager {
         state.put("lastCheckStatus", prefs.getString(KEY_LAST_STATUS, "unknown"));
         state.put("lastUpdateError", prefs.getString(KEY_LAST_ERROR, null));
         state.put("targetApkVersion", prefs.getString(KEY_LAST_TARGET_APK_VERSION, null));
+        state.put("targetApkReleaseKey", prefs.getString(KEY_LAST_TARGET_APK_RELEASE_KEY, null));
+        state.put("targetApkBuildKind", prefs.getString(KEY_LAST_TARGET_APK_BUILD_KIND, null));
+        state.put("targetApkPreviewIteration", prefs.getString(KEY_LAST_TARGET_APK_PREVIEW_ITERATION, null));
+        state.put("targetApkVersionCode", prefs.getString(KEY_LAST_TARGET_APK_VERSION_CODE, null));
         state.put("targetApkReleaseUrl", apkReleaseUrl());
         state.put("failedBundleVersions", prefs.getString(KEY_FAILED_VERSIONS, ""));
         state.put("checkInProgress", checkInProgress);
@@ -221,7 +232,13 @@ public final class BraiOtaManager {
         BraiOtaManifest manifest = BraiOtaManifest.parse(readText(manifestUrl));
         recordManifestApkVersions(manifest);
         try {
-            manifest.validate(manifestUrl, nativeApkVersionNumber());
+            manifest.validate(
+                manifestUrl,
+                nativeApkVersionNumber(),
+                BuildConfig.BRAI_APK_RELEASE_KEY,
+                BuildConfig.BRAI_APK_BUILD_KIND,
+                BuildConfig.BRAI_APK_PREVIEW_ITERATION
+            );
         } catch (BraiOtaException error) {
             if ("apk_required".equals(error.getMessage())) {
                 recordStatus("apk_required", error.getMessage());
@@ -477,7 +494,17 @@ public final class BraiOtaManager {
     }
 
     private synchronized void recordManifestApkVersions(BraiOtaManifest manifest) {
-        prefs.edit().putString(KEY_LAST_TARGET_APK_VERSION, String.valueOf(manifest.targetApkVersion)).apply();
+        SharedPreferences.Editor editor = prefs.edit()
+            .putString(KEY_LAST_TARGET_APK_VERSION, String.valueOf(manifest.targetApkVersion))
+            .putString(KEY_LAST_TARGET_APK_BUILD_KIND, manifest.targetApkBuildKind)
+            .putString(KEY_LAST_TARGET_APK_PREVIEW_ITERATION, String.valueOf(manifest.targetApkPreviewIteration))
+            .putString(KEY_LAST_TARGET_APK_VERSION_CODE, String.valueOf(manifest.targetApkVersionCode));
+        if (manifest.targetApkReleaseKey == null) {
+            editor.remove(KEY_LAST_TARGET_APK_RELEASE_KEY);
+        } else {
+            editor.putString(KEY_LAST_TARGET_APK_RELEASE_KEY, manifest.targetApkReleaseKey);
+        }
+        editor.apply();
     }
 
     private static int nativeApkVersionNumber() throws BraiOtaException {

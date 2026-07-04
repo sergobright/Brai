@@ -42,6 +42,9 @@ test('version endpoint returns build ledger, APK line, and release-index OTA tar
       file: 'brai-v1.apk',
       version: 1,
       version_code: 1,
+      release_key: 'production',
+      apk_build_kind: 'stable',
+      preview_iteration: null,
       release_url: '/releases/',
       published_at: '2026-06-30T20:23:42Z',
       capabilities: ['AccessibilityService', 'Overlay', 'Microphone', 'MediaProjection']
@@ -50,6 +53,9 @@ test('version endpoint returns build ledger, APK line, and release-index OTA tar
       file: 'brai-v1.apk',
       version: 1,
       version_code: 1,
+      release_key: 'production',
+      apk_build_kind: 'stable',
+      preview_iteration: null,
       release_url: '/releases/',
       published_at: '2026-06-30T20:23:42Z',
       capabilities: ['AccessibilityService', 'Overlay', 'Microphone', 'MediaProjection']
