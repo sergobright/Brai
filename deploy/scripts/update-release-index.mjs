@@ -73,26 +73,22 @@ function renderReleasePage(data, htmlPath) {
     <style>
       :root { color-scheme: dark; --bg: #0c1110; --panel: #121a18; --line: #2a3935; --text: #edf7f4; --muted: #9fb0ab; --accent: #4cc3ad; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
       * { box-sizing: border-box; }
-      body { margin: 0; min-height: 100dvh; background: var(--bg); color: var(--text); padding: 28px 18px; }
-      main { width: min(1080px, 100%); margin: 0 auto; }
-      h1 { margin: 0 0 8px; font-size: 32px; letter-spacing: 0; }
-      .lead { margin: 0 0 22px; color: var(--muted); }
-      .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 12px; }
-      section { border: 1px solid var(--line); border-radius: 8px; background: var(--panel); padding: 16px; }
-      h2 { margin: 0 0 4px; font-size: 20px; }
-      .app { margin: 0 0 14px; color: var(--muted); }
-      dl { display: grid; gap: 8px; margin: 0 0 14px; }
-      dt { color: var(--muted); font-size: 12px; text-transform: uppercase; }
-      dd { margin: 2px 0 0; overflow-wrap: anywhere; }
-      a, .missing { display: inline-flex; min-height: 42px; align-items: center; border-radius: 8px; padding: 0 14px; font-weight: 800; }
-      a { background: var(--accent); color: #06110f; text-decoration: none; }
-      .missing { border: 1px solid var(--line); color: var(--muted); }
+      body { margin: 0; min-height: 100dvh; background: var(--bg); color: var(--text); padding: 24px 16px; }
+      main { width: min(920px, 100%); margin: 0 auto; }
+      h1 { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+      .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; }
+      section { border: 1px solid var(--line); border-radius: 8px; background: var(--panel); padding: 12px; }
+      h2 { margin: 0 0 8px; font-size: 18px; line-height: 1.2; }
+      time, .unpublished { display: block; min-height: 40px; margin: 0 0 12px; color: var(--muted); line-height: 1.35; }
+      time { font-size: 15px; white-space: nowrap; }
+      .download { display: inline-flex; min-height: 38px; align-items: center; border-radius: 8px; padding: 0 14px; font-weight: 800; }
+      a.download { background: var(--accent); color: #06110f; text-decoration: none; }
+      .download[aria-disabled="true"] { border: 1px solid var(--line); color: var(--muted); }
     </style>
   </head>
   <body>
     <main>
       <h1>APK-релизы Brai</h1>
-      <p class="lead">Production, Dev и preview A-E устанавливаются как отдельные Android-приложения.</p>
       <div class="grid">${cards}</div>
     </main>
   </body>
@@ -104,24 +100,32 @@ function renderReleasePage(data, htmlPath) {
 
 function sectionCard(section) {
   const download = section.file
-    ? `<a href="./${escapeHtml(section.file)}">Скачать APK</a>`
-    : `<span class="missing">APK ещё не опубликован</span>`;
-  const capabilities = (Array.isArray(section.capabilities) ? section.capabilities : [])
-    .map((capability) => `<li>${escapeHtml(capability)}</li>`)
-    .join("");
+    ? `<a class="download" href="./${escapeHtml(section.file)}">Скачать</a>`
+    : `<span class="download" aria-disabled="true">Скачать</span>`;
+  const published = formatPublishedAt(section.publishedAt);
   return `<section>
   <h2>${escapeHtml(section.title)}</h2>
-  <p class="app">${escapeHtml(section.androidApp)}</p>
-  <dl>
-    <div><dt>APK</dt><dd>${section.apkVersion ? `v${escapeHtml(section.apkVersion)}` : "нет"}</dd></div>
-    <div><dt>versionCode</dt><dd>${escapeHtml(section.versionCode ?? "нет")}</dd></div>
-    <div><dt>applicationId</dt><dd>${escapeHtml(section.applicationId)}</dd></div>
-    <div><dt>published</dt><dd>${escapeHtml(section.publishedAt ?? "нет")}</dd></div>
-    <div><dt>file</dt><dd>${escapeHtml(section.file ?? "нет")}</dd></div>
-  </dl>
-  ${capabilities ? `<ul>${capabilities}</ul>` : ""}
+  ${section.publishedAt ? `<time datetime="${escapeHtml(section.publishedAt)}">${escapeHtml(published)}</time>` : `<span class="unpublished">${escapeHtml(published)}</span>`}
   ${download}
 </section>`;
+}
+
+function formatPublishedAt(value) {
+  if (!value) return "Не опубликовано";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Не опубликовано";
+  const datePart = new Intl.DateTimeFormat("ru-RU", {
+    timeZone: "Europe/Moscow",
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  }).format(date).replace(" г.", "");
+  const timePart = new Intl.DateTimeFormat("ru-RU", {
+    timeZone: "Europe/Moscow",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
+  return `${datePart}, ${timePart} МСК`;
 }
 
 function apkCapabilities() {

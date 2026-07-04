@@ -724,7 +724,7 @@ try {
     expect(registry.queue).toEqual([]);
   });
 
-  it("renders production and preview APK release sections without stale missing links", async () => {
+  it("renders compact APK release cards", async () => {
     const root = await fixtureRoot("brai-release-page-");
     const releaseDir = path.join(root, "deploy/releases");
     await mkdir(releaseDir, { recursive: true });
@@ -746,8 +746,12 @@ try {
     expect(html).toContain("<h2>Brai</h2>");
     expect(html).toContain("<h2>Brai Dev</h2>");
     expect(html).toContain("Brai E");
-    expect(html).toContain("APK ещё не опубликован");
-    expect(html).toContain("brai-v1.apk");
+    expect(html).toContain("23 июня 2026, 12:13 МСК");
+    expect(html).toContain('<a class="download" href="./brai-v1.apk">Скачать</a>');
+    expect(html).toContain('<span class="download" aria-disabled="true">Скачать</span>');
+    expect(html).not.toContain("versionCode");
+    expect(html).not.toContain("applicationId");
+    expect(html).not.toContain("AccessibilityService");
   });
 });
 
