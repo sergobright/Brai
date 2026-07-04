@@ -1,4 +1,4 @@
-package world.brightos.brai.airwhisper
+package world.brightos.brai.capabilities
 
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.AccessibilityService.ScreenshotResult
@@ -14,10 +14,20 @@ import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
 import android.widget.Toast
+import world.brightos.brai.airwhisper.AccessibilityContextReader
+import world.brightos.brai.airwhisper.AccessibilityTextInserter
+import world.brightos.brai.airwhisper.AirWhisperBus
+import world.brightos.brai.airwhisper.OverlayController
+import world.brightos.brai.airwhisper.PendingReason
+import world.brightos.brai.airwhisper.PendingTranscript
+import world.brightos.brai.airwhisper.PendingTranscriptStore
+import world.brightos.brai.airwhisper.RecorderState
+import world.brightos.brai.airwhisper.RecordingService
+import world.brightos.brai.airwhisper.VisibleConversationContext
 import java.io.File
 import kotlin.math.max
 
-open class AirWhisperAccessibilityService : AccessibilityService() {
+class BraiAccessibilityService : AccessibilityService() {
     private lateinit var overlay: OverlayController
     private val contextReader by lazy { AccessibilityContextReader(this) }
     private val textInserter by lazy { AccessibilityTextInserter(this) }

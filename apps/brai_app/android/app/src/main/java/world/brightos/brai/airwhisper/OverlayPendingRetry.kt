@@ -4,9 +4,10 @@ import android.content.Context
 import android.net.ConnectivityManager
 import android.net.Network
 import android.os.Handler
+import world.brightos.brai.capabilities.BraiAccessibilityService
 
 internal class OverlayPendingRetry(
-    private val service: AirWhisperAccessibilityService,
+    private val service: BraiAccessibilityService,
     private val handler: Handler
 ) {
     private var networkCallback: ConnectivityManager.NetworkCallback? = null

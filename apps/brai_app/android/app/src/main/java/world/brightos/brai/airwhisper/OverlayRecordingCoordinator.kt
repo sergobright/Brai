@@ -6,6 +6,7 @@ import android.os.Build
 import android.os.Handler
 import android.view.ViewConfiguration
 import android.widget.Toast
+import world.brightos.brai.capabilities.BraiAccessibilityService
 import java.io.File
 
 internal enum class RecordingButton {
@@ -14,7 +15,7 @@ internal enum class RecordingButton {
 }
 
 internal class OverlayRecordingCoordinator(
-    private val service: AirWhisperAccessibilityService,
+    private val service: BraiAccessibilityService,
     private val config: ConfigStore,
     private val handler: Handler,
     private val onLongPress: () -> Unit,

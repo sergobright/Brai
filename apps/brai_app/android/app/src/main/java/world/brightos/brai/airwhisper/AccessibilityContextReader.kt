@@ -6,9 +6,10 @@ import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
 import org.json.JSONArray
 import org.json.JSONObject
+import world.brightos.brai.capabilities.BraiAccessibilityService
 import kotlin.math.min
 
-internal class AccessibilityContextReader(private val service: AirWhisperAccessibilityService) {
+internal class AccessibilityContextReader(private val service: BraiAccessibilityService) {
     fun capture(): VisibleConversationContext? {
         val displayHeight = service.resources.displayMetrics.heightPixels
         val displayWidth = service.resources.displayMetrics.widthPixels

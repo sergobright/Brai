@@ -7,10 +7,11 @@ import android.os.Bundle
 import android.os.SystemClock
 import android.view.accessibility.AccessibilityNodeInfo
 import android.widget.Toast
+import world.brightos.brai.capabilities.BraiAccessibilityService
 import kotlin.math.max
 import kotlin.math.min
 
-internal class AccessibilityTextInserter(private val service: AirWhisperAccessibilityService) {
+internal class AccessibilityTextInserter(private val service: BraiAccessibilityService) {
     fun insert(text: String, focusedNode: AccessibilityNodeInfo?, findNode: () -> AccessibilityNodeInfo?): Boolean {
         if (text.isBlank()) return false
         copyToClipboard(text)

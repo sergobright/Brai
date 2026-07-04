@@ -7,10 +7,11 @@ import android.os.Handler
 import android.view.Gravity
 import android.view.WindowManager
 import android.widget.TextView
+import world.brightos.brai.capabilities.BraiAccessibilityService
 import kotlin.math.max
 
 internal class OverlayStatusBubble(
-    private val service: AirWhisperAccessibilityService,
+    private val service: BraiAccessibilityService,
     private val windowManager: WindowManager,
     private val handler: Handler
 ) {

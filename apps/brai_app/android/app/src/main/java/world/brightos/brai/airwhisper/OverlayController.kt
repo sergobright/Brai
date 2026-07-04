@@ -12,10 +12,11 @@ import android.view.MotionEvent
 import android.view.ViewConfiguration
 import android.view.WindowManager
 import android.widget.Toast
+import world.brightos.brai.capabilities.BraiAccessibilityService
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
-class OverlayController(private val service: AirWhisperAccessibilityService) {
+class OverlayController(private val service: BraiAccessibilityService) {
     private val windowManager = service.getSystemService(Context.WINDOW_SERVICE) as WindowManager
     private val config = ConfigStore(service)
     private val retryHandler = Handler(Looper.getMainLooper())

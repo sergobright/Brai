@@ -1,5 +1,6 @@
 package world.brightos.brai.airwhisper
 
+import world.brightos.brai.capabilities.BraiAccessibilityService
 import kotlin.math.max
 
 internal data class OverlayAnchor(
@@ -9,7 +10,7 @@ internal data class OverlayAnchor(
 )
 
 internal class OverlayGeometry(
-    private val service: AirWhisperAccessibilityService,
+    private val service: BraiAccessibilityService,
     private val mainSizePx: Int,
     private val screenshotSizePx: Int,
     private val screenshotGapPx: Int,
