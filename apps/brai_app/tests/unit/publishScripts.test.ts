@@ -789,7 +789,7 @@ try {
     expect(statusHtml).toContain("APK versionCode");
   });
 
-  it("increments the global preview APK counter across released slots", async () => {
+  it("commits the global preview APK counter only after a ready preview", async () => {
     const root = await fixtureRoot("brai-slots-apk-counter-");
     const envsRoot = path.join(root, "envs");
     const env = {
@@ -803,6 +803,30 @@ try {
     await execFileAsync("node", [slotScript, "next-apk-preview", "codex/one", "abc", "2"], { env });
     let registry = JSON.parse(await readFile(path.join(envsRoot, "preview-slots.json"), "utf8"));
     expect(registry.A).toMatchObject({ apk_preview_iteration: 1, apk_version_code: 20001 });
+    expect(registry.apk_preview_counter).toBe(0);
+
+    await execFileAsync("node", [slotScript, "failed", "codex/one", "abc"], { env });
+    registry = JSON.parse(await readFile(path.join(envsRoot, "preview-slots.json"), "utf8"));
+    expect(registry.apk_preview_counter).toBe(0);
+
+    await execFileAsync("node", [slotScript, "allocate", "codex/one", "abc"], { env });
+    await execFileAsync("node", [slotScript, "next-apk-preview", "codex/one", "abc", "2"], { env });
+    registry = JSON.parse(await readFile(path.join(envsRoot, "preview-slots.json"), "utf8"));
+    expect(registry.A).toMatchObject({ apk_preview_iteration: 1, apk_version_code: 20001 });
+
+    await execFileAsync("node", [slotScript, "ready", "codex/one", "abc"], { env });
+    registry = JSON.parse(await readFile(path.join(envsRoot, "preview-slots.json"), "utf8"));
+    expect(registry.apk_preview_counter).toBe(1);
+
+    registry.apk_preview_counter = 0;
+    await writeFile(path.join(envsRoot, "preview-slots.json"), JSON.stringify(registry));
+    await execFileAsync("node", [slotScript, "allocate", "codex/two", "def"], { env });
+    await execFileAsync("node", [slotScript, "next-apk-preview", "codex/two", "def", "2"], { env });
+    registry = JSON.parse(await readFile(path.join(envsRoot, "preview-slots.json"), "utf8"));
+    expect(registry.B).toMatchObject({ apk_preview_iteration: 2, apk_version_code: 20002 });
+    expect(registry.apk_preview_counter).toBe(1);
+
+    await execFileAsync("node", [slotScript, "release", "codex/two"], { env });
 
     await execFileAsync("node", [slotScript, "release", "codex/one"], { env });
     await execFileAsync("node", [slotScript, "allocate", "codex/two", "def"], { env });
@@ -810,6 +834,10 @@ try {
     registry = JSON.parse(await readFile(path.join(envsRoot, "preview-slots.json"), "utf8"));
 
     expect(registry.A).toMatchObject({ apk_preview_iteration: 2, apk_version_code: 20002 });
+    expect(registry.apk_preview_counter).toBe(1);
+
+    await execFileAsync("node", [slotScript, "ready", "codex/two", "def"], { env });
+    registry = JSON.parse(await readFile(path.join(envsRoot, "preview-slots.json"), "utf8"));
     expect(registry.apk_preview_counter).toBe(2);
   });
 

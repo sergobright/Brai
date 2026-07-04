@@ -207,6 +207,7 @@ Brai SHALL keep Preview APK artifacts aligned with their OTA manifests through t
 - **THEN** the allocated preview slot APK is built with Android `versionName=N` and `versionCode=N * 10000 + M`
 - **AND** the preview release metadata records `brai-vN-previewM.apk`, APK version `N`, and preview iteration `M`
 - **AND** the Preview OTA manifest targets release key, build kind, stable `N`, and preview `M`
+- **AND** `M` is committed only after the preview deployment is fully ready, so failed builds and failed deployments retry the same `M`
 
 #### Scenario: Accepted native work reaches production
 - **WHEN** native-boundary work is accepted into `main`

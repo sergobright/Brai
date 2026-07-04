@@ -5,6 +5,7 @@ Brai uses separate version lines for APK and OTA/web.
 - APK uses the public integer counter `vN`, starting at `v1`.
 - Android `versionName` is `N`; Android `versionCode` defaults to the same `N`.
 - Native-boundary preview builds reserve the next stable `N` for the task branch and use a global preview iteration `M`; their Android `versionCode` is `N * 10000 + M`.
+- Preview `M` is committed only after the preview deploy is fully ready; failed builds and failed deploys retry the same `M`.
 - Preview APK filenames are `brai-vN-previewM.apk`; accepted stable filenames remain `brai-vN.apk`, `brai-dev-vN.apk`, and `brai-a-vN.apk` through `brai-e-vN.apk`.
 - Preview APKs are transient separate applications from the stable Preview A-E baseline, so rejected preview APKs cannot update into accepted stable APKs.
 - OTA/web uses `X.Y.Z`; the old fourth public digit is not shown or compared.

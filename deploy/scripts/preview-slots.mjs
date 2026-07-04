@@ -92,6 +92,12 @@ function updateOwnedSlot(registry, branch, commit, now, status) {
   requireBranch(branch);
   const existing = findByBranch(registry, branch);
   if (!existing) throw new Error(`branch has no preview slot: ${branch}`);
+  if (status === "ready" && existing.entry.apk_build_kind === "preview" && existing.entry.apk_preview_iteration) {
+    registry.apk_preview_counter = Math.max(
+      committedPreviewCounter(registry),
+      positiveInteger(existing.entry.apk_preview_iteration, "APK preview iteration"),
+    );
+  }
   Object.assign(existing.entry, {
     status,
     commit: commit ?? existing.entry.commit,
@@ -105,9 +111,8 @@ function nextApkPreview(registry, branch, commit, stableVersion, now) {
   const existing = findByBranch(registry, branch);
   if (!existing) throw new Error(`branch has no preview slot: ${branch}`);
   const version = positiveInteger(stableVersion, "stable APK version");
-  const iteration = positiveInteger((registry.apk_preview_counter ?? 0) + 1, "APK preview iteration");
+  const iteration = positiveInteger(committedPreviewCounter(registry) + 1, "APK preview iteration");
   const versionCode = version * 10000 + iteration;
-  registry.apk_preview_counter = iteration;
   Object.assign(existing.entry, {
     commit: commit ?? existing.entry.commit,
     apk_version: String(version),
@@ -176,11 +181,24 @@ function readRegistry() {
   for (const slot of slots) {
     parsed[slot] = { ...defaultSlot(slot), ...(parsed[slot] ?? {}) };
   }
-  return {
+  const registry = {
     ...Object.fromEntries(slots.map((slot) => [slot, parsed[slot]])),
     queue: normalizeQueue(parsed.queue),
     apk_preview_counter: Number.isInteger(Number(parsed.apk_preview_counter)) ? Number(parsed.apk_preview_counter) : 0,
   };
+  registry.apk_preview_counter = committedPreviewCounter(registry);
+  return registry;
+}
+
+function committedPreviewCounter(registry) {
+  let counter = Number.isInteger(Number(registry.apk_preview_counter)) ? Number(registry.apk_preview_counter) : 0;
+  for (const slot of slots) {
+    const entry = registry[slot];
+    if (entry?.status === "ready" && entry.apk_build_kind === "preview" && entry.apk_preview_iteration) {
+      counter = Math.max(counter, positiveInteger(entry.apk_preview_iteration, "APK preview iteration"));
+    }
+  }
+  return counter;
 }
 
 function writeRegistry(registry) {
