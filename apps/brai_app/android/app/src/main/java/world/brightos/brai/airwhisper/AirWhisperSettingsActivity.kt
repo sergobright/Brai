@@ -24,6 +24,7 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.Switch
 import android.widget.TextView
+import world.brightos.brai.capabilities.BraiAccessibilityService
 
 class AirWhisperSettingsActivity : Activity() {
     private lateinit var ui: MainUi
@@ -585,7 +586,7 @@ class AirWhisperSettingsActivity : Activity() {
                 result.fold(
                     onSuccess = {
                         serverOk = true
-                        updateConnectionStatus("Сервер работает: $it", COLOR_OK_BADGE, COLOR_OK)
+                        updateConnectionStatus(if (it == "ok") "Сервер работает" else "Сервер работает: $it", COLOR_OK_BADGE, COLOR_OK)
                     },
                     onFailure = {
                         serverOk = false
@@ -699,7 +700,7 @@ class AirWhisperSettingsActivity : Activity() {
     private fun isAccessibilityEnabled(): Boolean {
         val manager = getSystemService(Context.ACCESSIBILITY_SERVICE) as AccessibilityManager
         return manager.getEnabledAccessibilityServiceList(AccessibilityServiceInfo.FEEDBACK_ALL_MASK)
-            .any { it.resolveInfo.serviceInfo.packageName == packageName && it.resolveInfo.serviceInfo.name == AirWhisperAccessibilityService::class.java.name }
+            .any { it.resolveInfo.serviceInfo.packageName == packageName && it.resolveInfo.serviceInfo.name == BraiAccessibilityService::class.java.name }
     }
 
     private fun cleanError(error: Throwable): String {

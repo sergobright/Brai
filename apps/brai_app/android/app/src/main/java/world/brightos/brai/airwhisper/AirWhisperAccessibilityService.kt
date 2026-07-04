@@ -17,7 +17,7 @@ import android.widget.Toast
 import java.io.File
 import kotlin.math.max
 
-class AirWhisperAccessibilityService : AccessibilityService() {
+open class AirWhisperAccessibilityService : AccessibilityService() {
     private lateinit var overlay: OverlayController
     private val contextReader by lazy { AccessibilityContextReader(this) }
     private val textInserter by lazy { AccessibilityTextInserter(this) }

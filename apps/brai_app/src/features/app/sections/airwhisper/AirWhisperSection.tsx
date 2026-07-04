@@ -59,12 +59,15 @@ export function AirWhisperSection() {
         </div>
 
         <div className="grid gap-2">
-          <StatusRow label="Экран настроек" ok={state?.settingsDeclared} />
-          <StatusRow label="Accessibility service" ok={state?.accessibilityServiceDeclared} active={state?.accessibilityServiceEnabled} />
-          <StatusRow label="Recording service" ok={state?.recordingServiceDeclared} />
-          <StatusRow label="Overlay" ok={state?.overlayDeclared} active={state?.overlayGranted} />
-          <StatusRow label="Микрофон" ok={state?.microphoneDeclared} active={state?.microphoneGranted} />
-          <StatusRow label="Уведомления" ok={state?.notificationsDeclared} active={state?.notificationsGranted} />
+          <StatusRow label="Экран настроек" status={builtInStatus(state?.settingsDeclared)} />
+          <StatusRow
+            label="Специальные возможности"
+            status={switchStatus(state?.accessibilityServiceDeclared, state?.accessibilityServiceEnabled, "Включено", "Нужно включить")}
+          />
+          <StatusRow label="Сервис записи" status={builtInStatus(state?.recordingServiceDeclared)} />
+          <StatusRow label="Overlay" status={switchStatus(state?.overlayDeclared, state?.overlayGranted, "Разрешено", "Нужно разрешение")} />
+          <StatusRow label="Микрофон" status={switchStatus(state?.microphoneDeclared, state?.microphoneGranted, "Разрешено", "Нужно разрешение")} />
+          <StatusRow label="Уведомления" status={switchStatus(state?.notificationsDeclared, state?.notificationsGranted, "Разрешено", "Нужно разрешение")} />
         </div>
 
         <div className="flex flex-wrap gap-2">
@@ -103,13 +106,26 @@ export function AirWhisperSection() {
   );
 }
 
-function StatusRow({ label, ok, active }: { label: string; ok?: boolean; active?: boolean }) {
-  const status = active === true ? "Активно" : ok === true ? "Готово" : ok === false ? "Нет" : "Не проверено";
-  const variant = active === true || ok === true ? "secondary" : "outline";
+type StatusView = { label: string; ok: boolean };
+
+function builtInStatus(declared?: boolean): StatusView {
+  if (declared === true) return { label: "Встроено", ok: true };
+  if (declared === false) return { label: "Нет", ok: false };
+  return { label: "Не проверено", ok: false };
+}
+
+function switchStatus(declared: boolean | undefined, active: boolean | undefined, activeLabel: string, inactiveLabel: string): StatusView {
+  if (declared === false) return { label: "Нет", ok: false };
+  if (active === true) return { label: activeLabel, ok: true };
+  if (active === false) return { label: inactiveLabel, ok: false };
+  return { label: "Не проверено", ok: false };
+}
+
+function StatusRow({ label, status }: { label: string; status: StatusView }) {
   return (
     <div className="flex min-h-9 items-center gap-3 rounded-md border border-border bg-muted/35 px-3 py-2">
       <span className="min-w-0 flex-1 truncate text-sm font-medium">{label}</span>
-      <Badge variant={variant}>{status}</Badge>
+      <Badge variant={status.ok ? "secondary" : "outline"}>{status.label}</Badge>
     </div>
   );
 }

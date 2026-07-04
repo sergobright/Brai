@@ -9,8 +9,5 @@
     <string name="focus_timer_notification_title">Brai Focus</string>
     <string name="focus_timer_notification_text">Таймер фокуса запущен</string>
     <string name="focus_timer_notification_stop">Остановить</string>
-    <string name="brai_accessibility_service_label">Brai Accessibility</string>
-    <string name="brai_accessibility_service_description">Помогает Brai выполнять разрешенные пользователем действия на устройстве.</string>
-    <string name="airwhisper_accessibility_service_label">AirWhisper</string>
-    <string name="airwhisper_accessibility_service_description">Показывает командные кнопки поверх приложений, читает видимое имя текущего чата, может делать скриншот активного окна и вставляет расшифрованный текст в поле ввода.</string>
+    <string name="brai_accessibility_service_description">Показывает командные кнопки поверх приложений, читает видимый контекст, может делать скриншот активного окна и вставляет текст в поле ввода.</string>
 </resources>

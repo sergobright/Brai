@@ -51,6 +51,7 @@ const eslintConfig = defineConfig([
     ".next/**",
     "out/**",
     "build/**",
+    "android/.gradle/**",
     "android/**/build/**",
     "android/app/src/main/assets/public/**",
     "test-results/**",

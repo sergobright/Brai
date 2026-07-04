@@ -38,12 +38,12 @@ class NetworkClient(context: Context) {
 
     fun publicHealthCheck(): String {
         val connection = openPublicConnection("/health", "GET")
-        return readJson(connection).optString("status", "unknown")
+        return healthStatus(readJson(connection))
     }
 
     fun healthCheck(): String {
         val connection = openAuthenticatedConnection("/v1/health", "GET")
-        return readJson(connection).optString("status", "unknown")
+        return healthStatus(readJson(connection))
     }
 
     fun requestAccess(displayName: String): AccessResponse {
@@ -200,6 +200,9 @@ class NetworkClient(context: Context) {
         }
         return JSONObject(body)
     }
+
+    private fun healthStatus(json: JSONObject): String =
+        json.optString("status").takeIf { it.isNotBlank() } ?: if (json.optBoolean("ok", false)) "ok" else "unknown"
 
     private fun writeField(out: BufferedOutputStream, boundary: String, name: String, value: String) {
         out.write("--$boundary\r\n".toByteArray())

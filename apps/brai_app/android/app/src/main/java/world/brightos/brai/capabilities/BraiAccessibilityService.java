@@ -1,12 +1,5 @@
 package world.brightos.brai.capabilities;
 
-import android.accessibilityservice.AccessibilityService;
-import android.view.accessibility.AccessibilityEvent;
+import world.brightos.brai.airwhisper.AirWhisperAccessibilityService;
 
-public final class BraiAccessibilityService extends AccessibilityService {
-    @Override
-    public void onAccessibilityEvent(AccessibilityEvent event) {}
-
-    @Override
-    public void onInterrupt() {}
-}
+public final class BraiAccessibilityService extends AirWhisperAccessibilityService {}

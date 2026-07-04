@@ -52,7 +52,7 @@
         <service
             android:name=".capabilities.BraiAccessibilityService"
             android:exported="true"
-            android:label="@string/brai_accessibility_service_label"
+            android:label="${braiAppLabel}"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
             <intent-filter>
                 <action android:name="android.accessibilityservice.AccessibilityService" />
@@ -66,19 +66,6 @@
             android:name=".capabilities.BraiMediaProjectionService"
             android:exported="false"
             android:foregroundServiceType="mediaProjection|microphone" />
-
-        <service
-            android:name=".airwhisper.AirWhisperAccessibilityService"
-            android:exported="true"
-            android:label="@string/airwhisper_accessibility_service_label"
-            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
-            <intent-filter>
-                <action android:name="android.accessibilityservice.AccessibilityService" />
-            </intent-filter>
-            <meta-data
-                android:name="android.accessibilityservice"
-                android:resource="@xml/airwhisper_accessibility_service" />
-        </service>
 
         <service
             android:name=".airwhisper.RecordingService"

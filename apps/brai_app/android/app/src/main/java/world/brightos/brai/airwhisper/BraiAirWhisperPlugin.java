@@ -22,6 +22,8 @@ import com.getcapacitor.annotation.PermissionCallback;
 
 import java.util.List;
 
+import world.brightos.brai.capabilities.BraiAccessibilityService;
+
 @CapacitorPlugin(
     name = "BraiAirWhisper",
     permissions = {
@@ -91,7 +93,7 @@ public final class BraiAirWhisperPlugin extends Plugin {
         JSObject state = new JSObject();
         state.put("native", true);
         state.put("settingsDeclared", hasActivity(AirWhisperSettingsActivity.class));
-        state.put("accessibilityServiceDeclared", hasService(AirWhisperAccessibilityService.class));
+        state.put("accessibilityServiceDeclared", hasService(BraiAccessibilityService.class));
         state.put("recordingServiceDeclared", hasService(RecordingService.class));
         state.put("accessibilityServiceEnabled", isAccessibilityServiceEnabled());
         state.put("overlayDeclared", hasRequestedPermission(Manifest.permission.SYSTEM_ALERT_WINDOW));
@@ -155,7 +157,7 @@ public final class BraiAirWhisperPlugin extends Plugin {
         AccessibilityManager manager = (AccessibilityManager) getContext().getSystemService(android.content.Context.ACCESSIBILITY_SERVICE);
         if (manager == null) return false;
         List<AccessibilityServiceInfo> enabled = manager.getEnabledAccessibilityServiceList(AccessibilityServiceInfo.FEEDBACK_ALL_MASK);
-        String expected = AirWhisperAccessibilityService.class.getName();
+        String expected = BraiAccessibilityService.class.getName();
         for (AccessibilityServiceInfo info : enabled) {
             if (info.getResolveInfo() != null && info.getResolveInfo().serviceInfo != null && expected.equals(info.getResolveInfo().serviceInfo.name)) {
                 return true;
