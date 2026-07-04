@@ -52,7 +52,7 @@ class BraiActionsWidgetStore(context: Context) {
             val normalizedViewId = normalizeViewId(viewId)
             val currentRaw = prefs.getString(snapshotKey(normalizedViewId), null)
             val currentVersion = currentRaw?.let { parseSnapshot(it, normalizedViewId).snapshotVersion } ?: 0L
-            if (snapshotVersion < currentVersion) return
+            if (snapshotVersion <= currentVersion) return
             val snapshot = WidgetActionsSnapshot(
                 viewId = normalizedViewId,
                 serverRevision = serverRevision,
@@ -81,9 +81,12 @@ class BraiActionsWidgetStore(context: Context) {
 
             val snapshot = loadSnapshot(viewId)
             if (!snapshot.hasSnapshot) return
-            writeSnapshot(snapshot.copy(actions = snapshot.actions.map { action ->
-                if (action.id == actionId) action.copy(status = status) else action
-            }))
+            writeSnapshot(snapshot.copy(
+                snapshotVersion = maxOf(snapshot.snapshotVersion + 1, Instant.now().toEpochMilli()),
+                actions = snapshot.actions.map { action ->
+                    if (action.id == actionId) action.copy(status = status) else action
+                }
+            ))
         }
     }
 

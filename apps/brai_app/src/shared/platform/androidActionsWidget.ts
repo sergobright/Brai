@@ -31,7 +31,7 @@ const BraiActionsWidget = registerPlugin<BraiActionsWidgetPlugin>("BraiActionsWi
  */
 export async function saveAndroidActionsWidgetSnapshot(
   state: ActivitiesState,
-  options: { viewId?: string; actions?: ActivityItem[] } = {},
+  options: { viewId?: string; actions?: ActivityItem[]; snapshotVersion?: number } = {},
 ): Promise<void> {
   if (!isAndroidShell()) return;
   const actions = options.actions ?? state.actions;
@@ -39,7 +39,7 @@ export async function saveAndroidActionsWidgetSnapshot(
     await BraiActionsWidget.saveSnapshot({
       viewId: options.viewId ?? DEFAULT_ACTIONS_WIDGET_VIEW_ID,
       serverRevision: state.server_revision,
-      snapshotVersion: snapshotVersionFor(state, actions),
+      snapshotVersion: options.snapshotVersion ?? snapshotVersionFor(state, actions),
       actions: actions.map((action) => ({
         id: action.id,
         title: action.title,

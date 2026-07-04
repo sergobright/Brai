@@ -18,7 +18,7 @@ export function createBraiActionCommands({
 }: {
   actions: ActivitiesState;
   flushActionPending: () => Promise<void>;
-  publishActionsSnapshot?: (nextActions: ActivitiesState) => void;
+  publishActionsSnapshot?: (nextActions: ActivitiesState) => Promise<void>;
   setActionPendingCount: Dispatch<SetStateAction<number>>;
   setActions: Dispatch<SetStateAction<ActivitiesState>>;
   setSyncStatus: Dispatch<SetStateAction<SyncStatus>>;
@@ -28,9 +28,9 @@ export function createBraiActionCommands({
     const queued = await pendingActivityEvents();
     const projected = projectActivitiesState(actions, queued);
     setActions(projected);
-    publishActionsSnapshot?.(projected);
     setActionPendingCount(queued.length);
     setSyncStatus("pending_sync");
+    await publishActionsSnapshot?.(projected);
     void flushActionPending().catch(() => undefined);
   }
 
@@ -86,9 +86,9 @@ export function createBraiActionCommands({
     const queued = await pendingActivityEvents();
     const projected = projectActivitiesState(actions, queued);
     setActions(projected);
-    publishActionsSnapshot?.(projected);
     setActionPendingCount(queued.length);
     setSyncStatus("pending_sync");
+    await publishActionsSnapshot?.(projected);
     void flushActionPending().catch(() => undefined);
   }
 
@@ -127,7 +127,12 @@ export function createBraiActionCommands({
     setActionPendingCount(queued.length);
     setSyncStatus("pending_sync");
     window.setTimeout(() => {
-      setActions((current) => projectActivitiesState(current, queued));
+      let projected = actions;
+      setActions((current) => {
+        projected = projectActivitiesState(current, queued);
+        return projected;
+      });
+      void publishActionsSnapshot?.(projected);
       void flushActionPending();
     }, ACTION_DELETE_COLLAPSE_MS);
   }

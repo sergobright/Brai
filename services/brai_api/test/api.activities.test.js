@@ -424,6 +424,33 @@ test('actions sync preserves markdown descriptions and clears them', async () =>
   }
 });
 
+test('actions sync preserves markdown descriptions from create events', async () => {
+  const fixture = await createFixture(['2026-06-16T10:00:00.000Z']);
+
+  try {
+    const response = await request(fixture.url, '/v1/activities/events/sync', {
+      method: 'POST',
+      body: JSON.stringify({
+        device: { device_id: 'android-device', platform: 'android' },
+        events: [
+          actionEvent('create-with-description', 1, 'create', 'action-1', '2026-06-16T09:00:00.000Z', {
+            title: 'Фокус',
+            description_md: 'Описание\r\nстрока'
+          })
+        ]
+      })
+    });
+
+    assert.equal(response.status, 200);
+    assert.equal(response.body.state.activities[0].description_md, 'Описание\nстрока');
+
+    const state = await request(fixture.url, '/v1/activities');
+    assert.equal(state.body.activities[0].description_md, 'Описание\nстрока');
+  } finally {
+    await fixture.close();
+  }
+});
+
 test('actions sync normalizes markdown description line endings', async () => {
   const fixture = await createFixture(['2026-06-16T10:00:00.000Z']);
 

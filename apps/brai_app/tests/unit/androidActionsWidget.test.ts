@@ -74,6 +74,20 @@ describe("Android Actions widget bridge", () => {
     expect(second).toBeGreaterThan(first);
   });
 
+  it("uses an explicit snapshot version when the app serializes widget publishes", async () => {
+    vi.stubGlobal("Capacitor", {
+      isNativePlatform: () => true,
+      getPlatform: () => "android",
+    });
+    const { saveAndroidActionsWidgetSnapshot } = await import("@/shared/platform/androidActionsWidget");
+
+    await saveAndroidActionsWidgetSnapshot(state(), { snapshotVersion: 42 });
+
+    expect(plugin.saveSnapshot).toHaveBeenCalledWith(expect.objectContaining({
+      snapshotVersion: 42,
+    }));
+  });
+
   it("reads and acknowledges widget status changes", async () => {
     vi.stubGlobal("Capacitor", {
       isNativePlatform: () => true,

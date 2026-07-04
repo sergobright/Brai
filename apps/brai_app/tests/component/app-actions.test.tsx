@@ -80,7 +80,7 @@ describe("BraiApp actions", () => {
     await waitFor(() => expect(screen.queryByRole("button", { name: "Продолжить черновик действия" })).not.toBeInTheDocument());
   });
 
-  it("closes mobile action creation immediately and ignores duplicate submit taps", async () => {
+  it("closes mobile action creation after local save and ignores duplicate submit taps", async () => {
     let resolveCreate: () => void = () => undefined;
     const onCreate = vi.fn(() => new Promise<void>((resolve) => {
       resolveCreate = resolve;
@@ -121,9 +121,10 @@ describe("BraiApp actions", () => {
     fireEvent.click(submit);
 
     expect(onCreate).toHaveBeenCalledTimes(1);
-    expect(document.querySelector(".actions-mobile-overlay")).not.toBeInTheDocument();
+    expect(document.querySelector(".actions-mobile-overlay")).toBeInTheDocument();
 
     await act(async () => resolveCreate());
+    await waitFor(() => expect(document.querySelector(".actions-mobile-overlay")).not.toBeInTheDocument());
   });
 
   it("closes the mobile create composer by pulling down and keeps the draft", async () => {

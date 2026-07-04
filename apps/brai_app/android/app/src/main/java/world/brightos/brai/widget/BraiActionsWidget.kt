@@ -2,6 +2,7 @@ package world.brightos.brai.widget
 
 import android.content.Context
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.key
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.glance.GlanceId
@@ -14,6 +15,7 @@ import androidx.glance.appwidget.GlanceAppWidgetManager
 import androidx.glance.appwidget.GlanceAppWidgetReceiver
 import androidx.glance.appwidget.SizeMode
 import androidx.glance.appwidget.action.ActionCallback
+import androidx.glance.appwidget.action.ToggleableStateKey
 import androidx.glance.appwidget.action.actionRunCallback
 import androidx.glance.appwidget.provideContent
 import androidx.glance.background
@@ -35,7 +37,12 @@ class BraiActionsWidgetReceiver : GlanceAppWidgetReceiver() {
 class ToggleBraiActionCallback : ActionCallback {
     override suspend fun onAction(context: Context, glanceId: GlanceId, parameters: ActionParameters) {
         val actionId = parameters[ActionIdKey]?.trim().orEmpty()
-        val nextStatus = parameters[NextStatusKey]?.trim().orEmpty()
+        val checked = parameters[ToggleableStateKey]
+        val nextStatus = when (checked) {
+            true -> "Done"
+            false -> "New"
+            null -> parameters[NextStatusKey]?.trim().orEmpty()
+        }
         val revision = parameters[RevisionKey]?.toLongOrNull() ?: 0L
         if (actionId.isBlank() || nextStatus !in setOf("New", "Done")) return
         withContext(Dispatchers.IO) {
@@ -106,24 +113,26 @@ private fun BraiActionsWidgetContent(state: WidgetState) {
             return@Column
         }
         state.actions.take(MAX_WIDGET_ACTIONS).forEach { action ->
-            val checked = action.status == "Done"
-            CheckBox(
-                checked = checked,
-                onCheckedChange = actionRunCallback(
-                    ToggleBraiActionCallback::class.java,
-                    actionParametersOf(
-                        ActionIdKey to action.id,
-                        NextStatusKey to if (checked) "New" else "Done",
-                        RevisionKey to state.serverRevision.toString()
-                    )
-                ),
-                text = action.title,
-                style = TextStyle(
-                    color = ColorProvider(R.color.brai_widget_text),
-                    fontSize = 12.sp
-                ),
-                maxLines = 1
-            )
+            key(action.id) {
+                val checked = action.status == "Done"
+                CheckBox(
+                    checked = checked,
+                    onCheckedChange = actionRunCallback(
+                        ToggleBraiActionCallback::class.java,
+                        actionParametersOf(
+                            ActionIdKey to action.id,
+                            NextStatusKey to if (checked) "New" else "Done",
+                            RevisionKey to state.serverRevision.toString()
+                        )
+                    ),
+                    text = action.title,
+                    style = TextStyle(
+                        color = ColorProvider(R.color.brai_widget_text),
+                        fontSize = 12.sp
+                    ),
+                    maxLines = 1
+                )
+            }
         }
     }
 }

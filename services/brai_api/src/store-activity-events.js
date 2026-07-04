@@ -393,7 +393,7 @@ export const activityEventMethods = {
         activity = {
           id: activityId,
           title,
-          description_md: activity?.description_md ?? '',
+          description_md: normalizeMarkdownSource(payload.description_md ?? activity?.description_md ?? ''),
           status: activity?.status ?? 'New',
           created_at_utc: activity?.created_at_utc ?? event.occurred_at_utc,
           updated_at_utc: event.occurred_at_utc,
@@ -590,7 +590,7 @@ export const activityEventMethods = {
         activities.set(activityId, {
           id: activityId,
           title,
-          description_md: existing?.description_md ?? '',
+          description_md: normalizeMarkdownSource(payload.description_md ?? existing?.description_md ?? ''),
           status: existing?.status ?? 'New',
           created_at_utc: existing?.created_at_utc ?? event.occurred_at_utc,
           updated_at_utc: event.occurred_at_utc,
