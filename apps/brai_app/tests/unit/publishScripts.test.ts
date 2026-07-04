@@ -746,6 +746,7 @@ try {
     expect(html).toContain("<h2>Brai</h2>");
     expect(html).toContain("<h2>Brai Dev</h2>");
     expect(html).toContain("Brai E");
+    expect(html).toContain('<p class="version">v1</p>');
     expect(html).toContain("23 июня 2026, 12:13 МСК");
     expect(html).toContain('<a class="download" href="./brai-v1.apk">Скачать</a>');
     expect(html).toContain('<span class="download" aria-disabled="true">Скачать</span>');

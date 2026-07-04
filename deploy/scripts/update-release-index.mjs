@@ -79,6 +79,7 @@ function renderReleasePage(data, htmlPath) {
       .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; }
       section { border: 1px solid var(--line); border-radius: 8px; background: var(--panel); padding: 12px; }
       h2 { margin: 0 0 8px; font-size: 18px; line-height: 1.2; }
+      .version { margin: -2px 0 8px; color: var(--text); font-weight: 800; }
       time, .unpublished { display: block; min-height: 40px; margin: 0 0 12px; color: var(--muted); line-height: 1.35; }
       time { font-size: 15px; white-space: nowrap; }
       .download { display: inline-flex; min-height: 38px; align-items: center; border-radius: 8px; padding: 0 14px; font-weight: 800; }
@@ -105,6 +106,7 @@ function sectionCard(section) {
   const published = formatPublishedAt(section.publishedAt);
   return `<section>
   <h2>${escapeHtml(section.title)}</h2>
+  ${section.apkVersion ? `<p class="version">v${escapeHtml(section.apkVersion)}</p>` : ""}
   ${section.publishedAt ? `<time datetime="${escapeHtml(section.publishedAt)}">${escapeHtml(published)}</time>` : `<span class="unpublished">${escapeHtml(published)}</span>`}
   ${download}
 </section>`;
