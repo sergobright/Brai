@@ -594,7 +594,9 @@ test("preview deploy reset reports permission recovery and preserves setgid", ()
   assert.match(script, /umask 0002/);
   assert.match(script, /Preview SQLite reset failed/);
   assert.match(script, /brai-deploy:brai-deploy 2775/);
-  assert.ok(script.includes('normalize_public_tree "$TARGET_ROOT"'));
+  assert.ok(script.includes('normalize_public_tree "$WEB_TARGET"'));
+  assert.ok(script.includes('normalize_public_tree "$MOBILE_TARGET"'));
+  assert.doesNotMatch(script, /normalize_public_tree "\$TARGET_ROOT"/);
   assert.match(playbook, /Ensure non-production data directories keep deploy setgid/);
   assert.match(playbook, /Ensure nested non-production data directories keep deploy setgid/);
   assert.match(playbook, /mode: "2775"/);

@@ -40,13 +40,27 @@ OTA_VERSION_ARGS=(
   --mobile-target "$MOBILE_TARGET"
 )
 APK_VERSION_ARGS=(--kind apk --root "$ROOT" --db "${BRAI_DB:-${BRAI_PROD_DB:-}}")
-if [[ "$ENVIRONMENT" == "prod" && "${BRAI_RECORD_APK_LEDGER:-false}" == "true" && -n "${BRAI_DB:-}" && -z "${BRAI_APP_VERSION:-}" && -n "${BRAI_BRANCH:-}" && -n "${BRAI_COMMIT:-}" ]]; then
+if [[ "$ENVIRONMENT" == preview-* && "${BRAI_BRANCH:-}" == codex/* && -n "${BRAI_COMMIT:-}" ]]; then
+  APK_VERSION_ARGS+=(--next-apk true --target-branch "$BRAI_BRANCH" --target-commit "$BRAI_COMMIT")
+fi
+if [[ "$ENVIRONMENT" == "prod" && "${BRAI_RECORD_APK_LEDGER:-true}" != "false" && -n "${BRAI_DB:-}" && -z "${BRAI_APP_VERSION:-}" && -n "${BRAI_BRANCH:-}" && -n "${BRAI_COMMIT:-}" ]]; then
   APK_LEDGER_RECORD=true
   APK_VERSION_ARGS+=(--next-apk true --target-branch "$BRAI_BRANCH" --target-commit "$BRAI_COMMIT")
 fi
 export BRAI_APP_VERSION="${BRAI_APP_VERSION:-$("$NODE_BIN" "$SCRIPT_DIR/resolve-app-version.mjs" "${OTA_VERSION_ARGS[@]}")}"
 export BRAI_APK_VERSION="${BRAI_APK_VERSION:-$("$NODE_BIN" "$SCRIPT_DIR/resolve-app-version.mjs" "${APK_VERSION_ARGS[@]}")}"
-export BRAI_ANDROID_VERSION_CODE="${BRAI_ANDROID_VERSION_CODE:-$BRAI_APK_VERSION}"
+export BRAI_APK_RELEASE_KEY="${BRAI_APK_RELEASE_KEY:-$RELEASE_KEY}"
+if [[ "$ENVIRONMENT" == preview-* && "${BRAI_BRANCH:-}" == codex/* && -n "${BRAI_COMMIT:-}" ]]; then
+  PREVIEW_JSON="$("$SCRIPT_DIR/preview-slots.sh" next-apk-preview "$BRAI_BRANCH" "$BRAI_COMMIT" "$BRAI_APK_VERSION")"
+  export BRAI_APK_BUILD_KIND="preview"
+  export BRAI_APK_PREVIEW_ITERATION="$(printf '%s' "$PREVIEW_JSON" | "$NODE_BIN" -e 'let raw = ""; process.stdin.on("data", c => raw += c); process.stdin.on("end", () => console.log(JSON.parse(raw).previewIteration));')"
+  export BRAI_ANDROID_VERSION_CODE="$(printf '%s' "$PREVIEW_JSON" | "$NODE_BIN" -e 'let raw = ""; process.stdin.on("data", c => raw += c); process.stdin.on("end", () => console.log(JSON.parse(raw).versionCode));')"
+  export BRAI_ANDROID_APP_LABEL="${BRAI_ANDROID_APP_LABEL:-Brai $SLOT v${BRAI_APK_VERSION}.${BRAI_APK_PREVIEW_ITERATION}}"
+else
+  export BRAI_APK_BUILD_KIND="${BRAI_APK_BUILD_KIND:-stable}"
+  export BRAI_APK_PREVIEW_ITERATION="${BRAI_APK_PREVIEW_ITERATION:-0}"
+  export BRAI_ANDROID_VERSION_CODE="${BRAI_ANDROID_VERSION_CODE:-$BRAI_APK_VERSION}"
+fi
 export NEXT_PUBLIC_BRAI_ENVIRONMENT="$ENVIRONMENT"
 export NEXT_PUBLIC_BRAI_PREVIEW_SLOT="$SLOT"
 export NEXT_PUBLIC_BRAI_BRANCH="${BRAI_BRANCH:-}"

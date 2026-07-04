@@ -89,6 +89,14 @@ RECOVERY
   esac
 fi
 
+normalize_preview_artifacts() {
+  local failed=0
+  chmod 2775 "$TARGET_ROOT" 2>/dev/null || true
+  normalize_public_tree "$WEB_TARGET" || failed=1
+  normalize_public_tree "$MOBILE_TARGET" || failed=1
+  return "$failed"
+}
+
 VERSION="${BRAI_APP_VERSION:-$("$NODE_BIN" "$SCRIPT_DIR/resolve-app-version.mjs" \
   --environment "$ENVIRONMENT" \
   --root "$ROOT" \
@@ -126,10 +134,14 @@ export NEXT_PUBLIC_BRAI_ANDROID_API="$ANDROID_API"
 "$SCRIPT_DIR/publish-client-web-layer.sh"
 
 if [[ "$ENVIRONMENT" != "prod" ]]; then
-  normalize_public_tree "$TARGET_ROOT"
+  echo "Normalizing preview artifact roots..."
+  if ! normalize_preview_artifacts; then
+    echo "Warning: preview artifact root normalization failed; continuing after published artifacts were normalized." >&2
+  fi
 fi
 
 if [[ "$ENVIRONMENT" != "prod" || "${BRAI_RECORD_PROD_BRANCH_DEPLOYMENT:-false}" == "true" ]]; then
+  echo "Recording deployment metadata..."
   if ! "$NODE_BIN" "$SCRIPT_DIR/record-deployment.mjs" \
     --db "$DB_PATH" \
     --environment "$ENVIRONMENT" \
@@ -149,15 +161,20 @@ if [[ "$ENVIRONMENT" != "prod" || "${BRAI_RECORD_PROD_BRANCH_DEPLOYMENT:-false}"
 fi
 
 if [[ "$ENVIRONMENT" != "prod" ]]; then
-  normalize_public_tree "$TARGET_ROOT"
-fi
-
-if [[ "$ENVIRONMENT" == preview-* ]]; then
-  "$SCRIPT_DIR/preview-slots.sh" ready "$BRANCH" "$COMMIT" >/dev/null
+  echo "Normalizing preview artifact roots after metadata..."
+  if ! normalize_preview_artifacts; then
+    echo "Warning: preview artifact root normalization after metadata failed; continuing." >&2
+  fi
 fi
 
 if command -v systemctl >/dev/null 2>&1 && [[ "${BRAI_RESTART_SERVICE:-true}" != "false" ]]; then
+  echo "Restarting $SERVICE_NAME..."
   "${BRAI_SUDO:-sudo}" systemctl restart "$SERVICE_NAME"
+fi
+
+if [[ "$ENVIRONMENT" == preview-* ]]; then
+  echo "Marking preview slot ready..."
+  "$SCRIPT_DIR/preview-slots.sh" ready "$BRANCH" "$COMMIT" >/dev/null
 fi
 
 echo "Deployed $BRANCH@$COMMIT to $ENVIRONMENT ($DOMAIN) with bundle $BUNDLE_VERSION."

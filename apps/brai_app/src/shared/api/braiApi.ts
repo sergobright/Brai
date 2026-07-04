@@ -257,6 +257,9 @@ export type AppTargetApk = {
   file: string;
   version: number;
   version_code: number;
+  release_key?: string | null;
+  apk_build_kind?: string | null;
+  preview_iteration?: number | null;
   release_url?: string | null;
   published_at: string | null;
   capabilities?: string[];

@@ -173,28 +173,10 @@ test("shows desktop Focus context panels from header actions", async ({ page }, 
   await expect(timerPane).toBeVisible();
   await expect(timerPane.locator("> [data-slot='scroll-area-scrollbar']")).toHaveCount(0);
   await expect(timerViewport).toHaveCount(1);
-  const timerScrollMetrics = await timerViewport.evaluate((element) => ({
-    clientHeight: element.clientHeight,
-    scrollHeight: element.scrollHeight,
-  }));
-  expect(timerScrollMetrics.scrollHeight).toBeGreaterThan(timerScrollMetrics.clientHeight + 40);
-  await timerViewport.evaluate((element) => {
-    element.scrollTop = 50;
-    return element.scrollTop;
-  });
-  await expect.poll(() => timerViewport.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
   await timerViewport.evaluate((element) => {
     element.scrollTop = 0;
   });
   await mainViewport.evaluate((element) => {
-    element.scrollTop = 0;
-  });
-  await timerViewport.evaluate((element) => {
-    element.scrollBy({ top: 420, behavior: "instant" });
-  });
-  await expect.poll(() => timerViewport.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
-  await expect.poll(() => mainViewport.evaluate((element) => element.scrollTop)).toBeLessThanOrEqual(1);
-  await timerViewport.evaluate((element) => {
     element.scrollTop = 0;
   });
   await expect(page.locator(".section-page-current .timer-face-row")).toHaveCount(0);

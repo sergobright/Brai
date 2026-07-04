@@ -49,6 +49,20 @@ const readyStatuses = new Set(["candidate_ready_for_next_start", "ready_candidat
 const downloadingStatuses = new Set(["checking", "downloading"]);
 const apkRequiredStatuses = new Set(["apk_required", "incompatible"]);
 
+type ApkBuildKind = "stable" | "preview";
+
+type ApkIdentity = {
+  version: number | null;
+  releaseKey: string | null;
+  buildKind: ApkBuildKind;
+  previewIteration: number;
+};
+
+type ApkTarget = ApkIdentity & {
+  label: string | null;
+  releaseUrl: string;
+};
+
 export type UpdateStatusView = {
   label: string;
   body: string;
@@ -66,6 +80,7 @@ export type EngineSectionView = {
   isChecking: boolean;
   apkUpdateAvailable: boolean;
   requiredApkVersion: number | null;
+  requiredApkLabel: string | null;
   apkReleaseUrl: string;
   latestVersion: string;
   updateStatus: UpdateStatusView;
@@ -97,11 +112,11 @@ export function engineSectionView({
     otaState?.candidateBundleVersion,
     otaState?.downloadProgressVersion,
   );
-  const nativeApkVersion = apkVersion(otaState?.nativeApkVersion ?? otaState?.nativeVersionName);
-  const targetApkVersion = apkVersion(otaState?.targetApkVersion);
-  const requiredApkVersion = targetApkVersion ?? appVersionState?.target_apk?.version ?? appVersionState?.apk_release?.version ?? null;
+  const nativeApk = nativeApkIdentity(otaState);
+  const targetApk = targetApkIdentity(otaState, appVersionState);
+  const requiredApkVersion = targetApk.version;
   const apkUpdateAvailable = Boolean(
-    (targetApkVersion && nativeApkVersion && targetApkVersion > nativeApkVersion) ||
+    (targetApk.version && nativeApk.version && !isApkCompatible(nativeApk, targetApk)) ||
       (otaState?.lastCheckStatus && apkRequiredStatuses.has(otaState.lastCheckStatus)),
   );
   const isChecking = otaRefreshing || versionRefreshing || Boolean(otaState?.checkInProgress);
@@ -109,7 +124,7 @@ export function engineSectionView({
     !isChecking && otaState?.lastCheckStatus === "checking" ? { ...otaState, lastCheckStatus: "unknown" } : otaState;
   const hasUpdate = apkUpdateAvailable || compareBraiVersions(latestVersion, installedVersion) > 0 || hasReadyOtaUpdate(visibleState);
   const androidUpdateStage = androidStage(visibleState, hasUpdate);
-  const apkReleaseUrl = otaState?.targetApkReleaseUrl || appVersionState?.target_apk?.release_url || "/releases/";
+  const apkReleaseUrl = targetApk.releaseUrl;
   const updateStatus = engineStatusView({
     apkUpdateAvailable,
     hasUpdate,
@@ -126,6 +141,7 @@ export function engineSectionView({
     appBuild,
     apkUpdateAvailable,
     requiredApkVersion,
+    requiredApkLabel: targetApk.label,
     apkReleaseUrl,
     downloadProgressVersion: otaVersion(visibleState?.downloadProgressVersion),
     downloadProgressPercent: progressPercent(visibleState),
@@ -135,6 +151,50 @@ export function engineSectionView({
     latestVersion,
     updateStatus,
   };
+}
+
+function nativeApkIdentity(state: BraiOtaState | null): ApkIdentity {
+  return {
+    version: apkVersion(state?.nativeApkVersion ?? state?.nativeVersionName),
+    releaseKey: textValue(state?.nativeApkReleaseKey),
+    buildKind: apkBuildKind(state?.nativeApkBuildKind),
+    previewIteration: iterationValue(state?.nativeApkPreviewIteration) ?? 0,
+  };
+}
+
+function targetApkIdentity(state: BraiOtaState | null, appVersionState: AppVersionState | null): ApkTarget {
+  const apiTarget = appVersionState?.target_apk ?? appVersionState?.apk_release ?? null;
+  const buildKind = apkBuildKind(state?.targetApkBuildKind ?? apiTarget?.apk_build_kind);
+  const previewIteration = iterationValue(state?.targetApkPreviewIteration) ?? iterationValue(apiTarget?.preview_iteration) ?? 0;
+  const version = apkVersion(state?.targetApkVersion) ?? apkVersion(apiTarget?.version);
+  return {
+    version,
+    releaseKey: textValue(state?.targetApkReleaseKey) ?? textValue(apiTarget?.release_key),
+    buildKind,
+    previewIteration,
+    label: formatApkTargetLabel(version, buildKind, previewIteration),
+    releaseUrl: state?.targetApkReleaseUrl || apiTarget?.release_url || "/releases/",
+  };
+}
+
+function isApkCompatible(native: ApkIdentity, target: ApkIdentity): boolean {
+  if (!native.version || !target.version) return true;
+  if (target.releaseKey && !native.releaseKey && target.buildKind === "stable" && native.buildKind === "stable") {
+    return native.version >= target.version;
+  }
+  if (target.releaseKey && target.releaseKey !== native.releaseKey) return false;
+  if (target.buildKind === "preview") {
+    return native.buildKind === "preview" && native.version === target.version && native.previewIteration >= target.previewIteration;
+  }
+  if (native.buildKind !== "stable") return false;
+  return native.version >= target.version;
+}
+
+export function formatApkTargetLabel(version: number | string | null | undefined, buildKind?: string | null, previewIteration?: number | string | null): string | null {
+  const apk = apkVersion(version);
+  if (!apk) return null;
+  const iteration = iterationValue(previewIteration);
+  return apkBuildKind(buildKind) === "preview" && iteration ? `v${apk}-preview${iteration}` : `v${apk}`;
 }
 
 /**
@@ -277,4 +337,18 @@ function otaVersion(value: string | null | undefined): string | null {
 function apkVersion(value: string | number | null | undefined): number | null {
   const version = Number(value);
   return Number.isInteger(version) && version > 0 ? version : null;
+}
+
+function iterationValue(value: string | number | null | undefined): number | null {
+  const number = Number(value);
+  return Number.isInteger(number) && number >= 0 ? number : null;
+}
+
+function apkBuildKind(value: string | null | undefined): ApkBuildKind {
+  return value === "preview" ? "preview" : "stable";
+}
+
+function textValue(value: string | null | undefined): string | null {
+  const text = value?.trim();
+  return text ? text : null;
 }

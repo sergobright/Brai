@@ -4,6 +4,7 @@ const browserHome = process.env.BRAI_BROWSER_HOME || "/srv/projects/brai";
 
 export default defineConfig({
   testDir: "./tests/e2e",
+  workers: 1,
   webServer: {
     command: "npm run dev -- --hostname 127.0.0.1 --port 3201",
     url: "http://127.0.0.1:3201",

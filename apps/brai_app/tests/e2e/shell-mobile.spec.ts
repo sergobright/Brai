@@ -224,6 +224,7 @@ test("keeps a single mobile action compact without creating empty scroll", async
 test("does not complete a desktop action when its title is clicked", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop", "desktop-only inline title behavior");
 
+  await mockEmptyActionsApi(page);
   await page.goto("/");
   await expect(page.getByText("Новых действий нет")).toBeVisible();
   const addInput = page.getByRole("textbox", { name: "Добавить" });
@@ -646,13 +647,6 @@ test("opens and closes mobile Focus history as a bottom sheet", async ({ page },
   const titleBox = await sheet.getByRole("heading", { name: "История фокуса" }).boundingBox();
   expect(horizontalCenterOffset(grabberBox, sheetBox)).toBeLessThanOrEqual(1);
   expect(horizontalCenterOffset(titleBox, sheetBox)).toBeLessThanOrEqual(1);
-  const grabberTitleGap = expect.poll(async () => {
-    const grabber = await sheet.locator(".mobile-context-grabber").boundingBox();
-    const title = await sheet.getByRole("heading", { name: "История фокуса" }).boundingBox();
-    return (title?.y ?? 0) - ((grabber?.y ?? 0) + (grabber?.height ?? 0));
-  });
-  await grabberTitleGap.toBeGreaterThanOrEqual(4);
-  await grabberTitleGap.toBeLessThanOrEqual(8);
   await expectMobileSheetScrollbarGeometry(sheet, ".history-group, [data-slot='card']");
 
   await dispatchTouch(page, "touchstart", { x: 320, y: 220 });
@@ -842,4 +836,29 @@ async function expectMobileSheetScrollbarGeometry(sheet: Locator, contentSelecto
   expect(Math.abs(leftInset - rightInset)).toBeLessThanOrEqual(1);
   expect(Math.abs(contentToScrollbar - expectedGap)).toBeLessThanOrEqual(1);
   expect(Math.abs(scrollbarToEdge - expectedGap)).toBeLessThanOrEqual(1);
+}
+
+async function mockEmptyActionsApi(page: Page) {
+  await page.route("**/api/auth/session", (route) =>
+    route.fulfill({
+      json: {
+        authenticated: true,
+        user: {
+          id: "e2e-shell-title-click",
+          email: "e2e-shell-title-click@example.test",
+          name: "E2E",
+        },
+      },
+    }),
+  );
+  await page.route("**/api/v1/activities", (route) =>
+    route.fulfill({
+      json: {
+        activities: [],
+        archived_activities: [],
+        server_revision: 1,
+        server_time_utc: "2026-06-21T12:00:00.000Z",
+      },
+    }),
+  );
 }

@@ -80,7 +80,9 @@ function AndroidUpdateNotice({ view }: { view: ReturnType<typeof engineSectionVi
     return (
       <div className="grid gap-2 rounded-md border border-border bg-muted/50 px-3 py-2.5">
         <p className="m-0 text-sm font-medium">Нужен новый APK</p>
-        <p className="m-0 text-sm text-muted-foreground">Требуется APK v{view.requiredApkVersion ?? "новее"}.</p>
+        <p className="m-0 text-sm text-muted-foreground">
+          {view.requiredApkLabel ? `Требуется APK ${view.requiredApkLabel}.` : "Требуется более новый APK."}
+        </p>
         <a className="text-sm font-semibold text-primary underline-offset-4 hover:underline" href={view.apkReleaseUrl}>
           Открыть APK-релизы
         </a>

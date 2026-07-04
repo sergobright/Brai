@@ -47,6 +47,30 @@ public class BraiOtaManifestTest {
     }
 
     @Test
+    public void checksStableTargetIdentity() throws Exception {
+        BraiOtaManifest manifest = BraiOtaManifest.parse(manifestWithApkTarget("2", "a", "stable", 0, 2));
+
+        manifest.validate(new URL("https://app.brightos.world/mobile-update/manifest.json"), 2, "a", "stable", 0);
+
+        assertTrue(manifest.isCompatibleWith(3, "a", "stable", 0));
+        assertFalse(manifest.isCompatibleWith(2, "b", "stable", 0));
+        assertFalse(manifest.isCompatibleWith(2, "a", "preview", 4));
+    }
+
+    @Test
+    public void checksPreviewTargetIdentity() throws Exception {
+        BraiOtaManifest manifest = BraiOtaManifest.parse(manifestWithApkTarget("2", "a", "preview", 6, 20006));
+
+        manifest.validate(new URL("https://app.brightos.world/mobile-update/manifest.json"), 2, "a", "preview", 6);
+
+        assertTrue(manifest.isCompatibleWith(2, "a", "preview", 7));
+        assertFalse(manifest.isCompatibleWith(2, "a", "preview", 5));
+        assertFalse(manifest.isCompatibleWith(3, "a", "preview", 7));
+        assertFalse(manifest.isCompatibleWith(2, "a", "stable", 0));
+        assertFalse(manifest.isCompatibleWith(2, "b", "preview", 7));
+    }
+
+    @Test
     public void rejectsInvalidTargetApkVersion() {
         assertThrows(
             BraiOtaException.class,
@@ -117,5 +141,16 @@ public class BraiOtaManifestTest {
             + "\"entrypoint\":\"index.html\","
             + "\"mandatory\":false"
             + "}";
+    }
+
+    private static String manifestWithApkTarget(String version, String releaseKey, String buildKind, int previewIteration, int versionCode) {
+        return validManifest().replace(
+            "\"targetApkVersion\":1,",
+            "\"targetApkVersion\":" + version + ","
+                + "\"targetApkReleaseKey\":\"" + releaseKey + "\","
+                + "\"targetApkBuildKind\":\"" + buildKind + "\","
+                + "\"targetApkPreviewIteration\":" + previewIteration + ","
+                + "\"targetApkVersionCode\":" + versionCode + ","
+        );
     }
 }

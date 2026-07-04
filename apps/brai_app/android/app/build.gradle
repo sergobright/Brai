@@ -9,6 +9,11 @@ def braiWebVersion = System.getenv('BRAI_APP_VERSION') ?: '0.0.10'
 def braiAndroidApi = System.getenv('NEXT_PUBLIC_BRAI_ANDROID_API') ?: 'https://api.brightos.world'
 def braiAndroidVersionCode = (System.getenv('BRAI_ANDROID_VERSION_CODE') ?: '1') as Integer
 def braiApkVersion = System.getenv('BRAI_APK_VERSION') ?: "${braiAndroidVersionCode}"
+def braiApkBuildKind = System.getenv('BRAI_APK_BUILD_KIND') ?: 'stable'
+def braiApkPreviewIteration = (System.getenv('BRAI_APK_PREVIEW_ITERATION') ?: '0') as Integer
+def braiAndroidAppLabel = System.getenv('BRAI_ANDROID_APP_LABEL')
+def braiPreviewPackageSuffix = braiApkBuildKind == 'preview' ? '.work' : ''
+def braiAppLabel = { fallback -> braiAndroidAppLabel ?: fallback }
 def braiProductionFallbackBundleVersion = System.getenv('BRAI_PROD_FALLBACK_BUNDLE_VERSION') ?: '0.0.10'
 def braiNonProductionFallbackBundleVersion = System.getenv('BRAI_NON_PROD_FALLBACK_BUNDLE_VERSION') ?: braiWebVersion
 
@@ -25,6 +30,8 @@ android {
         manifestPlaceholders = [braiAppLabel: 'Brai']
         buildConfigField "String", "BRAI_ANDROID_API", "\"${braiAndroidApi}\""
         buildConfigField "String", "BRAI_APK_VERSION", "\"${braiApkVersion}\""
+        buildConfigField "String", "BRAI_APK_BUILD_KIND", "\"${braiApkBuildKind}\""
+        buildConfigField "int", "BRAI_APK_PREVIEW_ITERATION", "${braiApkPreviewIteration}"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
              // Default: https://android.googlesource.com/platform/frameworks/base/+/282e181b58cf72b6ca770dc7ca5f91f135444502/tools/aapt/AaptAssets.cpp#61
@@ -38,86 +45,93 @@ android {
     productFlavors {
         production {
             dimension "environment"
-            manifestPlaceholders = [braiAppLabel: 'Brai']
+            manifestPlaceholders = [braiAppLabel: braiAppLabel('Brai')]
             buildConfigField "String", "BRAI_APP_BUILD", '"1"'
             buildConfigField "String", "BRAI_FALLBACK_BUNDLE_VERSION", "\"${braiProductionFallbackBundleVersion}\""
             buildConfigField "String", "BRAI_OTA_MANIFEST_URL", '"https://app.brightos.world/mobile-update/manifest.json"'
             buildConfigField "String", "BRAI_ENVIRONMENT", '"prod"'
             buildConfigField "String", "BRAI_PREVIEW_SLOT", '""'
+            buildConfigField "String", "BRAI_APK_RELEASE_KEY", '"production"'
             buildConfigField "String", "BRAI_OTA_CHANNEL", '"app.brightos.world/mobile-update"'
-            buildConfigField "String", "BRAI_APP_LABEL", '"Brai"'
+            buildConfigField "String", "BRAI_APP_LABEL", "\"${braiAppLabel('Brai')}\""
         }
         dev {
             dimension "environment"
             applicationIdSuffix ".dev"
-            manifestPlaceholders = [braiAppLabel: 'Brai Dev']
+            manifestPlaceholders = [braiAppLabel: braiAppLabel('Brai Dev')]
             buildConfigField "String", "BRAI_APP_BUILD", '"1-dev"'
             buildConfigField "String", "BRAI_FALLBACK_BUNDLE_VERSION", "\"${braiNonProductionFallbackBundleVersion}\""
             buildConfigField "String", "BRAI_OTA_MANIFEST_URL", '"https://dev.brightos.world/mobile-update/manifest.json"'
             buildConfigField "String", "BRAI_ENVIRONMENT", '"dev"'
             buildConfigField "String", "BRAI_PREVIEW_SLOT", '""'
+            buildConfigField "String", "BRAI_APK_RELEASE_KEY", '"dev"'
             buildConfigField "String", "BRAI_OTA_CHANNEL", '"dev.brightos.world/mobile-update"'
-            buildConfigField "String", "BRAI_APP_LABEL", '"Brai Dev"'
+            buildConfigField "String", "BRAI_APP_LABEL", "\"${braiAppLabel('Brai Dev')}\""
         }
         previewA {
             dimension "environment"
-            applicationIdSuffix ".preview.a"
-            manifestPlaceholders = [braiAppLabel: 'Brai A']
+            applicationIdSuffix ".preview.a${braiPreviewPackageSuffix}"
+            manifestPlaceholders = [braiAppLabel: braiAppLabel('Brai A')]
             buildConfigField "String", "BRAI_APP_BUILD", '"1-a"'
             buildConfigField "String", "BRAI_FALLBACK_BUNDLE_VERSION", "\"${braiNonProductionFallbackBundleVersion}\""
             buildConfigField "String", "BRAI_OTA_MANIFEST_URL", '"https://a.test.brightos.world/mobile-update/manifest.json"'
             buildConfigField "String", "BRAI_ENVIRONMENT", '"preview-a"'
             buildConfigField "String", "BRAI_PREVIEW_SLOT", '"A"'
+            buildConfigField "String", "BRAI_APK_RELEASE_KEY", '"a"'
             buildConfigField "String", "BRAI_OTA_CHANNEL", '"a.test.brightos.world/mobile-update"'
-            buildConfigField "String", "BRAI_APP_LABEL", '"Brai A"'
+            buildConfigField "String", "BRAI_APP_LABEL", "\"${braiAppLabel('Brai A')}\""
         }
         previewB {
             dimension "environment"
-            applicationIdSuffix ".preview.b"
-            manifestPlaceholders = [braiAppLabel: 'Brai B']
+            applicationIdSuffix ".preview.b${braiPreviewPackageSuffix}"
+            manifestPlaceholders = [braiAppLabel: braiAppLabel('Brai B')]
             buildConfigField "String", "BRAI_APP_BUILD", '"1-b"'
             buildConfigField "String", "BRAI_FALLBACK_BUNDLE_VERSION", "\"${braiNonProductionFallbackBundleVersion}\""
             buildConfigField "String", "BRAI_OTA_MANIFEST_URL", '"https://b.test.brightos.world/mobile-update/manifest.json"'
             buildConfigField "String", "BRAI_ENVIRONMENT", '"preview-b"'
             buildConfigField "String", "BRAI_PREVIEW_SLOT", '"B"'
+            buildConfigField "String", "BRAI_APK_RELEASE_KEY", '"b"'
             buildConfigField "String", "BRAI_OTA_CHANNEL", '"b.test.brightos.world/mobile-update"'
-            buildConfigField "String", "BRAI_APP_LABEL", '"Brai B"'
+            buildConfigField "String", "BRAI_APP_LABEL", "\"${braiAppLabel('Brai B')}\""
         }
         previewC {
             dimension "environment"
-            applicationIdSuffix ".preview.c"
-            manifestPlaceholders = [braiAppLabel: 'Brai C']
+            applicationIdSuffix ".preview.c${braiPreviewPackageSuffix}"
+            manifestPlaceholders = [braiAppLabel: braiAppLabel('Brai C')]
             buildConfigField "String", "BRAI_APP_BUILD", '"1-c"'
             buildConfigField "String", "BRAI_FALLBACK_BUNDLE_VERSION", "\"${braiNonProductionFallbackBundleVersion}\""
             buildConfigField "String", "BRAI_OTA_MANIFEST_URL", '"https://c.test.brightos.world/mobile-update/manifest.json"'
             buildConfigField "String", "BRAI_ENVIRONMENT", '"preview-c"'
             buildConfigField "String", "BRAI_PREVIEW_SLOT", '"C"'
+            buildConfigField "String", "BRAI_APK_RELEASE_KEY", '"c"'
             buildConfigField "String", "BRAI_OTA_CHANNEL", '"c.test.brightos.world/mobile-update"'
-            buildConfigField "String", "BRAI_APP_LABEL", '"Brai C"'
+            buildConfigField "String", "BRAI_APP_LABEL", "\"${braiAppLabel('Brai C')}\""
         }
         previewD {
             dimension "environment"
-            applicationIdSuffix ".preview.d"
-            manifestPlaceholders = [braiAppLabel: 'Brai D']
+            applicationIdSuffix ".preview.d${braiPreviewPackageSuffix}"
+            manifestPlaceholders = [braiAppLabel: braiAppLabel('Brai D')]
             buildConfigField "String", "BRAI_APP_BUILD", '"1-d"'
             buildConfigField "String", "BRAI_FALLBACK_BUNDLE_VERSION", "\"${braiNonProductionFallbackBundleVersion}\""
             buildConfigField "String", "BRAI_OTA_MANIFEST_URL", '"https://d.test.brightos.world/mobile-update/manifest.json"'
             buildConfigField "String", "BRAI_ENVIRONMENT", '"preview-d"'
             buildConfigField "String", "BRAI_PREVIEW_SLOT", '"D"'
+            buildConfigField "String", "BRAI_APK_RELEASE_KEY", '"d"'
             buildConfigField "String", "BRAI_OTA_CHANNEL", '"d.test.brightos.world/mobile-update"'
-            buildConfigField "String", "BRAI_APP_LABEL", '"Brai D"'
+            buildConfigField "String", "BRAI_APP_LABEL", "\"${braiAppLabel('Brai D')}\""
         }
         previewE {
             dimension "environment"
-            applicationIdSuffix ".preview.e"
-            manifestPlaceholders = [braiAppLabel: 'Brai E']
+            applicationIdSuffix ".preview.e${braiPreviewPackageSuffix}"
+            manifestPlaceholders = [braiAppLabel: braiAppLabel('Brai E')]
             buildConfigField "String", "BRAI_APP_BUILD", '"1-e"'
             buildConfigField "String", "BRAI_FALLBACK_BUNDLE_VERSION", "\"${braiNonProductionFallbackBundleVersion}\""
             buildConfigField "String", "BRAI_OTA_MANIFEST_URL", '"https://e.test.brightos.world/mobile-update/manifest.json"'
             buildConfigField "String", "BRAI_ENVIRONMENT", '"preview-e"'
             buildConfigField "String", "BRAI_PREVIEW_SLOT", '"E"'
+            buildConfigField "String", "BRAI_APK_RELEASE_KEY", '"e"'
             buildConfigField "String", "BRAI_OTA_CHANNEL", '"e.test.brightos.world/mobile-update"'
-            buildConfigField "String", "BRAI_APP_LABEL", '"Brai E"'
+            buildConfigField "String", "BRAI_APP_LABEL", "\"${braiAppLabel('Brai E')}\""
         }
     }
     signingConfigs {

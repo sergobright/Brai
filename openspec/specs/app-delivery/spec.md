@@ -144,7 +144,8 @@ Accepted preview promotion SHALL take `short_changes`, `detailed_changes`, and `
 - **WHEN** the project owner asks to make or publish an APK release
 - **THEN** the workflow builds and publishes APK artifacts with the current APK counter `N`
 - **AND** Android `versionName` is `N`
-- **AND** Android `versionCode` is `N` unless a future APK release explicitly increments both together
+- **AND** stable Android `versionCode` is `N`
+- **AND** branch preview APK `versionCode` is `N * 10000 + M`
 
 #### Scenario: Release or canon version is requested
 - **WHEN** a request asks to create a `release` or `canon` version row
@@ -196,19 +197,21 @@ Brai SHALL provide non-production Android flavors for preview slots `A` through 
 - **WHEN** preview APKs are built
 - **THEN** they use separate application ids, labels, icons, and OTA channels
 - **AND** they can be installed side-by-side with production
+- **AND** transient branch preview APKs use a separate application id from the accepted Preview A-E stable baseline
 
 ### Requirement: Non-production APK builds use APK target compatibility
 Brai SHALL keep Preview APK artifacts aligned with their OTA manifests through the public APK counter `N`.
 
 #### Scenario: Native preview APK is published
 - **WHEN** a `codex/*` branch changes the native Android boundary
-- **THEN** the allocated preview slot APK is built with Android `versionName=N` and `versionCode=N`
-- **AND** the preview release metadata records that APK file and APK version `N`
-- **AND** the Preview OTA manifest sets `targetApkVersion` to `N`
+- **THEN** the allocated preview slot APK is built with Android `versionName=N` and `versionCode=N * 10000 + M`
+- **AND** the preview release metadata records `brai-vN-previewM.apk`, APK version `N`, and preview iteration `M`
+- **AND** the Preview OTA manifest targets release key, build kind, stable `N`, and preview `M`
+- **AND** `M` is committed only after the preview deployment is fully ready, so failed builds and failed deployments retry the same `M`
 
 #### Scenario: Accepted native work reaches production
 - **WHEN** native-boundary work is accepted into `main`
-- **THEN** Preview A-E APKs are rebuilt from production source during slot release
+- **THEN** Production, Dev, and Preview A-E APKs are rebuilt from production source as stable `vN` APKs
 
 ### Requirement: Deployment metadata is recorded per environment
 Brai SHALL record deployment metadata for production and preview environments.
