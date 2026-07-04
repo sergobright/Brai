@@ -28,7 +28,7 @@ sealed class RecorderState {
         val provider: String = "",
         val model: String = ""
     ) : RecorderState()
-    data object ReceiverDelivered : RecorderState()
+    data object InboxDelivered : RecorderState()
     data class Error(val message: String) : RecorderState()
     data class InsertText(val text: String) : RecorderState()
 }

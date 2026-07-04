@@ -6,6 +6,18 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createFixture, jsonRequest, TOKEN } from '../test-support/api.js';
 
+const PNG_BYTES = Buffer.from([
+  0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+  0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
+  0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+  0x08, 0x06, 0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4,
+  0x89, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x44, 0x41,
+  0x54, 0x78, 0x9c, 0x63, 0x00, 0x01, 0x00, 0x00,
+  0x05, 0x00, 0x01, 0x0d, 0x0a, 0x2d, 0xb4, 0x00,
+  0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae,
+  0x42, 0x60, 0x82
+]);
+
 test('AirWhisper access tokens, health, admin summary, and migrations work in Brai API', async () => {
   const fixture = await createFixture(['2026-07-03T12:00:00.000Z']);
   try {
@@ -189,6 +201,63 @@ test('AirWhisper dictation accepts multipart audio and stores only usage metrics
     assert.equal(JSON.stringify(usage).includes('raw transcript'), false);
   } finally {
     await fixture.close();
+  }
+});
+
+test('Brai Cmd inbox route accepts Android access token and creates Inbox context items', async () => {
+  const storageRoot = await mkdtemp(join(tmpdir(), 'brai-cmd-inbox-'));
+  const fixture = await createFixture(['2026-07-04T12:00:00.000Z'], {
+    inboundStorageRoot: storageRoot,
+    inboundTitleGenerator: async () => 'Команда с контекстом'
+  });
+
+  try {
+    const denied = await jsonRequest(fixture.url, '/v1/brai-cmd/inbox', {
+      method: 'POST',
+      body: JSON.stringify({ text: 'без токена' })
+    });
+    assert.equal(denied.status, 401);
+
+    const access = await jsonRequest(fixture.url, '/v1/access/request', {
+      method: 'POST',
+      body: JSON.stringify({ displayName: 'Tester', deviceId: 'cmd-device' })
+    });
+    const response = await jsonRequest(fixture.url, '/v1/brai-cmd/inbox', {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${access.body.token}`,
+        'x-airwhisper-device-id': 'cmd-device'
+      },
+      body: JSON.stringify({
+        text: 'разбери экран',
+        description_json: { appLabel: 'Telegram', page: { items: ['hello'] } },
+        attachments: [{ base64: PNG_BYTES.toString('base64'), mime: 'image/png', name: 'screen.png' }],
+        idempotency_key: 'cmd-1'
+      })
+    });
+
+    assert.equal(response.status, 201);
+    const item = response.body.state.inbox[0];
+    assert.equal(item.title, 'Команда с контекстом');
+    assert.equal(item.explanation_text, 'разбери экран');
+    assert.equal(item.description_md, '{\n  "appLabel": "Telegram",\n  "page": {\n    "items": [\n      "hello"\n    ]\n  }\n}');
+    assert.equal(item.source, 'brai-cmd');
+    assert.equal(item.record_type_id, 1);
+    assert.match(item.attachment_links[0], /^\/v1\/inbox\/attachments\/.+\.png$/);
+
+    const duplicate = await jsonRequest(fixture.url, '/v1/brai-cmd/inbox', {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${access.body.token}`,
+        'x-airwhisper-device-id': 'cmd-device'
+      },
+      body: JSON.stringify({ text: 'разбери экран', idempotency_key: 'cmd-1' })
+    });
+    assert.equal(duplicate.status, 200);
+    assert.equal(fixture.store.db.prepare('SELECT COUNT(*) AS count FROM inbox').get().count, 1);
+  } finally {
+    await fixture.close();
+    await rm(storageRoot, { recursive: true, force: true });
   }
 });
 

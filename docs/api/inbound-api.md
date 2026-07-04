@@ -43,6 +43,22 @@ routes.
 
 Старые inbound routes `/v1/in` и `/v1/in/:target` не поддерживаются.
 
+## Встроенный Android Brai Cmd
+
+Android-приложение Brai Cmd не использует внешний `X-Brai-API-Key` и не хранит
+inbound secret в APK. Оно отправляет команды во входящие через внутренний route:
+
+```text
+POST /v1/brai-cmd/inbox
+Authorization: Bearer <device access token>
+X-AirWhisper-Device-Id: <install id>
+```
+
+Payload использует тот же Inbox mapping, что внешний `POST /v1/`: `text`,
+`description_json`, `attachments[]`, `source`, `source_key`,
+`idempotency_key`. Сервер принудительно маршрутизирует этот route в target
+`inbox`.
+
 ## Авторизация
 
 Все inbound-запросы требуют:

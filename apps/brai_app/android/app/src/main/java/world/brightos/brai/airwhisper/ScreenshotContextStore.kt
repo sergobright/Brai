@@ -53,7 +53,7 @@ object ScreenshotContextStore {
         File("${audioFile.absolutePath}.screenshot.jpg")
 }
 
-object ReceiverPayloadStore {
+object InboxPayloadStore {
     fun mark(audioFile: File) {
         sidecarFile(audioFile).apply {
             parentFile?.mkdirs()
@@ -61,23 +61,27 @@ object ReceiverPayloadStore {
         }
     }
 
-    fun isReceiverPayload(audioFile: File): Boolean =
-        sidecarFile(audioFile).isFile
+    fun isInboxPayload(audioFile: File): Boolean =
+        sidecarFile(audioFile).isFile || legacySidecarFile(audioFile).isFile
 
     fun saveTranscript(audioFile: File, transcript: String) {
         sidecarFile(audioFile).writeText(transcript.trim(), Charsets.UTF_8)
+        legacySidecarFile(audioFile).delete()
     }
 
     fun readTranscript(audioFile: File): String? {
-        val file = sidecarFile(audioFile)
+        val file = listOf(sidecarFile(audioFile), legacySidecarFile(audioFile)).firstOrNull { it.isFile } ?: return null
         if (!file.isFile) return null
         return file.readText(Charsets.UTF_8).trim().takeIf { it.isNotBlank() }
     }
 
     fun move(fromAudioFile: File, toAudioFile: File) {
-        val from = sidecarFile(fromAudioFile)
+        moveSidecar(sidecarFile(fromAudioFile), sidecarFile(toAudioFile))
+        moveSidecar(legacySidecarFile(fromAudioFile), legacySidecarFile(toAudioFile))
+    }
+
+    private fun moveSidecar(from: File, to: File) {
         if (!from.exists()) return
-        val to = sidecarFile(toAudioFile)
         if (from.renameTo(to)) return
         runCatching {
             from.copyTo(to, overwrite = true)
@@ -87,8 +91,12 @@ object ReceiverPayloadStore {
 
     fun delete(audioFile: File) {
         sidecarFile(audioFile).delete()
+        legacySidecarFile(audioFile).delete()
     }
 
     private fun sidecarFile(audioFile: File): File =
+        File("${audioFile.absolutePath}.inbox.txt")
+
+    private fun legacySidecarFile(audioFile: File): File =
         File("${audioFile.absolutePath}.receiver.txt")
 }

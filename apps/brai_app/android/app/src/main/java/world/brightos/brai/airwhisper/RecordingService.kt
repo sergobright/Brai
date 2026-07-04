@@ -18,7 +18,7 @@ import java.net.SocketTimeoutException
 import java.net.UnknownHostException
 import java.util.concurrent.atomic.AtomicBoolean
 
-private class ReceiverDeliveryException(message: String) : IOException(message)
+private class InboxDeliveryException(message: String) : IOException(message)
 
 class RecordingService : Service() {
     private val handler = Handler(Looper.getMainLooper())
@@ -26,7 +26,7 @@ class RecordingService : Service() {
     private var outputFile: File? = null
     private var conversationContext: VisibleConversationContext? = null
     private var screenshotFile: File? = null
-    private var receiverDelivery = false
+    private var inboxDelivery = false
     private var amplitudeTicker: Runnable? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -39,7 +39,7 @@ class RecordingService : Service() {
             else -> startRecording(
                 VisibleConversationContext.fromIntent(intent),
                 screenshotFileFromIntent(intent),
-                intent?.getBooleanExtra(EXTRA_RECEIVER_DELIVERY, false) == true
+                intent?.getBooleanExtra(EXTRA_INBOX_DELIVERY, false) == true
             )
         }
         return START_NOT_STICKY
@@ -52,23 +52,23 @@ class RecordingService : Service() {
             val pendingFile = finalizeRecording(unfinishedFile)
             ConversationContextStore.save(pendingFile, conversationContext)
             screenshotFile?.let { ScreenshotContextStore.save(pendingFile, it) }
-            if (receiverDelivery) ReceiverPayloadStore.mark(pendingFile)
+            if (inboxDelivery) InboxPayloadStore.mark(pendingFile)
         }
         outputFile = null
         conversationContext = null
         screenshotFile = null
-        receiverDelivery = false
+        inboxDelivery = false
         super.onDestroy()
     }
 
-    private fun startRecording(context: VisibleConversationContext?, screenshot: File?, deliverToReceiver: Boolean) {
+    private fun startRecording(context: VisibleConversationContext?, screenshot: File?, deliverToInbox: Boolean) {
         if (recorder != null) {
             screenshot?.delete()
             return
         }
         conversationContext = context
         screenshotFile = screenshot?.takeIf { it.isFile && it.length() > 0L }
-        receiverDelivery = deliverToReceiver
+        inboxDelivery = deliverToInbox
         startRecordingForeground()
 
         val file = File(recordingsDir().apply { mkdirs() }, "airwhisper-${System.currentTimeMillis()}.recording.m4a")
@@ -85,7 +85,7 @@ class RecordingService : Service() {
             recorder = mediaRecorder
             outputFile = file
             ScreenshotContextStore.save(file, screenshotFile)
-            if (receiverDelivery) ReceiverPayloadStore.mark(file)
+            if (inboxDelivery) InboxPayloadStore.mark(file)
             screenshotFile = null
             AirWhisperBus.post(RecorderState.Recording(0))
             startAmplitudeTicker()
@@ -93,7 +93,7 @@ class RecordingService : Service() {
             mediaRecorder.release()
             screenshotFile?.delete()
             screenshotFile = null
-            ReceiverPayloadStore.delete(file)
+            InboxPayloadStore.delete(file)
             file.delete()
             AirWhisperBus.post(RecorderState.Error(error.message ?: "Не удалось начать запись"))
             stopSelf()
@@ -107,7 +107,7 @@ class RecordingService : Service() {
             recordingFile?.delete()
             recordingFile?.let { ConversationContextStore.delete(it) }
             recordingFile?.let { ScreenshotContextStore.delete(it) }
-            recordingFile?.let { ReceiverPayloadStore.delete(it) }
+            recordingFile?.let { InboxPayloadStore.delete(it) }
             AirWhisperBus.post(RecorderState.Error("Запись слишком короткая"))
             stopRecordingForeground()
             stopSelf()
@@ -131,12 +131,12 @@ class RecordingService : Service() {
         releaseRecorder()
         outputFile = null
         conversationContext = null
-        receiverDelivery = false
+        inboxDelivery = false
         screenshotFile?.delete()
         screenshotFile = null
         recordingFile?.let { ConversationContextStore.delete(it) }
         recordingFile?.let { ScreenshotContextStore.delete(it) }
-        recordingFile?.let { ReceiverPayloadStore.delete(it) }
+        recordingFile?.let { InboxPayloadStore.delete(it) }
         recordingFile?.delete()
         AirWhisperBus.post(RecorderState.Idle)
         stopRecordingForeground()
@@ -175,19 +175,18 @@ class RecordingService : Service() {
                 var fallbackProvider = ""
                 var fallbackModel = ""
                 var permanentFailureMessage: String? = null
-                var receiverDelivered = false
+                var inboxDelivered = false
                 for (file in firstBatch) {
                     if (!file.exists()) continue
-                    val receiverPayload = ReceiverPayloadStore.isReceiverPayload(file)
+                    val inboxPayload = InboxPayloadStore.isInboxPayload(file)
                     if (isTooLargeForUpload(file)) {
                         permanentFailureMessage = tooLargeMessage(file)
                         markAudioUnretryable(file)
                         continue
                     }
-                    if (receiverPayload) {
-                        var text = ReceiverPayloadStore.readTranscript(file)
+                    if (inboxPayload) {
+                        var text = InboxPayloadStore.readTranscript(file)
                         if (text == null) {
-                            ConfigStore(this).appendReceiverLog("Отправка: расшифровываю голос")
                             val response = try {
                                 client.uploadAudio(file, null, null)
                             } catch (error: ServerResponseException) {
@@ -200,8 +199,7 @@ class RecordingService : Service() {
                             }
                             text = response.text.trim()
                             if (text.isNotBlank()) {
-                                ReceiverPayloadStore.saveTranscript(file, text)
-                                ConfigStore(this).appendReceiverLog("Отправка: текст готов, ${text.length} символов")
+                                InboxPayloadStore.saveTranscript(file, text)
                             }
                         }
                         val finalText = text.orEmpty()
@@ -212,9 +210,9 @@ class RecordingService : Service() {
                             )
                             return@Thread
                         }
-                        deliverToReceiver(client, file, finalText)
+                        deliverToInbox(client, file, finalText)
                         markAudioComplete(file)
-                        receiverDelivered = true
+                        inboxDelivered = true
                     } else {
                         val storedContext = ConversationContextStore.read(file)
                         val response = try {
@@ -270,8 +268,8 @@ class RecordingService : Service() {
                     )
                 } else if (permanentFailureMessage != null) {
                     AirWhisperBus.post(RecorderState.Error(permanentFailureMessage))
-                } else if (receiverDelivered) {
-                    AirWhisperBus.post(RecorderState.ReceiverDelivered)
+                } else if (inboxDelivered) {
+                    AirWhisperBus.post(RecorderState.InboxDelivered)
                 } else {
                     AirWhisperBus.post(RecorderState.Idle)
                 }
@@ -286,20 +284,18 @@ class RecordingService : Service() {
         }.start()
     }
 
-    private fun deliverToReceiver(client: NetworkClient, file: File, text: String) {
-        val screenshot = ScreenshotContextStore.read(file) ?: throw ReceiverDeliveryException("Скриншот недоступен")
-        val config = ConfigStore(this)
+    private fun deliverToInbox(client: NetworkClient, file: File, text: String) {
+        val context = ConversationContextStore.read(file)
+        val screenshot = ScreenshotContextStore.read(file)
         try {
-            config.appendReceiverLog("Отправка: GET handshake")
-            val handshakeStatus = client.receiverHandshake()
-            config.appendReceiverLog("Отправка: handshake OK HTTP $handshakeStatus")
-            config.appendReceiverLog("Отправка: POST JSON, текст ${text.length}, картинка ${screenshot.length()} байт")
-            val postStatus = client.uploadReceiverCommand(text, screenshot)
-            config.appendReceiverLog("Отправка: принято HTTP $postStatus")
+            client.uploadInboxCommand(
+                transcript = text,
+                conversationContext = context,
+                screenshotFile = screenshot,
+                idempotencyKey = file.name
+            )
         } catch (error: Throwable) {
-            config.receiverConnectionOk = false
-            config.appendReceiverLog("Отправка: ошибка ${error.message.orEmpty().take(180)}")
-            throw ReceiverDeliveryException(error.message ?: "Получатель данных не отвечает")
+            throw InboxDeliveryException(error.message ?: "Входящие не отвечают")
         }
     }
 
@@ -317,7 +313,7 @@ class RecordingService : Service() {
     private fun markAudioComplete(file: File) {
         ConversationContextStore.delete(file)
         ScreenshotContextStore.delete(file)
-        ReceiverPayloadStore.delete(file)
+        InboxPayloadStore.delete(file)
         if (file.delete()) return
         file.renameTo(File(file.parentFile ?: recordingsDir(), "${file.name}.done"))
     }
@@ -325,7 +321,7 @@ class RecordingService : Service() {
     private fun markAudioUnretryable(file: File) {
         ConversationContextStore.delete(file)
         ScreenshotContextStore.delete(file)
-        ReceiverPayloadStore.delete(file)
+        InboxPayloadStore.delete(file)
         val failedFile = File(file.parentFile ?: recordingsDir(), "${file.name}.failed")
         if (file.renameTo(failedFile)) return
         file.delete()
@@ -338,7 +334,7 @@ class RecordingService : Service() {
         if (file.renameTo(pendingFile)) {
             ConversationContextStore.move(file, pendingFile)
             ScreenshotContextStore.move(file, pendingFile)
-            ReceiverPayloadStore.move(file, pendingFile)
+            InboxPayloadStore.move(file, pendingFile)
             return pendingFile
         }
         return runCatching {
@@ -346,7 +342,7 @@ class RecordingService : Service() {
             if (pendingFile.exists()) file.delete()
             ConversationContextStore.move(file, pendingFile)
             ScreenshotContextStore.move(file, pendingFile)
-            ReceiverPayloadStore.move(file, pendingFile)
+            InboxPayloadStore.move(file, pendingFile)
             pendingFile
         }.getOrDefault(file)
     }
@@ -355,8 +351,8 @@ class RecordingService : Service() {
 
     private fun pendingStatusFor(error: Throwable): Pair<String, PendingReason> =
         when (error) {
-            is ReceiverDeliveryException ->
-                Pair("Данные сохранены. Получатель данных не отвечает; повторю автоматически.", PendingReason.Server)
+            is InboxDeliveryException ->
+                Pair("Команда сохранена. Входящие сейчас не отвечают; повторю автоматически.", PendingReason.Server)
             is UnknownHostException ->
                 Pair("Запись сохранена. Нет интернета; когда связь вернется, Brai Cmd расшифрует ее сам.", PendingReason.Network)
             is SocketTimeoutException ->
@@ -477,21 +473,21 @@ class RecordingService : Service() {
         private const val ACTION_CANCEL = "world.brightos.brai.airwhisper.CANCEL_RECORDING"
         private const val ACTION_RETRY = "world.brightos.brai.airwhisper.RETRY_RECORDINGS"
         private const val EXTRA_SCREENSHOT_PATH = "world.brightos.brai.airwhisper.extra.SCREENSHOT_PATH"
-        private const val EXTRA_RECEIVER_DELIVERY = "world.brightos.brai.airwhisper.extra.RECEIVER_DELIVERY"
+        private const val EXTRA_INBOX_DELIVERY = "world.brightos.brai.airwhisper.extra.INBOX_DELIVERY"
         private val uploadInProgress = AtomicBoolean(false)
 
         fun start(
             context: Context,
             conversationContext: VisibleConversationContext? = null,
             screenshotFile: File? = null,
-            sendToReceiver: Boolean = false
+            deliverToInbox: Boolean = false
         ) {
             val intent = Intent(context, RecordingService::class.java).setAction(ACTION_START)
             VisibleConversationContext.putInto(intent, conversationContext)
             if (screenshotFile != null && screenshotFile.isFile) {
                 intent.putExtra(EXTRA_SCREENSHOT_PATH, screenshotFile.absolutePath)
             }
-            intent.putExtra(EXTRA_RECEIVER_DELIVERY, sendToReceiver)
+            intent.putExtra(EXTRA_INBOX_DELIVERY, deliverToInbox)
             try {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) context.startForegroundService(intent) else context.startService(intent)
             } catch (error: Throwable) {

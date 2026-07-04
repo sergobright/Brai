@@ -16,7 +16,8 @@ import {
   handleAirWhisperAdminRoute,
   handleAirWhisperPublicRoute,
   isAirWhisperAdminRoute,
-  isAirWhisperPublicRoute
+  isAirWhisperPublicRoute,
+  requireAirWhisperAccess
 } from './airwhisper.js';
 import { sendReleaseLoginPage, serveRelease } from './release-routes.js';
 import { BraiStore, formatFocusInterval, formatSession } from './store.js';
@@ -244,6 +245,29 @@ export function createBraiServer({
 
       if (url.pathname === '/v1/in' || url.pathname.startsWith('/v1/in/')) {
         sendJson(req, res, 404, { error: 'not_found' });
+        return;
+      }
+
+      if (url.pathname === '/v1/brai-cmd/inbox') {
+        if (req.method !== 'POST') {
+          sendJson(req, res, 405, { error: 'method_not_allowed' });
+          return;
+        }
+        const access = requireAirWhisperAccess(req, store);
+        const requestNow = now();
+        const body = await readJson(req, { limit: INBOUND_BODY_LIMIT_BYTES });
+        const ownerUserId = store.primaryUserId();
+        const inboundBody = {
+          ...body,
+          target: 'inbox',
+          source: typeof body.source === 'string' && body.source.trim() ? body.source : 'brai-cmd',
+          source_key: typeof body.source_key === 'string' && body.source_key.trim() ? body.source_key : access.id,
+          record_type_id: body.record_type_id ?? 1
+        };
+        const result = await withUserScope(ownerUserId, () => inboundHandlers.get('inbox').receive(inboundBody, requestNow));
+        const state = await withUserScope(ownerUserId, () => inboxState(store, requestNow));
+        broadcast(sockets, { type: 'inbox_synced', inbox_state: state }, ownerUserId);
+        sendJson(req, res, result.created ? 201 : 200, { ok: true, target: 'inbox', ...result, state });
         return;
       }
 

@@ -2,8 +2,12 @@ package world.brightos.brai.airwhisper
 
 import android.content.Context
 import android.content.SharedPreferences
-import java.time.Instant
 import java.util.UUID
+
+enum class ContextDeliveryMode {
+    Json,
+    Screenshot
+}
 
 class ConfigStore(context: Context) {
     private val prefs = context.applicationContext.getSharedPreferences(AppConstants.PREFS, Context.MODE_PRIVATE)
@@ -21,40 +25,6 @@ class ConfigStore(context: Context) {
             return if (saved == LEGACY_AUTH_TOKEN_PLACEHOLDER) "" else saved
         }
         set(value) = prefs.edit().putString(AppConstants.KEY_AUTH_TOKEN, value.trim()).apply()
-
-    var receiverUrl: String
-        get() = prefs.getString(AppConstants.KEY_RECEIVER_URL, "").orEmpty().trim()
-        set(value) {
-            val clean = value.trim()
-            val changed = clean != receiverUrl
-            prefs.edit().putString(AppConstants.KEY_RECEIVER_URL, clean).apply()
-            if (changed) receiverConnectionOk = false
-        }
-
-    var receiverToken: String
-        get() = prefs.getString(AppConstants.KEY_RECEIVER_TOKEN, "").orEmpty().trim()
-        set(value) {
-            val clean = value.trim()
-            val changed = clean != receiverToken
-            prefs.edit().putString(AppConstants.KEY_RECEIVER_TOKEN, clean).apply()
-            if (changed) receiverConnectionOk = false
-        }
-
-    var receiverConnectionOk: Boolean
-        get() = prefs.getBoolean(AppConstants.KEY_RECEIVER_CONNECTION_OK, false)
-        set(value) = prefs.edit().putBoolean(AppConstants.KEY_RECEIVER_CONNECTION_OK, value).apply()
-
-    fun receiverReady(): Boolean =
-        receiverUrl.isNotBlank() && receiverToken.isNotBlank() && receiverConnectionOk
-
-    val receiverLog: String
-        get() = prefs.getString(AppConstants.KEY_RECEIVER_LOG, "").orEmpty()
-
-    fun appendReceiverLog(message: String) {
-        val lines = (receiverLog.lines().filter { it.isNotBlank() } + "${Instant.now()} $message")
-            .takeLast(MAX_RECEIVER_LOG_LINES)
-        prefs.edit().putString(AppConstants.KEY_RECEIVER_LOG, lines.joinToString("\n")).apply()
-    }
 
     var displayName: String
         get() = prefs.getString(AppConstants.KEY_DISPLAY_NAME, "").orEmpty()
@@ -80,6 +50,15 @@ class ConfigStore(context: Context) {
     var screenshotContextEnabled: Boolean
         get() = prefs.getBoolean(AppConstants.KEY_SCREENSHOT_CONTEXT_ENABLED, AppConstants.DEFAULT_SCREENSHOT_CONTEXT_ENABLED)
         set(value) = prefs.edit().putBoolean(AppConstants.KEY_SCREENSHOT_CONTEXT_ENABLED, value).apply()
+
+    var contextDeliveryMode: ContextDeliveryMode
+        get() = if (screenshotContextEnabled) ContextDeliveryMode.Screenshot else ContextDeliveryMode.Json
+        set(value) {
+            prefs.edit()
+                .putBoolean(AppConstants.KEY_HEADER_CONTEXT_ENABLED, value == ContextDeliveryMode.Json)
+                .putBoolean(AppConstants.KEY_SCREENSHOT_CONTEXT_ENABLED, value == ContextDeliveryMode.Screenshot)
+                .apply()
+        }
 
     var postProcessingEnabled: Boolean
         get() = prefs.getBoolean(AppConstants.KEY_POST_PROCESSING_ENABLED, false)
@@ -139,7 +118,6 @@ class ConfigStore(context: Context) {
 
     companion object {
         private const val LEGACY_AUTH_TOKEN_PLACEHOLDER = "replace-with-local-token"
-        private const val MAX_RECEIVER_LOG_LINES = 40
 
         private val LEGACY_SERVER_URLS = setOf(
             "https://your-server.example.com",

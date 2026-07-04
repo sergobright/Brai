@@ -5,11 +5,10 @@ import world.brightos.brai.BuildConfig
 import android.content.Context
 import android.media.MediaMetadataRetriever
 import android.util.Base64
-import android.util.Log
+import org.json.JSONArray
 import org.json.JSONObject
 import java.io.BufferedOutputStream
 import java.io.File
-import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.UUID
@@ -115,28 +114,43 @@ class NetworkClient(context: Context) {
         )
     }
 
-    fun receiverHandshake(): Int {
-        Log.i(TAG, "receiver handshake GET")
-        return openReceiverConnection("GET").let { ensureReceiverSuccess(it) }
-    }
-
-    fun uploadReceiverCommand(transcript: String, screenshotFile: File): Int {
-        Log.i(TAG, "receiver POST textChars=${transcript.length} imageBytes=${screenshotFile.length()}")
-        val connection = openReceiverConnection("POST").apply {
+    fun uploadInboxCommand(
+        transcript: String,
+        conversationContext: VisibleConversationContext?,
+        screenshotFile: File?,
+        idempotencyKey: String
+    ) {
+        val connection = openAuthenticatedConnection("/v1/brai-cmd/inbox", "POST").apply {
             doOutput = true
-            readTimeout = RECEIVER_READ_TIMEOUT_MS
+            readTimeout = DEFAULT_READ_TIMEOUT_MS
             setRequestProperty("Content-Type", "application/json; charset=utf-8")
+        }
+        val attachments = JSONArray()
+        if (screenshotFile?.isFile == true && screenshotFile.length() > 0L) {
+            val mime = if (screenshotFile.name.endsWith(".jpg", ignoreCase = true) ||
+                screenshotFile.name.endsWith(".jpeg", ignoreCase = true)
+            ) {
+                "image/jpeg"
+            } else {
+                "image/png"
+            }
+            attachments.put(JSONObject()
+                .put("base64", Base64.encodeToString(screenshotFile.readBytes(), Base64.NO_WRAP))
+                .put("mime", mime)
+                .put("name", screenshotFile.name)
+            )
         }
         val body = JSONObject()
             .put("text", transcript)
-            .put("image_base64", Base64.encodeToString(screenshotFile.readBytes(), Base64.NO_WRAP))
-            .put("image_mime", "image/png")
-            .put("source", "airwhisper")
-            .put("idempotency_key", screenshotFile.name)
-            .toString()
-            .toByteArray(Charsets.UTF_8)
-        connection.outputStream.use { it.write(body) }
-        return ensureReceiverSuccess(connection)
+            .put("source", "brai-cmd")
+            .put("source_key", config.installId)
+            .put("record_type_id", 1)
+            .put("idempotency_key", idempotencyKey)
+        if (conversationContext?.isReliable() == true) body.put("description_json", conversationContext.toJson())
+        if (attachments.length() > 0) body.put("attachments", attachments)
+        val bytes = body.toString().toByteArray(Charsets.UTF_8)
+        connection.outputStream.use { it.write(bytes) }
+        readJson(connection)
     }
 
     private fun openPublicConnection(path: String, method: String): HttpURLConnection {
@@ -158,34 +172,6 @@ class NetworkClient(context: Context) {
             setRequestProperty("X-AirWhisper-Device-Id", config.installId)
             setRequestProperty("X-AirWhisper-Client-Version", BuildConfig.VERSION_NAME)
         }
-    }
-
-    private fun openReceiverConnection(method: String): HttpURLConnection {
-        val endpoint = config.receiverUrl
-        val token = config.receiverToken
-        require(endpoint.startsWith("http://") || endpoint.startsWith("https://")) { "URL получателя должен начинаться с http:// или https://" }
-        require(token.isNotBlank()) { "Не указан токен получателя" }
-        return (URL(endpoint).openConnection() as HttpURLConnection).apply {
-            requestMethod = method
-            connectTimeout = 15_000
-            readTimeout = DEFAULT_READ_TIMEOUT_MS
-            setRequestProperty("Authorization", "Bearer $token")
-            setRequestProperty("Accept", "application/json")
-            setRequestProperty("X-AirWhisper-Device-Id", config.installId)
-            setRequestProperty("X-AirWhisper-Client-Version", BuildConfig.VERSION_NAME)
-        }
-    }
-
-    private fun ensureReceiverSuccess(connection: HttpURLConnection): Int {
-        val status = connection.responseCode
-        val stream = if (status in 200..299) connection.inputStream else connection.errorStream
-        val body = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
-        if (status !in 200..299) {
-            Log.w(TAG, "receiver HTTP $status: ${body.take(300)}")
-            throw IOException("HTTP $status: ${body.ifBlank { "получатель не принял запрос" }}")
-        }
-        Log.i(TAG, "receiver HTTP $status")
-        return status
     }
 
     private fun readJson(connection: HttpURLConnection): JSONObject {
@@ -235,11 +221,9 @@ class NetworkClient(context: Context) {
         config.postProcessingPrompt.take(MAX_POST_PROCESSING_PROMPT_CHARS)
 
     companion object {
-        private const val TAG = "AirWhisperReceiver"
         const val MAX_AUDIO_BYTES = 25L * 1024L * 1024L
         private const val MAX_POST_PROCESSING_PROMPT_CHARS = 4000
         private const val DEFAULT_READ_TIMEOUT_MS = 70_000
         private const val DICTATE_READ_TIMEOUT_MS = 240_000
-        private const val RECEIVER_READ_TIMEOUT_MS = 70_000
     }
 }

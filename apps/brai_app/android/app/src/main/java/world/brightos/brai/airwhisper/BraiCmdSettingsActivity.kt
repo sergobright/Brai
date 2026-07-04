@@ -21,6 +21,8 @@ import android.view.accessibility.AccessibilityManager
 import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
+import android.widget.RadioButton
+import android.widget.RadioGroup
 import android.widget.ScrollView
 import android.widget.Switch
 import android.widget.TextView
@@ -42,14 +44,8 @@ class BraiCmdSettingsActivity : Activity() {
     private lateinit var accessStatus: TextView
     private lateinit var postProcessingSwitch: Switch
     private lateinit var postProcessingPromptInput: EditText
-    private lateinit var receiverTokenButton: Button
-    private lateinit var receiverUrlInput: EditText
-    private lateinit var receiverTestButton: Button
-    private lateinit var receiverStatusIcon: TextView
-    private lateinit var receiverLogText: TextView
 
     private var serverOk = false
-    private var screen = Screen.Main
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -61,7 +57,7 @@ class BraiCmdSettingsActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
-        if (screen == Screen.Main) refreshStatus() else refreshReceiverUi()
+        refreshStatus()
     }
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
@@ -69,16 +65,7 @@ class BraiCmdSettingsActivity : Activity() {
         refreshStatus()
     }
 
-    override fun onBackPressed() {
-        when (screen) {
-            Screen.ReceiverToken -> buildReceiverUi()
-            Screen.Receiver -> buildUi()
-            Screen.Main -> super.onBackPressed()
-        }
-    }
-
     private fun buildUi() {
-        screen = Screen.Main
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(COLOR_BACKGROUND)
@@ -156,10 +143,6 @@ class BraiCmdSettingsActivity : Activity() {
 
         root.addView(ui.sectionTitle("6. Пост-обработка"))
         addPostProcessingCard(root)
-
-        root.addView(ui.actionButton("Подключить") { buildReceiverUi() }, ui.matchHeight(ui.dp(46)).apply {
-            setMargins(0, ui.dp(16), 0, 0)
-        })
 
         val scrollView = ScrollView(this).apply {
             setBackgroundColor(COLOR_BACKGROUND)
@@ -304,24 +287,40 @@ class BraiCmdSettingsActivity : Activity() {
 
     private fun addContextCard(root: LinearLayout) {
         val card = ui.panel()
-        val headerRow = ui.settingsSwitchRow(
-            title = "JSON страницы",
-            subtitle = "Использовать видимый текст страницы как контекст для ответа.",
-            checked = config.headerContextEnabled
-        ) { checked ->
-            config.headerContextEnabled = checked
-        }
-        val screenshotRow = ui.settingsSwitchRow(
-            title = "Кнопка со скриншотом",
-            subtitle = "Показывать кнопку отправки данных получателю.",
-            checked = config.screenshotContextEnabled
-        ) { checked ->
-            config.screenshotContextEnabled = checked
-        }
-        card.addView(headerRow)
-        card.addView(screenshotRow, ui.matchWrap().apply { setMargins(0, ui.dp(10), 0, 0) })
+        card.addView(TextView(this).apply {
+            text = "Отправлять во входящие"
+            textSize = 16f
+            typeface = Typeface.DEFAULT_BOLD
+            setTextColor(COLOR_TEXT)
+        })
+        card.addView(TextView(this).apply {
+            text = "Дополнительная кнопка отправляет голосовую команду и один выбранный тип контекста."
+            textSize = 13f
+            setTextColor(COLOR_MUTED)
+            setPadding(0, ui.dp(2), 0, ui.dp(8))
+        })
+        val jsonId = View.generateViewId()
+        val screenshotId = View.generateViewId()
+        card.addView(RadioGroup(this).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(contextRadioButton(jsonId, "JSON страницы", "Видимый текст и структура текущего экрана."))
+            addView(contextRadioButton(screenshotId, "Скриншот", "Картинка текущего экрана как вложение."))
+            check(if (config.contextDeliveryMode == ContextDeliveryMode.Screenshot) screenshotId else jsonId)
+            setOnCheckedChangeListener { _, checkedId ->
+                config.contextDeliveryMode = if (checkedId == screenshotId) ContextDeliveryMode.Screenshot else ContextDeliveryMode.Json
+            }
+        })
         root.addView(card, ui.matchWrap())
     }
+
+    private fun contextRadioButton(idValue: Int, title: String, subtitle: String): RadioButton =
+        RadioButton(this).apply {
+            id = idValue
+            text = "$title\n$subtitle"
+            textSize = 14f
+            setTextColor(COLOR_TEXT)
+            setPadding(0, ui.dp(4), 0, ui.dp(4))
+        }
 
     private fun addSettingsCard(root: LinearLayout) {
         val card = ui.panel()
@@ -344,8 +343,8 @@ class BraiCmdSettingsActivity : Activity() {
             config.mainIconSizePercent = value
         }, ui.matchWrap().apply { setMargins(0, ui.dp(12), 0, 0) })
         card.addView(ui.settingsSliderRow(
-            title = "Скриншот: непрозрачность",
-            subtitle = "Кнопка отправки данных получателю.",
+            title = "Контекст: непрозрачность",
+            subtitle = "Кнопка отправки во входящие.",
             value = config.screenshotIconOpacityPercent,
             min = AppConstants.MIN_ICON_OPACITY_PERCENT,
             max = AppConstants.MAX_ICON_OPACITY_PERCENT
@@ -353,7 +352,7 @@ class BraiCmdSettingsActivity : Activity() {
             config.screenshotIconOpacityPercent = value
         }, ui.matchWrap().apply { setMargins(0, ui.dp(12), 0, 0) })
         card.addView(ui.settingsSliderRow(
-            title = "Скриншот: размер",
+            title = "Контекст: размер",
             subtitle = "100% - текущий размер и середина ползунка.",
             value = config.screenshotIconSizePercent,
             min = AppConstants.MIN_ICON_SIZE_PERCENT,
@@ -362,210 +361,6 @@ class BraiCmdSettingsActivity : Activity() {
             config.screenshotIconSizePercent = value
         }, ui.matchWrap().apply { setMargins(0, ui.dp(12), 0, 0) })
         root.addView(card, ui.matchWrap())
-    }
-
-    private fun buildReceiverUi() {
-        screen = Screen.Receiver
-        val root = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setBackgroundColor(COLOR_BACKGROUND)
-            setPadding(ui.dp(20), ui.dp(24), ui.dp(20), ui.dp(30))
-        }
-
-        root.addView(TextView(this).apply {
-            text = "Подключите сервер получатель команд"
-            textSize = 24f
-            typeface = Typeface.DEFAULT_BOLD
-            setTextColor(COLOR_TEXT)
-            setPadding(0, 0, 0, ui.dp(16))
-        })
-
-        receiverTokenButton = ui.actionButton(if (config.receiverToken.isBlank()) "Указать токен" else "Изменить токен") {
-            buildReceiverTokenUi()
-        }
-        root.addView(receiverTokenButton, ui.matchHeight(ui.dp(46)))
-
-        root.addView(TextView(this).apply {
-            text = "URL для получения данных"
-            textSize = 16f
-            typeface = Typeface.DEFAULT_BOLD
-            setTextColor(COLOR_TEXT)
-            setPadding(0, ui.dp(18), 0, ui.dp(8))
-        })
-
-        val urlRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-        }
-        receiverUrlInput = EditText(this).apply {
-            hint = "https://example.com/commands"
-            setSingleLine(true)
-            textSize = 16f
-            setTextColor(COLOR_TEXT)
-            setHintTextColor(COLOR_MUTED)
-            setPadding(ui.dp(12), 0, ui.dp(12), 0)
-            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
-            background = ui.roundedBackground(COLOR_INPUT, COLOR_BORDER)
-            setText(config.receiverUrl)
-            addTextChangedListener(object : TextWatcher {
-                override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
-                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
-                    config.receiverUrl = s?.toString().orEmpty()
-                    refreshReceiverUi()
-                }
-                override fun afterTextChanged(s: Editable?) = Unit
-            })
-        }
-        urlRow.addView(receiverUrlInput, LinearLayout.LayoutParams(0, ui.dp(46), 1f))
-        receiverStatusIcon = TextView(this).apply {
-            textSize = 26f
-            typeface = Typeface.DEFAULT_BOLD
-            gravity = Gravity.CENTER
-        }
-        urlRow.addView(receiverStatusIcon, LinearLayout.LayoutParams(ui.dp(38), ui.dp(46)).apply {
-            setMargins(ui.dp(8), 0, 0, 0)
-        })
-        root.addView(urlRow, ui.matchWrap())
-
-        receiverTestButton = ui.actionButton("Тест") { testReceiver() }
-        root.addView(receiverTestButton, ui.matchHeight(ui.dp(44)).apply { setMargins(0, ui.dp(12), 0, 0) })
-
-        root.addView(TextView(this).apply {
-            text = "Логи подключения"
-            textSize = 16f
-            typeface = Typeface.DEFAULT_BOLD
-            setTextColor(COLOR_TEXT)
-            setPadding(0, ui.dp(18), 0, ui.dp(8))
-        })
-        receiverLogText = TextView(this).apply {
-            textSize = 12f
-            setTextColor(COLOR_MUTED)
-            setPadding(ui.dp(10), ui.dp(9), ui.dp(10), ui.dp(9))
-            background = ui.roundedBackground(COLOR_INPUT, COLOR_BORDER)
-        }
-        root.addView(receiverLogText, ui.matchWrap())
-
-        val scrollView = ScrollView(this).apply {
-            setBackgroundColor(COLOR_BACKGROUND)
-            clipToPadding = false
-            isFillViewport = true
-            addView(root)
-        }
-        ui.applyScreenEdgePadding(scrollView)
-        setContentView(scrollView)
-        refreshReceiverUi()
-    }
-
-    private fun buildReceiverTokenUi() {
-        screen = Screen.ReceiverToken
-        val root = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setBackgroundColor(COLOR_BACKGROUND)
-            setPadding(ui.dp(20), ui.dp(24), ui.dp(20), ui.dp(30))
-        }
-
-        root.addView(TextView(this).apply {
-            text = "Токен получателя"
-            textSize = 24f
-            typeface = Typeface.DEFAULT_BOLD
-            setTextColor(COLOR_TEXT)
-            setPadding(0, 0, 0, ui.dp(16))
-        })
-
-        val savedToken = config.receiverToken
-        if (savedToken.isNotBlank()) {
-            root.addView(TextView(this).apply {
-                text = maskToken(savedToken)
-                textSize = 18f
-                typeface = Typeface.DEFAULT_BOLD
-                setTextColor(COLOR_OK)
-                setPadding(ui.dp(12), ui.dp(10), ui.dp(12), ui.dp(10))
-                background = ui.roundedBackground(COLOR_OK_BADGE)
-            }, ui.matchWrap().apply { setMargins(0, 0, 0, ui.dp(12)) })
-        }
-
-        val tokenInput = EditText(this).apply {
-            hint = "Введите токен"
-            setSingleLine(true)
-            textSize = 16f
-            setTextColor(COLOR_TEXT)
-            setHintTextColor(COLOR_MUTED)
-            setPadding(ui.dp(12), 0, ui.dp(12), 0)
-            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
-            background = ui.roundedBackground(COLOR_INPUT, COLOR_BORDER)
-        }
-        root.addView(tokenInput, ui.matchHeight(ui.dp(46)))
-
-        root.addView(ui.actionButton("Сохранить") {
-            val token = tokenInput.text?.toString().orEmpty().trim()
-            if (token.isNotBlank()) {
-                config.receiverToken = token
-                buildReceiverUi()
-            }
-        }, ui.matchHeight(ui.dp(44)).apply { setMargins(0, ui.dp(12), 0, 0) })
-
-        if (savedToken.isNotBlank()) {
-            root.addView(ui.actionButton("Сбросить") {
-                config.receiverToken = ""
-                config.receiverConnectionOk = false
-                buildReceiverUi()
-            }, ui.matchHeight(ui.dp(44)).apply { setMargins(0, ui.dp(12), 0, 0) })
-        }
-
-        val scrollView = ScrollView(this).apply {
-            setBackgroundColor(COLOR_BACKGROUND)
-            clipToPadding = false
-            isFillViewport = true
-            addView(root)
-        }
-        ui.applyScreenEdgePadding(scrollView)
-        setContentView(scrollView)
-    }
-
-    private fun refreshReceiverUi() {
-        if (!this::receiverTestButton.isInitialized || !this::receiverStatusIcon.isInitialized) return
-        val hasUrl = this::receiverUrlInput.isInitialized && receiverUrlInput.text?.toString()?.trim()?.isNotBlank() == true
-        val hasToken = config.receiverToken.isNotBlank()
-        if (this::receiverTokenButton.isInitialized) {
-            receiverTokenButton.text = if (hasToken) "Изменить токен" else "Указать токен"
-        }
-        receiverTestButton.isEnabled = hasUrl && hasToken
-        receiverTestButton.alpha = if (receiverTestButton.isEnabled) 1f else 0.45f
-        receiverStatusIcon.text = when {
-            !hasUrl || !hasToken -> ""
-            config.receiverConnectionOk -> "✓"
-            else -> "✕"
-        }
-        receiverStatusIcon.setTextColor(if (config.receiverConnectionOk) COLOR_OK else COLOR_BAD)
-        if (this::receiverLogText.isInitialized) {
-            receiverLogText.text = config.receiverLog.ifBlank { "Логов пока нет" }
-        }
-    }
-
-    private fun testReceiver() {
-        config.receiverUrl = receiverUrlInput.text?.toString().orEmpty()
-        config.appendReceiverLog("Тест: GET ${config.receiverUrl}")
-        refreshReceiverUi()
-        receiverTestButton.isEnabled = false
-        receiverTestButton.alpha = 0.65f
-        receiverStatusIcon.text = "..."
-        receiverStatusIcon.setTextColor(COLOR_INFO)
-        Thread {
-            val result = runCatching { NetworkClient(this).receiverHandshake() }
-            runOnUiThread {
-                config.receiverConnectionOk = result.isSuccess
-                result.fold(
-                    onSuccess = {
-                        config.appendReceiverLog("Тест: OK HTTP $it")
-                        RecordingService.retryPending(this)
-                    },
-                    onFailure = {
-                        config.appendReceiverLog("Тест: ошибка ${it.message.orEmpty().take(180)}")
-                    }
-                )
-                refreshReceiverUi()
-            }
-        }.start()
     }
 
     private fun refreshPostProcessingUi() {
@@ -706,15 +501,6 @@ class BraiCmdSettingsActivity : Activity() {
     private fun cleanError(error: Throwable): String {
         val message = error.message.orEmpty()
         return message.removePrefix("HTTP 403: ").removePrefix("HTTP 400: ").ifBlank { "Не удалось получить доступ" }
-    }
-
-    private fun maskToken(token: String): String =
-        token.take(3) + "******" + token.takeLast(3)
-
-    private enum class Screen {
-        Main,
-        Receiver,
-        ReceiverToken
     }
 
     companion object {

@@ -26,7 +26,10 @@ class OverlayController(private val service: BraiAccessibilityService) {
     private val touchSlop = ViewConfiguration.get(service).scaledTouchSlop
     private val statusBubble = OverlayStatusBubble(service, windowManager, retryHandler)
     private val settingsListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
-        if (key in iconSettingKeys) applyIconSettings()
+        if (key in overlaySettingKeys) {
+            applyIconSettings()
+            updateScreenshotButtonVisibility()
+        }
     }
     private val recording = OverlayRecordingCoordinator(
         service = service,
@@ -77,11 +80,9 @@ class OverlayController(private val service: BraiAccessibilityService) {
                 Toast.makeText(service, "Сохраненных текстов: ${state.transcripts}. Зажмите кнопку, чтобы вставить следующий.", Toast.LENGTH_LONG).show()
             }
         } else if (state is RecorderState.Pending) {
-            val receiverPending = state.message.startsWith("Данные сохранены")
             showStatusBubble(
-                title = if (receiverPending) "Данные сохранены" else if (state.recordings > 0) "Запись сохранена" else "Текст сохранен",
+                title = if (state.recordings > 0) "Запись сохранена" else "Текст сохранен",
                 subtitle = when {
-                    receiverPending -> "Ждет получателя"
                     state.reason == PendingReason.Network -> "Ждет интернет"
                     state.reason == PendingReason.Transcription -> "Ждет модель"
                     state.reason == PendingReason.Server -> "Ждет сервер"
@@ -91,7 +92,6 @@ class OverlayController(private val service: BraiAccessibilityService) {
                 }
             )
             val toast = when {
-                receiverPending -> state.message
                 state.reason == PendingReason.Network -> "Запись сохранена, ждет интернет"
                 state.reason == PendingReason.Transcription -> "Запись сохранена, ждет модель"
                 state.reason == PendingReason.Server -> "Запись сохранена, ждет сервер"
@@ -100,10 +100,10 @@ class OverlayController(private val service: BraiAccessibilityService) {
             }
             Toast.makeText(service, toast, Toast.LENGTH_LONG).show()
             if (state.recordings > 0) pendingRetry.schedule()
-        } else if (state is RecorderState.ReceiverDelivered) {
+        } else if (state is RecorderState.InboxDelivered) {
             pendingRetry.cancel()
-            showStatusBubble("Отправлено", "Получатель принял данные")
-            Toast.makeText(service, "Данные отправлены получателю", Toast.LENGTH_SHORT).show()
+            showStatusBubble("Отправлено", "Во входящих")
+            Toast.makeText(service, "Команда отправлена во входящие", Toast.LENGTH_SHORT).show()
         } else if (state is RecorderState.Error) {
             showStatusBubble("Ошибка", state.message)
             Toast.makeText(service, state.message, Toast.LENGTH_SHORT).show()
@@ -287,7 +287,7 @@ class OverlayController(private val service: BraiAccessibilityService) {
     }
 
     private fun handleScreenshotButtonClick() {
-        if (!config.screenshotContextEnabled) {
+        if (!contextButtonAllowed()) {
             hideScreenshotButton()
             return
         }
@@ -295,14 +295,14 @@ class OverlayController(private val service: BraiAccessibilityService) {
     }
 
     private fun updateScreenshotButtonVisibility() {
-        if (!Settings.canDrawOverlays(service) || !config.screenshotContextEnabled || Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+        if (!Settings.canDrawOverlays(service) || !contextButtonAllowed()) {
             hideScreenshotButton()
             return
         }
         val buttonX = currentButtonX()
         val buttonY = currentButtonY()
         val view = screenshotButton ?: ScreenshotButtonView(service).also {
-            it.contentDescription = "Команда со скриншотом Brai Cmd"
+            it.contentDescription = "Отправить контекст Brai Cmd"
             it.setOnTouchListener { _, event -> handleScreenshotTouch(event) }
             it.setRecorderState(recording.screenshotButtonState(AirWhisperBus.latest))
             screenshotButton = it
@@ -525,17 +525,23 @@ class OverlayController(private val service: BraiAccessibilityService) {
     private fun screenshotButtonSizePx(): Int =
         (service.dp(BASE_SCREENSHOT_BUTTON_DP) * config.screenshotIconSizePercent / 100f).roundToInt()
 
+    private fun contextButtonAllowed(): Boolean =
+        config.contextDeliveryMode == ContextDeliveryMode.Json ||
+            (config.contextDeliveryMode == ContextDeliveryMode.Screenshot && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R)
+
     private fun geometry(): OverlayGeometry =
         OverlayGeometry(service, mainButtonSizePx(), screenshotButtonSizePx(), screenshotButtonGapPx, cancelSizePx, cancelGapPx)
 
     private companion object {
         const val BASE_MAIN_BUTTON_DP = 62
         const val BASE_SCREENSHOT_BUTTON_DP = 46
-        val iconSettingKeys = setOf(
+        val overlaySettingKeys = setOf(
             AppConstants.KEY_MAIN_ICON_OPACITY_PERCENT,
             AppConstants.KEY_MAIN_ICON_SIZE_PERCENT,
             AppConstants.KEY_SCREENSHOT_ICON_OPACITY_PERCENT,
-            AppConstants.KEY_SCREENSHOT_ICON_SIZE_PERCENT
+            AppConstants.KEY_SCREENSHOT_ICON_SIZE_PERCENT,
+            AppConstants.KEY_HEADER_CONTEXT_ENABLED,
+            AppConstants.KEY_SCREENSHOT_CONTEXT_ENABLED
         )
     }
 }

@@ -95,28 +95,32 @@ internal class OverlayRecordingCoordinator(
             AirWhisperBus.post(RecorderState.Error("Откройте Brai Cmd и разрешите уведомления"))
             return
         }
-        if (useScreenshot && !config.receiverReady()) {
-            config.appendReceiverLog("Кнопка: получатель не настроен или тест не пройден")
-            AirWhisperBus.post(RecorderState.Error("Подключите получателя данных"))
-            return
-        }
         if (config.authToken.isBlank()) {
             AirWhisperBus.post(RecorderState.Error("Откройте Brai Cmd и получите доступ"))
             return
         }
         activeButton = if (useScreenshot) RecordingButton.Screenshot else RecordingButton.Main
-        val conversationContext = if (!useScreenshot && config.headerContextEnabled) service.captureVisibleConversationContext() else null
-        startRecordingWithScreenshot(conversationContext, useScreenshot)
-    }
-
-    private fun startRecordingWithScreenshot(conversationContext: VisibleConversationContext?, useScreenshot: Boolean) {
         if (!useScreenshot) {
-            beginRecording(conversationContext, null, sendToReceiver = false)
+            beginRecording(null, null, deliverToInbox = false)
             return
         }
-        if (!config.screenshotContextEnabled || Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+        when (config.contextDeliveryMode) {
+            ContextDeliveryMode.Json -> {
+                val conversationContext = service.captureVisibleConversationContext()
+                if (conversationContext == null) {
+                    activeButton = null
+                    AirWhisperBus.post(RecorderState.Error("JSON страницы недоступен"))
+                    return
+                }
+                beginRecording(conversationContext, null, deliverToInbox = true)
+            }
+            ContextDeliveryMode.Screenshot -> startRecordingWithScreenshot()
+        }
+    }
+
+    private fun startRecordingWithScreenshot() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
             activeButton = null
-            config.appendReceiverLog("Кнопка: скриншот недоступен")
             AirWhisperBus.post(RecorderState.Error("Скриншот недоступен"))
             return
         }
@@ -130,19 +134,18 @@ internal class OverlayRecordingCoordinator(
                 if (screenshotFile == null) {
                     startingRecording = false
                     activeButton = null
-                    config.appendReceiverLog("Кнопка: Android не вернул скриншот")
                     AirWhisperBus.post(RecorderState.Error("Скриншот недоступен"))
                     return@captureActiveWindowScreenshot
                 }
-                beginRecording(conversationContext, screenshotFile, sendToReceiver = true)
+                beginRecording(null, screenshotFile, deliverToInbox = true)
             }
         }, if (hiddenForScreenshot) SCREENSHOT_HIDE_DELAY_MS else 0L)
     }
 
-    private fun beginRecording(conversationContext: VisibleConversationContext?, screenshotFile: File?, sendToReceiver: Boolean) {
+    private fun beginRecording(conversationContext: VisibleConversationContext?, screenshotFile: File?, deliverToInbox: Boolean) {
         startingRecording = false
         Haptics.recordingStart(service)
-        RecordingService.start(service, conversationContext, screenshotFile, sendToReceiver = sendToReceiver)
+        RecordingService.start(service, conversationContext, screenshotFile, deliverToInbox = deliverToInbox)
     }
 
     companion object {

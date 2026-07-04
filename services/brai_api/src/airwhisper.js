@@ -113,7 +113,7 @@ export async function handleAirWhisperAdminRoute({ req, res, url, store, sendJso
   }
 }
 
-function requireAirWhisperAccess(req, store) {
+export function requireAirWhisperAccess(req, store) {
   const token = bearerToken(req);
   const deviceId = headerValue(req, 'x-airwhisper-device-id');
   if (!token) throw new AirWhisperHttpError(401, 'Missing bearer token', 'unauthorized');
