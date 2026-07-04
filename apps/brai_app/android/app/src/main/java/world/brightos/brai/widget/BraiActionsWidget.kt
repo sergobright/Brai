@@ -3,6 +3,9 @@ package world.brightos.brai.widget
 import android.content.Context
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.key
+import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.longPreferencesKey
+import androidx.glance.currentState
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.glance.GlanceId
@@ -18,10 +21,12 @@ import androidx.glance.appwidget.action.ActionCallback
 import androidx.glance.appwidget.action.ToggleableStateKey
 import androidx.glance.appwidget.action.actionRunCallback
 import androidx.glance.appwidget.provideContent
+import androidx.glance.appwidget.state.updateAppWidgetState
 import androidx.glance.background
 import androidx.glance.layout.Column
 import androidx.glance.layout.fillMaxSize
 import androidx.glance.layout.padding
+import androidx.glance.state.PreferencesGlanceStateDefinition
 import androidx.glance.text.FontWeight
 import androidx.glance.text.Text
 import androidx.glance.text.TextStyle
@@ -60,20 +65,29 @@ class ToggleBraiActionCallback : ActionCallback {
 
 object BraiActionsWidget : GlanceAppWidget() {
     override val sizeMode: SizeMode = SizeMode.Single
+    override val stateDefinition = PreferencesGlanceStateDefinition
 
     override suspend fun provideGlance(context: Context, id: GlanceId) {
-        val state = withContext(Dispatchers.IO) { loadWidgetState(context) }
         provideContent {
-            BraiActionsWidgetContent(state)
+            key(currentState<Preferences>()[WidgetInvalidationKey] ?: 0L) {
+                BraiActionsWidgetContent(loadWidgetState(context))
+            }
         }
     }
 
     suspend fun updateEveryInstance(context: Context, first: GlanceId? = null) {
-        if (first != null) update(context, first)
-        GlanceAppWidgetManager(context)
+        val glanceIds = GlanceAppWidgetManager(context)
             .getGlanceIds(BraiActionsWidget::class.java)
-            .filter { glanceId -> glanceId != first }
-            .forEach { glanceId -> update(context, glanceId) }
+        val orderedIds = buildList {
+            if (first != null) add(first)
+            addAll(glanceIds.filter { glanceId -> glanceId != first })
+        }
+        orderedIds.forEach { glanceId ->
+            updateAppWidgetState(context, glanceId) { preferences ->
+                preferences[WidgetInvalidationKey] = System.nanoTime()
+            }
+            update(context, glanceId)
+        }
     }
 
     suspend fun updateEveryInstanceNowAndSoon(context: Context, first: GlanceId? = null) {
@@ -162,4 +176,5 @@ private data class WidgetState(
 private val ActionIdKey = ActionParameters.Key<String>("action_id")
 private val NextStatusKey = ActionParameters.Key<String>("next_status")
 private val RevisionKey = ActionParameters.Key<String>("server_revision")
+private val WidgetInvalidationKey = longPreferencesKey("widget_invalidation")
 private const val MAX_WIDGET_ACTIONS = 8

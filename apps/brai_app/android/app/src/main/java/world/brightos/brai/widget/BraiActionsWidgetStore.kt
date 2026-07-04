@@ -67,7 +67,9 @@ class BraiActionsWidgetStore(context: Context) {
     fun enqueueStatusChange(viewId: String, actionId: String, status: String, baseServerRevision: Long) {
         synchronized(LOCK) {
             if (actionId.isBlank() || !isStatus(status)) return
-            val pending = pendingStatusChanges().toMutableList()
+            val pending = pendingStatusChanges()
+                .filterNot { change -> change.actionId == actionId }
+                .toMutableList()
             pending.add(
                 WidgetActionStatusChange(
                     id = UUID.randomUUID().toString(),
