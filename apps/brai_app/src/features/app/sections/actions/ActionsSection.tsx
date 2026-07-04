@@ -63,6 +63,7 @@ export function ActionsSection({
   const [titleDrafts, setTitleDrafts] = useState<Record<string, string>>({});
   const [detailTitleFocusRequest, setDetailTitleFocusRequest] = useState(0);
   const suppressMobileCreatePopRef = useRef(false);
+  const mobileCreateSubmitInFlightRef = useRef(false);
   const workspaceRef = useRef<HTMLDivElement | null>(null);
   const splitDragStyleRef = useRef<{ cursor: string; userSelect: string } | null>(null);
   const desktopInputRef = useRef<HTMLInputElement | null>(null);
@@ -153,9 +154,13 @@ export function ActionsSection({
   }
 
   async function submitMobile(title: string, descriptionMd: string) {
-    await onCreate(title, descriptionMd);
+    if (mobileCreateSubmitInFlightRef.current) return;
+    mobileCreateSubmitInFlightRef.current = true;
     onMobileCreateDraftChange({ title: "", descriptionMd: "" });
     closeMobileCreate();
+    void onCreate(title, descriptionMd).finally(() => {
+      mobileCreateSubmitInFlightRef.current = false;
+    });
   }
 
   useEffect(() => {

@@ -1,11 +1,14 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { cachedActivitiesState, openProfileMenuItem, setupBraiAppTest } from "./app-test-support";
 import { BraiApp } from "@/features/app/BraiApp";
 import { ActionRow } from "@/features/app/sections/actions/ActionRow";
+import { ActionsSection } from "@/features/app/sections/actions/ActionsSection";
 import { TITLE_MAX_LENGTH } from "@/shared/activities/text";
 import { pendingActivityEvents, saveActivitiesState } from "@/shared/storage/activityStore";
 import { pendingEvents, saveCanonicalState } from "@/shared/storage/syncStore";
+import { emptyActivitiesState } from "@/shared/types/activities";
 
 describe("BraiApp actions", () => {
   setupBraiAppTest();
@@ -75,6 +78,52 @@ describe("BraiApp actions", () => {
       );
     });
     await waitFor(() => expect(screen.queryByRole("button", { name: "Продолжить черновик действия" })).not.toBeInTheDocument());
+  });
+
+  it("closes mobile action creation immediately and ignores duplicate submit taps", async () => {
+    let resolveCreate: () => void = () => undefined;
+    const onCreate = vi.fn(() => new Promise<void>((resolve) => {
+      resolveCreate = resolve;
+    }));
+
+    function Harness() {
+      const [draft, setDraft] = useState({ title: "", descriptionMd: "" });
+      return (
+        <ActionsSection
+          state={emptyActivitiesState(new Date("2026-07-04T12:00:00.000Z"))}
+          localSnapshotReady
+          autoFocusAddInput={false}
+          activeActivityId={null}
+          activeActivityElapsedSeconds={0}
+          mobileCreateDraft={draft}
+          onAutosaveDetails={vi.fn()}
+          onCreate={onCreate}
+          onDelete={vi.fn()}
+          onMobileCreateDraftChange={setDraft}
+          onMobileOverlayChange={vi.fn()}
+          onReorder={vi.fn()}
+          onSetStatus={vi.fn()}
+          onStartActionFocus={vi.fn()}
+          onStopActionFocus={vi.fn()}
+          onUpdateTitle={vi.fn()}
+        />
+      );
+    }
+
+    render(<Harness />);
+
+    fireEvent.click(document.querySelector(".actions-fab") as HTMLElement);
+    const overlay = document.querySelector(".actions-mobile-overlay") as HTMLElement;
+    fireEvent.change(within(overlay).getByRole("textbox", { name: "Добавить действие" }), { target: { value: "Один" } });
+    const submit = within(overlay).getByRole("button", { name: "Добавить действие" });
+
+    fireEvent.click(submit);
+    fireEvent.click(submit);
+
+    expect(onCreate).toHaveBeenCalledTimes(1);
+    expect(document.querySelector(".actions-mobile-overlay")).not.toBeInTheDocument();
+
+    await act(async () => resolveCreate());
   });
 
   it("closes the mobile create composer by pulling down and keeps the draft", async () => {

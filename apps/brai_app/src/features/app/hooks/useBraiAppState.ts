@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BraiApi } from "@/shared/api/braiApi";
 import { defaultApiBase } from "@/shared/config/runtime";
 import {
@@ -62,6 +62,10 @@ export function useBraiAppState(initialSection: SectionId) {
   const activeRef = useRef(false);
   const androidStopInFlightRef = useRef(false);
   const androidWidgetStatusInFlightRef = useRef(false);
+  const androidActionsPublishInFlightRef = useRef(false);
+  const androidActionsPublishQueuedRef = useRef<ActionsState | null>(null);
+  const actionFlushInFlightRef = useRef(false);
+  const actionFlushQueuedRef = useRef(false);
   const timerFlushTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const stopTimerRef = useRef<() => Promise<void>>(async () => undefined);
   const [timer, setTimer] = useState<TimerState>(() => emptyTimerState());
@@ -294,6 +298,22 @@ export function useBraiAppState(initialSection: SectionId) {
   }
 
   async function flushActionPending(sourceApi = apiRef.current) {
+    if (actionFlushInFlightRef.current) {
+      actionFlushQueuedRef.current = true;
+      return;
+    }
+    actionFlushInFlightRef.current = true;
+    try {
+      do {
+        actionFlushQueuedRef.current = false;
+        await flushActionPendingOnce(sourceApi);
+      } while (actionFlushQueuedRef.current);
+    } finally {
+      actionFlushInFlightRef.current = false;
+    }
+  }
+
+  async function flushActionPendingOnce(sourceApi = apiRef.current) {
     const queued = await pendingActionEvents();
     setActionPendingCount(queued.length);
     if (queued.length === 0) {
@@ -364,7 +384,7 @@ export function useBraiAppState(initialSection: SectionId) {
       const projected = projectActionsState(canonical ?? currentActions, queued);
       actionsRef.current = projected;
       setActions(projected);
-      await publishAndroidActionsSnapshot(projected);
+      publishAndroidActionsSnapshot(projected);
       await acknowledgeAndroidActionsWidgetStatusChanges(acknowledgedIds);
       if (!enqueued) return;
 
@@ -621,13 +641,26 @@ export function useBraiAppState(initialSection: SectionId) {
     setSyncStatus(typeof navigator !== "undefined" && navigator.onLine ? "sync_failed" : "offline");
   }
 
-  async function publishAndroidActionsSnapshot(nextActions: ActionsState) {
+  const publishAndroidActionsSnapshot = useCallback((nextActions: ActionsState) => {
     if (!localSnapshotReady || syncStatus === "auth_required") return;
-    await saveAndroidActionsWidgetSnapshot(nextActions, {
-      viewId: DEFAULT_ACTIONS_WIDGET_VIEW_ID,
-      actions: nextActions.actions,
-    });
-  }
+    androidActionsPublishQueuedRef.current = nextActions;
+    if (androidActionsPublishInFlightRef.current) return;
+    androidActionsPublishInFlightRef.current = true;
+    void (async () => {
+      try {
+        while (androidActionsPublishQueuedRef.current) {
+          const snapshot = androidActionsPublishQueuedRef.current;
+          androidActionsPublishQueuedRef.current = null;
+          await saveAndroidActionsWidgetSnapshot(snapshot, {
+            viewId: DEFAULT_ACTIONS_WIDGET_VIEW_ID,
+            actions: snapshot.actions,
+          });
+        }
+      } finally {
+        androidActionsPublishInFlightRef.current = false;
+      }
+    })();
+  }, [localSnapshotReady, syncStatus]);
 
   useEffect(() => {
     apiRef.current = api;
@@ -711,20 +744,14 @@ export function useBraiAppState(initialSection: SectionId) {
       void clearAndroidActionsWidgetData();
       return;
     }
-    void saveAndroidActionsWidgetSnapshot(actions, {
-      viewId: DEFAULT_ACTIONS_WIDGET_VIEW_ID,
-      actions: actions.actions,
-    });
-  }, [actions, localSnapshotReady, syncStatus]);
+    publishAndroidActionsSnapshot(actions);
+  }, [actions, localSnapshotReady, publishAndroidActionsSnapshot, syncStatus]);
 
   useEffect(() => {
     if (!localSnapshotReady || syncStatus === "auth_required") return undefined;
     const publishLatest = () => {
       const nextActions = actionsRef.current;
-      void saveAndroidActionsWidgetSnapshot(nextActions, {
-        viewId: DEFAULT_ACTIONS_WIDGET_VIEW_ID,
-        actions: nextActions.actions,
-      });
+      publishAndroidActionsSnapshot(nextActions);
     };
     const publishWhenHidden = () => {
       if (document.visibilityState === "hidden") publishLatest();
@@ -737,7 +764,7 @@ export function useBraiAppState(initialSection: SectionId) {
       window.removeEventListener("pagehide", publishLatest);
       document.removeEventListener("visibilitychange", publishWhenHidden);
     };
-  }, [localSnapshotReady, syncStatus]);
+  }, [localSnapshotReady, publishAndroidActionsSnapshot, syncStatus]);
 
   useEffect(() => {
     if (!localSnapshotReady || syncStatus === "auth_required") return undefined;

@@ -46,7 +46,7 @@ class ToggleBraiActionCallback : ActionCallback {
                 baseServerRevision = revision
             )
         }
-        BraiActionsWidget.updateEveryInstance(context)
+        BraiActionsWidget.updateEveryInstance(context, glanceId)
     }
 }
 
@@ -60,9 +60,11 @@ object BraiActionsWidget : GlanceAppWidget() {
         }
     }
 
-    suspend fun updateEveryInstance(context: Context) {
+    suspend fun updateEveryInstance(context: Context, first: GlanceId? = null) {
+        if (first != null) update(context, first)
         GlanceAppWidgetManager(context)
             .getGlanceIds(BraiActionsWidget::class.java)
+            .filter { glanceId -> glanceId != first }
             .forEach { glanceId -> update(context, glanceId) }
     }
 }

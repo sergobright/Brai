@@ -47,6 +47,7 @@ export function MobileCreateComposer({
 }) {
   const [descriptionActive, setDescriptionActive] = useState(false);
   const formRef = useRef<HTMLFormElement | null>(null);
+  const submitInFlightRef = useRef(false);
   const textScrollRef = useRef<HTMLDivElement | null>(null);
   const titleRef = useRef<HTMLTextAreaElement | null>(null);
   const descriptionRef = useRef<HTMLTextAreaElement | null>(null);
@@ -79,9 +80,15 @@ export function MobileCreateComposer({
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (submitInFlightRef.current) return;
     const trimmed = cleanTitle(draft.title);
     if (!trimmed) return;
-    await onSubmit(trimmed, normalizeDescription(draft.descriptionMd));
+    submitInFlightRef.current = true;
+    try {
+      await onSubmit(trimmed, normalizeDescription(draft.descriptionMd));
+    } finally {
+      submitInFlightRef.current = false;
+    }
   }
 
   function onTitleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
