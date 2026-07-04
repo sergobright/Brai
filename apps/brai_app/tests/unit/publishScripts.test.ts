@@ -658,6 +658,30 @@ try {
     await expect(readFile(path.join(root, "deploy/web/old.txt"), "utf8")).rejects.toThrow();
   });
 
+  it("replaces stale browser web trees that cannot be cleaned in place", async () => {
+    const root = await fixtureRoot("brai-web-stale-");
+    await writeStaticExport(root, "fresh-web");
+    const previewRoot = path.join(root, "envs/preview-b");
+    const webTarget = path.join(previewRoot, "web");
+    const staleDir = path.join(webTarget, "stale");
+    await mkdir(staleDir, { recursive: true });
+    await writeFile(path.join(staleDir, "old.txt"), "old");
+    await chmod(staleDir, 0o555);
+
+    try {
+      await execFileAsync("bash", [path.join(workspaceRoot, "deploy/scripts/publish-web.sh")], {
+        env: { ...process.env, BRAI_ROOT: root, BRAI_WEB_TARGET: webTarget },
+      });
+    } finally {
+      await chmod(staleDir, 0o755).catch(() => {});
+    }
+
+    await execFileAsync("bash", ["-c", `source "$1"; normalize_public_tree "$2"`, "bash", path.join(workspaceRoot, "deploy/scripts/permissions.sh"), previewRoot]);
+
+    await expect(readFile(path.join(webTarget, "index.html"), "utf8")).resolves.toContain("fresh-web");
+    await expect(readFile(path.join(webTarget, "stale/old.txt"), "utf8")).rejects.toThrow();
+  });
+
   it("syncs occupied preview OTA manifests from each preview source", async () => {
     const root = await fixtureRoot("brai-preview-ota-sync-");
     const envsRoot = path.join(root, "envs");

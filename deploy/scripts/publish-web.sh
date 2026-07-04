@@ -13,6 +13,14 @@ if [[ ! -d "$SOURCE" ]]; then
 fi
 
 mkdir -p "$TARGET"
-find "$TARGET" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+if ! find "$TARGET" -mindepth 1 -maxdepth 1 -exec rm -rf {} +; then
+  TARGET_PARENT="$(dirname "$TARGET")"
+  STALE_ROOT="${BRAI_WEB_STALE_ROOT:-$(dirname "$TARGET_PARENT")/.stale-web}"
+  STALE_TARGET="$STALE_ROOT/$(basename "$TARGET_PARENT").$(basename "$TARGET").$(date -u +%Y%m%d%H%M%S).$$"
+  echo "Warning: unable to clean $TARGET; moving stale tree to $STALE_TARGET" >&2
+  mkdir -p "$STALE_ROOT"
+  mv "$TARGET" "$STALE_TARGET"
+  mkdir -p "$TARGET"
+fi
 cp -R "$SOURCE"/. "$TARGET"/
 normalize_public_tree "$TARGET"
