@@ -719,6 +719,28 @@ export function useBraiAppState(initialSection: SectionId) {
 
   useEffect(() => {
     if (!localSnapshotReady || syncStatus === "auth_required") return undefined;
+    const publishLatest = () => {
+      const nextActions = actionsRef.current;
+      void saveAndroidActionsWidgetSnapshot(nextActions, {
+        viewId: DEFAULT_ACTIONS_WIDGET_VIEW_ID,
+        actions: nextActions.actions,
+      });
+    };
+    const publishWhenHidden = () => {
+      if (document.visibilityState === "hidden") publishLatest();
+    };
+    window.addEventListener("blur", publishLatest);
+    window.addEventListener("pagehide", publishLatest);
+    document.addEventListener("visibilitychange", publishWhenHidden);
+    return () => {
+      window.removeEventListener("blur", publishLatest);
+      window.removeEventListener("pagehide", publishLatest);
+      document.removeEventListener("visibilitychange", publishWhenHidden);
+    };
+  }, [localSnapshotReady, syncStatus]);
+
+  useEffect(() => {
+    if (!localSnapshotReady || syncStatus === "auth_required") return undefined;
     let cancelled = false;
     const consume = () => {
       if (!cancelled) void consumeAndroidActionsWidgetStatusChangesRef.current().catch(handleError);
@@ -871,9 +893,7 @@ export function useBraiAppState(initialSection: SectionId) {
   const actionCommands = createBraiActionCommands({
     actions,
     flushActionPending,
-    publishActionsSnapshot: (nextActions) => {
-      void publishAndroidActionsSnapshot(nextActions).catch(handleError);
-    },
+    publishActionsSnapshot: publishAndroidActionsSnapshot,
     setActionPendingCount,
     setActions,
     setSyncStatus,

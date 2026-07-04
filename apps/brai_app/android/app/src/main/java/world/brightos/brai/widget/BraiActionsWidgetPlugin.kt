@@ -1,6 +1,5 @@
 package world.brightos.brai.widget
 
-import androidx.glance.appwidget.updateAll
 import com.getcapacitor.JSArray
 import com.getcapacitor.JSObject
 import com.getcapacitor.Plugin
@@ -10,9 +9,12 @@ import com.getcapacitor.annotation.CapacitorPlugin
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @CapacitorPlugin(name = "BraiActionsWidget")
 class BraiActionsWidgetPlugin : Plugin() {
+    private val pluginScope = CoroutineScope(Dispatchers.Main)
+
     @PluginMethod
     fun saveSnapshot(call: PluginCall) {
         val viewId = call.getString("viewId", DEFAULT_ACTIONS_WIDGET_VIEW_ID) ?: DEFAULT_ACTIONS_WIDGET_VIEW_ID
@@ -30,9 +32,17 @@ class BraiActionsWidgetPlugin : Plugin() {
                 }
             }
         }
-        BraiActionsWidgetStore(context).saveSnapshot(viewId, serverRevision, snapshotVersion, actions)
-        updateWidgets()
-        call.resolve()
+        pluginScope.launch {
+            try {
+                withContext(Dispatchers.IO) {
+                    BraiActionsWidgetStore(context).saveSnapshot(viewId, serverRevision, snapshotVersion, actions)
+                }
+                BraiActionsWidget.updateEveryInstance(context)
+                call.resolve()
+            } catch (error: Exception) {
+                call.reject("widget_update_failed", error)
+            }
+        }
     }
 
     @PluginMethod
@@ -67,14 +77,16 @@ class BraiActionsWidgetPlugin : Plugin() {
 
     @PluginMethod
     fun clear(call: PluginCall) {
-        BraiActionsWidgetStore(context).clear()
-        updateWidgets()
-        call.resolve()
-    }
-
-    private fun updateWidgets() {
-        CoroutineScope(Dispatchers.Main).launch {
-            BraiActionsWidget.updateAll(context)
+        pluginScope.launch {
+            try {
+                withContext(Dispatchers.IO) {
+                    BraiActionsWidgetStore(context).clear()
+                }
+                BraiActionsWidget.updateEveryInstance(context)
+                call.resolve()
+            } catch (error: Exception) {
+                call.reject("widget_clear_failed", error)
+            }
         }
     }
 }
