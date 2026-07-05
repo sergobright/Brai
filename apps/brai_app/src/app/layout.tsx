@@ -36,7 +36,7 @@ export const viewport: Viewport = {
   ],
 };
 
-const earlyPaintStyle = "html,body{min-height:100%;margin:0;background:#050607;color-scheme:dark light}";
+const earlyPaintStyle = "html,body{min-height:100%;margin:0;background:#050607;color-scheme:dark light}html[data-theme=light],html[data-theme=light] body{background:#f7f7f3;color-scheme:light}html[data-theme=dark],html[data-theme=dark] body{background:#050607;color-scheme:dark}";
 
 export default function RootLayout({
   children,

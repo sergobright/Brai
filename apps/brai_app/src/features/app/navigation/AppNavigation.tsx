@@ -476,7 +476,7 @@ export function MainDock({
   return (
     <nav
       className={cx(
-        "main-dock pointer-events-auto fixed bottom-5 left-1/2 z-[70] -translate-x-1/2 max-[860px]:static max-[860px]:inset-auto max-[860px]:flex max-[860px]:translate-x-0 max-[860px]:justify-center max-[860px]:pb-[env(safe-area-inset-bottom)] max-[860px]:[touch-action:none]",
+        "main-dock pointer-events-auto fixed bottom-5 left-1/2 z-[70] -translate-x-1/2 max-[860px]:static max-[860px]:inset-auto max-[860px]:flex max-[860px]:translate-x-0 max-[860px]:justify-center max-[860px]:border-t max-[860px]:border-border max-[860px]:bg-background max-[860px]:pb-[env(safe-area-inset-bottom)] max-[860px]:[touch-action:none]",
         hidden && "max-[860px]:pointer-events-none max-[860px]:invisible max-[860px]:opacity-0",
       )}
       aria-label="Основная навигация"
