@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import Database from 'better-sqlite3';
 import { createBraiServer } from '../src/server.js';
+import { BraiStore } from '../src/store.js';
 import {
   RELEASE_PASSWORD,
   SESSION_SECRET,
@@ -238,10 +239,17 @@ test('migration adds inbox entity schema and metadata', async () => {
       fixture.store.db.prepare('SELECT description FROM schema_migrations WHERE version = 48').get().description,
       'promote items to main entity table and seed item roles'
     );
+    assert.equal(
+      fixture.store.db.prepare('SELECT description FROM schema_migrations WHERE version = 49').get().description,
+      'rename handlers to agents and add AI logs'
+    );
     assert.ok(fixture.store.db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'inbox_events'").get());
     assert.ok(fixture.store.db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'inbox_record_types'").get());
-    assert.ok(fixture.store.db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'handlers'").get());
-    assert.ok(fixture.store.db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'handler_schedules'").get());
+    assert.ok(fixture.store.db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'agents'").get());
+    assert.ok(fixture.store.db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'agent_schedules'").get());
+    assert.ok(fixture.store.db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'ai_logs'").get());
+    assert.equal(fixture.store.db.prepare("SELECT COUNT(*) AS count FROM sqlite_master WHERE type = 'table' AND name = 'handlers'").get().count, 0);
+    assert.equal(fixture.store.db.prepare("SELECT COUNT(*) AS count FROM sqlite_master WHERE type = 'table' AND name = 'handler_schedules'").get().count, 0);
     assert.deepEqual(
       fixture.store.db.prepare('SELECT id FROM inbox_record_types ORDER BY id').all().map((row) => row.id),
       [1, 2, 3, 4]
@@ -251,12 +259,16 @@ test('migration adds inbox entity schema and metadata', async () => {
       'События входящих'
     );
     assert.equal(
-      fixture.store.db.prepare("SELECT title FROM table_descriptions WHERE table_name = 'handlers'").get().title,
-      'Обработчики'
+      fixture.store.db.prepare("SELECT title FROM table_descriptions WHERE table_name = 'agents'").get().title,
+      'AI-агенты'
     );
     assert.equal(
-      fixture.store.db.prepare("SELECT title FROM table_descriptions WHERE table_name = 'handler_schedules'").get().title,
-      'Расписания обработчиков'
+      fixture.store.db.prepare("SELECT title FROM table_descriptions WHERE table_name = 'agent_schedules'").get().title,
+      'Расписания AI-агентов'
+    );
+    assert.equal(
+      fixture.store.db.prepare("SELECT title FROM table_descriptions WHERE table_name = 'ai_logs'").get().title,
+      'AI-логи'
     );
     assert.equal(
       fixture.store.db.prepare("SELECT title FROM table_descriptions WHERE table_name = 'item_role_types'").get().title,
@@ -268,12 +280,13 @@ test('migration adds inbox entity schema and metadata', async () => {
     );
     const handler = fixture.store.db
       .prepare(`
-        SELECT target, kind, trigger_description, conditions_description, llm_provider,
+        SELECT version, target, kind, trigger_description, conditions_description, llm_provider,
           llm_prompt_template, llm_timeout_ms, source_module
-        FROM handlers
+        FROM agents
         WHERE id = 'inbound.inbox.title_generator'
       `)
       .get();
+    assert.equal(handler.version, '1');
     assert.equal(handler.target, 'inbox');
     assert.equal(handler.kind, 'inbound_llm_title_generator');
     assert.match(handler.trigger_description, /POST \/v1\//);
@@ -284,16 +297,17 @@ test('migration adds inbox entity schema and metadata', async () => {
     assert.equal(handler.source_module, 'services/brai_api/src/inbound.js');
     const scheduledHandler = fixture.store.db
       .prepare(`
-        SELECT target, kind, status, trigger_description, side_effects_description, llm_provider,
+        SELECT version, target, kind, status, trigger_description, side_effects_description, llm_provider,
           llm_prompt_template, llm_timeout_ms, source_module
-        FROM handlers
+        FROM agents
         WHERE id = 'maintenance.tasks_md_deduper'
       `)
       .get();
+    assert.equal(scheduledHandler.version, '1');
     assert.equal(scheduledHandler.target, 'repository');
     assert.equal(scheduledHandler.kind, 'scheduled_llm_git_pr');
     assert.equal(scheduledHandler.status, 'disabled');
-    assert.match(scheduledHandler.trigger_description, /handler_schedules/);
+    assert.match(scheduledHandler.trigger_description, /agent_schedules/);
     assert.match(scheduledHandler.side_effects_description, /Legacy side effects/);
     assert.equal(scheduledHandler.llm_provider, 'codex-cli');
     assert.match(scheduledHandler.llm_prompt_template, /{{tasks_md}}/);
@@ -301,12 +315,12 @@ test('migration adds inbox entity schema and metadata', async () => {
     assert.equal(scheduledHandler.source_module, 'services/brai_api/src/scheduler-runner.js');
     const schedule = fixture.store.db
       .prepare(`
-        SELECT handler_id, status, next_run_at_utc, interval_seconds
-        FROM handler_schedules
+        SELECT agent_id, status, next_run_at_utc, interval_seconds
+        FROM agent_schedules
         WHERE id = 'maintenance.tasks_md_deduper'
       `)
       .get();
-    assert.equal(schedule.handler_id, 'maintenance.tasks_md_deduper');
+    assert.equal(schedule.agent_id, 'maintenance.tasks_md_deduper');
     assert.equal(schedule.status, 'disabled');
     assert.equal(schedule.next_run_at_utc, null);
     assert.equal(schedule.interval_seconds, null);
@@ -340,18 +354,102 @@ test('migration adds inbox entity schema and metadata', async () => {
     assert.equal(fixture.store.db.prepare('SELECT COUNT(*) AS count FROM items').get().count, 0);
     assert.equal(
       fixture.store.db
-        .prepare("SELECT COUNT(*) AS count FROM handlers WHERE id = 'inbound.inbox.title_generator'")
+        .prepare("SELECT COUNT(*) AS count FROM agents WHERE id = 'inbound.inbox.title_generator'")
         .get().count,
       1
     );
     assert.equal(
       fixture.store.db
-        .prepare("SELECT COUNT(*) AS count FROM handler_schedules WHERE id = 'maintenance.tasks_md_deduper'")
+        .prepare("SELECT COUNT(*) AS count FROM agent_schedules WHERE id = 'maintenance.tasks_md_deduper'")
         .get().count,
       1
     );
   } finally {
     await fixture.close();
+  }
+});
+
+test('migration renames legacy handler tables to agents', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'brai-api-handler-rename-'));
+  const dbPath = path.join(tmp, 'brai.sqlite');
+  const db = new Database(dbPath);
+  db.exec(`
+    CREATE TABLE schema_migrations (
+      version INTEGER PRIMARY KEY,
+      applied_at_utc TEXT NOT NULL,
+      description TEXT NOT NULL
+    );
+
+    CREATE TABLE handlers (
+      id TEXT PRIMARY KEY,
+      target TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      status TEXT NOT NULL,
+      title TEXT NOT NULL,
+      summary TEXT NOT NULL,
+      trigger_description TEXT NOT NULL,
+      conditions_description TEXT NOT NULL,
+      input_description TEXT NOT NULL,
+      output_description TEXT NOT NULL,
+      interactions_description TEXT NOT NULL,
+      side_effects_description TEXT NOT NULL,
+      llm_provider TEXT NOT NULL DEFAULT '',
+      llm_model TEXT NOT NULL DEFAULT '',
+      llm_prompt_template TEXT NOT NULL DEFAULT '',
+      llm_timeout_ms INTEGER,
+      fallback_description TEXT NOT NULL DEFAULT '',
+      source_module TEXT NOT NULL,
+      updated_at_utc TEXT NOT NULL
+    );
+
+    CREATE INDEX idx_handlers_target_status
+    ON handlers (target, status);
+
+    INSERT INTO handlers (
+      id, target, kind, status, title, summary, trigger_description,
+      conditions_description, input_description, output_description,
+      interactions_description, side_effects_description, llm_provider,
+      llm_model, llm_prompt_template, llm_timeout_ms, fallback_description,
+      source_module, updated_at_utc
+    ) VALUES (
+      'legacy.agent', 'legacy', 'legacy_kind', 'active', 'Legacy', 'Legacy',
+      '', '', '', '', '', '', '', '', '', NULL, '', 'legacy.js',
+      '2026-07-01T00:00:00.000Z'
+    );
+
+    CREATE TABLE handler_schedules (
+      id TEXT PRIMARY KEY,
+      handler_id TEXT NOT NULL,
+      status TEXT NOT NULL CHECK (status IN ('active', 'paused', 'disabled')),
+      next_run_at_utc TEXT,
+      interval_seconds INTEGER CHECK (interval_seconds IS NULL OR interval_seconds > 0),
+      locked_until_utc TEXT,
+      last_started_at_utc TEXT,
+      last_finished_at_utc TEXT,
+      last_error TEXT NOT NULL DEFAULT '',
+      updated_at_utc TEXT NOT NULL,
+      FOREIGN KEY (handler_id) REFERENCES handlers(id)
+    );
+
+    INSERT INTO handler_schedules (
+      id, handler_id, status, next_run_at_utc, interval_seconds, updated_at_utc
+    ) VALUES (
+      'legacy.agent', 'legacy.agent', 'disabled', NULL, NULL,
+      '2026-07-01T00:00:00.000Z'
+    );
+  `);
+  db.close();
+
+  const store = new BraiStore(dbPath);
+  try {
+    assert.equal(store.db.prepare("SELECT COUNT(*) AS count FROM sqlite_master WHERE type = 'table' AND name = 'handlers'").get().count, 0);
+    assert.equal(store.db.prepare("SELECT COUNT(*) AS count FROM sqlite_master WHERE type = 'table' AND name = 'handler_schedules'").get().count, 0);
+    assert.equal(store.db.prepare("SELECT version FROM agents WHERE id = 'legacy.agent'").get().version, '1');
+    assert.equal(store.db.prepare("SELECT agent_id FROM agent_schedules WHERE id = 'legacy.agent'").get().agent_id, 'legacy.agent');
+    assert.ok(store.db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'ai_logs'").get());
+  } finally {
+    store.close();
+    fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
 

@@ -11,7 +11,7 @@
 - Activities sync использует отдельный event log: `activities` и `activity_events`.
 - Main work entities живут identity-уровнем в таблице `items`; временные роли сущностей живут в `item_roles`, справочник ролей - в `item_role_types`.
 - Server SQLite schema metadata регистрируется в таблице `table_descriptions`.
-- Runtime-обработчики регистрируются в server SQLite таблице `handlers`.
+- Runtime AI-агенты регистрируются в server SQLite таблице `agents`.
 
 ## Runtime schema verification
 
@@ -41,7 +41,8 @@
 - Каждое server-side schema изменение получает migration marker в `schema_migrations`.
 - Любое server-side schema metadata изменение обновляет `table_descriptions` в том же change: новые/изменённые таблицы, столбцы, индексы, связи, зависимости и назначение. Content-only изменения строк этого не требуют.
 - `table_descriptions` имеет поля `table_name`, `title`, `short_description`, `long_description`, `updated_at_utc`; перед обновлением проверь эти поля в целевой DB.
-- Любой новый или изменённый runtime-обработчик должен обновлять строку в `handlers` в том же change. Заполняй максимум полезного контекста: stable id, target, kind, status, краткое и подробное описание, когда срабатывает, условия пропуска, входы, выходы, зависимости/взаимодействия, side effects, LLM provider/model, полный prompt template, timeout, fallback и source module.
+- Любой новый или изменённый runtime AI-агент должен обновлять строку в `agents` в том же change. Заполняй максимум полезного контекста: stable id, target, kind, status, краткое и подробное описание, когда срабатывает, условия пропуска, входы, выходы, зависимости/взаимодействия, side effects, LLM provider/model, полный prompt template, timeout, fallback и source module.
+- Каждый runtime AI-агент при фактическом срабатывании пишет ровно одну строку в `ai_logs`: `agent_id`, `agent_version`, UTC `dt`, `status`, единый `json_data`, короткий русский `ai_title`, и nullable `flow_id`/`flow_command`.
 - Перед live migration или destructive-risk изменением делай SQLite backup.
 - Migration должна быть idempotent для повторного запуска.
 - Не меняй canonical data shape без проверки API consumers и client cache projection.

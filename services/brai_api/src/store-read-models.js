@@ -14,9 +14,9 @@ import { formatSession, groupSessionsByDateHour } from './store-helpers.js';
 import { scopeSql } from './user-scope.js';
 
 export const readModelMethods = {
-  getHandler(id) {
+  getAgent(id) {
     return this.db
-      .prepare('SELECT * FROM handlers WHERE id = ? AND status = ?')
+      .prepare('SELECT * FROM agents WHERE id = ? AND status = ?')
       .get(id, 'active') ?? null;
   }
 ,

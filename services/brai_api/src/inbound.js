@@ -31,7 +31,7 @@ for (const [mime, type] of ATTACHMENT_TYPES) type.mime = mime;
 const CONTENT_TYPES_BY_EXTENSION = new Map(
   [...ATTACHMENT_TYPES.values()].map((type) => [type.extension, type.mime]).filter(([extension]) => extension)
 );
-const INBOX_TITLE_HANDLER_ID = 'inbound.inbox.title_generator';
+const INBOX_TITLE_AGENT_ID = 'inbound.inbox.title_generator';
 const DEFAULT_TITLE_PROMPT_TEMPLATE = [
   'Сгенерируй короткий русский заголовок для входящего сообщения.',
   'Верни только заголовок, без Markdown, кавычек и пояснений.',
@@ -97,6 +97,9 @@ export async function receiveInboxInbound({
     : null;
   const attachmentLinks = [];
   const writtenPaths = [];
+  const agent = store.getAgent(INBOX_TITLE_AGENT_ID);
+  let titleResult = null;
+  let aiLogWritten = false;
 
   try {
     if (attachments.length > 0) fs.mkdirSync(storageRoot, { recursive: true });
@@ -110,8 +113,8 @@ export async function receiveInboxInbound({
       }
       attachmentLinks.push(`/v1/inbox/attachments/${fileName}`);
     });
-    const title = await generateTitle(text, {
-      handler: store.getHandler(INBOX_TITLE_HANDLER_ID),
+    titleResult = await generateTitle(text, {
+      agent,
       codexBin,
       codexModel,
       codexTimeoutMs,
@@ -120,7 +123,7 @@ export async function receiveInboxInbound({
     store.createInboundInboxItem({
       eventId,
       inboxId,
-      title,
+      title: titleResult.title,
       descriptionText,
       explanationText: text,
       attachmentLinks,
@@ -131,8 +134,29 @@ export async function receiveInboxInbound({
       recordTypeId,
       nowIso
     });
+    recordInboundTitleAiLog(store, {
+      agent,
+      dt: nowIso,
+      status: titleResult.status,
+      inboxId,
+      text,
+      title: titleResult.title,
+      error: titleResult.error
+    });
+    aiLogWritten = true;
   } catch (error) {
     for (const filePath of writtenPaths) fs.rmSync(filePath, { force: true });
+    if (titleResult && !aiLogWritten) {
+      recordInboundTitleAiLog(store, {
+        agent,
+        dt: nowIso,
+        status: 'failed',
+        inboxId,
+        text,
+        title: titleResult.title,
+        error: errorText(error)
+      });
+    }
     throw error;
   }
 
@@ -288,21 +312,46 @@ function throwStatus(message, status) {
   throw error;
 }
 
-async function generateTitle(text, { handler, codexBin, codexModel, codexTimeoutMs, titleGenerator }) {
+async function generateTitle(text, { agent, codexBin, codexModel, codexTimeoutMs, titleGenerator }) {
   const fallback = fallbackTitle(text);
   try {
     const title = titleGenerator
       ? await titleGenerator(text)
       : await codexTitle(text, {
         codexBin,
-        codexModel: codexModel ?? optionalText(handler?.llm_model),
-        promptTemplate: optionalBodyText(handler?.llm_prompt_template) ?? DEFAULT_TITLE_PROMPT_TEMPLATE,
-        timeoutMs: Number.isFinite(codexTimeoutMs) ? codexTimeoutMs : handler?.llm_timeout_ms
+        codexModel: codexModel ?? optionalText(agent?.llm_model),
+        promptTemplate: optionalBodyText(agent?.llm_prompt_template) ?? DEFAULT_TITLE_PROMPT_TEMPLATE,
+        timeoutMs: Number.isFinite(codexTimeoutMs) ? codexTimeoutMs : agent?.llm_timeout_ms
       });
-    return cleanTitle(title) || fallback;
-  } catch {
-    return fallback;
+    const clean = cleanTitle(title);
+    return clean ? { title: clean, status: 'done', error: '' } : { title: fallback, status: 'failed', error: 'empty_title' };
+  } catch (error) {
+    return { title: fallback, status: 'failed', error: errorText(error) };
   }
+}
+
+function recordInboundTitleAiLog(store, { agent, dt, status, inboxId, text, title, error }) {
+  store.recordAiLog({
+    agentId: INBOX_TITLE_AGENT_ID,
+    agentVersion: agent?.version ?? '',
+    dt,
+    status,
+    aiTitle: status === 'done' ? 'Сгенерировал заголовок входящего' : 'Fallback заголовка входящего',
+    jsonData: {
+      schema: 'brai.ai_log.v1',
+      inputs: [
+        { ref: 'request.body.text', value: text }
+      ],
+      outputs: [
+        { ref: 'inbox.id', value: inboxId },
+        { ref: 'inbox.title', value: title }
+      ],
+      metadata: {
+        error: error || null,
+        fallback_used: status === 'failed'
+      }
+    }
+  });
 }
 
 function fallbackTitle(text) {
@@ -371,6 +420,10 @@ function codexTitle(text, { codexBin = 'codex', codexModel = null, promptTemplat
 
 function renderPrompt(template, text) {
   return template.includes('{{text}}') ? template.replaceAll('{{text}}', text) : `${template.trim()}\n\n${text}`;
+}
+
+function errorText(error) {
+  return error instanceof Error ? error.message.slice(0, 1000) : String(error).slice(0, 1000);
 }
 
 function compactTimestamp(date) {

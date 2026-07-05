@@ -107,6 +107,12 @@ test('inbound inbox POST creates an inbox row with explanation and attachment li
     assert.equal(duplicate.status, 200);
     assert.equal(tableCount(fixture, 'inbox'), 1);
     assert.equal(tableCount(fixture, 'inbox_events'), 1);
+    const aiLogs = fixture.store.db.prepare('SELECT agent_id, agent_version, status, json_data FROM ai_logs').all();
+    assert.equal(aiLogs.length, 1);
+    assert.equal(aiLogs[0].agent_id, 'inbound.inbox.title_generator');
+    assert.equal(aiLogs[0].agent_version, '1');
+    assert.equal(aiLogs[0].status, 'done');
+    assert.equal(JSON.parse(aiLogs[0].json_data).outputs.find((output) => output.ref === 'inbox.title').value, 'Снимок идеи');
   } finally {
     await fixture.close();
     fs.rmSync(storageRoot, { recursive: true, force: true });
@@ -350,7 +356,7 @@ process.stdin.on('end', () => {
   try {
     fixture.store.db
       .prepare(`
-        UPDATE handlers
+        UPDATE agents
         SET llm_prompt_template = ?
         WHERE id = 'inbound.inbox.title_generator'
       `)
@@ -367,6 +373,7 @@ process.stdin.on('end', () => {
 
     assert.equal(response.status, 201);
     assert.equal(response.body.state.inbox[0].title, 'Codex title');
+    assert.equal(fixture.store.db.prepare("SELECT status FROM ai_logs WHERE agent_id = 'inbound.inbox.title_generator'").get().status, 'done');
   } finally {
     await fixture.close();
     fs.rmSync(tmp, { recursive: true, force: true });
@@ -392,6 +399,9 @@ test('inbound inbox falls back to a local title when Codex title generation fail
 
     assert.equal(response.status, 201);
     assert.equal(response.body.state.inbox[0].title, 'Очень длинное сообщение для заголовка и контекста');
+    const aiLog = fixture.store.db.prepare("SELECT status, json_data FROM ai_logs WHERE agent_id = 'inbound.inbox.title_generator'").get();
+    assert.equal(aiLog.status, 'failed');
+    assert.equal(JSON.parse(aiLog.json_data).metadata.fallback_used, true);
   } finally {
     await fixture.close();
   }

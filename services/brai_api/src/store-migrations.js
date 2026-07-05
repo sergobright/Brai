@@ -147,8 +147,9 @@ export const migrationMethods = {
 
     this.ensureBuildVersionRefs();
     this.ensureInboxSchema();
-    this.ensureHandlerSchema();
-    this.ensureHandlerScheduleSchema();
+    this.ensureAgentSchema();
+    this.ensureAgentScheduleSchema();
+    this.ensureAiLogSchema();
     this.ensureAirWhisperSchema();
     this.ensureTableDescriptions();
 
@@ -270,6 +271,14 @@ export const migrationMethods = {
     if (!this.hasMigration(48)) {
       this.clearItemsEntityData();
       this.recordMigration(48, 'promote items to main entity table and seed item roles');
+    }
+
+    if (!this.hasMigration(49)) {
+      this.ensureAgentSchema();
+      this.ensureAgentScheduleSchema();
+      this.ensureAiLogSchema();
+      this.ensureTableDescriptions();
+      this.recordMigration(49, 'rename handlers to agents and add AI logs');
     }
   }
 ,
@@ -745,8 +754,9 @@ export const migrationMethods = {
       ['inbox', 'Входящие', 'Список входящих материалов.', 'Хранит входящие материалы Brai до нормализации: user_id владельца, заголовок, описание, источник, ключ источника, требование ответа, связь с предыдущим входящим, тип записи, дату, автора, предварительный раздел, срочность, ссылки на вложения, пояснение, текст нормализации и признак нормализации.'],
       ['inbox_events', 'События входящих', 'Журнал изменений входящих.', 'Хранит клиентские события по входящим для offline-first синхронизации, аудита и восстановления текущей таблицы inbox. Поле user_id отделяет события разных пользователей.'],
       ['inbox_record_types', 'Типы входящих', 'Справочник типов входящих.', 'Хранит разрешённые типы записей Inbox: входящее от человека по API, входящее от агента по API, внутреннее входящее от агента и добавленное человеком из интерфейса.'],
-      ['handlers', 'Обработчики', 'Реестр runtime-обработчиков.', 'Хранит полный реестр обработчиков Brai: stable id, target, тип, статус, подробное описание, условия срабатывания, входы, выходы, взаимодействия, side effects, используемый LLM provider/model, prompt template, timeout, fallback и source module. Каждое добавление или изменение обработчика должно обновлять соответствующую строку.'],
-      ['handler_schedules', 'Расписания обработчиков', 'Очередь scheduled runtime-обработчиков.', 'Хранит расписания runtime-обработчиков Brai: ссылку на handlers, статус, следующий запуск, повторяемый интервал, lock от параллельного запуска, последние timestamps и последнюю ошибку. Внешний systemd timer только будит scheduler-runner; due-логика хранится здесь.'],
+      ['agents', 'AI-агенты', 'Реестр runtime AI-агентов.', 'Хранит полный реестр AI-агентов Brai: stable id, version, target, тип, статус, подробное описание, условия срабатывания, входы, выходы, взаимодействия, side effects, используемый LLM provider/model, prompt template, timeout, fallback и source module. Каждое добавление или изменение агента должно обновлять соответствующую строку и при изменении поведения увеличивать version.'],
+      ['agent_schedules', 'Расписания AI-агентов', 'Очередь scheduled runtime AI-агентов.', 'Хранит расписания runtime AI-агентов Brai: ссылку на agents, статус, следующий запуск, повторяемый интервал, lock от параллельного запуска, последние timestamps и последнюю ошибку. Внешний systemd timer только будит scheduler-runner; due-логика хранится здесь.'],
+      ['ai_logs', 'AI-логи', 'Журнал запусков AI-агентов.', 'Хранит ровно одну строку на срабатывание AI-агента: agent_id, agent_version из agents.version, UTC timestamp dt, статус done/failed, короткий русский ai_title, будущие flow_id/flow_command и json_data стандарта brai.ai_log.v1. json_data описывает inputs и outputs через ref вида table.field, request.field, response.field или path.'],
       ['item_roles', 'Роли сущностей', 'Активные и завершённые роли сущностей.', 'Хранит временные роли сущностей из items: ссылку на items.id, тип роли из item_role_types, период активности, простой статус active/ended/deleted и небольшой role-level metadata_json. Реальные поля роли живут в payload_table типа роли.'],
       ['item_role_types', 'Типы ролей сущностей', 'Справочник ролей items.', 'Хранит системные и будущие пользовательские типы ролей для items: системное название, человеческое название, описание, payload_table, признак is_system, дату создания и soft-delete дату вывода из употребления.'],
       ['items', 'Сущности', 'Главная таблица сущностей.', 'Хранит identity-уровень сущностей Brai: стабильный id, user_id владельца, человеческое имя, общее описание, автора создания, timestamps создания и обновления общих полей, а также deleted_at_utc для soft-delete. Role-specific данные живут в таблицах ролей.'],
@@ -782,7 +792,7 @@ export const migrationMethods = {
       }
     }
     this.db
-      .prepare("DELETE FROM table_descriptions WHERE table_name IN ('timer_sessions', 'timer_session_sources', 'focus_session_versions')")
+      .prepare("DELETE FROM table_descriptions WHERE table_name IN ('timer_sessions', 'timer_session_sources', 'focus_session_versions', 'handlers', 'handler_schedules')")
       .run();
   }
 ,
@@ -1061,11 +1071,18 @@ export const migrationMethods = {
   }
 ,
 
-  ensureHandlerSchema() {
+  ensureAgentSchema() {
     const now = new Date().toISOString();
+    if (this.tableExists('handlers') && !this.tableExists('agents')) {
+      this.db.exec(`
+        DROP INDEX IF EXISTS idx_handlers_target_status;
+        ALTER TABLE handlers RENAME TO agents;
+      `);
+    }
     this.db.exec(`
-      CREATE TABLE IF NOT EXISTS handlers (
+      CREATE TABLE IF NOT EXISTS agents (
         id TEXT PRIMARY KEY,
+        version TEXT NOT NULL DEFAULT '1',
         target TEXT NOT NULL,
         kind TEXT NOT NULL,
         status TEXT NOT NULL,
@@ -1086,19 +1103,25 @@ export const migrationMethods = {
         updated_at_utc TEXT NOT NULL
       );
 
-      CREATE INDEX IF NOT EXISTS idx_handlers_target_status
-      ON handlers (target, status);
-    `);
+      DROP INDEX IF EXISTS idx_handlers_target_status;
 
-    const upsertHandler = this.db.prepare(`
-      INSERT INTO handlers (
-        id, target, kind, status, title, summary, trigger_description,
+      CREATE INDEX IF NOT EXISTS idx_agents_target_status
+      ON agents (target, status);
+    `);
+    if (this.tableExists('agents') && !this.columnExists('agents', 'version')) {
+      this.db.exec("ALTER TABLE agents ADD COLUMN version TEXT NOT NULL DEFAULT '1';");
+    }
+
+    const upsertAgent = this.db.prepare(`
+      INSERT INTO agents (
+        id, version, target, kind, status, title, summary, trigger_description,
         conditions_description, input_description, output_description,
         interactions_description, side_effects_description, llm_provider,
         llm_model, llm_prompt_template, llm_timeout_ms, fallback_description,
         source_module, updated_at_utc
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
+        version = excluded.version,
         target = excluded.target,
         kind = excluded.kind,
         status = excluded.status,
@@ -1119,8 +1142,9 @@ export const migrationMethods = {
         updated_at_utc = excluded.updated_at_utc
     `);
 
-    upsertHandler.run(
+    upsertAgent.run(
       'inbound.inbox.title_generator',
+      '1',
       'inbox',
       'inbound_llm_title_generator',
       'active',
@@ -1130,7 +1154,7 @@ export const migrationMethods = {
       'Запускается только для поддержанного target inbox и только при создании новой записи. Не запускается для duplicate idempotency_key, неавторизованных запросов, invalid payload, неподдержанных вложений или ошибок validation.',
       'Получает trimmed body.text. Остальные поля inbound payload участвуют в создании Inbox-записи, но не передаются в LLM prompt.',
       'Возвращает строку inbox.title: первая непустая строка ответа модели очищается от внешних кавычек, обрезается до 80 символов и сохраняется через inbox_events create payload.',
-      'Читает собственную строку из handlers, использует Codex CLI из BRAI_CODEX_BIN, модель из runtime-настройки BRAI_CODEX_MODEL при наличии, иначе llm_model из handlers, timeout из runtime BRAI_CODEX_TIMEOUT_MS при наличии, иначе llm_timeout_ms из handlers. Результат сохраняется через store.createInboundInboxItem в inbox_events/inbox.',
+      'Читает собственную строку из agents, использует Codex CLI из BRAI_CODEX_BIN, модель из runtime-настройки BRAI_CODEX_MODEL при наличии, иначе llm_model из agents, timeout из runtime BRAI_CODEX_TIMEOUT_MS при наличии, иначе llm_timeout_ms из agents. Результат сохраняется через store.createInboundInboxItem в inbox_events/inbox и store.recordAiLog в ai_logs.',
       'Создает временную директорию для output-last-message и удаляет ее после завершения. При успехе меняет только title будущей Inbox-записи; запись Inbox и файлы вложений выполняются внешним inbound handler flow.',
       'codex-cli',
       '',
@@ -1145,18 +1169,19 @@ export const migrationMethods = {
       'services/brai_api/src/inbound.js',
       now
     );
-    upsertHandler.run(
+    upsertAgent.run(
       'maintenance.tasks_md_deduper',
+      '1',
       'repository',
       'scheduled_llm_git_pr',
       'disabled',
       'Дедупликация TASKS.md',
       'Legacy handler выключен: агентские задачи перенесены из TASKS.md в activities как operation.',
-      'Срабатывает из services/brai_api/src/scheduler-runner.js, когда handler_schedules.next_run_at_utc наступил и строка не заблокирована другим запуском.',
+      'Срабатывает из services/brai_api/src/scheduler-runner.js, когда agent_schedules.next_run_at_utc наступил и строка не заблокирована другим запуском.',
       'Не запускается после переноса агентских задач в activities.',
       'Legacy input: корневой TASKS.md. Новый источник правды для агентских задач: activities rows с activity_type_id operation.',
       'Ничего не создает, пока handler disabled.',
-      'Читает handlers и handler_schedules из server SQLite, запускает Codex CLI read-only для получения полного обновленного TASKS.md, затем использует git CLI для clone, branch, commit и push.',
+      'Читает agents и agent_schedules из server SQLite, запускает Codex CLI read-only для получения полного обновленного TASKS.md, затем использует git CLI для clone, branch, commit и push. Каждый запуск пишет одну строку ai_logs.',
       'Legacy side effects отключены: раньше мог создать временную директорию, codex/tasks-md-dedupe-* ветку, commit, push и GitHub PR.',
       'codex-cli',
       '',
@@ -1174,8 +1199,9 @@ export const migrationMethods = {
       'services/brai_api/src/scheduler-runner.js',
       now
     );
-    upsertHandler.run(
+    upsertAgent.run(
       'airwhisper.dictate.transcription',
+      '1',
       'airwhisper',
       'android_audio_transcription',
       'active',
@@ -1184,9 +1210,9 @@ export const migrationMethods = {
       'Срабатывает на POST /v1/dictate или /v1/airwhisper/dictate после проверки AirWhisper bearer token, X-AirWhisper-Device-Id, multipart/form-data, лимита размера и обязательного audio/file поля.',
       'Не запускается без активного AirWhisper access token, без device id, при отключенном/невалидном multipart, превышении лимита audio bytes или неподдержанном audio content type/extension.',
       'Получает multipart audio/file, audioDurationMs, clientVersion/appPackage/device metadata, optional locale, postProcessingEnabled/postProcessingPrompt, headerContextEnabled и normalizedContextJson. Raw audio, screenshot и prompts не сохраняются в SQLite.',
-      'Возвращает JSON с text, requestId, provider, model, fallbackUsed, timings, postProcessed и postProcessingModel. В SQLite сохраняются только usage metrics и error_code.',
+      'Возвращает JSON с text, requestId, provider, model, fallbackUsed, timings, postProcessed и postProcessingModel. В SQLite сохраняются usage metrics/error_code и одна строка ai_logs на запрос.',
       'Читает airwhisper_access_tokens/settings/usage_events, вызывает Groq transcription endpoint, при ошибке и наличии ключа вызывает OpenAI fallback, затем опционально Groq chat completions для post-processing/context reply.',
-      'Выдача access token записывает только hash секрета и hash device id. Dictation requests создают usage row без текста транскрипта, аудио, скриншотов или prompt содержимого.',
+      'Выдача access token записывает только hash секрета и hash device id. Dictation requests создают usage row без аудио, скриншотов или prompt содержимого; текст результата и технические ссылки на входы фиксируются в ai_logs.',
       'groq,openai',
       'whisper-large-v3; openai/gpt-oss-20b',
       [
@@ -1204,12 +1230,26 @@ export const migrationMethods = {
   }
 ,
 
-  ensureHandlerScheduleSchema() {
+  ensureAgentScheduleSchema() {
     const now = new Date().toISOString();
+    if (this.tableExists('handler_schedules') && !this.tableExists('agent_schedules')) {
+      this.db.exec(`
+        DROP INDEX IF EXISTS idx_handler_schedules_due;
+        DROP INDEX IF EXISTS idx_handler_schedules_handler;
+        ALTER TABLE handler_schedules RENAME TO agent_schedules;
+      `);
+    }
+    if (
+      this.tableExists('agent_schedules') &&
+      this.columnExists('agent_schedules', 'handler_id') &&
+      !this.columnExists('agent_schedules', 'agent_id')
+    ) {
+      this.db.exec('ALTER TABLE agent_schedules RENAME COLUMN handler_id TO agent_id;');
+    }
     this.db.exec(`
-      CREATE TABLE IF NOT EXISTS handler_schedules (
+      CREATE TABLE IF NOT EXISTS agent_schedules (
         id TEXT PRIMARY KEY,
-        handler_id TEXT NOT NULL,
+        agent_id TEXT NOT NULL,
         status TEXT NOT NULL CHECK (status IN ('active', 'paused', 'disabled')),
         next_run_at_utc TEXT,
         interval_seconds INTEGER CHECK (interval_seconds IS NULL OR interval_seconds > 0),
@@ -1218,24 +1258,27 @@ export const migrationMethods = {
         last_finished_at_utc TEXT,
         last_error TEXT NOT NULL DEFAULT '',
         updated_at_utc TEXT NOT NULL,
-        FOREIGN KEY (handler_id) REFERENCES handlers(id)
+        FOREIGN KEY (agent_id) REFERENCES agents(id)
       );
 
-      CREATE INDEX IF NOT EXISTS idx_handler_schedules_due
-      ON handler_schedules (status, next_run_at_utc, locked_until_utc);
+      DROP INDEX IF EXISTS idx_handler_schedules_due;
+      DROP INDEX IF EXISTS idx_handler_schedules_handler;
 
-      CREATE INDEX IF NOT EXISTS idx_handler_schedules_handler
-      ON handler_schedules (handler_id);
+      CREATE INDEX IF NOT EXISTS idx_agent_schedules_due
+      ON agent_schedules (status, next_run_at_utc, locked_until_utc);
+
+      CREATE INDEX IF NOT EXISTS idx_agent_schedules_agent
+      ON agent_schedules (agent_id);
     `);
 
     this.db.prepare(`
-      INSERT INTO handler_schedules (
-        id, handler_id, status, next_run_at_utc, interval_seconds,
+      INSERT INTO agent_schedules (
+        id, agent_id, status, next_run_at_utc, interval_seconds,
         locked_until_utc, last_started_at_utc, last_finished_at_utc,
         last_error, updated_at_utc
       ) VALUES (?, ?, ?, ?, ?, NULL, NULL, NULL, '', ?)
       ON CONFLICT(id) DO UPDATE SET
-        handler_id = excluded.handler_id,
+        agent_id = excluded.agent_id,
         status = excluded.status,
         next_run_at_utc = excluded.next_run_at_utc,
         interval_seconds = excluded.interval_seconds,
@@ -1248,6 +1291,27 @@ export const migrationMethods = {
       null,
       now
     );
+  }
+,
+
+  ensureAiLogSchema() {
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS ai_logs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        agent_id TEXT NOT NULL,
+        agent_version TEXT NOT NULL,
+        dt TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('done', 'failed')),
+        json_data TEXT NOT NULL,
+        ai_title TEXT NOT NULL,
+        flow_id TEXT,
+        flow_command TEXT,
+        FOREIGN KEY (agent_id) REFERENCES agents(id)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_ai_logs_agent_dt
+      ON ai_logs (agent_id, dt);
+    `);
   }
 ,
 

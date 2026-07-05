@@ -1,5 +1,5 @@
 [Unit]
-Description=Run Brai scheduled runtime handlers every five minutes
+Description=Run Brai scheduled runtime agents every five minutes
 
 [Timer]
 OnBootSec=1min
@@ -9,4 +9,3 @@ Unit=brai-scheduler.service
 
 [Install]
 WantedBy=timers.target
-
