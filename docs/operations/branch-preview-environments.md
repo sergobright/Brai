@@ -8,9 +8,9 @@ Brai uses one VPS for six active app environments:
 
 ## Agent Flow
 
-Read-only questions, planning, investigation without project-file changes, and environment setup outside the project do not need a branch or preview slot. Before the first project-file change for a new task, start from `origin/main` and create `codex/<task-slug>` unless the project owner explicitly chooses another branch/base.
+Read-only questions, planning, investigation without project-file changes, Git-ignored-only local writes, and environment setup outside the project do not need a branch or preview slot. Before the first tracked or non-ignored project-file change for a new task, start from `origin/main` and create `codex/<task-slug>` unless the project owner explicitly chooses another branch/base.
 
-Agents must not reuse an existing `codex/*` branch just because Codex Desktop selected it by default. A new Codex thread must start a new task branch before changing project files, regardless of which branch the UI selected. Direct follow-ups may continue the same branch only inside the same Codex thread while the branch is not accepted into `main`; explicit project-owner branch instructions do not override this thread boundary for project-file writes.
+Agents must not reuse an existing `codex/*` branch just because Codex Desktop selected it by default. A new Codex thread must start a new task branch before changing tracked or non-ignored project files, regardless of which branch the UI selected. Direct follow-ups may continue the same branch only inside the same Codex thread while the branch is not accepted into `main`; explicit project-owner branch instructions do not override this thread boundary for project-file writes.
 
 Follow-up branches keep the exact task base recorded by the starter in `.brai-task/task.json`. While the branch is not accepted, agents must not update it from a later `origin/main` with fetch/pull/merge/rebase commands. Background merges into `main` are handled by the eventual PR/merge queue or by starting a new task after acceptance, not by repeatedly rebasing an in-review preview branch.
 
@@ -29,7 +29,7 @@ Local dev server URLs are agent-only verification aids. The user-facing handoff 
 
 ## Mechanical Guard Rails
 
-Use the checked-in task starter before the first project-file change:
+Classify intended write paths with `git check-ignore` before starting work. Git-ignored-only local writes such as `vault/`, scratch files, caches, outputs, and dependency directories stay in the current workspace. Use the checked-in task starter before the first tracked or non-ignored project-file change:
 
 ```bash
 scripts/brai-task-start.sh <task-slug>
