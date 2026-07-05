@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import { spawn } from 'node:child_process';
 import crypto from 'node:crypto';
 import http from 'node:http';
 import path from 'node:path';
@@ -42,6 +43,11 @@ export function createBraiServer({
   releaseDir = null,
   inboundApiKey = null,
   inboundToken = null,
+  vaultRoot = null,
+  syncthingGuiAddress = null,
+  syncthingApiKey = null,
+  syncthingFolderIdPrefix = 'vault-user-',
+  prepareUserVault = null,
   betterAuthSecret = sessionSecret,
   betterAuthUrl = null,
   resendApiKey = null,
@@ -59,6 +65,17 @@ export function createBraiServer({
   fs.mkdirSync(path.dirname(dbPath), { recursive: true });
   const store = new BraiStore(dbPath);
   const braiCmdRuntime = createBraiCmdRuntime(braiCmd);
+  const resolvedVaultRoot =
+    typeof vaultRoot === 'string' && vaultRoot.trim()
+      ? vaultRoot
+      : path.resolve(path.dirname(dbPath), '..', 'vault');
+  const ensureUserVault = prepareUserVault ?? createUserVaultPreparer({
+    vaultRoot: resolvedVaultRoot,
+    syncthingGuiAddress,
+    syncthingApiKey,
+    syncthingFolderIdPrefix,
+    logger
+  });
   const authRuntime = createBraiAuth({
     dbPath,
     secret: betterAuthSecret ?? sessionSecret ?? 'brai-local-auth-secret-for-local-development-only',
@@ -144,6 +161,17 @@ export function createBraiServer({
         const text = await response.text();
         const payload = parseJson(text);
         if (response.ok && payload?.user?.id) {
+          try {
+            await ensureUserVault({ userId: payload.user.id, email: payload.user.email });
+          } catch (error) {
+            logger.error?.('Failed to prepare user vault', {
+              error: error instanceof Error ? error.message : String(error),
+              userId: payload.user.id,
+              email: payload.user.email ?? null
+            });
+            sendJson(req, res, 503, { error: 'vault_prepare_failed' });
+            return;
+          }
           store.claimFirstUser(payload.user.id, now().toISOString());
         }
         relayAuthText(req, res, response, text, payload);
@@ -830,4 +858,99 @@ function parseCookies(header) {
 function shouldUseSecureCookie(req) {
   const host = req.headers.host ?? '';
   return host.includes('brightos.world') || req.headers['x-forwarded-proto'] === 'https';
+}
+
+export function createUserVaultPreparer({
+  vaultRoot = null,
+  syncthingGuiAddress = null,
+  syncthingApiKey = null,
+  syncthingFolderIdPrefix = 'vault-user-',
+  syncthingBin = 'syncthing',
+  runSyncthingCli = defaultRunSyncthingCli
+} = {}) {
+  const root = typeof vaultRoot === 'string' && vaultRoot.trim() ? path.resolve(vaultRoot) : '';
+  return async ({ userId, email }) => {
+    if (!root) return;
+    const safeUserId = validateVaultUserId(userId);
+    const label = cleanEmail(email) ?? safeUserId;
+    ensureDirectoryMode(root, 0o2770);
+
+    const folderPath = path.join(root, safeUserId);
+    ensureDirectoryMode(folderPath, 0o2770);
+    if (!fs.statSync(folderPath).isDirectory()) {
+      throw new Error('vault_user_path_not_directory');
+    }
+
+    if (!syncthingApiKey) return;
+
+    const baseArgs = [
+      syncthingBin,
+      'cli',
+      `--gui-address=${syncthingGuiAddress || '127.0.0.1:8384'}`,
+      `--gui-apikey=${syncthingApiKey}`
+    ];
+    const folderId = `${syncthingFolderIdPrefix}${safeUserId}`;
+    const listedFolders = await runSyncthingCli([...baseArgs, 'config', 'folders', 'list']);
+    const hasFolder = listedFolders
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .includes(folderId);
+
+    if (!hasFolder) {
+      await runSyncthingCli([
+        ...baseArgs,
+        'config',
+        'folders',
+        'add',
+        `--id=${folderId}`,
+        `--label=${label}`,
+        `--path=${folderPath}`,
+        '--type=sendreceive'
+      ]);
+      return;
+    }
+
+    await runSyncthingCli([...baseArgs, 'config', 'folders', folderId, 'label', 'set', label]);
+    await runSyncthingCli([...baseArgs, 'config', 'folders', folderId, 'path', 'set', folderPath]);
+  };
+}
+
+function validateVaultUserId(userId) {
+  if (typeof userId !== 'string' || !/^[A-Za-z0-9_-]+$/.test(userId)) {
+    throw new Error('invalid_vault_user_id');
+  }
+  return userId;
+}
+
+function ensureDirectoryMode(dirPath, mode) {
+  fs.mkdirSync(dirPath, { recursive: true, mode });
+  try {
+    fs.chmodSync(dirPath, mode);
+  } catch (error) {
+    if (error?.code !== 'EACCES' && error?.code !== 'EPERM') throw error;
+  }
+}
+
+async function defaultRunSyncthingCli(command) {
+  const [bin, ...args] = command;
+  return new Promise((resolve, reject) => {
+    const child = spawn(bin, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (chunk) => {
+      stdout += chunk;
+    });
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk;
+    });
+    child.on('error', reject);
+    child.on('close', (code) => {
+      if (code === 0) {
+        resolve(stdout);
+        return;
+      }
+      reject(new Error(stderr.trim() || stdout.trim() || `syncthing cli exited with ${code}`));
+    });
+  });
 }

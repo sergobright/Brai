@@ -1,5 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
 import {
   SESSION_SECRET,
   actionEvent,
@@ -9,6 +11,7 @@ import {
   request
 } from '../test-support/api.js';
 import { renderOtpEmail } from '../src/auth.js';
+import { createUserVaultPreparer } from '../src/server.js';
 
 test('email OTP message renders the reusable responsive card', () => {
   const message = renderOtpEmail({ otp: '<123456>' });
@@ -123,6 +126,65 @@ test('email OTP signs in, claims legacy data, and isolates the next user', async
     assert.deepEqual(secondAfterWrite.body.activities.map((item) => item.id), ['second-action']);
   } finally {
     await fixture.close();
+  }
+});
+
+test('email OTP prepares per-user vault folder on successful sign-in', async () => {
+  const sentOtps = new Map();
+  const prepared = [];
+  const fixture = await createFixture([
+    '2026-07-01T10:00:00.000Z',
+    '2026-07-01T10:00:01.000Z'
+  ], {
+    sessionSecret: SESSION_SECRET,
+    sendOtp: ({ email, otp }) => sentOtps.set(email, otp),
+    prepareUserVault: async (user) => prepared.push(user)
+  });
+
+  try {
+    await jsonRequest(fixture.url, '/auth/otp/send', {
+      method: 'POST',
+      body: JSON.stringify({ email: 'sergey@example.com' })
+    });
+    const verify = await jsonRequest(fixture.url, '/auth/otp/verify', {
+      method: 'POST',
+      body: JSON.stringify({ email: 'sergey@example.com', otp: sentOtps.get('sergey@example.com') })
+    });
+    assert.equal(verify.status, 200);
+    assert.deepEqual(prepared, [{
+      userId: verify.body.user.id,
+      email: 'sergey@example.com'
+    }]);
+  } finally {
+    await fixture.close();
+  }
+});
+
+test('user vault preparer creates per-user subfolder and sync folder label by email', async () => {
+  const root = await fs.promises.mkdtemp(path.join(process.env.TMPDIR || '/tmp', 'brai-vault-'));
+  const commands = [];
+  const runSyncthingCli = async (command) => {
+    commands.push(command);
+    return command.at(-1) === 'list' ? '' : '';
+  };
+  const prepare = createUserVaultPreparer({
+    vaultRoot: root,
+    syncthingGuiAddress: '127.0.0.1:8384',
+    syncthingApiKey: 'test-key',
+    runSyncthingCli
+  });
+
+  try {
+    await prepare({ userId: 'user_123', email: 'sergey@example.com' });
+    const userPath = path.join(root, 'user_123');
+    assert.equal(fs.existsSync(userPath), true);
+    assert.equal(fs.statSync(userPath).isDirectory(), true);
+    assert.deepEqual(commands, [
+      ['syncthing', 'cli', '--gui-address=127.0.0.1:8384', '--gui-apikey=test-key', 'config', 'folders', 'list'],
+      ['syncthing', 'cli', '--gui-address=127.0.0.1:8384', '--gui-apikey=test-key', 'config', 'folders', 'add', '--id=vault-user-user_123', '--label=sergey@example.com', `--path=${userPath}`, '--type=sendreceive']
+    ]);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
   }
 });
 

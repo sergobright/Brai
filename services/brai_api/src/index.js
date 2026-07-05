@@ -18,6 +18,10 @@ const authFromEmail = process.env.BRAI_AUTH_FROM ?? 'Brai <auth@mail.brightos.wo
 const inboundApiKey = process.env.BRAI_INBOUND_API_KEY ?? process.env.BRAI_INBOUND_TOKEN;
 const inboundStorageRoot =
   process.env.BRAI_INBOUND_STORAGE_ROOT ?? path.join(path.dirname(dbPath), 'inbox-attachments');
+const vaultRoot = process.env.BRAI_VAULT_ROOT ?? '';
+const syncthingGuiAddress = process.env.BRAI_SYNCTHING_GUI_ADDRESS ?? '127.0.0.1:8384';
+const syncthingApiKey = process.env.BRAI_SYNCTHING_API_KEY ?? '';
+const syncthingFolderIdPrefix = process.env.BRAI_SYNCTHING_FOLDER_ID_PREFIX ?? 'vault-user-';
 const codexBin = process.env.BRAI_CODEX_BIN ?? 'codex';
 const codexModel = process.env.BRAI_CODEX_MODEL?.trim() || null;
 const parsedCodexTimeoutMs = Number(process.env.BRAI_CODEX_TIMEOUT_MS);
@@ -53,6 +57,10 @@ const runtime = createBraiServer({
   releaseDir,
   inboundApiKey,
   inboundStorageRoot,
+  vaultRoot,
+  syncthingGuiAddress,
+  syncthingApiKey,
+  syncthingFolderIdPrefix,
   codexBin,
   codexModel,
   codexTimeoutMs,

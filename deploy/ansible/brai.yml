@@ -141,14 +141,14 @@
         path: "{{ brai_syncthing_vault_path }}"
         state: directory
         owner: root
-        group: "{{ brai_syncthing_user }}"
+        group: "{{ brai_deploy_user }}"
         mode: "2770"
 
     - name: Ensure existing Syncthing vault contents are writable by sync group
       ansible.builtin.file:
         path: "{{ brai_syncthing_vault_path }}"
         state: directory
-        group: "{{ brai_syncthing_user }}"
+        group: "{{ brai_deploy_user }}"
         mode: "u=rwX,g=rwX,o="
         recurse: true
 
@@ -157,7 +157,7 @@
         path: "{{ brai_syncthing_vault_path }}"
         state: directory
         owner: root
-        group: "{{ brai_syncthing_user }}"
+        group: "{{ brai_deploy_user }}"
         mode: "2770"
 
     - name: Check Syncthing systemd service template
