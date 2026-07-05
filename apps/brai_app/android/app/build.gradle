@@ -1,3 +1,5 @@
+import java.util.Locale
+
 apply plugin: 'com.android.application'
 apply plugin: 'org.jetbrains.kotlin.android'
 apply plugin: 'org.jetbrains.kotlin.plugin.compose'
@@ -19,6 +21,20 @@ def braiApkPreviewIteration = (System.getenv('BRAI_APK_PREVIEW_ITERATION') ?: '0
 def braiAndroidAppLabel = System.getenv('BRAI_ANDROID_APP_LABEL')
 def braiPreviewPackageSuffix = braiApkBuildKind == 'preview' ? '.work' : ''
 def braiAppLabel = { fallback -> braiAndroidAppLabel ?: fallback }
+def braiProductionAndroidApi = 'https://api.brightos.world'
+def braiNonProductionAndroidApis = [
+    dev: 'https://dev.brightos.world/api',
+    previewa: 'https://a.test.brightos.world/api',
+    previewb: 'https://b.test.brightos.world/api',
+    previewc: 'https://c.test.brightos.world/api',
+    previewd: 'https://d.test.brightos.world/api',
+    previewe: 'https://e.test.brightos.world/api',
+]
+
+def braiRequestedNonProductionFlavor = {
+    def requestedTasks = gradle.startParameter.taskNames.join(' ').toLowerCase(Locale.ROOT)
+    braiNonProductionAndroidApis.keySet().find { flavor -> requestedTasks.contains(flavor) }
+}
 
 android {
     namespace = "world.brightos.brai"
@@ -159,6 +175,49 @@ android {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
+    }
+}
+
+tasks.register('validateBraiAndroidApiBundle') {
+    doLast {
+        def flavor = braiRequestedNonProductionFlavor()
+        if (!flavor) return
+        def expectedApi = braiNonProductionAndroidApis[flavor]
+        def commandFlavor = flavor.startsWith('preview') ? "preview${flavor[-1].toUpperCase(Locale.ROOT)}" : flavor
+        if (braiAndroidApi != expectedApi) {
+            throw new GradleException("NEXT_PUBLIC_BRAI_ANDROID_API must be ${expectedApi} for ${commandFlavor} Android builds, got ${braiAndroidApi}. Use deploy/scripts/build-android-env-apk.sh ${commandFlavor}.")
+        }
+
+        def assetsDir = file("$projectDir/src/main/assets/public")
+        if (!assetsDir.exists()) {
+            throw new GradleException("Missing Capacitor web assets for ${commandFlavor}; run deploy/scripts/build-android-env-apk.sh ${commandFlavor}.")
+        }
+        def textAssets = fileTree(assetsDir).matching {
+            include '**/*.html'
+            include '**/*.js'
+            include '**/*.json'
+            include '**/*.txt'
+        }.files
+        def productionAsset = textAssets.find { asset -> asset.getText('UTF-8').contains(braiProductionAndroidApi) }
+        if (productionAsset != null) {
+            throw new GradleException("Non-production Android build contains production API in ${productionAsset.name}. Rebuild web assets with NEXT_PUBLIC_BRAI_ANDROID_API=${expectedApi} before Gradle packaging.")
+        }
+        def expectedAsset = textAssets.find { asset -> asset.getText('UTF-8').contains(expectedApi) }
+        if (expectedAsset == null) {
+            throw new GradleException("Non-production Android build assets do not contain ${expectedApi}. Use deploy/scripts/build-android-env-apk.sh ${commandFlavor}.")
+        }
+    }
+}
+
+tasks.configureEach { task ->
+    def taskName = task.name.toLowerCase(Locale.ROOT)
+    def packagesNonProductionAndroid = braiNonProductionAndroidApis.keySet().any { flavor -> taskName.contains(flavor) } &&
+        (taskName.startsWith('assemble') ||
+            taskName.startsWith('bundle') ||
+            taskName.startsWith('connected') ||
+            taskName.startsWith('package'))
+    if (packagesNonProductionAndroid) {
+        task.dependsOn('validateBraiAndroidApiBundle')
     }
 }
 

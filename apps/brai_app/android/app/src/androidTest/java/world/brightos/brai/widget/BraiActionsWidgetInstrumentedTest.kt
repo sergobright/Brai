@@ -30,6 +30,22 @@ class BraiActionsWidgetInstrumentedTest {
     }
 
     @Test
+    fun widgetSnapshotKeepsMoreThanEightActions() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val store = BraiActionsWidgetStore(context)
+        val actions = (1..12).map { index ->
+            WidgetActionItem("widget-action-$index", "Действие $index", "New")
+        }
+
+        store.clear()
+        store.saveSnapshot(DEFAULT_ACTIONS_WIDGET_VIEW_ID, serverRevision = 777L, snapshotVersion = 777_000L, actions = actions)
+
+        val saved = store.loadSnapshot(DEFAULT_ACTIONS_WIDGET_VIEW_ID)
+        assertEquals(12, saved.actions.size)
+        assertEquals(actions, saved.actions)
+    }
+
+    @Test
     fun widgetPendingStatusDoesNotBlockNewAppSnapshot() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val store = BraiActionsWidgetStore(context)

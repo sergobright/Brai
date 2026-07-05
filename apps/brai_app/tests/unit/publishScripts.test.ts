@@ -244,6 +244,9 @@ describe("mobile OTA publish scripts", () => {
     expect(buildApk).toContain("fs.writeFileSync(outVersionFile");
     expect(buildApk.indexOf('(cd "$ROOT" && "$NPM_BIN" run app:build)')).toBeLessThan(buildApk.indexOf('(cd "$ROOT" && "$NPM_BIN" run app:cap:sync)'));
     expect(gradle).toContain('throw new GradleException("BRAI_APP_VERSION is required for Android builds")');
+    expect(gradle).toContain("tasks.register('validateBraiAndroidApiBundle')");
+    expect(gradle).toContain("Non-production Android build contains production API");
+    expect(gradle).toContain("https://a.test.brightos.world/api");
     expect(gradle).not.toContain("BRAI_PROD_FALLBACK_BUNDLE_VERSION");
     expect(gradle).not.toContain("BRAI_NON_PROD_FALLBACK_BUNDLE_VERSION");
     expect(gradle).not.toContain("?: '0.0.10'");
