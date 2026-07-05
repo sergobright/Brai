@@ -745,6 +745,8 @@ export function useBraiAppState(initialSection: SectionId) {
     return () => {
       cancelled = true;
     };
+    // Boot is intentionally one-shot; rerunning on setter wrapper identity would duplicate startup sync.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useBraiLiveUpdates({
