@@ -5,10 +5,16 @@
 - `main` is the accepted production base.
 - `codex/*` branches are task branches from the current `origin/main`.
 - Preview slots A-E are review environments for preview-class `codex/*` work.
-- Read-only analysis, planning, and questions without project-file writes do not need a task branch.
+- Read-only analysis, planning, questions, and Git-ignored-only local writes do not need a task branch.
 - `npm run app:dev` is only a local development server command; it is not a branch or deploy workflow.
 
-Before the first project-file change in every new Codex thread, run:
+Before the first write, classify the intended target paths. If every intended write is Git-ignored, work in the current workspace and do not start a task branch. Check planned paths with:
+
+```bash
+git check-ignore -q -- <path>
+```
+
+This covers local notes such as `vault/`, scratch files, caches, outputs, and dependency directories. If any intended write touches a tracked file or a new non-ignored project path, run the starter before that first project-file change:
 
 ```bash
 scripts/brai-task-start.sh <task-slug>

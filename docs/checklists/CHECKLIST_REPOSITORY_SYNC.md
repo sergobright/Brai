@@ -3,7 +3,8 @@
 - [ ] Read `docs/guidelines/07-git-versioning-repository-sync.md`.
 - [ ] Check current branch.
 - [ ] Inspect `git status --short`.
-- [ ] For new project-file work in a new Codex thread, always start with escalated `scripts/brai-task-start.sh <task-slug>` no matter which branch Codex Desktop selected.
+- [ ] Before the first write, classify target paths with `git check-ignore`; Git-ignored-only local writes such as `vault/` do not need a task branch.
+- [ ] For new tracked or non-ignored project-file work in a new Codex thread, start with escalated `scripts/brai-task-start.sh <task-slug>` no matter which branch Codex Desktop selected.
 - [ ] If the starter cannot create the `.codex-worktrees/` task worktree, stop without project-file changes; do not create or switch to a manual fallback branch in the current checkout.
 - [ ] Do not run `npm ci` in every fresh task worktree just because ignored `node_modules` are missing; the starter links existing dependency dirs from the main checkout when available.
 - [ ] Continue an existing `codex/*` branch only inside the same Codex thread before acceptance, and run `node scripts/brai-task.mjs follow-up` before new project-file writes.

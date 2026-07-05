@@ -12,7 +12,8 @@ This file routes agents to the project rules.
 
 - После сжатия контекста, перед продолжением правок и перед финальным ответом, если были изменения файлов проекта, перечитать `AGENTS.md`.
 - Read-only анализ, планирование и вопросы без project-file writes не требуют новой ветки.
-- Перед первой правкой файлов проекта в новом Codex thread всегда запускать официальный starter от актуального `origin/main`: `scripts/brai-task-start.sh <task-slug>`; выбранная UI ветка не имеет значения.
+- Перед первой записью сначала определить целевые пути. Если все целевые записи попадают в Git-ignored пути (`git check-ignore -q -- <path>`), включая `vault/`, локальные заметки, scratch/cache/output/dependency directories, работать в текущем workspace без starter.
+- Если хотя бы одна целевая запись затрагивает tracked file или новый non-ignored project path, перед первой такой правкой в новом Codex thread запускать официальный starter от актуального `origin/main`: `scripts/brai-task-start.sh <task-slug>`; выбранная UI ветка не имеет значения.
 - Нельзя вручную создавать/switch-ить fallback ветки через `git switch`, `git checkout`, `git branch`, `git worktree`.
 - Если текущий thread уже вывел ветку на preview и пользователь ещё не принял её, прямые follow-up правки в этом же thread идут в ту же `codex/*` ветку через `node scripts/brai-task.mjs follow-up`.
 - Пока preview/follow-up ветка не принята, не подтягивать в неё новый `origin/main`: не делать `git fetch origin main`, `git pull origin main`, `git merge origin/main`, `git rebase origin/main` и эквиваленты. База задачи заморожена в `.brai-task/task.json` с момента starter; новые изменения `main` учитываются только после принятия или в новой задаче.
