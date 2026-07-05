@@ -328,6 +328,7 @@ await fs.writeFile(outputPath, JSON.stringify({
     expect(buildApk).toContain('if [[ -z "$MOBILE_TARGET" && -n "$ENV_PATH" ]]; then');
     expect(buildApk).toContain('--mobile-target "$MOBILE_TARGET"');
     expect(ciDeploy).toContain('export BRAI_PROD_DB="$DEPLOY_REPO/data/brai.sqlite"');
+    expect(ciDeploy).toContain('export BRAI_PUBLIC_SITE_TARGET="$DEPLOY_REPO/deploy/site"');
   });
 
   it("records shipped APK ledger rows idempotently by target commit", async () => {

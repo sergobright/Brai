@@ -129,6 +129,7 @@ esac
 
 if [[ "$ENVIRONMENT" == "prod" ]]; then
   export BRAI_WEB_TARGET="$DEPLOY_REPO/deploy/web"
+  export BRAI_PUBLIC_SITE_TARGET="$DEPLOY_REPO/deploy/site"
   export BRAI_MOBILE_TARGET="$DEPLOY_REPO/deploy/mobile-update"
   export BRAI_DB="$DEPLOY_REPO/data/brai.sqlite"
 fi
