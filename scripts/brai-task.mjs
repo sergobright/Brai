@@ -45,6 +45,8 @@ const ACCEPTANCE_RECEIPT_VERSION = "brai-acceptance-v1";
 const RELEASE_NOTES_VERSION = "brai-release-notes-v1";
 const DEFAULT_INFRA_DOCS_HANDOFF_WAIT_MS = 180000;
 const DEFAULT_INFRA_DOCS_HANDOFF_POLL_MS = 10000;
+const DEFAULT_PREVIEW_HANDOFF_WAIT_MS = 1800000;
+const DEFAULT_PREVIEW_HANDOFF_POLL_MS = 10000;
 const DELIVERY_CLASS = {
   BLOCKED: "blocked",
   INFRA_DOCS: "infra-docs",
@@ -395,8 +397,8 @@ function previewHandoff(branchArg) {
   const baseRef = taskBaseRefForBranch(branch);
   if (!isAncestor(baseRef, head)) throw new Error(`Task base ${baseRef} is not an ancestor of ${head}.`);
 
-  const run = findSuccessfulDeliveryRun(branch, head, ["public-guard", "checks", "temporal-worker-check", "deploy-preview"]);
-  const slot = readPreviewSlot(branch, head);
+  const run = waitForSuccessfulPreviewRun(branch, head, ["public-guard", "checks", "temporal-worker-check", "deploy-preview"]);
+  const slot = waitForReadyPreviewSlot(branch, head);
   const url = previewUrlForSlot(slot);
   const receipt = {
     branch,
@@ -1962,11 +1964,27 @@ function runJsonMaybe(args) {
 function waitForSuccessfulDeliveryRun(branch, sha, requiredJobs) {
   const waitMs = Number(process.env.BRAI_INFRA_DOCS_HANDOFF_WAIT_MS ?? DEFAULT_INFRA_DOCS_HANDOFF_WAIT_MS);
   const pollMs = Number(process.env.BRAI_INFRA_DOCS_HANDOFF_POLL_MS ?? DEFAULT_INFRA_DOCS_HANDOFF_POLL_MS);
+  return waitForCondition(() => findSuccessfulDeliveryRun(branch, sha, requiredJobs), waitMs, pollMs);
+}
+
+function waitForSuccessfulPreviewRun(branch, sha, requiredJobs) {
+  const waitMs = Number(process.env.BRAI_PREVIEW_HANDOFF_WAIT_MS ?? DEFAULT_PREVIEW_HANDOFF_WAIT_MS);
+  const pollMs = Number(process.env.BRAI_PREVIEW_HANDOFF_POLL_MS ?? DEFAULT_PREVIEW_HANDOFF_POLL_MS);
+  return waitForCondition(() => findSuccessfulDeliveryRun(branch, sha, requiredJobs), waitMs, pollMs);
+}
+
+function waitForReadyPreviewSlot(branch, sha) {
+  const waitMs = Number(process.env.BRAI_PREVIEW_HANDOFF_WAIT_MS ?? DEFAULT_PREVIEW_HANDOFF_WAIT_MS);
+  const pollMs = Number(process.env.BRAI_PREVIEW_HANDOFF_POLL_MS ?? DEFAULT_PREVIEW_HANDOFF_POLL_MS);
+  return waitForCondition(() => readPreviewSlot(branch, sha), waitMs, pollMs);
+}
+
+function waitForCondition(fn, waitMs, pollMs) {
   const deadline = Date.now() + waitMs;
   let lastError;
   do {
     try {
-      return findSuccessfulDeliveryRun(branch, sha, requiredJobs);
+      return fn();
     } catch (error) {
       lastError = error;
       if (Date.now() >= deadline) break;

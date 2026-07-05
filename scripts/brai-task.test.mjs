@@ -1369,6 +1369,21 @@ test("delivery handoff writes infra-docs receipt only for merged PRs", () => {
   assert.equal(receipt.runId, 42);
 });
 
+test("preview handoff waits for an in-progress delivery run before writing a receipt", () => {
+  const fixture = setupPreviewHandoffFixture();
+  const result = runPreviewHandoffFixture(fixture);
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.match(result.stdout, /Preview C: https:\/\/c\.test\.example/);
+  assert.equal(fs.readFileSync(fixture.runListCountFile, "utf8").trim(), "2");
+
+  const receipt = JSON.parse(fs.readFileSync(path.join(fixture.repo, ".brai-task", "preview-handoff.json"), "utf8"));
+  assert.equal(receipt.branch, "codex/foo");
+  assert.equal(receipt.slot, "C");
+  assert.equal(receipt.url, "https://c.test.example");
+  assert.equal(receipt.runId, 42);
+});
+
 test("no-preview acceptance diffs ignore reconciled main-only runtime paths", () => {
   const repo = fs.mkdtempSync(path.join(os.tmpdir(), "brai-task-no-preview-reconcile-"));
   const previous = process.cwd();
@@ -1909,6 +1924,117 @@ fi
   return { repo, bin };
 }
 
+function setupPreviewHandoffFixture() {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "brai-task-preview-handoff-"));
+  const remote = path.join(root, "origin.git");
+  const repo = path.join(root, "repo");
+  const bin = path.join(root, "bin");
+  const registry = path.join(root, "preview-slots.json");
+  const runListCountFile = path.join(root, "gh-run-list-count.txt");
+
+  git(["init", "--bare", remote], root);
+  fs.mkdirSync(repo);
+  git(["init"], repo);
+  git(["config", "user.email", "test@example.invalid"], repo);
+  git(["config", "user.name", "Brai Test"], repo);
+  fs.writeFileSync(path.join(repo, ".gitignore"), ".brai-task/\n");
+  fs.writeFileSync(path.join(repo, "base.txt"), "base\n");
+  fs.mkdirSync(path.join(repo, "deploy"), { recursive: true });
+  fs.writeFileSync(
+    path.join(repo, "deploy", "environments.json"),
+    `${JSON.stringify({ environments: { "preview-c": { domain: "c.test.example" } } }, null, 2)}\n`,
+  );
+  git(["add", ".gitignore", "base.txt", "deploy/environments.json"], repo);
+  git(["commit", "-m", "base"], repo);
+  const base = git(["rev-parse", "HEAD"], repo).stdout.trim();
+  git(["remote", "add", "origin", remote], repo);
+  git(["push", "origin", "HEAD:main"], repo);
+  git(["checkout", "-b", "codex/foo"], repo);
+  fs.mkdirSync(path.join(repo, "apps", "brai_app", "src", "app"), { recursive: true });
+  fs.writeFileSync(path.join(repo, "apps", "brai_app", "src", "app", "page.tsx"), "export default function Page() { return null; }\n");
+  git(["add", "apps/brai_app/src/app/page.tsx"], repo);
+  git(["commit", "-m", "runtime change"], repo);
+  const head = git(["rev-parse", "HEAD"], repo).stdout.trim();
+  git(["push", "origin", "HEAD:codex/foo"], repo);
+
+  fs.mkdirSync(path.join(repo, ".brai-task"));
+  fs.writeFileSync(
+    path.join(repo, ".brai-task", "task.json"),
+    `${JSON.stringify({
+      branch: "codex/foo",
+      mode: "new",
+      base,
+      createdAt: "2026-06-26T00:00:00.000Z",
+      ...(process.env.CODEX_THREAD_ID ? { threadId: process.env.CODEX_THREAD_ID } : {}),
+    })}\n`,
+  );
+  fs.writeFileSync(
+    path.join(repo, ".brai-task", "release-notes.json"),
+    `${JSON.stringify({
+      receiptType: "brai-release-notes-v1",
+      short_changes: "Подготовлен preview handoff.",
+      detailed_changes: "Runtime ветка ждёт успешный delivery run и готовый preview slot.",
+      reason: "Нужно проверить, что handoff не бросает активную доставку.",
+    })}\n`,
+  );
+  fs.writeFileSync(
+    registry,
+    `${JSON.stringify({
+      C: {
+        branch: "codex/foo",
+        commit: head,
+        status: "ready",
+      },
+    })}\n`,
+  );
+
+  const pendingRun = {
+    databaseId: 42,
+    headSha: head,
+    status: "in_progress",
+    conclusion: "",
+    url: "https://github.example/actions/runs/42",
+  };
+  const successfulRun = {
+    ...pendingRun,
+    status: "completed",
+    conclusion: "success",
+  };
+  const jobs = {
+    jobs: ["public-guard", "checks", "temporal-worker-check", "deploy-preview"].map((name) => ({ name, conclusion: "success" })),
+  };
+
+  fs.mkdirSync(bin);
+  const gh = path.join(bin, "gh");
+  fs.writeFileSync(
+    gh,
+    `#!/usr/bin/env bash
+count_file="${runListCountFile}"
+if [ "$1" = "run" ] && [ "$2" = "list" ]; then
+  count=0
+  if [ -f "$count_file" ]; then
+    count="$(cat "$count_file")"
+  fi
+  count="$((count + 1))"
+  printf '%s' "$count" > "$count_file"
+  if [ "$count" -eq 1 ]; then
+    printf '%s' '${JSON.stringify([pendingRun])}'
+  else
+    printf '%s' '${JSON.stringify([successfulRun])}'
+  fi
+elif [ "$1" = "run" ] && [ "$2" = "view" ]; then
+  printf '%s' '${JSON.stringify(jobs)}'
+else
+  echo "unexpected gh $*" >&2
+  exit 1
+fi
+`,
+  );
+  fs.chmodSync(gh, 0o755);
+
+  return { repo, bin, registry, runListCountFile };
+}
+
 function runDeliveryHandoffFixture({ repo, bin }) {
   const previousCwd = process.cwd();
   const previousPath = process.env.PATH;
@@ -1935,6 +2061,39 @@ function runDeliveryHandoffFixture({ repo, bin }) {
     else process.env.BRAI_INFRA_DOCS_HANDOFF_WAIT_MS = previousWait;
     if (previousPoll == null) delete process.env.BRAI_INFRA_DOCS_HANDOFF_POLL_MS;
     else process.env.BRAI_INFRA_DOCS_HANDOFF_POLL_MS = previousPoll;
+  }
+}
+
+function runPreviewHandoffFixture({ repo, bin, registry }) {
+  const previousCwd = process.cwd();
+  const previousPath = process.env.PATH;
+  const previousRegistry = process.env.BRAI_PREVIEW_REGISTRY;
+  const previousWait = process.env.BRAI_PREVIEW_HANDOFF_WAIT_MS;
+  const previousPoll = process.env.BRAI_PREVIEW_HANDOFF_POLL_MS;
+  const previousLog = console.log;
+  const logs = [];
+  try {
+    process.chdir(repo);
+    process.env.PATH = `${bin}${path.delimiter}${process.env.PATH}`;
+    process.env.BRAI_PREVIEW_REGISTRY = registry;
+    process.env.BRAI_PREVIEW_HANDOFF_WAIT_MS = "2000";
+    process.env.BRAI_PREVIEW_HANDOFF_POLL_MS = "1";
+    console.log = (...args) => logs.push(args.join(" "));
+    deliveryHandoff("codex/foo");
+    return { status: 0, stdout: logs.join("\n"), stderr: "" };
+  } catch (error) {
+    return { status: 1, stdout: logs.join("\n"), stderr: error instanceof Error ? error.message : String(error) };
+  } finally {
+    console.log = previousLog;
+    process.chdir(previousCwd);
+    if (previousPath == null) delete process.env.PATH;
+    else process.env.PATH = previousPath;
+    if (previousRegistry == null) delete process.env.BRAI_PREVIEW_REGISTRY;
+    else process.env.BRAI_PREVIEW_REGISTRY = previousRegistry;
+    if (previousWait == null) delete process.env.BRAI_PREVIEW_HANDOFF_WAIT_MS;
+    else process.env.BRAI_PREVIEW_HANDOFF_WAIT_MS = previousWait;
+    if (previousPoll == null) delete process.env.BRAI_PREVIEW_HANDOFF_POLL_MS;
+    else process.env.BRAI_PREVIEW_HANDOFF_POLL_MS = previousPoll;
   }
 }
 

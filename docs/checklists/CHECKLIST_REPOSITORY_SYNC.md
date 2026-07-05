@@ -21,7 +21,7 @@
 - [ ] Push the `codex/*` task branch to `origin` unless the task is explicitly local-only/no-push.
 - [ ] Classify delivery with the guard: preview-class runtime/product or `infra-docs`.
 - [ ] For preview-class work, wait for CI/deploy to assign or reuse a preview slot.
-- [ ] For preview-class work, record release notes with `node scripts/brai-task.mjs release-notes --short "..." --details "..." --reason "..."`, then run `scripts/brai-preview-handoff.sh` and use its verified preview letter, URL, branch, and commit.
+- [ ] For preview-class work, record release notes with `node scripts/brai-task.mjs release-notes --short "..." --details "..." --reason "..."`, then run `scripts/brai-preview-handoff.sh`, let it wait through transient `queued` / `in_progress` states, and use its verified preview letter, URL, branch, and commit only after success.
 - [ ] For `infra-docs` work, run `node scripts/brai-task.mjs handoff` and use its verified no-preview PR state only after the PR is `MERGED`; `OPEN`, `BEHIND`, `BLOCKED`, `DIRTY`, failed checks, and auto-merge-only states are blockers.
 - [ ] If all preview slots are occupied, report queued status and queue position/source when available.
 - [ ] If the project owner accepts the preview (`Принято`, `принимаю`, `accepted`, or equivalent, but not negated phrases like `пока не принято`), run `deploy/scripts/accept-preview.sh <codex-branch>` instead of replying with an acknowledgement; the script must verify the exact branch head before PR or merge actions.

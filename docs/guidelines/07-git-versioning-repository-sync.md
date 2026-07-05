@@ -98,7 +98,7 @@ Before final handoff, classify the branch with the guard:
 - technical fixes that only change tests, test config, or narrowly allowed agent-operation bookkeeping use the `technical-no-preview` PR path into `main`;
 - blocked or unknown paths must be reported instead of handed off as complete.
 
-Preview-class work is incomplete until the exact branch head is pushed, CI/deploy has verified the slot, release notes have been recorded with `node scripts/brai-task.mjs release-notes --short "..." --details "..." --reason "..."`, and `scripts/brai-preview-handoff.sh` succeeds. The final implementation response must start with that command's verified `<slot emoji> Preview` header, then URL, branch, and commit.
+Preview-class work is incomplete until the exact branch head is pushed, CI/deploy has verified the slot, release notes have been recorded with `node scripts/brai-task.mjs release-notes --short "..." --details "..." --reason "..."`, and `scripts/brai-preview-handoff.sh` succeeds. That handoff command keeps polling transient preview `queued` / `in_progress` states by default; do not treat an active delivery run as a completed handoff. The final implementation response must start with that command's verified `<slot emoji> Preview` header, then URL, branch, and commit.
 
 No-preview work is complete only after `node scripts/brai-task.mjs handoff` verifies the no-preview workflow and reports branch, commit, `deliveryClass=infra-docs` or `deliveryClass=technical-no-preview`, `autoMerge=enabled` when applicable, and `prState=MERGED` with merged PR metadata. `autoMerge=enabled` alone is an intermediate state, not final handoff evidence.
 
