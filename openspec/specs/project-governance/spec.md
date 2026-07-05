@@ -105,6 +105,15 @@ Brai SHALL treat the server SQLite `table_descriptions` table as the registry fo
 - **THEN** the same change updates `table_descriptions`
 - **AND** content-only row changes do not require `table_descriptions` updates
 
+### Requirement: Database foreign keys use parent table names
+Brai SHALL name any new or renamed database foreign-key column that references `<parent_table>.id` as `<parent_table>_id`.
+
+#### Scenario: Foreign-key column is created or renamed
+- **WHEN** a database schema change creates or renames a foreign-key column referencing `items.id`
+- **THEN** the column is named `items_id`
+- **AND** a foreign-key column referencing `item_role_types.id` is named `item_role_types_id`
+- **AND** shortened names such as `item_id`, `role_type_id`, or `event_type_id` are not introduced for plural parent tables
+
 ### Requirement: SocratiCode is used for semantic code search
 Agents and maintainers MUST use SocratiCode for semantic code search after confirming the project codebase index is complete.
 
