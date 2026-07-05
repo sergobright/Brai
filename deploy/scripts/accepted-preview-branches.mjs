@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 
 export const INFRA_DOCS_LABEL = "brai-delivery:infra-docs";
 export const TECHNICAL_NO_PREVIEW_LABEL = "brai-delivery:technical-no-preview";
+const LEGACY_NO_PREVIEW_LABELS = new Set(["bright-delivery:infra-docs", "bright-delivery:technical-no-preview"]);
 
 if (path.resolve(process.argv[1] ?? "") === fileURLToPath(import.meta.url)) {
   const args = process.argv.slice(2);
@@ -76,7 +77,9 @@ function hasLabel(pull, labelName) {
 }
 
 function hasNoPreviewLabel(pull) {
-  return hasLabel(pull, INFRA_DOCS_LABEL) || hasLabel(pull, TECHNICAL_NO_PREVIEW_LABEL);
+  return hasLabel(pull, INFRA_DOCS_LABEL)
+    || hasLabel(pull, TECHNICAL_NO_PREVIEW_LABEL)
+    || [...LEGACY_NO_PREVIEW_LABELS].some((label) => hasLabel(pull, label));
 }
 
 async function fetchAssociatedPulls(commitSha) {

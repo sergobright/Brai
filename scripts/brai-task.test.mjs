@@ -1767,7 +1767,8 @@ test("accepted preview stale cleanup is best effort", () => {
   const promoteScript = fs.readFileSync(path.join(process.cwd(), "deploy/scripts/ci-ssh-promote-deployment.sh"), "utf8");
   const otaSyncScript = fs.readFileSync(path.join(process.cwd(), "deploy/scripts/sync-occupied-preview-ota-manifests.sh"), "utf8");
   const requiredLoop = script.slice(script.indexOf('for index in "${!REQUIRED_BRANCHES[@]}"'), script.indexOf('if [[ "$MODE" == "promote" ]]'));
-  const cleanupLoop = script.slice(script.indexOf('for branch in "${CLEANUP_BRANCHES[@]}"'));
+  const cleanupStart = script.indexOf("cleanup_previously_accepted_preview()");
+  const cleanupLoop = script.slice(script.indexOf('for branch in "${CLEANUP_BRANCHES[@]}"', cleanupStart));
 
   assert.match(promoteScript, /accepted_build_recorded\(\)/);
   assert.match(promoteScript, /target_commit = \?/);
@@ -1775,6 +1776,8 @@ test("accepted preview stale cleanup is best effort", () => {
   assert.match(requiredLoop, /exit 1/);
   assert.doesNotMatch(requiredLoop, /BRAI_REQUIRE_PREVIEW_SLOT_RELEASE=true/);
   assert.match(requiredLoop, /slot_released/);
+  assert.match(script, /filter_cleanup_branches_to_active_previews/);
+  assert.match(script, /Skipping \$skipped previously accepted previews with no active preview slot or queue entry/);
   assert.match(cleanupLoop, /cleanup_previously_accepted_preview/);
   assert.match(cleanupLoop, /Best-effort cleanup failed/);
   assert.doesNotMatch(cleanupLoop, /exit 1/);

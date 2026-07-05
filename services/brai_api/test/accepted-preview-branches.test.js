@@ -25,6 +25,16 @@ test('accepted preview branch lookup prints nothing when a main commit has no ac
   ]), []);
 });
 
+test('accepted preview branch lookup skips current and legacy no-preview labels', () => {
+  assert.deepEqual(acceptedPreviewBranches([
+    { base: { ref: 'main' }, head: { ref: 'codex/current-docs' }, merged_at: '2026-06-25T10:00:00Z', labels: [{ name: 'brai-delivery:infra-docs' }] },
+    { base: { ref: 'main' }, head: { ref: 'codex/current-tech' }, merged_at: '2026-06-25T10:00:00Z', labels: [{ name: 'brai-delivery:technical-no-preview' }] },
+    { base: { ref: 'main' }, head: { ref: 'codex/legacy-docs' }, merged_at: '2026-06-25T10:00:00Z', labels: [{ name: 'bright-delivery:infra-docs' }] },
+    { base: { ref: 'main' }, head: { ref: 'codex/legacy-tech' }, merged_at: '2026-06-25T10:00:00Z', labels: [{ name: 'bright-delivery:technical-no-preview' }] },
+    { base: { ref: 'main' }, head: { ref: 'codex/preview' }, merged_at: '2026-06-25T10:00:00Z', labels: [] }
+  ]), ['codex/preview']);
+});
+
 test('accepted preview branch lookup requires release notes for JSON promotion metadata', () => {
   const body = `Accepted preview.
 

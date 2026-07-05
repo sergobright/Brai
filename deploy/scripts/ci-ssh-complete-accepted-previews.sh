@@ -8,6 +8,7 @@ TARGET_BRANCH="${BRAI_TARGET_BRANCH:-main}"
 TARGET_ENVIRONMENT="${BRAI_TARGET_ENVIRONMENT:-prod}"
 TARGET_COMMIT="${BRAI_TARGET_COMMIT:-${GITHUB_SHA:-}}"
 MODE="${BRAI_ACCEPTED_PREVIEWS_MODE:-all}"
+ENVS_ROOT="${BRAI_ENVS_ROOT:-/srv/projects/brai-envs}"
 
 : "${TARGET_COMMIT:?BRAI_TARGET_COMMIT or GITHUB_SHA is required}"
 
@@ -45,6 +46,70 @@ signal_temporal_preview() {
 sync_occupied_preview_ota_manifests() {
   if [[ "$MODE" == "release" && "$TARGET_ENVIRONMENT" == "prod" ]]; then
     "$SCRIPT_DIR/sync-occupied-preview-ota-manifests.sh"
+  fi
+}
+
+active_preview_branches() {
+  : "${BRAI_DEPLOY_HOST:?BRAI_DEPLOY_HOST is required}"
+  : "${BRAI_DEPLOY_USER:?BRAI_DEPLOY_USER is required}"
+  : "${BRAI_DEPLOY_SSH_KEY:?BRAI_DEPLOY_SSH_KEY is required}"
+
+  local key_file
+  key_file="$(mktemp "${TMPDIR:-/tmp}/brai-preview-registry-key.XXXXXX")"
+  printf '%s\n' "$BRAI_DEPLOY_SSH_KEY" >"$key_file"
+  chmod 600 "$key_file"
+  local status=0
+  set +e
+  ssh -i "$key_file" -p "${BRAI_DEPLOY_SSH_PORT:-22}" -o StrictHostKeyChecking=accept-new "$BRAI_DEPLOY_USER@$BRAI_DEPLOY_HOST" \
+    bash -s -- "$ENVS_ROOT" "${BRAI_PREVIEW_REGISTRY:-}" <<'REMOTE'
+set -euo pipefail
+ENVS_ROOT="$1"
+REGISTRY="${2:-$ENVS_ROOT/preview-slots.json}"
+[[ -f "$REGISTRY" ]] || exit 0
+node - "$REGISTRY" <<'NODE'
+const fs = require("node:fs");
+const registry = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+for (const slot of ["A", "B", "C", "D", "E"]) {
+  const entry = registry[slot] || {};
+  if (entry.branch && (entry.status || "free") !== "free") console.log(entry.branch);
+}
+for (const entry of registry.queue || []) {
+  if (entry.branch) console.log(entry.branch);
+}
+NODE
+REMOTE
+  status=$?
+  set -e
+  rm -f "$key_file"
+  return "$status"
+}
+
+filter_cleanup_branches_to_active_previews() {
+  [[ "${#CLEANUP_BRANCHES[@]}" -gt 0 ]] || return 0
+  local active_list
+  if ! active_list="$(active_preview_branches)"; then
+    echo "Warning: could not inspect active preview slots; falling back to recent merged cleanup." >&2
+    return 0
+  fi
+
+  declare -A active=()
+  local branch
+  while IFS= read -r branch; do
+    [[ -n "$branch" ]] && active[$branch]=1
+  done <<<"$active_list"
+
+  local filtered=()
+  local skipped=0
+  for branch in "${CLEANUP_BRANCHES[@]}"; do
+    if [[ -n "${active[$branch]:-}" ]]; then
+      filtered+=("$branch")
+    else
+      skipped=$((skipped + 1))
+    fi
+  done
+  CLEANUP_BRANCHES=("${filtered[@]}")
+  if [[ "$skipped" -gt 0 ]]; then
+    echo "Skipping $skipped previously accepted previews with no active preview slot or queue entry."
   fi
 }
 
@@ -140,6 +205,8 @@ done
 if [[ "$MODE" == "promote" ]]; then
   exit 0
 fi
+
+filter_cleanup_branches_to_active_previews
 
 cleanup_previously_accepted_preview() {
   local branch="$1"
