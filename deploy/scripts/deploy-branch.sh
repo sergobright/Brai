@@ -186,13 +186,20 @@ normalize_preview_artifacts() {
   return "$failed"
 }
 
+OTA_VERSION_ARGS=(
+  --environment "$ENVIRONMENT"
+  --root "$ROOT"
+  --db "$DB_PATH"
+  --prod-db "${BRAI_PROD_DB:-}"
+  --prod-web-version-json "${BRAI_PROD_WEB_VERSION_JSON:-}"
+  --mobile-target "$MOBILE_TARGET"
+)
+if [[ "$ENVIRONMENT" == preview-* && "$BRANCH" == codex/* ]]; then
+  OTA_VERSION_ARGS+=(--next-ota true)
+fi
+
 VERSION="${BRAI_APP_VERSION:-$("$NODE_BIN" "$SCRIPT_DIR/resolve-app-version.mjs" \
-  --environment "$ENVIRONMENT" \
-  --root "$ROOT" \
-  --db "$DB_PATH" \
-  --prod-db "${BRAI_PROD_DB:-}" \
-  --prod-web-version-json "${BRAI_PROD_WEB_VERSION_JSON:-}" \
-  --mobile-target "$MOBILE_TARGET")}"
+  "${OTA_VERSION_ARGS[@]}")}"
 
 if [[ "$ENVIRONMENT" == "prod" ]]; then
   BUNDLE_VERSION="${BRAI_MOBILE_BUNDLE_VERSION:-$VERSION}"

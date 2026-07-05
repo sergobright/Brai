@@ -19,6 +19,7 @@ if (path.resolve(process.argv[1] ?? "") === fileURLToPath(import.meta.url)) {
     prodDb: args["prod-db"],
     prodWebVersionJson: args["prod-web-version-json"],
     mobileTarget: args["mobile-target"],
+    nextOta: args["next-ota"] === "true",
     nextApk: args["next-apk"] === "true",
     targetBranch: args["target-branch"],
     targetCommit: args["target-commit"],
@@ -34,6 +35,7 @@ export function resolveAppVersion({
   prodWebVersionJson = "",
   mobileTarget = "",
   explicit = kind === "apk" ? process.env.BRAI_APK_VERSION || "" : process.env.BRAI_APP_VERSION || "",
+  nextOta = false,
   nextApk = false,
   targetBranch = "",
   targetCommit = "",
@@ -41,16 +43,20 @@ export function resolveAppVersion({
   if (kind === "apk") return validApkVersion(explicit || resolveApkVersion(db || prodDb, { nextApk, targetBranch, targetCommit }));
   if (explicit) return validOtaVersion(explicit);
 
-  const ledgerVersion = latestOtaVersion([
+  const ledgerVersions = [
     db && latestBuildOtaVersion(db),
     prodDb && latestBuildOtaVersion(prodDb),
-  ]);
-  if (ledgerVersion) return validOtaVersion(ledgerVersion);
-
-  const deployedVersion = latestOtaVersion([
+  ];
+  const deployedVersions = [
     environment !== "prod" && prodWebVersionJson && readVersionJson(prodWebVersionJson),
     mobileTarget && latestMobileTargetVersion(mobileTarget),
-  ]);
+  ];
+  if (nextOta) return nextPatchVersion(latestOtaVersion([...ledgerVersions, ...deployedVersions]));
+
+  const ledgerVersion = latestOtaVersion(ledgerVersions);
+  if (ledgerVersion) return validOtaVersion(ledgerVersion);
+
+  const deployedVersion = latestOtaVersion(deployedVersions);
   if (deployedVersion) return validOtaVersion(deployedVersion);
   throw new Error("Unable to resolve Brai X.Y.Z OTA version; set BRAI_APP_VERSION or provide build ledger/deployed mobile metadata");
 }
@@ -149,6 +155,13 @@ function validOtaVersion(version) {
   const normalized = normalizeOtaVersion(version);
   if (!normalized) throw new Error(`Invalid Brai X.Y.Z OTA version: ${version}`);
   return normalized;
+}
+
+function nextPatchVersion(version) {
+  const normalized = validOtaVersion(version);
+  const parts = normalized.split(".").map(Number);
+  parts[2] += 1;
+  return parts.join(".");
 }
 
 function validApkVersion(version) {
