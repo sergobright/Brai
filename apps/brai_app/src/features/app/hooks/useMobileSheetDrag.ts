@@ -1,6 +1,6 @@
 "use client";
 
-import type { CSSProperties, PointerEvent, TouchEvent } from "react";
+import type { CSSProperties, PointerEvent, TouchEvent as ReactTouchEvent } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 type DragState = {
@@ -47,6 +47,7 @@ export function useMobileSheetDrag({
   const dragRef = useRef<DragState | null>(null);
   const sheetElementRef = useRef<HTMLElement | null>(null);
   const backdropElementRef = useRef<HTMLElement | null>(null);
+  const removeNativeTouchRef = useRef<(() => void) | null>(null);
   const timerRef = useRef<number | null>(null);
   const frameRef = useRef<number | null>(null);
   const pendingOffsetRef = useRef(0);
@@ -62,6 +63,7 @@ export function useMobileSheetDrag({
 
   useEffect(() => {
     return () => {
+      removeNativeTouchRef.current?.();
       if (timerRef.current != null) window.clearTimeout(timerRef.current);
       if (frameRef.current != null) window.cancelAnimationFrame(frameRef.current);
     };
@@ -93,11 +95,6 @@ export function useMobileSheetDrag({
       frameRef.current = null;
       applyOffset(pendingOffsetRef.current);
     });
-  }, [applyOffset]);
-
-  const setSheetRef = useCallback((element: HTMLElement | null) => {
-    sheetElementRef.current = element;
-    if (element) applyOffset(currentOffsetRef.current);
   }, [applyOffset]);
 
   const setBackdropRef = useCallback((element: HTMLElement | null) => {
@@ -227,13 +224,13 @@ export function useMobileSheetDrag({
     end(event.pointerId);
   }, [end]);
 
-  const onTouchStart = useCallback((event: TouchEvent<HTMLElement>) => {
+  const onTouchStart = useCallback((event: ReactTouchEvent<HTMLElement>) => {
     const touch = event.changedTouches[0];
     if (!touch) return;
     start(touch.identifier, touch.clientX, touch.clientY, event.target);
   }, [start]);
 
-  const onTouchMove = useCallback((event: TouchEvent<HTMLElement>) => {
+  const onTouchMove = useCallback((event: ReactTouchEvent<HTMLElement>) => {
     const drag = dragRef.current;
     if (!drag) return;
     const touch = Array.from(event.changedTouches).find((item) => item.identifier === drag.id);
@@ -243,12 +240,53 @@ export function useMobileSheetDrag({
     });
   }, [move]);
 
-  const onTouchEnd = useCallback((event: TouchEvent<HTMLElement>) => {
+  const onTouchEnd = useCallback((event: ReactTouchEvent<HTMLElement>) => {
     const drag = dragRef.current;
     if (!drag) return;
     const touch = Array.from(event.changedTouches).find((item) => item.identifier === drag.id);
     end(touch?.identifier ?? drag.id);
   }, [end]);
+
+  const onNativeTouchStart = useCallback((event: TouchEvent) => {
+    const touch = event.changedTouches[0];
+    if (!touch) return;
+    start(touch.identifier, touch.clientX, touch.clientY, event.target);
+  }, [start]);
+
+  const onNativeTouchMove = useCallback((event: TouchEvent) => {
+    const drag = dragRef.current;
+    if (!drag) return;
+    const touch = Array.from(event.changedTouches).find((item) => item.identifier === drag.id);
+    if (!touch) return;
+    move(touch.identifier, touch.clientX, touch.clientY, () => {
+      if (event.cancelable) event.preventDefault();
+    });
+  }, [move]);
+
+  const onNativeTouchEnd = useCallback((event: TouchEvent) => {
+    const drag = dragRef.current;
+    if (!drag) return;
+    const touch = Array.from(event.changedTouches).find((item) => item.identifier === drag.id);
+    end(touch?.identifier ?? drag.id);
+  }, [end]);
+
+  const setSheetRef = useCallback((element: HTMLElement | null) => {
+    removeNativeTouchRef.current?.();
+    removeNativeTouchRef.current = null;
+    sheetElementRef.current = element;
+    if (!element) return;
+    applyOffset(currentOffsetRef.current);
+    element.addEventListener("touchstart", onNativeTouchStart, { capture: true, passive: true });
+    element.addEventListener("touchmove", onNativeTouchMove, { capture: true, passive: false });
+    element.addEventListener("touchend", onNativeTouchEnd, { capture: true, passive: true });
+    element.addEventListener("touchcancel", onNativeTouchEnd, { capture: true, passive: true });
+    removeNativeTouchRef.current = () => {
+      element.removeEventListener("touchstart", onNativeTouchStart, { capture: true });
+      element.removeEventListener("touchmove", onNativeTouchMove, { capture: true });
+      element.removeEventListener("touchend", onNativeTouchEnd, { capture: true });
+      element.removeEventListener("touchcancel", onNativeTouchEnd, { capture: true });
+    };
+  }, [applyOffset, onNativeTouchEnd, onNativeTouchMove, onNativeTouchStart]);
 
   const sheetStyle = {
     transform: sheetTransform(axis),
