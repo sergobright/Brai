@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT="${BRAI_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/permissions.sh"
-SOURCE="$ROOT/apps/brai_app/out"
+SOURCE="${BRAI_WEB_SOURCE:-$ROOT/apps/brai_app/out}"
 TARGET="${BRAI_WEB_TARGET:-$ROOT/deploy/web}"
 
 if [[ ! -d "$SOURCE" ]]; then

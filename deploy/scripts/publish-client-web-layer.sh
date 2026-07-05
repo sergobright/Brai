@@ -13,6 +13,7 @@ node -e 'const major = Number(process.versions.node.split(".")[0]); if (major < 
 NPM_BIN="${NPM_BIN:-npm}"
 NODE_BIN="${NODE_BIN:-node}"
 BUILD_CLIENT="${BRAI_BUILD_CLIENT:-true}"
+ENVIRONMENT="${NEXT_PUBLIC_BRAI_ENVIRONMENT:-${BRAI_ENVIRONMENT:-prod}}"
 
 mapfile -t APP_META < <("$NODE_BIN" -e '
 let version = process.env.BRAI_APP_VERSION || "";
@@ -54,9 +55,15 @@ fs.writeFileSync(outVersionFile, `${JSON.stringify(parsed, null, 2)}\n`);
 echo "Publishing browser web assets..."
 "$SCRIPT_DIR/publish-web.sh"
 
+if [[ "$ENVIRONMENT" == "prod" ]]; then
+  echo "Publishing public landing..."
+  BRAI_WEB_SOURCE="$ROOT/landing/public" \
+  BRAI_WEB_TARGET="${BRAI_PUBLIC_SITE_TARGET:-$ROOT/deploy/site}" \
+  "$SCRIPT_DIR/publish-web.sh"
+fi
+
 export BRAI_MOBILE_BUNDLE_VERSION="${BRAI_MOBILE_BUNDLE_VERSION:-$VERSION}"
 
-ENVIRONMENT="${NEXT_PUBLIC_BRAI_ENVIRONMENT:-${BRAI_ENVIRONMENT:-prod}}"
 export BRAI_TARGET_APK_VERSION="${BRAI_TARGET_APK_VERSION:-$("$NODE_BIN" "$SCRIPT_DIR/resolve-required-apk-version.mjs" "$ENVIRONMENT")}"
 export BRAI_TARGET_APK_RELEASE_KEY="${BRAI_TARGET_APK_RELEASE_KEY:-$("$NODE_BIN" "$SCRIPT_DIR/resolve-required-apk-version.mjs" "$ENVIRONMENT" releaseKey)}"
 export BRAI_TARGET_APK_BUILD_KIND="${BRAI_TARGET_APK_BUILD_KIND:-$("$NODE_BIN" "$SCRIPT_DIR/resolve-required-apk-version.mjs" "$ENVIRONMENT" buildKind)}"

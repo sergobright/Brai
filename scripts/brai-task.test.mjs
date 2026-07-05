@@ -448,6 +448,14 @@ test("production SQLite maintenance has an explicit permission repair command", 
   assert.match(script, /check\n\}/);
 });
 
+test("production client publish also refreshes the public landing", () => {
+  const script = fs.readFileSync(path.resolve(import.meta.dirname, "../deploy/scripts/publish-client-web-layer.sh"), "utf8");
+  assert.match(script, /if \[\[ "\$ENVIRONMENT" == "prod" \]\]; then/);
+  assert.match(script, /BRAI_WEB_SOURCE="\$ROOT\/landing\/public"/);
+  assert.match(script, /BRAI_PUBLIC_SITE_TARGET:-\$ROOT\/deploy\/site/);
+  assert.match(script, /"\$SCRIPT_DIR\/publish-web\.sh"/);
+});
+
 test("operation activity completion helper backs up and verifies exact rows", { skip: !sqliteCli() }, () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "brai-complete-operation-"));
   const db = path.join(root, "brai.sqlite");
