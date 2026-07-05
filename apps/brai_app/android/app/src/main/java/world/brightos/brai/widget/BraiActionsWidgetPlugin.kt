@@ -15,6 +15,15 @@ import kotlinx.coroutines.withContext
 class BraiActionsWidgetPlugin : Plugin() {
     private val pluginScope = CoroutineScope(Dispatchers.Main)
 
+    override fun load() {
+        activePlugin = this
+    }
+
+    override fun handleOnDestroy() {
+        if (activePlugin === this) activePlugin = null
+        super.handleOnDestroy()
+    }
+
     @PluginMethod
     fun saveSnapshot(call: PluginCall) {
         val viewId = call.getString("viewId", DEFAULT_ACTIONS_WIDGET_VIEW_ID) ?: DEFAULT_ACTIONS_WIDGET_VIEW_ID
@@ -71,8 +80,21 @@ class BraiActionsWidgetPlugin : Plugin() {
                 }
             }
         }
-        BraiActionsWidgetStore(context).acknowledgeStatusChanges(ids)
-        call.resolve()
+        if (ids.isEmpty()) {
+            call.resolve()
+            return
+        }
+        pluginScope.launch {
+            try {
+                withContext(Dispatchers.IO) {
+                    BraiActionsWidgetStore(context).acknowledgeStatusChanges(ids)
+                }
+                BraiActionsWidget.updateEveryInstanceNowAndSoon(context)
+                call.resolve()
+            } catch (error: Exception) {
+                call.reject("widget_acknowledge_failed", error)
+            }
+        }
     }
 
     @PluginMethod
@@ -86,6 +108,24 @@ class BraiActionsWidgetPlugin : Plugin() {
                 call.resolve()
             } catch (error: Exception) {
                 call.reject("widget_clear_failed", error)
+            }
+        }
+    }
+
+    private fun notifyStatusChangesPendingNow() {
+        notifyListeners(EVENT_STATUS_CHANGES_PENDING, JSObject())
+    }
+
+    companion object {
+        private const val EVENT_STATUS_CHANGES_PENDING = "statusChangesPending"
+
+        @Volatile
+        private var activePlugin: BraiActionsWidgetPlugin? = null
+
+        fun notifyStatusChangesPending() {
+            val plugin = activePlugin ?: return
+            plugin.pluginScope.launch {
+                plugin.notifyStatusChangesPendingNow()
             }
         }
     }

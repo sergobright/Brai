@@ -59,6 +59,7 @@ class ToggleBraiActionCallback : ActionCallback {
                 baseServerRevision = revision
             )
         }
+        BraiActionsWidgetPlugin.notifyStatusChangesPending()
         BraiActionsWidget.updateEveryInstanceNowAndSoon(context, glanceId)
     }
 }

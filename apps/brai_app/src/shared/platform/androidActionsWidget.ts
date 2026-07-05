@@ -1,4 +1,4 @@
-import { registerPlugin } from "@capacitor/core";
+import { registerPlugin, type PluginListenerHandle } from "@capacitor/core";
 import { isNativeShell, platformName } from "@/shared/platform/platform";
 import type { ActivityItem, ActivityStatus, ActivitiesState } from "@/shared/types/activities";
 
@@ -22,6 +22,7 @@ type BraiActionsWidgetPlugin = {
   pendingStatusChanges(): Promise<{ changes: AndroidActionsWidgetStatusChange[] }>;
   acknowledgeStatusChanges(options: { ids: string[] }): Promise<void>;
   clear(): Promise<void>;
+  addListener(eventName: "statusChangesPending", listenerFunc: () => void): Promise<PluginListenerHandle>;
 };
 
 const BraiActionsWidget = registerPlugin<BraiActionsWidgetPlugin>("BraiActionsWidget");
@@ -58,6 +59,17 @@ export async function pendingAndroidActionsWidgetStatusChanges(): Promise<Androi
     return changes.filter((change) => change.status === "New" || change.status === "Done");
   } catch {
     return [];
+  }
+}
+
+export async function listenAndroidActionsWidgetStatusChangesPending(
+  onPending: () => void,
+): Promise<PluginListenerHandle | null> {
+  if (!isAndroidShell()) return null;
+  try {
+    return await BraiActionsWidget.addListener("statusChangesPending", onPending);
+  } catch {
+    return null;
   }
 }
 

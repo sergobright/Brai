@@ -22,10 +22,46 @@ class BraiActionsWidgetInstrumentedTest {
         assertEquals("New", store.pendingStatusChanges().single().status)
 
         store.clear()
-        store.saveSnapshot(DEFAULT_ACTIONS_WIDGET_VIEW_ID, serverRevision = 501L, snapshotVersion = 501_000L, actions)
+        store.saveSnapshot(DEFAULT_ACTIONS_WIDGET_VIEW_ID, serverRevision = 501L, snapshotVersion = 501_000L, actions = actions)
         BraiActionsWidget.updateEveryInstanceNowAndSoon(context)
 
         val saved = store.loadSnapshot(DEFAULT_ACTIONS_WIDGET_VIEW_ID)
         assertEquals(actions, saved.actions)
+    }
+
+    @Test
+    fun widgetPendingStatusDoesNotBlockNewAppSnapshot() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val store = BraiActionsWidgetStore(context)
+        val firstSnapshot = listOf(
+            WidgetActionItem("widget-action-one", "Виджет один", "New"),
+        )
+        val appSnapshotAfterWidgetTap = listOf(
+            WidgetActionItem("widget-action-one", "Виджет один", "Done"),
+            WidgetActionItem("widget-action-two", "Виджет два", "New"),
+        )
+
+        store.clear()
+        store.saveSnapshot(
+            DEFAULT_ACTIONS_WIDGET_VIEW_ID,
+            serverRevision = 501L,
+            snapshotVersion = 501_000L,
+            actions = firstSnapshot,
+        )
+        store.enqueueStatusChange(DEFAULT_ACTIONS_WIDGET_VIEW_ID, "widget-action-one", "Done", 501L)
+
+        assertEquals("Done", store.loadSnapshot(DEFAULT_ACTIONS_WIDGET_VIEW_ID).actions.single().status)
+
+        store.saveSnapshot(
+            DEFAULT_ACTIONS_WIDGET_VIEW_ID,
+            serverRevision = 502L,
+            snapshotVersion = 501_001L,
+            actions = appSnapshotAfterWidgetTap,
+        )
+        val pendingIds = store.pendingStatusChanges().map { change -> change.id }.toSet()
+        store.acknowledgeStatusChanges(pendingIds)
+
+        val saved = store.loadSnapshot(DEFAULT_ACTIONS_WIDGET_VIEW_ID)
+        assertEquals(appSnapshotAfterWidgetTap, saved.actions)
     }
 }

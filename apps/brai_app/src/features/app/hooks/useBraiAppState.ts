@@ -7,6 +7,7 @@ import {
   acknowledgeAndroidActionsWidgetStatusChanges,
   clearAndroidActionsWidgetData,
   DEFAULT_ACTIONS_WIDGET_VIEW_ID,
+  listenAndroidActionsWidgetStatusChangesPending,
   pendingAndroidActionsWidgetStatusChanges,
   saveAndroidActionsWidgetSnapshot,
 } from "@/shared/platform/androidActionsWidget";
@@ -795,17 +796,26 @@ export function useBraiAppState(initialSection: SectionId) {
       platformName() !== "android"
     ) return undefined;
     let cancelled = false;
+    let listener: { remove: () => Promise<void> } | null = null;
     const consume = () => {
       if (!cancelled) void consumeAndroidActionsWidgetStatusChangesRef.current().catch(handleError);
     };
     consume();
     const interval = window.setInterval(consume, ANDROID_ACTIONS_WIDGET_STATUS_POLL_MS);
+    void listenAndroidActionsWidgetStatusChangesPending(consume).then((handle) => {
+      if (cancelled) {
+        void handle?.remove().catch(() => undefined);
+        return;
+      }
+      listener = handle;
+    });
     window.addEventListener("focus", consume);
     window.addEventListener("pageshow", consume);
     document.addEventListener("visibilitychange", consume);
     return () => {
       cancelled = true;
       window.clearInterval(interval);
+      void listener?.remove().catch(() => undefined);
       window.removeEventListener("focus", consume);
       window.removeEventListener("pageshow", consume);
       document.removeEventListener("visibilitychange", consume);

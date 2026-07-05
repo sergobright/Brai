@@ -14,6 +14,7 @@ const cmdPlugin = vi.hoisted(() => ({
 
 const actionsWidgetPlugin = vi.hoisted(() => ({
   acknowledgeStatusChanges: vi.fn(),
+  addListener: vi.fn(),
   clear: vi.fn(),
   pendingStatusChanges: vi.fn(),
   saveSnapshot: vi.fn(),
@@ -47,10 +48,12 @@ export function setupBraiAppTest() {
     cmdPlugin.openSettings.mockReset();
     cmdPlugin.openSettings.mockResolvedValue({});
     actionsWidgetPlugin.acknowledgeStatusChanges.mockReset();
+    actionsWidgetPlugin.addListener.mockReset();
     actionsWidgetPlugin.clear.mockReset();
     actionsWidgetPlugin.pendingStatusChanges.mockReset();
     actionsWidgetPlugin.saveSnapshot.mockReset();
     actionsWidgetPlugin.acknowledgeStatusChanges.mockResolvedValue({});
+    actionsWidgetPlugin.addListener.mockResolvedValue({ remove: vi.fn(async () => undefined) });
     actionsWidgetPlugin.clear.mockResolvedValue({});
     actionsWidgetPlugin.pendingStatusChanges.mockResolvedValue({ changes: [] });
     actionsWidgetPlugin.saveSnapshot.mockResolvedValue({});

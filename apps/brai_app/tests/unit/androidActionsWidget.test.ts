@@ -3,6 +3,7 @@ import type { ActivitiesState } from "@/shared/types/activities";
 
 const plugin = vi.hoisted(() => ({
   acknowledgeStatusChanges: vi.fn(),
+  addListener: vi.fn(),
   clear: vi.fn(),
   pendingStatusChanges: vi.fn(),
   saveSnapshot: vi.fn(),
@@ -16,6 +17,7 @@ describe("Android Actions widget bridge", () => {
   beforeEach(() => {
     vi.resetModules();
     plugin.acknowledgeStatusChanges.mockReset();
+    plugin.addListener.mockReset();
     plugin.clear.mockReset();
     plugin.pendingStatusChanges.mockReset();
     plugin.saveSnapshot.mockReset();
@@ -111,6 +113,21 @@ describe("Android Actions widget bridge", () => {
     await acknowledgeAndroidActionsWidgetStatusChanges(["change-1", "change-2"]);
 
     expect(plugin.acknowledgeStatusChanges).toHaveBeenCalledWith({ ids: ["change-1", "change-2"] });
+  });
+
+  it("subscribes to native pending status notifications on Android", async () => {
+    vi.stubGlobal("Capacitor", {
+      isNativePlatform: () => true,
+      getPlatform: () => "android",
+    });
+    const handle = { remove: vi.fn() };
+    plugin.addListener.mockResolvedValue(handle);
+    const { listenAndroidActionsWidgetStatusChangesPending } = await import("@/shared/platform/androidActionsWidget");
+    const listener = vi.fn();
+
+    await expect(listenAndroidActionsWidgetStatusChangesPending(listener)).resolves.toBe(handle);
+
+    expect(plugin.addListener).toHaveBeenCalledWith("statusChangesPending", listener);
   });
 });
 

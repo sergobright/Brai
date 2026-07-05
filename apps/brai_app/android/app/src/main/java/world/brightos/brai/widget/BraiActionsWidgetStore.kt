@@ -60,7 +60,7 @@ class BraiActionsWidgetStore(context: Context) {
                 actions = actions,
                 hasSnapshot = true
             )
-            writeSnapshot(applyPending(snapshot))
+            writeSnapshot(snapshot)
         }
     }
 
@@ -80,15 +80,6 @@ class BraiActionsWidgetStore(context: Context) {
                 )
             )
             writePendingStatusChanges(pending)
-
-            val snapshot = loadSnapshot(viewId)
-            if (!snapshot.hasSnapshot) return
-            writeSnapshot(snapshot.copy(
-                snapshotVersion = maxOf(snapshot.snapshotVersion + 1, Instant.now().toEpochMilli()),
-                actions = snapshot.actions.map { action ->
-                    if (action.id == actionId) action.copy(status = status) else action
-                }
-            ))
         }
     }
 
