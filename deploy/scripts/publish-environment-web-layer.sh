@@ -12,16 +12,9 @@ if [[ "$#" -eq 0 ]]; then
 fi
 
 VERSION="$("$NODE_BIN" -e '
-const fs = require("node:fs");
-const path = require("node:path");
-const root = process.argv[1];
 let version = process.env.BRAI_APP_VERSION || "";
-if (!version) {
-  const parsed = JSON.parse(fs.readFileSync(path.join(root, "apps/brai_app/public/version.json"), "utf8"));
-  version = String(parsed.version || "");
-}
 const match = version.match(/^(\d+)\.(\d+)\.(\d+)(?:\.|$)/);
-if (!match) throw new Error("Unable to resolve Brai X.Y.Z app version");
+if (!match) throw new Error("BRAI_APP_VERSION is required as Brai X.Y.Z app version");
 console.log(match.slice(1, 4).join("."));
 ' "$ROOT")"
 

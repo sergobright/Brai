@@ -30,6 +30,22 @@ class BraiActionsWidgetInstrumentedTest {
     }
 
     @Test
+    fun widgetSnapshotKeepsMoreThanEightActions() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val store = BraiActionsWidgetStore(context)
+        val actions = (1..12).map { index ->
+            WidgetActionItem("widget-action-$index", "Действие $index", "New")
+        }
+
+        store.clear()
+        store.saveSnapshot(DEFAULT_ACTIONS_WIDGET_VIEW_ID, serverRevision = 777L, snapshotVersion = 777_000L, actions = actions)
+
+        val saved = store.loadSnapshot(DEFAULT_ACTIONS_WIDGET_VIEW_ID)
+        assertEquals(12, saved.actions.size)
+        assertEquals(actions, saved.actions)
+    }
+
+    @Test
     fun widgetPendingStatusDoesNotBlockNewAppSnapshot() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val store = BraiActionsWidgetStore(context)
@@ -63,5 +79,41 @@ class BraiActionsWidgetInstrumentedTest {
 
         val saved = store.loadSnapshot(DEFAULT_ACTIONS_WIDGET_VIEW_ID)
         assertEquals(appSnapshotAfterWidgetTap, saved.actions)
+    }
+
+    @Test
+    fun newerServerRevisionBeatsOlderSnapshotVersion() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val store = BraiActionsWidgetStore(context)
+        val staleSnapshot = listOf(
+            WidgetActionItem("widget-action-old", "Старое", "New"),
+        )
+        val latestSnapshot = listOf(
+            WidgetActionItem("widget-action-new", "Новое", "New"),
+        )
+
+        store.clear()
+        store.saveSnapshot(
+            DEFAULT_ACTIONS_WIDGET_VIEW_ID,
+            serverRevision = 501L,
+            snapshotVersion = 999_000L,
+            actions = staleSnapshot,
+        )
+        store.saveSnapshot(
+            DEFAULT_ACTIONS_WIDGET_VIEW_ID,
+            serverRevision = 502L,
+            snapshotVersion = 1L,
+            actions = latestSnapshot,
+        )
+        store.saveSnapshot(
+            DEFAULT_ACTIONS_WIDGET_VIEW_ID,
+            serverRevision = 501L,
+            snapshotVersion = 1_000_000L,
+            actions = staleSnapshot,
+        )
+
+        val saved = store.loadSnapshot(DEFAULT_ACTIONS_WIDGET_VIEW_ID)
+        assertEquals(502L, saved.serverRevision)
+        assertEquals(latestSnapshot, saved.actions)
     }
 }

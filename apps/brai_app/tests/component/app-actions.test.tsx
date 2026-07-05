@@ -97,6 +97,55 @@ describe("BraiApp actions", () => {
     }, { interval: 25, timeout: 900 });
   });
 
+  it("publishes Android widget snapshots for mobile create before one second", async () => {
+    stubAndroidCapacitor();
+    render(<BraiApp />);
+
+    await waitFor(() => expect(actionsWidgetPlugin.saveSnapshot).toHaveBeenCalled());
+    actionsWidgetPlugin.saveSnapshot.mockClear();
+
+    fireEvent.click(document.querySelector(".actions-fab") as HTMLElement);
+    const title = await screen.findByRole("textbox", { name: "Добавить действие" });
+    fireEvent.change(title, { target: { value: "Мобильный виджет" } });
+    fireEvent.click(screen.getByRole("button", { name: "Добавить действие" }));
+
+    await waitFor(() => {
+      expect(actionsWidgetPlugin.saveSnapshot).toHaveBeenCalledWith(expect.objectContaining({
+        actions: expect.arrayContaining([
+          expect.objectContaining({ status: "New", title: "Мобильный виджет" }),
+        ]),
+        viewId: "all",
+      }));
+    }, { interval: 25, timeout: 900 });
+  });
+
+  it("retries Android widget snapshot publishing when the app returns to foreground", async () => {
+    stubAndroidCapacitor();
+    await saveActivitiesState(cachedActivitiesState("action-widget-foreground", "Виджет"));
+    actionsWidgetPlugin.saveSnapshot
+      .mockRejectedValueOnce(new Error("bridge unavailable"))
+      .mockResolvedValue({});
+
+    render(<BraiApp />);
+
+    await waitFor(() => expect(screen.getByRole("checkbox", { name: "Виджет" })).toBeInTheDocument());
+    await waitFor(() => expect(actionsWidgetPlugin.saveSnapshot).toHaveBeenCalled());
+    actionsWidgetPlugin.saveSnapshot.mockClear();
+
+    act(() => {
+      window.dispatchEvent(new Event("focus"));
+    });
+
+    await waitFor(() => {
+      expect(actionsWidgetPlugin.saveSnapshot).toHaveBeenCalledWith(expect.objectContaining({
+        actions: expect.arrayContaining([
+          expect.objectContaining({ status: "New", title: "Виджет" }),
+        ]),
+        viewId: "all",
+      }));
+    }, { interval: 25, timeout: 900 });
+  });
+
   it("applies Android widget status changes to the app in under one second", async () => {
     stubAndroidCapacitor();
     await saveActivitiesState(cachedActivitiesState("action-widget", "Виджет"));

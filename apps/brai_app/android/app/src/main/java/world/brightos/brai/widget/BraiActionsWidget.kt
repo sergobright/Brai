@@ -20,10 +20,11 @@ import androidx.glance.appwidget.SizeMode
 import androidx.glance.appwidget.action.ActionCallback
 import androidx.glance.appwidget.action.ToggleableStateKey
 import androidx.glance.appwidget.action.actionRunCallback
+import androidx.glance.appwidget.lazy.LazyColumn
+import androidx.glance.appwidget.lazy.items
 import androidx.glance.appwidget.provideContent
 import androidx.glance.appwidget.state.updateAppWidgetState
 import androidx.glance.background
-import androidx.glance.layout.Column
 import androidx.glance.layout.fillMaxSize
 import androidx.glance.layout.padding
 import androidx.glance.state.PreferencesGlanceStateDefinition
@@ -100,41 +101,47 @@ object BraiActionsWidget : GlanceAppWidget() {
 
 @Composable
 private fun BraiActionsWidgetContent(state: WidgetState) {
-    Column(
+    LazyColumn(
         modifier = GlanceModifier
             .fillMaxSize()
             .background(ColorProvider(R.color.brai_widget_background))
             .padding(12.dp)
     ) {
-        Text(
-            text = "Actions",
-            style = TextStyle(
-                color = ColorProvider(R.color.brai_widget_text),
-                fontSize = 15.sp,
-                fontWeight = FontWeight.Bold
-            )
-        )
-        if (state.message != null) {
+        item {
             Text(
-                text = state.message,
+                text = "Actions",
                 style = TextStyle(
-                    color = ColorProvider(R.color.brai_widget_muted),
-                    fontSize = 12.sp
+                    color = ColorProvider(R.color.brai_widget_text),
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Bold
                 )
             )
-            return@Column
+        }
+        if (state.message != null) {
+            item {
+                Text(
+                    text = state.message,
+                    style = TextStyle(
+                        color = ColorProvider(R.color.brai_widget_muted),
+                        fontSize = 12.sp
+                    )
+                )
+            }
+            return@LazyColumn
         }
         if (state.actions.isEmpty()) {
-            Text(
-                text = "Нет действий",
-                style = TextStyle(
-                    color = ColorProvider(R.color.brai_widget_muted),
-                    fontSize = 12.sp
+            item {
+                Text(
+                    text = "Нет действий",
+                    style = TextStyle(
+                        color = ColorProvider(R.color.brai_widget_muted),
+                        fontSize = 12.sp
+                    )
                 )
-            )
-            return@Column
+            }
+            return@LazyColumn
         }
-        state.actions.take(MAX_WIDGET_ACTIONS).forEach { action ->
+        items(state.actions) { action ->
             key(action.id) {
                 val checked = action.status == "Done"
                 CheckBox(
@@ -178,4 +185,3 @@ private val ActionIdKey = ActionParameters.Key<String>("action_id")
 private val NextStatusKey = ActionParameters.Key<String>("next_status")
 private val RevisionKey = ActionParameters.Key<String>("server_revision")
 private val WidgetInvalidationKey = longPreferencesKey("widget_invalidation")
-private const val MAX_WIDGET_ACTIONS = 8

@@ -232,6 +232,7 @@ describe("mobile OTA publish scripts", () => {
   it("uses the public API endpoint for production Android bundles", async () => {
     const deployBranch = await readFile(path.join(workspaceRoot, "deploy/scripts/deploy-branch.sh"), "utf8");
     const buildApk = await readFile(path.join(workspaceRoot, "deploy/scripts/build-android-env-apk.sh"), "utf8");
+    const gradle = await readFile(path.join(workspaceRoot, "apps/brai_app/android/app/build.gradle"), "utf8");
 
     expect(deployBranch).toContain('ANDROID_API="https://api.brightos.world"');
     expect(deployBranch).toContain('export NEXT_PUBLIC_BRAI_ANDROID_API="$ANDROID_API"');
@@ -240,6 +241,15 @@ describe("mobile OTA publish scripts", () => {
     expect(buildApk).toContain('export JAVA_HOME="/srv/opt/jdk-21"');
     expect(buildApk).toContain('SIGNING_ENV="${BRAI_ANDROID_SIGNING_ENV:-/srv/projects/brai-envs/android-signing/signing.env}"');
     expect(buildApk).toContain('/srv/opt/android-build-env/build-android.sh "$ROOT/apps/brai_app/android" "$GRADLE_TASK"');
+    expect(buildApk).toContain("fs.writeFileSync(outVersionFile");
+    expect(buildApk.indexOf('(cd "$ROOT" && "$NPM_BIN" run app:build)')).toBeLessThan(buildApk.indexOf('(cd "$ROOT" && "$NPM_BIN" run app:cap:sync)'));
+    expect(gradle).toContain('throw new GradleException("BRAI_APP_VERSION is required for Android builds")');
+    expect(gradle).toContain("tasks.register('validateBraiAndroidApiBundle')");
+    expect(gradle).toContain("Non-production Android build contains production API");
+    expect(gradle).toContain("https://a.test.brightos.world/api");
+    expect(gradle).not.toContain("BRAI_PROD_FALLBACK_BUNDLE_VERSION");
+    expect(gradle).not.toContain("BRAI_NON_PROD_FALLBACK_BUNDLE_VERSION");
+    expect(gradle).not.toContain("?: '0.0.10'");
   });
 
   it("marks preview ready only after the service restart succeeds", async () => {
@@ -432,6 +442,7 @@ try {
       env: {
         ...process.env,
         BRAI_ROOT: root,
+        BRAI_APP_VERSION: "9.9.9",
         BRAI_TARGET_APK_VERSION: "2999",
         BRAI_PUBLISHED_AT: "2026-06-15T00:00:00Z",
       },
@@ -467,6 +478,7 @@ try {
       env: {
         ...process.env,
         BRAI_ROOT: root,
+        BRAI_APP_VERSION: "9.9.9",
         BRAI_TARGET_APK_VERSION: "2",
         BRAI_TARGET_APK_RELEASE_KEY: "a",
         BRAI_TARGET_APK_BUILD_KIND: "preview",

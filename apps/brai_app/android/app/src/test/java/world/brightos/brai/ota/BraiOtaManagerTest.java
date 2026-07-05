@@ -27,6 +27,13 @@ public class BraiOtaManagerTest {
     }
 
     @Test
+    public void newerEmbeddedBundleWinsOverStaleStoredOta() {
+        assertTrue(BraiOtaManager.shouldPreferFallbackBundle("0.0.10", "0.0.73"));
+        assertFalse(BraiOtaManager.shouldPreferFallbackBundle("0.0.73", "0.0.73"));
+        assertFalse(BraiOtaManager.shouldPreferFallbackBundle("0.0.74", "0.0.73"));
+    }
+
+    @Test
     public void roundsDownloadProgressPercent() {
         assertEquals(67, BraiOtaManager.downloadProgressPercent(2, 3));
         assertEquals(100, BraiOtaManager.downloadProgressPercent(5, 3));

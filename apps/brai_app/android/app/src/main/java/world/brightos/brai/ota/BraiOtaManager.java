@@ -93,9 +93,12 @@ public final class BraiOtaManager {
         String stableVersion = prefs.getString(KEY_STABLE_VERSION, null);
         String stablePath = prefs.getString(KEY_STABLE_PATH, null);
         if (stableVersion != null && stablePath != null && new File(stablePath, "index.html").isFile()) {
-            activeBundleVersion = stableVersion;
-            recordStatus("startup_stable", null);
-            return new ServerPath(ServerPath.PathType.BASE_PATH, stablePath);
+            if (!shouldPreferFallbackBundle(stableVersion, fallbackBundleVersion())) {
+                activeBundleVersion = stableVersion;
+                recordStatus("startup_stable", null);
+                return new ServerPath(ServerPath.PathType.BASE_PATH, stablePath);
+            }
+            clearStableIfOlderThanFallback(stableVersion);
         }
 
         clearStableIfMissing();
@@ -436,6 +439,14 @@ public final class BraiOtaManager {
             .apply();
     }
 
+    private void clearStableIfOlderThanFallback(String stableVersion) {
+        prefs.edit()
+            .putString(KEY_PREVIOUS_STABLE_VERSION, stableVersion)
+            .remove(KEY_STABLE_VERSION)
+            .remove(KEY_STABLE_PATH)
+            .apply();
+    }
+
     private void clearCandidate(String reason) {
         prefs.edit()
             .remove(KEY_CANDIDATE_VERSION)
@@ -530,6 +541,10 @@ public final class BraiOtaManager {
 
     static boolean isActiveCandidate(String candidateVersion, String activeBundleVersion) {
         return candidateVersion != null && candidateVersion.equals(activeBundleVersion);
+    }
+
+    static boolean shouldPreferFallbackBundle(String stableVersion, String fallbackVersion) {
+        return stableVersion != null && fallbackVersion != null && BraiOtaVersion.compare(fallbackVersion, stableVersion) > 0;
     }
 
     static int downloadProgressPercent(long bytes, long totalBytes) {

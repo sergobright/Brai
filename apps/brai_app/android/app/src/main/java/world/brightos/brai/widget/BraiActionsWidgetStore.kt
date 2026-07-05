@@ -51,8 +51,9 @@ class BraiActionsWidgetStore(context: Context) {
         synchronized(LOCK) {
             val normalizedViewId = normalizeViewId(viewId)
             val currentRaw = prefs.getString(snapshotKey(normalizedViewId), null)
-            val currentVersion = currentRaw?.let { parseSnapshot(it, normalizedViewId).snapshotVersion } ?: 0L
-            if (snapshotVersion <= currentVersion) return
+            val current = currentRaw?.let { parseSnapshot(it, normalizedViewId) }
+            if (current != null && serverRevision < current.serverRevision) return
+            if (current != null && serverRevision == current.serverRevision && snapshotVersion <= current.snapshotVersion) return
             val snapshot = WidgetActionsSnapshot(
                 viewId = normalizedViewId,
                 serverRevision = serverRevision,

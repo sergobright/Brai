@@ -38,6 +38,7 @@ import { useBraiTheme } from "./useBraiTheme";
 import { useBraiVersion } from "./useBraiVersion";
 
 const ANDROID_ACTIONS_WIDGET_STATUS_POLL_MS = 250;
+const ANDROID_ACTIONS_WIDGET_SNAPSHOT_DEBOUNCE_MS = 75;
 
 /**
  * Owns the Brai client state machine, local cache loading, and sync flow.
@@ -66,6 +67,8 @@ export function useBraiAppState(initialSection: SectionId) {
   const androidStopInFlightRef = useRef(false);
   const androidWidgetStatusInFlightRef = useRef(false);
   const androidActionsSnapshotVersionRef = useRef(0);
+  const androidActionsSnapshotLatestRef = useRef<ActionsState | null>(null);
+  const androidActionsSnapshotTimerRef = useRef<number | null>(null);
   const actionFlushInFlightRef = useRef(false);
   const actionFlushQueuedRef = useRef(false);
   const timerFlushTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -371,7 +374,7 @@ export function useBraiAppState(initialSection: SectionId) {
       }
       if (projected) {
         setActionsAndRef(projected);
-        void publishAndroidActionsSnapshot(projected).catch(() => undefined);
+        requestAndroidActionsSnapshotPublish(projected);
       }
       setActionPendingCount(remaining.length);
       const [timerQueued, inboxQueued] = await Promise.all([pendingEvents(), pendingInboxEvents()]);
@@ -683,6 +686,30 @@ export function useBraiAppState(initialSection: SectionId) {
     });
   }, [localSnapshotReady, syncStatus]);
 
+  const flushAndroidActionsSnapshotPublish = useCallback((nextActions?: ActionsState): void => {
+    if (!localSnapshotReady || syncStatus === "auth_required") return;
+    if (nextActions) androidActionsSnapshotLatestRef.current = nextActions;
+    if (androidActionsSnapshotTimerRef.current != null) {
+      window.clearTimeout(androidActionsSnapshotTimerRef.current);
+      androidActionsSnapshotTimerRef.current = null;
+    }
+    const latest = androidActionsSnapshotLatestRef.current;
+    if (latest) void publishAndroidActionsSnapshot(latest).catch(() => undefined);
+  }, [localSnapshotReady, publishAndroidActionsSnapshot, syncStatus]);
+
+  const requestAndroidActionsSnapshotPublish = useCallback((nextActions: ActionsState): void => {
+    if (!localSnapshotReady || syncStatus === "auth_required") return;
+    androidActionsSnapshotLatestRef.current = nextActions;
+    if (androidActionsSnapshotTimerRef.current != null) return;
+    androidActionsSnapshotTimerRef.current = window.setTimeout(() => {
+      flushAndroidActionsSnapshotPublish();
+    }, ANDROID_ACTIONS_WIDGET_SNAPSHOT_DEBOUNCE_MS);
+  }, [flushAndroidActionsSnapshotPublish, localSnapshotReady, syncStatus]);
+
+  useEffect(() => () => {
+    if (androidActionsSnapshotTimerRef.current != null) window.clearTimeout(androidActionsSnapshotTimerRef.current);
+  }, []);
+
   useEffect(() => {
     apiRef.current = api;
     refreshAllRef.current = refreshAll;
@@ -766,27 +793,31 @@ export function useBraiAppState(initialSection: SectionId) {
       void clearAndroidActionsWidgetData();
       return;
     }
-    void publishAndroidActionsSnapshot(actions);
-  }, [actions, localSnapshotReady, publishAndroidActionsSnapshot, syncStatus]);
+    requestAndroidActionsSnapshotPublish(actions);
+  }, [actions, localSnapshotReady, requestAndroidActionsSnapshotPublish, syncStatus]);
 
   useEffect(() => {
     if (!localSnapshotReady || syncStatus === "auth_required") return undefined;
     const publishLatest = () => {
       const nextActions = actionsRef.current;
-      void publishAndroidActionsSnapshot(nextActions);
+      flushAndroidActionsSnapshotPublish(nextActions);
     };
-    const publishWhenHidden = () => {
-      if (document.visibilityState === "hidden") publishLatest();
+    const publishOnVisibilityChange = () => {
+      publishLatest();
     };
     window.addEventListener("blur", publishLatest);
+    window.addEventListener("focus", publishLatest);
     window.addEventListener("pagehide", publishLatest);
-    document.addEventListener("visibilitychange", publishWhenHidden);
+    window.addEventListener("pageshow", publishLatest);
+    document.addEventListener("visibilitychange", publishOnVisibilityChange);
     return () => {
       window.removeEventListener("blur", publishLatest);
+      window.removeEventListener("focus", publishLatest);
       window.removeEventListener("pagehide", publishLatest);
-      document.removeEventListener("visibilitychange", publishWhenHidden);
+      window.removeEventListener("pageshow", publishLatest);
+      document.removeEventListener("visibilitychange", publishOnVisibilityChange);
     };
-  }, [localSnapshotReady, publishAndroidActionsSnapshot, syncStatus]);
+  }, [flushAndroidActionsSnapshotPublish, localSnapshotReady, syncStatus]);
 
   useEffect(() => {
     if (
@@ -957,7 +988,7 @@ export function useBraiAppState(initialSection: SectionId) {
     actions,
     flushActionPending,
     getActions: () => actionsRef.current,
-    publishActionsSnapshot: publishAndroidActionsSnapshot,
+    publishActionsSnapshot: async (nextActions) => requestAndroidActionsSnapshotPublish(nextActions),
     setActionPendingCount,
     setActions: setActionsAndRef,
     setSyncStatus,

@@ -81,6 +81,21 @@ if [[ -f "$SIGNING_ENV" ]]; then
 fi
 
 (cd "$ROOT" && "$NPM_BIN" run app:build)
+"$NODE_BIN" -e '
+const fs = require("node:fs");
+const path = require("node:path");
+const [root, version] = process.argv.slice(1);
+const outVersionFile = path.join(root, "apps/brai_app/out/version.json");
+const publicVersionFile = path.join(root, "apps/brai_app/public/version.json");
+const sourceFile = fs.existsSync(outVersionFile) ? outVersionFile : publicVersionFile;
+const parsed = fs.existsSync(sourceFile) ? JSON.parse(fs.readFileSync(sourceFile, "utf8")) : {};
+const [major, release, build] = version.split(".").map(Number);
+Object.assign(parsed, {
+  version,
+  versionParts: { major, release, build },
+});
+fs.writeFileSync(outVersionFile, `${JSON.stringify(parsed, null, 2)}\n`);
+' "$ROOT" "$BRAI_APP_VERSION"
 (cd "$ROOT" && "$NPM_BIN" run app:cap:sync)
 if [[ -x "/srv/opt/android-build-env/build-android.sh" ]]; then
   /srv/opt/android-build-env/build-android.sh "$ROOT/apps/brai_app/android" "$GRADLE_TASK"

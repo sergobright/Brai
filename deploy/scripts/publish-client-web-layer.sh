@@ -15,18 +15,10 @@ NODE_BIN="${NODE_BIN:-node}"
 BUILD_CLIENT="${BRAI_BUILD_CLIENT:-true}"
 
 mapfile -t APP_META < <("$NODE_BIN" -e '
-const fs = require("node:fs");
-const path = require("node:path");
-const root = process.argv[1];
 let version = process.env.BRAI_APP_VERSION || "";
-const versionFile = path.join(root, "apps/brai_app/public/version.json");
-if (!version && fs.existsSync(versionFile)) {
-  const parsed = JSON.parse(fs.readFileSync(versionFile, "utf8"));
-  version = String(parsed.version || "");
-}
 const match = version.match(/^(\d+)\.(\d+)\.(\d+)(?:\.|$)/);
 if (!match) {
-  throw new Error("Unable to resolve Brai X.Y.Z app version");
+  throw new Error("BRAI_APP_VERSION is required as Brai X.Y.Z app version");
 }
 console.log(match.slice(1, 4).join("."));
 ' "$ROOT")
