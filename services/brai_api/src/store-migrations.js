@@ -280,6 +280,11 @@ export const migrationMethods = {
       this.ensureTableDescriptions();
       this.recordMigration(49, 'rename handlers to agents and add AI logs');
     }
+
+    if (!this.hasMigration(50)) {
+      this.removeTasksMdDeduperAgent();
+      this.recordMigration(50, 'remove legacy TASKS.md dedupe agent');
+    }
   }
 ,
 
@@ -1170,36 +1175,6 @@ export const migrationMethods = {
       now
     );
     upsertAgent.run(
-      'maintenance.tasks_md_deduper',
-      '1',
-      'repository',
-      'scheduled_llm_git_pr',
-      'disabled',
-      'Дедупликация TASKS.md',
-      'Legacy handler выключен: агентские задачи перенесены из TASKS.md в activities как operation.',
-      'Срабатывает из services/brai_api/src/scheduler-runner.js, когда agent_schedules.next_run_at_utc наступил и строка не заблокирована другим запуском.',
-      'Не запускается после переноса агентских задач в activities.',
-      'Legacy input: корневой TASKS.md. Новый источник правды для агентских задач: activities rows с activity_type_id operation.',
-      'Ничего не создает, пока handler disabled.',
-      'Читает agents и agent_schedules из server SQLite, запускает Codex CLI read-only для получения полного обновленного TASKS.md, затем использует git CLI для clone, branch, commit и push. Каждый запуск пишет одну строку ai_logs.',
-      'Legacy side effects отключены: раньше мог создать временную директорию, codex/tasks-md-dedupe-* ветку, commit, push и GitHub PR.',
-      'codex-cli',
-      '',
-      [
-        'Ты обслуживаешь корневой TASKS.md проекта Brai.',
-        'Нужно убрать только очевидные дубли или почти одинаковые записи в разделе "## Записи".',
-        'Не добавляй новые факты, не переписывай стиль, не меняй смысл уникальных записей.',
-        'Если дубликатов нет, верни ровно: NO_CHANGES',
-        'Если изменения нужны, верни полный новый файл TASKS.md без Markdown fence и без пояснений.',
-        '',
-        '{{tasks_md}}'
-      ].join('\n'),
-      120000,
-      'Не применяется, пока handler disabled.',
-      'services/brai_api/src/scheduler-runner.js',
-      now
-    );
-    upsertAgent.run(
       'airwhisper.dictate.transcription',
       '1',
       'airwhisper',
@@ -1231,7 +1206,6 @@ export const migrationMethods = {
 ,
 
   ensureAgentScheduleSchema() {
-    const now = new Date().toISOString();
     if (this.tableExists('handler_schedules') && !this.tableExists('agent_schedules')) {
       this.db.exec(`
         DROP INDEX IF EXISTS idx_handler_schedules_due;
@@ -1270,27 +1244,21 @@ export const migrationMethods = {
       CREATE INDEX IF NOT EXISTS idx_agent_schedules_agent
       ON agent_schedules (agent_id);
     `);
+  }
+,
 
-    this.db.prepare(`
-      INSERT INTO agent_schedules (
-        id, agent_id, status, next_run_at_utc, interval_seconds,
-        locked_until_utc, last_started_at_utc, last_finished_at_utc,
-        last_error, updated_at_utc
-      ) VALUES (?, ?, ?, ?, ?, NULL, NULL, NULL, '', ?)
-      ON CONFLICT(id) DO UPDATE SET
-        agent_id = excluded.agent_id,
-        status = excluded.status,
-        next_run_at_utc = excluded.next_run_at_utc,
-        interval_seconds = excluded.interval_seconds,
-        updated_at_utc = excluded.updated_at_utc
-    `).run(
-      'maintenance.tasks_md_deduper',
-      'maintenance.tasks_md_deduper',
-      'disabled',
-      null,
-      null,
-      now
-    );
+  removeTasksMdDeduperAgent() {
+    if (this.tableExists('agent_schedules')) {
+      this.db
+        .prepare("DELETE FROM agent_schedules WHERE id = ? OR agent_id = ?")
+        .run('maintenance.tasks_md_deduper', 'maintenance.tasks_md_deduper');
+    }
+    if (this.tableExists('ai_logs')) {
+      this.db.prepare("DELETE FROM ai_logs WHERE agent_id = ?").run('maintenance.tasks_md_deduper');
+    }
+    if (this.tableExists('agents')) {
+      this.db.prepare("DELETE FROM agents WHERE id = ?").run('maintenance.tasks_md_deduper');
+    }
   }
 ,
 

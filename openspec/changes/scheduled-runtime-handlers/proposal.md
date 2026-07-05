@@ -4,18 +4,16 @@
 
 Add a small server-side scheduler for runtime agents. A systemd timer wakes a
 Node runner every five minutes; SQLite decides which registered agent is due.
-The previously planned `TASKS.md` dedupe agent is now disabled because agent
-task tracking moved from `TASKS.md` into `activities` operation rows.
+The previously planned `TASKS.md` dedupe agent has been removed because agent
+task tracking moved out of the root `TASKS.md` file.
 
 ## Capabilities
 
 - Add `agent_schedules` as the source of truth for scheduled runtime agent
   due time, interval, lock state, and last run status.
-- Register `maintenance.tasks_md_deduper` in `agents` as disabled legacy
-  documentation.
 - Run scheduled agents through `brai-scheduler.timer` and
   `brai-scheduler.service`.
-- Keep scheduled runtime agent state in SQLite without running obsolete
+- Keep scheduled runtime agent state in SQLite without registering obsolete
   `TASKS.md` maintenance.
 
 ## Rationale

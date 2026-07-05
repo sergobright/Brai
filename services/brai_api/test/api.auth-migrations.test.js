@@ -243,6 +243,10 @@ test('migration adds inbox entity schema and metadata', async () => {
       fixture.store.db.prepare('SELECT description FROM schema_migrations WHERE version = 49').get().description,
       'rename handlers to agents and add AI logs'
     );
+    assert.equal(
+      fixture.store.db.prepare('SELECT description FROM schema_migrations WHERE version = 50').get().description,
+      'remove legacy TASKS.md dedupe agent'
+    );
     assert.ok(fixture.store.db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'inbox_events'").get());
     assert.ok(fixture.store.db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'inbox_record_types'").get());
     assert.ok(fixture.store.db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'agents'").get());
@@ -295,35 +299,18 @@ test('migration adds inbox entity schema and metadata', async () => {
     assert.match(handler.llm_prompt_template, /{{text}}/);
     assert.equal(handler.llm_timeout_ms, 3000);
     assert.equal(handler.source_module, 'services/brai_api/src/inbound.js');
-    const scheduledHandler = fixture.store.db
-      .prepare(`
-        SELECT version, target, kind, status, trigger_description, side_effects_description, llm_provider,
-          llm_prompt_template, llm_timeout_ms, source_module
-        FROM agents
-        WHERE id = 'maintenance.tasks_md_deduper'
-      `)
-      .get();
-    assert.equal(scheduledHandler.version, '1');
-    assert.equal(scheduledHandler.target, 'repository');
-    assert.equal(scheduledHandler.kind, 'scheduled_llm_git_pr');
-    assert.equal(scheduledHandler.status, 'disabled');
-    assert.match(scheduledHandler.trigger_description, /agent_schedules/);
-    assert.match(scheduledHandler.side_effects_description, /Legacy side effects/);
-    assert.equal(scheduledHandler.llm_provider, 'codex-cli');
-    assert.match(scheduledHandler.llm_prompt_template, /{{tasks_md}}/);
-    assert.equal(scheduledHandler.llm_timeout_ms, 120000);
-    assert.equal(scheduledHandler.source_module, 'services/brai_api/src/scheduler-runner.js');
-    const schedule = fixture.store.db
-      .prepare(`
-        SELECT agent_id, status, next_run_at_utc, interval_seconds
-        FROM agent_schedules
-        WHERE id = 'maintenance.tasks_md_deduper'
-      `)
-      .get();
-    assert.equal(schedule.agent_id, 'maintenance.tasks_md_deduper');
-    assert.equal(schedule.status, 'disabled');
-    assert.equal(schedule.next_run_at_utc, null);
-    assert.equal(schedule.interval_seconds, null);
+    assert.equal(
+      fixture.store.db
+        .prepare("SELECT COUNT(*) AS count FROM agents WHERE id = 'maintenance.tasks_md_deduper'")
+        .get().count,
+      0
+    );
+    assert.equal(
+      fixture.store.db
+        .prepare("SELECT COUNT(*) AS count FROM agent_schedules WHERE id = 'maintenance.tasks_md_deduper' OR agent_id = 'maintenance.tasks_md_deduper'")
+        .get().count,
+      0
+    );
 
     const operations = fixture.store.db
       .prepare("SELECT status, COUNT(*) AS count FROM activities WHERE activity_type_id = 'operation' GROUP BY status ORDER BY status")
@@ -360,9 +347,81 @@ test('migration adds inbox entity schema and metadata', async () => {
     );
     assert.equal(
       fixture.store.db
-        .prepare("SELECT COUNT(*) AS count FROM agent_schedules WHERE id = 'maintenance.tasks_md_deduper'")
+        .prepare("SELECT COUNT(*) AS count FROM agents WHERE id = 'maintenance.tasks_md_deduper'")
         .get().count,
-      1
+      0
+    );
+    assert.equal(
+      fixture.store.db
+        .prepare("SELECT COUNT(*) AS count FROM agent_schedules WHERE id = 'maintenance.tasks_md_deduper' OR agent_id = 'maintenance.tasks_md_deduper'")
+        .get().count,
+      0
+    );
+  } finally {
+    await fixture.close();
+  }
+});
+
+test('migration removes legacy TASKS.md dedupe agent rows', async () => {
+  const fixture = await createFixture(['2026-07-05T12:00:00.000Z']);
+  const agentId = 'maintenance.tasks_md_deduper';
+  const now = '2026-07-05T12:00:00.000Z';
+
+  try {
+    fixture.store.db.prepare(`
+      INSERT INTO agents (
+        id, version, target, kind, status, title, summary, trigger_description,
+        conditions_description, input_description, output_description,
+        interactions_description, side_effects_description, llm_provider,
+        llm_model, llm_prompt_template, llm_timeout_ms, fallback_description,
+        source_module, updated_at_utc
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      agentId,
+      '1',
+      'repository',
+      'scheduled_llm_git_pr',
+      'disabled',
+      'Дедупликация TASKS.md',
+      'Legacy TASKS.md dedupe agent.',
+      'Legacy trigger.',
+      'Legacy conditions.',
+      'Legacy input.',
+      'Legacy output.',
+      'Legacy interactions.',
+      'Legacy side effects.',
+      'codex-cli',
+      '',
+      '{{tasks_md}}',
+      120000,
+      '',
+      'services/brai_api/src/scheduler-runner.js',
+      now
+    );
+    fixture.store.db.prepare(`
+      INSERT INTO agent_schedules (
+        id, agent_id, status, next_run_at_utc, interval_seconds,
+        locked_until_utc, last_started_at_utc, last_finished_at_utc,
+        last_error, updated_at_utc
+      ) VALUES (?, ?, ?, NULL, NULL, NULL, NULL, NULL, '', ?)
+    `).run(agentId, agentId, 'disabled', now);
+    fixture.store.db.prepare(`
+      INSERT INTO ai_logs (agent_id, agent_version, dt, status, json_data, ai_title, flow_id, flow_command)
+      VALUES (?, ?, ?, ?, ?, ?, NULL, NULL)
+    `).run(agentId, '1', now, 'done', '{"schema":"brai.ai_log.v1"}', 'Legacy log');
+    fixture.store.db.prepare('DELETE FROM schema_migrations WHERE version = 50').run();
+
+    fixture.store.migrate();
+
+    assert.equal(fixture.store.db.prepare("SELECT COUNT(*) AS count FROM agents WHERE id = ?").get(agentId).count, 0);
+    assert.equal(
+      fixture.store.db.prepare("SELECT COUNT(*) AS count FROM agent_schedules WHERE id = ? OR agent_id = ?").get(agentId, agentId).count,
+      0
+    );
+    assert.equal(fixture.store.db.prepare("SELECT COUNT(*) AS count FROM ai_logs WHERE agent_id = ?").get(agentId).count, 0);
+    assert.equal(
+      fixture.store.db.prepare('SELECT description FROM schema_migrations WHERE version = 50').get().description,
+      'remove legacy TASKS.md dedupe agent'
     );
   } finally {
     await fixture.close();

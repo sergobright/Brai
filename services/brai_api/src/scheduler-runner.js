@@ -1,22 +1,16 @@
-import { spawnSync } from 'node:child_process';
-import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 import { BraiStore } from './store.js';
 
-const TASKS_MD_AGENT_ID = 'maintenance.tasks_md_deduper';
-const TASKS_BRANCH_PREFIX = 'codex/tasks-md-dedupe-';
 const DEFAULT_LOCK_SECONDS = 10 * 60;
-const DEFAULT_CODEX_TIMEOUT_MS = 120000;
+const DEFAULT_AGENT_TIMEOUT_MS = 120000;
 const MAX_ERROR_LENGTH = 1000;
 
 const dirname = path.dirname(fileURLToPath(import.meta.url));
 const serviceRoot = path.resolve(dirname, '..');
-const repoRoot = path.resolve(serviceRoot, '..', '..');
 
-const AGENTS = new Map([[TASKS_MD_AGENT_ID, runTasksMdDeduper]]);
+const AGENTS = new Map();
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   main().catch((error) => {
@@ -92,81 +86,16 @@ export async function runDueSchedules({ store, nowDate = new Date(), config = sc
   return results;
 }
 
-export async function runTasksMdDeduper({ schedule, config, timeoutMs, nowDate = new Date() }) {
-  const openPr = openDedupePr(config);
-  if (openPr) return { skipped: true, reason: `open PR already exists: ${openPr}`, prUrl: openPr };
-
-  const remoteUrl = command(['git', '-C', config.repoRoot, 'config', '--get', 'remote.origin.url']).stdout.trim();
-  if (!remoteUrl) throw new Error('remote.origin.url is not configured');
-
-  fs.mkdirSync(config.workRoot, { recursive: true });
-  const worktree = fs.mkdtempSync(path.join(config.workRoot, 'tasks-md-dedupe-'));
-  try {
-    command(['git', 'clone', '--no-tags', '--branch', 'main', '--single-branch', remoteUrl, worktree], {
-      timeoutMs: config.gitTimeoutMs
-    });
-
-    const tasksPath = path.join(worktree, 'TASKS.md');
-    const currentTasksMd = fs.readFileSync(tasksPath, 'utf8');
-    const nextTasksMd = cleanTasksMdCandidate(codexTasksMd(currentTasksMd, { schedule, config, timeoutMs, cwd: worktree }));
-    if (!nextTasksMd || nextTasksMd === currentTasksMd) return { skipped: true, reason: 'no changes' };
-
-    const branch = `${TASKS_BRANCH_PREFIX}${branchTimestamp(nowDate)}`;
-    command(['git', '-C', worktree, 'checkout', '-b', branch], { timeoutMs: config.gitTimeoutMs });
-    fs.writeFileSync(tasksPath, nextTasksMd);
-
-    const changedFiles = command(['git', '-C', worktree, 'diff', '--name-only'], { timeoutMs: config.gitTimeoutMs })
-      .stdout
-      .trim()
-      .split('\n')
-      .filter(Boolean);
-    if (changedFiles.length === 0) return { skipped: true, reason: 'no git diff' };
-    if (changedFiles.length !== 1 || changedFiles[0] !== 'TASKS.md') {
-      throw new Error(`TASKS.md handler changed unexpected files: ${changedFiles.join(', ')}`);
-    }
-
-    command(['git', '-C', worktree, 'add', 'TASKS.md'], { timeoutMs: config.gitTimeoutMs });
-    command(['git', '-C', worktree, 'commit', '-m', 'Deduplicate TASKS.md entries'], {
-      env: gitCommitEnv(config.env),
-      timeoutMs: config.gitTimeoutMs
-    });
-    const headSha = command(['git', '-C', worktree, 'rev-parse', 'HEAD'], { timeoutMs: config.gitTimeoutMs }).stdout.trim();
-    command(['git', '-C', worktree, 'push', '-u', 'origin', branch], {
-      env: gitCommitEnv(config.env),
-      timeoutMs: config.gitTimeoutMs
-    });
-    const prUrl = createDedupePr({ config, cwd: worktree, branch, headSha });
-    return { branch, prUrl };
-  } finally {
-    fs.rmSync(worktree, { recursive: true, force: true });
-  }
-}
-
-export function cleanTasksMdCandidate(output) {
-  const trimmed = String(output ?? '').trim();
-  if (!trimmed || trimmed === 'NO_CHANGES') return null;
-  const fenced = trimmed.match(/^```(?:markdown|md|text)?\s*\n([\s\S]*?)\n```$/i);
-  const text = (fenced ? fenced[1] : trimmed).trimEnd();
-  if (!text.startsWith('# TASKS.md')) throw new Error('Codex returned invalid TASKS.md: missing title');
-  if (!text.includes('## Записи')) throw new Error('Codex returned invalid TASKS.md: missing entries section');
-  return `${text}\n`;
-}
-
 function schedulerConfig(env = process.env) {
   return {
     env,
     dbPath: env.BRAI_DB ?? path.join(serviceRoot, 'data', 'brai.sqlite'),
-    repoRoot: env.BRAI_ROOT ?? repoRoot,
-    workRoot: env.BRAI_SCHEDULER_WORK_ROOT ?? path.join(os.tmpdir(), 'brai-scheduler'),
-    codexBin: env.BRAI_CODEX_BIN ?? 'codex',
-    codexModel: env.BRAI_SCHEDULER_CODEX_MODEL?.trim() || env.BRAI_CODEX_MODEL?.trim() || null,
-    codexTimeoutMs: numberEnv(env.BRAI_SCHEDULER_CODEX_TIMEOUT_MS),
-    gitTimeoutMs: numberEnv(env.BRAI_SCHEDULER_GIT_TIMEOUT_MS) ?? 120000
+    agentTimeoutMs: numberEnv(env.BRAI_SCHEDULER_AGENT_TIMEOUT_MS)
   };
 }
 
 function agentTimeoutMs(row, config) {
-  return config.codexTimeoutMs ?? (Number.isFinite(row.llm_timeout_ms) ? row.llm_timeout_ms : DEFAULT_CODEX_TIMEOUT_MS);
+  return config.agentTimeoutMs ?? (Number.isFinite(row.llm_timeout_ms) ? row.llm_timeout_ms : DEFAULT_AGENT_TIMEOUT_MS);
 }
 
 function finishSchedule(store, row, finishedAt, error) {
@@ -200,8 +129,7 @@ function recordScheduledAgentAiLog(store, { row, finish, status, output, error }
       inputs: [
         { ref: 'agent_schedules.id', value: row.id },
         { ref: 'agent_schedules.next_run_at_utc', value: row.next_run_at_utc },
-        { ref: 'agent_schedules.interval_seconds', value: row.interval_seconds },
-        { ref: 'path', value: 'TASKS.md' }
+        { ref: 'agent_schedules.interval_seconds', value: row.interval_seconds }
       ],
       outputs: [
         { ref: 'agent_schedules.status', value: finish.status },
@@ -218,98 +146,6 @@ function recordScheduledAgentAiLog(store, { row, finish, status, output, error }
   });
 }
 
-function codexTasksMd(tasksMd, { schedule, config, timeoutMs, cwd }) {
-  const outputDir = fs.mkdtempSync(path.join(os.tmpdir(), 'brai-tasks-md-codex-'));
-  const outputPath = path.join(outputDir, 'TASKS.md');
-  try {
-    const args = ['--sandbox', 'read-only', '--ask-for-approval', 'never'];
-    if (config.codexModel) args.push('--model', config.codexModel);
-    args.push('exec', '--ephemeral', '--skip-git-repo-check', '--output-last-message', outputPath, '-');
-    const result = spawnSync(config.codexBin, args, {
-      cwd,
-      input: renderPrompt(schedule.llm_prompt_template, tasksMd),
-      encoding: 'utf8',
-      env: config.env,
-      timeout: timeoutMs,
-      stdio: ['pipe', 'ignore', 'pipe']
-    });
-    if (result.error) throw result.error;
-    if (result.status !== 0) throw new Error(result.stderr?.trim() || `Codex exited with ${result.status}`);
-    return fs.existsSync(outputPath) ? fs.readFileSync(outputPath, 'utf8') : '';
-  } finally {
-    fs.rmSync(outputDir, { recursive: true, force: true });
-  }
-}
-
-function openDedupePr(config) {
-  const result = command([
-    'gh',
-    'pr',
-    'list',
-    '--base',
-    'main',
-    '--state',
-    'open',
-    '--json',
-    'headRefName,url',
-    '--jq',
-    `.[] | select(.headRefName | startswith("${TASKS_BRANCH_PREFIX}")) | .url`
-  ], { cwd: config.repoRoot, timeoutMs: config.gitTimeoutMs });
-  return result.stdout.trim().split('\n').find(Boolean) ?? null;
-}
-
-function createDedupePr({ config, cwd, branch, headSha }) {
-  const prUrl = command([
-    'gh',
-    'pr',
-    'create',
-    '--base',
-    'main',
-    '--head',
-    branch,
-    '--title',
-    'Deduplicate TASKS.md entries',
-    '--body',
-    'Automated TASKS.md maintenance by the Brai scheduler. The handler only updates TASKS.md and enables auto-merge through normal branch protection.'
-  ], { cwd, env: gitCommitEnv(config.env), timeoutMs: config.gitTimeoutMs }).stdout.trim();
-  if (!prUrl) throw new Error('gh pr create did not return a PR URL');
-
-  command([
-    'gh',
-    'pr',
-    'merge',
-    prUrl,
-    '--squash',
-    '--auto',
-    '--match-head-commit',
-    headSha
-  ], { cwd, env: gitCommitEnv(config.env), timeoutMs: config.gitTimeoutMs });
-  return prUrl;
-}
-
-function command(args, { cwd, env = process.env, timeoutMs = 30000 } = {}) {
-  const result = spawnSync(args[0], args.slice(1), {
-    cwd,
-    env,
-    encoding: 'utf8',
-    timeout: timeoutMs
-  });
-  if (result.error) throw result.error;
-  if (result.status !== 0) {
-    throw new Error(`${args.join(' ')} failed: ${result.stderr || result.stdout || result.status}`);
-  }
-  return { stdout: result.stdout ?? '', stderr: result.stderr ?? '' };
-}
-
-function renderPrompt(template, tasksMd) {
-  const source = template?.trim() || '{{tasks_md}}';
-  return source.includes('{{tasks_md}}') ? source.replaceAll('{{tasks_md}}', tasksMd) : `${source}\n\n${tasksMd}`;
-}
-
-function branchTimestamp(date) {
-  return date.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'z').toLowerCase();
-}
-
 function numberEnv(value) {
   if (value == null || value === '') return null;
   const number = Number(value);
@@ -320,14 +156,4 @@ function errorText(error) {
   if (!error) return '';
   const text = error instanceof Error ? error.message : String(error);
   return text.slice(0, MAX_ERROR_LENGTH);
-}
-
-function gitCommitEnv(env) {
-  return {
-    ...env,
-    GIT_AUTHOR_NAME: env.GIT_AUTHOR_NAME ?? 'Brai Scheduler',
-    GIT_AUTHOR_EMAIL: env.GIT_AUTHOR_EMAIL ?? 'scheduler@brightos.world',
-    GIT_COMMITTER_NAME: env.GIT_COMMITTER_NAME ?? 'Brai Scheduler',
-    GIT_COMMITTER_EMAIL: env.GIT_COMMITTER_EMAIL ?? 'scheduler@brightos.world'
-  };
 }

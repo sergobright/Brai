@@ -13,10 +13,6 @@ WorkingDirectory=/srv/projects/brai/services/brai_api
 EnvironmentFile=/etc/brai/brai-api.env
 Environment=BRAI_ROOT=/srv/projects/brai
 Environment=BRAI_DB=/srv/projects/brai/data/brai.sqlite
-Environment=BRAI_CODEX_BIN=/srv/opt/codex-cli/bin/codex
-Environment=BRAI_SCHEDULER_CODEX_TIMEOUT_MS=120000
-Environment=CODEX_HOME=/srv/opt/codex-runtime/brai
-Environment=HOME=/srv/opt/codex-runtime/brai
 ExecStart=/srv/opt/node-v22.16.0/bin/node src/scheduler-runner.js
 NoNewPrivileges=true
 PrivateTmp=true

@@ -4,9 +4,9 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { BraiStore } from '../src/store.js';
-import { cleanTasksMdCandidate, runDueSchedules } from '../src/scheduler-runner.js';
+import { runDueSchedules } from '../src/scheduler-runner.js';
 
-const AGENT_ID = 'maintenance.tasks_md_deduper';
+const AGENT_ID = 'test.scheduled.agent';
 
 test('scheduler claims due recurring schedule and advances it', async () => {
   const fixture = createStore();
@@ -22,11 +22,11 @@ test('scheduler claims due recurring schedule and advances it', async () => {
     const results = await runDueSchedules({
       store: fixture.store,
       nowDate: now,
-      config: { codexTimeoutMs: 1000 },
+      config: { agentTimeoutMs: 1000 },
       logger: quietLogger(),
       agents: new Map([[AGENT_ID, async () => {
         calls += 1;
-        return { branch: 'codex/tasks-md-dedupe-test' };
+        return { ok: true };
       }]])
     });
 
@@ -43,7 +43,9 @@ test('scheduler claims due recurring schedule and advances it', async () => {
     assert.equal(aiLogs[0].agent_id, AGENT_ID);
     assert.equal(aiLogs[0].agent_version, '1');
     assert.equal(aiLogs[0].status, 'done');
-    assert.equal(JSON.parse(aiLogs[0].json_data).outputs.some((output) => output.ref === 'agent_schedules.status'), true);
+    const aiLogData = JSON.parse(aiLogs[0].json_data);
+    assert.equal(aiLogData.inputs.some((input) => input.ref === 'path'), false);
+    assert.equal(aiLogData.outputs.some((output) => output.ref === 'agent_schedules.status'), true);
   } finally {
     fixture.close();
   }
@@ -61,7 +63,7 @@ test('scheduler skips locked schedule', async () => {
     const results = await runDueSchedules({
       store: fixture.store,
       nowDate: new Date('2026-07-01T12:00:00.000Z'),
-      config: { codexTimeoutMs: 1000 },
+      config: { agentTimeoutMs: 1000 },
       logger: quietLogger(),
       agents: new Map([[AGENT_ID, async () => {
         throw new Error('should not run');
@@ -89,7 +91,7 @@ test('scheduler records failure and still advances recurring schedule', async ()
     const results = await runDueSchedules({
       store: fixture.store,
       nowDate: now,
-      config: { codexTimeoutMs: 1000 },
+      config: { agentTimeoutMs: 1000 },
       logger: quietLogger(),
       agents: new Map([[AGENT_ID, async () => {
         throw new Error('boom');
@@ -110,22 +112,47 @@ test('scheduler records failure and still advances recurring schedule', async ()
   }
 });
 
-test('TASKS.md candidate output is strict', () => {
-  assert.equal(cleanTasksMdCandidate('NO_CHANGES'), null);
-  assert.equal(
-    cleanTasksMdCandidate('```markdown\n# TASKS.md\n\n## Записи\n\n- one\n```'),
-    '# TASKS.md\n\n## Записи\n\n- one\n'
-  );
-  assert.throws(() => cleanTasksMdCandidate('updated file'), /missing title/);
-});
-
 function createStore() {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'brai-scheduler-test-'));
   const store = new BraiStore(path.join(tmp, 'brai.sqlite'));
-  store.db.prepare('UPDATE agents SET status = ? WHERE id = ?').run('active', AGENT_ID);
-  store.db
-    .prepare('UPDATE agent_schedules SET status = ?, interval_seconds = ? WHERE id = ?')
-    .run('active', 21600, AGENT_ID);
+  const now = new Date().toISOString();
+  store.db.prepare(`
+    INSERT INTO agents (
+      id, version, target, kind, status, title, summary, trigger_description,
+      conditions_description, input_description, output_description,
+      interactions_description, side_effects_description, llm_provider,
+      llm_model, llm_prompt_template, llm_timeout_ms, fallback_description,
+      source_module, updated_at_utc
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    AGENT_ID,
+    '1',
+    'test',
+    'test_scheduled_agent',
+    'active',
+    'Test scheduled agent',
+    'Test scheduled agent.',
+    'Test trigger.',
+    'Test conditions.',
+    'Test input.',
+    'Test output.',
+    'Test interactions.',
+    'Test side effects.',
+    '',
+    '',
+    '',
+    1000,
+    '',
+    'services/brai_api/test/scheduler-runner.test.js',
+    now
+  );
+  store.db.prepare(`
+    INSERT INTO agent_schedules (
+      id, agent_id, status, next_run_at_utc, interval_seconds,
+      locked_until_utc, last_started_at_utc, last_finished_at_utc,
+      last_error, updated_at_utc
+    ) VALUES (?, ?, ?, ?, ?, NULL, NULL, NULL, '', ?)
+  `).run(AGENT_ID, AGENT_ID, 'active', null, 21600, now);
   return {
     store,
     close() {

@@ -8,8 +8,8 @@ SHALL keep agent descriptions in the existing `agents` registry.
 - **WHEN** the Brai API store migrates
 - **THEN** `agent_schedules` exists
 - **AND** `table_descriptions` describes `agent_schedules`
-- **AND** `maintenance.tasks_md_deduper` is registered in `agents` as disabled legacy documentation
-- **AND** its schedule is disabled because agent tasks now live in `activities` operation rows
+- **AND** `maintenance.tasks_md_deduper` is absent from `agents`
+- **AND** no schedule row exists for `maintenance.tasks_md_deduper`
 
 #### Scenario: A recurring agent is due
 - **WHEN** the scheduler runner sees an active schedule whose `next_run_at_utc`
@@ -30,12 +30,11 @@ runner every five minutes.
 - **AND** the service runs `services/brai_api/src/scheduler-runner.js`
 - **AND** application ports remain unexposed
 
-### Requirement: Legacy TASKS.md dedupe agent stays disabled
-Brai SHALL NOT run the legacy `TASKS.md` dedupe agent after agent task tracking
-moves into `activities` operation rows.
+### Requirement: Legacy TASKS.md dedupe agent is removed
+Brai SHALL NOT register or schedule the legacy `TASKS.md` dedupe agent.
 
-#### Scenario: Scheduler sees the legacy agent
-- **WHEN** `maintenance.tasks_md_deduper` exists in `agents`
-- **THEN** its agent status is `disabled`
-- **AND** its schedule status is `disabled`
+#### Scenario: Store migration completes
+- **WHEN** the Brai API store migrates
+- **THEN** `maintenance.tasks_md_deduper` is absent from `agents`
+- **AND** `maintenance.tasks_md_deduper` is absent from `agent_schedules`
 - **AND** no `codex/tasks-md-dedupe-*` branch is created
