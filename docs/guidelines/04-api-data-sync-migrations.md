@@ -27,6 +27,12 @@
 - В technical schema/workflow decisions ссылайся на `items.id`.
 - Первый зарегистрированный main entity - `activities`.
 
+## FK naming
+
+- Любой новый или переименованный FK на `<parent_table>.id` называй `<parent_table>_id`.
+- FK на `items.id` называется `items_id`; FK на `item_role_types.id` называется `item_role_types_id`.
+- Не используй сокращённые формы для plural parent tables: `item_id`, `role_type_id`, `event_type_id`.
+
 ## Миграции
 
 - Каждое server-side schema изменение получает migration marker в `schema_migrations`.
