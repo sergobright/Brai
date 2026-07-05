@@ -17,7 +17,8 @@ type DragState = {
 
 type DragAxis = "x" | "y";
 
-const DRAG_EXCLUSION_SELECTOR = "button, input, select, a, [role='button'], [role='switch'], [role='slider'], [contenteditable='true'], [data-mobile-sheet-no-drag]";
+const DRAG_HARD_EXCLUSION_SELECTOR = "input, select, textarea, [role='switch'], [role='slider'], [contenteditable='true'], [data-mobile-sheet-no-drag]";
+const DRAG_CONTROL_SELECTOR = "button, a, [role='button']";
 const SCROLL_VIEWPORT_SELECTOR = "[data-slot='scroll-area-viewport']";
 const DRAG_ACTIVATION_PX = 10;
 const SETTLE_MS = 180;
@@ -124,7 +125,7 @@ export function useMobileSheetDrag({
   }, [clearTimer, scheduleOffset]);
 
   const start = useCallback((id: number, clientX: number, clientY: number, target: EventTarget | null) => {
-    if (!enabled || (excludeControls && isExcluded(target))) return false;
+    if (!enabled || isHardExcluded(target) || (excludeControls && axis === "x" && isControl(target))) return false;
     clearTimer();
     const scrollViewport = closestScrollViewport(target);
     const initialScrollTop = scrollViewport?.scrollTop ?? 0;
@@ -142,7 +143,7 @@ export function useMobileSheetDrag({
     setClosing(false);
     setSettling(false);
     return true;
-  }, [clearTimer, enabled, excludeControls]);
+  }, [axis, clearTimer, enabled, excludeControls]);
 
   const move = useCallback((id: number, clientX: number, clientY: number, preventDefault: () => void) => {
     const drag = dragRef.current;
@@ -279,8 +280,12 @@ export function useMobileSheetDrag({
   };
 }
 
-function isExcluded(target: EventTarget | null) {
-  return target instanceof Element && target.closest(DRAG_EXCLUSION_SELECTOR) != null;
+function isHardExcluded(target: EventTarget | null) {
+  return target instanceof Element && target.closest(DRAG_HARD_EXCLUSION_SELECTOR) != null;
+}
+
+function isControl(target: EventTarget | null) {
+  return target instanceof Element && target.closest(DRAG_CONTROL_SELECTOR) != null;
 }
 
 function closestScrollViewport(target: EventTarget | null) {
