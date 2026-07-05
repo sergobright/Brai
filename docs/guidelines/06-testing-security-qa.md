@@ -45,6 +45,7 @@ scripts/use-node22.sh node scripts/brai-sandbox-check-mode.mjs -- <command>
 | `npm run app:lint`, `npm run app:test`, `npm run task:test`, `npm run openspec:validate`, `npm run public:guard`, `npm run temporal:test` | `sandbox` | Обычные repo checks без известных sandbox EPERM. |
 | `npm run app:build`, `npm run app:dev`, `npm --prefix apps/brai_app run build`, `npm --prefix apps/brai_app run dev` | `require_escalated` | Next/Turbopack открывает local workers/servers. |
 | `npm --prefix services/brai_api test` | `require_escalated` | API suite слушает `127.0.0.1`. |
+| `npm run socraticode:preflight`, `npm run socraticode:ensure` | `require_escalated` | SocratiCode читает localhost Qdrant/Ollama и при bootstrap может запускать Docker-backed local services, что в Codex sandbox неавторитетно. |
 | `deploy/scripts/complete-operation-activities.sh <operation:agent-task:id>` | `require_escalated` | Helper re-enters host deploy context and may write live SQLite; only test-owned `BRAI_DB` paths are sandbox-safe. |
 | `deploy/scripts/classify-delivery.mjs --file <path>` или `BRAI_CHANGED_FILES=... deploy/scripts/classify-delivery.mjs` | `sandbox` | Changed files переданы явно, Git metadata не нужен. |
 | `deploy/scripts/classify-delivery.mjs` без `--file`/`BRAI_CHANGED_FILES` | `require_escalated` | Скрипт читает Git metadata. |

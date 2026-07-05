@@ -126,9 +126,15 @@ Agents and maintainers MUST use SocratiCode for semantic code search after confi
 - **THEN** the project declares them in `.socraticodecontextartifacts.json`
 - **AND** SocratiCode context search is available for those artifacts after indexing
 
+#### Scenario: Git worktrees share one SocratiCode index
+- **WHEN** Brai is opened from the main checkout or any `codex/*` git worktree
+- **THEN** the project resolves one stable shared SocratiCode `projectId` from committed `.socraticode.json`
+- **AND** semantic code search, code graph, and context artifacts use the same shared collections across those worktrees
+
 #### Scenario: SocratiCode freshness is checked
 - **WHEN** SocratiCode behavior, agent rules, OpenSpec routing, or repository context indexing changes
-- **THEN** `npm run socraticode:preflight` verifies the local MCP config, context artifact registry, and active watcher state
+- **THEN** `npm run socraticode:ensure` can create or catch up the shared index and start the watcher
+- **AND** `npm run socraticode:preflight` verifies the local MCP config, context artifact registry, complete shared index, and active watcher state
 
 #### Scenario: Exact repository inspection is needed
 - **WHEN** an agent needs exact string matching, file discovery, or non-semantic repository inspection

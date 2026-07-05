@@ -62,6 +62,13 @@ export function sandboxCheckMode(command, env = process.env) {
     };
   }
 
+  if (/\bnpm run socraticode:(preflight|ensure)\b/.test(text)) {
+    return {
+      mode: "require_escalated",
+      reason: "SocratiCode preflight/ensure reads localhost Qdrant or starts Docker-backed local services outside the sandbox network namespace.",
+    };
+  }
+
   if (/\bnode scripts\/brai-task\.mjs access-contract --server\b/.test(text)) {
     return {
       mode: "require_escalated",

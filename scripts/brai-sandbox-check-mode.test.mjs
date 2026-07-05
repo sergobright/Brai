@@ -6,6 +6,8 @@ import { sandboxCheckMode } from "./brai-sandbox-check-mode.mjs";
 test("sandbox helper marks Next and API commands as requiring escalation", () => {
   assert.equal(sandboxCheckMode(["npm", "run", "app:build"]).mode, "require_escalated");
   assert.equal(sandboxCheckMode(["npm", "--prefix", "services/brai_api", "test"]).mode, "require_escalated");
+  assert.equal(sandboxCheckMode(["npm", "run", "socraticode:preflight"]).mode, "require_escalated");
+  assert.equal(sandboxCheckMode(["npm", "run", "socraticode:ensure"]).mode, "require_escalated");
 });
 
 test("sandbox helper handles classify-delivery explicit files", () => {

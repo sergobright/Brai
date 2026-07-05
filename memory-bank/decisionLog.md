@@ -25,3 +25,13 @@ Rationale:
 - Semantic feature, responsibility, and architecture search should use the shared index before speculative file reads.
 - Exact string and file discovery still use `rg`.
 - Agent rules, docs, OpenSpec, and Memory Bank are declared as SocratiCode context artifacts so governance context is searchable.
+
+## 2026-07-05 - SocratiCode Shared Worktree Index
+
+Brai commits a stable SocratiCode `projectId` and uses a local `npm run socraticode:ensure` bootstrap so all main/task worktrees share one semantic index.
+
+Rationale:
+
+- Brai implementation work runs in `git worktrees`; path-hash indexing makes each new worktree look unindexed.
+- A committed `projectId` lets worktrees converge on one shared codebase/context/graph collection.
+- The local ensure/preflight workflow keeps the shared index complete and the watcher active instead of relying on manual MCP bootstrap steps.

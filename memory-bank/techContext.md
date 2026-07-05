@@ -13,6 +13,7 @@ Stack:
 Common checks:
 
 ```bash
+npm run socraticode:ensure
 npm run public:guard
 npm run socraticode:preflight
 npm run openspec:validate
