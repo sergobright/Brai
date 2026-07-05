@@ -36,3 +36,18 @@ test("OTA version follows the build ledger before stale deployed manifests", () 
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
+
+test("OTA version resolution fails instead of falling back to stale public metadata", () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "brai-version-missing-"));
+  try {
+    fs.mkdirSync(path.join(tmp, "apps/brai_app/public"), { recursive: true });
+    fs.writeFileSync(path.join(tmp, "apps/brai_app/public/version.json"), `${JSON.stringify({ version: "0.0.10" })}\n`);
+
+    assert.throws(
+      () => resolveAppVersion({ environment: "prod", root: tmp, explicit: "" }),
+      /Unable to resolve Brai X\.Y\.Z OTA version/,
+    );
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});

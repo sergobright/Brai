@@ -775,16 +775,20 @@ export function useBraiAppState(initialSection: SectionId) {
       const nextActions = actionsRef.current;
       void publishAndroidActionsSnapshot(nextActions);
     };
-    const publishWhenHidden = () => {
-      if (document.visibilityState === "hidden") publishLatest();
+    const publishOnVisibilityChange = () => {
+      publishLatest();
     };
     window.addEventListener("blur", publishLatest);
+    window.addEventListener("focus", publishLatest);
     window.addEventListener("pagehide", publishLatest);
-    document.addEventListener("visibilitychange", publishWhenHidden);
+    window.addEventListener("pageshow", publishLatest);
+    document.addEventListener("visibilitychange", publishOnVisibilityChange);
     return () => {
       window.removeEventListener("blur", publishLatest);
+      window.removeEventListener("focus", publishLatest);
       window.removeEventListener("pagehide", publishLatest);
-      document.removeEventListener("visibilitychange", publishWhenHidden);
+      window.removeEventListener("pageshow", publishLatest);
+      document.removeEventListener("visibilitychange", publishOnVisibilityChange);
     };
   }, [localSnapshotReady, publishAndroidActionsSnapshot, syncStatus]);
 

@@ -97,6 +97,33 @@ describe("BraiApp actions", () => {
     }, { interval: 25, timeout: 900 });
   });
 
+  it("retries Android widget snapshot publishing when the app returns to foreground", async () => {
+    stubAndroidCapacitor();
+    await saveActivitiesState(cachedActivitiesState("action-widget-foreground", "Виджет"));
+    actionsWidgetPlugin.saveSnapshot
+      .mockRejectedValueOnce(new Error("bridge unavailable"))
+      .mockResolvedValue({});
+
+    render(<BraiApp />);
+
+    await waitFor(() => expect(screen.getByRole("checkbox", { name: "Виджет" })).toBeInTheDocument());
+    await waitFor(() => expect(actionsWidgetPlugin.saveSnapshot).toHaveBeenCalled());
+    actionsWidgetPlugin.saveSnapshot.mockClear();
+
+    act(() => {
+      window.dispatchEvent(new Event("focus"));
+    });
+
+    await waitFor(() => {
+      expect(actionsWidgetPlugin.saveSnapshot).toHaveBeenCalledWith(expect.objectContaining({
+        actions: expect.arrayContaining([
+          expect.objectContaining({ status: "New", title: "Виджет" }),
+        ]),
+        viewId: "all",
+      }));
+    }, { interval: 25, timeout: 900 });
+  });
+
   it("applies Android widget status changes to the app in under one second", async () => {
     stubAndroidCapacitor();
     await saveActivitiesState(cachedActivitiesState("action-widget", "Виджет"));
