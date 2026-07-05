@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { TextDecoder } from 'node:util';
 
 export const INBOUND_BODY_LIMIT_BYTES = 16 * 1024 * 1024;
@@ -12,6 +12,8 @@ const PDF_SIGNATURE = Buffer.from('%PDF-');
 const MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024;
 const MAX_ATTACHMENT_TOTAL_BYTES = 12 * 1024 * 1024;
 const MAX_ATTACHMENTS = 10;
+const IMAGE_PREVIEW_SUFFIX = '.thumb.jpg';
+const IMAGE_PREVIEW_MAX_PX = 640;
 const UTF8_DECODER = new TextDecoder('utf-8', { fatal: true });
 const ATTACHMENT_TYPES = new Map([
   ['image/png', { extension: 'png', valid: (bytes) => bytes.subarray(0, 8).equals(PNG_SIGNATURE) }],
@@ -111,6 +113,10 @@ export async function receiveInboxInbound({
         fs.writeFileSync(filePath, attachment.bytes, { flag: 'wx' });
         writtenPaths.push(filePath);
       }
+      if (attachment.mime?.startsWith('image/')) {
+        const previewPath = path.join(storageRoot, imagePreviewName(fileName));
+        if (createImagePreview(filePath, previewPath)) writtenPaths.push(previewPath);
+      }
       attachmentLinks.push(`/v1/inbox/attachments/${fileName}`);
     });
     titleResult = await generateTitle(text, {
@@ -195,6 +201,14 @@ export function serveInboxAttachment(req, res, url, storageRoot, sendJson, store
   return true;
 }
 
+export function imagePreviewName(name) {
+  return `${name}${IMAGE_PREVIEW_SUFFIX}`;
+}
+
+export function originalNameForImagePreview(name) {
+  return name.endsWith(IMAGE_PREVIEW_SUFFIX) ? name.slice(0, -IMAGE_PREVIEW_SUFFIX.length) : null;
+}
+
 function requiredText(value, message) {
   const text = optionalText(value);
   if (text) return text;
@@ -251,8 +265,29 @@ function decodeAttachments(body) {
     totalBytes += bytes.length;
     if (totalBytes > MAX_ATTACHMENT_TOTAL_BYTES) throwStatus('attachments_too_large', 413);
     if (!attachmentType.valid(bytes)) throwStatus(legacyImage ? 'invalid_image' : 'invalid_attachment', 400);
-    return { bytes, extension: attachmentType.extension };
+    return { bytes, extension: attachmentType.extension, mime };
   });
+}
+
+function createImagePreview(filePath, previewPath) {
+  if (fs.existsSync(previewPath)) return false;
+  const result = spawnSync(process.env.BRAI_THUMBNAIL_FFMPEG_BIN ?? 'ffmpeg', [
+    '-v',
+    'error',
+    '-y',
+    '-i',
+    filePath,
+    '-frames:v',
+    '1',
+    '-vf',
+    `scale='min(${IMAGE_PREVIEW_MAX_PX},iw)':'min(${IMAGE_PREVIEW_MAX_PX},ih)':force_original_aspect_ratio=decrease`,
+    '-q:v',
+    '5',
+    previewPath
+  ], { timeout: 5000 });
+  if (result.status === 0 && fs.existsSync(previewPath)) return true;
+  fs.rmSync(previewPath, { force: true });
+  return false;
 }
 
 function decodeBase64(value) {

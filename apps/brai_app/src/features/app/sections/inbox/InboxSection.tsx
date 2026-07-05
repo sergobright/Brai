@@ -30,6 +30,10 @@ import {
   DetailFields,
   DetailHistory,
   DetailPanelTabBar,
+  attachmentHref,
+  attachmentName,
+  attachmentPreviewLink,
+  isImageAttachment,
   type DetailPanelTab,
 } from "../DetailPanelTabs";
 import { MobileCreateComposer, mobileCreateDraftHasText, type MobileCreateDraft } from "../MobileCreateComposer";
@@ -414,6 +418,10 @@ function InboxRow({
 }) {
   const title = titleDraft ?? item.title;
   const preview = visibleDescriptionPreview(item.description_md);
+  const imageLink = item.attachment_links.find(isImageAttachment);
+  const imageName = imageLink ? attachmentName(imageLink) : "";
+  const imageHref = imageLink ? attachmentHref(imageLink) : "";
+  const imagePreviewHref = imageLink ? attachmentHref(attachmentPreviewLink(imageLink)) : "";
   const typeIconId = useId();
   const [dragX, setDragX] = useState(0);
   const [dragging, setDragging] = useState(false);
@@ -490,7 +498,8 @@ function InboxRow({
     <div
       ref={swipeRef}
       className={cx(
-        "action-row group relative grid min-h-[54px] max-h-[220px] grid-cols-[minmax(0,1fr)_44px] items-stretch overflow-hidden border-b border-border transition-[max-height,opacity,border-color,box-shadow] duration-150 [&:has(+_.action-row.selected)]:border-b-transparent max-[860px]:grid-cols-[minmax(0,1fr)_46px] max-[860px]:select-none max-[860px]:[touch-action:pan-y]",
+        "action-row group relative grid min-h-[54px] grid-cols-[minmax(0,1fr)_44px] items-stretch overflow-hidden border-b border-border transition-[max-height,opacity,border-color,box-shadow] duration-150 [&:has(+_.action-row.selected)]:border-b-transparent max-[860px]:grid-cols-[minmax(0,1fr)_46px] max-[860px]:select-none max-[860px]:[touch-action:pan-y]",
+        imageLink ? "max-h-[360px]" : "max-h-[220px]",
         item.pending && "pending opacity-80",
         deleteOpen && "delete-open",
         dragging && "dragging",
@@ -534,6 +543,22 @@ function InboxRow({
             >
               {preview}
             </p>
+          ) : null}
+          {imageLink ? (
+            <div className="mt-1.5 overflow-hidden rounded-md bg-muted" aria-label={`Превью вложения ${imageName}`}>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={imagePreviewHref}
+                alt={imageName}
+                loading="lazy"
+                className="aspect-[16/9] w-full object-cover"
+                onError={(event) => {
+                  if (event.currentTarget.dataset.fallback === "1") return;
+                  event.currentTarget.dataset.fallback = "1";
+                  event.currentTarget.src = imageHref;
+                }}
+              />
+            </div>
           ) : null}
         </div>
       </div>
