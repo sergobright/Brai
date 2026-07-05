@@ -1,6 +1,6 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { cmdPlugin, openEngineFromProfile, openProfileMenuItem, openSettingsFromProfile, otaPlugin, setupBraiAppTest, stubAndroidCapacitor, testVersionState } from "./app-test-support";
+import { cmdPlugin, openEngineFromProfile, openProfileMenu, openProfileMenuItem, openSettingsFromProfile, otaPlugin, setupBraiAppTest, stubAndroidCapacitor, testVersionState } from "./app-test-support";
 import { BraiApp } from "@/features/app/BraiApp";
 
 describe("BraiApp settings", () => {
@@ -27,7 +27,7 @@ describe("BraiApp settings", () => {
     await openEngineFromProfile();
 
     expect(screen.getByRole("heading", { name: "Engine" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Текущая OTA-версия 0.0.10" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Текущая OTA-версия unknown" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Проверить обновления" })).toBeInTheDocument();
   });
 
@@ -57,6 +57,16 @@ describe("BraiApp settings", () => {
 
     await waitFor(() => expect(cmdPlugin.openSettings).toHaveBeenCalledTimes(1));
     expect(screen.queryByText(/работает только в Android-приложении Brai/)).not.toBeInTheDocument();
+  });
+
+  it("uses larger rows in the mobile menu that contains Brai Cmd", async () => {
+    render(<BraiApp />);
+
+    const drawer = await openProfileMenu();
+
+    for (const name of ["Настройки", "Архив", "Выйти", "Brai Cmd", "Engine"]) {
+      expect(within(drawer).getByRole("button", { name })).toHaveClass("h-12", "text-base");
+    }
   });
 
   it("marks Engine when a newer ledger version is available", async () => {

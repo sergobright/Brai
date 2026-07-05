@@ -52,7 +52,7 @@ export function resolveAppVersion({
     mobileTarget && latestMobileTargetVersion(mobileTarget),
   ]);
   if (deployedVersion) return validOtaVersion(deployedVersion);
-  return validOtaVersion(readVersionJson(path.join(root, "apps/brai_app/public/version.json")) || "0.0.0");
+  throw new Error("Unable to resolve Brai X.Y.Z OTA version; set BRAI_APP_VERSION or provide build ledger/deployed mobile metadata");
 }
 
 function resolveApkVersion(dbPath, { nextApk = false, targetBranch = "", targetCommit = "" } = {}) {

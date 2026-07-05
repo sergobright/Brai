@@ -230,13 +230,14 @@ export function MobileProfileDrawer({
         {mode === "rail" ? (
           <div className="flex min-h-0 flex-1 flex-col pt-2">
             <SidebarMenu>
-              <ActionMenuItem icon={Settings} label="Настройки" active={section === "settings"} onClick={() => closeThen(onSettings)} />
-              <ActionMenuItem icon={Archive} label="Архив" active={section === "archive"} onClick={() => closeThen(onArchive)} />
-              <ActionMenuItem icon={LogOut} label="Выйти" onClick={() => closeThenAsync(onLogout)} />
+              <ActionMenuItem large icon={Settings} label="Настройки" active={section === "settings"} onClick={() => closeThen(onSettings)} />
+              <ActionMenuItem large icon={Archive} label="Архив" active={section === "archive"} onClick={() => closeThen(onArchive)} />
+              <ActionMenuItem large icon={LogOut} label="Выйти" onClick={() => closeThenAsync(onLogout)} />
             </SidebarMenu>
             <SidebarMenu className="mt-auto">
-              <BraiCmdMenuItem active={section === "brai-cmd"} onClick={() => closeThen(onBraiCmd)} />
+              <BraiCmdMenuItem large active={section === "brai-cmd"} onClick={() => closeThen(onBraiCmd)} />
               <EngineMenuItem
+                large
                 active={section === "engine"}
                 appVersionState={appVersionState}
                 otaRefreshing={otaRefreshing}
@@ -330,12 +331,13 @@ function PageMenu({
   );
 }
 
-function BraiCmdMenuItem({ active, onClick }: { active: boolean; onClick: () => void }) {
-  return <ActionMenuItem icon={Command} label="Brai Cmd" active={active} onClick={onClick} />;
+function BraiCmdMenuItem({ active, large = false, onClick }: { active: boolean; large?: boolean; onClick: () => void }) {
+  return <ActionMenuItem large={large} icon={Command} label="Brai Cmd" active={active} onClick={onClick} />;
 }
 
 function EngineMenuItem({
   active,
+  large = false,
   appVersionState,
   otaRefreshing,
   otaState,
@@ -344,6 +346,7 @@ function EngineMenuItem({
   onClick,
 }: {
   active: boolean;
+  large?: boolean;
   appVersionState: AppVersionState | null;
   otaRefreshing: boolean;
   otaState: BraiOtaState | null;
@@ -361,23 +364,33 @@ function EngineMenuItem({
   });
   const Icon = view.hasUpdate ? Download : Cpu;
 
-  return <ActionMenuItem icon={Icon} label="Engine" active={active} onClick={onClick} />;
+  return <ActionMenuItem large={large} icon={Icon} label="Engine" active={active} onClick={onClick} />;
 }
 
 function ActionMenuItem({
   icon: Icon,
   label,
   active = false,
+  large = false,
   onClick,
 }: {
   icon: LucideIcon;
   label: string;
   active?: boolean;
+  large?: boolean;
   onClick: () => void | Promise<void>;
 }) {
   return (
     <SidebarMenuItem>
-      <SidebarMenuButton type="button" aria-label={label} isActive={active} tooltip={label} onClick={() => void onClick()}>
+      <SidebarMenuButton
+        type="button"
+        aria-label={label}
+        className={large ? "gap-3 px-3 text-base [&>svg]:size-5" : undefined}
+        isActive={active}
+        size={large ? "lg" : "default"}
+        tooltip={label}
+        onClick={() => void onClick()}
+      >
         <Icon aria-hidden="true" />
         <span>{label}</span>
       </SidebarMenuButton>

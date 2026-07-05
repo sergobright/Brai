@@ -104,10 +104,11 @@ export function engineSectionView({
   versionError: boolean;
   versionRefreshing: boolean;
 }): EngineSectionView {
-  const activeWebVersion = otaVersion(otaState?.activeBundleVersion) ?? otaVersion(appBuild) ?? "0.0.0";
+  const activeWebVersion = otaVersion(otaState?.activeBundleVersion) ?? otaVersion(appBuild) ?? "unknown";
   const installedVersion = activeWebVersion;
+  const comparableInstalledVersion = otaVersion(installedVersion) ?? "0.0.0";
   const latestVersion = latestKnownVersion(
-    installedVersion,
+    comparableInstalledVersion,
     appVersionState?.ota_version ?? appVersionState?.version,
     otaState?.candidateBundleVersion,
     otaState?.downloadProgressVersion,
@@ -122,7 +123,7 @@ export function engineSectionView({
   const isChecking = otaRefreshing || versionRefreshing || Boolean(otaState?.checkInProgress);
   const visibleState =
     !isChecking && otaState?.lastCheckStatus === "checking" ? { ...otaState, lastCheckStatus: "unknown" } : otaState;
-  const hasUpdate = apkUpdateAvailable || compareBraiVersions(latestVersion, installedVersion) > 0 || hasReadyOtaUpdate(visibleState);
+  const hasUpdate = apkUpdateAvailable || compareBraiVersions(latestVersion, comparableInstalledVersion) > 0 || hasReadyOtaUpdate(visibleState);
   const androidUpdateStage = androidStage(visibleState, hasUpdate);
   const apkReleaseUrl = targetApk.releaseUrl;
   const updateStatus = engineStatusView({
