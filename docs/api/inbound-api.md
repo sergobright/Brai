@@ -26,7 +26,7 @@ Brai использует короткий inbound endpoint:
 | `inbox` | Активен | Создать Inbox-запись из внешнего текста, описания, metadata и вложений. |
 
 Будущие target-ы, например `finance` или `calendar`, добавляются как новые
-handlers за тем же коротким endpoint. Не заводи для них новую top-level группу
+agents за тем же коротким endpoint. Не заводи для них новую top-level группу
 routes.
 
 ## URL
@@ -276,9 +276,9 @@ description просит прикрепить или добавить данны
 
 ## Генерация заголовка
 
-Handler генерирует `inbox.title` из `text`.
+AI-агент генерирует `inbox.title` из `text`.
 
-Текущий LLM-обработчик зарегистрирован в SQLite `handlers`:
+Текущий LLM-агент зарегистрирован в SQLite `agents`:
 
 | Поле | Значение |
 | --- | --- |
@@ -296,10 +296,10 @@ Runtime-настройки:
 | Env | Назначение |
 | --- | --- |
 | `BRAI_CODEX_BIN` | Путь к Codex CLI. |
-| `BRAI_CODEX_MODEL` | Runtime override модели Codex CLI; если не задан, используется `handlers.llm_model`. |
-| `BRAI_CODEX_TIMEOUT_MS` | Runtime override timeout генерации заголовка; если не задан, используется `handlers.llm_timeout_ms`. |
+| `BRAI_CODEX_MODEL` | Runtime override модели Codex CLI; если не задан, используется `agents.llm_model`. |
+| `BRAI_CODEX_TIMEOUT_MS` | Runtime override timeout генерации заголовка; если не задан, используется `agents.llm_timeout_ms`. |
 
-Prompt хранится в `handlers.llm_prompt_template`; `{{text}}` заменяется на
+Prompt хранится в `agents.llm_prompt_template`; `{{text}}` заменяется на
 входной `text`. Текущий template:
 
 ```text
@@ -312,6 +312,13 @@ Prompt хранится в `handlers.llm_prompt_template`; `{{text}}` замен
 Если Codex CLI падает или выходит по timeout, fallback-заголовок берется из
 первых семи слов `text`, чистится и режется до 80 символов. Если он пустой,
 используется `Входящее`.
+
+Каждое фактическое срабатывание генератора пишет ровно одну строку в
+`ai_logs`: `agent_id = inbound.inbox.title_generator`, `agent_version` из
+`agents.version`, `status = done` или `failed`, короткий русский
+`ai_title`, и `json_data` стандарта `brai.ai_log.v1` с refs
+`request.body.text`, `inbox.id` и `inbox.title`. Duplicate idempotency key не
+создает вторую строку, потому генератор не запускается.
 
 ## Ошибки
 
@@ -337,8 +344,8 @@ Prompt хранится в `handlers.llm_prompt_template`; `{{text}}` замен
 
 При изменении этого API contract обновляй эту страницу в том же commit.
 
-При создании или изменении inbound/runtime handler обязательно обновляй
-соответствующую строку SQLite `handlers` в миграции/seed-коде.
+При создании или изменении inbound/runtime AI-агента обязательно обновляй
+соответствующую строку SQLite `agents` в миграции/seed-коде.
 
 Обновляй релевантный раздел, если меняется что-то из этого:
 

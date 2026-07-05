@@ -29,7 +29,7 @@ test('AirWhisper access tokens, health, admin summary, and migrations work in Br
       fixture.store.db.prepare('SELECT description FROM schema_migrations WHERE version = 47').get().description,
       'add AirWhisper dictation runtime'
     );
-    assert.ok(fixture.store.db.prepare("SELECT 1 FROM handlers WHERE id = 'airwhisper.dictate.transcription'").get());
+    assert.ok(fixture.store.db.prepare("SELECT 1 FROM agents WHERE id = 'airwhisper.dictate.transcription'").get());
 
     const denied = await fetch(`${fixture.url}/v1/health`);
     assert.equal(denied.status, 401);
@@ -199,6 +199,13 @@ test('AirWhisper dictation accepts multipart audio and stores only usage metrics
     assert.equal(usage.every((row) => row.audio_bytes === 'fake-audio'.length), true);
     assert.equal(JSON.stringify(usage).includes('processed transcript'), false);
     assert.equal(JSON.stringify(usage).includes('raw transcript'), false);
+    const aiLogs = fixture.store.db.prepare('SELECT agent_id, agent_version, status, json_data FROM ai_logs ORDER BY id').all();
+    assert.equal(aiLogs.length, 2);
+    assert.equal(aiLogs.every((row) => row.agent_id === 'airwhisper.dictate.transcription'), true);
+    assert.equal(aiLogs.every((row) => row.agent_version === '1'), true);
+    assert.equal(aiLogs.every((row) => row.status === 'done'), true);
+    assert.equal(JSON.parse(aiLogs[0].json_data).outputs.find((output) => output.ref === 'response.text').value, 'processed transcript');
+    assert.equal(JSON.parse(aiLogs[1].json_data).outputs.find((output) => output.ref === 'response.text').value, 'context reply');
   } finally {
     await fixture.close();
   }
@@ -292,6 +299,10 @@ test('AirWhisper dictation rejects bad requests and records failure usage', asyn
       fixture.store.db.prepare('SELECT success, error_code FROM airwhisper_usage_events').get().error_code,
       'unsupported_media_type'
     );
+    const aiLog = fixture.store.db.prepare('SELECT agent_id, status, json_data FROM ai_logs').get();
+    assert.equal(aiLog.agent_id, 'airwhisper.dictate.transcription');
+    assert.equal(aiLog.status, 'failed');
+    assert.equal(JSON.parse(aiLog.json_data).metadata.error, 'unsupported_media_type');
   } finally {
     await fixture.close();
   }

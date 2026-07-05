@@ -4,6 +4,7 @@ const GROQ_TRANSCRIPTIONS_URL = 'https://api.groq.com/openai/v1/audio/transcript
 const GROQ_CHAT_COMPLETIONS_URL = 'https://api.groq.com/openai/v1/chat/completions';
 const OPENAI_TRANSCRIPTIONS_URL = 'https://api.openai.com/v1/audio/transcriptions';
 const MAX_POST_PROCESSING_PROMPT_CHARS = 4000;
+const AIRWHISPER_AGENT_ID = 'airwhisper.dictate.transcription';
 
 export function airWhisperConfigFromEnv(env = process.env) {
   return {
@@ -152,6 +153,7 @@ async function handleDictate({ req, res, store, runtime, access, sendJson }) {
   const started = Date.now();
   const requestId = randomUUID();
   const { config, deps } = runtime;
+  const agent = store.getAgent(AIRWHISPER_AGENT_ID);
   const clientVersion = headerValue(req, 'x-airwhisper-client-version');
   let audioBytes = 0;
   let audioDurationMs = 0;
@@ -160,6 +162,14 @@ async function handleDictate({ req, res, store, runtime, access, sendJson }) {
   let provider = '';
   let model = '';
   let fallbackUsed = false;
+  let audio = null;
+  let postProcessingPrompt = '';
+  let normalizedContextJson = '';
+  let contextEnabled = false;
+  let postProcessed = false;
+  let postProcessingModel = '';
+  let text = '';
+  let aiLogWritten = false;
 
   try {
     const contentType = headerValue(req, 'content-type');
@@ -175,7 +185,7 @@ async function handleDictate({ req, res, store, runtime, access, sendJson }) {
     const body = await readBody(req, maxRequestBytes);
     const multipart = parseMultipart(body, parseBoundary(contentType));
     audioDurationMs = parseDurationMs(multipart.fields.audioDurationMs ?? multipart.fields.durationMs);
-    const audio = multipart.files.find((file) => file.fieldName === 'audio' || file.fieldName === 'file');
+    audio = multipart.files.find((file) => file.fieldName === 'audio' || file.fieldName === 'file');
     if (!audio) throw new AirWhisperHttpError(400, 'Missing audio file field', 'missing_audio');
     audioBytes = audio.data.length;
     if (audioBytes > config.maxAudioBytes) throw new AirWhisperHttpError(413, 'Audio file is too large', 'audio_too_large');
@@ -187,12 +197,11 @@ async function handleDictate({ req, res, store, runtime, access, sendJson }) {
     provider = transcription.provider;
     model = transcription.model;
     fallbackUsed = Boolean(transcription.fallbackUsed);
-    let text = transcription.text;
-    let postProcessed = false;
-    let postProcessingModel = '';
+    text = transcription.text;
 
-    const postProcessingPrompt = postProcessingPromptField(multipart.fields);
-    const normalizedContextJson = normalizedContextJsonField(multipart.fields);
+    postProcessingPrompt = postProcessingPromptField(multipart.fields);
+    normalizedContextJson = normalizedContextJsonField(multipart.fields);
+    contextEnabled = titleContextEnabled(multipart.fields);
     if (postProcessingPrompt && text.trim()) {
       const postProcessingStarted = Date.now();
       const processed = await deps.postProcessTranscript(text, postProcessingPrompt);
@@ -200,7 +209,7 @@ async function handleDictate({ req, res, store, runtime, access, sendJson }) {
       postProcessed = true;
       postProcessingModel = processed.model;
       text = processed.text;
-    } else if (titleContextEnabled(multipart.fields) && normalizedContextJson && text.trim()) {
+    } else if (contextEnabled && normalizedContextJson && text.trim()) {
       const contextReplyStarted = Date.now();
       const generated = await deps.generateContextReply(text, normalizedContextJson);
       postProcessingMs = Date.now() - contextReplyStarted;
@@ -209,6 +218,7 @@ async function handleDictate({ req, res, store, runtime, access, sendJson }) {
       text = generated.text;
     }
 
+    const totalMs = Date.now() - started;
     store.recordAirWhisperUsage({
       accessTokenId: access.id,
       success: true,
@@ -219,10 +229,33 @@ async function handleDictate({ req, res, store, runtime, access, sendJson }) {
       fallbackUsed,
       transcriptionMs,
       postProcessingMs,
-      totalMs: Date.now() - started,
+      totalMs,
       transcriptChars: text.length,
       clientVersion
     });
+    recordAirWhisperAiLog(store, {
+      agent,
+      status: 'done',
+      requestId,
+      accessTokenId: access.id,
+      clientVersion,
+      audio,
+      audioBytes,
+      audioDurationMs,
+      postProcessingPrompt,
+      normalizedContextJson,
+      contextEnabled,
+      text,
+      provider,
+      model,
+      fallbackUsed,
+      postProcessed,
+      postProcessingModel,
+      transcriptionMs,
+      postProcessingMs,
+      totalMs
+    });
+    aiLogWritten = true;
 
     sendJson(req, res, 200, {
       text,
@@ -231,7 +264,7 @@ async function handleDictate({ req, res, store, runtime, access, sendJson }) {
       model,
       fallbackUsed,
       timings: {
-        totalMs: Date.now() - started,
+        totalMs,
         transcriptionMs,
         postProcessingMs
       },
@@ -254,8 +287,81 @@ async function handleDictate({ req, res, store, runtime, access, sendJson }) {
       transcriptChars: 0,
       clientVersion
     });
+    if (!aiLogWritten) {
+      recordAirWhisperAiLog(store, {
+        agent,
+        status: 'failed',
+        requestId,
+        accessTokenId: access.id,
+        clientVersion,
+        audio,
+        audioBytes,
+        audioDurationMs,
+        postProcessingPrompt,
+        normalizedContextJson,
+        contextEnabled,
+        text,
+        provider,
+        model,
+        fallbackUsed,
+        postProcessed,
+        postProcessingModel,
+        transcriptionMs,
+        postProcessingMs,
+        totalMs: Date.now() - started,
+        error: errorCode(error),
+        errorMessage: errorText(error)
+      });
+    }
     throw error;
   }
+}
+
+function recordAirWhisperAiLog(store, input) {
+  store.recordAiLog({
+    agentId: AIRWHISPER_AGENT_ID,
+    agentVersion: input.agent?.version ?? '',
+    status: input.status,
+    aiTitle: input.status === 'done' ? 'Расшифровал AirWhisper аудио' : 'Не расшифровал AirWhisper аудио',
+    jsonData: {
+      schema: 'brai.ai_log.v1',
+      inputs: [
+        {
+          ref: 'request.file.audio',
+          value: {
+            field: input.audio?.fieldName ?? '',
+            filename: input.audio?.filename ?? '',
+            content_type: input.audio?.contentType ?? '',
+            bytes: input.audioBytes
+          }
+        },
+        { ref: 'request.field.audioDurationMs', value: input.audioDurationMs },
+        { ref: 'request.field.postProcessingPrompt', value: { present: Boolean(input.postProcessingPrompt), chars: input.postProcessingPrompt?.length ?? 0 } },
+        { ref: 'request.field.normalizedContextJson', value: { present: Boolean(input.normalizedContextJson), chars: input.normalizedContextJson?.length ?? 0 } },
+        { ref: 'request.field.headerContextEnabled', value: input.contextEnabled },
+        { ref: 'request.header.x-airwhisper-client-version', value: input.clientVersion || '' }
+      ],
+      outputs: [
+        { ref: 'response.text', value: input.text || '' },
+        { ref: 'response.provider', value: input.provider || '' },
+        { ref: 'response.model', value: input.model || '' },
+        { ref: 'response.postProcessed', value: Boolean(input.postProcessed) },
+        { ref: 'response.postProcessingModel', value: input.postProcessingModel || '' }
+      ],
+      metadata: {
+        request_id: input.requestId,
+        access_token_id: input.accessTokenId,
+        fallback_used: Boolean(input.fallbackUsed),
+        timings_ms: {
+          total: input.totalMs,
+          transcription: input.transcriptionMs,
+          post_processing: input.postProcessingMs
+        },
+        error: input.error ?? null,
+        error_message: input.errorMessage ?? null
+      }
+    }
+  });
 }
 
 async function transcribeAudio(file, config) {
@@ -582,6 +688,10 @@ function errorCode(error) {
     return 'request_aborted';
   }
   return error instanceof AirWhisperHttpError ? error.code : 'internal_error';
+}
+
+function errorText(error) {
+  return error instanceof Error ? error.message.slice(0, 1000) : String(error).slice(0, 1000);
 }
 
 function parsePositiveInt(value, fallback) {
