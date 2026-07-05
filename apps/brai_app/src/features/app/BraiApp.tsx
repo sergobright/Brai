@@ -2,11 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { BookOpen, Crown, Info, Settings } from "lucide-react";
-import { APP_OTA_CHANNEL } from "@/shared/config/runtime";
 import { installAndroidBackHandler } from "@/shared/platform/platform";
-import type { BraiOtaState } from "@/shared/platform/ota";
 import { getBraiLocalStorageItem, removeBraiLocalStorageItem, setBraiLocalStorageItem } from "@/shared/storage/localStorageKeys";
-import { Button } from "@/shared/ui/button";
 import { ScrollArea } from "@/shared/ui/scroll-area";
 import { SidebarInset, SidebarProvider } from "@/shared/ui/sidebar";
 import type { SectionId } from "./appModel";
@@ -21,7 +18,6 @@ import { ActionsInfoPanel } from "./sections/actions/ActionsInfoPanel";
 import { ArchiveSection } from "./sections/actions/ArchiveSection";
 import { EvilEyeSection } from "./sections/EvilEyeSection";
 import { EngineSection } from "./sections/engine/EngineSection";
-import { formatApkTargetLabel } from "./sections/engine/engineModel";
 import { FocusBackground, FocusContextPanelSheet, FocusSection } from "./sections/focus/FocusSection";
 import { InboxSection } from "./sections/inbox/InboxSection";
 import { SettingsSection } from "./sections/settings/SettingsSection";
@@ -41,7 +37,6 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
   const sectionRef = useRef(app.section);
   const selectSectionRef = useRef(app.selectSection);
   const adjacentSection = app.swipeNavigation.visual?.to;
-  const apkBlocked = isDevPreviewApkIncompatible(app.otaState);
   const mobileMenuSwipe = useLeftEdgeMenuSwipe(
     () => openMobileMenu("rail"),
     !app.mobileMenuOpen && !app.mobileContextPanel && !app.actionOverlayOpen,
@@ -172,10 +167,6 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
         ) : null}
       </>
     );
-  }
-
-  if (apkBlocked) {
-    return <ApkCompatibilityBlocker otaState={app.otaState} refreshing={app.otaRefreshing} onRefresh={app.refreshOtaStateOnce} />;
   }
 
   return (
@@ -323,51 +314,4 @@ function saveMobileCreateDraft(storageKey: string, draft: MobileCreateDraft) {
   } catch {
     // localStorage can be unavailable in constrained WebViews.
   }
-}
-
-function isDevPreviewApkIncompatible(otaState: BraiOtaState | null): boolean {
-  return otaState?.lastCheckStatus === "apk_required" || otaState?.lastCheckStatus === "incompatible";
-}
-
-function ApkCompatibilityBlocker({
-  otaState,
-  refreshing,
-  onRefresh,
-}: {
-  otaState: BraiOtaState | null;
-  refreshing: boolean;
-  onRefresh: () => Promise<void>;
-}) {
-  const releaseUrl = apkReleaseUrl(otaState);
-  const requiredApkLabel = formatApkTargetLabel(otaState?.targetApkVersion, otaState?.targetApkBuildKind, otaState?.targetApkPreviewIteration);
-  const requiredApk = requiredApkLabel ? `Требуется APK ${requiredApkLabel}.` : "Требуется более новый APK.";
-
-  return (
-    <main className="grid min-h-dvh place-items-center bg-background px-4 py-8 text-foreground">
-      <section className="grid w-full max-w-[520px] gap-5 rounded-lg border border-destructive/35 bg-card p-5 shadow-sm" aria-label="APK устарел">
-        <div className="grid gap-1.5">
-          <p className="m-0 text-xs font-semibold uppercase text-destructive">Нужен новый APK</p>
-          <h1 className="m-0 text-2xl leading-tight">Установленный APK не подходит для этой версии</h1>
-          <p className="m-0 text-sm leading-6 text-muted-foreground">
-            Эта OTA-версия требует другой Android shell. {requiredApk}
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2.5">
-          <Button type="button" disabled={refreshing} onClick={() => void onRefresh()}>
-            {refreshing ? "Проверяем..." : "Проверить снова"}
-          </Button>
-          <Button asChild type="button" variant="secondary">
-            <a href={releaseUrl}>Открыть APK-релизы</a>
-          </Button>
-        </div>
-      </section>
-    </main>
-  );
-}
-
-function apkReleaseUrl(otaState: BraiOtaState | null): string {
-  if (otaState?.targetApkReleaseUrl) return otaState.targetApkReleaseUrl;
-  const channel = otaState?.nativeOtaChannel || APP_OTA_CHANNEL;
-  const host = channel.split("/")[0];
-  return host ? `https://${host}/releases/` : "/releases/";
 }

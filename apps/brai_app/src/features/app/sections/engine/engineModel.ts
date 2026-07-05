@@ -173,7 +173,7 @@ function targetApkIdentity(state: BraiOtaState | null, appVersionState: AppVersi
     buildKind,
     previewIteration,
     label: formatApkTargetLabel(version, buildKind, previewIteration),
-    releaseUrl: state?.targetApkReleaseUrl || apiTarget?.release_url || "/releases/",
+    releaseUrl: state?.targetApkReleaseUrl || apiTarget?.release_url || releaseUrlFromChannel(state?.nativeOtaChannel) || "/releases/",
   };
 }
 
@@ -351,4 +351,9 @@ function apkBuildKind(value: string | null | undefined): ApkBuildKind {
 function textValue(value: string | null | undefined): string | null {
   const text = value?.trim();
   return text ? text : null;
+}
+
+function releaseUrlFromChannel(channel: string | null | undefined): string | null {
+  const host = channel?.split("/")[0]?.trim();
+  return host ? `https://${host}/releases/` : null;
 }

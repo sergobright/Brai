@@ -116,7 +116,7 @@ describe("BraiApp settings", () => {
     expect(screen.queryByText(/Software caused connection abort|ENOENT|\/data\/user/)).not.toBeInTheDocument();
   });
 
-  it("blocks when the installed APK is incompatible", async () => {
+  it("keeps the app usable when the installed APK cannot apply the next OTA", async () => {
     stubAndroidCapacitor();
     otaPlugin.getState.mockResolvedValue({
       activeBundleVersion: "0.0.10",
@@ -132,14 +132,17 @@ describe("BraiApp settings", () => {
 
     render(<BraiApp />);
 
-    await waitFor(() => expect(screen.getByRole("heading", { name: "Установленный APK не подходит для этой версии" })).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Действия" })).toBeInTheDocument());
+    expect(screen.queryByRole("heading", { name: "Установленный APK не подходит для этой версии" })).not.toBeInTheDocument();
+
+    await openEngineFromProfile();
+
     expect(screen.getByText("Нужен новый APK")).toBeInTheDocument();
     expect(screen.getByText(/Требуется APK v2/)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Открыть APK-релизы" })).toHaveAttribute("href", "https://a.test.brightos.world/releases/");
-    expect(screen.queryByRole("heading", { name: "Действия" })).not.toBeInTheDocument();
   });
 
-  it("blocks production too when OTA requires a newer APK", async () => {
+  it("shows production APK requirements only inside Engine", async () => {
     stubAndroidCapacitor();
     otaPlugin.getState.mockResolvedValue({
       activeBundleVersion: "0.0.10",
@@ -152,7 +155,12 @@ describe("BraiApp settings", () => {
 
     render(<BraiApp />);
 
-    await waitFor(() => expect(screen.getByRole("heading", { name: "Установленный APK не подходит для этой версии" })).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Действия" })).toBeInTheDocument());
+
+    await openEngineFromProfile();
+
+    expect(screen.getByText("Нужен новый APK")).toBeInTheDocument();
+    expect(screen.getByText(/Требуется APK v2/)).toBeInTheDocument();
   });
 
   it("starts an Android OTA check from Engine", async () => {
