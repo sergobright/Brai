@@ -48,7 +48,7 @@ export const migrationMethods = {
 
     if (!this.hasMigration(4)) {
       this.recomputeActivities(new Date().toISOString());
-      this.recordMigration(4, 'rename actions to activities and seed item registry');
+      this.recordMigration(4, 'rename actions to activities');
     }
 
     if (!this.hasMigration(5)) {
@@ -264,6 +264,13 @@ export const migrationMethods = {
       this.ensureTableDescriptions();
       this.recordMigration(47, 'add AirWhisper dictation runtime');
     }
+
+    this.ensureItemEntitySchema();
+    this.ensureTableDescriptions();
+    if (!this.hasMigration(48)) {
+      this.clearItemsEntityData();
+      this.recordMigration(48, 'promote items to main entity table and seed item roles');
+    }
   }
 ,
 
@@ -349,6 +356,7 @@ export const migrationMethods = {
 
   ensureUserOwnershipSchema() {
     const tables = [
+      'items',
       'activities',
       'activity_events',
       'inbox',
@@ -739,7 +747,9 @@ export const migrationMethods = {
       ['inbox_record_types', 'Типы входящих', 'Справочник типов входящих.', 'Хранит разрешённые типы записей Inbox: входящее от человека по API, входящее от агента по API, внутреннее входящее от агента и добавленное человеком из интерфейса.'],
       ['handlers', 'Обработчики', 'Реестр runtime-обработчиков.', 'Хранит полный реестр обработчиков Brai: stable id, target, тип, статус, подробное описание, условия срабатывания, входы, выходы, взаимодействия, side effects, используемый LLM provider/model, prompt template, timeout, fallback и source module. Каждое добавление или изменение обработчика должно обновлять соответствующую строку.'],
       ['handler_schedules', 'Расписания обработчиков', 'Очередь scheduled runtime-обработчиков.', 'Хранит расписания runtime-обработчиков Brai: ссылку на handlers, статус, следующий запуск, повторяемый интервал, lock от параллельного запуска, последние timestamps и последнюю ошибку. Внешний systemd timer только будит scheduler-runner; due-логика хранится здесь.'],
-      ['items', 'Сущности', 'Реестр рабочих сущностей.', 'Хранит главные рабочие сущности Brai как стабильные id для схемы, API и технических решений.'],
+      ['item_roles', 'Роли сущностей', 'Активные и завершённые роли сущностей.', 'Хранит временные роли сущностей из items: ссылку на items.id, тип роли из item_role_types, период активности, простой статус active/ended/deleted и небольшой role-level metadata_json. Реальные поля роли живут в payload_table типа роли.'],
+      ['item_role_types', 'Типы ролей сущностей', 'Справочник ролей items.', 'Хранит системные и будущие пользовательские типы ролей для items: системное название, человеческое название, описание, payload_table, признак is_system, дату создания и soft-delete дату вывода из употребления.'],
+      ['items', 'Сущности', 'Главная таблица сущностей.', 'Хранит identity-уровень сущностей Brai: стабильный id, user_id владельца, человеческое имя, общее описание, автора создания, timestamps создания и обновления общих полей, а также deleted_at_utc для soft-delete. Role-specific данные живут в таблицах ролей.'],
       ['schema_migrations', 'Миграции', 'Журнал изменений схемы.', 'Хранит версии уже примененных миграций SQLite, время применения и краткое описание.'],
       ['session', 'Auth-сессии', 'Better Auth sessions.', 'Хранит Better Auth web-сессии пользователей: token, срок действия, userId, ipAddress и userAgent.'],
       ['sqlite_sequence', 'Счётчики', 'Служебные счетчики SQLite.', 'Внутренняя таблица SQLite для AUTOINCREMENT-счетчиков. Это не бизнес-данные Brai.'],
@@ -1048,9 +1058,6 @@ export const migrationMethods = {
           OR source <> ''
         );
     `);
-    this.db
-      .prepare('INSERT INTO items (id, created_at_utc) VALUES (?, ?) ON CONFLICT(id) DO NOTHING')
-      .run('inbox', now);
   }
 ,
 
@@ -1247,11 +1254,6 @@ export const migrationMethods = {
   ensureActivitySchema() {
     const now = new Date().toISOString();
     this.db.exec(`
-      CREATE TABLE IF NOT EXISTS items (
-        id TEXT PRIMARY KEY,
-        created_at_utc TEXT NOT NULL
-      );
-
       CREATE TABLE IF NOT EXISTS activity_types (
         id TEXT PRIMARY KEY,
         title TEXT NOT NULL,
@@ -1328,10 +1330,6 @@ export const migrationMethods = {
     ]) {
       upsertActivityType.run(...type, now);
     }
-    this.db
-      .prepare('INSERT INTO items (id, created_at_utc) VALUES (?, ?) ON CONFLICT(id) DO NOTHING')
-      .run('activities', now);
-
     if (this.tableExists('activity_events') && this.columnExists('activity_events', 'type') && !this.columnExists('activity_events', 'change_type')) {
       this.db.exec('ALTER TABLE activity_events RENAME COLUMN type TO change_type;');
     }
@@ -1372,6 +1370,102 @@ export const migrationMethods = {
 
       CREATE INDEX IF NOT EXISTS idx_activity_events_change_type_occurred
       ON activity_events (change_type, occurred_at_utc, server_sequence);
+    `);
+  }
+,
+
+  ensureItemEntitySchema() {
+    const now = new Date().toISOString();
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS items (
+        id TEXT PRIMARY KEY,
+        user_id TEXT,
+        title TEXT NOT NULL DEFAULT '',
+        description TEXT NOT NULL DEFAULT '',
+        author TEXT NOT NULL DEFAULT '',
+        created_at_utc TEXT NOT NULL,
+        updated_at_utc TEXT NOT NULL,
+        deleted_at_utc TEXT
+      );
+
+      CREATE TABLE IF NOT EXISTS item_role_types (
+        id INTEGER PRIMARY KEY,
+        title_system TEXT NOT NULL UNIQUE,
+        title TEXT NOT NULL,
+        description TEXT NOT NULL,
+        payload_table TEXT NOT NULL DEFAULT '',
+        is_system INTEGER NOT NULL DEFAULT 0 CHECK (is_system IN (0, 1)),
+        created_at_utc TEXT NOT NULL,
+        deleted_at_utc TEXT
+      );
+
+      CREATE TABLE IF NOT EXISTS item_roles (
+        id INTEGER PRIMARY KEY,
+        items_id TEXT NOT NULL,
+        item_role_types_id INTEGER NOT NULL,
+        active_from_utc TEXT NOT NULL,
+        active_to_utc TEXT,
+        status TEXT NOT NULL CHECK (status IN ('active', 'ended', 'deleted')),
+        metadata_json TEXT NOT NULL DEFAULT '{}',
+        FOREIGN KEY (items_id) REFERENCES items(id),
+        FOREIGN KEY (item_role_types_id) REFERENCES item_role_types(id)
+      );
+    `);
+
+    for (const [column, definition] of [
+      ['user_id', 'TEXT'],
+      ['title', "TEXT NOT NULL DEFAULT ''"],
+      ['description', "TEXT NOT NULL DEFAULT ''"],
+      ['author', "TEXT NOT NULL DEFAULT ''"],
+      ['created_at_utc', "TEXT NOT NULL DEFAULT ''"],
+      ['updated_at_utc', "TEXT NOT NULL DEFAULT ''"],
+      ['deleted_at_utc', 'TEXT']
+    ]) {
+      if (!this.columnExists('items', column)) {
+        this.db.exec(`ALTER TABLE items ADD COLUMN ${column} ${definition};`);
+      }
+    }
+    this.db.exec(`
+      UPDATE items
+      SET updated_at_utc = created_at_utc
+      WHERE updated_at_utc = '';
+
+      CREATE INDEX IF NOT EXISTS idx_items_user_deleted_updated
+      ON items (user_id, deleted_at_utc, updated_at_utc);
+
+      CREATE INDEX IF NOT EXISTS idx_item_roles_items_status
+      ON item_roles (items_id, status);
+
+      CREATE INDEX IF NOT EXISTS idx_item_roles_type_status
+      ON item_roles (item_role_types_id, status);
+    `);
+
+    const upsertRoleType = this.db.prepare(`
+      INSERT INTO item_role_types (
+        id, title_system, title, description, payload_table, is_system, created_at_utc, deleted_at_utc
+      ) VALUES (?, ?, ?, ?, ?, 1, ?, NULL)
+      ON CONFLICT(id) DO UPDATE SET
+        title_system = excluded.title_system,
+        title = excluded.title,
+        description = excluded.description,
+        payload_table = excluded.payload_table,
+        is_system = 1,
+        deleted_at_utc = NULL
+    `);
+    for (const roleType of [
+      [1, 'activity', 'Activity', 'Роль activity для сущностей, чьи поля роли живут в activities.', 'activities'],
+      [2, 'inbox', 'Inbox', 'Роль inbox для сущностей, чьи поля роли живут в inbox.', 'inbox'],
+      [3, 'focus_session', 'Focus session', 'Роль focus_session для сущностей, чьи поля роли живут в focus_sessions.', 'focus_sessions']
+    ]) {
+      upsertRoleType.run(...roleType, now);
+    }
+  }
+,
+
+  clearItemsEntityData() {
+    this.db.exec(`
+      DELETE FROM item_roles;
+      DELETE FROM items;
     `);
   }
 ,

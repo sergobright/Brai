@@ -9,7 +9,7 @@
 - Server SQLite является source of truth для timer canonical state, sessions, Activities и activity events.
 - Timer sync основан на event log и deterministic replay.
 - Activities sync использует отдельный event log: `activities` и `activity_events`.
-- Main work entities регистрируются в таблице `items`; сейчас основной entity - `activities`.
+- Main work entities живут identity-уровнем в таблице `items`; временные роли сущностей живут в `item_roles`, справочник ролей - в `item_role_types`.
 - Server SQLite schema metadata регистрируется в таблице `table_descriptions`.
 - Runtime-обработчики регистрируются в server SQLite таблице `handlers`.
 
@@ -23,9 +23,12 @@
 
 ## Main entities
 
-- Brai main work entities регистрируются в server SQLite таблице `items`.
+- `items` - главная таблица сущностей Brai: стабильный id, владелец, человеческое имя, общее описание, автор создания, timestamps identity-уровня и soft-delete.
+- `items` не является registry таблиц и не должна заполняться строками `activities`, `inbox` или другими payload table names.
+- Роли сущностей назначаются через `item_roles`; role-specific поля живут в таблице из `item_role_types.payload_table`.
+- Системные `item_role_types`: `activity` -> `activities`, `inbox` -> `inbox`, `focus_session` -> `focus_sessions`.
+- Новые сущности не создаются вручную; прямой путь создания должен идти через отдельную AI-процедуру. Не добавляй обходные ручные процедуры без явного требования.
 - В technical schema/workflow decisions ссылайся на `items.id`.
-- Первый зарегистрированный main entity - `activities`.
 
 ## FK naming
 

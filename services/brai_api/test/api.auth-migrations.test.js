@@ -80,7 +80,7 @@ test('migration seeds legacy sessions and survives close and reopen', async () =
   }
 });
 
-test('migration renames actions tables to activities and seeds items', async () => {
+test('migration renames actions tables to activities and clears items', async () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'brai-api-actions-migrate-'));
   const dbPath = path.join(tmp, 'brai.sqlite');
   seedActionsDatabase(dbPath);
@@ -109,7 +109,7 @@ test('migration renames actions tables to activities and seeds items', async () 
     assert.ok(tables.includes('activity_events'));
     assert.ok(!tables.includes('actions'));
     assert.ok(!tables.includes('action_events'));
-    assert.equal(runtime.store.db.prepare('SELECT id FROM items').get().id, 'activities');
+    assert.equal(runtime.store.db.prepare('SELECT COUNT(*) AS count FROM items').get().count, 0);
     const activityColumns = runtime.store.db.prepare("PRAGMA table_info(activities)").all().map((row) => row.name);
     assert.ok(activityColumns.includes('description_md'));
     assert.ok(activityColumns.includes('activity_type_id'));
@@ -174,11 +174,35 @@ test('migration adds inbox entity schema and metadata', async () => {
     assert.ok(indexes.includes('idx_inbox_record_type_created'));
     assert.ok(indexes.includes('idx_inbox_related'));
 
-    const items = fixture.store.db
-      .prepare("SELECT id FROM items WHERE id IN ('activities', 'inbox') ORDER BY id")
-      .all()
-      .map((row) => row.id);
-    assert.deepEqual(items, ['activities', 'inbox']);
+    const itemColumns = new Set(
+      fixture.store.db.prepare('PRAGMA table_info(items)').all().map((row) => row.name)
+    );
+    assert.deepEqual(
+      ['id', 'user_id', 'title', 'description', 'author', 'created_at_utc', 'updated_at_utc', 'deleted_at_utc'].filter(
+        (column) => !itemColumns.has(column)
+      ),
+      []
+    );
+    assert.equal(fixture.store.db.prepare('SELECT COUNT(*) AS count FROM items').get().count, 0);
+    assert.deepEqual(
+      fixture.store.db
+        .prepare('SELECT title_system, payload_table, is_system FROM item_role_types ORDER BY id')
+        .all(),
+      [
+        { title_system: 'activity', payload_table: 'activities', is_system: 1 },
+        { title_system: 'inbox', payload_table: 'inbox', is_system: 1 },
+        { title_system: 'focus_session', payload_table: 'focus_sessions', is_system: 1 }
+      ]
+    );
+    const roleColumns = new Set(
+      fixture.store.db.prepare('PRAGMA table_info(item_roles)').all().map((row) => row.name)
+    );
+    assert.deepEqual(
+      ['id', 'items_id', 'item_role_types_id', 'active_from_utc', 'active_to_utc', 'status', 'metadata_json'].filter(
+        (column) => !roleColumns.has(column)
+      ),
+      []
+    );
     assert.deepEqual(
       fixture.store.db.prepare('SELECT id FROM activity_types ORDER BY id').all().map((row) => row.id),
       ['action', 'operation']
@@ -210,6 +234,10 @@ test('migration adds inbox entity schema and metadata', async () => {
       fixture.store.db.prepare('SELECT description FROM schema_migrations WHERE version = 41').get().description,
       'add scheduled runtime handlers'
     );
+    assert.equal(
+      fixture.store.db.prepare('SELECT description FROM schema_migrations WHERE version = 48').get().description,
+      'promote items to main entity table and seed item roles'
+    );
     assert.ok(fixture.store.db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'inbox_events'").get());
     assert.ok(fixture.store.db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'inbox_record_types'").get());
     assert.ok(fixture.store.db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'handlers'").get());
@@ -229,6 +257,14 @@ test('migration adds inbox entity schema and metadata', async () => {
     assert.equal(
       fixture.store.db.prepare("SELECT title FROM table_descriptions WHERE table_name = 'handler_schedules'").get().title,
       'Расписания обработчиков'
+    );
+    assert.equal(
+      fixture.store.db.prepare("SELECT title FROM table_descriptions WHERE table_name = 'item_role_types'").get().title,
+      'Типы ролей сущностей'
+    );
+    assert.equal(
+      fixture.store.db.prepare("SELECT title FROM table_descriptions WHERE table_name = 'item_roles'").get().title,
+      'Роли сущностей'
     );
     const handler = fixture.store.db
       .prepare(`
@@ -301,7 +337,7 @@ test('migration adds inbox entity schema and metadata', async () => {
     );
 
     fixture.store.migrate();
-    assert.equal(fixture.store.db.prepare("SELECT COUNT(*) AS count FROM items WHERE id = 'inbox'").get().count, 1);
+    assert.equal(fixture.store.db.prepare('SELECT COUNT(*) AS count FROM items').get().count, 0);
     assert.equal(
       fixture.store.db
         .prepare("SELECT COUNT(*) AS count FROM handlers WHERE id = 'inbound.inbox.title_generator'")
