@@ -37,27 +37,6 @@ test("OTA version follows the build ledger before stale deployed manifests", () 
   }
 });
 
-test("source version override can intentionally bump OTA above the build ledger", () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "brai-version-source-"));
-  try {
-    const dbPath = path.join(tmp, "brai.sqlite");
-    const db = new Database(dbPath);
-    db.exec(`
-      CREATE TABLE build_versions (version_type_id TEXT NOT NULL, version INTEGER NOT NULL);
-      INSERT INTO build_versions (version_type_id, version) VALUES ('build', 83), ('apk', 1);
-    `);
-    db.close();
-
-    fs.mkdirSync(path.join(tmp, "apps/brai_app/public"), { recursive: true });
-    fs.writeFileSync(path.join(tmp, "apps/brai_app/public/version.json"), `${JSON.stringify({ version: "0.0.84", sourceVersionOverride: true })}\n`);
-
-    assert.equal(resolveAppVersion({ environment: "prod", db: dbPath, root: tmp, explicit: "" }), "0.0.84");
-    assert.equal(resolveAppVersion({ environment: "preview-d", prodDb: dbPath, root: tmp, explicit: "" }), "0.0.84");
-  } finally {
-    fs.rmSync(tmp, { recursive: true, force: true });
-  }
-});
-
 test("OTA version resolution fails instead of falling back to stale public metadata", () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "brai-version-missing-"));
   try {

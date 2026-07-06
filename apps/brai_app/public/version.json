@@ -1,12 +1,12 @@
 {
   "name": "Brai",
   "client": "next-capacitor",
-  "version": "0.0.84",
-  "sourceVersionOverride": true,
+  "version": "0.0.10",
+  "otaVersion": "0.0.84",
   "versionParts": {
     "major": 0,
     "release": 0,
-    "build": 84
+    "build": 10
   },
   "androidVersionCode": 1
 }

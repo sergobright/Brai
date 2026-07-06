@@ -41,11 +41,9 @@ export function resolveAppVersion({
   if (kind === "apk") return validApkVersion(explicit || resolveApkVersion(db || prodDb, { nextApk, targetBranch, targetCommit }));
   if (explicit) return validOtaVersion(explicit);
 
-  const sourceOverride = process.env.BRAI_IGNORE_SOURCE_VERSION_OVERRIDE === "true" ? "" : sourceVersionOverride(root);
   const ledgerVersion = latestOtaVersion([
     db && latestBuildOtaVersion(db),
     prodDb && latestBuildOtaVersion(prodDb),
-    sourceOverride,
   ]);
   if (ledgerVersion) return validOtaVersion(ledgerVersion);
 
@@ -99,13 +97,6 @@ function readVersionJson(filePath) {
   if (!fs.existsSync(filePath)) return "";
   const parsed = JSON.parse(fs.readFileSync(filePath, "utf8"));
   return parsed.otaVersion || parsed.version || "";
-}
-
-function sourceVersionOverride(root) {
-  const versionJson = path.join(root, "apps/brai_app/public/version.json");
-  if (!fs.existsSync(versionJson)) return "";
-  const parsed = JSON.parse(fs.readFileSync(versionJson, "utf8"));
-  return parsed.sourceVersionOverride === true ? parsed.otaVersion || parsed.version || "" : "";
 }
 
 function latestMobileTargetVersion(mobileTarget) {

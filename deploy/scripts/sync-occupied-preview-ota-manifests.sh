@@ -101,7 +101,7 @@ if [[ ! -f "$REGISTRY" ]]; then
   exit 0
 fi
 
-VERSION="${BRAI_APP_VERSION:-$(BRAI_IGNORE_SOURCE_VERSION_OVERRIDE=true "$NODE_BIN" "$ROOT/deploy/scripts/resolve-app-version.mjs" --environment prod --root "$ROOT" --db "$PROD_DB")}"
+VERSION="${BRAI_APP_VERSION:-$("$NODE_BIN" "$ROOT/deploy/scripts/resolve-app-version.mjs" --environment prod --root "$ROOT" --db "$PROD_DB")}"
 mapfile -t OCCUPIED_SLOTS < <("$NODE_BIN" -e '
 const fs = require("node:fs");
 const registry = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
