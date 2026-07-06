@@ -1538,6 +1538,7 @@ function deliveryClassForFile(file) {
   ) {
     return "docs";
   }
+  if (file === "supabase/migrations/0002_enable_rls_public_tables.sql") return "infra";
   if (
     file === ".gitignore" ||
     file === ".github/workflows/brai-delivery.yml" ||
@@ -1569,6 +1570,7 @@ function deliveryClassForFile(file) {
       "deploy/scripts/preview-slots.sh",
       "deploy/scripts/production-sqlite-maintenance.sh",
       "deploy/scripts/permissions.sh",
+      "deploy/scripts/postgres-smoke.mjs",
       "deploy/scripts/prune-caddy-site-blocks.mjs",
       "deploy/scripts/publish-capacitor-apk.sh",
       "deploy/scripts/publish-client-web-layer.sh",
