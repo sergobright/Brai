@@ -19,17 +19,7 @@ export function apkReleaseTargets(root = process.env.BRAI_ROOT ?? path.resolve(i
   const { environments } = JSON.parse(fs.readFileSync(path.join(root, "deploy/environments.json"), "utf8"));
   return [
     fromDeployEnv("prod", environments.prod),
-    {
-      environment: "dev",
-      displayName: "Dev",
-      displayLabel: "Dev",
-      domain: "dev.brightos.world",
-      androidApp: "Brai Dev",
-      androidFlavor: "dev",
-      applicationId: `${environments.prod.applicationId}.dev`,
-      path: "",
-      releaseKey: "dev",
-    },
+    fromDeployEnv("dev", environments.dev),
     ...previewKeys.map((key) => fromDeployEnv(`preview-${key}`, environments[`preview-${key}`])),
   ];
 }

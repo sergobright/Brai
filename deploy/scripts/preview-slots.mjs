@@ -34,6 +34,13 @@ try {
     case "clear-apk":
       result = clearOwnedApk(registry, args[0], args[1], now);
       break;
+    case "supabase":
+      result = updateOwnedSupabaseBranch(registry, args[0], {
+        name: args[1] || null,
+        id: args[2] || null,
+        status: args[3] || null
+      }, now);
+      break;
     case "next-apk-preview":
       result = nextApkPreview(registry, args[0], args[1], args[2], now);
       break;
@@ -47,7 +54,7 @@ try {
       result = { ok: true, registry };
       break;
     default:
-      throw new Error("usage: preview-slots.sh init|status|allocate <branch> <commit>|ready <branch> <commit>|failed <branch> <commit>|apk <branch> <commit> <versionCode> <file> <version> [previewIteration] [buildKind]|clear-apk <branch> <commit>|next-apk-preview <branch> <commit> <stableVersion>|release <branch-or-slot>|dequeue <branch>");
+      throw new Error("usage: preview-slots.sh init|status|allocate <branch> <commit>|ready <branch> <commit>|failed <branch> <commit>|apk <branch> <commit> <versionCode> <file> <version> [previewIteration] [buildKind]|clear-apk <branch> <commit>|supabase <branch> <name> [id] [status]|next-apk-preview <branch> <commit> <stableVersion>|release <branch-or-slot>|dequeue <branch>");
   }
 
   if (command !== "status") {
@@ -156,6 +163,19 @@ function clearOwnedApk(registry, branch, commit, now) {
     apk_preview_iteration: null,
     apk_build_kind: "stable",
     apk_updated_at: null,
+    updated_at: now,
+  });
+  return { ok: true, slot: existing.slot, entry: existing.entry };
+}
+
+function updateOwnedSupabaseBranch(registry, branch, metadata, now) {
+  requireBranch(branch);
+  const existing = findByBranch(registry, branch);
+  if (!existing) throw new Error(`branch has no preview slot: ${branch}`);
+  Object.assign(existing.entry, {
+    supabase_branch_name: metadata.name,
+    supabase_branch_id: metadata.id,
+    supabase_branch_status: metadata.status,
     updated_at: now,
   });
   return { ok: true, slot: existing.slot, entry: existing.entry };
@@ -281,6 +301,9 @@ function defaultSlot(slot) {
     apk_preview_iteration: null,
     apk_build_kind: "stable",
     apk_updated_at: null,
+    supabase_branch_name: null,
+    supabase_branch_id: null,
+    supabase_branch_status: null,
     assigned_at: null,
     updated_at: null,
   };
@@ -307,6 +330,7 @@ function renderStatusPage(registry) {
           <div><dt>APK</dt><dd>${apkUrl ? `<a href="${escapeHtml(apkUrl)}">${escapeHtml(entry.apk_file)}</a>` : escapeHtml(apkStatus)}</dd></div>
           <div><dt>APK versionCode</dt><dd>${escapeHtml(entry.apk_version_code ?? "none")}</dd></div>
           <div><dt>APK kind</dt><dd>${escapeHtml(entry.apk_build_kind ?? "stable")}</dd></div>
+          <div><dt>Supabase</dt><dd>${escapeHtml(entry.supabase_branch_name ? `${entry.supabase_branch_name} (${entry.supabase_branch_status ?? "unknown"})` : "none")}</dd></div>
         </dl>
       </section>`;
     })

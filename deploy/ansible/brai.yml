@@ -385,9 +385,20 @@
         dest: "{{ brai_env_root }}/{{ item.value.path }}/brai-api.env"
         remote_src: true
         force: false
-        owner: root
-        group: root
-        mode: "0640"
+        owner: "{{ brai_deploy_user }}"
+        group: "{{ brai_deploy_user }}"
+        mode: "0660"
+      loop: "{{ brai_envs | dict2items | rejectattr('key', 'equalto', 'prod') | list }}"
+      loop_control:
+        label: "{{ item.key }}"
+      when: not ansible_check_mode
+
+    - name: Ensure per-environment Brai API env files are deploy-writable
+      ansible.builtin.file:
+        path: "{{ brai_env_root }}/{{ item.value.path }}/brai-api.env"
+        owner: "{{ brai_deploy_user }}"
+        group: "{{ brai_deploy_user }}"
+        mode: "0660"
       loop: "{{ brai_envs | dict2items | rejectattr('key', 'equalto', 'prod') | list }}"
       loop_control:
         label: "{{ item.key }}"

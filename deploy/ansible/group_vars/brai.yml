@@ -25,6 +25,11 @@ brai_envs:
     path: prod
     api_port: 3020
     service: brai-api.service
+  dev:
+    domain: dev.brightos.world
+    path: dev
+    api_port: 3030
+    service: brai-api-dev.service
   preview-a:
     domain: a.test.brightos.world
     path: preview-a

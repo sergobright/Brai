@@ -2,7 +2,7 @@ import process from "node:process";
 import { BraiStore } from "../../services/brai_api/src/store.js";
 
 const args = parseArgs(process.argv.slice(2));
-const store = new BraiStore(required(args, "db"));
+const store = new BraiStore(databaseTarget(args));
 
 try {
   store.recordDeployment({
@@ -36,4 +36,8 @@ function required(values, key) {
   const value = values[key];
   if (!value) throw new Error(`missing --${key}`);
   return value;
+}
+
+function databaseTarget(values) {
+  return values["postgres-url"] || process.env.BRAI_DATABASE_URL || required(values, "db");
 }

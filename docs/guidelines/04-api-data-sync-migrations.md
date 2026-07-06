@@ -2,24 +2,27 @@
 
 ## Назначение
 
-Этот guideline нужен перед изменением `services/brai_api`, SQLite schema, sync endpoints, canonical replay, migrations или client data contracts.
+Этот guideline нужен перед изменением `services/brai_api`, Supabase/Postgres schema, sync endpoints, canonical replay, migrations или client data contracts.
 
 ## Источники данных
 
-- Server SQLite является source of truth для timer canonical state, sessions, Activities и activity events.
+- Supabase Postgres является runtime source of truth для timer canonical state, sessions, Activities, activity events, auth, deploy/version ledger, agents, schedules и AI logs.
+- `BRAI_DATABASE_URL` - server-side Postgres DSN для runtime API, scheduler и deploy ledger scripts. `BRAI_DATA_STORE=postgres` - transitional guard. `BRAI_DB` остаётся только для frozen SQLite backup/import source и legacy tests.
+- Node API остаётся единственной data API boundary. Web/Android не получают Supabase service credentials и не ходят напрямую в Supabase Data API.
 - Timer sync основан на event log и deterministic replay.
 - Activities sync использует отдельный event log: `activities` и `activity_events`.
 - Main work entities живут identity-уровнем в таблице `items`; временные роли сущностей живут в `item_roles`, справочник ролей - в `item_role_types`.
-- Server SQLite schema metadata регистрируется в таблице `table_descriptions`.
-- Runtime AI-агенты регистрируются в server SQLite таблице `agents`.
+- Server schema metadata регистрируется в таблице `table_descriptions`.
+- Runtime AI-агенты регистрируются в таблице `agents`.
 
 ## Runtime schema verification
 
-- Перед правилом, миграцией, утверждением или handoff про runtime SQLite таблицу проверь реальное целевое окружение: DB path, наличие таблицы, `.schema`, `PRAGMA table_info`, индексы и релевантные строки.
+- Перед правилом, миграцией, утверждением или handoff про runtime таблицу проверь реальное целевое окружение: environment, Postgres DSN source, наличие таблицы, columns, indexes, constraints и релевантные строки.
 - Не выводи состояние preview/prod из кода, миграций, скриншота или слов Сергея. Если не проверил живую базу, так и скажи.
-- Для live SQLite в WAL mode используй обычный read-only connection (`mode=ro`), а не `immutable=1`, иначе свежие данные из `-wal` можно не увидеть.
-- Для live SQLite writes следуй production SQLite maintenance runbook. Codex namespace подходит для read-only проверок, но не является источником правды по write-доступу к runtime `data/`; Codex operation-задачи закрывай через `deploy/scripts/complete-operation-activities.sh <operation-activity-id>`, который пишет только undeleted `activity_type_id='operation'` rows с `author='Codex'`.
-- В невизуальном handoff укажи проверенные environment, DB path, SQL/команду и ключевые строки результата.
+- Для live Postgres проверок используй server-side credentials только из защищённых env-файлов или CI secrets; не вставляй DSN, пароли, tokens или connection strings в docs, logs и commit.
+- Legacy SQLite проверяй только как frozen backup/import source. Для frozen SQLite в WAL mode используй обычный read-only connection (`mode=ro`), а не `immutable=1`, иначе свежие данные из `-wal` можно не увидеть.
+- Codex operation-задачи закрывай через deploy-owned helper для текущего runtime API/DB; не обходи API/runtime ownership прямыми клиентскими credentials.
+- В невизуальном handoff укажи проверенные environment, DSN source без секрета, SQL/команду и ключевые строки результата.
 
 ## Main entities
 
@@ -38,14 +41,16 @@
 
 ## Миграции
 
-- Каждое server-side schema изменение получает migration marker в `schema_migrations`.
+- Postgres baseline живёт в `supabase/migrations/0001_brai_baseline.sql`; не портируй старые SQLite migrations буквально без необходимости.
+- Каждое server-side schema изменение получает Supabase migration file и marker в Postgres migration history.
 - Любое server-side schema metadata изменение обновляет `table_descriptions` в том же change: новые/изменённые таблицы, столбцы, индексы, связи, зависимости и назначение. Content-only изменения строк этого не требуют.
 - `table_descriptions` имеет поля `table_name`, `title`, `short_description`, `long_description`, `updated_at_utc`; перед обновлением проверь эти поля в целевой DB.
 - Любой новый или изменённый runtime AI-агент должен обновлять строку в `agents` в том же change. Заполняй максимум полезного контекста: stable id, target, kind, status, краткое и подробное описание, когда срабатывает, условия пропуска, входы, выходы, зависимости/взаимодействия, side effects, LLM provider/model, полный prompt template, timeout, fallback и source module.
 - Каждый runtime AI-агент при фактическом срабатывании пишет ровно одну строку в `ai_logs`: `agent_id`, `agent_version`, UTC `dt`, `status`, единый `json_data`, короткий русский `ai_title`, и nullable `flow_id`/`flow_command`.
-- Перед live migration или destructive-risk изменением делай SQLite backup.
+- Перед production cutover, import или destructive-risk изменением делай свежий frozen SQLite backup и сохраняй его read-only.
 - Migration должна быть idempotent для повторного запуска.
 - Не меняй canonical data shape без проверки API consumers и client cache projection.
+- Preview `codex/*` использует отдельную Supabase preview branch с production data clone. Dev использует долгоживущую `brai-dev` branch без automatic prod refresh.
 
 ## Sync rules
 

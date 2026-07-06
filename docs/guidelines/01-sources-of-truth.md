@@ -17,15 +17,15 @@
 - Stable requirements: `openspec/specs/`.
 - Planned requirements: `openspec/changes/<change-id>/`.
 - Public project context and decisions: `memory-bank/`.
-- Server SQLite schema metadata: `table_descriptions`, updated with every schema metadata change.
+- Server Postgres schema metadata: `table_descriptions`, updated with every schema metadata change.
 - Runtime or service registry: outside the repository.
 
 ## Runtime Facts
 
 - Do not record rules, claim implementation, or accept verification for a runtime table, service, deployment, or environment until the actual target environment has been inspected.
-- For SQLite facts, verify the real database path, table presence, schema, indexes, and relevant rows with read-only SQL before writing docs or reporting completion.
-- Preview and production databases can differ; name the environment and path checked.
-- For live SQLite databases in WAL mode, use a normal read-only connection and include WAL state. Do not use `immutable=1` for freshness-sensitive verification.
+- For Postgres facts, verify the real environment, DSN source without secrets, table presence, schema, indexes, constraints, and relevant rows with read-only SQL before writing docs or reporting completion.
+- Preview, Dev, and production databases can differ; name the environment and checked DSN source.
+- For frozen SQLite backup/import facts, verify the real database path with read-only SQL. If a backup is in WAL mode, use a normal read-only connection and include WAL state; do not use `immutable=1` for freshness-sensitive verification.
 - If runtime access is unavailable, report the blocker. Do not infer production or preview state from repository code, migrations, screenshots, or user wording alone.
 
 ## Public Safety

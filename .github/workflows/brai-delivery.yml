@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - dev
       - 'codex/**'
   pull_request:
     branches:
@@ -44,6 +45,7 @@ jobs:
     outputs:
       delivery_class: ${{ steps.classify.outputs.delivery_class }}
       requires_preview: ${{ steps.classify.outputs.requires_preview }}
+      requires_dev_deploy: ${{ steps.classify.outputs.requires_dev_deploy }}
       auto_merge: ${{ steps.classify.outputs.auto_merge }}
     steps:
       - uses: actions/checkout@v4
@@ -181,6 +183,15 @@ jobs:
           BRAI_BRANCH: ${{ github.ref_name }}
           BRAI_COMMIT: ${{ github.sha }}
           BRAI_BASE_COMMIT: ${{ github.event.before }}
+      - name: Temporal Supabase preview started
+        run: deploy/scripts/ci-temporal-signal.sh preview --branch "$BRAI_BRANCH" --sha "$BRAI_COMMIT" --event supabase_preview_started --source deploy-preview
+        env:
+          BRAI_DEPLOY_HOST: ${{ vars.BRAI_DEPLOY_HOST }}
+          BRAI_DEPLOY_USER: ${{ vars.BRAI_DEPLOY_USER }}
+          BRAI_DEPLOY_SSH_PORT: ${{ vars.BRAI_DEPLOY_SSH_PORT || '22' }}
+          BRAI_DEPLOY_SSH_KEY: ${{ secrets.BRAI_DEPLOY_SSH_KEY }}
+          BRAI_BRANCH: ${{ github.ref_name }}
+          BRAI_COMMIT: ${{ github.sha }}
       - id: deploy_preview
         run: deploy/scripts/ci-ssh-deploy.sh
         env:
@@ -191,9 +202,31 @@ jobs:
           BRAI_DEPLOY_SSH_KEY: ${{ secrets.BRAI_DEPLOY_SSH_KEY }}
           BRAI_BRANCH: ${{ github.ref_name }}
           BRAI_COMMIT: ${{ github.sha }}
+      - name: Temporal Supabase preview passed
+        if: success()
+        run: deploy/scripts/ci-temporal-signal.sh preview --branch "$BRAI_BRANCH" --sha "$BRAI_COMMIT" --event supabase_preview_passed --slot "$BRAI_PREVIEW_SLOT" --source deploy-preview
+        env:
+          BRAI_DEPLOY_HOST: ${{ vars.BRAI_DEPLOY_HOST }}
+          BRAI_DEPLOY_USER: ${{ vars.BRAI_DEPLOY_USER }}
+          BRAI_DEPLOY_SSH_PORT: ${{ vars.BRAI_DEPLOY_SSH_PORT || '22' }}
+          BRAI_DEPLOY_SSH_KEY: ${{ secrets.BRAI_DEPLOY_SSH_KEY }}
+          BRAI_BRANCH: ${{ github.ref_name }}
+          BRAI_COMMIT: ${{ github.sha }}
+          BRAI_PREVIEW_SLOT: ${{ steps.deploy_preview.outputs.preview_slot }}
       - name: Temporal preview deploy passed
         if: success()
         run: deploy/scripts/ci-temporal-signal.sh preview --branch "$BRAI_BRANCH" --sha "$BRAI_COMMIT" --event preview_deploy_passed --slot "$BRAI_PREVIEW_SLOT" --source deploy-preview
+        env:
+          BRAI_DEPLOY_HOST: ${{ vars.BRAI_DEPLOY_HOST }}
+          BRAI_DEPLOY_USER: ${{ vars.BRAI_DEPLOY_USER }}
+          BRAI_DEPLOY_SSH_PORT: ${{ vars.BRAI_DEPLOY_SSH_PORT || '22' }}
+          BRAI_DEPLOY_SSH_KEY: ${{ secrets.BRAI_DEPLOY_SSH_KEY }}
+          BRAI_BRANCH: ${{ github.ref_name }}
+          BRAI_COMMIT: ${{ github.sha }}
+          BRAI_PREVIEW_SLOT: ${{ steps.deploy_preview.outputs.preview_slot }}
+      - name: Temporal Supabase preview failed
+        if: failure() && steps.deploy_preview.outcome == 'failure'
+        run: deploy/scripts/ci-temporal-signal.sh preview --branch "$BRAI_BRANCH" --sha "$BRAI_COMMIT" --event supabase_preview_failed --slot "$BRAI_PREVIEW_SLOT" --source deploy-preview
         env:
           BRAI_DEPLOY_HOST: ${{ vars.BRAI_DEPLOY_HOST }}
           BRAI_DEPLOY_USER: ${{ vars.BRAI_DEPLOY_USER }}
@@ -322,6 +355,39 @@ jobs:
           BRAI_DEPLOY_SSH_PORT: ${{ vars.BRAI_DEPLOY_SSH_PORT || '22' }}
           BRAI_DEPLOY_SSH_KEY: ${{ secrets.BRAI_DEPLOY_SSH_KEY }}
           BRAI_COMMIT: ${{ github.sha }}
+      - name: Temporal Supabase prod migration started
+        run: deploy/scripts/ci-temporal-signal.sh promotion --target prod --sha "$BRAI_COMMIT" --event supabase_prod_migration_started --source deploy-prod
+        env:
+          BRAI_DEPLOY_HOST: ${{ vars.BRAI_DEPLOY_HOST }}
+          BRAI_DEPLOY_USER: ${{ vars.BRAI_DEPLOY_USER }}
+          BRAI_DEPLOY_SSH_PORT: ${{ vars.BRAI_DEPLOY_SSH_PORT || '22' }}
+          BRAI_DEPLOY_SSH_KEY: ${{ secrets.BRAI_DEPLOY_SSH_KEY }}
+          BRAI_COMMIT: ${{ github.sha }}
+      - run: npm --prefix services/brai_api ci
+      - id: supabase_prod_migration
+        run: |
+          node deploy/scripts/supabase-branch.mjs migrate --postgres-url "$BRAI_DATABASE_URL"
+          node deploy/scripts/postgres-smoke.mjs "$BRAI_DATABASE_URL" --expect-imported
+        env:
+          BRAI_DATABASE_URL: ${{ secrets.BRAI_PROD_DATABASE_URL }}
+          BRAI_EXPECT_IMPORTED: 'true'
+      - name: Temporal Supabase prod migration passed
+        run: deploy/scripts/ci-temporal-signal.sh promotion --target prod --sha "$BRAI_COMMIT" --event supabase_prod_migration_passed --source deploy-prod
+        env:
+          BRAI_DEPLOY_HOST: ${{ vars.BRAI_DEPLOY_HOST }}
+          BRAI_DEPLOY_USER: ${{ vars.BRAI_DEPLOY_USER }}
+          BRAI_DEPLOY_SSH_PORT: ${{ vars.BRAI_DEPLOY_SSH_PORT || '22' }}
+          BRAI_DEPLOY_SSH_KEY: ${{ secrets.BRAI_DEPLOY_SSH_KEY }}
+          BRAI_COMMIT: ${{ github.sha }}
+      - name: Temporal Supabase prod migration failed
+        if: failure() && steps.supabase_prod_migration.outcome == 'failure'
+        run: deploy/scripts/ci-temporal-signal.sh promotion --target prod --sha "$BRAI_COMMIT" --event supabase_prod_migration_failed --source deploy-prod
+        env:
+          BRAI_DEPLOY_HOST: ${{ vars.BRAI_DEPLOY_HOST }}
+          BRAI_DEPLOY_USER: ${{ vars.BRAI_DEPLOY_USER }}
+          BRAI_DEPLOY_SSH_PORT: ${{ vars.BRAI_DEPLOY_SSH_PORT || '22' }}
+          BRAI_DEPLOY_SSH_KEY: ${{ secrets.BRAI_DEPLOY_SSH_KEY }}
+          BRAI_COMMIT: ${{ github.sha }}
       - id: promote_accepted_previews
         run: deploy/scripts/ci-ssh-complete-accepted-previews.sh
         env:
@@ -414,6 +480,95 @@ jobs:
           BRAI_DEPLOY_SSH_KEY: ${{ secrets.BRAI_DEPLOY_SSH_KEY }}
           BRAI_COMMIT: ${{ github.sha }}
 
+  deploy-dev:
+    needs:
+      - classify-delivery
+      - checks
+      - temporal-worker-check
+    if: github.event_name == 'push' && github.ref == 'refs/heads/dev' && needs['classify-delivery'].outputs.requires_dev_deploy == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: services/brai_temporal/package-lock.json
+      - name: Temporal dev deploy started
+        run: deploy/scripts/ci-temporal-signal.sh promotion --target dev --sha "$BRAI_COMMIT" --event dev_deploy_started --source deploy-dev
+        env:
+          BRAI_DEPLOY_HOST: ${{ vars.BRAI_DEPLOY_HOST }}
+          BRAI_DEPLOY_USER: ${{ vars.BRAI_DEPLOY_USER }}
+          BRAI_DEPLOY_SSH_PORT: ${{ vars.BRAI_DEPLOY_SSH_PORT || '22' }}
+          BRAI_DEPLOY_SSH_KEY: ${{ secrets.BRAI_DEPLOY_SSH_KEY }}
+          BRAI_COMMIT: ${{ github.sha }}
+      - name: Temporal dev Supabase migration started
+        run: deploy/scripts/ci-temporal-signal.sh promotion --target dev --sha "$BRAI_COMMIT" --event dev_supabase_migration_started --source deploy-dev
+        env:
+          BRAI_DEPLOY_HOST: ${{ vars.BRAI_DEPLOY_HOST }}
+          BRAI_DEPLOY_USER: ${{ vars.BRAI_DEPLOY_USER }}
+          BRAI_DEPLOY_SSH_PORT: ${{ vars.BRAI_DEPLOY_SSH_PORT || '22' }}
+          BRAI_DEPLOY_SSH_KEY: ${{ secrets.BRAI_DEPLOY_SSH_KEY }}
+          BRAI_COMMIT: ${{ github.sha }}
+      - id: deploy_dev
+        run: deploy/scripts/ci-ssh-deploy.sh
+        env:
+          BRAI_DEPLOY_HOST: ${{ vars.BRAI_DEPLOY_HOST }}
+          BRAI_DEPLOY_USER: ${{ vars.BRAI_DEPLOY_USER }}
+          BRAI_DEPLOY_SSH_PORT: ${{ vars.BRAI_DEPLOY_SSH_PORT || '22' }}
+          BRAI_DEPLOY_REPO: ${{ vars.BRAI_DEPLOY_REPO || '/srv/projects/brai' }}
+          BRAI_DEPLOY_SSH_KEY: ${{ secrets.BRAI_DEPLOY_SSH_KEY }}
+          BRAI_BRANCH: dev
+          BRAI_COMMIT: ${{ github.sha }}
+          BRAI_BASE_COMMIT: ${{ github.event.before }}
+      - name: Temporal dev Supabase migration passed
+        if: success()
+        run: deploy/scripts/ci-temporal-signal.sh promotion --target dev --sha "$BRAI_COMMIT" --event dev_supabase_migration_passed --source deploy-dev
+        env:
+          BRAI_DEPLOY_HOST: ${{ vars.BRAI_DEPLOY_HOST }}
+          BRAI_DEPLOY_USER: ${{ vars.BRAI_DEPLOY_USER }}
+          BRAI_DEPLOY_SSH_PORT: ${{ vars.BRAI_DEPLOY_SSH_PORT || '22' }}
+          BRAI_DEPLOY_SSH_KEY: ${{ secrets.BRAI_DEPLOY_SSH_KEY }}
+          BRAI_COMMIT: ${{ github.sha }}
+      - name: Temporal dev version recorded
+        if: success()
+        run: deploy/scripts/ci-temporal-signal.sh promotion --target dev --sha "$BRAI_COMMIT" --event dev_version_recorded --source deploy-dev
+        env:
+          BRAI_DEPLOY_HOST: ${{ vars.BRAI_DEPLOY_HOST }}
+          BRAI_DEPLOY_USER: ${{ vars.BRAI_DEPLOY_USER }}
+          BRAI_DEPLOY_SSH_PORT: ${{ vars.BRAI_DEPLOY_SSH_PORT || '22' }}
+          BRAI_DEPLOY_SSH_KEY: ${{ secrets.BRAI_DEPLOY_SSH_KEY }}
+          BRAI_COMMIT: ${{ github.sha }}
+      - name: Temporal dev deploy passed
+        if: success()
+        run: deploy/scripts/ci-temporal-signal.sh promotion --target dev --sha "$BRAI_COMMIT" --event dev_deploy_passed --source deploy-dev
+        env:
+          BRAI_DEPLOY_HOST: ${{ vars.BRAI_DEPLOY_HOST }}
+          BRAI_DEPLOY_USER: ${{ vars.BRAI_DEPLOY_USER }}
+          BRAI_DEPLOY_SSH_PORT: ${{ vars.BRAI_DEPLOY_SSH_PORT || '22' }}
+          BRAI_DEPLOY_SSH_KEY: ${{ secrets.BRAI_DEPLOY_SSH_KEY }}
+          BRAI_COMMIT: ${{ github.sha }}
+      - name: Temporal dev Supabase migration failed
+        if: failure() && steps.deploy_dev.outcome == 'failure'
+        run: deploy/scripts/ci-temporal-signal.sh promotion --target dev --sha "$BRAI_COMMIT" --event dev_supabase_migration_failed --source deploy-dev
+        env:
+          BRAI_DEPLOY_HOST: ${{ vars.BRAI_DEPLOY_HOST }}
+          BRAI_DEPLOY_USER: ${{ vars.BRAI_DEPLOY_USER }}
+          BRAI_DEPLOY_SSH_PORT: ${{ vars.BRAI_DEPLOY_SSH_PORT || '22' }}
+          BRAI_DEPLOY_SSH_KEY: ${{ secrets.BRAI_DEPLOY_SSH_KEY }}
+          BRAI_COMMIT: ${{ github.sha }}
+      - name: Temporal dev deploy failed
+        if: failure() && steps.deploy_dev.outcome == 'failure'
+        run: deploy/scripts/ci-temporal-signal.sh promotion --target dev --sha "$BRAI_COMMIT" --event dev_deploy_failed --source deploy-dev
+        env:
+          BRAI_DEPLOY_HOST: ${{ vars.BRAI_DEPLOY_HOST }}
+          BRAI_DEPLOY_USER: ${{ vars.BRAI_DEPLOY_USER }}
+          BRAI_DEPLOY_SSH_PORT: ${{ vars.BRAI_DEPLOY_SSH_PORT || '22' }}
+          BRAI_DEPLOY_SSH_KEY: ${{ secrets.BRAI_DEPLOY_SSH_KEY }}
+          BRAI_COMMIT: ${{ github.sha }}
+
   sync-local-main-checkout:
     needs: deploy-prod
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -492,6 +647,15 @@ jobs:
           BRAI_DEPLOY_SSH_KEY: ${{ secrets.BRAI_DEPLOY_SSH_KEY }}
           BRAI_BRANCH: ${{ env.BRAI_RELEASE_BRANCH }}
           BRAI_COMMIT: ${{ env.BRAI_RELEASE_COMMIT }}
+      - name: Temporal Supabase preview release started
+        run: deploy/scripts/ci-temporal-signal.sh preview --branch "$BRAI_BRANCH" --sha "$BRAI_COMMIT" --event supabase_preview_release_started --source release-preview-slot
+        env:
+          BRAI_DEPLOY_HOST: ${{ vars.BRAI_DEPLOY_HOST }}
+          BRAI_DEPLOY_USER: ${{ vars.BRAI_DEPLOY_USER }}
+          BRAI_DEPLOY_SSH_PORT: ${{ vars.BRAI_DEPLOY_SSH_PORT || '22' }}
+          BRAI_DEPLOY_SSH_KEY: ${{ secrets.BRAI_DEPLOY_SSH_KEY }}
+          BRAI_BRANCH: ${{ env.BRAI_RELEASE_BRANCH }}
+          BRAI_COMMIT: ${{ env.BRAI_RELEASE_COMMIT }}
       - id: release_slot
         run: deploy/scripts/ci-ssh-release-slot.sh
         env:
@@ -502,6 +666,16 @@ jobs:
           BRAI_DEPLOY_SSH_KEY: ${{ secrets.BRAI_DEPLOY_SSH_KEY }}
           BRAI_BRANCH: ${{ env.BRAI_RELEASE_BRANCH }}
           BRAI_REQUIRE_PREVIEW_SLOT_RELEASE: ${{ github.event_name == 'workflow_dispatch' && 'true' || 'false' }}
+      - name: Temporal Supabase preview released
+        if: success() && (steps.release_slot.outputs.released == 'true' || github.event_name == 'pull_request')
+        run: deploy/scripts/ci-temporal-signal.sh preview --branch "$BRAI_BRANCH" --sha "$BRAI_COMMIT" --event supabase_preview_released --source release-preview-slot
+        env:
+          BRAI_DEPLOY_HOST: ${{ vars.BRAI_DEPLOY_HOST }}
+          BRAI_DEPLOY_USER: ${{ vars.BRAI_DEPLOY_USER }}
+          BRAI_DEPLOY_SSH_PORT: ${{ vars.BRAI_DEPLOY_SSH_PORT || '22' }}
+          BRAI_DEPLOY_SSH_KEY: ${{ secrets.BRAI_DEPLOY_SSH_KEY }}
+          BRAI_BRANCH: ${{ env.BRAI_RELEASE_BRANCH }}
+          BRAI_COMMIT: ${{ env.BRAI_RELEASE_COMMIT }}
       - name: Temporal preview released
         if: success() && (steps.release_slot.outputs.released == 'true' || github.event_name == 'pull_request')
         run: deploy/scripts/ci-temporal-signal.sh preview --branch "$BRAI_BRANCH" --sha "$BRAI_COMMIT" --event slot_released --source release-preview-slot
@@ -515,6 +689,16 @@ jobs:
       - name: Temporal preview branch deleted
         if: success() && github.event_name == 'delete' && steps.release_slot.outputs.released != 'true'
         run: deploy/scripts/ci-temporal-signal.sh preview --branch "$BRAI_BRANCH" --sha "$BRAI_COMMIT" --event branch_deleted --source release-preview-slot
+        env:
+          BRAI_DEPLOY_HOST: ${{ vars.BRAI_DEPLOY_HOST }}
+          BRAI_DEPLOY_USER: ${{ vars.BRAI_DEPLOY_USER }}
+          BRAI_DEPLOY_SSH_PORT: ${{ vars.BRAI_DEPLOY_SSH_PORT || '22' }}
+          BRAI_DEPLOY_SSH_KEY: ${{ secrets.BRAI_DEPLOY_SSH_KEY }}
+          BRAI_BRANCH: ${{ env.BRAI_RELEASE_BRANCH }}
+          BRAI_COMMIT: ${{ env.BRAI_RELEASE_COMMIT }}
+      - name: Temporal Supabase preview release failed
+        if: failure()
+        run: deploy/scripts/ci-temporal-signal.sh preview --branch "$BRAI_BRANCH" --sha "$BRAI_COMMIT" --event supabase_preview_release_failed --source release-preview-slot
         env:
           BRAI_DEPLOY_HOST: ${{ vars.BRAI_DEPLOY_HOST }}
           BRAI_DEPLOY_USER: ${{ vars.BRAI_DEPLOY_USER }}

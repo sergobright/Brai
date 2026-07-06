@@ -1,0 +1,502 @@
+-- Brai Postgres baseline for Supabase branches.
+-- Runtime data is imported from the frozen SQLite backup during cutover.
+
+CREATE TABLE IF NOT EXISTS schema_migrations (
+  version integer PRIMARY KEY,
+  applied_at_utc text NOT NULL,
+  description text NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS app_settings (
+  key text PRIMARY KEY,
+  value text NOT NULL,
+  updated_at_utc text NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS "user" (
+  "id" text PRIMARY KEY,
+  "name" text NOT NULL,
+  "email" text NOT NULL UNIQUE,
+  "emailVerified" boolean NOT NULL,
+  "image" text,
+  "createdAt" timestamptz NOT NULL,
+  "updatedAt" timestamptz NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS "session" (
+  "id" text PRIMARY KEY,
+  "expiresAt" timestamptz NOT NULL,
+  "token" text NOT NULL UNIQUE,
+  "createdAt" timestamptz NOT NULL,
+  "updatedAt" timestamptz NOT NULL,
+  "ipAddress" text,
+  "userAgent" text,
+  "userId" text NOT NULL REFERENCES "user" ("id") ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS "account" (
+  "id" text PRIMARY KEY,
+  "accountId" text NOT NULL,
+  "providerId" text NOT NULL,
+  "userId" text NOT NULL REFERENCES "user" ("id") ON DELETE CASCADE,
+  "accessToken" text,
+  "refreshToken" text,
+  "idToken" text,
+  "accessTokenExpiresAt" timestamptz,
+  "refreshTokenExpiresAt" timestamptz,
+  "scope" text,
+  "password" text,
+  "createdAt" timestamptz NOT NULL,
+  "updatedAt" timestamptz NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS "verification" (
+  "id" text PRIMARY KEY,
+  "identifier" text NOT NULL,
+  "value" text NOT NULL,
+  "expiresAt" timestamptz NOT NULL,
+  "createdAt" timestamptz NOT NULL,
+  "updatedAt" timestamptz NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS "session_userId_idx" ON "session" ("userId");
+CREATE INDEX IF NOT EXISTS "account_userId_idx" ON "account" ("userId");
+CREATE INDEX IF NOT EXISTS "verification_identifier_idx" ON "verification" ("identifier");
+
+CREATE TABLE IF NOT EXISTS timer_devices (
+  device_id text PRIMARY KEY,
+  platform text NOT NULL,
+  display_name text,
+  created_at_utc text NOT NULL,
+  last_seen_at_utc text NOT NULL,
+  last_sync_at_utc text,
+  last_server_clock_offset_ms integer
+);
+
+CREATE TABLE IF NOT EXISTS timer_events (
+  event_id text PRIMARY KEY,
+  device_id text NOT NULL REFERENCES timer_devices(device_id),
+  client_sequence integer NOT NULL,
+  server_sequence integer NOT NULL UNIQUE,
+  type text NOT NULL CHECK (type IN ('start', 'stop', 'edit_session', 'delete_session', 'start_activity_focus', 'switch_activity_focus', 'stop_activity_focus', 'edit_focus_interval', 'invalid')),
+  occurred_at_utc text NOT NULL,
+  received_at_utc text NOT NULL,
+  local_timer_id text,
+  base_server_revision integer,
+  status text NOT NULL CHECK (status IN ('accepted', 'ignored')),
+  ignore_reason text,
+  payload_version integer NOT NULL,
+  metadata_json text,
+  user_id text
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_timer_events_device_sequence ON timer_events (device_id, client_sequence);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_timer_events_server_sequence ON timer_events (server_sequence);
+CREATE INDEX IF NOT EXISTS idx_timer_events_occurred ON timer_events (occurred_at_utc);
+CREATE INDEX IF NOT EXISTS idx_timer_events_device_occurred ON timer_events (device_id, occurred_at_utc);
+CREATE INDEX IF NOT EXISTS idx_timer_events_received ON timer_events (received_at_utc);
+CREATE INDEX IF NOT EXISTS idx_timer_events_user_sequence ON timer_events (user_id, server_sequence);
+
+CREATE TABLE IF NOT EXISTS activity_types (
+  id text PRIMARY KEY,
+  title text NOT NULL,
+  description text NOT NULL,
+  created_at_utc text NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS activities (
+  id text PRIMARY KEY,
+  activity_type_id text NOT NULL DEFAULT 'action' REFERENCES activity_types(id),
+  title text NOT NULL,
+  description_md text NOT NULL DEFAULT '',
+  author text NOT NULL DEFAULT '',
+  reason text NOT NULL DEFAULT '',
+  status text NOT NULL CHECK (status IN ('New', 'Done')),
+  created_at_utc text NOT NULL,
+  updated_at_utc text NOT NULL,
+  completed_at_utc text,
+  sort_order integer,
+  deleted_at_utc text,
+  restored_at_utc text,
+  last_event_id text,
+  user_id text
+);
+
+CREATE TABLE IF NOT EXISTS activity_events (
+  event_id text PRIMARY KEY,
+  device_id text NOT NULL REFERENCES timer_devices(device_id),
+  client_sequence integer NOT NULL,
+  server_sequence integer NOT NULL UNIQUE,
+  activity_id text,
+  change_type text NOT NULL CHECK (change_type IN ('create', 'update_title', 'update_description', 'set_status', 'reorder', 'delete', 'restore', 'invalid')),
+  occurred_at_utc text NOT NULL,
+  received_at_utc text NOT NULL,
+  payload_json text,
+  status text NOT NULL CHECK (status IN ('accepted', 'ignored')),
+  ignore_reason text,
+  payload_version integer NOT NULL,
+  user_id text
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_activity_events_device_sequence ON activity_events (device_id, client_sequence);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_activity_events_server_sequence ON activity_events (server_sequence);
+CREATE INDEX IF NOT EXISTS idx_activity_events_occurred ON activity_events (occurred_at_utc);
+CREATE INDEX IF NOT EXISTS idx_activity_events_device_occurred ON activity_events (device_id, occurred_at_utc);
+CREATE INDEX IF NOT EXISTS idx_activity_events_activity_occurred ON activity_events (activity_id, occurred_at_utc, server_sequence);
+CREATE INDEX IF NOT EXISTS idx_activity_events_change_type_occurred ON activity_events (change_type, occurred_at_utc, server_sequence);
+CREATE INDEX IF NOT EXISTS idx_activity_events_user_sequence ON activity_events (user_id, server_sequence);
+CREATE INDEX IF NOT EXISTS idx_activities_status_created ON activities (status, created_at_utc);
+CREATE INDEX IF NOT EXISTS idx_activities_updated ON activities (updated_at_utc);
+CREATE INDEX IF NOT EXISTS idx_activities_type_status_updated ON activities (activity_type_id, status, updated_at_utc);
+CREATE INDEX IF NOT EXISTS idx_activities_user_status_created ON activities (user_id, status, created_at_utc);
+CREATE INDEX IF NOT EXISTS idx_activities_new_sort_order ON activities (status, sort_order) WHERE deleted_at_utc IS NULL AND sort_order IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS focus_sessions (
+  id text PRIMARY KEY,
+  created_at_utc text NOT NULL,
+  updated_at_utc text NOT NULL,
+  deleted_at_utc text,
+  deleted_event_id text,
+  start_origin text NOT NULL DEFAULT 'focus' CHECK (start_origin IN ('focus', 'activity')),
+  started_by_activity_id text,
+  user_id text
+);
+
+CREATE TABLE IF NOT EXISTS focus_session_intervals (
+  id text PRIMARY KEY,
+  focus_session_id text NOT NULL REFERENCES focus_sessions(id) ON DELETE CASCADE,
+  activity_id text,
+  started_at_utc text NOT NULL,
+  ended_at_utc text,
+  duration_seconds integer,
+  created_at_utc text NOT NULL,
+  updated_at_utc text NOT NULL,
+  created_event_id text REFERENCES timer_events(event_id),
+  ended_event_id text REFERENCES timer_events(event_id),
+  created_by_device_id text REFERENCES timer_devices(device_id),
+  user_id text
+);
+
+CREATE TABLE IF NOT EXISTS focus_session_sources (
+  session_id text NOT NULL REFERENCES focus_sessions(id) ON DELETE CASCADE,
+  event_id text NOT NULL REFERENCES timer_events(event_id),
+  device_id text NOT NULL,
+  role text NOT NULL,
+  PRIMARY KEY (session_id, event_id, role)
+);
+
+CREATE INDEX IF NOT EXISTS idx_focus_session_intervals_session_started ON focus_session_intervals (focus_session_id, started_at_utc);
+CREATE INDEX IF NOT EXISTS idx_focus_session_intervals_activity_started ON focus_session_intervals (activity_id, started_at_utc);
+CREATE INDEX IF NOT EXISTS idx_focus_session_intervals_started ON focus_session_intervals (started_at_utc);
+CREATE INDEX IF NOT EXISTS idx_focus_session_intervals_ended ON focus_session_intervals (ended_at_utc);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_focus_session_intervals_one_active ON focus_session_intervals (focus_session_id) WHERE ended_at_utc IS NULL;
+CREATE INDEX IF NOT EXISTS idx_focus_sessions_user_updated ON focus_sessions (user_id, updated_at_utc);
+CREATE INDEX IF NOT EXISTS idx_focus_intervals_user_started ON focus_session_intervals (user_id, started_at_utc);
+
+CREATE TABLE IF NOT EXISTS inbox_record_types (
+  id integer PRIMARY KEY,
+  key text NOT NULL UNIQUE,
+  title text NOT NULL,
+  description text NOT NULL,
+  created_at_utc text NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS inbox (
+  id text PRIMARY KEY,
+  title text NOT NULL,
+  description_text text NOT NULL DEFAULT '',
+  source text NOT NULL DEFAULT '',
+  source_key text NOT NULL DEFAULT '',
+  response_required integer NOT NULL DEFAULT 0 CHECK (response_required IN (0, 1)),
+  related_inbox_id text,
+  record_type_id integer NOT NULL DEFAULT 4,
+  item_date text,
+  author text NOT NULL DEFAULT '',
+  preliminary_section text NOT NULL DEFAULT '',
+  urgency text NOT NULL DEFAULT '',
+  attachment_links_json text NOT NULL DEFAULT '[]',
+  explanation_text text NOT NULL DEFAULT '',
+  normalization_text text NOT NULL DEFAULT '',
+  is_normalized integer NOT NULL DEFAULT 0 CHECK (is_normalized IN (0, 1)),
+  created_at_utc text NOT NULL,
+  updated_at_utc text NOT NULL,
+  deleted_at_utc text,
+  last_event_id text,
+  user_id text
+);
+
+CREATE TABLE IF NOT EXISTS inbox_events (
+  event_id text PRIMARY KEY,
+  device_id text NOT NULL REFERENCES timer_devices(device_id),
+  client_sequence integer NOT NULL,
+  server_sequence integer NOT NULL UNIQUE,
+  inbox_id text,
+  type text NOT NULL CHECK (type IN ('create', 'update_title', 'update_description', 'delete', 'invalid')),
+  occurred_at_utc text NOT NULL,
+  received_at_utc text NOT NULL,
+  payload_json text,
+  status text NOT NULL CHECK (status IN ('accepted', 'ignored')),
+  ignore_reason text,
+  payload_version integer NOT NULL,
+  user_id text
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_inbox_events_device_sequence ON inbox_events (device_id, client_sequence);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_inbox_events_server_sequence ON inbox_events (server_sequence);
+CREATE INDEX IF NOT EXISTS idx_inbox_events_occurred ON inbox_events (occurred_at_utc);
+CREATE INDEX IF NOT EXISTS idx_inbox_events_inbox_occurred ON inbox_events (inbox_id, occurred_at_utc, server_sequence);
+CREATE INDEX IF NOT EXISTS idx_inbox_events_user_sequence ON inbox_events (user_id, server_sequence);
+CREATE INDEX IF NOT EXISTS idx_inbox_source_key_created ON inbox (source_key, created_at_utc);
+CREATE INDEX IF NOT EXISTS idx_inbox_record_type_created ON inbox (record_type_id, created_at_utc);
+CREATE INDEX IF NOT EXISTS idx_inbox_related ON inbox (related_inbox_id);
+CREATE INDEX IF NOT EXISTS idx_inbox_item_date ON inbox (item_date);
+CREATE INDEX IF NOT EXISTS idx_inbox_normalized_updated ON inbox (is_normalized, updated_at_utc);
+CREATE INDEX IF NOT EXISTS idx_inbox_user_created ON inbox (user_id, created_at_utc);
+
+CREATE TABLE IF NOT EXISTS items (
+  id text PRIMARY KEY,
+  user_id text,
+  title text NOT NULL DEFAULT '',
+  description text NOT NULL DEFAULT '',
+  author text NOT NULL DEFAULT '',
+  created_at_utc text NOT NULL,
+  updated_at_utc text NOT NULL,
+  deleted_at_utc text
+);
+
+CREATE TABLE IF NOT EXISTS item_role_types (
+  id integer PRIMARY KEY,
+  title_system text NOT NULL UNIQUE,
+  title text NOT NULL,
+  description text NOT NULL,
+  payload_table text NOT NULL DEFAULT '',
+  is_system integer NOT NULL DEFAULT 0 CHECK (is_system IN (0, 1)),
+  created_at_utc text NOT NULL,
+  deleted_at_utc text
+);
+
+CREATE TABLE IF NOT EXISTS item_roles (
+  id integer GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+  items_id text NOT NULL REFERENCES items(id),
+  item_role_types_id integer NOT NULL REFERENCES item_role_types(id),
+  active_from_utc text NOT NULL,
+  active_to_utc text,
+  status text NOT NULL CHECK (status IN ('active', 'ended', 'deleted')),
+  metadata_json text NOT NULL DEFAULT '{}'
+);
+
+CREATE INDEX IF NOT EXISTS idx_items_user_deleted_updated ON items (user_id, deleted_at_utc, updated_at_utc);
+CREATE INDEX IF NOT EXISTS idx_item_roles_items_status ON item_roles (items_id, status);
+CREATE INDEX IF NOT EXISTS idx_item_roles_type_status ON item_roles (item_role_types_id, status);
+
+CREATE TABLE IF NOT EXISTS agents (
+  id text PRIMARY KEY,
+  version text NOT NULL DEFAULT '1',
+  target text NOT NULL,
+  kind text NOT NULL,
+  status text NOT NULL,
+  title text NOT NULL,
+  summary text NOT NULL,
+  trigger_description text NOT NULL,
+  conditions_description text NOT NULL,
+  input_description text NOT NULL,
+  output_description text NOT NULL,
+  interactions_description text NOT NULL,
+  side_effects_description text NOT NULL,
+  llm_provider text NOT NULL DEFAULT '',
+  llm_model text NOT NULL DEFAULT '',
+  llm_prompt_template text NOT NULL DEFAULT '',
+  llm_timeout_ms integer,
+  fallback_description text NOT NULL DEFAULT '',
+  source_module text NOT NULL,
+  updated_at_utc text NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS agent_schedules (
+  id text PRIMARY KEY,
+  agent_id text NOT NULL REFERENCES agents(id),
+  status text NOT NULL CHECK (status IN ('active', 'paused', 'disabled')),
+  next_run_at_utc text,
+  interval_seconds integer CHECK (interval_seconds IS NULL OR interval_seconds > 0),
+  locked_until_utc text,
+  last_started_at_utc text,
+  last_finished_at_utc text,
+  last_error text NOT NULL DEFAULT '',
+  updated_at_utc text NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS ai_logs (
+  id integer GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+  agent_id text NOT NULL REFERENCES agents(id),
+  agent_version text NOT NULL,
+  dt text NOT NULL,
+  status text NOT NULL CHECK (status IN ('done', 'failed')),
+  json_data text NOT NULL,
+  ai_title text NOT NULL,
+  flow_id text,
+  flow_command text
+);
+
+CREATE INDEX IF NOT EXISTS idx_agents_target_status ON agents (target, status);
+CREATE INDEX IF NOT EXISTS idx_agent_schedules_agent ON agent_schedules (agent_id);
+CREATE INDEX IF NOT EXISTS idx_agent_schedules_due ON agent_schedules (status, next_run_at_utc, locked_until_utc);
+CREATE INDEX IF NOT EXISTS idx_ai_logs_agent_dt ON ai_logs (agent_id, dt);
+
+CREATE TABLE IF NOT EXISTS brai_cmd_settings (
+  key text PRIMARY KEY,
+  value text NOT NULL,
+  updated_at_utc text NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS brai_cmd_access_tokens (
+  id text PRIMARY KEY,
+  display_name text NOT NULL,
+  token_hash text NOT NULL UNIQUE,
+  device_id_hash text,
+  status text NOT NULL CHECK (status IN ('active', 'revoked')),
+  source text NOT NULL CHECK (source IN ('self_service', 'admin')),
+  created_at_utc text NOT NULL,
+  activated_at_utc text,
+  last_used_at_utc text,
+  client_version text NOT NULL DEFAULT '',
+  app_package text NOT NULL DEFAULT ''
+);
+
+CREATE TABLE IF NOT EXISTS brai_cmd_usage_events (
+  id text PRIMARY KEY,
+  access_token_id text NOT NULL REFERENCES brai_cmd_access_tokens(id) ON DELETE CASCADE,
+  created_at_utc text NOT NULL,
+  success integer NOT NULL CHECK (success IN (0, 1)),
+  error_code text NOT NULL DEFAULT '',
+  audio_bytes integer NOT NULL DEFAULT 0,
+  audio_duration_ms integer NOT NULL DEFAULT 0,
+  provider text NOT NULL DEFAULT '',
+  model text NOT NULL DEFAULT '',
+  fallback_used integer NOT NULL DEFAULT 0 CHECK (fallback_used IN (0, 1)),
+  transcription_ms integer NOT NULL DEFAULT 0,
+  post_processing_ms integer NOT NULL DEFAULT 0,
+  total_ms integer NOT NULL DEFAULT 0,
+  transcript_chars integer NOT NULL DEFAULT 0,
+  client_version text NOT NULL DEFAULT ''
+);
+
+CREATE INDEX IF NOT EXISTS idx_brai_cmd_access_tokens_status_created ON brai_cmd_access_tokens (status, created_at_utc);
+CREATE INDEX IF NOT EXISTS idx_brai_cmd_usage_events_created ON brai_cmd_usage_events (created_at_utc);
+CREATE INDEX IF NOT EXISTS idx_brai_cmd_usage_events_token_created ON brai_cmd_usage_events (access_token_id, created_at_utc);
+
+CREATE TABLE IF NOT EXISTS version_types (
+  id text PRIMARY KEY,
+  title text NOT NULL,
+  description text NOT NULL,
+  created_at_utc text NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS build_versions (
+  id integer GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+  version_type_id text NOT NULL REFERENCES version_types(id),
+  version integer NOT NULL CHECK (version > 0),
+  included_in_version_id integer REFERENCES build_versions(id) ON DELETE SET NULL,
+  short_changes text NOT NULL,
+  detailed_changes text NOT NULL,
+  reason text NOT NULL,
+  released_at_utc text NOT NULL,
+  created_at_utc text NOT NULL,
+  UNIQUE (version_type_id, version)
+);
+
+CREATE TABLE IF NOT EXISTS build_version_refs (
+  id integer GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+  version_type_id text NOT NULL,
+  version integer NOT NULL,
+  source_branch text,
+  source_commit text,
+  target_branch text NOT NULL,
+  target_commit text NOT NULL,
+  created_at_utc text NOT NULL,
+  FOREIGN KEY (version_type_id, version) REFERENCES build_versions(version_type_id, version) ON DELETE CASCADE,
+  UNIQUE (version_type_id, target_branch, target_commit)
+);
+
+CREATE TABLE IF NOT EXISTS deployment_records (
+  id integer GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+  environment text NOT NULL,
+  slot text,
+  branch text NOT NULL,
+  commit_sha text NOT NULL,
+  domain text NOT NULL,
+  web_ota_version text,
+  apk_version text,
+  short_changes text NOT NULL,
+  detailed_changes text NOT NULL,
+  reason text NOT NULL,
+  deployed_at_utc text NOT NULL,
+  created_at_utc text NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS build_version_counters (
+  version_type_id text PRIMARY KEY REFERENCES version_types(id),
+  last_version integer NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS sequence_counters (
+  name text PRIMARY KEY,
+  last_value integer NOT NULL DEFAULT 0
+);
+
+CREATE INDEX IF NOT EXISTS idx_build_versions_type_released ON build_versions (version_type_id, released_at_utc);
+CREATE INDEX IF NOT EXISTS idx_build_version_refs_version ON build_version_refs (version_type_id, version);
+CREATE INDEX IF NOT EXISTS idx_deployment_records_branch_deployed ON deployment_records (branch, deployed_at_utc);
+CREATE INDEX IF NOT EXISTS idx_deployment_records_env_deployed ON deployment_records (environment, deployed_at_utc);
+
+CREATE TABLE IF NOT EXISTS table_descriptions (
+  table_name text PRIMARY KEY,
+  title text NOT NULL,
+  short_description text NOT NULL,
+  long_description text NOT NULL,
+  updated_at_utc text NOT NULL
+);
+
+INSERT INTO schema_migrations (version, applied_at_utc, description)
+VALUES (1, now()::text, 'Postgres baseline schema')
+ON CONFLICT (version) DO NOTHING;
+
+INSERT INTO app_settings (key, value, updated_at_utc) VALUES
+  ('goal_start_date', '2026-06-14', now()::text),
+  ('goal_days', '15', now()::text),
+  ('daily_goal_seconds', '7200', now()::text),
+  ('goal_timezone', 'Europe/Moscow', now()::text)
+ON CONFLICT (key) DO NOTHING;
+
+INSERT INTO activity_types (id, title, description, created_at_utc) VALUES
+  ('action', 'Действие', 'Пользовательская activity, созданная человеком в интерфейсе или синхронизированная с клиента.', now()::text),
+  ('operation', 'Операция агента', 'Внутренняя задача агента с автором и причиной выполнения.', now()::text)
+ON CONFLICT (id) DO UPDATE SET title = excluded.title, description = excluded.description;
+
+INSERT INTO inbox_record_types (id, key, title, description, created_at_utc) VALUES
+  (1, 'api_human_inbound', 'Входящее от человека по API', 'Внешний API запрос, инициированный человеком.', now()::text),
+  (2, 'api_agent_inbound', 'Входящее от агента по API', 'Внешний API запрос, инициированный агентом.', now()::text),
+  (3, 'internal_agent_inbound', 'Внутреннее входящее от агента', 'Внутренний агент Brai создал входящую запись.', now()::text),
+  (4, 'interface_human_created', 'Человек добавил из интерфейса', 'Пользователь создал входящую запись в интерфейсе Brai.', now()::text)
+ON CONFLICT (id) DO UPDATE SET key = excluded.key, title = excluded.title, description = excluded.description;
+
+INSERT INTO item_role_types (id, title_system, title, description, payload_table, is_system, created_at_utc, deleted_at_utc) VALUES
+  (1, 'activity', 'Activity', 'Роль activity для сущностей, чьи поля роли живут в activities.', 'activities', 1, now()::text, NULL),
+  (2, 'inbox', 'Inbox', 'Роль inbox для сущностей, чьи поля роли живут в inbox.', 'inbox', 1, now()::text, NULL),
+  (3, 'focus_session', 'Focus session', 'Роль focus_session для сущностей, чьи поля роли живут в focus_sessions.', 'focus_sessions', 1, now()::text, NULL)
+ON CONFLICT (id) DO UPDATE SET
+  title_system = excluded.title_system,
+  title = excluded.title,
+  description = excluded.description,
+  payload_table = excluded.payload_table,
+  is_system = 1,
+  deleted_at_utc = NULL;
+
+INSERT INTO version_types (id, title, description, created_at_utc) VALUES
+  ('apk', 'APK', 'Публичная Android APK-линия. Увеличивается только при осознанном выпуске нового APK.', now()::text),
+  ('build', 'Сборка', 'Принятая web/OTA сборка Brai. Обязательная запись production promotion.', now()::text)
+ON CONFLICT (id) DO UPDATE SET title = excluded.title, description = excluded.description;
+
+INSERT INTO build_version_counters (version_type_id, last_version) VALUES
+  ('apk', 0),
+  ('build', 0)
+ON CONFLICT (version_type_id) DO NOTHING;

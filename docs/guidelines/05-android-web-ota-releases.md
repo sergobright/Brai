@@ -23,11 +23,11 @@ Build and publish a release APK only when native Android code, Capacitor config,
 `/releases/` shows only APK artifacts:
 
 - Production: `Brai`, `brai-vN.apk`
-- Dev artifact: `Brai Dev`, `brai-dev-vN.apk`
+- Dev: `Brai Dev`, `brai-dev-vN.apk`
 - Preview A-E: `Brai A`...`Brai E`, `brai-a-vN.apk`...`brai-e-vN.apk`
 - Active native preview work temporarily replaces its slot card with `Preview A`...`Preview E` and the active `brai-vN-previewM.apk` artifact.
 
-The Dev APK is an artifact only while the Dev environment is disabled; do not restore Dev deploy paths just to publish it.
+The Dev APK belongs to the persistent protected Dev environment on `dev.brightos.world`. Dev deploys use the long-lived Supabase `brai-dev` branch and must keep APK, OTA/web, API, and version ledger in sync.
 
 ## OTA Manifest
 

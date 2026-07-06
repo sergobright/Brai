@@ -15,6 +15,19 @@
       "path": "prod",
       "releaseKey": "production"
     },
+    "dev": {
+      "branch": "dev",
+      "domain": "dev.brightos.world",
+      "displayName": "Dev",
+      "displayLabel": "Dev",
+      "androidApp": "Brai Dev",
+      "androidFlavor": "dev",
+      "applicationId": "world.brightos.brai.dev",
+      "apiPort": 3030,
+      "serviceName": "brai-api-dev.service",
+      "path": "dev",
+      "releaseKey": "dev"
+    },
     "preview-a": {
       "branch": "codex/*",
       "domain": "a.test.brightos.world",

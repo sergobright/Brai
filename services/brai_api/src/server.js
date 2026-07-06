@@ -36,6 +36,7 @@ const STATE_CHANGING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
 export function createBraiServer({
   dbPath,
+  databaseUrl = null,
   token,
   webPassword = null,
   releasePassword = webPassword,
@@ -62,8 +63,9 @@ export function createBraiServer({
   now = () => new Date(),
   logger = console
 }) {
-  fs.mkdirSync(path.dirname(dbPath), { recursive: true });
-  const store = new BraiStore(dbPath);
+  const dataRoot = path.dirname(dbPath);
+  fs.mkdirSync(dataRoot, { recursive: true });
+  const store = new BraiStore(databaseUrl ?? dbPath);
   const braiCmdRuntime = createBraiCmdRuntime(braiCmd);
   const resolvedVaultRoot =
     typeof vaultRoot === 'string' && vaultRoot.trim()
@@ -78,6 +80,7 @@ export function createBraiServer({
   });
   const authRuntime = createBraiAuth({
     dbPath,
+    databaseUrl,
     secret: betterAuthSecret ?? sessionSecret ?? 'brai-local-auth-secret-for-local-development-only',
     baseURL: betterAuthUrl,
     resendApiKey,
@@ -495,8 +498,8 @@ export function createBraiServer({
       new Promise((resolve) => {
         for (const socket of sockets) socket.close();
         wss.close(() => {
-          server.close(() => {
-            authRuntime.close();
+          server.close(async () => {
+            await authRuntime.close();
             store.close();
             resolve();
           });

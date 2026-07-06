@@ -13,6 +13,7 @@
   "dependencies": {
     "better-auth": "^1.6.23",
     "better-sqlite3": "^12.11.1",
+    "pg": "^8.22.0",
     "resend": "^6.16.0",
     "ws": "^8.18.0"
   }

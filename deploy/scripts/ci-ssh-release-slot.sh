@@ -64,6 +64,12 @@ if [[ -z "$RELEASE_ROOT" || ! -r "$RELEASE_ROOT/deploy/scripts/preview-slots.mjs
 fi
 
 cd "$RELEASE_ROOT"
+if [[ -f "/etc/brai/supabase-deploy.env" ]]; then
+  set -a
+  # shellcheck source=/dev/null
+  . /etc/brai/supabase-deploy.env
+  set +a
+fi
 mapfile -t SLOT_META < <(bash deploy/scripts/preview-slots.sh status | node -e '
 let raw = "";
 process.stdin.on("data", (chunk) => raw += chunk);
@@ -91,9 +97,19 @@ if [[ -n "${SLOT_META[0]:-}" ]]; then
   export BRAI_ROOT="$BASELINE_SOURCE"
   export BRAI_RELEASE_TARGET="$DEPLOY_REPO/deploy/releases"
   export BRAI_PROD_DB="$DEPLOY_REPO/data/brai.sqlite"
+  if [[ -f "/etc/brai/brai-api.env" ]]; then
+    set -a
+    # shellcheck source=/dev/null
+    . /etc/brai/brai-api.env
+    set +a
+    export BRAI_PROD_DATABASE_URL="${BRAI_DATABASE_URL:-}"
+  fi
   export BRAI_PROD_WEB_VERSION_JSON="$DEPLOY_REPO/deploy/web/version.json"
   deploy/scripts/build-android-env-apk.sh "preview${SLOT_META[0]}" >&2
   cd "$RELEASE_ROOT"
+fi
+if [[ "$RELEASE_BRANCH" == codex/* ]]; then
+  node deploy/scripts/supabase-branch.mjs delete-preview --branch "$RELEASE_BRANCH" >&2
 fi
 RELEASE_JSON="$(bash deploy/scripts/preview-slots.sh release "$RELEASE_BRANCH")"
 printf '%s\n' "$RELEASE_JSON"

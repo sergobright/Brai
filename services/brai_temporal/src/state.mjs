@@ -4,19 +4,22 @@ export const STATE_QUERY = "state";
 export const EVENT_SIGNAL = "event";
 
 const MAX_EVENTS = 100;
-const NO_PREVIEW_TASKS = ["preview_deploy", "accepted_preview_promotion", "slot_release"];
+const NO_PREVIEW_TASKS = ["supabase_preview", "preview_deploy", "accepted_preview_promotion", "supabase_preview_release", "slot_release"];
 const PREVIEW_TASKS = {
   branch_pushed: "Branch push observed",
   delivery_classification: "Delivery path classification",
   checks: "GitHub checks",
+  supabase_preview: "Supabase preview branch",
   preview_deploy: "Preview deploy",
   delivery_handoff: "No-preview delivery handoff",
   auto_merge: "No-preview auto-merge",
   accepted_for_target: "Accepted for target",
   accepted_preview_promotion: "Accepted preview metadata promotion",
+  supabase_preview_release: "Supabase preview branch release",
   slot_release: "Preview slot release"
 };
 const PROMOTION_TASKS = {
+  supabase_migration: "Supabase migration",
   deploy: "Target deploy",
   version_recorded: "Version and deployment ledger recorded",
   accepted_previews: "Accepted preview promotion and slot release"
@@ -36,6 +39,9 @@ export const PREVIEW_EVENTS = new Set([
   "checks_started",
   "checks_passed",
   "checks_failed",
+  "supabase_preview_started",
+  "supabase_preview_passed",
+  "supabase_preview_failed",
   "preview_deploy_started",
   "preview_deploy_passed",
   "preview_deploy_failed",
@@ -46,6 +52,9 @@ export const PREVIEW_EVENTS = new Set([
   "slot_release_started",
   "slot_released",
   "slot_release_failed",
+  "supabase_preview_release_started",
+  "supabase_preview_released",
+  "supabase_preview_release_failed",
   "release_failed",
   "released",
   "branch_deleted"
@@ -54,6 +63,9 @@ export const PREVIEW_EVENTS = new Set([
 export const PROMOTION_EVENTS = new Set([
   "promotion_started",
   "dev_deploy_started",
+  "dev_supabase_migration_started",
+  "dev_supabase_migration_passed",
+  "dev_supabase_migration_failed",
   "dev_version_recorded",
   "accepted_previews_started",
   "accepted_previews_passed",
@@ -61,6 +73,9 @@ export const PROMOTION_EVENTS = new Set([
   "dev_deploy_passed",
   "dev_deploy_failed",
   "prod_deploy_started",
+  "supabase_prod_migration_started",
+  "supabase_prod_migration_passed",
+  "supabase_prod_migration_failed",
   "prod_version_recorded",
   "prod_deploy_passed",
   "prod_deploy_failed",
@@ -112,24 +127,30 @@ export function applyPreviewEvent(state, rawEvent) {
 
   switch (event.type) {
     case "branch_pushed":
+      const classification = state.tasks.delivery_classification;
+      const keepClassification = classification?.status === "passed" && classification.sha === event.sha;
+      const keepNoPreview = keepClassification && isNoPreviewDeliveryClass(state.deliveryClass) && isNoPreviewRequired(state);
       state.status = "branch_pushed";
       state.terminal = false;
       state.checks = "not_started";
       state.previewDeploy = "not_started";
       state.slot = "";
-      state.deliveryClass = event.deliveryClass || "preview";
+      state.deliveryClass = keepClassification ? state.deliveryClass : event.deliveryClass || "preview";
       state.handoff = "not_started";
       state.autoMerge = "not_started";
       state.blocker = null;
       state.blockers = [];
-      resetTask(state, "delivery_classification", event);
+      if (!keepClassification) resetTask(state, "delivery_classification", event);
       resetTask(state, "delivery_handoff", event);
       resetTask(state, "auto_merge", event);
       resetTask(state, "checks", event);
+      resetTask(state, "supabase_preview", event);
       resetTask(state, "preview_deploy", event);
       resetTask(state, "accepted_for_target", event);
       resetTask(state, "accepted_preview_promotion", event);
+      resetTask(state, "supabase_preview_release", event);
       resetTask(state, "slot_release", event);
+      if (keepNoPreview) markNoPreviewRequired(state, event);
       setTask(state, "branch_pushed", "passed", event);
       break;
     case "delivery_classified":
@@ -189,13 +210,25 @@ export function applyPreviewEvent(state, rawEvent) {
       break;
     case "checks_passed":
       state.checks = "passed";
-      state.status = state.previewDeploy === "passed" ? "ready_for_review" : "checks_passed";
       setTask(state, "checks", "passed", event);
+      state.status = previewReady(state) ? "ready_for_review" : "checks_passed";
       break;
     case "checks_failed":
       state.checks = "failed";
       state.status = "waiting_for_fix";
       setTask(state, "checks", "failed", event);
+      break;
+    case "supabase_preview_started":
+      state.status = event.type;
+      setTask(state, "supabase_preview", "running", event);
+      break;
+    case "supabase_preview_passed":
+      setTask(state, "supabase_preview", "passed", event);
+      state.status = previewReady(state) ? "ready_for_review" : event.type;
+      break;
+    case "supabase_preview_failed":
+      state.status = "waiting_for_fix";
+      setTask(state, "supabase_preview", "failed", event);
       break;
     case "preview_deploy_started":
       state.previewDeploy = "running";
@@ -204,8 +237,8 @@ export function applyPreviewEvent(state, rawEvent) {
       break;
     case "preview_deploy_passed":
       state.previewDeploy = "passed";
-      state.status = state.checks === "passed" ? "ready_for_review" : "preview_deploy_passed";
       setTask(state, "preview_deploy", "passed", event);
+      state.status = previewReady(state) ? "ready_for_review" : "preview_deploy_passed";
       break;
     case "preview_deploy_failed":
       state.previewDeploy = "failed";
@@ -234,6 +267,18 @@ export function applyPreviewEvent(state, rawEvent) {
     case "slot_release_started":
       setTask(state, "slot_release", "running", event);
       state.status = "slot_release_started";
+      break;
+    case "supabase_preview_release_started":
+      setTask(state, "supabase_preview_release", "running", event);
+      state.status = event.type;
+      break;
+    case "supabase_preview_released":
+      setTask(state, "supabase_preview_release", "passed", event);
+      state.status = event.type;
+      break;
+    case "supabase_preview_release_failed":
+      setTask(state, "supabase_preview_release", "failed", event);
+      state.status = "waiting_for_fix";
       break;
     case "slot_released":
     case "released":
@@ -290,7 +335,7 @@ export function createPromotionState(input) {
     tasks: createTasks(PROMOTION_TASKS),
     events: []
   };
-  if (input.target !== "dev" && input.target !== "prod") state.tasks.accepted_previews.status = "not_applicable";
+  if (input.target !== "prod") state.tasks.accepted_previews.status = "not_applicable";
   return applyPromotionEvent(state, {
     type: "promotion_started",
     sha: input.sha,
@@ -312,8 +357,23 @@ export function applyPromotionEvent(state, rawEvent) {
       state.deploy = "running";
       state.status = event.type;
       setTask(state, "deploy", "running", event);
-      if (state.target === "dev" || state.target === "prod") resetTask(state, "accepted_previews", event);
+      if (state.target === "prod") resetTask(state, "accepted_previews", event);
       resetTask(state, "version_recorded", event);
+      break;
+    case "dev_supabase_migration_started":
+    case "supabase_prod_migration_started":
+      state.status = event.type;
+      setTask(state, "supabase_migration", "running", event);
+      break;
+    case "dev_supabase_migration_passed":
+    case "supabase_prod_migration_passed":
+      state.status = event.type;
+      setTask(state, "supabase_migration", "passed", event);
+      break;
+    case "dev_supabase_migration_failed":
+    case "supabase_prod_migration_failed":
+      state.status = "waiting_for_fix";
+      setTask(state, "supabase_migration", "failed", event);
       break;
     case "dev_version_recorded":
     case "prod_version_recorded":
@@ -398,6 +458,12 @@ function isNoPreviewRequired(state) {
 
 function isNoPreviewDeliveryClass(deliveryClass) {
   return deliveryClass === "infra-docs" || deliveryClass === "technical-no-preview";
+}
+
+function previewReady(state) {
+  return state.checks === "passed" &&
+    state.previewDeploy === "passed" &&
+    state.tasks.supabase_preview?.status === "passed";
 }
 
 function resetTask(state, name, event) {
