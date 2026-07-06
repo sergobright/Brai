@@ -64,28 +64,36 @@ test("opens the right mobile dock overflow with placeholder items", async ({ pag
   test.skip(testInfo.project.name !== "mobile", "mobile-only dock overflow");
 
   await page.goto("/");
-  await page.getByRole("button", { name: "Открыть правое меню" }).click();
+  const rightButton = page.getByRole("button", { name: "Открыть правое меню" });
+  const rightButtonBefore = await rightButton.boundingBox();
+  await rightButton.click();
 
   const sheet = page.locator(".mobile-dock-overflow-sheet");
   await expect(sheet).toBeVisible();
   await expect(sheet).toHaveAttribute("aria-label", "Правое меню");
   await expect(sheet.getByRole("button", { name: "Заглушка: Дата" })).toBeVisible();
   await expect(sheet.getByRole("button", { name: "Заглушка: Флаг" })).toBeVisible();
-  await expect(sheet.getByRole("button", { name: "Скрыть правое меню" })).toBeVisible();
+  const closeButton = page.getByRole("button", { name: "Скрыть правое меню" });
+  await expect(closeButton).toBeVisible();
 
   const viewport = page.viewportSize();
   const sheetBox = await sheet.boundingBox();
   const dockBox = await page.locator(".main-dock").boundingBox();
-  if (!viewport || !sheetBox || !dockBox) throw new Error("Missing dock overflow geometry");
-  expect(sheetBox.width).toBeLessThan(viewport.width - 20);
+  const dimBox = await page.locator(".mobile-dock-overflow-dim").boundingBox();
+  const rightButtonAfter = await closeButton.boundingBox();
+  if (!viewport || !sheetBox || !dockBox || !dimBox || !rightButtonBefore || !rightButtonAfter) throw new Error("Missing dock overflow geometry");
+  expect(sheetBox.width).toBeGreaterThanOrEqual(viewport.width - 1);
   expect(sheetBox.height).toBeLessThan(90);
   expect(sheetBox.y + sheetBox.height).toBeLessThanOrEqual(dockBox.y + 1);
+  expect(dimBox.y + dimBox.height).toBeLessThanOrEqual(sheetBox.y + 1);
+  expect(Math.abs(rightButtonBefore.x - rightButtonAfter.x)).toBeLessThanOrEqual(1);
+  expect(Math.abs(rightButtonBefore.y - rightButtonAfter.y)).toBeLessThanOrEqual(1);
 
-  await sheet.getByRole("button", { name: "Скрыть правое меню" }).click();
+  await closeButton.click();
   await expect(page.locator(".mobile-dock-overflow-sheet")).toHaveCount(0);
 
   await page.getByRole("button", { name: "Открыть правое меню" }).click();
-  await page.locator(".mobile-dock-overflow-backdrop").click({ position: { x: 20, y: 120 } });
+  await page.locator(".mobile-dock-overflow-dim").click({ position: { x: 20, y: 120 } });
   await expect(page.locator(".mobile-dock-overflow-sheet")).toHaveCount(0);
 });
 

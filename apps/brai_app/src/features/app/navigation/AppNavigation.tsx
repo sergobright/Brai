@@ -115,10 +115,12 @@ export function MobileMenuButton({ onClick }: { onClick: () => void }) {
 
 export function MobileDockOverflowButton({
   hidden,
+  open = false,
   side,
   onClick,
 }: {
   hidden: boolean;
+  open?: boolean;
   side: "left" | "right";
   onClick: () => void;
 }) {
@@ -130,10 +132,10 @@ export function MobileDockOverflowButton({
         side === "left" ? "left-3" : "right-3",
         hidden && "max-[860px]:pointer-events-none max-[860px]:invisible max-[860px]:opacity-0",
       )}
-      aria-label={side === "left" ? "Открыть левое меню" : "Открыть правое меню"}
+      aria-label={side === "left" ? "Открыть левое меню" : open ? "Скрыть правое меню" : "Открыть правое меню"}
       onClick={onClick}
     >
-      {side === "left" ? <Ellipsis className="h-5 w-5" aria-hidden="true" /> : <ChevronUp className="h-5 w-5" aria-hidden="true" />}
+      {side === "left" ? <Ellipsis className="h-5 w-5" aria-hidden="true" /> : open ? <ChevronDown className="h-5 w-5" aria-hidden="true" /> : <ChevronUp className="h-5 w-5" aria-hidden="true" />}
     </button>
   );
 }
@@ -292,19 +294,27 @@ export function MobileDockOverflowSheet({
     <div
       className={cx(
         "mobile-dock-overflow-backdrop fixed inset-0 z-[110] hidden items-end max-[860px]:flex",
-        side === "right" && "justify-center px-3 pb-[calc(4.25rem+env(safe-area-inset-bottom))]",
+        side === "right" && "pointer-events-none justify-center pb-[calc(3.75rem+env(safe-area-inset-bottom))]",
       )}
       data-nav-swipe-exclusion
       onClick={() => closeSheet()}
     >
-      <div ref={backdropRef} className="absolute inset-0 bg-foreground/20 dark:bg-background/80" style={backdropStyle} aria-hidden="true" />
+      <div
+        ref={backdropRef}
+        className={cx(
+          "mobile-dock-overflow-dim absolute inset-x-0 top-0 bg-foreground/20 dark:bg-background/80",
+          side === "left" ? "bottom-0" : "pointer-events-auto bottom-[calc(7.5rem+env(safe-area-inset-bottom))]",
+        )}
+        style={backdropStyle}
+        aria-hidden="true"
+      />
       <aside
         ref={sheetRef}
         className={cx(
           "mobile-dock-overflow-sheet pointer-events-auto relative z-[1] grid min-w-0 overflow-hidden shadow-xl animate-[mobile-detail-sheet-in_180ms_ease-out] will-change-transform",
           side === "left"
             ? "max-h-[60dvh] w-full grid-rows-[auto_minmax(0,1fr)] rounded-t-2xl border-t border-border bg-card pb-[env(safe-area-inset-bottom)] pt-2"
-            : "w-full max-w-md gap-2 rounded-2xl border border-border bg-card/95 px-4 py-3 backdrop-blur-[14px]",
+            : "w-full justify-center bg-transparent px-8 py-1 shadow-none",
         )}
         style={sheetStyle}
         aria-label={side === "left" ? "Левое меню" : "Правое меню"}
@@ -342,11 +352,10 @@ export function MobileDockOverflowSheet({
             </div>
           </>
         ) : (
-          <div className="mobile-dock-overflow-icons flex min-h-0 items-center justify-between gap-2">
+          <div className="mobile-dock-overflow-icons flex min-h-0 w-full items-center justify-around gap-2">
             {MOBILE_DOCK_PLACEHOLDER_ITEMS.map(({ icon: Icon, label }) => (
               <MobileDockOverflowActionButton key={label} icon={Icon} label={`Заглушка: ${label}`} disabled />
             ))}
-            <MobileDockOverflowActionButton icon={ChevronDown} label="Скрыть правое меню" onClick={() => closeSheet()} />
           </div>
         )}
       </aside>

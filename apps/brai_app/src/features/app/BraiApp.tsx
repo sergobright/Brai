@@ -241,8 +241,9 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
       />
       <MobileDockOverflowButton
         side="right"
-        hidden={app.mobileMenuOpen || mobileDockMenu != null || app.actionOverlayOpen}
-        onClick={() => setMobileDockMenu("right")}
+        open={mobileDockMenu === "right"}
+        hidden={app.mobileMenuOpen || mobileDockMenu === "left" || app.actionOverlayOpen}
+        onClick={() => setMobileDockMenu((current) => current === "right" ? null : "right")}
       />
       {app.mobileMenuOpen ? (
         <MobileProfileDrawer
