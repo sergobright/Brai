@@ -174,8 +174,7 @@ describe("BraiApp inbox", () => {
 
     fireEvent.click(screen.getAllByRole("button", { name: "Входящие" }).at(-1) as HTMLElement);
     const title = await screen.findByRole("textbox", { name: "Название входящего: Входящее с файлами" });
-    const rowPreview = screen.getByLabelText("Превью вложения photo.png");
-    expect(within(rowPreview).getByRole("img", { name: "photo.png" })).toHaveAttribute("src", "/api/v1/inbox/attachments/photo.png.thumb.jpg");
+    expect(screen.queryByLabelText("Превью вложения photo.png")).not.toBeInTheDocument();
     fireEvent.click(title);
 
     expect(screen.getByRole("tab", { name: "Инфо" })).toHaveAttribute("aria-selected", "true");
