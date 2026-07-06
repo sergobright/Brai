@@ -22,9 +22,39 @@ try {
     scalar("SELECT COUNT(*)::int FROM activity_types WHERE id IN ('action', 'operation')"),
     scalar("SELECT COUNT(*)::int FROM inbox_record_types"),
     scalar("SELECT COUNT(*)::int FROM build_version_counters WHERE version_type_id IN ('apk', 'build')"),
+    scalar("SELECT COUNT(*)::int FROM pg_event_trigger WHERE evtname = 'brai_enable_rls_for_new_public_tables' AND evtenabled IN ('O', 'R', 'A')"),
+    scalar(`
+      SELECT COUNT(*)::int
+      FROM pg_class c
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = 'public'
+        AND c.relkind IN ('r', 'p')
+        AND c.relrowsecurity
+    `),
+    rows(`
+      SELECT format('%I.%I', n.nspname, c.relname) AS table_name
+      FROM pg_class c
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = 'public'
+        AND c.relkind IN ('r', 'p')
+        AND NOT c.relrowsecurity
+      ORDER BY c.relname
+    `),
     expectImported ? scalar("SELECT value FROM app_settings WHERE key = 'postgres_imported_from_sqlite'") : Promise.resolve("")
   ]);
-  const [ping, migrations, supabaseMigrations, versionTypes, activityTypes, inboxTypes, counters, importMarker] = checks;
+  const [
+    ping,
+    migrations,
+    supabaseMigrations,
+    versionTypes,
+    activityTypes,
+    inboxTypes,
+    counters,
+    rlsAutoTrigger,
+    rlsProtectedTables,
+    publicTablesWithoutRls,
+    importMarker
+  ] = checks;
   if (ping !== 1) throw new Error("Postgres ping failed");
   if (migrations < 1) throw new Error("schema_migrations is empty");
   if (supabaseMigrations < 1) throw new Error("supabase_migration_files is empty");
@@ -32,8 +62,24 @@ try {
   if (activityTypes !== 2) throw new Error("activity_types seed is incomplete");
   if (inboxTypes < 4) throw new Error("inbox_record_types seed is incomplete");
   if (counters !== 2) throw new Error("build_version_counters seed is incomplete");
+  if (rlsAutoTrigger !== 1) throw new Error("public table RLS auto-enable trigger is missing or disabled");
+  if (publicTablesWithoutRls.length > 0) {
+    throw new Error(`Public tables without RLS: ${publicTablesWithoutRls.map((row) => row.table_name).join(", ")}`);
+  }
   if (expectImported && importMarker !== "true") throw new Error("SQLite import marker is missing");
-  console.log(JSON.stringify({ ok: true, migrations, supabaseMigrations, versionTypes, activityTypes, inboxTypes, counters, importMarker: importMarker || undefined }, null, 2));
+  console.log(JSON.stringify({
+    ok: true,
+    migrations,
+    supabaseMigrations,
+    versionTypes,
+    activityTypes,
+    inboxTypes,
+    counters,
+    rlsAutoTrigger,
+    rlsProtectedTables,
+    publicTablesWithoutRls: publicTablesWithoutRls.length,
+    importMarker: importMarker || undefined
+  }, null, 2));
 } finally {
   await pool.end();
 }
@@ -41,6 +87,11 @@ try {
 async function scalar(sql) {
   const result = await pool.query(sql);
   return Object.values(result.rows[0])[0];
+}
+
+async function rows(sql) {
+  const result = await pool.query(sql);
+  return result.rows;
 }
 
 function postgresSsl(databaseUrl) {
