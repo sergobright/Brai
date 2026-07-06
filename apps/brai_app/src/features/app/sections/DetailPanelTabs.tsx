@@ -109,7 +109,8 @@ export function DetailAttachments({ links }: { links: string[] }) {
                   src={previewHref}
                   alt={name}
                   loading="lazy"
-                  className="aspect-[16/10] w-full bg-muted object-cover"
+                  draggable={false}
+                  className="aspect-[16/10] w-full bg-muted object-cover [touch-action:pan-y]"
                   onError={(event) => {
                     if (event.currentTarget.dataset.fallback === "1") return;
                     event.currentTarget.dataset.fallback = "1";
@@ -161,6 +162,7 @@ export function DetailAttachments({ links }: { links: string[] }) {
           <img
             src={attachmentHref(previewLink)}
             alt={attachmentName(previewLink)}
+            draggable={false}
             className="max-h-full max-w-full object-contain"
             onClick={(event) => event.stopPropagation()}
           />

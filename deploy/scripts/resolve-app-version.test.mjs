@@ -31,7 +31,29 @@ test("OTA version follows the build ledger before stale deployed manifests", () 
 
     assert.equal(resolveAppVersion({ environment: "prod", db: dbPath, prodWebVersionJson, mobileTarget, root: tmp }), "0.0.66");
     assert.equal(resolveAppVersion({ environment: "preview-a", prodDb: dbPath, prodWebVersionJson, mobileTarget, root: tmp }), "0.0.66");
+    assert.equal(resolveAppVersion({ environment: "preview-a", prodDb: dbPath, prodWebVersionJson, mobileTarget, nextOta: true, root: tmp }), "0.0.67");
     assert.equal(resolveAppVersion({ kind: "apk", db: dbPath }), "1");
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("next preview OTA version advances past the current slot manifest", () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "brai-version-next-preview-"));
+  try {
+    const dbPath = path.join(tmp, "brai.sqlite");
+    const db = new Database(dbPath);
+    db.exec(`
+      CREATE TABLE build_versions (version_type_id TEXT NOT NULL, version INTEGER NOT NULL);
+      INSERT INTO build_versions (version_type_id, version) VALUES ('build', 80);
+    `);
+    db.close();
+
+    const mobileTarget = path.join(tmp, "mobile-update");
+    fs.mkdirSync(mobileTarget, { recursive: true });
+    fs.writeFileSync(path.join(mobileTarget, "manifest.json"), `${JSON.stringify({ otaVersion: "0.0.81" })}\n`);
+
+    assert.equal(resolveAppVersion({ environment: "preview-e", prodDb: dbPath, mobileTarget, nextOta: true, root: tmp }), "0.0.82");
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
