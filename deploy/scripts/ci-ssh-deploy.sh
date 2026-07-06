@@ -148,6 +148,7 @@ npm ci
 npm --prefix apps/brai_app ci
 npm --prefix services/brai_api ci
 export BRAI_BRANCH BRAI_COMMIT
+export BRAI_NATIVE_APK_CHANGE
 export BRAI_ROOT="$SOURCE_ROOT"
 export BRAI_RELEASE_TARGET="$DEPLOY_REPO/deploy/releases"
 export BRAI_PROD_DB="$DEPLOY_REPO/data/brai.sqlite"

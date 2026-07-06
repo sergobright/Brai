@@ -104,7 +104,7 @@ export function DetailAttachments({ links }: { links: string[] }) {
               >
                 {/* Private attachment dimensions are unknown, so native img is the least surprising renderer. */}
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={href} alt={name} loading="lazy" className="max-h-48 w-full object-contain bg-background" />
+                <img src={href} alt={name} loading="lazy" draggable={false} className="max-h-48 w-full object-contain bg-background [touch-action:pan-y]" />
                 <span className="truncate px-2.5 py-2 text-sm text-muted-foreground group-hover:text-foreground">{name}</span>
               </button>
             );
@@ -150,6 +150,7 @@ export function DetailAttachments({ links }: { links: string[] }) {
           <img
             src={attachmentHref(previewLink)}
             alt={attachmentName(previewLink)}
+            draggable={false}
             className="max-h-full max-w-full object-contain"
             onClick={(event) => event.stopPropagation()}
           />
