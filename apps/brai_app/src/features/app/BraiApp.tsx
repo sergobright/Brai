@@ -7,6 +7,7 @@ import { installAndroidBackHandler } from "@/shared/platform/platform";
 import { getBraiLocalStorageItem, removeBraiLocalStorageItem, setBraiLocalStorageItem } from "@/shared/storage/localStorageKeys";
 import { ScrollArea } from "@/shared/ui/scroll-area";
 import { SidebarInset, SidebarProvider } from "@/shared/ui/sidebar";
+import { AppStartupSplash, SPLASH_MAX_VISIBLE_MS } from "./AppStartupSplash";
 import type { SectionId } from "./appModel";
 import { isPrimarySection, sectionIcon, sectionTitle } from "./appModel";
 import { cx } from "./appUtils";
@@ -34,6 +35,7 @@ const INBOX_MOBILE_CREATE_DRAFT_STORAGE_KEY = "brai_inbox_mobile_create_draft";
 export function BraiApp({ initialSection = "actions" }: { initialSection?: SectionId }) {
   const app = useBraiAppState(initialSection);
   const [mobileDockMenu, setMobileDockMenu] = useState<"left" | "right" | null>(null);
+  const [startupExpired, setStartupExpired] = useState(false);
   const dockOverflowOpen = mobileDockMenu != null;
   const [actionsMobileCreateDraft, setActionsMobileCreateDraft] = useStoredMobileCreateDraft(ACTIONS_MOBILE_CREATE_DRAFT_STORAGE_KEY);
   const [inboxMobileCreateDraft, setInboxMobileCreateDraft] = useStoredMobileCreateDraft(INBOX_MOBILE_CREATE_DRAFT_STORAGE_KEY);
@@ -41,6 +43,7 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
   const sectionRef = useRef(app.section);
   const selectSectionRef = useRef(app.selectSection);
   const adjacentSection = app.swipeNavigation.visual?.to;
+  const startupReady = app.localSnapshotReady || app.displaySyncStatus === "auth_required" || app.displaySyncStatus === "offline" || app.displaySyncStatus === "sync_failed";
   const mobileMenuSwipe = useLeftEdgeMenuSwipe(
     () => setMobileDockMenu("left"),
     !app.mobileMenuOpen && !mobileDockMenu && !app.mobileContextPanel && !app.actionOverlayOpen,
@@ -60,6 +63,11 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
     sectionRef.current = app.section;
     selectSectionRef.current = app.selectSection;
   }, [app.section, app.selectSection]);
+
+  useEffect(() => {
+    const timeout = window.setTimeout(() => setStartupExpired(true), SPLASH_MAX_VISIBLE_MS);
+    return () => window.clearTimeout(timeout);
+  }, []);
 
   useEffect(() => installAndroidBackHandler(() => {
     if (window.history.state?.braiMobileMenu || window.history.state?.braiMobileDockMenu || window.history.state?.braiMobileSheet || window.history.state?.braiActivityEditor || window.history.state?.braiMobileActionCreate || window.history.state?.braiInboxEditor || window.history.state?.braiMobileInboxCreate || window.history.state?.braiFactoryLog) return false;
@@ -185,7 +193,8 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
   }
 
   return (
-    <SidebarProvider
+    <>
+      <SidebarProvider
       open={false}
       className={cx(
         "app-shell h-dvh min-h-0 overflow-hidden [--sticky-top-offset:0px] max-[860px]:grid max-[860px]:grid-rows-[minmax(0,1fr)_auto] max-[860px]:[--mobile-top-padding:env(safe-area-inset-top)]",
@@ -289,7 +298,9 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
       {app.mobileContextPanel === "focus-history" && app.section === "focus" ? (
         <FocusContextPanelSheet panel="history" history={app.history} goal={app.goal} todayKey={app.todayKey} onClose={() => app.setMobileContextPanel(null)} onCloseStart={app.markMobileContextPanelClosing} onDeleteSession={app.onDeleteFocusSession} onEditInterval={app.onEditFocusInterval} onEditSession={app.onEditFocusSession} />
       ) : null}
-    </SidebarProvider>
+      </SidebarProvider>
+      {startupExpired ? null : <AppStartupSplash ready={startupReady} />}
+    </>
   );
 }
 
