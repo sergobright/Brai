@@ -583,6 +583,9 @@ function serverAccessContract(root = process.env.BRAI_ROOT ?? "/srv/projects/bra
   const deployIdentityFile = process.env.BRAI_DEPLOY_IDENTITY_FILE ?? process.env.BRAI_DEPLOY_SSH_KEY_FILE;
   const serviceUser = process.env.BRAI_SERVICE_USER ?? "brai";
   const mainSyncScript = process.env.BRAI_MAIN_SYNC_SCRIPT ?? "/srv/opt/brai-main-sync.sh";
+  const protectedEnvDir = process.env.BRAI_PROTECTED_ENV_DIR ?? "/etc/brai";
+  const apiEnvFile = process.env.BRAI_API_ENV_FILE ?? path.join(protectedEnvDir, "brai-api.env");
+  const supabaseDeployEnvFile = process.env.BRAI_SUPABASE_DEPLOY_ENV_FILE ?? path.join(protectedEnvDir, "supabase-deploy.env");
   const localOperationHelper = path.join(root, "deploy/scripts/complete-operation-activities.sh");
   const acceptedPreviewOtaHelper = path.join(root, "deploy/scripts/sync-occupied-preview-ota-manifests.sh");
   const checks = [
@@ -607,6 +610,28 @@ function serverAccessContract(root = process.env.BRAI_ROOT ?? "/srv/projects/bra
       owner: deployOwner,
       group: deployGroup,
       requiredModeBits: 0o660,
+    }),
+    contractPathCheck("protected env dir", protectedEnvDir, {
+      sudoStat: true,
+      owner: "root",
+      group: deployGroup,
+      expectDirectory: true,
+      requiredModeBits: 0o750,
+      forbiddenModeBits: 0o007,
+    }),
+    contractPathCheck("runtime api env", apiEnvFile, {
+      sudoStat: true,
+      owner: "root",
+      group: deployGroup,
+      requiredModeBits: 0o640,
+      forbiddenModeBits: 0o137,
+    }),
+    contractPathCheck("supabase deploy env", supabaseDeployEnvFile, {
+      sudoStat: true,
+      owner: "root",
+      group: deployGroup,
+      requiredModeBits: 0o640,
+      forbiddenModeBits: 0o137,
     }),
     commandCheck("operation helper host-local sudo", [localOperationHelper, "--host-local", "--check-access"], { cwd: root }),
     commandCheck("accepted preview OTA sync access", [acceptedPreviewOtaHelper, "--check-access"], {
@@ -706,8 +731,23 @@ function pathCheck(name, target, { requireRead = false, requireWrite = false, ex
   return check;
 }
 
-function contractPathCheck(name, target, { owner, group, requiredModeBits = 0, expectDirectory = false } = {}) {
-  const check = pathCheck(name, target, { expectDirectory });
+function sudoStatPathCheck(name, target, { expectDirectory = false } = {}) {
+  const check = { name, ok: true, path: target, sudoStat: true };
+  const result = spawnSync("sudo", ["-n", "stat", "-c", "%u %g %a %F", target], { encoding: "utf8" });
+  if (result.status !== 0) {
+    return { ...check, ok: false, reason: String(result.stderr || result.stdout || "sudo stat failed").trim() };
+  }
+  const [uid, gid, mode, ...typeParts] = result.stdout.trim().split(/\s+/);
+  check.mode = mode;
+  check.uid = Number(uid);
+  check.gid = Number(gid);
+  check.fileType = typeParts.join(" ");
+  if (expectDirectory && check.fileType !== "directory") return { ...check, ok: false, reason: "not a directory" };
+  return check;
+}
+
+function contractPathCheck(name, target, { owner, group, requiredModeBits = 0, forbiddenModeBits = 0, expectDirectory = false, sudoStat = false } = {}) {
+  const check = sudoStat ? sudoStatPathCheck(name, target, { expectDirectory }) : pathCheck(name, target, { expectDirectory });
   if (!check.ok) return check;
   if (owner) {
     check.expectedOwner = owner;
@@ -727,6 +767,14 @@ function contractPathCheck(name, target, { owner, group, requiredModeBits = 0, e
     if ((mode & requiredModeBits) !== requiredModeBits) {
       const missing = (requiredModeBits & ~mode).toString(8);
       return { ...check, ok: false, reason: `mode ${check.mode} missing ${missing}` };
+    }
+  }
+  if (forbiddenModeBits) {
+    const mode = Number.parseInt(check.mode, 8);
+    check.forbiddenModeBits = forbiddenModeBits.toString(8);
+    if ((mode & forbiddenModeBits) !== 0) {
+      const present = (mode & forbiddenModeBits).toString(8);
+      return { ...check, ok: false, reason: `mode ${check.mode} has forbidden ${present}` };
     }
   }
   return check;

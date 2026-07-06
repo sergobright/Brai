@@ -89,6 +89,9 @@ test("server access contract checks deploy ownership instead of agent write acce
   assert.match(script, /requiredModeBits: 0o2770/);
   assert.match(script, /contractPathCheck\("preview slot registry", path\.join\(envsRoot, "preview-slots\.json"\), \{/);
   assert.match(script, /requiredModeBits: 0o660/);
+  assert.match(script, /contractPathCheck\("protected env dir", protectedEnvDir, \{/);
+  assert.match(script, /sudoStat: true/);
+  assert.match(script, /sudo", \["-n", "stat"/);
   assert.doesNotMatch(script, /pathCheck\("env roots", envsRoot, \{ requireWrite: true/);
 });
 
@@ -239,6 +242,7 @@ test("local main sync preserves runtime dirs and hard resets to origin main", ()
   assert.match(script, /sync-occupied-preview-ota-manifests\.sh/);
   assert.match(script, /preserve_agent_dependency_paths/);
   assert.match(script, /apps\/brai_app\/node_modules/);
+  assert.ok(script.match(/-type l -prune -o/g)?.length >= 4);
   assert.match(script, /chmod u=rwx,g=rx,o=x deploy\/scripts/);
   assert.match(script, /chgrp brai-deploy "\$deploy_tool"/);
   assert.match(script, /chmod u=rwx,g=rx,o=rx "\$deploy_tool"/);
@@ -442,6 +446,31 @@ test("operation activity completion helper rejects unsafe ids", () => {
   });
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /Invalid operation activity id/);
+});
+
+test("operation activity completion helper rejects duplicate ids before DB access", () => {
+  const result = spawnSync("bash", [
+    "deploy/scripts/complete-operation-activities.sh",
+    "--local",
+    "operation:agent-task:dupe",
+    "operation:agent-task:dupe",
+  ], {
+    cwd: path.resolve(import.meta.dirname, ".."),
+    encoding: "utf8",
+  });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /Duplicate operation activity id/);
+});
+
+test("main checkout sync removes dangling dependency symlinks before relinking", () => {
+  const script = fs.readFileSync(path.resolve(import.meta.dirname, "../deploy/scripts/sync-local-main-checkout.sh"), "utf8");
+  const dependencyBlock = script.slice(
+    script.indexOf("preserve_agent_dependency_paths()"),
+    script.indexOf("exec 9>"),
+  );
+
+  assert.match(dependencyBlock, /\[ -L "\$dependency_path" \]/);
+  assert.match(dependencyBlock, /rm -f "\$dependency_path"/);
 });
 
 test("native APK detector ignores OTA web-layer changes", () => {

@@ -5,7 +5,11 @@ import { sandboxCheckMode } from "./brai-sandbox-check-mode.mjs";
 
 test("sandbox helper marks Next and API commands as requiring escalation", () => {
   assert.equal(sandboxCheckMode(["npm", "run", "app:build"]).mode, "require_escalated");
+  assert.equal(sandboxCheckMode(["npm", "run", "app:dev"]).mode, "require_escalated");
+  assert.equal(sandboxCheckMode(["npm", "--prefix", "apps/brai_app", "run", "build"]).mode, "require_escalated");
+  assert.equal(sandboxCheckMode(["npm", "--prefix", "apps/brai_app", "run", "dev"]).mode, "require_escalated");
   assert.equal(sandboxCheckMode(["npm", "--prefix", "services/brai_api", "test"]).mode, "require_escalated");
+  assert.equal(sandboxCheckMode(["npm", "--prefix", "services/brai_api", "run", "test"]).mode, "require_escalated");
   assert.equal(sandboxCheckMode(["npm", "run", "socraticode:preflight"]).mode, "require_escalated");
   assert.equal(sandboxCheckMode(["npm", "run", "socraticode:ensure"]).mode, "require_escalated");
 });
@@ -36,6 +40,10 @@ test("sandbox helper marks handoff commands as requiring escalation", () => {
 
 test("sandbox helper marks browser and Android commands", () => {
   assert.equal(sandboxCheckMode(["npm", "run", "app:e2e"]).mode, "require_escalated");
+  assert.equal(sandboxCheckMode(["playwright", "test"]).mode, "require_escalated");
   assert.equal(sandboxCheckMode(["agent-browser", "open", "https://brightos.world"]).mode, "agent_browser");
+  assert.equal(sandboxCheckMode(["npm", "run", "app:cap:sync"]).mode, "require_escalated");
+  assert.equal(sandboxCheckMode(["npm", "run", "android:build:release"]).mode, "require_escalated");
+  assert.equal(sandboxCheckMode(["deploy/scripts/build-android-env-apk.sh", "production"]).mode, "require_escalated");
   assert.equal(sandboxCheckMode(["apps/brai_app/android/gradlew", ":app:testProductionDebugUnitTest"]).mode, "require_escalated");
 });

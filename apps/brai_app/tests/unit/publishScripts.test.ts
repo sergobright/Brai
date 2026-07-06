@@ -359,6 +359,20 @@ describe("mobile OTA publish scripts", () => {
     expect(releaseSlot).toContain('deploy/scripts/build-android-env-apk.sh "preview${SLOT_META[0]}" >&2');
   });
 
+  it("guards APK publication against stale embedded web versions", async () => {
+    const buildApk = await readFile(path.join(workspaceRoot, "deploy/scripts/build-android-env-apk.sh"), "utf8");
+    const syncIndex = buildApk.indexOf('(cd "$ROOT" && "$NPM_BIN" run app:cap:sync)');
+    const publishIndex = buildApk.indexOf('BRAI_RELEASE_ENV="$RELEASE_KEY" BRAI_APK_SOURCE="$APK" "$SCRIPT_DIR/publish-capacitor-apk.sh"');
+    const guardBlock = buildApk.slice(syncIndex, publishIndex);
+
+    expect(syncIndex).toBeGreaterThan(0);
+    expect(publishIndex).toBeGreaterThan(syncIndex);
+    expect(guardBlock).toContain("version.json");
+    expect(guardBlock).toContain("BRAI_APP_VERSION");
+    expect(guardBlock).toContain("Embedded APK version.json mismatch");
+    expect(guardBlock).toMatch(/exit 1/);
+  });
+
   it("publishes a versioned bundle and atomic manifest from a static export", async () => {
     const root = await fixtureRoot("brai-mobile-publish-");
     await writeStaticExport(root, "ota");

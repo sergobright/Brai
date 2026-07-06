@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import test from "node:test";
 
 import {
+  assertWatcherActive,
   parseCliArgs,
   parseCommittedProjectId,
   waitForWatcherActive,
@@ -34,4 +36,23 @@ test("waitForWatcherActive polls until the watcher becomes active", async () => 
 
   assert.equal(active, true);
   assert.equal(checks, 3);
+});
+
+test("preflight mode reads SocratiCode state without mutating local services", () => {
+  const script = fs.readFileSync(new URL("./brai-socraticode-preflight.mjs", import.meta.url), "utf8");
+  const preflightBlock = script.slice(script.indexOf("let info;"), script.indexOf("async function main()"));
+
+  assert.doesNotMatch(preflightBlock, /ensureEmbeddingReady/);
+  assert.doesNotMatch(preflightBlock, /indexProject/);
+  assert.doesNotMatch(preflightBlock, /updateProjectIndex/);
+  assert.doesNotMatch(preflightBlock, /startWatching/);
+  assert.doesNotMatch(preflightBlock, /ensureWatcherFresh/);
+});
+
+test("preflight watcher check is read-only", async () => {
+  await assertWatcherActive("/tmp/brai", async () => true);
+  await assert.rejects(
+    () => assertWatcherActive("/tmp/brai", async () => false),
+    /SocratiCode watcher is inactive/,
+  );
 });

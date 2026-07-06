@@ -19,7 +19,9 @@ brai_operation_maintainers:
 brai_source_group: mark
 brai_service_user: brai
 brai_service_group: brai
+brai_protected_env_dir: /etc/brai
 brai_api_env_source: /etc/brai/brai-api.env
+brai_supabase_deploy_env_source: /etc/brai/supabase-deploy.env
 brai_basic_auth_directive: "import brai_unified_basic_auth"
 brai_envs:
   prod:

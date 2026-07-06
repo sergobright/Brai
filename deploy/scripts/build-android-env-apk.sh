@@ -78,6 +78,26 @@ if [[ -f "$SIGNING_ENV" ]]; then
   set +a
 fi
 
+verify_version_json() {
+  local file="$1"
+  local expected="$2"
+  if [[ ! -f "$file" ]]; then
+    echo "Missing version.json: $file" >&2
+    exit 1
+  fi
+  local actual
+  actual="$("$NODE_BIN" -e '
+const fs = require("node:fs");
+const [file] = process.argv.slice(1);
+const parsed = JSON.parse(fs.readFileSync(file, "utf8"));
+console.log(parsed.version || "");
+' "$file")"
+  if [[ "$actual" != "$expected" ]]; then
+    echo "version.json mismatch in $file: expected $expected, got ${actual:-missing}" >&2
+    exit 1
+  fi
+}
+
 (cd "$ROOT" && "$NPM_BIN" run app:build)
 "$NODE_BIN" -e '
 const fs = require("node:fs");
@@ -94,7 +114,9 @@ Object.assign(parsed, {
 });
 fs.writeFileSync(outVersionFile, `${JSON.stringify(parsed, null, 2)}\n`);
 ' "$ROOT" "$BRAI_APP_VERSION"
+verify_version_json "$ROOT/apps/brai_app/out/version.json" "$BRAI_APP_VERSION"
 (cd "$ROOT" && "$NPM_BIN" run app:cap:sync)
+verify_version_json "$ROOT/apps/brai_app/android/app/src/main/assets/public/version.json" "$BRAI_APP_VERSION"
 if [[ -x "/srv/opt/android-build-env/build-android.sh" ]]; then
   /srv/opt/android-build-env/build-android.sh "$ROOT/apps/brai_app/android" "$GRADLE_TASK"
 else
@@ -104,6 +126,24 @@ fi
 APK="$ROOT/apps/brai_app/android/app/build/outputs/apk/$FLAVOR/release/app-$FLAVOR-release.apk"
 if [[ ! -f "$APK" ]]; then
   echo "Missing APK output: $APK" >&2
+  exit 1
+fi
+
+if ! command -v unzip >/dev/null 2>&1; then
+  echo "unzip is required to verify embedded APK version.json" >&2
+  exit 1
+fi
+APK_VERSION_JSON="$(unzip -p "$APK" assets/public/version.json)"
+APK_EMBEDDED_VERSION="$(printf '%s' "$APK_VERSION_JSON" | "$NODE_BIN" -e '
+let raw = "";
+process.stdin.on("data", (chunk) => raw += chunk);
+process.stdin.on("end", () => {
+  const parsed = JSON.parse(raw);
+  console.log(parsed.version || "");
+});
+')"
+if [[ "$APK_EMBEDDED_VERSION" != "$BRAI_APP_VERSION" ]]; then
+  echo "Embedded APK version.json mismatch: expected $BRAI_APP_VERSION, got ${APK_EMBEDDED_VERSION:-missing}" >&2
   exit 1
 fi
 

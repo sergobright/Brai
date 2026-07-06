@@ -34,6 +34,54 @@
         append: true
       loop: "{{ brai_deploy_writers }}"
 
+    - name: Ensure protected Brai env directory contract
+      ansible.builtin.file:
+        path: "{{ brai_protected_env_dir }}"
+        state: directory
+        owner: root
+        group: "{{ brai_deploy_user }}"
+        mode: "0750"
+      tags:
+        - brai-env-contract
+        - targeted-infra-apply
+
+    - name: Check protected Brai env files exist
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      register: brai_protected_env_files
+      loop:
+        - "{{ brai_api_env_source }}"
+        - "{{ brai_supabase_deploy_env_source }}"
+      tags:
+        - brai-env-contract
+        - targeted-infra-apply
+
+    - name: Refuse to create protected Brai env files from source
+      ansible.builtin.fail:
+        msg: "{{ item.item }} is missing; create it on the server with secrets outside Git, then rerun this playbook."
+      loop: "{{ brai_protected_env_files.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+      when: not item.stat.exists
+      tags:
+        - brai-env-contract
+        - targeted-infra-apply
+
+    - name: Ensure protected Brai env file permissions
+      ansible.builtin.file:
+        path: "{{ item.item }}"
+        state: file
+        owner: root
+        group: "{{ brai_deploy_user }}"
+        mode: "0640"
+      loop: "{{ brai_protected_env_files.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+      when: item.stat.exists
+      tags:
+        - brai-env-contract
+        - targeted-infra-apply
+
     - name: Create environment root
       ansible.builtin.file:
         path: "{{ brai_env_root }}"

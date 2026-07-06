@@ -140,6 +140,14 @@ async function ensureWatcherFresh(root, socraticode, report) {
   }
 }
 
+export async function assertWatcherActive(root, isWatchedByAnyProcess) {
+  if (await isWatchedByAnyProcess(root)) return;
+  throw new Error(
+    `SocratiCode watcher is inactive for ${root}.\n` +
+      "Run npm run socraticode:ensure or start it through SocratiCode codebase_watch.",
+  );
+}
+
 export async function runSocraticodeCheck(options = {}) {
   const mode = options.mode ?? "preflight";
   const root = path.resolve(options.root ?? process.cwd());
@@ -214,7 +222,7 @@ export async function runSocraticodeCheck(options = {}) {
     );
   }
 
-  await ensureWatcherFresh(root, socraticode, () => {});
+  await assertWatcherActive(root, socraticode.isWatchedByAnyProcess);
   console.log(
     `SocratiCode preflight OK for ${root} ` +
       `(projectId=${effectiveProjectId}, committedProjectId=${committedProjectId}, collection=${collection})`,
