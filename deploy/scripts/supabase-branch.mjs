@@ -13,6 +13,11 @@ const requireFromApi = createRequire(path.join(root, "services/brai_api/package.
 const { Pool } = requireFromApi("pg");
 const [command, ...argv] = process.argv.slice(2);
 const args = parseArgs(argv);
+const LEGACY_DATABASE_ENV_KEYS = new Set([
+  "BRAI_DATA_STORE",
+  "BRAI_DB",
+  "BRAI_LEGACY_SQLITE_PATH",
+]);
 
 if (command === "preview-env") {
   const branch = required(args, "branch");
@@ -241,7 +246,7 @@ function upsertEnvFile(filePath, values) {
   const keys = new Set(Object.keys(values));
   const kept = existing.filter((line) => {
     const key = line.match(/^\s*([A-Z0-9_]+)=/)?.[1];
-    return key ? !keys.has(key) : line.trim() !== "";
+    return key ? !keys.has(key) && !LEGACY_DATABASE_ENV_KEYS.has(key) : line.trim() !== "";
   });
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   fs.writeFileSync(filePath, `${[...kept, ...Object.entries(values).map(([key, value]) => `${key}=${shellQuote(value)}`)].join("\n")}\n`);
