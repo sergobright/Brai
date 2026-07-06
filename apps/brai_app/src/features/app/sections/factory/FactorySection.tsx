@@ -188,8 +188,8 @@ export function FactorySection({ onMobileOverlayChange }: { onMobileOverlayChang
           gridTemplateColumns: "minmax(0,var(--actions-list-percent)) minmax(0,calc(100% - var(--actions-list-percent)))",
         } as CSSProperties}
       >
-        <ScrollArea className="h-full min-h-0 min-w-0">
-          <div className="grid gap-3 pr-[18px] max-[860px]:pr-0" aria-label="Поток AI_logs">
+        <ScrollArea className="h-full min-h-0 min-w-0 max-[860px]:-mx-3.5 max-[860px]:[&>[data-slot=scroll-area-scrollbar]]:!right-0" contentInset="none">
+          <div className="grid gap-3 pr-[18px] max-[860px]:px-3.5" aria-label="Поток AI_logs">
             <div className="sticky top-0 z-[2] flex items-center justify-between gap-3 bg-background/95 pb-3 backdrop-blur max-[860px]:hidden">
               <div className="min-w-0">
                 <p className="m-0 text-sm font-medium">AI_logs/</p>
@@ -344,9 +344,11 @@ function FactoryMobileDetail({ log, onClose }: { log: FactoryLog; onClose: () =>
         aria-label="Подробности AI log"
         {...sheetDragHandlers}
       >
-        <div className="flex items-center justify-between gap-3 border-b border-border px-5 pb-3">
-          <div className="h-1.5 w-12 rounded-full bg-muted-foreground/30" aria-hidden="true" />
-          <Button type="button" variant="ghost" size="icon-sm" aria-label="Закрыть подробности" onClick={close}>
+        <div className="relative min-h-12 border-b border-border px-5">
+          <div className="absolute left-1/2 top-0 flex h-6 w-32 -translate-x-1/2 touch-none cursor-grab items-start justify-center pt-1.5 active:cursor-grabbing">
+            <span className="h-1.5 w-12 rounded-full bg-muted-foreground/30" aria-hidden="true" />
+          </div>
+          <Button type="button" variant="ghost" size="icon-sm" className="absolute right-4 top-2.5" aria-label="Закрыть подробности" onClick={close}>
             <X aria-hidden="true" />
           </Button>
         </div>
