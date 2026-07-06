@@ -23,6 +23,7 @@ test("preview env setup rewrites existing shell-unsafe values safely", () => {
     BRAI_ENVS_ROOT: dir,
     BRAI_PREVIEW_REGISTRY: path.join(dir, "preview-slots.json"),
     BRAI_PREVIEW_LOCK: path.join(dir, "preview-slots.lock"),
+    NODE_BIN: process.execPath,
     SUPABASE_SELF_HOSTED: "true",
     SUPABASE_SELF_HOSTED_DATABASE_URL: "postgres://brai:brai@127.0.0.1:5432/brai"
   };
