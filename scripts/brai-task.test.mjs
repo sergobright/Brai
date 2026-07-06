@@ -354,6 +354,7 @@ test("delivery classifier separates infra-docs from runtime preview", () => {
   assert.equal(deliveryClassForFile("scripts/check-open-openspec-changes.mjs"), "infra");
   assert.equal(deliveryClassForFile("services/brai_temporal/src/state.mjs"), "infra");
   assert.equal(deliveryClassForFile("supabase/migrations/0002_enable_rls_public_tables.sql"), "infra");
+  assert.equal(deliveryClassForFile("supabase/migrations/0003_fix_rls_function_search_path.sql"), "infra");
   assert.equal(deliveryClassForFile("deploy/web/index.html"), "blocked");
   assert.equal(deliveryClassForFile("package.json"), "unknown");
 
@@ -361,6 +362,7 @@ test("delivery classifier separates infra-docs from runtime preview", () => {
   assert.equal(classifyDelivery([".github/workflows/brai-delivery.yml"]).deliveryClass, "infra-docs");
   assert.equal(classifyDelivery(["deploy/scripts/complete-operation-activities.sh"]).deliveryClass, "infra-docs");
   assert.equal(classifyDelivery(["supabase/migrations/0002_enable_rls_public_tables.sql"]).deliveryClass, "infra-docs");
+  assert.equal(classifyDelivery(["supabase/migrations/0003_fix_rls_function_search_path.sql"]).deliveryClass, "infra-docs");
   assert.deepEqual(classifyDeployDelivery(["deploy/scripts/complete-operation-activities.sh"], {
     eventName: "push",
     ref: "refs/heads/codex/operation-done-helper",

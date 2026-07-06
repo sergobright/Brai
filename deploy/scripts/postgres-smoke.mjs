@@ -24,6 +24,16 @@ try {
     scalar("SELECT COUNT(*)::int FROM build_version_counters WHERE version_type_id IN ('apk', 'build')"),
     scalar("SELECT COUNT(*)::int FROM pg_event_trigger WHERE evtname = 'brai_enable_rls_for_new_public_tables' AND evtenabled IN ('O', 'R', 'A')"),
     scalar(`
+      SELECT EXISTS (
+        SELECT 1
+        FROM pg_proc p
+        JOIN pg_namespace n ON n.oid = p.pronamespace
+        WHERE n.nspname = 'public'
+          AND p.proname = 'brai_enable_rls_for_new_public_tables'
+          AND 'search_path=pg_catalog' = ANY(COALESCE(p.proconfig, ARRAY[]::text[]))
+      )::int
+    `),
+    scalar(`
       SELECT COUNT(*)::int
       FROM pg_class c
       JOIN pg_namespace n ON n.oid = c.relnamespace
@@ -51,6 +61,7 @@ try {
     inboxTypes,
     counters,
     rlsAutoTrigger,
+    rlsFunctionSearchPath,
     rlsProtectedTables,
     publicTablesWithoutRls,
     importMarker
@@ -63,6 +74,7 @@ try {
   if (inboxTypes < 4) throw new Error("inbox_record_types seed is incomplete");
   if (counters !== 2) throw new Error("build_version_counters seed is incomplete");
   if (rlsAutoTrigger !== 1) throw new Error("public table RLS auto-enable trigger is missing or disabled");
+  if (rlsFunctionSearchPath !== 1) throw new Error("public table RLS auto-enable function search_path is mutable");
   if (publicTablesWithoutRls.length > 0) {
     throw new Error(`Public tables without RLS: ${publicTablesWithoutRls.map((row) => row.table_name).join(", ")}`);
   }
@@ -76,6 +88,7 @@ try {
     inboxTypes,
     counters,
     rlsAutoTrigger,
+    rlsFunctionSearchPath,
     rlsProtectedTables,
     publicTablesWithoutRls: publicTablesWithoutRls.length,
     importMarker: importMarker || undefined
