@@ -31,6 +31,9 @@ try {
     case "apk":
       result = updateOwnedApk(registry, args[0], args[1], args[2], args[3], args[4], args[5], args[6], now);
       break;
+    case "clear-apk":
+      result = clearOwnedApk(registry, args[0], args[1], now);
+      break;
     case "next-apk-preview":
       result = nextApkPreview(registry, args[0], args[1], args[2], now);
       break;
@@ -44,7 +47,7 @@ try {
       result = { ok: true, registry };
       break;
     default:
-      throw new Error("usage: preview-slots.sh init|status|allocate <branch> <commit>|ready <branch> <commit>|failed <branch> <commit>|apk <branch> <commit> <versionCode> <file> <version> [previewIteration] [buildKind]|next-apk-preview <branch> <commit> <stableVersion>|release <branch-or-slot>|dequeue <branch>");
+      throw new Error("usage: preview-slots.sh init|status|allocate <branch> <commit>|ready <branch> <commit>|failed <branch> <commit>|apk <branch> <commit> <versionCode> <file> <version> [previewIteration] [buildKind]|clear-apk <branch> <commit>|next-apk-preview <branch> <commit> <stableVersion>|release <branch-or-slot>|dequeue <branch>");
   }
 
   if (command !== "status") {
@@ -93,10 +96,7 @@ function updateOwnedSlot(registry, branch, commit, now, status) {
   const existing = findByBranch(registry, branch);
   if (!existing) throw new Error(`branch has no preview slot: ${branch}`);
   if (status === "ready" && existing.entry.apk_build_kind === "preview" && existing.entry.apk_preview_iteration) {
-    registry.apk_preview_counter = Math.max(
-      committedPreviewCounter(registry),
-      positiveInteger(existing.entry.apk_preview_iteration, "APK preview iteration"),
-    );
+    commitPreviewCounter(registry, existing.entry.apk_version, existing.entry.apk_preview_iteration);
   }
   Object.assign(existing.entry, {
     status,
@@ -111,7 +111,7 @@ function nextApkPreview(registry, branch, commit, stableVersion, now) {
   const existing = findByBranch(registry, branch);
   if (!existing) throw new Error(`branch has no preview slot: ${branch}`);
   const version = positiveInteger(stableVersion, "stable APK version");
-  const iteration = positiveInteger(committedPreviewCounter(registry) + 1, "APK preview iteration");
+  const iteration = positiveInteger(committedPreviewCounter(registry, version) + 1, "APK preview iteration");
   const versionCode = version * 10000 + iteration;
   Object.assign(existing.entry, {
     commit: commit ?? existing.entry.commit,
@@ -139,6 +139,23 @@ function updateOwnedApk(registry, branch, commit, versionCode, file, version, pr
     apk_preview_iteration: iteration,
     apk_build_kind: buildKind || (iteration ? "preview" : "stable"),
     apk_updated_at: now,
+    updated_at: now,
+  });
+  return { ok: true, slot: existing.slot, entry: existing.entry };
+}
+
+function clearOwnedApk(registry, branch, commit, now) {
+  requireBranch(branch);
+  const existing = findByBranch(registry, branch);
+  if (!existing) throw new Error(`branch has no preview slot: ${branch}`);
+  Object.assign(existing.entry, {
+    commit: commit ?? existing.entry.commit,
+    apk_version_code: null,
+    apk_file: null,
+    apk_version: null,
+    apk_preview_iteration: null,
+    apk_build_kind: "stable",
+    apk_updated_at: null,
     updated_at: now,
   });
   return { ok: true, slot: existing.slot, entry: existing.entry };
@@ -175,7 +192,7 @@ function findByBranch(registry, branch) {
 }
 
 function readRegistry() {
-  const initial = { ...Object.fromEntries(slots.map((slot) => [slot, defaultSlot(slot)])), queue: [], apk_preview_counter: 0 };
+  const initial = { ...Object.fromEntries(slots.map((slot) => [slot, defaultSlot(slot)])), queue: [], apk_preview_counter: 0, apk_preview_counters: {} };
   if (!fs.existsSync(registryPath)) return initial;
   const parsed = JSON.parse(fs.readFileSync(registryPath, "utf8"));
   for (const slot of slots) {
@@ -185,20 +202,58 @@ function readRegistry() {
     ...Object.fromEntries(slots.map((slot) => [slot, parsed[slot]])),
     queue: normalizeQueue(parsed.queue),
     apk_preview_counter: Number.isInteger(Number(parsed.apk_preview_counter)) ? Number(parsed.apk_preview_counter) : 0,
+    apk_preview_counters: normalizePreviewCounters(parsed.apk_preview_counters),
   };
   registry.apk_preview_counter = committedPreviewCounter(registry);
   return registry;
 }
 
-function committedPreviewCounter(registry) {
-  let counter = Number.isInteger(Number(registry.apk_preview_counter)) ? Number(registry.apk_preview_counter) : 0;
+function committedPreviewCounter(registry, stableVersion = null) {
+  const versionKey = stableVersion == null ? null : String(stableVersion);
+  let counter = versionKey
+    ? positivePreviewCounter(registry.apk_preview_counters?.[versionKey])
+    : positivePreviewCounter(registry.apk_preview_counter);
   for (const slot of slots) {
     const entry = registry[slot];
-    if (entry?.status === "ready" && entry.apk_build_kind === "preview" && entry.apk_preview_iteration) {
+    if (
+      entry?.status === "ready" &&
+      entry.apk_build_kind === "preview" &&
+      entry.apk_preview_iteration &&
+      (!versionKey || String(entry.apk_version) === versionKey)
+    ) {
       counter = Math.max(counter, positiveInteger(entry.apk_preview_iteration, "APK preview iteration"));
     }
   }
   return counter;
+}
+
+function commitPreviewCounter(registry, stableVersion, previewIteration) {
+  const version = positiveInteger(stableVersion, "stable APK version");
+  const iteration = positiveInteger(previewIteration, "APK preview iteration");
+  registry.apk_preview_counters ??= {};
+  registry.apk_preview_counters[String(version)] = Math.max(
+    positivePreviewCounter(registry.apk_preview_counters[String(version)]),
+    iteration,
+  );
+  registry.apk_preview_counter = Math.max(positivePreviewCounter(registry.apk_preview_counter), iteration);
+}
+
+function normalizePreviewCounters(value) {
+  const counters = {};
+  if (!value || typeof value !== "object" || Array.isArray(value)) return counters;
+  for (const [key, raw] of Object.entries(value)) {
+    const version = Number(key);
+    const counter = Number(raw);
+    if (Number.isInteger(version) && version > 0 && Number.isInteger(counter) && counter > 0) {
+      counters[String(version)] = counter;
+    }
+  }
+  return counters;
+}
+
+function positivePreviewCounter(value) {
+  const counter = Number(value);
+  return Number.isInteger(counter) && counter > 0 ? counter : 0;
 }
 
 function writeRegistry(registry) {

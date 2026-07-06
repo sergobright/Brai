@@ -244,6 +244,12 @@ X-Brai-Target: finance
 Attachment links сохраняются как `/v1/inbox/attachments/<file>`. Файлы лежат в
 storage root окружения из `BRAI_INBOUND_STORAGE_ROOT`.
 
+Для image-вложений сервер пытается сразу создать уменьшенную копию
+`/v1/inbox/attachments/<file>.thumb.jpg` размером до `640px` по большей стороне.
+`attachment_links` по-прежнему содержит только оригиналы; UI строит preview URL
+детерминированно. Preview доступен только если текущий пользователь имеет доступ
+к оригинальному вложению.
+
 ## Типы записей
 
 Типы записей зарегистрированы в `inbox_record_types`.

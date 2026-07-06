@@ -425,12 +425,17 @@ try {
 
   it("rebuilds APK release rows and records production ledger rows by default", async () => {
     const deploy = await readFile(path.join(workspaceRoot, "deploy/scripts/ci-ssh-deploy.sh"), "utf8");
+    const deployBranch = await readFile(path.join(workspaceRoot, "deploy/scripts/deploy-branch.sh"), "utf8");
     const buildApk = await readFile(path.join(workspaceRoot, "deploy/scripts/build-android-env-apk.sh"), "utf8");
     const buildNonproduction = await readFile(path.join(workspaceRoot, "deploy/scripts/build-nonproduction-apks.sh"), "utf8");
     const releaseSlot = await readFile(path.join(workspaceRoot, "deploy/scripts/ci-ssh-release-slot.sh"), "utf8");
     const prodBlock = deploy.slice(deploy.indexOf('elif [[ "$ENVIRONMENT" == "prod" ]]'));
 
     expect(prodBlock).toContain('deploy/scripts/build-android-env-apk.sh production');
+    expect(deploy).toContain("export BRAI_NATIVE_APK_CHANGE");
+    expect(deployBranch).toContain('BRAI_NATIVE_APK_CHANGE:-false');
+    expect(deployBranch).toContain('resolve-required-apk-version.mjs" prod apkVersion');
+    expect(deployBranch).toContain('preview-slots.sh" clear-apk "$BRANCH" "$COMMIT"');
     expect(prodBlock).toContain('node deploy/scripts/resolve-app-version.mjs --environment prod --root "$SOURCE_ROOT" --db "${BRAI_DB:-}"');
     expect(prodBlock).toContain('deploy/scripts/build-nonproduction-apks.sh');
     expect(prodBlock.indexOf('deploy/scripts/build-android-env-apk.sh production')).toBeLessThan(prodBlock.indexOf('deploy/scripts/build-nonproduction-apks.sh'));
@@ -820,7 +825,7 @@ try {
     expect(statusHtml).toContain("APK versionCode");
   });
 
-  it("commits the global preview APK counter only after a ready preview", async () => {
+  it("commits preview APK counters per stable version only after a ready preview", async () => {
     const root = await fixtureRoot("brai-slots-apk-counter-");
     const envsRoot = path.join(root, "envs");
     const env = {
@@ -848,6 +853,7 @@ try {
     await execFileAsync("node", [slotScript, "ready", "codex/one", "abc"], { env });
     registry = JSON.parse(await readFile(path.join(envsRoot, "preview-slots.json"), "utf8"));
     expect(registry.apk_preview_counter).toBe(1);
+    expect(registry.apk_preview_counters).toMatchObject({ 2: 1 });
 
     registry.apk_preview_counter = 0;
     await writeFile(path.join(envsRoot, "preview-slots.json"), JSON.stringify(registry));
@@ -870,6 +876,18 @@ try {
     await execFileAsync("node", [slotScript, "ready", "codex/two", "def"], { env });
     registry = JSON.parse(await readFile(path.join(envsRoot, "preview-slots.json"), "utf8"));
     expect(registry.apk_preview_counter).toBe(2);
+    expect(registry.apk_preview_counters).toMatchObject({ 2: 2 });
+
+    await execFileAsync("node", [slotScript, "allocate", "codex/three", "ghi"], { env });
+    await execFileAsync("node", [slotScript, "next-apk-preview", "codex/three", "ghi", "3"], { env });
+    registry = JSON.parse(await readFile(path.join(envsRoot, "preview-slots.json"), "utf8"));
+    let three = Object.values(registry).find((entry: unknown) => (entry as { branch?: string }).branch === "codex/three");
+    expect(three).toMatchObject({ apk_preview_iteration: 1, apk_version_code: 30001 });
+
+    await execFileAsync("node", [slotScript, "clear-apk", "codex/three", "ghi"], { env });
+    registry = JSON.parse(await readFile(path.join(envsRoot, "preview-slots.json"), "utf8"));
+    three = Object.values(registry).find((entry: unknown) => (entry as { branch?: string }).branch === "codex/three");
+    expect(three).toMatchObject({ apk_preview_iteration: null, apk_version_code: null, apk_build_kind: "stable" });
   });
 
   it("queues preview branches when every slot is occupied", async () => {
