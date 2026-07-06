@@ -14,8 +14,9 @@ import rawFieldReference from "./detailFieldReference.json";
 
 export type DetailPanelKind = "actions" | "inbox";
 export type DetailPanelTab = "info" | "links" | "ai" | "history" | "details" | "db";
+type DetailPanelTabItem<T extends string> = { id: T; label: string };
 
-const DETAIL_PANEL_TABS: Array<{ id: DetailPanelTab; label: string }> = [
+const DETAIL_PANEL_TABS: Array<DetailPanelTabItem<DetailPanelTab>> = [
   { id: "info", label: "Инфо" },
   { id: "links", label: "Связи" },
   { id: "ai", label: "AI" },
@@ -43,14 +44,16 @@ type DetailValueRow = { name: string; value: unknown };
 
 const fieldReference = rawFieldReference as DetailReference;
 
-export function DetailPanelTabBar({
+export function DetailPanelTabBar<T extends string = DetailPanelTab>({
   activeTab,
   className,
   onChange,
+  tabs = DETAIL_PANEL_TABS as Array<DetailPanelTabItem<T>>,
 }: {
-  activeTab: DetailPanelTab;
+  activeTab: T;
   className?: string;
-  onChange: (tab: DetailPanelTab) => void;
+  onChange: (tab: T) => void;
+  tabs?: Array<DetailPanelTabItem<T>>;
 }) {
   return (
     <div
@@ -58,7 +61,7 @@ export function DetailPanelTabBar({
       role="tablist"
       aria-label="Вкладки панели деталей"
     >
-      {DETAIL_PANEL_TABS.map((tab) => (
+      {tabs.map((tab) => (
         <button
           key={tab.id}
           type="button"

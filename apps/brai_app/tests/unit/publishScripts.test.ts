@@ -431,11 +431,15 @@ try {
     const releaseSlot = await readFile(path.join(workspaceRoot, "deploy/scripts/ci-ssh-release-slot.sh"), "utf8");
     const prodBlock = deploy.slice(deploy.indexOf('elif [[ "$ENVIRONMENT" == "prod" ]]'));
 
-    expect(prodBlock).toContain('deploy/scripts/build-android-env-apk.sh production');
     expect(deploy).toContain("export BRAI_NATIVE_APK_CHANGE");
-    expect(deployBranch).toContain('BRAI_NATIVE_APK_CHANGE:-false');
+    expect(deployBranch).toContain("BRAI_NATIVE_APK_CHANGE:-false");
     expect(deployBranch).toContain('resolve-required-apk-version.mjs" prod apkVersion');
+    expect(deployBranch).toContain('export BRAI_TARGET_APK_VERSION="$("$NODE_BIN" "$SCRIPT_DIR/resolve-required-apk-version.mjs" prod apkVersion)"');
+    expect(deployBranch).toContain('export BRAI_TARGET_APK_BUILD_KIND="stable"');
+    expect(deployBranch).not.toContain("BRAI_TARGET_APK_VERSION:-");
+    expect(deployBranch).not.toContain("BRAI_TARGET_APK_BUILD_KIND:-stable");
     expect(deployBranch).toContain('preview-slots.sh" clear-apk "$BRANCH" "$COMMIT"');
+    expect(prodBlock).toContain('deploy/scripts/build-android-env-apk.sh production');
     expect(prodBlock).toContain('node deploy/scripts/resolve-app-version.mjs --environment prod --root "$SOURCE_ROOT" --db "${BRAI_DB:-}"');
     expect(prodBlock).toContain('deploy/scripts/build-nonproduction-apks.sh');
     expect(prodBlock.indexOf('deploy/scripts/build-android-env-apk.sh production')).toBeLessThan(prodBlock.indexOf('deploy/scripts/build-nonproduction-apks.sh'));
@@ -883,7 +887,6 @@ try {
     registry = JSON.parse(await readFile(path.join(envsRoot, "preview-slots.json"), "utf8"));
     let three = Object.values(registry).find((entry: unknown) => (entry as { branch?: string }).branch === "codex/three");
     expect(three).toMatchObject({ apk_preview_iteration: 1, apk_version_code: 30001 });
-
     await execFileAsync("node", [slotScript, "clear-apk", "codex/three", "ghi"], { env });
     registry = JSON.parse(await readFile(path.join(envsRoot, "preview-slots.json"), "utf8"));
     three = Object.values(registry).find((entry: unknown) => (entry as { branch?: string }).branch === "codex/three");

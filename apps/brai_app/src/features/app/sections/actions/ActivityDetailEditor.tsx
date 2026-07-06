@@ -16,6 +16,7 @@ import type { ActivityItem } from "@/shared/types/activities";
 import { Button } from "@/shared/ui/button";
 import { hasMarkdownSyntax, MarkdownContent } from "@/shared/ui/markdown-content";
 import { ScrollArea } from "@/shared/ui/scroll-area";
+import { MobileDetailFloatingCloseButton } from "../../chrome/AppChrome";
 import { cx, fitTextareaHeight, focusEditableEnd, plainEditableText, setPlainEditableText } from "../../appUtils";
 import { useMobileSheetDrag } from "../../hooks/useMobileSheetDrag";
 import { useMobileSheetTop } from "../../hooks/useMobileSheetTop";
@@ -249,21 +250,19 @@ export function ActivityDetailEditor({
       <DetailEmptyTab />
     );
   const closeButton = (
-    <button
-      type="button"
-      className={cx(
-        "actions-detail-close grid place-items-center rounded-full text-xl leading-none",
-        mode === "desktop" &&
-          "h-[34px] w-[34px] border border-border bg-secondary text-foreground",
-        mode === "mobile" &&
-          "fixed bottom-[calc(20px+env(safe-area-inset-bottom))] right-[18px] z-[2] h-[58px] w-[58px] border-0 bg-primary text-2xl font-semibold text-primary-foreground shadow-lg",
-      )}
-      aria-label={mode === "mobile" ? "Сохранить и закрыть" : "Закрыть редактор"}
-      title={mode === "mobile" ? "Сохранить" : "Закрыть"}
-      onClick={mode === "mobile" ? closeWithAnimation : closeEditor}
-    >
-      {mode === "mobile" ? "✓" : "×"}
-    </button>
+    mode === "mobile" ? (
+      <MobileDetailFloatingCloseButton ariaLabel="Сохранить и закрыть" onClick={closeWithAnimation} />
+    ) : (
+      <button
+        type="button"
+        className="actions-detail-close grid h-[34px] w-[34px] place-items-center rounded-full border border-border bg-secondary text-xl leading-none text-foreground"
+        aria-label="Закрыть редактор"
+        title="Закрыть"
+        onClick={closeEditor}
+      >
+        ×
+      </button>
+    )
   );
   const detailTitle = (
     <div className="actions-detail-title-block relative mb-2 mt-6 grid min-w-0">
