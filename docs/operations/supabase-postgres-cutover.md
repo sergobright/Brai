@@ -8,10 +8,12 @@ This runbook moves Brai runtime data from frozen SQLite to Supabase Postgres. Do
 - `BRAI_DATA_STORE=postgres` is a transitional guard for environments that should refuse SQLite runtime usage.
 - `BRAI_DB` is legacy-only after cutover: frozen backup/import source and legacy tests.
 - Web and Android keep using the Brai Node API. They must not receive Supabase service credentials or call Supabase Data API directly.
+- On the one-VPS deployment, Temporal keeps using hidden Supabase databases `temporal` and `temporal_visibility`; Brai product tables live in `postgres.public`, visible in Supabase Studio at `https://supabase.brightos.world`.
 
 ## Protected Env Files
 
 - Production runtime env: `/etc/brai/brai-api.env`
+- Production Supabase Studio: `https://supabase.brightos.world` through Caddy unified basic auth, proxying localhost-only Studio on `127.0.0.1:54323`.
 - Supabase deploy automation env: `/etc/brai/supabase-deploy.env`
 - Preview and Dev runtime envs: `/srv/projects/brai-envs/<environment>/brai-api.env`
 - GitHub secrets required by delivery workflows: `SUPABASE_ACCESS_TOKEN`, `SUPABASE_PROJECT_REF`, `BRAI_PROD_DATABASE_URL`

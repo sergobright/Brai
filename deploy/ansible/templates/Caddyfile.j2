@@ -33,6 +33,22 @@ http://{{ brai_syncthing_domain }} {
   }
 }
 
+http://{{ brai_supabase_studio_domain }} {
+  redir https://{{ brai_supabase_studio_domain }}{uri} permanent
+}
+
+{{ brai_supabase_studio_domain }} {
+  import brai_unified_basic_auth
+  encode zstd gzip
+  tls {
+    issuer acme {
+      disable_http_challenge
+    }
+  }
+
+  reverse_proxy 127.0.0.1:{{ brai_supabase_studio_port }}
+}
+
 http://{{ brai_envs.prod.domain }} {
   redir https://{{ brai_envs.prod.domain }}{uri} permanent
 }
