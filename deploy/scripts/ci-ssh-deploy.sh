@@ -159,12 +159,14 @@ if [[ -f "/etc/brai/supabase-deploy.env" ]]; then
   . /etc/brai/supabase-deploy.env
   set +a
 fi
-if [[ "$ENVIRONMENT" == "prod" && -f "/etc/brai/brai-api.env" ]]; then
+if [[ "$ENVIRONMENT" == "prod" && -r "/etc/brai/brai-api.env" ]]; then
   set -a
   # shellcheck source=/dev/null
   . /etc/brai/brai-api.env
   set +a
   export BRAI_PROD_DATABASE_URL="${BRAI_DATABASE_URL:-}"
+elif [[ "$ENVIRONMENT" == "prod" ]]; then
+  echo "Production runtime env is not readable by deploy user; systemd will load it on service restart."
 fi
 if [[ "$ENVIRONMENT" == "prod" && -n "${BRAI_DATABASE_URL:-}" ]]; then
   node deploy/scripts/supabase-branch.mjs migrate --postgres-url "$BRAI_DATABASE_URL"
