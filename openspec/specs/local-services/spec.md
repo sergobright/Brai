@@ -36,7 +36,7 @@ The live Brai API service SHALL run with the supported Brai Node.js runtime inst
 #### Scenario: Brai API tests are run
 - **WHEN** maintainers run `npm --prefix services/brai_api test`
 - **THEN** the tests execute under the supported Brai Node runtime
-- **AND** native SQLite dependencies are installed or rebuilt for that runtime
+- **AND** `BRAI_TEST_DATABASE_URL` points at a writable Postgres database for isolated test schemas
 - **AND** the test suite passes without a native `SIGSEGV`
 
 ### Requirement: One VPS hosts production and preview services behind Caddy

@@ -363,26 +363,17 @@ export const inboxEventMethods = {
 ,
 
   nextInboxServerSequence() {
-    if (this.db.dialect === 'postgres') return this.nextPostgresCounter('inbox_events.server_sequence');
-    const row = this.db
-      .prepare('SELECT COALESCE(MAX(server_sequence), 0) + 1 AS next FROM inbox_events')
-      .get();
-    return row.next;
+    return this.nextPostgresCounter('inbox_events.server_sequence');
   }
 ,
 
   nextInvalidInboxClientSequence(deviceId) {
-    if (this.db.dialect === 'postgres') return -this.nextPostgresCounter(`inbox_events.invalid_client_sequence.${deviceId}`);
-    return -this.nextInboxServerSequence();
+    return -this.nextPostgresCounter(`inbox_events.invalid_client_sequence.${deviceId}`);
   }
 ,
 
   nextInboxClientSequence(deviceId) {
-    if (this.db.dialect === 'postgres') return this.nextPostgresCounter(`inbox_events.client_sequence.${deviceId}`);
-    const row = this.db
-      .prepare('SELECT COALESCE(MAX(client_sequence), 0) + 1 AS next FROM inbox_events WHERE device_id = ?')
-      .get(deviceId);
-    return row.next;
+    return this.nextPostgresCounter(`inbox_events.client_sequence.${deviceId}`);
   }
 ,
 

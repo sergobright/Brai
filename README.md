@@ -2,7 +2,7 @@
 
 Brai is a local-first personal operating system for focused work. It brings daily actions, focus sessions, goals, history, and self-hosted sync into one web and Android app that keeps working when the network is unreliable.
 
-The project is built around a simple rule: the device should remain useful first, and the server should sync state when it can. Local data is stored in the client outbox, then reconciled through the Brai API backed by SQLite.
+The project is built around a simple rule: the device should remain useful first, and the server should sync state when it can. Local data is stored in the client outbox, then reconciled through the Brai API backed by Supabase Postgres.
 
 ## What Is Inside
 
@@ -18,7 +18,7 @@ The project is built around a simple rule: the device should remain useful first
 
 - `apps/brai_app/` - Next.js 16, React 19, Tailwind CSS, source-owned UI, and Capacitor Android.
 - `apps/brai_site/` - static public site source for `brightos.world`.
-- `services/brai_api/` - Node.js Brai API with SQLite storage and offline-first sync endpoints.
+- `services/brai_api/` - Node.js Brai API with Supabase Postgres storage and offline-first sync endpoints.
 - `deploy/` - deployment scripts, Ansible playbooks, Caddy/systemd templates, and environment mapping.
 - `docs/` - development guidelines, checklists, and operations notes.
 - `openspec/specs/` - accepted product and workflow requirements.

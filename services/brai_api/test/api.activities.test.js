@@ -185,12 +185,22 @@ test('actions sync applies late events to only the affected activity', async () 
     });
 
     fixture.store.db.exec(`
+      CREATE OR REPLACE FUNCTION fail_activity_delete_fn()
+      RETURNS trigger
+      LANGUAGE plpgsql
+      AS $$
+      BEGIN
+        IF OLD.id = 'action-2' THEN
+          RAISE EXCEPTION 'unrelated activity was rebuilt';
+        END IF;
+        RETURN OLD;
+      END;
+      $$;
+
       CREATE TRIGGER fail_activity_delete
       BEFORE DELETE ON activities
-      WHEN old.id = 'action-2'
-      BEGIN
-        SELECT RAISE(ABORT, 'unrelated activity was rebuilt');
-      END;
+      FOR EACH ROW
+      EXECUTE FUNCTION fail_activity_delete_fn();
     `);
 
     const response = await request(fixture.url, '/v1/activities/events/sync', {

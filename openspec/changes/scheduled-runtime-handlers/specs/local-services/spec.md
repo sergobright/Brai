@@ -1,7 +1,7 @@
 ## ADDED Requirements
 
-### Requirement: Scheduled runtime agents use SQLite schedule state
-Brai SHALL store scheduled runtime agent due state in server SQLite and
+### Requirement: Scheduled runtime agents use Postgres schedule state
+Brai SHALL store scheduled runtime agent due state in server Supabase Postgres and
 SHALL keep agent descriptions in the existing `agents` registry.
 
 #### Scenario: Scheduled agent schema is initialized

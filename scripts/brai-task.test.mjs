@@ -99,7 +99,6 @@ test("server access contract checks operation helper sudo boundary", () => {
   assert.match(script, /commandCheck\("accepted preview OTA sync access"/);
   assert.match(script, /sync-occupied-preview-ota-manifests\.sh/);
   assert.match(script, /BRAI_PROD_SOURCE_ROOT: path\.join\(envsRoot, "prod\/source"\)/);
-  assert.match(script, /BRAI_PROD_DB: path\.join\(deployRepo, "data\/brai\.sqlite"\)/);
   assert.match(script, /operationHelperRemoteAccessCheck/);
   assert.match(script, /BRAI_DEPLOY_SSH_KEY_FILE/);
   assert.match(sudoers, /ALL=\(\{\{ brai_service_user \}\}\) NOPASSWD:/);
@@ -205,7 +204,6 @@ test("main checkout lock preserves agent worktrees by default", () => {
   assert.match(script, /-maxdepth 1 -type f -name '\*\.json'/);
   assert.match(script, /sudo chmod 0751 "\$root"/);
   assert.match(script, /sudo chmod u=rwx,g=rx,o=x "\$root\/deploy"/);
-  assert.match(script, /production-sqlite-maintenance\.sh/);
   assert.match(script, /complete-operation-activities\.sh/);
   assert.match(script, /sync-occupied-preview-ota-manifests\.sh/);
   assert.match(script, /sudo chmod u=rwx,g=rx,o=x "\$root\/deploy\/scripts"/);
@@ -237,7 +235,6 @@ test("local main sync preserves runtime dirs and hard resets to origin main", ()
   assert.match(script, /chown mark:mark \.codex-worktrees/);
   assert.match(script, /BRAI_LOCK_STALE_WORKTREES:-0/);
   assert.match(script, /chmod u=rwx,g=rx,o=x deploy/);
-  assert.match(script, /production-sqlite-maintenance\.sh/);
   assert.match(script, /complete-operation-activities\.sh/);
   assert.match(script, /sync-occupied-preview-ota-manifests\.sh/);
   assert.match(script, /preserve_agent_dependency_paths/);
@@ -337,7 +334,6 @@ test("delivery classifier separates infra-docs from runtime preview", () => {
   assert.equal(deliveryClassForFile("deploy/scripts/classify-delivery.mjs"), "infra");
   assert.equal(deliveryClassForFile("deploy/scripts/preview-slots.mjs"), "infra");
   assert.equal(deliveryClassForFile("deploy/scripts/preview-slots.sh"), "infra");
-  assert.equal(deliveryClassForFile("deploy/scripts/production-sqlite-maintenance.sh"), "infra");
   assert.equal(deliveryClassForFile("deploy/scripts/permissions.sh"), "infra");
   assert.equal(deliveryClassForFile("deploy/scripts/postgres-smoke.mjs"), "infra");
   assert.equal(deliveryClassForFile("deploy/scripts/prune-caddy-site-blocks.mjs"), "infra");
@@ -400,29 +396,6 @@ test("delivery classifier separates infra-docs from runtime preview", () => {
     }).deliveryClass,
     "runtime-preview",
   );
-  assert.equal(
-    classifyDelivery(["services/brai_api/src/store-migrations.js"], {
-      diffs: {
-        "services/brai_api/src/store-migrations.js": [
-          "    id: 'operation:agent-task:app-test-vite-temp-permissions',",
-          "-    done: false",
-          "+    done: true",
-        ].join("\n"),
-      },
-    }).deliveryClass,
-    "technical-no-preview",
-  );
-  assert.equal(
-    classifyDelivery(["services/brai_api/src/store-migrations.js"], {
-      diffs: {
-        "services/brai_api/src/store-migrations.js": [
-          "-    this.recordMigration(42, 'seed agent task activities');",
-          "+    this.recordMigration(42, 'seed operation activities');",
-        ].join("\n"),
-      },
-    }).deliveryClass,
-    "runtime-preview",
-  );
   assert.equal(classifyDelivery(["apps/brai_app/src/app/page.tsx"]).deliveryClass, "runtime-preview");
   assert.equal(classifyDelivery(["docs/foo.md", "apps/brai_app/src/app/page.tsx"]).deliveryClass, "runtime-preview");
   assert.equal(classifyDelivery(["package.json"]).fallback, "unknown_path");
@@ -435,25 +408,17 @@ test("operation activity completion helper has a narrow shell contract", () => {
   assert.match(helper, /DEPLOY_REPO="\$\{BRAI_DEPLOY_REPO:-\/srv\/projects\/brai-envs\/prod\/source\}"/);
   assert.match(helper, /--host-local/);
   assert.match(helper, /sudo -n -u "\$SERVICE_USER"/);
-  assert.match(helper, /Refusing live SQLite write as \$user/);
+  assert.match(helper, /BRAI_DATABASE_URL is required/);
+  assert.match(helper, /new Pool/);
   assert.match(helper, /\^operation\[:\._-\]/);
   assert.match(helper, /activity_type_id = 'operation'/);
   assert.match(helper, /author = 'Codex'/);
   assert.match(helper, /deleted_at_utc IS NULL/);
   assert.match(helper, /status IN \('New', 'Done'\)/);
-  assert.match(helper, /\.backup/);
-  assert.match(helper, /BEGIN IMMEDIATE/);
+  assert.match(helper, /await client\.query\("BEGIN"\)/);
   assert.match(helper, /completed_at_utc = COALESCE/);
   assert.doesNotMatch(helper, /activity_type_id = 'action'/);
-});
-
-test("production SQLite maintenance has an explicit permission repair command", () => {
-  const script = fs.readFileSync(path.resolve(import.meta.dirname, "../deploy/scripts/production-sqlite-maintenance.sh"), "utf8");
-  assert.match(script, /repair-permissions/);
-  assert.match(script, /SQLite permission repair must run as root/);
-  assert.match(script, /chown "\$SERVICE_USER:\$SERVICE_GROUP" "\$path"/);
-  assert.match(script, /chmod 0664 "\$path"/);
-  assert.match(script, /check\n\}/);
+  assert.doesNotMatch(helper, /SQLite|sqlite|BRAI_DB|\.backup/);
 });
 
 test("production client publish also refreshes the public landing", () => {
@@ -462,95 +427,6 @@ test("production client publish also refreshes the public landing", () => {
   assert.match(script, /BRAI_WEB_SOURCE="\$ROOT\/landing\/public"/);
   assert.match(script, /BRAI_PUBLIC_SITE_TARGET:-\$ROOT\/deploy\/site/);
   assert.match(script, /"\$SCRIPT_DIR\/publish-web\.sh"/);
-});
-
-test("operation activity completion helper backs up and verifies exact rows", { skip: !sqliteCli() }, () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "brai-complete-operation-"));
-  const db = path.join(root, "brai.sqlite");
-  const backups = path.join(root, "backups");
-  const sqlite = sqliteCli();
-  try {
-    fs.mkdirSync(backups);
-    spawnSync(sqlite, [db, `
-      CREATE TABLE activities (
-        id TEXT PRIMARY KEY,
-        activity_type_id TEXT NOT NULL,
-        title TEXT NOT NULL,
-        author TEXT NOT NULL,
-        status TEXT NOT NULL,
-        updated_at_utc TEXT NOT NULL,
-        completed_at_utc TEXT,
-        deleted_at_utc TEXT
-      );
-      INSERT INTO activities VALUES
-        ('operation:agent-task:test-one', 'operation', 'One', 'Codex', 'New', '2026-07-03T00:00:00.000Z', NULL, NULL),
-        ('operation:agent-task:test-two', 'operation', 'Two', 'Codex', 'New', '2026-07-03T00:00:00.000Z', NULL, NULL),
-        ('operation:codex:test-three', 'operation', 'Three', 'Codex', 'New', '2026-07-03T00:00:00.000Z', NULL, NULL),
-        ('operation-fea2f5d003a9803f', 'operation', 'Four', 'Codex', 'New', '2026-07-03T00:00:00.000Z', NULL, NULL),
-        ('action-1', 'action', 'Action', 'User', 'New', '2026-07-03T00:00:00.000Z', NULL, NULL);
-    `], { stdio: "inherit" });
-
-    const result = spawnSync("bash", [
-      "deploy/scripts/complete-operation-activities.sh",
-      "--local",
-      "operation:agent-task:test-one",
-      "operation:agent-task:test-two",
-      "operation:codex:test-three",
-      "operation-fea2f5d003a9803f",
-    ], {
-      cwd: path.resolve(import.meta.dirname, ".."),
-      env: {
-        ...process.env,
-        BRAI_DB: db,
-        BRAI_SQLITE_BACKUP_DIR: backups,
-        BRAI_SQLITE_BIN: sqlite,
-      },
-      encoding: "utf8",
-    });
-
-    assert.equal(result.status, 0, result.stderr || result.stdout);
-    assert.match(result.stdout, /backup=.*brai-before-complete-operation-activities-/);
-    assert.match(result.stdout, /updated=4/);
-    assert.match(result.stdout, /operation:agent-task:test-one/);
-    assert.match(result.stdout, /operation:agent-task:test-two/);
-    assert.match(result.stdout, /operation:codex:test-three/);
-    assert.match(result.stdout, /operation-fea2f5d003a9803f/);
-    const rows = spawnSync(sqlite, [db, "SELECT id || ':' || status FROM activities ORDER BY id;"], { encoding: "utf8" });
-    assert.equal(rows.status, 0, rows.stderr);
-    assert.deepEqual(rows.stdout.trim().split("\n"), [
-      "action-1:New",
-      "operation-fea2f5d003a9803f:Done",
-      "operation:agent-task:test-one:Done",
-      "operation:agent-task:test-two:Done",
-      "operation:codex:test-three:Done",
-    ]);
-    assert.equal(fs.readdirSync(backups).filter((name) => name.endsWith(".sqlite")).length, 1);
-
-    const rerun = spawnSync("bash", [
-      "deploy/scripts/complete-operation-activities.sh",
-      "--local",
-      "operation:agent-task:test-one",
-      "operation:agent-task:test-two",
-      "operation:codex:test-three",
-      "operation-fea2f5d003a9803f",
-    ], {
-      cwd: path.resolve(import.meta.dirname, ".."),
-      env: {
-        ...process.env,
-        BRAI_DB: db,
-        BRAI_SQLITE_BACKUP_DIR: backups,
-        BRAI_SQLITE_BIN: sqlite,
-      },
-      encoding: "utf8",
-    });
-
-    assert.equal(rerun.status, 0, rerun.stderr || rerun.stdout);
-    assert.match(rerun.stdout, /backup=not_needed/);
-    assert.match(rerun.stdout, /updated=0/);
-    assert.equal(fs.readdirSync(backups).filter((name) => name.endsWith(".sqlite")).length, 1);
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true });
-  }
 });
 
 test("operation activity completion helper rejects unsafe ids", () => {
@@ -565,15 +441,6 @@ test("operation activity completion helper rejects unsafe ids", () => {
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /Invalid operation activity id/);
 });
-
-function sqliteCli() {
-  const candidates = [
-    process.env.BRAI_TEST_SQLITE_BIN,
-    "/srv/opt/android-sdk/platform-tools/sqlite3",
-    "/usr/bin/sqlite3",
-  ].filter(Boolean);
-  return candidates.find((candidate) => fs.existsSync(candidate) && fs.statSync(candidate).mode & 0o111) ?? "";
-}
 
 test("native APK detector ignores OTA web-layer changes", () => {
   assert.equal(requiresNativeApkChange(["apps/brai_app/android/app/build.gradle"]), true);
@@ -603,36 +470,29 @@ test("production deploy resolves ledger version through the shared resolver", ()
   assert.doesNotMatch(script, /version_type_id = 'apk'/);
 });
 
-test("preview deploy reset reports permission recovery and preserves setgid", () => {
+test("preview deploy requires Postgres and preserves artifact setgid", () => {
   const script = fs.readFileSync(new URL("../deploy/scripts/deploy-branch.sh", import.meta.url), "utf8");
   const playbook = fs.readFileSync(new URL("../deploy/ansible/brai.yml", import.meta.url), "utf8");
   const unit = fs.readFileSync(new URL("../deploy/ansible/templates/brai-api.service.j2", import.meta.url), "utf8");
   assert.match(script, /umask 0002/);
-  assert.match(script, /normalize_preview_sqlite_permissions/);
-  assert.match(script, /assert_preview_sqlite_permissions/);
-  assert.match(script, /chmod 0664 "\$path"/);
-  assert.match(script, /Preview SQLite permissions are invalid/);
-  assert.match(script, /chown -R \$SERVICE_USER:\$SERVICE_GROUP/);
+  assert.match(script, /BRAI_DATABASE_URL is required/);
   assert.match(script, /wait_for_preview_api/);
   assert.match(script, /Preview API health check failed/);
-  assert.match(script, /Preview SQLite reset failed/);
-  assert.match(script, /brai-deploy:brai-deploy 2775/);
   const recordIndex = script.indexOf("record-deployment.mjs");
-  const normalizeAfterRecordIndex = script.indexOf("normalize_preview_sqlite_permissions", recordIndex);
   const restartIndex = script.indexOf("systemctl restart");
   const readyIndex = script.indexOf("preview-slots.sh\" ready");
   assert.ok(recordIndex > 0);
-  assert.ok(normalizeAfterRecordIndex > recordIndex);
-  assert.ok(restartIndex > normalizeAfterRecordIndex);
+  assert.ok(restartIndex > recordIndex);
   assert.ok(readyIndex > restartIndex);
   assert.ok(script.includes('normalize_public_tree "$WEB_TARGET"'));
   assert.ok(script.includes('normalize_public_tree "$MOBILE_TARGET"'));
   assert.doesNotMatch(script, /normalize_public_tree "\$TARGET_ROOT"/);
   assert.match(playbook, /Ensure non-production data directories keep deploy setgid/);
   assert.match(playbook, /Ensure nested non-production data directories keep deploy setgid/);
-  assert.match(playbook, /Ensure existing non-production SQLite files are service-writable/);
-  assert.match(playbook, /brai\.sqlite-wal/);
+  assert.doesNotMatch(playbook, /SQLite|sqlite|brai\.sqlite/);
   assert.match(playbook, /mode: "2775"/);
+  assert.match(unit, /EnvironmentFile={{ brai_env_root }}\/{{ item.value.path }}\/brai-api.env/);
+  assert.doesNotMatch(unit, /BRAI_LEGACY_SQLITE_PATH|EnvironmentFile=-/);
   assert.match(unit, /Group={{ brai_deploy_user }}/);
   assert.match(unit, /SupplementaryGroups={{ brai_deploy_user }}/);
   assert.match(unit, /UMask=0002/);
@@ -1802,7 +1662,7 @@ test("accepted preview stale cleanup is best effort", () => {
   const cleanupLoop = script.slice(script.indexOf('for branch in "${CLEANUP_BRANCHES[@]}"', cleanupStart));
 
   assert.match(promoteScript, /accepted_build_recorded\(\)/);
-  assert.match(promoteScript, /target_commit = \?/);
+  assert.match(promoteScript, /target_commit = \$3/);
   assert.match(promoteScript, /already promoted for/);
   assert.match(requiredLoop, /exit 1/);
   assert.doesNotMatch(requiredLoop, /BRAI_REQUIRE_PREVIEW_SLOT_RELEASE=true/);

@@ -9,7 +9,6 @@ import { describe, expect, it } from "vitest";
 
 const execFileAsync = promisify(execFile);
 const workspaceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
-const nodeCliEnv = { ...process.env, NODE_OPTIONS: "" };
 
 describe("mobile OTA publish scripts", () => {
   it("publishes browser web and Android OTA from one web-layer command", async () => {
@@ -270,132 +269,39 @@ describe("mobile OTA publish scripts", () => {
   });
 
   it("resolves OTA app versions from the build ledger before deployed files", async () => {
-    const root = await fixtureRoot("brai-apk-version-resolve-");
-    await writeStaticExport(root, "stale-public-version");
-    const dbPath = path.join(root, "brai.sqlite");
-    await execFileAsync("node", ["--input-type=module", "-e", `
-const { pathToFileURL } = await import("node:url");
-const { BraiStore } = await import(pathToFileURL(process.argv[1]));
-const store = new BraiStore(process.argv[2]);
-try {
-  store.upsertBuildVersion({
-    versionTypeId: "apk",
-    version: 1,
-    includedInVersionId: null,
-    shortChanges: "Production APK-сборка",
-    detailedChanges: "Production APK-сборка",
-    reason: "Нужно для теста",
-    releasedAtUtc: "2026-06-28T17:29:00.000Z",
-  });
-} finally {
-  store.close();
-}
-`, path.join(workspaceRoot, "services/brai_api/src/store.js"), dbPath], { env: nodeCliEnv });
-
-    await mkdir(path.join(root, "deploy/web"), { recursive: true });
-    await writeFile(path.join(root, "deploy/web/version.json"), JSON.stringify({ version: "0.0.38" }));
-    const mobileTarget = path.join(root, "envs/preview-a/mobile-update");
-    await mkdir(path.join(mobileTarget, "bundles/0.11.52.20260629202736"), { recursive: true });
-    await writeFile(
-      path.join(mobileTarget, "bundles/0.11.52.20260629202736/metadata.json"),
-      JSON.stringify({ otaVersion: "0.11.52" }),
-    );
-    const resolver = path.join(workspaceRoot, "deploy/scripts/resolve-app-version.mjs");
-    const outputPath = path.join(root, "resolved-versions.json");
-    await execFileAsync("node", ["--input-type=module", "-e", `
-const fs = await import("node:fs/promises");
-const { pathToFileURL } = await import("node:url");
-const [, resolver, root, db, prodWebVersionJson, mobileTarget, outputPath] = process.argv.slice(1);
-const { resolveAppVersion } = await import(pathToFileURL(resolver));
-await fs.writeFile(outputPath, JSON.stringify({
-  production: resolveAppVersion({ environment: "prod", root, db, explicit: "" }),
-  nextProductionApk: resolveAppVersion({ kind: "apk", environment: "prod", root, db, explicit: "", nextApk: true, targetBranch: "main", targetCommit: "abc" }),
-  preview: resolveAppVersion({ environment: "preview-a", root, prodDb: db, prodWebVersionJson, mobileTarget, explicit: "" }),
-}));
-`, "import-helper", resolver, root, dbPath, path.join(root, "deploy/web/version.json"), mobileTarget, outputPath], { env: nodeCliEnv });
-    const versions = JSON.parse(await readFile(outputPath, "utf8"));
     const deployBranch = await readFile(path.join(workspaceRoot, "deploy/scripts/deploy-branch.sh"), "utf8");
     const ciDeploy = await readFile(path.join(workspaceRoot, "deploy/scripts/ci-ssh-deploy.sh"), "utf8");
 
-    expect(versions.production).toBe("0.0.1");
-    expect(versions.nextProductionApk).toBe("2");
-    expect(versions.preview).toBe("0.0.1");
-    expect(deployBranch).toContain('--prod-db "${BRAI_PROD_DB:-}"');
+    expect(deployBranch).toContain('BRAI_DATABASE_URL="$POSTGRES_URL" BRAI_PROD_DATABASE_URL="$PROD_POSTGRES_URL" "$NODE_BIN" "$SCRIPT_DIR/resolve-app-version.mjs"');
+    expect(deployBranch).not.toContain('--postgres-url "$POSTGRES_URL"');
+    expect(deployBranch).not.toContain('--prod-postgres-url "$PROD_POSTGRES_URL"');
+    expect(deployBranch).not.toContain("--db");
+    expect(deployBranch).not.toContain("--prod-db");
     expect(deployBranch).toContain('--mobile-target "$MOBILE_TARGET"');
     expect(deployBranch).toContain('BRAI_RECORD_PROD_BRANCH_DEPLOYMENT');
     const buildApk = await readFile(path.join(workspaceRoot, "deploy/scripts/build-android-env-apk.sh"), "utf8");
     expect(buildApk).toContain('MOBILE_TARGET="${BRAI_MOBILE_TARGET:-}"');
     expect(buildApk).toContain('if [[ -z "$MOBILE_TARGET" && -n "$ENV_PATH" ]]; then');
     expect(buildApk).toContain('--mobile-target "$MOBILE_TARGET"');
-    expect(ciDeploy).toContain('export BRAI_PROD_DB="$DEPLOY_REPO/data/brai.sqlite"');
+    expect(ciDeploy).toContain(': "${BRAI_DATABASE_URL:?BRAI_DATABASE_URL is required for production deploy}"');
+    expect(ciDeploy).not.toContain("BRAI_PROD_DB");
     expect(ciDeploy).toContain('export BRAI_PUBLIC_SITE_TARGET="$DEPLOY_REPO/deploy/site"');
   });
 
   it("records shipped APK ledger rows idempotently by target commit", async () => {
-    const root = await fixtureRoot("brai-apk-ledger-");
-    await writeStaticExport(root, "stale-public-version");
-    const dbPath = path.join(root, "brai.sqlite");
-    await execFileAsync("node", ["--input-type=module", "-e", `
-const { pathToFileURL } = await import("node:url");
-const { BraiStore } = await import(pathToFileURL(process.argv[1]));
-const store = new BraiStore(process.argv[2]);
-try {
-  store.upsertBuildVersion({
-    versionTypeId: "apk",
-    version: 1,
-    includedInVersionId: null,
-    shortChanges: "Production APK",
-    detailedChanges: "Production APK",
-    reason: "Needed for test",
-    releasedAtUtc: "2026-06-28T17:29:00.000Z",
-  });
-} finally {
-  store.close();
-}
-`, path.join(workspaceRoot, "services/brai_api/src/store.js"), dbPath], { env: nodeCliEnv });
+    const recordScript = await readFile(path.join(workspaceRoot, "deploy/scripts/record-shipped-apk-version.mjs"), "utf8");
+    const resolver = await readFile(path.join(workspaceRoot, "deploy/scripts/resolve-app-version.mjs"), "utf8");
 
-    const recordScript = path.join(workspaceRoot, "deploy/scripts/record-shipped-apk-version.mjs");
-    const recordArgs = [
-      recordScript,
-      "--db", dbPath,
-      "--version", "2",
-      "--version-code", "3000",
-      "--target-branch", "main",
-      "--target-commit", "abc",
-      "--released-at", "2026-06-28T17:30:00.000Z",
-    ];
-    await execFileAsync("node", recordArgs, { env: nodeCliEnv });
-    await execFileAsync("node", recordArgs, { env: nodeCliEnv });
-
-    const resolver = path.join(workspaceRoot, "deploy/scripts/resolve-app-version.mjs");
-    const outputPath = path.join(root, "apk-ledger.json");
-    await execFileAsync("node", ["--input-type=module", "-e", `
-const fs = await import("node:fs/promises");
-const { pathToFileURL } = await import("node:url");
-const [, storeModule, resolver, db, outputPath] = process.argv.slice(1);
-const { BraiStore } = await import(pathToFileURL(storeModule));
-const { resolveAppVersion } = await import(pathToFileURL(resolver));
-const store = new BraiStore(db);
-try {
-  await fs.writeFile(outputPath, JSON.stringify({
-    apkRows: store.db.prepare("SELECT version FROM build_versions WHERE version_type_id = 'apk' ORDER BY version").all(),
-    sameCommit: resolveAppVersion({ kind: "apk", environment: "prod", db, explicit: "", nextApk: true, targetBranch: "main", targetCommit: "abc" }),
-    nextCommit: resolveAppVersion({ kind: "apk", environment: "prod", db, explicit: "", nextApk: true, targetBranch: "main", targetCommit: "def" }),
-  }));
-} finally {
-  store.close();
-}
-`, "import-helper", path.join(workspaceRoot, "services/brai_api/src/store.js"), resolver, dbPath, outputPath], { env: nodeCliEnv });
-    const ledger = JSON.parse(await readFile(outputPath, "utf8"));
-
-    expect(ledger.apkRows).toEqual([{ version: 1 }, { version: 2 }]);
-    expect(ledger.sameCommit).toBe("2");
-    expect(ledger.nextCommit).toBe("3");
+    expect(recordScript).toContain('required(values, "postgres-url")');
+    expect(recordScript).not.toContain('"db"');
+    expect(resolver).toContain("BRAI_DATABASE_URL is required to resolve Brai APK version");
+    expect(resolver).not.toContain("better-sqlite3");
   });
 
   it("promotes production deployment metadata into the production database path", async () => {
     const script = await readFile(path.join(workspaceRoot, "deploy/scripts/ci-ssh-promote-deployment.sh"), "utf8");
-    expect(script).toContain('export BRAI_DB="$DEPLOY_REPO/data/brai.sqlite"');
+    expect(script).toContain('[[ -n "${BRAI_DATABASE_URL:-}" ]] || return 1');
+    expect(script).not.toContain("BRAI_DB");
   });
 
   it("restores stale preview source permissions before deploy cleanup", async () => {
@@ -406,22 +312,22 @@ try {
     expect(script.indexOf('find "$SOURCE_ROOT" -user "$(id -u)"')).toBeLessThan(script.indexOf('rm -rf "$SOURCE_ROOT"'));
   });
 
-  it("keeps preview runtime SQLite writable by the deploy group", async () => {
+  it("keeps preview runtime Supabase env mandatory and artifacts writable by the deploy group", async () => {
     const deploy = await readFile(path.join(workspaceRoot, "deploy/scripts/deploy-branch.sh"), "utf8");
     const playbook = await readFile(path.join(workspaceRoot, "deploy/ansible/brai.yml"), "utf8");
     const service = await readFile(path.join(workspaceRoot, "deploy/ansible/templates/brai-api.service.j2"), "utf8");
-    const resetBlock = deploy.slice(deploy.indexOf('if [[ -z "$POSTGRES_URL" && "$ENVIRONMENT" == preview-*'));
 
+    expect(deploy).toContain(': "${POSTGRES_URL:?BRAI_DATABASE_URL is required for $ENVIRONMENT deploy}"');
+    expect(service).toContain("EnvironmentFile={{ brai_env_root }}/{{ item.value.path }}/brai-api.env");
+    expect(service).not.toContain("EnvironmentFile=-");
+    expect(service).not.toContain("BRAI_LEGACY_SQLITE_PATH");
     expect(service).toContain('Group={{ brai_deploy_user }}');
     expect(service).toContain('UMask=0002');
     expect(playbook).toContain("Ensure non-production data directories keep deploy setgid");
     expect(playbook).toContain('group: "{{ brai_deploy_user }}"');
     expect(playbook).toContain('mode: "2775"');
-    expect(resetBlock).toContain('[[ -z "$POSTGRES_URL" && "$ENVIRONMENT" == preview-*');
-    expect(resetBlock).toContain("Preview SQLite reset failed");
-    expect(resetBlock).toContain("brai-deploy:brai-deploy 2775");
-    expect(resetBlock).toContain("find \"$TARGET_ROOT/data\" -type d -exec chmod 2775 {} +");
-    expect(resetBlock.indexOf("Preview SQLite reset failed")).toBeLessThan(deploy.indexOf("record-deployment.mjs"));
+    expect(deploy).not.toContain("Preview SQLite reset failed");
+    expect(deploy).not.toContain("brai.sqlite");
   });
 
   it("rebuilds APK release rows and records production ledger rows by default", async () => {
@@ -441,7 +347,7 @@ try {
     expect(deployBranch).not.toContain("BRAI_TARGET_APK_BUILD_KIND:-stable");
     expect(deployBranch).toContain('preview-slots.sh" clear-apk "$BRANCH" "$COMMIT"');
     expect(prodBlock).toContain('deploy/scripts/build-android-env-apk.sh production');
-    expect(prodBlock).toContain('node deploy/scripts/resolve-app-version.mjs --environment prod --root "$SOURCE_ROOT" --db "${BRAI_DB:-}"');
+    expect(prodBlock).toContain('node deploy/scripts/resolve-app-version.mjs --environment prod --root "$SOURCE_ROOT"');
     expect(prodBlock).toContain('deploy/scripts/build-nonproduction-apks.sh');
     expect(prodBlock.indexOf('deploy/scripts/build-android-env-apk.sh production')).toBeLessThan(prodBlock.indexOf('deploy/scripts/build-nonproduction-apks.sh'));
     expect(buildApk).toContain('"${BRAI_RECORD_APK_LEDGER:-true}" != "false"');
@@ -517,7 +423,7 @@ try {
     });
   });
 
-  it("publishes an APK using app version metadata when env version is unset", async () => {
+  it("publishes an APK using explicit APK version metadata", async () => {
     const root = await fixtureRoot("brai-apk-publish-");
     await writeStaticExport(root, "apk");
     await mkdir(path.join(root, "deploy"), { recursive: true });
@@ -533,6 +439,7 @@ try {
         ...process.env,
         BRAI_ROOT: root,
         BRAI_APK_SOURCE: apkPath,
+        BRAI_APK_VERSION: "1",
         BRAI_ANDROID_VERSION_CODE: "2999",
         BRAI_PUBLISHED_AT: "2026-06-15T00:00:00Z",
       },
@@ -558,6 +465,7 @@ try {
         ...process.env,
         BRAI_ROOT: root,
         BRAI_RELEASE_ENV: "dev",
+        BRAI_APK_VERSION: "1",
         BRAI_ANDROID_VERSION_CODE: "3001",
         BRAI_PUBLISHED_AT: "2026-06-15T00:00:00Z",
       },
@@ -644,6 +552,7 @@ try {
           BRAI_ROOT: root,
           BRAI_APK_SOURCE: apkPath,
           BRAI_RELEASE_ENV: "a",
+          BRAI_APK_VERSION: "1",
           BRAI_ANDROID_VERSION_CODE: "2999",
           BRAI_PUBLISHED_AT: "2026-06-15T00:00:00Z",
         },
@@ -727,7 +636,6 @@ try {
     const root = await fixtureRoot("brai-preview-ota-sync-");
     const envsRoot = path.join(root, "envs");
     const sourceRoot = path.join(envsRoot, "preview-b/source");
-    const dbPath = path.join(root, "brai.sqlite");
     await writeStaticExport(sourceRoot, "preview-b-content");
     await mkdir(path.join(sourceRoot, "deploy"), { recursive: true });
     await copyFile(
@@ -758,31 +666,13 @@ try {
         archiveUrl: "https://b.test.brightos.world/mobile-update/bundles/0.0.67/bundle.zip",
       }),
     );
-    await execFileAsync("node", ["--input-type=module", "-e", `
-const { pathToFileURL } = await import("node:url");
-const { BraiStore } = await import(pathToFileURL(process.argv[1]));
-const store = new BraiStore(process.argv[2]);
-try {
-  store.upsertBuildVersion({
-    versionTypeId: "build",
-    version: 68,
-    includedInVersionId: null,
-    shortChanges: "Production build",
-    detailedChanges: "Production build",
-    reason: "Test",
-    releasedAtUtc: "2026-07-03T00:00:00.000Z",
-  });
-} finally {
-  store.close();
-}
-`, path.join(workspaceRoot, "services/brai_api/src/store.js"), dbPath], { env: nodeCliEnv });
-
     await execFileAsync("bash", [path.join(workspaceRoot, "deploy/scripts/sync-occupied-preview-ota-manifests.sh"), "--local"], {
       env: {
         ...process.env,
         BRAI_ROOT: workspaceRoot,
         BRAI_ENVS_ROOT: envsRoot,
-        BRAI_PROD_DB: dbPath,
+        BRAI_APP_VERSION: "0.0.68",
+        BRAI_PROD_DATABASE_URL: "postgres://example.invalid/brai",
         BRAI_BUILD_CLIENT: "false",
         BRAI_TARGET_APK_VERSION: "2999",
         BRAI_PUBLISHED_AT: "2026-07-03T00:00:00Z",

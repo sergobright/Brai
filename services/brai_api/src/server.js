@@ -35,8 +35,8 @@ const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 30;
 const STATE_CHANGING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
 export function createBraiServer({
-  dbPath,
-  databaseUrl = null,
+  databaseUrl,
+  dataRoot = path.join(process.cwd(), 'data'),
   token,
   webPassword = null,
   releasePassword = webPassword,
@@ -54,7 +54,7 @@ export function createBraiServer({
   resendApiKey = null,
   authFromEmail = null,
   sendOtp = null,
-  inboundStorageRoot = path.join(path.dirname(dbPath), 'inbox-attachments'),
+  inboundStorageRoot = path.join(dataRoot, 'inbox-attachments'),
   codexBin = 'codex',
   codexModel = null,
   codexTimeoutMs = null,
@@ -63,14 +63,13 @@ export function createBraiServer({
   now = () => new Date(),
   logger = console
 }) {
-  const dataRoot = path.dirname(dbPath);
   fs.mkdirSync(dataRoot, { recursive: true });
-  const store = new BraiStore(databaseUrl ?? dbPath);
+  const store = new BraiStore(databaseUrl);
   const braiCmdRuntime = createBraiCmdRuntime(braiCmd);
   const resolvedVaultRoot =
     typeof vaultRoot === 'string' && vaultRoot.trim()
       ? vaultRoot
-      : path.resolve(path.dirname(dbPath), '..', 'vault');
+      : path.resolve(dataRoot, '..', 'vault');
   const ensureUserVault = prepareUserVault ?? createUserVaultPreparer({
     vaultRoot: resolvedVaultRoot,
     syncthingGuiAddress,
@@ -79,7 +78,6 @@ export function createBraiServer({
     logger
   });
   const authRuntime = createBraiAuth({
-    dbPath,
     databaseUrl,
     secret: betterAuthSecret ?? sessionSecret ?? 'brai-local-auth-secret-for-local-development-only',
     baseURL: betterAuthUrl,
@@ -114,7 +112,12 @@ export function createBraiServer({
 
       const url = new URL(req.url ?? '/', 'http://localhost');
       if (req.method === 'GET' && url.pathname === '/health') {
-        sendJson(req, res, 200, { ok: true, service: 'brai-api' });
+        store.db.prepare('SELECT 1 AS ok').get();
+        sendJson(req, res, 200, {
+          ok: true,
+          service: 'brai-api',
+          database: { dialect: 'postgres', branch: process.env.BRAI_SUPABASE_BRANCH || null }
+        });
         return;
       }
 

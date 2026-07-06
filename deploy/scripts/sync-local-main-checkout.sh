@@ -195,7 +195,6 @@ if [ "${BRAI_MAIN_SYNC_LOCK_CHECKOUT:-1}" = "1" ]; then
       fi
     done
     for deploy_tool in \
-      deploy/scripts/production-sqlite-maintenance.sh \
       deploy/scripts/complete-operation-activities.sh \
       deploy/scripts/sync-occupied-preview-ota-manifests.sh
     do

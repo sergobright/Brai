@@ -21,7 +21,15 @@ export class PostgresSyncDatabase {
     this.currentTxId = null;
     this.tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'brai-pg-sync-'));
     this.worker = new Worker(path.join(dirname, 'postgres-sync-worker.js'), {
-      workerData: { databaseUrl, ssl }
+      workerData: { databaseUrl, ssl },
+      execArgv: []
+    });
+    this.workerError = null;
+    this.worker.on('error', (error) => {
+      this.workerError = error;
+    });
+    this.worker.on('exit', (code) => {
+      if (code !== 0 && !this.workerError) this.workerError = new Error(`Postgres worker exited with code ${code}`);
     });
   }
 
@@ -80,6 +88,7 @@ export class PostgresSyncDatabase {
       resultPath
     });
     const wait = Atomics.wait(view, 0, 0, this.timeoutMs);
+    if (this.workerError) throw this.workerError;
     if (wait === 'timed-out') throw new Error(`Postgres query timed out after ${this.timeoutMs}ms`);
     const payload = JSON.parse(fs.readFileSync(resultPath, 'utf8'));
     fs.rmSync(resultPath, { force: true });
@@ -121,8 +130,8 @@ function translateSql(sql, { returningId = false } = {}) {
   let text = sql.trim().replace(/;+\s*$/, '');
   text = text.replace(/\bINSERT\s+OR\s+IGNORE\s+INTO\b/gi, 'INSERT INTO');
   text = replaceSqliteIs(text);
-  text = replaceInstr(text);
   text = replaceQuestionParams(text);
+  text = replaceInstr(text);
   if (/^INSERT\s+INTO\b/i.test(text) && !/\bON\s+CONFLICT\b/i.test(text) && /\bINSERT\s+OR\s+IGNORE\b/i.test(sql)) {
     text += ' ON CONFLICT DO NOTHING';
   }

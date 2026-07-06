@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import Database from 'better-sqlite3';
+import { Pool } from 'pg';
 import { createBraiServer } from '../src/server.js';
 
 export const TOKEN = 'test-token';
@@ -14,6 +14,7 @@ export const BETTER_AUTH_SECRET = 'test-better-auth-secret-with-enough-entropy-3
 
 export async function createFixture(times, options = {}) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'brai-api-'));
+  const database = await createTestDatabase();
   const releaseDir = path.join(tmp, 'releases');
   if (options.releaseFiles) {
     fs.mkdirSync(releaseDir);
@@ -30,7 +31,8 @@ export async function createFixture(times, options = {}) {
   }
   let index = 0;
   const runtime = createBraiServer({
-    dbPath: path.join(tmp, 'brai.sqlite'),
+    databaseUrl: database.url,
+    dataRoot: tmp,
     token: TOKEN,
     webPassword: options.webPassword,
     releasePassword: options.releasePassword,
@@ -54,7 +56,7 @@ export async function createFixture(times, options = {}) {
     inboundTitleGenerator: options.inboundTitleGenerator,
     braiCmd: options.braiCmd,
     now: () => new Date(times[Math.min(index++, times.length - 1)]),
-    logger: { error: () => {} }
+    logger: options.logger ?? { error: () => {} }
   });
 
   await new Promise((resolve) => runtime.server.listen(0, '127.0.0.1', resolve));
@@ -65,6 +67,7 @@ export async function createFixture(times, options = {}) {
     store: runtime.store,
     close: async () => {
       await runtime.close();
+      await database.drop();
       fs.rmSync(tmp, { recursive: true, force: true });
     }
   };
@@ -168,132 +171,60 @@ export function inboxEvent(eventId, clientSequence, type, inboxId, occurredAtUtc
 
 export function tableCount(fixture, table) {
   assert.match(table, /^[a-z_]+$/);
-  return fixture.store.db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get().count;
+  return Number(fixture.store.db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get().count);
 }
 
 export function activityTypeCount(fixture, activityTypeId) {
-  return fixture.store.db
+  return Number(fixture.store.db
     .prepare('SELECT COUNT(*) AS count FROM activities WHERE activity_type_id = ?')
-    .get(activityTypeId).count;
+    .get(activityTypeId).count);
 }
 
-export function seedLegacyDatabase(dbPath) {
-  const db = new Database(dbPath);
-  db.exec(`
-    CREATE TABLE timer_sessions (
-      id TEXT PRIMARY KEY,
-      started_at_utc TEXT NOT NULL,
-      ended_at_utc TEXT,
-      duration_seconds INTEGER,
-      created_at_utc TEXT NOT NULL,
-      updated_at_utc TEXT NOT NULL
-    );
-
-    CREATE UNIQUE INDEX idx_timer_sessions_one_active
-    ON timer_sessions ((ended_at_utc IS NULL))
-    WHERE ended_at_utc IS NULL;
-
-    CREATE TABLE app_settings (
-      key TEXT PRIMARY KEY,
-      value TEXT NOT NULL,
-      updated_at_utc TEXT NOT NULL
-    );
-  `);
-  const insert = db.prepare(`
-    INSERT INTO timer_sessions (
-      id, started_at_utc, ended_at_utc, duration_seconds, created_at_utc, updated_at_utc
-    ) VALUES (?, ?, ?, ?, ?, ?)
-  `);
-  insert.run(
-    'legacy-complete',
-    '2026-06-14T08:00:00.000Z',
-    '2026-06-14T09:00:00.000Z',
-    3600,
-    '2026-06-14T08:00:00.000Z',
-    '2026-06-14T09:00:00.000Z'
-  );
-  insert.run(
-    'legacy-active',
-    '2026-06-14T10:00:00.000Z',
-    null,
-    null,
-    '2026-06-14T10:00:00.000Z',
-    '2026-06-14T10:00:00.000Z'
-  );
-  db.close();
+export async function createTestDatabase() {
+  const baseUrl = process.env.BRAI_TEST_DATABASE_URL?.trim();
+  if (!baseUrl) throw new Error('BRAI_TEST_DATABASE_URL is required for API tests');
+  const schema = `brai_test_${process.pid}_${Date.now()}_${Math.random().toString(16).slice(2)}`.replace(/[^a-zA-Z0-9_]/g, '_');
+  const pool = new Pool({ connectionString: baseUrl, ssl: postgresSsl(baseUrl) });
+  const client = await pool.connect();
+  try {
+    await client.query(`CREATE SCHEMA ${quoteIdent(schema)}`);
+    await client.query(`SET search_path TO ${quoteIdent(schema)}`);
+    await client.query(fs.readFileSync(path.resolve(import.meta.dirname, '../../../supabase/migrations/0001_brai_baseline.sql'), 'utf8'));
+  } catch (error) {
+    await dropTestSchema(baseUrl, schema).catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+    await pool.end();
+  }
+  return {
+    url: databaseUrlForSchema(baseUrl, schema),
+    drop: () => dropTestSchema(baseUrl, schema)
+  };
 }
 
-export function seedActionsDatabase(dbPath) {
-  const db = new Database(dbPath);
-  db.exec(`
-    CREATE TABLE schema_migrations (
-      version INTEGER PRIMARY KEY,
-      applied_at_utc TEXT NOT NULL,
-      description TEXT NOT NULL
-    );
+async function dropTestSchema(baseUrl, schema) {
+  const cleanup = new Pool({ connectionString: baseUrl, ssl: postgresSsl(baseUrl) });
+  try {
+    await cleanup.query(`DROP SCHEMA IF EXISTS ${quoteIdent(schema)} CASCADE`);
+  } finally {
+    await cleanup.end();
+  }
+}
 
-    INSERT INTO schema_migrations (version, applied_at_utc, description)
-    VALUES
-      (1, '2026-06-16T00:00:00.000Z', 'base timer sessions and settings schema'),
-      (2, '2026-06-16T00:00:00.000Z', 'offline-first timer event log and canonical sessions'),
-      (3, '2026-06-16T00:00:00.000Z', 'offline-first actions event log and canonical actions');
+function databaseUrlForSchema(baseUrl, schema) {
+  const url = new URL(baseUrl);
+  url.searchParams.set('options', `-c search_path=${schema}`);
+  return url.toString();
+}
 
-    CREATE TABLE timer_devices (
-      device_id TEXT PRIMARY KEY,
-      platform TEXT NOT NULL,
-      display_name TEXT,
-      created_at_utc TEXT NOT NULL,
-      last_seen_at_utc TEXT NOT NULL,
-      last_sync_at_utc TEXT,
-      last_server_clock_offset_ms INTEGER
-    );
+function quoteIdent(value) {
+  return `"${String(value).replaceAll('"', '""')}"`;
+}
 
-    INSERT INTO timer_devices (
-      device_id, platform, display_name, created_at_utc, last_seen_at_utc
-    ) VALUES (
-      'web-device', 'web', 'Brai Web', '2026-06-16T09:00:00.000Z', '2026-06-16T09:00:00.000Z'
-    );
-
-    CREATE TABLE actions (
-      id TEXT PRIMARY KEY,
-      title TEXT NOT NULL,
-      status TEXT NOT NULL CHECK (status IN ('New', 'Done')),
-      created_at_utc TEXT NOT NULL,
-      updated_at_utc TEXT NOT NULL,
-      completed_at_utc TEXT,
-      last_event_id TEXT
-    );
-
-    INSERT INTO actions (
-      id, title, status, created_at_utc, updated_at_utc, completed_at_utc, last_event_id
-    ) VALUES (
-      'action-1', 'Фокус', 'New', '2026-06-16T09:00:00.000Z', '2026-06-16T09:00:00.000Z', NULL, 'create'
-    );
-
-    CREATE TABLE action_events (
-      event_id TEXT PRIMARY KEY,
-      device_id TEXT NOT NULL,
-      client_sequence INTEGER NOT NULL,
-      server_sequence INTEGER NOT NULL UNIQUE,
-      action_id TEXT,
-      type TEXT NOT NULL CHECK (type IN ('create', 'update_title', 'set_status', 'invalid')),
-      occurred_at_utc TEXT NOT NULL,
-      received_at_utc TEXT NOT NULL,
-      payload_json TEXT,
-      status TEXT NOT NULL CHECK (status IN ('accepted', 'ignored')),
-      ignore_reason TEXT,
-      payload_version INTEGER NOT NULL,
-      FOREIGN KEY (device_id) REFERENCES timer_devices(device_id)
-    );
-
-    INSERT INTO action_events (
-      event_id, device_id, client_sequence, server_sequence, action_id, type,
-      occurred_at_utc, received_at_utc, payload_json, status, ignore_reason, payload_version
-    ) VALUES (
-      'create', 'web-device', 1, 1, 'action-1', 'create',
-      '2026-06-16T09:00:00.000Z', '2026-06-16T09:00:00.000Z',
-      '{"title":"Фокус"}', 'accepted', NULL, 1
-    );
-  `);
-  db.close();
+function postgresSsl(databaseUrl) {
+  const override = process.env.BRAI_DATABASE_SSL;
+  if (override === 'false' || override === '0') return false;
+  if (override === 'true' || override === '1') return { rejectUnauthorized: false };
+  return /supabase\.(?:co|com)|pooler\.supabase\.com/.test(databaseUrl) ? { rejectUnauthorized: false } : false;
 }

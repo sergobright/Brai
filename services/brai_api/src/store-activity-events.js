@@ -330,17 +330,12 @@ export const activityEventMethods = {
 ,
 
   nextActivityServerSequence() {
-    if (this.db.dialect === 'postgres') return this.nextPostgresCounter('activity_events.server_sequence');
-    const row = this.db
-      .prepare('SELECT COALESCE(MAX(server_sequence), 0) + 1 AS next FROM activity_events')
-      .get();
-    return row.next;
+    return this.nextPostgresCounter('activity_events.server_sequence');
   }
 ,
 
   nextInvalidActivityClientSequence(deviceId) {
-    if (this.db.dialect === 'postgres') return -this.nextPostgresCounter(`activity_events.invalid_client_sequence.${deviceId}`);
-    return -this.nextActivityServerSequence();
+    return -this.nextPostgresCounter(`activity_events.invalid_client_sequence.${deviceId}`);
   }
 ,
 

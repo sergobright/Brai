@@ -73,21 +73,16 @@ Agents and maintainers MUST verify runtime tables, services, deployments, and en
 
 #### Scenario: Runtime database fact is used
 - **WHEN** work depends on a runtime database table, schema, row, migration state, or environment-specific ledger
-- **THEN** the agent verifies the actual target environment and database path with read-only inspection
+- **THEN** the agent verifies the actual target environment and protected DSN source with read-only inspection
 - **AND** verifies table presence, schema, indexes, and relevant rows before making claims or changing durable rules
 - **AND** does not infer runtime state from repository code, migrations, screenshots, or user wording alone
 
-#### Scenario: Live SQLite database uses WAL
-- **WHEN** a live SQLite database may have WAL files
-- **THEN** freshness-sensitive verification uses a normal read-only connection that includes WAL state
-- **AND** does not use `immutable=1` as the source of truth for fresh runtime facts
-
 #### Scenario: Non-visual runtime change is handed off
 - **WHEN** a user cannot visually verify a runtime or database change
-- **THEN** the handoff includes the environment, path or system checked, and key query or command results
+- **THEN** the handoff includes the environment, DSN source without secrets, system checked, and key query or command results
 
 ### Requirement: Main entities are registered in items
-Brai SHALL treat the server SQLite `items` table as the registry of main work entities.
+Brai SHALL treat the server Supabase Postgres `items` table as the registry of main work entities.
 
 #### Scenario: Main entity is used in technical work
 - **WHEN** a schema, workflow, API, or project decision refers to a main Brai work entity
@@ -98,10 +93,10 @@ Brai SHALL treat the server SQLite `items` table as the registry of main work en
 - **THEN** the `items` table contains the `activities` entity
 
 ### Requirement: Server schema metadata is registered in table_descriptions
-Brai SHALL treat the server SQLite `table_descriptions` table as the registry for schema metadata.
+Brai SHALL treat the server Supabase Postgres `table_descriptions` table as the registry for schema metadata.
 
 #### Scenario: Server schema metadata changes
-- **WHEN** a server SQLite change adds or changes a table, column, index, relationship, dependency, or schema purpose
+- **WHEN** a server Postgres change adds or changes a table, column, index, relationship, dependency, or schema purpose
 - **THEN** the same change updates `table_descriptions`
 - **AND** content-only row changes do not require `table_descriptions` updates
 

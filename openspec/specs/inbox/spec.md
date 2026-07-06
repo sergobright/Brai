@@ -5,7 +5,7 @@
 This specification defines Inbox storage, sync, and first UI behavior for incoming material before normalization.
 ## Requirements
 ### Requirement: Inbox records incoming items
-Brai SHALL store incoming items in a server SQLite `inbox` table and
+Brai SHALL store incoming items in a server Supabase Postgres `inbox` table and
 register `inbox` as a main work entity in `items`.
 
 #### Scenario: Inbox schema is initialized

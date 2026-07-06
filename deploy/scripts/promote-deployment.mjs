@@ -1,6 +1,4 @@
 import process from "node:process";
-import fs from "node:fs";
-import path from "node:path";
 import { BraiStore } from "../../services/brai_api/src/store.js";
 
 const args = parseArgs(process.argv.slice(2));
@@ -11,7 +9,6 @@ const targetCommit = required(args, "target-commit");
 const deployedAtUtc = args["deployed-at"] || new Date().toISOString();
 const ledgerOnly = args["ledger-only"] === "true";
 const targetDb = databaseTarget(args, "target");
-if (!isPostgresUrl(targetDb)) fs.mkdirSync(path.dirname(targetDb), { recursive: true });
 const target = new BraiStore(targetDb);
 let source = null;
 
@@ -58,15 +55,7 @@ try {
 
 function openSourceStore(values, targetEnvironment) {
   const sourceDb = databaseTarget(values, "source");
-  try {
-    return new BraiStore(sourceDb);
-  } catch (error) {
-    if (canUseSourceFallback(values, targetEnvironment)) {
-      console.error(`Warning: preview deployment metadata is unavailable; using branch and commit fallback. ${error.message}`);
-      return null;
-    }
-    throw error;
-  }
+  return new BraiStore(sourceDb);
 }
 
 function fallbackSourceRecord(values, sourceBranch, targetEnvironment) {
@@ -142,13 +131,9 @@ function required(values, key) {
 }
 
 function databaseTarget(values, prefix) {
-  const arg = values[`${prefix}-postgres-url`] || values[`${prefix}-db`];
+  const arg = values[`${prefix}-postgres-url`];
   if (arg) return arg;
   if (prefix === "target" && process.env.BRAI_DATABASE_URL) return process.env.BRAI_DATABASE_URL;
   if (prefix === "source" && process.env.BRAI_SOURCE_DATABASE_URL) return process.env.BRAI_SOURCE_DATABASE_URL;
-  return required(values, `${prefix}-db`);
-}
-
-function isPostgresUrl(value) {
-  return /^postgres(?:ql)?:\/\//.test(String(value ?? ""));
+  return required(values, `${prefix}-postgres-url`);
 }

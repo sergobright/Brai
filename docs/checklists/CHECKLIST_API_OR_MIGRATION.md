@@ -5,7 +5,7 @@
 - [ ] Прочитан `docs/guidelines/04-api-data-sync-migrations.md`.
 - [ ] Для runtime DB/schema утверждений проверены реальные environment и DSN source без секрета; результат не выведен только из кода, миграций, скриншота или слов Сергея.
 - [ ] Live Postgres проверен read-only SQL: таблицы, columns, indexes, constraints и релевантные строки.
-- [ ] Frozen SQLite проверена только как backup/import source; при WAL используется `mode=ro`, не `immutable=1`.
+- [ ] Runtime не добавляет SQLite fallback, `BRAI_DB`, `BRAI_DATA_STORE`, локальные DB paths или import scripts.
 - [ ] Есть Supabase migration file и marker в Postgres migration history, если меняется schema.
 - [ ] `table_descriptions` schema проверена в целевой DB; обновлены `table_name`, `title`, `short_description`, `long_description`, `updated_at_utc` для schema metadata changes. Пропуск допустим только для content-only изменений строк.
 - [ ] Migration idempotent.

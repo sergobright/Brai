@@ -10,7 +10,6 @@ const { Pool } = requireFromApi("pg");
 
 const databaseUrl = process.env.BRAI_DATABASE_URL ?? process.env.DATABASE_URL ?? process.argv[2];
 if (!databaseUrl) throw new Error("BRAI_DATABASE_URL, DATABASE_URL, or argv[2] is required");
-const expectImported = process.env.BRAI_EXPECT_IMPORTED === "true" || process.argv.includes("--expect-imported");
 
 const pool = new Pool({ connectionString: databaseUrl, ssl: postgresSsl(databaseUrl) });
 try {
@@ -54,8 +53,7 @@ try {
         AND c.relkind IN ('r', 'p')
         AND NOT c.relrowsecurity
       ORDER BY c.relname
-    `),
-    expectImported ? scalar("SELECT value FROM app_settings WHERE key = 'postgres_imported_from_sqlite'") : Promise.resolve("")
+    `)
   ]);
   const [
     ping,
@@ -68,8 +66,7 @@ try {
     rlsAutoTrigger,
     rlsFunctionSearchPath,
     rlsProtectedTables,
-    publicTablesWithoutRls,
-    importMarker
+    publicTablesWithoutRls
   ] = checks;
   if (ping !== 1) throw new Error("Postgres ping failed");
   if (migrations < 1) throw new Error("schema_migrations is empty");
@@ -83,7 +80,6 @@ try {
   if (publicTablesWithoutRls.length > 0) {
     throw new Error(`Public tables without RLS: ${publicTablesWithoutRls.map((row) => row.table_name).join(", ")}`);
   }
-  if (expectImported && importMarker !== "true") throw new Error("SQLite import marker is missing");
   console.log(JSON.stringify({
     ok: true,
     migrations,
@@ -95,8 +91,7 @@ try {
     rlsAutoTrigger,
     rlsFunctionSearchPath,
     rlsProtectedTables,
-    publicTablesWithoutRls: publicTablesWithoutRls.length,
-    importMarker: importMarker || undefined
+    publicTablesWithoutRls: publicTablesWithoutRls.length
   }, null, 2));
 } finally {
   await pool.end();

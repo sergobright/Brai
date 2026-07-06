@@ -1,5 +1,5 @@
 -- Brai Postgres baseline for Supabase branches.
--- Runtime data is imported from the frozen SQLite backup during cutover.
+-- Runtime data lives only in Supabase/Postgres environments.
 
 CREATE TABLE IF NOT EXISTS schema_migrations (
   version integer PRIMARY KEY,
@@ -460,6 +460,10 @@ INSERT INTO schema_migrations (version, applied_at_utc, description)
 VALUES (1, now()::text, 'Postgres baseline schema')
 ON CONFLICT (version) DO NOTHING;
 
+INSERT INTO schema_migrations (version, applied_at_utc, description)
+VALUES (47, now()::text, 'add Brai Cmd dictation runtime')
+ON CONFLICT (version) DO NOTHING;
+
 INSERT INTO app_settings (key, value, updated_at_utc) VALUES
   ('goal_start_date', '2026-06-14', now()::text),
   ('goal_days', '15', now()::text),
@@ -478,6 +482,126 @@ INSERT INTO inbox_record_types (id, key, title, description, created_at_utc) VAL
   (3, 'internal_agent_inbound', 'Внутреннее входящее от агента', 'Внутренний агент Brai создал входящую запись.', now()::text),
   (4, 'interface_human_created', 'Человек добавил из интерфейса', 'Пользователь создал входящую запись в интерфейсе Brai.', now()::text)
 ON CONFLICT (id) DO UPDATE SET key = excluded.key, title = excluded.title, description = excluded.description;
+
+INSERT INTO agents (
+  id,
+  version,
+  target,
+  kind,
+  status,
+  title,
+  summary,
+  trigger_description,
+  conditions_description,
+  input_description,
+  output_description,
+  interactions_description,
+  side_effects_description,
+  llm_provider,
+  llm_model,
+  llm_prompt_template,
+  llm_timeout_ms,
+  fallback_description,
+  source_module,
+  updated_at_utc
+) VALUES (
+  'brai-cmd.dictate.transcription',
+  '1',
+  'brai-cmd',
+  'runtime',
+  'active',
+  'Brai Cmd диктовка',
+  'Принимает аудио Brai Cmd, сохраняет usage metrics и пишет ai_logs без хранения исходного аудио.',
+  'Срабатывает при POST /v1/dictate с валидным Brai Cmd access token.',
+  'Пропускается при невалидном токене, неподдержанном media type или ошибке валидации.',
+  'Multipart audio, device id, client metadata и optional post-processing/context fields.',
+  'Текстовая расшифровка или ошибка с usage/ai_logs audit trail.',
+  'Использует runtime deps braiCmd для transcription, post-processing и context reply.',
+  'Пишет brai_cmd_usage_events и ai_logs; не сохраняет аудио или raw transcript в runtime таблицах.',
+  '',
+  '',
+  '',
+  NULL,
+  'Возвращает structured API error и пишет failed ai_log/usage row при runtime failure.',
+  'services/brai_api/src/brai-cmd-routes.js',
+  now()::text
+)
+ON CONFLICT (id) DO UPDATE SET
+  version = excluded.version,
+  target = excluded.target,
+  kind = excluded.kind,
+  status = excluded.status,
+  title = excluded.title,
+  summary = excluded.summary,
+  trigger_description = excluded.trigger_description,
+  conditions_description = excluded.conditions_description,
+  input_description = excluded.input_description,
+  output_description = excluded.output_description,
+  interactions_description = excluded.interactions_description,
+  side_effects_description = excluded.side_effects_description,
+  fallback_description = excluded.fallback_description,
+  source_module = excluded.source_module,
+  updated_at_utc = excluded.updated_at_utc;
+
+INSERT INTO agents (
+  id,
+  version,
+  target,
+  kind,
+  status,
+  title,
+  summary,
+  trigger_description,
+  conditions_description,
+  input_description,
+  output_description,
+  interactions_description,
+  side_effects_description,
+  llm_provider,
+  llm_model,
+  llm_prompt_template,
+  llm_timeout_ms,
+  fallback_description,
+  source_module,
+  updated_at_utc
+) VALUES (
+  'inbound.inbox.title_generator',
+  '1',
+  'inbound-api',
+  'runtime',
+  'active',
+  'Inbound Inbox title generator',
+  'Генерирует короткий заголовок для входящих записей, созданных через inbound API.',
+  'Срабатывает при успешном создании inbox item через inbound API, если title не передан явно.',
+  'Пропускается при explicit title или ошибке валидации запроса.',
+  'Текст, source, attachments metadata и normalized inbound payload.',
+  'Короткий title для inbox row и ai_logs audit trail.',
+  'Использует configured inboundTitleGenerator или локальный fallback title.',
+  'Пишет ai_logs и влияет на title создаваемой inbox записи.',
+  '',
+  '',
+  '',
+  NULL,
+  'Возвращает локально вычисленный заголовок, если внешний generator недоступен.',
+  'services/brai_api/src/inbound.js',
+  now()::text
+)
+ON CONFLICT (id) DO UPDATE SET
+  version = excluded.version,
+  target = excluded.target,
+  kind = excluded.kind,
+  status = excluded.status,
+  title = excluded.title,
+  summary = excluded.summary,
+  trigger_description = excluded.trigger_description,
+  conditions_description = excluded.conditions_description,
+  input_description = excluded.input_description,
+  output_description = excluded.output_description,
+  interactions_description = excluded.interactions_description,
+  side_effects_description = excluded.side_effects_description,
+  fallback_description = excluded.fallback_description,
+  source_module = excluded.source_module,
+  updated_at_utc = excluded.updated_at_utc;
 
 INSERT INTO item_role_types (id, title_system, title, description, payload_table, is_system, created_at_utc, deleted_at_utc) VALUES
   (1, 'activity', 'Activity', 'Роль activity для сущностей, чьи поля роли живут в activities.', 'activities', 1, now()::text, NULL),
@@ -500,3 +624,51 @@ INSERT INTO build_version_counters (version_type_id, last_version) VALUES
   ('apk', 0),
   ('build', 0)
 ON CONFLICT (version_type_id) DO NOTHING;
+
+INSERT INTO build_versions (
+  version_type_id,
+  version,
+  included_in_version_id,
+  short_changes,
+  detailed_changes,
+  reason,
+  released_at_utc,
+  created_at_utc
+) VALUES
+  ('build', 1, NULL, 'Первичная публичная web/OTA-сборка.', 'Начальная запись web/OTA-сборки Brai.', 'Начальное состояние runtime базы Brai.', now()::text, now()::text),
+  ('apk', 1, NULL, 'Первичная публичная APK-сборка.', 'Начальная запись APK-линии Brai.', 'Начальное состояние runtime базы Brai.', now()::text, now()::text)
+ON CONFLICT (version_type_id, version) DO NOTHING;
+
+INSERT INTO build_version_counters (version_type_id, last_version) VALUES
+  ('apk', 1),
+  ('build', 1)
+ON CONFLICT (version_type_id) DO UPDATE
+SET last_version = GREATEST(build_version_counters.last_version, excluded.last_version);
+
+INSERT INTO table_descriptions (table_name, title, short_description, long_description, updated_at_utc) VALUES
+  (
+    'brai_cmd_settings',
+    'Brai Cmd настройки',
+    'Настройки self-service доступа Brai Cmd.',
+    'Хранит server-side feature settings для Brai Cmd, включая включение регистрации access tokens.',
+    now()::text
+  ),
+  (
+    'brai_cmd_access_tokens',
+    'Brai Cmd access tokens',
+    'Хэши access tokens и device binding для Android Brai Cmd.',
+    'Хранит только хэши секретов и metadata клиента; исходные токены и device ids не сохраняются в открытом виде.',
+    now()::text
+  ),
+  (
+    'brai_cmd_usage_events',
+    'Brai Cmd usage events',
+    'Метрики выполнения Brai Cmd диктовки.',
+    'Фиксирует counts, timings, provider/model metadata и ошибки без хранения исходного аудио или текста расшифровки.',
+    now()::text
+  )
+ON CONFLICT (table_name) DO UPDATE SET
+  title = excluded.title,
+  short_description = excluded.short_description,
+  long_description = excluded.long_description,
+  updated_at_utc = excluded.updated_at_utc;

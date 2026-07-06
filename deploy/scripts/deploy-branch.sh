@@ -56,86 +56,16 @@ fi
 if [[ "$ENVIRONMENT" == "prod" ]]; then
   WEB_TARGET="${BRAI_WEB_TARGET:-$ROOT/deploy/web}"
   MOBILE_TARGET="${BRAI_MOBILE_TARGET:-$ROOT/deploy/mobile-update}"
-  DB_PATH="${BRAI_DB:-$ROOT/data/brai.sqlite}"
 else
   TARGET_ROOT="${BRAI_ENV_ROOT:-$ENVS_ROOT/$ENV_PATH}"
   umask 0002
   WEB_TARGET="$TARGET_ROOT/web"
   MOBILE_TARGET="$TARGET_ROOT/mobile-update"
-  DB_PATH="$TARGET_ROOT/data/brai.sqlite"
-  mkdir -p "$WEB_TARGET" "$MOBILE_TARGET" "$(dirname "$DB_PATH")"
+  mkdir -p "$WEB_TARGET" "$MOBILE_TARGET"
 fi
 POSTGRES_URL="${BRAI_DATABASE_URL:-}"
 PROD_POSTGRES_URL="${BRAI_PROD_DATABASE_URL:-}"
-
-SERVICE_USER="${BRAI_SQLITE_SERVICE_USER:-brai}"
-SERVICE_GROUP="${BRAI_SQLITE_SERVICE_GROUP:-brai-deploy}"
-
-has_mode_bit() {
-  local mode="$1"
-  local bit="$2"
-  (( (8#$mode & bit) != 0 ))
-}
-
-preview_sqlite_permissions_ok() {
-  [[ "$ENVIRONMENT" == preview-* ]] || return 0
-  local data_dir
-  data_dir="$(dirname "$DB_PATH")"
-  [[ -d "$data_dir" ]] || return 1
-  [[ "$(stat -c '%G' "$data_dir")" == "$SERVICE_GROUP" ]] || return 1
-  has_mode_bit "$(stat -c '%a' "$data_dir")" 02000 || return 1
-  has_mode_bit "$(stat -c '%a' "$data_dir")" 0020 || return 1
-  local path
-  for path in "$DB_PATH" "$DB_PATH-wal" "$DB_PATH-shm"; do
-    [[ -e "$path" ]] || continue
-    [[ "$(stat -c '%G' "$path")" == "$SERVICE_GROUP" ]] || return 1
-    has_mode_bit "$(stat -c '%a' "$path")" 0020 || return 1
-  done
-}
-
-preview_sqlite_safe_path() {
-  [[ "$ENVIRONMENT" == preview-* ]] || return 0
-  case "$TARGET_ROOT" in
-    "$ENVS_ROOT"/preview-*) ;;
-    *)
-      echo "Refusing to normalize preview DB outside $ENVS_ROOT/preview-* path: $TARGET_ROOT" >&2
-      exit 1
-      ;;
-  esac
-}
-
-normalize_preview_sqlite_permissions() {
-  [[ "$ENVIRONMENT" == preview-* ]] || return 0
-  preview_sqlite_safe_path
-  preview_sqlite_permissions_ok && return 0
-  local data_dir
-  data_dir="$(dirname "$DB_PATH")"
-  chmod 2775 "$data_dir" 2>/dev/null || true
-  local path
-  for path in "$DB_PATH" "$DB_PATH-wal" "$DB_PATH-shm"; do
-    if [[ -e "$path" && "$(stat -c '%u' "$path")" == "$(id -u)" ]]; then
-      chmod 0664 "$path"
-    fi
-  done
-}
-
-assert_preview_sqlite_permissions() {
-  [[ "$ENVIRONMENT" == preview-* ]] || return 0
-  preview_sqlite_safe_path
-  preview_sqlite_permissions_ok && return 0
-  local data_dir
-  data_dir="$(dirname "$DB_PATH")"
-  cat >&2 <<RECOVERY
-Preview SQLite permissions are invalid under $data_dir.
-Expected: data directory group $SERVICE_GROUP with setgid+group-write, SQLite files group-writable by $SERVICE_GROUP.
-Recovery: run the Brai Ansible playbook as an admin, or run:
-  chown -R $SERVICE_USER:$SERVICE_GROUP "$data_dir"
-  chmod -R u+rwX,g+rwX,o=rX "$data_dir"
-  find "$data_dir" -type d -exec chmod 2775 {} +
-Then retry this same branch deploy so the preview slot is reused.
-RECOVERY
-  exit 1
-}
+: "${POSTGRES_URL:?BRAI_DATABASE_URL is required for $ENVIRONMENT deploy}"
 
 wait_for_preview_api() {
   [[ "$ENVIRONMENT" == preview-* || "$ENVIRONMENT" == "dev" ]] || return 0
@@ -153,33 +83,6 @@ wait_for_preview_api() {
   return 1
 }
 
-if [[ -z "$POSTGRES_URL" && "$ENVIRONMENT" == preview-* && "$ALLOCATED_NEW" == "true" && "${BRAI_RESET_NEW_PREVIEW_DB:-true}" != "false" ]]; then
-  case "$TARGET_ROOT" in
-    "$ENVS_ROOT"/preview-*)
-      find "$TARGET_ROOT" -user "$(id -u)" -exec chmod u+rwX,g+rwX {} + || true
-      if ! rm -f "$TARGET_ROOT/data/brai.sqlite" "$TARGET_ROOT/data/brai.sqlite-shm" "$TARGET_ROOT/data/brai.sqlite-wal"; then
-        cat >&2 <<RECOVERY
-Preview SQLite reset failed under $TARGET_ROOT/data.
-Expected: data directory brai-deploy:brai-deploy 2775, SQLite files group-writable 0664.
-Recovery: run the Brai Ansible playbook as an admin, or run:
-  chown -R brai-deploy:brai-deploy "$TARGET_ROOT/data"
-  chmod -R u+rwX,g+rwX,o=rX "$TARGET_ROOT/data"
-  find "$TARGET_ROOT/data" -type d -exec chmod 2775 {} +
-Then retry this same branch deploy so the preview slot is reused.
-RECOVERY
-        exit 1
-      fi
-      ;;
-    *)
-      echo "Refusing to reset preview DB outside $ENVS_ROOT/preview-* path: $TARGET_ROOT" >&2
-      exit 1
-      ;;
-  esac
-fi
-
-normalize_preview_sqlite_permissions
-assert_preview_sqlite_permissions
-
 normalize_preview_artifacts() {
   local failed=0
   chmod 2775 "$TARGET_ROOT" 2>/dev/null || true
@@ -191,10 +94,6 @@ normalize_preview_artifacts() {
 OTA_VERSION_ARGS=(
   --environment "$ENVIRONMENT"
   --root "$ROOT"
-  --db "$DB_PATH"
-  --postgres-url "$POSTGRES_URL"
-  --prod-db "${BRAI_PROD_DB:-}"
-  --prod-postgres-url "$PROD_POSTGRES_URL"
   --prod-web-version-json "${BRAI_PROD_WEB_VERSION_JSON:-}"
   --mobile-target "$MOBILE_TARGET"
 )
@@ -202,7 +101,7 @@ if [[ "$ENVIRONMENT" == preview-* && "$BRANCH" == codex/* ]]; then
   OTA_VERSION_ARGS+=(--next-ota true)
 fi
 
-VERSION="${BRAI_APP_VERSION:-$("$NODE_BIN" "$SCRIPT_DIR/resolve-app-version.mjs" \
+VERSION="${BRAI_APP_VERSION:-$(BRAI_DATABASE_URL="$POSTGRES_URL" BRAI_PROD_DATABASE_URL="$PROD_POSTGRES_URL" "$NODE_BIN" "$SCRIPT_DIR/resolve-app-version.mjs" \
   "${OTA_VERSION_ARGS[@]}")}"
 
 if [[ "$ENVIRONMENT" == "prod" ]]; then
@@ -250,9 +149,7 @@ fi
 
 if [[ "$ENVIRONMENT" != "prod" || "${BRAI_RECORD_PROD_BRANCH_DEPLOYMENT:-false}" == "true" ]]; then
   echo "Recording deployment metadata..."
-  if ! "$NODE_BIN" "$SCRIPT_DIR/record-deployment.mjs" \
-    --db "$DB_PATH" \
-    --postgres-url "$POSTGRES_URL" \
+  if ! BRAI_DATABASE_URL="$POSTGRES_URL" "$NODE_BIN" "$SCRIPT_DIR/record-deployment.mjs" \
     --environment "$ENVIRONMENT" \
     --slot "$SLOT" \
     --branch "$BRANCH" \
@@ -268,9 +165,6 @@ if [[ "$ENVIRONMENT" != "prod" || "${BRAI_RECORD_PROD_BRANCH_DEPLOYMENT:-false}"
     echo "Warning: preview deployment metadata was not recorded; production promotion still requires preview handoff release notes and will not use deployment fallback metadata." >&2
   fi
 fi
-
-normalize_preview_sqlite_permissions
-assert_preview_sqlite_permissions
 
 if [[ "$ENVIRONMENT" != "prod" ]]; then
   echo "Normalizing preview artifact roots after metadata..."

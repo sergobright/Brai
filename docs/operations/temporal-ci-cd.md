@@ -111,7 +111,7 @@ The `state` query exposes `deliveryClass`, `handoff`, `autoMerge`, `tasks`, `mis
 
 The production checklist requires Supabase migration/smoke, accepted-preview metadata promotion,
 version/ledger recording, deployment, and preview-slot cleanup. The production Supabase smoke
-requires the SQLite import marker so an empty baseline database cannot pass cutover by accident.
+requires baseline runtime tables and deployment ledger tables to be present.
 During the post-deploy accepted-preview release step, occupied preview OTA manifests are republished
 from each preview slot's own source checkout so their `otaVersion` follows the production build
 ledger without replacing preview content with production content. `prod_deploy_passed` completes the
@@ -185,7 +185,7 @@ Then open `https://temporal.brightos.world` with the unified Caddy basic auth an
 - Temporal unavailable: the strict CI/CD job fails. Restart or repair `brai-temporal.service` / `brai-temporal-worker.service`, then rerun the failed GitHub Actions job.
 - Worker stopped: workflows remain in Temporal; restart `brai-temporal-worker.service`.
 - Failed preview deploy: query the workflow state and inspect `status`, `blocker`, `blockers`, and `tasks`, then fix and push the same `codex/*` branch.
-- Failed Supabase preview: check `/etc/brai/supabase-deploy.env`, Supabase Branching status, the per-env `brai-api.env`, and `deploy/scripts/supabase-branch.mjs` output, then rerun `deploy-preview`.
+- Failed Supabase preview: check `/etc/brai/supabase-deploy.env`, self-hosted schema creation, the per-env `brai-api.env`, and `deploy/scripts/supabase-branch.mjs` output, then rerun `deploy-preview`.
 - Failed accepted-preview cleanup: query both `brai:promotion:prod:<sha>` and the affected `brai:preview:<branch>` workflow. Fix metadata promotion or slot release, then rerun the failed `deploy-prod` job.
 - Failed production Supabase migration: run the cutover/import smoke from [Supabase Postgres Cutover](supabase-postgres-cutover.md), then rerun `deploy-prod`.
 - Failed production deploy: query `brai:promotion:prod:<sha>`, fix the deploy or ledger issue, then rerun the failed production job.

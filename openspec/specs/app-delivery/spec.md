@@ -105,7 +105,7 @@ Brai SHALL publish a release APK whenever a change crosses the native Android re
 - **AND** updates and verifies the release page metadata
 
 ### Requirement: Build, APK, and OTA versions are separate
-Brai SHALL track accepted production builds and APK public releases in the server SQLite `build_versions` table.
+Brai SHALL track accepted production builds and APK public releases in the server Supabase Postgres `build_versions` table.
 
 `build_versions.version` SHALL be the integer APK counter for `version_type_id = apk`.
 

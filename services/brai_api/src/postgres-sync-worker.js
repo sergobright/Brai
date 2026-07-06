@@ -1,6 +1,8 @@
 import fs from 'node:fs';
 import { parentPort, workerData } from 'node:worker_threads';
-import { Pool } from 'pg';
+import { Pool, types } from 'pg';
+
+types.setTypeParser(20, (value) => Number(value));
 
 const pool = new Pool({
   connectionString: workerData.databaseUrl,

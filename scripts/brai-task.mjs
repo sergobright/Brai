@@ -581,7 +581,7 @@ function serverAccessContract(root = process.env.BRAI_ROOT ?? "/srv/projects/bra
   const deployHost = process.env.BRAI_DEPLOY_HOST ?? "localhost";
   const deploySshPort = process.env.BRAI_DEPLOY_SSH_PORT ?? "22";
   const deployIdentityFile = process.env.BRAI_DEPLOY_IDENTITY_FILE ?? process.env.BRAI_DEPLOY_SSH_KEY_FILE;
-  const serviceUser = process.env.BRAI_SQLITE_SERVICE_USER ?? "brai";
+  const serviceUser = process.env.BRAI_SERVICE_USER ?? "brai";
   const mainSyncScript = process.env.BRAI_MAIN_SYNC_SCRIPT ?? "/srv/opt/brai-main-sync.sh";
   const localOperationHelper = path.join(root, "deploy/scripts/complete-operation-activities.sh");
   const acceptedPreviewOtaHelper = path.join(root, "deploy/scripts/sync-occupied-preview-ota-manifests.sh");
@@ -591,7 +591,6 @@ function serverAccessContract(root = process.env.BRAI_ROOT ?? "/srv/projects/bra
       cwd: root,
       env: { ...process.env, BRAI_ENVS_ROOT: envsRoot },
     }),
-    commandCheck("sqlite maintenance", [path.join(root, "deploy/scripts/production-sqlite-maintenance.sh"), "check"], { cwd: root }),
     contractPathCheck("env roots", envsRoot, {
       owner: deployOwner,
       group: deployGroup,
@@ -618,7 +617,6 @@ function serverAccessContract(root = process.env.BRAI_ROOT ?? "/srv/projects/bra
         BRAI_DEPLOY_USER: deployUser,
         BRAI_DEPLOY_REPO: deployRepo,
         BRAI_PROD_SOURCE_ROOT: path.join(envsRoot, "prod/source"),
-        BRAI_PROD_DB: path.join(deployRepo, "data/brai.sqlite"),
       },
     }),
     operationHelperRemoteAccessCheck({
@@ -1572,7 +1570,6 @@ function deliveryClassForFile(file) {
       "deploy/scripts/generate-android-preview-icons.sh",
       "deploy/scripts/preview-slots.mjs",
       "deploy/scripts/preview-slots.sh",
-      "deploy/scripts/production-sqlite-maintenance.sh",
       "deploy/scripts/permissions.sh",
       "deploy/scripts/postgres-smoke.mjs",
       "deploy/scripts/prune-caddy-site-blocks.mjs",
@@ -1629,7 +1626,6 @@ function isNoPreviewAcceptanceForHead(acceptance, branch, head) {
 
 function isTechnicalRuntimeChange(file, context) {
   if (file === "apps/brai_app/package.json") return isClientPackageTestScriptDiff(diffForFile(file, context));
-  if (file === "services/brai_api/src/store-migrations.js") return isAgentOperationDoneDiff(diffForFile(file, context));
   return false;
 }
 
@@ -1649,19 +1645,6 @@ function isClientPackageTestScriptDiff(diff) {
     .map((line) => line.match(/^[+-]\s*"([^"]+)":/)?.[1])
     .filter(Boolean);
   return keys.length > 0 && keys.every((key) => key === "test" || key === "test:watch");
-}
-
-function isAgentOperationDoneDiff(diff) {
-  if (!String(diff).includes("operation:agent-task:")) return false;
-  const changes = changedDiffLines(diff);
-  const removed = changes.filter((line) => line.startsWith("-"));
-  const added = changes.filter((line) => line.startsWith("+"));
-  return (
-    removed.length > 0 &&
-    removed.length === added.length &&
-    removed.every((line) => /^-\s*done:\s*false,?\s*$/.test(line)) &&
-    added.every((line) => /^\+\s*done:\s*true,?\s*$/.test(line))
-  );
 }
 
 function writeGithubOutput(classification) {

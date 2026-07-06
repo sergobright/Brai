@@ -11,7 +11,6 @@ NODE_BIN="${NODE_BIN:-node}"
 ENVS_ROOT="${BRAI_ENVS_ROOT:-/srv/projects/brai-envs}"
 DEPLOY_REPO="${BRAI_DEPLOY_REPO:-/srv/projects/brai}"
 PROD_SOURCE_ROOT="${BRAI_PROD_SOURCE_ROOT:-$ENVS_ROOT/prod/source}"
-PROD_DB="${BRAI_PROD_DB:-${BRAI_DB:-$ROOT/data/brai.sqlite}}"
 PROD_POSTGRES_URL="${BRAI_PROD_DATABASE_URL:-${BRAI_DATABASE_URL:-}}"
 REGISTRY="${BRAI_PREVIEW_REGISTRY:-$ENVS_ROOT/preview-slots.json}"
 MODE="${1:-}"
@@ -25,7 +24,8 @@ check_access() {
   local check_root="$1"
   test -x "$check_root/deploy/scripts/sync-occupied-preview-ota-manifests.sh"
   test -r "$REGISTRY"
-  "$NODE_BIN" "$check_root/deploy/scripts/resolve-app-version.mjs" --environment prod --root "$check_root" --db "$PROD_DB" --postgres-url "$PROD_POSTGRES_URL" >/dev/null
+  : "${PROD_POSTGRES_URL:?BRAI_PROD_DATABASE_URL or BRAI_DATABASE_URL is required}"
+  BRAI_DATABASE_URL="$PROD_POSTGRES_URL" "$NODE_BIN" "$check_root/deploy/scripts/resolve-app-version.mjs" --environment prod --root "$check_root" >/dev/null
   echo "accepted preview OTA sync access ok: $check_root"
 }
 
@@ -33,8 +33,6 @@ if [[ ( "$MODE" != "--local" || "$CHECK_ACCESS" == "true" ) && -n "${BRAI_DEPLOY
   : "${BRAI_DEPLOY_USER:?BRAI_DEPLOY_USER is required}"
   : "${BRAI_DEPLOY_SSH_KEY:?BRAI_DEPLOY_SSH_KEY is required}"
   SSH_PORT="${BRAI_DEPLOY_SSH_PORT:-22}"
-  REMOTE_PROD_DB="${BRAI_PROD_DB:-${BRAI_DB:-$DEPLOY_REPO/data/brai.sqlite}}"
-  REMOTE_PROD_POSTGRES_URL="${BRAI_PROD_DATABASE_URL:-${BRAI_DATABASE_URL:-}}"
   REMOTE_ROOT="${BRAI_REMOTE_ROOT:-$PROD_SOURCE_ROOT}"
   LOCAL_MODE_ARG="--local"
   if [[ "$CHECK_ACCESS" == "true" ]]; then
@@ -45,8 +43,16 @@ if [[ ( "$MODE" != "--local" || "$CHECK_ACCESS" == "true" ) && -n "${BRAI_DEPLOY
   printf '%s\n' "$BRAI_DEPLOY_SSH_KEY" >"$KEY_FILE"
   chmod 600 "$KEY_FILE"
   ssh -i "$KEY_FILE" -p "$SSH_PORT" -o StrictHostKeyChecking=accept-new "$BRAI_DEPLOY_USER@$BRAI_DEPLOY_HOST" \
-    "if [ ! -x '$REMOTE_ROOT/deploy/scripts/sync-occupied-preview-ota-manifests.sh' ]; then echo 'Cannot run OTA sync from deploy-owned source: $REMOTE_ROOT' >&2; exit 1; fi; BRAI_ROOT='$REMOTE_ROOT' BRAI_ENVS_ROOT='$ENVS_ROOT' BRAI_PROD_DB='$REMOTE_PROD_DB' BRAI_PROD_DATABASE_URL='$REMOTE_PROD_POSTGRES_URL' BRAI_PROD_WEB_VERSION_JSON='$DEPLOY_REPO/deploy/web/version.json' BRAI_RELEASE_TARGET='$DEPLOY_REPO/deploy/releases' '$REMOTE_ROOT/deploy/scripts/sync-occupied-preview-ota-manifests.sh' '$LOCAL_MODE_ARG'"
+    "if [ ! -x '$REMOTE_ROOT/deploy/scripts/sync-occupied-preview-ota-manifests.sh' ]; then echo 'Cannot run OTA sync from deploy-owned source: $REMOTE_ROOT' >&2; exit 1; fi; BRAI_ROOT='$REMOTE_ROOT' BRAI_ENVS_ROOT='$ENVS_ROOT' BRAI_PROD_WEB_VERSION_JSON='$DEPLOY_REPO/deploy/web/version.json' BRAI_RELEASE_TARGET='$DEPLOY_REPO/deploy/releases' '$REMOTE_ROOT/deploy/scripts/sync-occupied-preview-ota-manifests.sh' '$LOCAL_MODE_ARG'"
   exit 0
+fi
+
+if [[ -z "$PROD_POSTGRES_URL" && -r "/etc/brai/brai-api.env" ]]; then
+  set -a
+  # shellcheck source=/dev/null
+  . /etc/brai/brai-api.env
+  set +a
+  PROD_POSTGRES_URL="${BRAI_PROD_DATABASE_URL:-${BRAI_DATABASE_URL:-}}"
 fi
 
 if [[ "${BRAI_SKIP_DEPLOY_USER_REENTRY:-false}" != "true" ]]; then
@@ -65,7 +71,6 @@ if [[ "${BRAI_SKIP_DEPLOY_USER_REENTRY:-false}" != "true" ]]; then
       BRAI_ENVS_ROOT="$ENVS_ROOT" \
       BRAI_DEPLOY_REPO="$DEPLOY_REPO" \
       BRAI_PROD_SOURCE_ROOT="$PROD_SOURCE_ROOT" \
-      BRAI_PROD_DB="$PROD_DB" \
       BRAI_PROD_DATABASE_URL="$PROD_POSTGRES_URL" \
       BRAI_PROD_WEB_VERSION_JSON="${BRAI_PROD_WEB_VERSION_JSON:-$DEPLOY_REPO/deploy/web/version.json}" \
       BRAI_RELEASE_TARGET="${BRAI_RELEASE_TARGET:-$DEPLOY_REPO/deploy/releases}" \
@@ -88,7 +93,6 @@ if [[ "$ROOT" == "$DEPLOY_REPO" && "$ROOT" != "$PROD_SOURCE_ROOT" && ( "$MODE" =
     BRAI_ENVS_ROOT="$ENVS_ROOT" \
     BRAI_DEPLOY_REPO="$DEPLOY_REPO" \
     BRAI_PROD_SOURCE_ROOT="$PROD_SOURCE_ROOT" \
-    BRAI_PROD_DB="$PROD_DB" \
     BRAI_PROD_DATABASE_URL="$PROD_POSTGRES_URL" \
     BRAI_PROD_WEB_VERSION_JSON="${BRAI_PROD_WEB_VERSION_JSON:-$DEPLOY_REPO/deploy/web/version.json}" \
     BRAI_RELEASE_TARGET="${BRAI_RELEASE_TARGET:-$DEPLOY_REPO/deploy/releases}" \
@@ -105,7 +109,8 @@ if [[ ! -f "$REGISTRY" ]]; then
   exit 0
 fi
 
-VERSION="${BRAI_APP_VERSION:-$("$NODE_BIN" "$ROOT/deploy/scripts/resolve-app-version.mjs" --environment prod --root "$ROOT" --db "$PROD_DB" --postgres-url "$PROD_POSTGRES_URL")}"
+: "${PROD_POSTGRES_URL:?BRAI_PROD_DATABASE_URL or BRAI_DATABASE_URL is required}"
+VERSION="${BRAI_APP_VERSION:-$(BRAI_DATABASE_URL="$PROD_POSTGRES_URL" "$NODE_BIN" "$ROOT/deploy/scripts/resolve-app-version.mjs" --environment prod --root "$ROOT")}"
 mapfile -t OCCUPIED_SLOTS < <("$NODE_BIN" -e '
 const fs = require("node:fs");
 const registry = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
@@ -134,7 +139,6 @@ for slot in "${OCCUPIED_SLOTS[@]}"; do
     BRAI_ENVS_ROOT="$ENVS_ROOT" \
     BRAI_APP_VERSION="$VERSION" \
     BRAI_MOBILE_BUNDLE_VERSION="$VERSION" \
-    BRAI_PROD_DB="$PROD_DB" \
     BRAI_PROD_DATABASE_URL="$PROD_POSTGRES_URL" \
     BRAI_PROD_WEB_VERSION_JSON="${BRAI_PROD_WEB_VERSION_JSON:-$ROOT/deploy/web/version.json}" \
     BRAI_RELEASE_TARGET="${BRAI_RELEASE_TARGET:-$ROOT/deploy/releases}" \

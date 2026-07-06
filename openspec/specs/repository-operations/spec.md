@@ -134,7 +134,7 @@ Brai SHALL block project-file writes, commits, pushes, and final handoff when lo
 - **AND** the agent reports the missing delivery evidence as incomplete or blocked
 
 ### Requirement: Access permissions follow one deploy contract
-Brai SHALL validate repository, deploy, preview slot, and SQLite permissions through `node scripts/brai-task.mjs access-contract --local|--server` instead of relying on one-off manual permission repairs.
+Brai SHALL validate repository, deploy, preview slot, and Supabase/Postgres runtime access through `node scripts/brai-task.mjs access-contract --local|--server` instead of relying on one-off manual permission repairs.
 
 #### Scenario: Local agent access is validated
 - **WHEN** an agent investigates or changes guard, task starter, workspace permission, or deploy permission behavior
@@ -144,8 +144,8 @@ Brai SHALL validate repository, deploy, preview slot, and SQLite permissions thr
 
 #### Scenario: Server deploy access is validated
 - **WHEN** server deployment permissions are checked after Ansible, main-sync, or deploy helper changes
-- **THEN** `access-contract --server` checks deploy-owned env roots, prod source, preview slot state, public deploy artifacts, main-sync tooling, Node/npm availability, and production SQLite maintenance
-- **AND** `deploy/scripts/production-sqlite-maintenance.sh check` fails on wrong owner, group, or mode for production SQLite files and directories
+- **THEN** `access-contract --server` checks deploy-owned env roots, prod source, preview slot state, public deploy artifacts, main-sync tooling, Node/npm availability, and Supabase/Postgres env wiring
+- **AND** Postgres smoke fails when required runtime tables or deployment ledger tables are missing
 - **AND** `deploy/scripts/preview-slots.sh status` remains read-only and reports lock permission drift explicitly
 
 #### Scenario: Accepted preview release uses deploy-owned source

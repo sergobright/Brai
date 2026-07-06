@@ -1,4 +1,3 @@
-import Database from 'better-sqlite3';
 import { betterAuth } from 'better-auth';
 import { emailOTP } from 'better-auth/plugins';
 import { Resend } from 'resend';
@@ -32,21 +31,15 @@ const DEFAULT_ALLOWED_HOSTS = [
 ];
 
 export function createBraiAuth({
-  dbPath,
-  databaseUrl = null,
+  databaseUrl,
   secret,
   baseURL,
   resendApiKey = null,
   fromEmail = DEFAULT_FROM,
   sendOtp = null
 }) {
-  const db = databaseUrl && isPostgresUrl(databaseUrl)
-    ? new Pool({ connectionString: databaseUrl, ssl: postgresSsl(databaseUrl) })
-    : new Database(dbPath);
-  if (!databaseUrl || !isPostgresUrl(databaseUrl)) {
-    db.pragma('journal_mode = WAL');
-    db.pragma('foreign_keys = ON');
-  }
+  if (!isPostgresUrl(databaseUrl)) throw new Error('BRAI_DATABASE_URL must be a postgres:// or postgresql:// URL');
+  const db = new Pool({ connectionString: databaseUrl, ssl: postgresSsl(databaseUrl) });
   const resend = resendApiKey ? new Resend(resendApiKey) : null;
   const sender = sendOtp ?? (async ({ email, otp }) => {
     if (!resend) {
@@ -87,7 +80,7 @@ export function createBraiAuth({
 
   return {
     auth,
-    close: () => (typeof db.end === 'function' ? db.end() : db.close())
+    close: () => db.end()
   };
 }
 

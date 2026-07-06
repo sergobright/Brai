@@ -83,31 +83,10 @@ export function sandboxCheckMode(command, env = process.env) {
     };
   }
 
-  if (/\bdeploy\/scripts\/production-sqlite-maintenance\.sh\b/.test(text)) {
-    const dbPath = env.BRAI_DB?.trim();
-    if (dbPath && dbPath !== "/srv/projects/brai/data/brai.sqlite") {
-      return {
-        mode: "sandbox",
-        reason: "production-sqlite-maintenance uses a non-production BRAI_DB path.",
-      };
-    }
-    return {
-      mode: "require_escalated",
-      reason: "Production SQLite ownership checks must run in the host namespace, not Codex sandbox uid remap.",
-    };
-  }
-
   if (/\bdeploy\/scripts\/complete-operation-activities\.sh\b/.test(text)) {
-    const dbPath = env.BRAI_DB?.trim();
-    if (dbPath && dbPath !== "/srv/projects/brai/data/brai.sqlite") {
-      return {
-        mode: "sandbox",
-        reason: "complete-operation-activities uses a non-production BRAI_DB path.",
-      };
-    }
     return {
       mode: "require_escalated",
-      reason: "complete-operation-activities enters the host deploy boundary and may write live SQLite.",
+      reason: "complete-operation-activities enters the host deploy boundary and may write the live runtime DB.",
     };
   }
 

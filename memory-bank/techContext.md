@@ -5,7 +5,7 @@ Stack:
 - Node.js 22+
 - Next.js 16, React 19, TypeScript, Tailwind CSS
 - Capacitor Android
-- SQLite through `better-sqlite3`
+- Supabase Postgres through `pg`
 - shadcn-compatible local UI primitives
 - GitHub Actions for CI/CD
 - Ansible/Caddy/systemd for self-hosted environments
@@ -34,4 +34,4 @@ Version baseline after the APK reset:
 - Accepted working-branch promotion into `main`: write the `build` row first, then record deployment metadata.
 - GitHub PR numbers are review metadata and do not define version numbers.
 
-Do not commit SQLite files, APKs, OTA bundles, keystores, `.env` files, private keys, or generated deploy output such as `deploy/web` and `deploy/mobile-update`.
+Do not commit runtime database files, APKs, OTA bundles, keystores, `.env` files, private keys, or generated deploy output such as `deploy/web` and `deploy/mobile-update`.

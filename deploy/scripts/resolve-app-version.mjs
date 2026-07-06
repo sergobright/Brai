@@ -7,7 +7,6 @@ import { fileURLToPath } from "node:url";
 
 const repoRoot = path.resolve(import.meta.dirname, "../..");
 const requireFromApi = createRequire(path.join(repoRoot, "services/brai_api/package.json"));
-const Database = requireFromApi("better-sqlite3");
 const { Pool } = requireFromApi("pg");
 
 if (path.resolve(process.argv[1] ?? "") === fileURLToPath(import.meta.url)) {
@@ -16,9 +15,7 @@ if (path.resolve(process.argv[1] ?? "") === fileURLToPath(import.meta.url)) {
     kind: args.kind,
     root: args.root,
     environment: args.environment,
-    db: args.db,
     postgresUrl: args["postgres-url"] || process.env.BRAI_DATABASE_URL || "",
-    prodDb: args["prod-db"],
     prodPostgresUrl: args["prod-postgres-url"] || process.env.BRAI_PROD_DATABASE_URL || "",
     prodWebVersionJson: args["prod-web-version-json"],
     mobileTarget: args["mobile-target"],
@@ -27,50 +24,18 @@ if (path.resolve(process.argv[1] ?? "") === fileURLToPath(import.meta.url)) {
     targetBranch: args["target-branch"],
     targetCommit: args["target-commit"],
   };
-  const value = options.postgresUrl || options.prodPostgresUrl
-    ? await resolveAppVersionAsync(options)
-    : resolveAppVersion(options);
+  const value = await resolveAppVersionAsync(options);
   console.log(value);
 }
 
 export function resolveAppVersion({
   kind = "ota",
-  root = process.env.BRAI_ROOT || path.resolve(import.meta.dirname, "../.."),
-  environment = process.env.NEXT_PUBLIC_BRAI_ENVIRONMENT || "",
-  db = "",
-  postgresUrl = "",
-  prodDb = process.env.BRAI_PROD_DB || "",
-  prodPostgresUrl = process.env.BRAI_PROD_DATABASE_URL || "",
-  prodWebVersionJson = "",
-  mobileTarget = "",
   explicit = kind === "apk" ? process.env.BRAI_APK_VERSION || "" : process.env.BRAI_APP_VERSION || "",
-  nextOta = false,
-  nextApk = false,
-  targetBranch = "",
-  targetCommit = "",
 } = {}) {
-  if (postgresUrl || prodPostgresUrl) {
-    throw new Error("resolveAppVersion() is synchronous; use resolveAppVersionAsync() for Postgres URLs");
-  }
-  if (kind === "apk") return validApkVersion(explicit || resolveApkVersion(db || prodDb, { nextApk, targetBranch, targetCommit }));
+  if (kind === "apk" && explicit) return validApkVersion(explicit);
   if (explicit) return validOtaVersion(explicit);
-
-  const ledgerVersions = [
-    db && latestBuildOtaVersion(db),
-    prodDb && latestBuildOtaVersion(prodDb),
-  ];
-  const deployedVersions = [
-    environment !== "prod" && prodWebVersionJson && readVersionJson(prodWebVersionJson),
-    mobileTarget && latestMobileTargetVersion(mobileTarget),
-  ];
-  if (nextOta) return nextPatchVersion(latestOtaVersion([...ledgerVersions, ...deployedVersions]));
-
-  const ledgerVersion = latestOtaVersion(ledgerVersions);
-  if (ledgerVersion) return validOtaVersion(ledgerVersion);
-
-  const deployedVersion = latestOtaVersion(deployedVersions);
-  if (deployedVersion) return validOtaVersion(deployedVersion);
-  throw new Error("Unable to resolve Brai X.Y.Z OTA version; set BRAI_APP_VERSION or provide build ledger/deployed mobile metadata");
+  if (kind === "apk") throw new Error("Unable to resolve Brai APK version; set BRAI_APK_VERSION or provide BRAI_DATABASE_URL");
+  throw new Error("Unable to resolve Brai X.Y.Z OTA version; set BRAI_APP_VERSION or provide BRAI_DATABASE_URL");
 }
 
 export async function resolveAppVersionAsync(options = {}) {
@@ -88,11 +53,13 @@ export async function resolveAppVersionAsync(options = {}) {
     mobileTarget = "",
   } = options;
 
-  if (!postgresUrl && !prodPostgresUrl) return resolveAppVersion(options);
   if (kind === "apk") {
     return validApkVersion(explicit || await resolveApkVersionPg(postgresUrl || prodPostgresUrl, { nextApk, targetBranch, targetCommit }));
   }
   if (explicit) return validOtaVersion(explicit);
+  if (!postgresUrl && !prodPostgresUrl) {
+    throw new Error("BRAI_DATABASE_URL or BRAI_PROD_DATABASE_URL is required to resolve Brai OTA version");
+  }
 
   const ledgerVersions = [
     postgresUrl && await latestBuildOtaVersionPg(postgresUrl),
@@ -113,7 +80,7 @@ export async function resolveAppVersionAsync(options = {}) {
 }
 
 async function resolveApkVersionPg(databaseUrl, { nextApk = false, targetBranch = "", targetCommit = "" } = {}) {
-  if (!databaseUrl) return "1";
+  if (!databaseUrl) throw new Error("BRAI_DATABASE_URL is required to resolve Brai APK version");
   const pool = new Pool({ connectionString: databaseUrl, ssl: postgresSsl(databaseUrl) });
   try {
     const latest = await pool.query("SELECT COALESCE(MAX(version), 0) AS apk FROM build_versions WHERE version_type_id = 'apk'");
@@ -147,44 +114,6 @@ async function latestBuildOtaVersionPg(databaseUrl) {
     return value > 0 ? `0.0.${value}` : "";
   } finally {
     await pool.end();
-  }
-}
-
-function resolveApkVersion(dbPath, { nextApk = false, targetBranch = "", targetCommit = "" } = {}) {
-  if (!dbPath || !fs.existsSync(dbPath)) return "1";
-  const db = new Database(dbPath, { readonly: true, fileMustExist: true });
-  try {
-    let apk = Number(db.prepare("SELECT COALESCE(MAX(version), 0) AS apk FROM build_versions WHERE version_type_id = 'apk'").get()?.apk || 0);
-    if (nextApk) {
-      const existing = targetCommit
-        ? db
-          .prepare(`
-            SELECT version
-            FROM build_version_refs
-            WHERE version_type_id = 'apk'
-              AND target_branch = ?
-              AND target_commit = ?
-            ORDER BY version DESC
-            LIMIT 1
-          `)
-          .get(targetBranch || "", targetCommit)
-        : null;
-      apk = Number(existing?.version || 0) || apk + 1;
-    }
-    return String(apk || 1);
-  } finally {
-    db.close();
-  }
-}
-
-function latestBuildOtaVersion(dbPath) {
-  if (!dbPath || !fs.existsSync(dbPath)) return "";
-  const db = new Database(dbPath, { readonly: true, fileMustExist: true });
-  try {
-    const build = Number(db.prepare("SELECT COALESCE(MAX(version), 0) AS build FROM build_versions WHERE version_type_id = 'build'").get()?.build || 0);
-    return build > 0 ? `0.0.${build}` : "";
-  } finally {
-    db.close();
   }
 }
 

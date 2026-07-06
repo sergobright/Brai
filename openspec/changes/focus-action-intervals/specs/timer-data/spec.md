@@ -12,7 +12,7 @@ Focus sessions in a versioned server-side table.
 
 #### Scenario: Only one version is current
 - **WHEN** a Focus session has version history
-- **THEN** SQLite enforces that at most one version for that session has
+- **THEN** Postgres enforces that at most one version for that session has
   `is_current = 1`
 
 ## ADDED Requirements
@@ -234,4 +234,3 @@ event endpoint.
   already deleted completed Focus session
 - **THEN** the server acknowledges the event without restoring or duplicating
   the deleted session
-

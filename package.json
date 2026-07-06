@@ -14,7 +14,7 @@
     "socraticode:preflight": "scripts/use-node22.sh node scripts/brai-socraticode-preflight.mjs",
     "task:start": "scripts/use-node22.sh node scripts/brai-task.mjs start",
     "task:doctor": "scripts/use-node22.sh node scripts/brai-task.mjs doctor",
-    "task:test": "scripts/use-node22.sh node --test scripts/*.test.mjs",
+    "task:test": "scripts/use-node22.sh node --test scripts/*.test.mjs deploy/scripts/*.test.mjs",
     "preview:handoff": "scripts/use-node22.sh node scripts/brai-task.mjs preview",
     "app:dev": "scripts/use-node22.sh npm --prefix apps/brai_app run dev",
     "app:build": "scripts/use-node22.sh npm --prefix apps/brai_app run build",

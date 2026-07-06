@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-DB_PATH="${BRAI_DB:-/srv/projects/brai/data/brai.sqlite}"
-BACKUP_DIR="${BRAI_SQLITE_BACKUP_DIR:-/srv/projects/brai/data/backups}"
-SQLITE_BIN="${BRAI_SQLITE_BIN:-/srv/opt/android-sdk/platform-tools/sqlite3}"
-SERVICE_USER="${BRAI_SQLITE_SERVICE_USER:-brai}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="${BRAI_ROOT:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
+NODE_BIN="${NODE_BIN:-node}"
+SERVICE_USER="${BRAI_SERVICE_USER:-brai}"
 DEPLOY_USER="${BRAI_DEPLOY_USER:-brai-deploy}"
-DEPLOY_GROUP="${BRAI_DEPLOY_GROUP:-brai-deploy}"
 DEPLOY_HOST="${BRAI_DEPLOY_HOST:-localhost}"
 DEPLOY_REPO="${BRAI_DEPLOY_REPO:-/srv/projects/brai-envs/prod/source}"
 SSH_PORT="${BRAI_DEPLOY_SSH_PORT:-22}"
 SSH_KEY_FILE="${BRAI_DEPLOY_SSH_KEY_FILE:-${HOME:-}/.ssh/brai_deploy_ed25519}"
-PROD_DB="/srv/projects/brai/data/brai.sqlite"
+API_ENV_FILE="${BRAI_API_ENV_FILE:-/etc/brai/brai-api.env}"
 MODE="remote"
+CHECK_ACCESS=0
 
 usage() {
   cat >&2 <<USAGE
@@ -23,10 +23,7 @@ Usage:
   $0 --check-access
   $0 --host-local --check-access
 
-Completes operation activities in live SQLite after creating a backup.
-Default mode uses the host deploy SSH boundary and the deploy-owned prod source;
---host-local uses local sudo to enter the service user without SSH.
---local is for the host-side script invocation or tests with BRAI_DB outside $PROD_DB.
+Completes Codex operation activities in the current Supabase runtime database.
 USAGE
 }
 
@@ -34,18 +31,12 @@ if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
   usage
   exit 0
 fi
-CHECK_ACCESS=0
+
 while [[ "${1:-}" == "--local" || "${1:-}" == "--host-local" || "${1:-}" == "--check-access" ]]; do
   case "$1" in
-    --local)
-      MODE="local"
-      ;;
-    --host-local)
-      MODE="host-local"
-      ;;
-    --check-access)
-      CHECK_ACCESS=1
-      ;;
+    --local) MODE="local" ;;
+    --host-local) MODE="host-local" ;;
+    --check-access) CHECK_ACCESS=1 ;;
   esac
   shift
 done
@@ -130,168 +121,112 @@ SERVICE_USER="$2"
 HELPER="$DEPLOY_REPO/deploy/scripts/complete-operation-activities.sh"
 test -x "$HELPER"
 sudo -n -l -u "$SERVICE_USER" "$HELPER" --local operation:agent-task:access-contract-probe >/dev/null
-echo "operation-helper-access=ok remote"
+sudo -n -u "$SERVICE_USER" "$HELPER" --local --check-access
 REMOTE
 }
 
 check_host_local_access() {
   local helper="$DEPLOY_REPO/deploy/scripts/complete-operation-activities.sh"
-  if [[ ! -x "$helper" ]]; then
-    echo "operation helper is not executable: $helper" >&2
-    exit 1
-  fi
+  test -x "$helper"
   sudo -n -l -u "$SERVICE_USER" "$helper" --local operation:agent-task:access-contract-probe >/dev/null
-  echo "operation-helper-access=ok host-local"
+  sudo -n -u "$SERVICE_USER" "$helper" --local --check-access
 }
 
-require_sqlite() {
-  if [[ ! -x "$SQLITE_BIN" ]]; then
-    echo "sqlite3 is not executable: $SQLITE_BIN" >&2
-    exit 1
+load_runtime_env() {
+  if [[ -z "${BRAI_DATABASE_URL:-}" && -r "$API_ENV_FILE" ]]; then
+    set -a
+    # shellcheck source=/dev/null
+    . "$API_ENV_FILE"
+    set +a
   fi
-  if [[ ! -f "$DB_PATH" ]]; then
-    echo "SQLite DB is missing: $DB_PATH" >&2
-    exit 1
-  fi
+  : "${BRAI_DATABASE_URL:?BRAI_DATABASE_URL is required}"
 }
 
-require_writer() {
-  local user
-  user="$(id -un)"
-  if [[ "$DB_PATH" == "$PROD_DB" && "$user" != "$SERVICE_USER" ]]; then
-    echo "Live SQLite writes must run in host service/deploy context, not $user." >&2
-    echo "Use remote mode; it SSHes to $DEPLOY_USER@$DEPLOY_HOST and re-enters as $SERVICE_USER." >&2
-    exit 2
-  fi
-  if [[ "$user" == "root" || "$user" == "$DEPLOY_USER" || ("$DB_PATH" == "$PROD_DB" && "$user" == "mark") ]]; then
-    echo "Refusing live SQLite write as $user." >&2
-    exit 2
-  fi
+node_pg() {
+  "$NODE_BIN" --input-type=module - "$ROOT" "$@"
 }
 
-verify_prod_permissions() {
-  if [[ "$DB_PATH" != "$PROD_DB" ]]; then
-    return
-  fi
-
-  local path group mode
-  for path in "$(dirname "$DB_PATH")" "$BACKUP_DIR" "$DB_PATH" "$DB_PATH-wal" "$DB_PATH-shm"; do
-    if [[ ! -e "$path" ]]; then
-      continue
-    fi
-    group="$(stat -c '%G' "$path")"
-    mode="$(stat -c '%A' "$path")"
-    if [[ "$group" != "$DEPLOY_GROUP" || "${mode:5:1}" != "w" ]]; then
-      echo "Unexpected live SQLite permissions: $(stat -c '%n %U:%G %a' "$path")" >&2
-      echo "Fix ownership/mode through Ansible or production SQLite maintenance, not this helper." >&2
-      exit 2
-    fi
-  done
+check_local_access() {
+  load_runtime_env
+  node_pg <<'NODE'
+const { createRequire } = await import("node:module");
+const [root] = process.argv.slice(2);
+const require = createRequire(`${root}/services/brai_api/package.json`);
+const { Pool } = require("pg");
+const databaseUrl = process.env.BRAI_DATABASE_URL;
+const ssl = /supabase\.(?:co|com)|pooler\.supabase\.com/.test(databaseUrl) ? { rejectUnauthorized: false } : false;
+const pool = new Pool({ connectionString: databaseUrl, ssl });
+try {
+  await pool.query("SELECT 1");
+  console.log("operation-helper-access=ok postgres");
+} finally {
+  await pool.end();
 }
-
-sql_list() {
-  local first=1 id
-  for id in "$@"; do
-    if [[ "$first" -eq 0 ]]; then
-      printf ','
-    fi
-    first=0
-    printf "'%s'" "$id"
-  done
+NODE
 }
 
 complete_local() {
-  require_writer
-  require_sqlite
-  verify_prod_permissions
-
-  local now stamp backup_path ids expected existing new_count changed done_count
-  now="$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"
-  stamp="$(date -u +%Y%m%dT%H%M%SZ)"
-  backup_path="$BACKUP_DIR/brai-before-complete-operation-activities-$stamp.sqlite"
-  ids="$(sql_list "$@")"
-  expected="$#"
-
-  existing="$("$SQLITE_BIN" "file:$DB_PATH?mode=ro" "
-    SELECT COUNT(*)
+  load_runtime_env
+  local ids_json
+  ids_json="$("$NODE_BIN" -e 'console.log(JSON.stringify(process.argv.slice(1)))' "$@")"
+  BRAI_OPERATION_IDS_JSON="$ids_json" node_pg <<'NODE'
+const { createRequire } = await import("node:module");
+const [root] = process.argv.slice(2);
+const require = createRequire(`${root}/services/brai_api/package.json`);
+const { Pool } = require("pg");
+const ids = JSON.parse(process.env.BRAI_OPERATION_IDS_JSON || "[]");
+const databaseUrl = process.env.BRAI_DATABASE_URL;
+const ssl = /supabase\.(?:co|com)|pooler\.supabase\.com/.test(databaseUrl) ? { rejectUnauthorized: false } : false;
+const pool = new Pool({ connectionString: databaseUrl, ssl });
+const now = new Date().toISOString();
+const client = await pool.connect();
+try {
+  await client.query("BEGIN");
+  const existing = await client.query(`
+    SELECT id, status
     FROM activities
     WHERE activity_type_id = 'operation'
       AND author = 'Codex'
       AND deleted_at_utc IS NULL
       AND status IN ('New', 'Done')
-      AND id IN ($ids);
-  ")"
-  if [[ "$existing" != "$expected" ]]; then
-    echo "Expected $expected open Codex operation activities, found $existing." >&2
-    exit 1
-  fi
-
-  new_count="$("$SQLITE_BIN" "file:$DB_PATH?mode=ro" "
-    SELECT COUNT(*)
-    FROM activities
+      AND id = ANY($1::text[])
+    ORDER BY id
+  `, [ids]);
+  if (existing.rows.length !== ids.length) throw new Error(`Expected ${ids.length} Codex operation activities, found ${existing.rows.length}.`);
+  const update = await client.query(`
+    UPDATE activities
+    SET status = 'Done',
+        completed_at_utc = COALESCE(completed_at_utc, $2),
+        updated_at_utc = $2
     WHERE activity_type_id = 'operation'
       AND author = 'Codex'
       AND deleted_at_utc IS NULL
       AND status = 'New'
-      AND id IN ($ids);
-  ")"
-
-  if [[ "$new_count" != "0" ]]; then
-    umask 0002
-    mkdir -p "$BACKUP_DIR"
-    "$SQLITE_BIN" "$DB_PATH" ".backup '$backup_path'"
-    chmod 0664 "$backup_path"
-
-    changed="$("$SQLITE_BIN" "$DB_PATH" "
-      BEGIN IMMEDIATE;
-      UPDATE activities
-      SET status = 'Done',
-          completed_at_utc = COALESCE(completed_at_utc, '$now'),
-          updated_at_utc = '$now'
-      WHERE activity_type_id = 'operation'
-        AND author = 'Codex'
-        AND deleted_at_utc IS NULL
-        AND status = 'New'
-        AND id IN ($ids);
-      SELECT changes();
-      COMMIT;
-    ")"
-    if [[ "$changed" != "$new_count" ]]; then
-      echo "Expected to update $new_count operation activities, changed $changed." >&2
-      exit 1
-    fi
-    verify_prod_permissions
-    echo "backup=$backup_path"
-  else
-    changed=0
-    echo "backup=not_needed"
-  fi
-
-  done_count="$("$SQLITE_BIN" "file:$DB_PATH?mode=ro" "
-    SELECT COUNT(*)
+      AND id = ANY($1::text[])
+  `, [ids, now]);
+  const done = await client.query(`
+    SELECT id, title, author, status, updated_at_utc, completed_at_utc
     FROM activities
     WHERE activity_type_id = 'operation'
       AND author = 'Codex'
       AND deleted_at_utc IS NULL
       AND status = 'Done'
       AND completed_at_utc IS NOT NULL
-      AND id IN ($ids);
-  ")"
-  if [[ "$done_count" != "$expected" ]]; then
-    echo "Expected $expected completed operation activities, found $done_count." >&2
-    exit 1
-  fi
-
-  echo "updated=$changed"
-  "$SQLITE_BIN" -header -column "file:$DB_PATH?mode=ro" "
-    SELECT id, title, author, status, updated_at_utc, completed_at_utc
-    FROM activities
-    WHERE activity_type_id = 'operation'
-      AND author = 'Codex'
-      AND deleted_at_utc IS NULL
-      AND id IN ($ids)
-    ORDER BY id;
-  "
+      AND id = ANY($1::text[])
+    ORDER BY id
+  `, [ids]);
+  if (done.rows.length !== ids.length) throw new Error(`Expected ${ids.length} completed operation activities, found ${done.rows.length}.`);
+  await client.query("COMMIT");
+  console.log(`updated=${update.rowCount}`);
+  console.table(done.rows);
+} catch (error) {
+  await client.query("ROLLBACK");
+  throw error;
+} finally {
+  client.release();
+  await pool.end();
+}
+NODE
 }
 
 if [[ "$CHECK_ACCESS" -eq 1 ]]; then
@@ -300,8 +235,7 @@ if [[ "$CHECK_ACCESS" -eq 1 ]]; then
   elif [[ "$MODE" == "host-local" ]]; then
     check_host_local_access
   else
-    require_sqlite
-    echo "operation-helper-access=ok local"
+    check_local_access
   fi
 elif [[ "$MODE" == "remote" ]]; then
   complete_remote "$@"

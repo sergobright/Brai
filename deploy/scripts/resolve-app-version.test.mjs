@@ -1,25 +1,43 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-import { resolveAppVersion } from "./resolve-app-version.mjs";
+import { BraiStore } from "../../services/brai_api/src/store.js";
+import { createTestDatabase } from "../../services/brai_api/test-support/api.js";
+import { resolveAppVersion, resolveAppVersionAsync } from "./resolve-app-version.mjs";
 
-const requireFromApi = createRequire(new URL("../../services/brai_api/package.json", import.meta.url));
-const Database = requireFromApi("better-sqlite3");
+test("explicit versions resolve without database access", () => {
+  assert.equal(resolveAppVersion({ explicit: "1.2.3" }), "1.2.3");
+  assert.equal(resolveAppVersion({ kind: "apk", explicit: "7" }), "7");
+});
 
-test("OTA version follows the build ledger before stale deployed manifests", () => {
+test("version resolution fails without Supabase/Postgres ledger URL", async () => {
+  await assert.rejects(
+    () => resolveAppVersionAsync({ environment: "prod", explicit: "" }),
+    /BRAI_DATABASE_URL or BRAI_PROD_DATABASE_URL is required/
+  );
+  await assert.rejects(
+    () => resolveAppVersionAsync({ kind: "apk", explicit: "" }),
+    /BRAI_DATABASE_URL is required to resolve Brai APK version/
+  );
+});
+
+test("OTA version follows the Postgres build ledger before stale deployed manifests", { skip: !process.env.BRAI_TEST_DATABASE_URL }, async () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "brai-version-"));
+  const database = await createTestDatabase();
+  const store = new BraiStore(database.url);
   try {
-    const dbPath = path.join(tmp, "brai.sqlite");
-    const db = new Database(dbPath);
-    db.exec(`
-      CREATE TABLE build_versions (version_type_id TEXT NOT NULL, version INTEGER NOT NULL);
-      INSERT INTO build_versions (version_type_id, version) VALUES ('build', 66), ('apk', 1);
-    `);
-    db.close();
+    store.upsertBuildVersion({
+      versionTypeId: "build",
+      version: 66,
+      includedInVersionId: null,
+      shortChanges: "Production build.",
+      detailedChanges: "Production build.",
+      reason: "Test.",
+      releasedAtUtc: "2026-07-06T00:00:00.000Z"
+    });
 
     const prodWebVersionJson = path.join(tmp, "version.json");
     fs.writeFileSync(prodWebVersionJson, `${JSON.stringify({ version: "0.0.63" })}\n`);
@@ -29,47 +47,12 @@ test("OTA version follows the build ledger before stale deployed manifests", () 
     fs.writeFileSync(path.join(mobileTarget, "manifest.json"), `${JSON.stringify({ otaVersion: "0.0.63" })}\n`);
     fs.writeFileSync(path.join(mobileTarget, "bundles", "0.0.63", "metadata.json"), `${JSON.stringify({ otaVersion: "0.0.63" })}\n`);
 
-    assert.equal(resolveAppVersion({ environment: "prod", db: dbPath, prodWebVersionJson, mobileTarget, root: tmp }), "0.0.66");
-    assert.equal(resolveAppVersion({ environment: "preview-a", prodDb: dbPath, prodWebVersionJson, mobileTarget, root: tmp }), "0.0.66");
-    assert.equal(resolveAppVersion({ environment: "preview-a", prodDb: dbPath, prodWebVersionJson, mobileTarget, nextOta: true, root: tmp }), "0.0.67");
-    assert.equal(resolveAppVersion({ kind: "apk", db: dbPath }), "1");
+    assert.equal(await resolveAppVersionAsync({ environment: "prod", postgresUrl: database.url, prodWebVersionJson, mobileTarget }), "0.0.66");
+    assert.equal(await resolveAppVersionAsync({ environment: "preview-a", prodPostgresUrl: database.url, prodWebVersionJson, mobileTarget, nextOta: true }), "0.0.67");
+    assert.equal(await resolveAppVersionAsync({ kind: "apk", postgresUrl: database.url }), "1");
   } finally {
-    fs.rmSync(tmp, { recursive: true, force: true });
-  }
-});
-
-test("next preview OTA version advances past the current slot manifest", () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "brai-version-next-preview-"));
-  try {
-    const dbPath = path.join(tmp, "brai.sqlite");
-    const db = new Database(dbPath);
-    db.exec(`
-      CREATE TABLE build_versions (version_type_id TEXT NOT NULL, version INTEGER NOT NULL);
-      INSERT INTO build_versions (version_type_id, version) VALUES ('build', 80);
-    `);
-    db.close();
-
-    const mobileTarget = path.join(tmp, "mobile-update");
-    fs.mkdirSync(mobileTarget, { recursive: true });
-    fs.writeFileSync(path.join(mobileTarget, "manifest.json"), `${JSON.stringify({ otaVersion: "0.0.81" })}\n`);
-
-    assert.equal(resolveAppVersion({ environment: "preview-e", prodDb: dbPath, mobileTarget, nextOta: true, root: tmp }), "0.0.82");
-  } finally {
-    fs.rmSync(tmp, { recursive: true, force: true });
-  }
-});
-
-test("OTA version resolution fails instead of falling back to stale public metadata", () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "brai-version-missing-"));
-  try {
-    fs.mkdirSync(path.join(tmp, "apps/brai_app/public"), { recursive: true });
-    fs.writeFileSync(path.join(tmp, "apps/brai_app/public/version.json"), `${JSON.stringify({ version: "0.0.10" })}\n`);
-
-    assert.throws(
-      () => resolveAppVersion({ environment: "prod", root: tmp, explicit: "" }),
-      /Unable to resolve Brai X\.Y\.Z OTA version/,
-    );
-  } finally {
+    store.close();
+    await database.drop();
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });

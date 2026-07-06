@@ -5,16 +5,17 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { BraiStore } from '../src/store.js';
+import { createTestDatabase } from '../test-support/api.js';
 
-function tempStore() {
+async function tempStore() {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'brai-version-ledger-'));
-  const dbPath = path.join(tmp, 'store.sqlite');
-  const store = new BraiStore(dbPath);
-  return { tmp, dbPath, store };
+  const database = await createTestDatabase();
+  const store = new BraiStore(database.url);
+  return { tmp, dbUrl: database.url, store, drop: () => database.drop() };
 }
 
-test('accepted preview version recording creates idempotent build row with authored notes', () => {
-  const { tmp, store } = tempStore();
+test('accepted preview version recording creates idempotent build row with authored notes', async () => {
+  const { tmp, store, drop } = await tempStore();
   try {
     const accepted = {
       sourceBranch: 'codex/example',
@@ -46,12 +47,13 @@ test('accepted preview version recording creates idempotent build row with autho
     assert.equal(store.db.prepare('SELECT COUNT(*) AS count FROM build_version_refs').get().count, 1);
   } finally {
     store.close();
+    await drop();
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
 
-test('release and canon version creation remain disabled', () => {
-  const { tmp, store } = tempStore();
+test('release and canon version creation remain disabled', async () => {
+  const { tmp, store, drop } = await tempStore();
   try {
     assert.throws(
       () => store.recordReleaseVersion({}),
@@ -70,19 +72,21 @@ test('release and canon version creation remain disabled', () => {
     );
   } finally {
     store.close();
+    await drop();
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
 
 test('accepted preview promotion records deployment and required build ledger row', () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'brai-promote-apk-only-'));
-  const sourceDb = path.join(tmp, 'source', 'source.sqlite');
-  const targetDb = path.join(tmp, 'target', 'nested', 'target.sqlite');
+  let sourceDatabase;
+  let targetDatabase;
 
-  try {
+  return (async () => {
     const repoRoot = path.resolve(import.meta.dirname, '../../..');
-    fs.mkdirSync(path.dirname(sourceDb), { recursive: true });
-    const source = new BraiStore(sourceDb);
+    sourceDatabase = await createTestDatabase();
+    targetDatabase = await createTestDatabase();
+    const source = new BraiStore(sourceDatabase.url);
     source.recordDeployment({
       environment: 'preview-a',
       slot: 'A',
@@ -99,10 +103,10 @@ test('accepted preview promotion records deployment and required build ledger ro
 
     execFileSync(process.execPath, [
       path.join(repoRoot, 'deploy/scripts/promote-deployment.mjs'),
-      '--source-db',
-      sourceDb,
-      '--target-db',
-      targetDb,
+      '--source-postgres-url',
+      sourceDatabase.url,
+      '--target-postgres-url',
+      targetDatabase.url,
       '--source-branch',
       'codex/build-ledger',
       '--source-commit',
@@ -125,7 +129,7 @@ test('accepted preview promotion records deployment and required build ledger ro
       'Нужно завершать деплой только после записи версии сборки.'
     ], { cwd: repoRoot });
 
-    const promoted = new BraiStore(targetDb);
+    const promoted = new BraiStore(targetDatabase.url);
     try {
       assert.deepEqual(
         promoted.db.prepare('SELECT version_type_id, version FROM build_versions ORDER BY version_type_id, version').all(),
@@ -148,19 +152,23 @@ test('accepted preview promotion records deployment and required build ledger ro
     } finally {
       promoted.close();
     }
-  } finally {
+  })().finally(async () => {
+    await sourceDatabase?.drop();
+    await targetDatabase?.drop();
     fs.rmSync(tmp, { recursive: true, force: true });
-  }
+  });
 });
 
 test('accepted preview promotion uses release-note reason when source reason is generic', () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'brai-promote-reason-fallback-'));
-  const sourceDb = path.join(tmp, 'source.sqlite');
-  const targetDb = path.join(tmp, 'target.sqlite');
+  let sourceDatabase;
+  let targetDatabase;
 
-  try {
+  return (async () => {
     const repoRoot = path.resolve(import.meta.dirname, '../../..');
-    const source = new BraiStore(sourceDb);
+    sourceDatabase = await createTestDatabase();
+    targetDatabase = await createTestDatabase();
+    const source = new BraiStore(sourceDatabase.url);
     source.recordDeployment({
       environment: 'preview-a',
       slot: 'A',
@@ -177,10 +185,10 @@ test('accepted preview promotion uses release-note reason when source reason is 
 
     execFileSync(process.execPath, [
       path.join(repoRoot, 'deploy/scripts/promote-deployment.mjs'),
-      '--source-db',
-      sourceDb,
-      '--target-db',
-      targetDb,
+      '--source-postgres-url',
+      sourceDatabase.url,
+      '--target-postgres-url',
+      targetDatabase.url,
       '--source-branch',
       'codex/reason-fallback',
       '--source-commit',
@@ -201,30 +209,33 @@ test('accepted preview promotion uses release-note reason when source reason is 
       'app.brightos.world',
     ], { cwd: repoRoot });
 
-    const promoted = new BraiStore(targetDb);
+    const promoted = new BraiStore(targetDatabase.url);
     try {
       const build = promoted.db.prepare("SELECT reason FROM build_versions WHERE version_type_id = 'build' AND version = 2").get();
       assert.equal(build.reason, 'Нужно сохранить authored reason из release notes.');
     } finally {
       promoted.close();
     }
-  } finally {
+  })().finally(async () => {
+    await sourceDatabase?.drop();
+    await targetDatabase?.drop();
     fs.rmSync(tmp, { recursive: true, force: true });
-  }
+  });
 });
 
-test('accepted promotion rejects missing authored source notes before deployment record', () => {
+test('accepted promotion rejects missing authored source notes before deployment record', async () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bright-promote-release-disabled-'));
-  const targetDb = path.join(tmp, 'target.sqlite');
+  const sourceDatabase = await createTestDatabase();
+  const targetDatabase = await createTestDatabase();
   const repoRoot = path.resolve(import.meta.dirname, '../../..');
 
   try {
     const result = spawnSync(process.execPath, [
       path.join(repoRoot, 'deploy/scripts/promote-deployment.mjs'),
-      '--source-db',
-      path.join(tmp, 'missing.sqlite'),
-      '--target-db',
-      targetDb,
+      '--source-postgres-url',
+      sourceDatabase.url,
+      '--target-postgres-url',
+      targetDatabase.url,
       '--source-branch',
       'codex/missing-notes',
       '--source-commit',
@@ -247,19 +258,21 @@ test('accepted promotion rejects missing authored source notes before deployment
 
     assert.notEqual(result.status, 0);
     assert.match(result.stderr, /missing Russian source short_changes/);
-    const store = new BraiStore(targetDb);
+    const store = new BraiStore(targetDatabase.url);
     try {
       assert.equal(store.listDeploymentRecords({ environment: 'prod' }).length, 0);
     } finally {
       store.close();
     }
   } finally {
+    await sourceDatabase.drop();
+    await targetDatabase.drop();
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
 
-test('accepted promotion rerun skips missing slot after build ledger was recorded', () => {
-  const { tmp, dbPath, store } = tempStore();
+test('accepted promotion rerun skips missing slot after build ledger was recorded', async () => {
+  const { tmp, dbUrl, store, drop } = await tempStore();
   const repoRoot = path.resolve(import.meta.dirname, '../../..');
   const registry = path.join(tmp, 'preview-slots.json');
   try {
@@ -290,7 +303,7 @@ test('accepted promotion rerun skips missing slot after build ledger was recorde
         ...process.env,
         NODE_BIN: process.execPath,
         BRAI_ROOT: repoRoot,
-        BRAI_DB: dbPath,
+        BRAI_DATABASE_URL: dbUrl,
         BRAI_ENVS_ROOT: tmp,
         BRAI_PREVIEW_REGISTRY: registry,
         BRAI_SOURCE_BRANCH: 'codex/rerun',
@@ -305,12 +318,13 @@ test('accepted promotion rerun skips missing slot after build ledger was recorde
 
     assert.match(output, /already promoted for main@merge-rerun/);
   } finally {
+    await drop();
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
 
-test('reset script resets APK row without deleting build history', () => {
-  const { tmp, dbPath, store } = tempStore();
+test('reset script resets APK row without deleting build history', async () => {
+  const { tmp, dbUrl, store, drop } = await tempStore();
   const repoRoot = path.resolve(import.meta.dirname, '../../..');
   try {
     const now = '2026-07-02T12:00:00.000Z';
@@ -359,11 +373,11 @@ test('reset script resets APK row without deleting build history', () => {
 
     execFileSync(process.execPath, [
       path.join(repoRoot, 'deploy/scripts/reset-apk-only-version-ledger.mjs'),
-      '--db',
-      dbPath
+      '--postgres-url',
+      dbUrl
     ], { cwd: repoRoot });
 
-    const reset = new BraiStore(dbPath);
+    const reset = new BraiStore(dbUrl);
     try {
       assert.deepEqual(
         reset.db.prepare('SELECT id FROM version_types ORDER BY id').all().map((row) => row.id),
@@ -383,6 +397,7 @@ test('reset script resets APK row without deleting build history', () => {
       reset.close();
     }
   } finally {
+    await drop();
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });

@@ -12,13 +12,12 @@ TARGET_COMMIT="${BRAI_TARGET_COMMIT:?BRAI_TARGET_COMMIT is required}"
 SOURCE_SHORT_CHANGES="${BRAI_SOURCE_SHORT_CHANGES:?BRAI_SOURCE_SHORT_CHANGES is required}"
 SOURCE_DETAILS="${BRAI_SOURCE_DETAILED_CHANGES:?BRAI_SOURCE_DETAILED_CHANGES is required}"
 SOURCE_REASON="${BRAI_SOURCE_REASON:?BRAI_SOURCE_REASON is required}"
-TARGET_DB="${BRAI_DB:-$ROOT/data/brai.sqlite}"
 TARGET_POSTGRES_URL="${BRAI_DATABASE_URL:-}"
+: "${TARGET_POSTGRES_URL:?BRAI_DATABASE_URL is required for accepted promotion}"
 
 accepted_build_recorded() {
-  if [[ -n "$TARGET_POSTGRES_URL" ]]; then
-    [[ -r "$ROOT/services/brai_api/package.json" ]] || return 1
-    "$NODE_BIN" --input-type=module - "$ROOT" "$TARGET_POSTGRES_URL" "$SOURCE_BRANCH" "$TARGET_BRANCH" "$TARGET_COMMIT" <<'NODE'
+  [[ -r "$ROOT/services/brai_api/package.json" ]] || return 1
+  "$NODE_BIN" --input-type=module - "$ROOT" "$TARGET_POSTGRES_URL" "$SOURCE_BRANCH" "$TARGET_BRANCH" "$TARGET_COMMIT" <<'NODE'
 const { createRequire } = await import("node:module");
 const [sourceRoot, databaseUrl, sourceBranch, targetBranch, targetCommit] = process.argv.slice(2);
 const require = createRequire(`${sourceRoot}/services/brai_api/package.json`);
@@ -39,30 +38,6 @@ try {
   await pool.end();
 }
 NODE
-    return
-  fi
-  [[ -r "$ROOT/services/brai_api/src/store.js" && -f "$TARGET_DB" ]] || return 1
-  "$NODE_BIN" --input-type=module - "$ROOT" "$TARGET_DB" "$SOURCE_BRANCH" "$TARGET_BRANCH" "$TARGET_COMMIT" <<'NODE'
-const { createRequire } = await import("node:module");
-const [sourceRoot, dbPath, sourceBranch, targetBranch, targetCommit] = process.argv.slice(2);
-const require = createRequire(`${sourceRoot}/services/brai_api/src/store.js`);
-const Database = require("better-sqlite3");
-const db = new Database(dbPath, { readonly: true, fileMustExist: true });
-try {
-  const row = db.prepare(`
-    SELECT 1
-    FROM build_version_refs
-    WHERE version_type_id = 'build'
-      AND source_branch = ?
-      AND target_branch = ?
-      AND target_commit = ?
-    LIMIT 1
-  `).get(sourceBranch, targetBranch, targetCommit);
-  process.exit(row ? 0 : 1);
-} finally {
-  db.close();
-}
-NODE
 }
 
 if [[ "$TARGET_ENVIRONMENT" == "prod" && "$SOURCE_BRANCH" == codex/* ]]; then
@@ -81,11 +56,11 @@ process.exit(1);
     echo "No preview slot found for accepted production branch $SOURCE_BRANCH." >&2
     exit 1
   fi
-  SOURCE_DB="$ENVS_ROOT/preview-${SLOT,,}/data/brai.sqlite"
   SOURCE_POSTGRES_URL=""
   if [[ -f "$ENVS_ROOT/preview-${SLOT,,}/brai-api.env" ]]; then
     SOURCE_POSTGRES_URL="$(env -i bash -c 'set -a; . "$1"; printf "%s" "${BRAI_DATABASE_URL:-}"' _ "$ENVS_ROOT/preview-${SLOT,,}/brai-api.env")"
   fi
+  : "${SOURCE_POSTGRES_URL:?Preview BRAI_DATABASE_URL is required for accepted promotion}"
   TARGET_DOMAIN="app.brightos.world"
   SOURCE_COMMIT="$("$NODE_BIN" -e '
 const fs = require("node:fs");
@@ -99,11 +74,7 @@ else
   exit 1
 fi
 
-"$NODE_BIN" "$SCRIPT_DIR/promote-deployment.mjs" \
-  --source-db "$SOURCE_DB" \
-  --source-postgres-url "$SOURCE_POSTGRES_URL" \
-  --target-db "$TARGET_DB" \
-  --target-postgres-url "$TARGET_POSTGRES_URL" \
+BRAI_SOURCE_DATABASE_URL="$SOURCE_POSTGRES_URL" BRAI_DATABASE_URL="$TARGET_POSTGRES_URL" "$NODE_BIN" "$SCRIPT_DIR/promote-deployment.mjs" \
   --source-branch "$SOURCE_BRANCH" \
   --target-environment "$TARGET_ENVIRONMENT" \
   --target-branch "$TARGET_BRANCH" \

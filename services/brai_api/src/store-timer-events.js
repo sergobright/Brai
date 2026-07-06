@@ -23,63 +23,6 @@ const TIMER_EVENT_TYPES = new Set([
 ]);
 
 export const timerEventMethods = {
-  seedLegacyEvents() {
-    if (!this.tableExists('timer_sessions')) return;
-    const existingEvents = this.db.prepare('SELECT COUNT(*) AS count FROM timer_events').get();
-    if (existingEvents.count > 0) return;
-
-    const sessions = this.db
-      .prepare('SELECT * FROM timer_sessions ORDER BY started_at_utc ASC, id ASC')
-      .all();
-    if (sessions.length === 0) return;
-
-    const now = new Date().toISOString();
-    this.upsertDevice(
-      {
-        device_id: LEGACY_DEVICE_ID,
-        platform: 'server',
-        display_name: 'Legacy server sessions'
-      },
-      now
-    );
-
-    let sequence = 1;
-    for (const session of sessions) {
-      this.insertEvent({
-        event_id: `legacy:${session.id}:start`,
-        device_id: LEGACY_DEVICE_ID,
-        client_sequence: sequence++,
-        type: 'start',
-        occurred_at_utc: session.started_at_utc,
-        received_at_utc: session.created_at_utc ?? now,
-        local_timer_id: session.id,
-        base_server_revision: null,
-        status: 'accepted',
-        ignore_reason: null,
-        payload_version: EVENT_PAYLOAD_VERSION,
-        metadata_json: JSON.stringify({ legacy_session_id: session.id })
-      });
-
-      if (session.ended_at_utc) {
-        this.insertEvent({
-          event_id: `legacy:${session.id}:stop`,
-          device_id: LEGACY_DEVICE_ID,
-          client_sequence: sequence++,
-          type: 'stop',
-          occurred_at_utc: session.ended_at_utc,
-          received_at_utc: session.updated_at_utc ?? now,
-          local_timer_id: session.id,
-          base_server_revision: null,
-          status: 'accepted',
-          ignore_reason: null,
-          payload_version: EVENT_PAYLOAD_VERSION,
-          metadata_json: JSON.stringify({ legacy_session_id: session.id })
-        });
-      }
-    }
-  }
-,
-
   close() {
     this.db.close();
   }
@@ -544,28 +487,17 @@ export const timerEventMethods = {
 ,
 
   nextServerSequence() {
-    if (this.db.dialect === 'postgres') return this.nextPostgresCounter('timer_events.server_sequence');
-    const row = this.db
-      .prepare('SELECT COALESCE(MAX(server_sequence), 0) + 1 AS next FROM timer_events')
-      .get();
-    return row.next;
+    return this.nextPostgresCounter('timer_events.server_sequence');
   }
 ,
 
   nextDeviceSequence(deviceId) {
-    if (this.db.dialect === 'postgres') return this.nextPostgresCounter(`timer_events.client_sequence.${deviceId}`);
-    const row = this.db
-      .prepare(
-        'SELECT COALESCE(MAX(client_sequence), 0) + 1 AS next FROM timer_events WHERE device_id = ?'
-      )
-      .get(deviceId);
-    return row.next;
+    return this.nextPostgresCounter(`timer_events.client_sequence.${deviceId}`);
   }
 ,
 
   nextInvalidTimerClientSequence(deviceId) {
-    if (this.db.dialect === 'postgres') return -this.nextPostgresCounter(`timer_events.invalid_client_sequence.${deviceId}`);
-    return -this.nextServerSequence();
+    return -this.nextPostgresCounter(`timer_events.invalid_client_sequence.${deviceId}`);
   }
 ,
 

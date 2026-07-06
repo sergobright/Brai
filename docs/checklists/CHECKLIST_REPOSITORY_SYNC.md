@@ -13,7 +13,7 @@
 - [ ] Confirm local Git hooks are enabled with `git config core.hooksPath .githooks`.
 - [ ] For suspicious guard state, run `node scripts/brai-task.mjs doctor --strict`; nonzero means the task is not ready for handoff.
 - [ ] For suspicious workspace/cache/output permissions, run `node scripts/brai-task.mjs preflight --strict`; use `scripts/brai-task-repair-permissions.sh --workspace <task>` only for allowlisted ignored paths.
-- [ ] For permissions/ownership/access changes, run `node scripts/brai-task.mjs access-contract --local`; after server remediation, run `node scripts/brai-task.mjs access-contract --server`, `deploy/scripts/preview-slots.sh status`, and the relevant runtime smoke (`deploy/scripts/postgres-smoke.mjs "$BRAI_DATABASE_URL" --expect-imported` for cutover/prod DB changes; `deploy/scripts/production-sqlite-maintenance.sh check` only for legacy snapshot/import permissions).
+- [ ] For permissions/ownership/access changes, run `node scripts/brai-task.mjs access-contract --local`; after server remediation, run `node scripts/brai-task.mjs access-contract --server`, `deploy/scripts/preview-slots.sh status`, and the relevant runtime smoke (`deploy/scripts/postgres-smoke.mjs "$BRAI_DATABASE_URL"` for prod/Dev/preview DB changes).
 - [ ] Stage only intended files.
 - [ ] Do not revert unrelated changes.
 - [ ] Run or report relevant checks.

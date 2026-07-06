@@ -383,9 +383,9 @@ test('event sync edits completed single-interval focus sessions idempotently', a
 
     assert.equal(
       fixture.store.db
-        .prepare("SELECT COUNT(*) AS count FROM sqlite_master WHERE type = 'table' AND name = 'focus_session_versions'")
-        .get().count,
-      0
+        .prepare("SELECT to_regclass('focus_session_versions') AS table_name")
+        .get().table_name,
+      null
     );
   } finally {
     await fixture.close();

@@ -1,17 +1,18 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { braiCmdConfigFromEnv } from './brai-cmd.js';
+import { isPostgresUrl } from './postgres-sync-db.js';
 import { createBraiServer } from './server.js';
 
 const dirname = path.dirname(fileURLToPath(import.meta.url));
 const serviceRoot = path.resolve(dirname, '..');
 const port = Number(process.env.PORT ?? 3020);
 const databaseUrl = process.env.BRAI_DATABASE_URL?.trim() || null;
-if (process.env.BRAI_DATA_STORE === 'postgres' && !databaseUrl) {
-  console.error('BRAI_DATABASE_URL is required when BRAI_DATA_STORE=postgres');
+if (!databaseUrl || !isPostgresUrl(databaseUrl)) {
+  console.error('BRAI_DATABASE_URL must be a postgres:// or postgresql:// URL');
   process.exit(1);
 }
-const dbPath = process.env.BRAI_LEGACY_SQLITE_PATH ?? process.env.BRAI_DB ?? path.join(serviceRoot, 'data', 'brai.sqlite');
+const dataRoot = process.env.BRAI_DATA_ROOT ?? path.join(serviceRoot, 'data');
 const token = process.env.BRAI_TOKEN;
 const webPassword = process.env.BRAI_WEB_PASSWORD;
 const releasePassword = process.env.BRAI_RELEASE_PASSWORD ?? webPassword;
@@ -22,7 +23,7 @@ const resendApiKey = process.env.RESEND_API_KEY ?? null;
 const authFromEmail = process.env.BRAI_AUTH_FROM ?? 'Brai <auth@mail.brightos.world>';
 const inboundApiKey = process.env.BRAI_INBOUND_API_KEY ?? process.env.BRAI_INBOUND_TOKEN;
 const inboundStorageRoot =
-  process.env.BRAI_INBOUND_STORAGE_ROOT ?? path.join(process.env.BRAI_DATA_ROOT ?? path.dirname(dbPath), 'inbox-attachments');
+  process.env.BRAI_INBOUND_STORAGE_ROOT ?? path.join(dataRoot, 'inbox-attachments');
 const vaultRoot = process.env.BRAI_VAULT_ROOT ?? '';
 const syncthingGuiAddress = process.env.BRAI_SYNCTHING_GUI_ADDRESS ?? '127.0.0.1:8384';
 const syncthingApiKey = process.env.BRAI_SYNCTHING_API_KEY ?? '';
@@ -50,8 +51,8 @@ if (!sessionSecret) {
 }
 
 const runtime = createBraiServer({
-  dbPath,
   databaseUrl,
+  dataRoot,
   token,
   webPassword,
   releasePassword,

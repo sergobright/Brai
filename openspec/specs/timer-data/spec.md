@@ -247,7 +247,7 @@ Focus sessions in a versioned server-side table.
 
 #### Scenario: Only one version is current
 - **WHEN** a Focus session has version history
-- **THEN** SQLite enforces that at most one version for that session has
+- **THEN** Postgres enforces that at most one version for that session has
   `is_current = 1`
 
 ### Requirement: Completed Focus sessions can be edited offline-first

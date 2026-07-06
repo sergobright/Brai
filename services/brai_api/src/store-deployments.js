@@ -151,32 +151,22 @@ export const deploymentMethods = {
   },
 
   nextVersion(versionTypeId) {
-    if (this.db.dialect === 'postgres') {
-      const row = this.db
-        .prepare(`
-          INSERT INTO build_version_counters (version_type_id, last_version)
-          VALUES (?, 0)
-          ON CONFLICT (version_type_id) DO NOTHING
-        `)
-        .run(versionTypeId);
-      void row;
-      return this.db
-        .prepare(`
-          UPDATE build_version_counters
-          SET last_version = last_version + 1
-          WHERE version_type_id = ?
-          RETURNING last_version AS next
-        `)
-        .get(versionTypeId).next;
-    }
     const row = this.db
       .prepare(`
-        SELECT COALESCE(MAX(version), 0) + 1 AS next
-        FROM build_versions
-        WHERE version_type_id = ?
+        INSERT INTO build_version_counters (version_type_id, last_version)
+        VALUES (?, 0)
+        ON CONFLICT (version_type_id) DO NOTHING
       `)
-      .get(versionTypeId);
-    return row.next;
+      .run(versionTypeId);
+    void row;
+    return this.db
+      .prepare(`
+        UPDATE build_version_counters
+        SET last_version = last_version + 1
+        WHERE version_type_id = ?
+        RETURNING last_version AS next
+      `)
+      .get(versionTypeId).next;
   },
 
   latestVersion(versionTypeId) {
@@ -246,14 +236,12 @@ export const deploymentMethods = {
         releasedAtUtc,
         new Date().toISOString(),
       );
-    if (this.db.dialect === 'postgres') {
-      this.db.prepare(`
-        INSERT INTO build_version_counters (version_type_id, last_version)
-        VALUES (?, ?)
-        ON CONFLICT (version_type_id) DO UPDATE SET
-          last_version = GREATEST(build_version_counters.last_version, excluded.last_version)
-      `).run(versionTypeId, version);
-    }
+    this.db.prepare(`
+      INSERT INTO build_version_counters (version_type_id, last_version)
+      VALUES (?, ?)
+      ON CONFLICT (version_type_id) DO UPDATE SET
+        last_version = GREATEST(build_version_counters.last_version, excluded.last_version)
+    `).run(versionTypeId, version);
     if (targetBranch && targetCommit) {
       this.upsertBuildVersionRef({
         versionTypeId,

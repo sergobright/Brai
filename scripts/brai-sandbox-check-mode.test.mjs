@@ -21,23 +21,11 @@ test("sandbox helper handles classify-delivery explicit files", () => {
 
 test("sandbox helper marks live operation completion as requiring escalation", () => {
   assert.equal(sandboxCheckMode(["deploy/scripts/complete-operation-activities.sh", "operation:agent-task:x"]).mode, "require_escalated");
-  assert.equal(
-    sandboxCheckMode(["deploy/scripts/complete-operation-activities.sh", "--local", "operation:agent-task:x"], {
-      BRAI_DB: "/tmp/brai-test.sqlite",
-    }).mode,
-    "sandbox",
-  );
+  assert.equal(sandboxCheckMode(["deploy/scripts/complete-operation-activities.sh", "--local", "operation:agent-task:x"]).mode, "require_escalated");
 });
 
 test("sandbox helper marks host access checks as requiring escalation", () => {
   assert.equal(sandboxCheckMode(["node", "scripts/brai-task.mjs", "access-contract", "--server"]).mode, "require_escalated");
-  assert.equal(sandboxCheckMode(["deploy/scripts/production-sqlite-maintenance.sh", "check"]).mode, "require_escalated");
-  assert.equal(
-    sandboxCheckMode(["deploy/scripts/production-sqlite-maintenance.sh", "check"], {
-      BRAI_DB: "/tmp/brai-test.sqlite",
-    }).mode,
-    "sandbox",
-  );
 });
 
 test("sandbox helper marks handoff commands as requiring escalation", () => {

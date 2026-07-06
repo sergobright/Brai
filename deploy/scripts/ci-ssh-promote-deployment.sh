@@ -53,10 +53,9 @@ fi
 
 accepted_build_recorded() {
   local source_root="$1"
-  local target_db="$DEPLOY_REPO/data/brai.sqlite"
-  if [[ -n "${BRAI_DATABASE_URL:-}" ]]; then
-    [[ -r "$source_root/services/brai_api/package.json" ]] || return 1
-    node --input-type=module - "$source_root" "$BRAI_DATABASE_URL" "$BRAI_SOURCE_BRANCH" "$BRAI_TARGET_BRANCH" "$BRAI_TARGET_COMMIT" <<'NODE'
+  [[ -n "${BRAI_DATABASE_URL:-}" ]] || return 1
+  [[ -r "$source_root/services/brai_api/package.json" ]] || return 1
+  node --input-type=module - "$source_root" "$BRAI_DATABASE_URL" "$BRAI_SOURCE_BRANCH" "$BRAI_TARGET_BRANCH" "$BRAI_TARGET_COMMIT" <<'NODE'
 const { createRequire } = await import("node:module");
 const [sourceRoot, databaseUrl, sourceBranch, targetBranch, targetCommit] = process.argv.slice(2);
 const require = createRequire(`${sourceRoot}/services/brai_api/package.json`);
@@ -75,30 +74,6 @@ try {
   process.exit(result.rows.length ? 0 : 1);
 } finally {
   await pool.end();
-}
-NODE
-    return
-  fi
-  [[ -r "$source_root/services/brai_api/src/store.js" && -f "$target_db" ]] || return 1
-  node --input-type=module - "$source_root" "$target_db" "$BRAI_SOURCE_BRANCH" "$BRAI_TARGET_BRANCH" "$BRAI_TARGET_COMMIT" <<'NODE'
-const { createRequire } = await import("node:module");
-const [sourceRoot, dbPath, sourceBranch, targetBranch, targetCommit] = process.argv.slice(2);
-const require = createRequire(`${sourceRoot}/services/brai_api/src/store.js`);
-const Database = require("better-sqlite3");
-const db = new Database(dbPath, { readonly: true, fileMustExist: true });
-try {
-  const row = db.prepare(`
-    SELECT 1
-    FROM build_version_refs
-    WHERE version_type_id = 'build'
-      AND source_branch = ?
-      AND target_branch = ?
-      AND target_commit = ?
-    LIMIT 1
-  `).get(sourceBranch, targetBranch, targetCommit);
-  process.exit(row ? 0 : 1);
-} finally {
-  db.close();
 }
 NODE
 }
@@ -131,10 +106,6 @@ process.exit(1);
   fi
   RUN_ROOT="$ENVS_ROOT/preview-$SLOT/source"
 fi
-if [[ "$BRAI_TARGET_ENVIRONMENT" == "prod" ]]; then
-  export BRAI_DB="$DEPLOY_REPO/data/brai.sqlite"
-fi
-
 cd "$RUN_ROOT"
 BRAI_SOURCE_BRANCH="$BRAI_SOURCE_BRANCH" \
 BRAI_TARGET_ENVIRONMENT="$BRAI_TARGET_ENVIRONMENT" \

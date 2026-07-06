@@ -105,7 +105,6 @@ if getent group brai-deploy >/dev/null 2>&1; then
     fi
   done
   for deploy_tool in \
-    "$root/deploy/scripts/production-sqlite-maintenance.sh" \
     "$root/deploy/scripts/complete-operation-activities.sh" \
     "$root/deploy/scripts/sync-occupied-preview-ota-manifests.sh"
   do

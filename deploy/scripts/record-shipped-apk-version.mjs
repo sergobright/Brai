@@ -55,5 +55,5 @@ function required(values, key) {
 }
 
 function databaseTarget(values) {
-  return values["postgres-url"] || process.env.BRAI_DATABASE_URL || required(values, "db");
+  return values["postgres-url"] || process.env.BRAI_DATABASE_URL || required(values, "postgres-url");
 }

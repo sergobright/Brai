@@ -1,6 +1,5 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
 import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -19,7 +18,7 @@ test('Brai Cmd access tokens, health, admin summary, and migrations work in Brai
   const fixture = await createFixture(['2026-07-03T12:00:00.000Z']);
   try {
     for (const table of ['brai_cmd_settings', 'brai_cmd_access_tokens', 'brai_cmd_usage_events']) {
-      assert.ok(fixture.store.db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(table));
+      assert.ok(fixture.store.db.prepare('SELECT to_regclass(?) AS table_name').get(table).table_name);
       assert.ok(fixture.store.db.prepare('SELECT title FROM table_descriptions WHERE table_name = ?').get(table));
     }
     assert.equal(
@@ -68,72 +67,6 @@ test('Brai Cmd access tokens, health, admin summary, and migrations work in Brai
     assert.equal(summary.totals.activeTokens, 1);
   } finally {
     await fixture.close();
-  }
-});
-
-test('Brai Cmd imports legacy token hashes and usage once', async () => {
-  const tempDir = await mkdtemp(join(tmpdir(), 'brai-cmd-legacy-'));
-  const legacyPath = join(tempDir, 'brai-cmd-store.json');
-  const rawToken = 'aw_legacy-token';
-  const deviceId = 'legacy-device';
-  await writeFile(legacyPath, JSON.stringify({
-    settings: { registrationEnabled: false },
-    tokens: [{
-      id: 'legacy-token-1',
-      displayName: 'Legacy User',
-      tokenHash: sha256(rawToken),
-      deviceIdHash: sha256(deviceId),
-      status: 'active',
-      source: 'self_service',
-      createdAt: '2026-06-01T00:00:00.000Z',
-      activatedAt: '2026-06-01T00:00:00.000Z',
-      lastUsedAt: null,
-      clientVersion: 'old-apk',
-      appPackage: 'dev.braicmd'
-    }],
-    usageEvents: [{
-      id: 'legacy-usage-1',
-      accessTokenId: 'legacy-token-1',
-      createdAt: '2026-06-02T00:00:00.000Z',
-      success: true,
-      audioBytes: 42,
-      audioDurationMs: 1000,
-      provider: 'groq',
-      model: 'whisper-large-v3',
-      fallbackUsed: false,
-      transcriptionMs: 200,
-      totalMs: 300,
-      transcriptChars: 12,
-      clientVersion: 'old-apk'
-    }]
-  }));
-
-  const previousPath = process.env.BRAI_CMD_LEGACY_STORE_PATH;
-  process.env.BRAI_CMD_LEGACY_STORE_PATH = legacyPath;
-  const fixture = await createFixture(['2026-07-03T12:05:00.000Z']);
-  try {
-    assert.equal(fixture.store.braiCmdSettings().registrationEnabled, false);
-    assert.equal(fixture.store.db.prepare('SELECT COUNT(*) AS count FROM brai_cmd_access_tokens').get().count, 1);
-    assert.equal(fixture.store.db.prepare('SELECT COUNT(*) AS count FROM brai_cmd_usage_events').get().count, 1);
-    assert.equal(JSON.stringify(fixture.store.braiCmdAdminSummary()).includes(rawToken), false);
-
-    const health = await fetch(`${fixture.url}/v1/health`, {
-      headers: {
-        authorization: `Bearer ${rawToken}`,
-        'x-brai-cmd-device-id': deviceId
-      }
-    });
-    assert.equal(health.status, 200);
-
-    fixture.store.migrate();
-    assert.equal(fixture.store.db.prepare('SELECT COUNT(*) AS count FROM brai_cmd_access_tokens').get().count, 1);
-    assert.equal(fixture.store.db.prepare('SELECT COUNT(*) AS count FROM brai_cmd_usage_events').get().count, 1);
-    assert.ok(fixture.store.db.prepare("SELECT value FROM brai_cmd_settings WHERE key = 'legacy_store_imported_path'").get());
-  } finally {
-    await fixture.close();
-    if (previousPath === undefined) delete process.env.BRAI_CMD_LEGACY_STORE_PATH;
-    else process.env.BRAI_CMD_LEGACY_STORE_PATH = previousPath;
-    await rm(tempDir, { recursive: true, force: true });
   }
 });
 
@@ -329,10 +262,6 @@ async function dictate(baseUrl, token, deviceId, fields = {}) {
     body: form
   });
   return { status: response.status, body: await response.json() };
-}
-
-function sha256(value) {
-  return createHash('sha256').update(value).digest('hex');
 }
 
 async function fakeFfmpeg(dir) {

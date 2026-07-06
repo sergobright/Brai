@@ -25,7 +25,7 @@
 - Do not record rules, claim implementation, or accept verification for a runtime table, service, deployment, or environment until the actual target environment has been inspected.
 - For Postgres facts, verify the real environment, DSN source without secrets, table presence, schema, indexes, constraints, and relevant rows with read-only SQL before writing docs or reporting completion.
 - Preview, Dev, and production databases can differ; name the environment and checked DSN source.
-- For frozen SQLite backup/import facts, verify the real database path with read-only SQL. If a backup is in WAL mode, use a normal read-only connection and include WAL state; do not use `immutable=1` for freshness-sensitive verification.
+- SQLite is not a runtime database for Brai. Do not document or implement SQLite fallback paths for API, scheduler, deploy ledger, Dev, production, or previews.
 - If runtime access is unavailable, report the blocker. Do not infer production or preview state from repository code, migrations, screenshots, or user wording alone.
 
 ## Public Safety

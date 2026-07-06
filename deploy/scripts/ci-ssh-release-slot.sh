@@ -96,7 +96,6 @@ if [[ -n "${SLOT_META[0]:-}" ]]; then
   export BRAI_COMMIT=""
   export BRAI_ROOT="$BASELINE_SOURCE"
   export BRAI_RELEASE_TARGET="$DEPLOY_REPO/deploy/releases"
-  export BRAI_PROD_DB="$DEPLOY_REPO/data/brai.sqlite"
   if [[ -f "/etc/brai/brai-api.env" ]]; then
     set -a
     # shellcheck source=/dev/null
@@ -109,7 +108,26 @@ if [[ -n "${SLOT_META[0]:-}" ]]; then
   cd "$RELEASE_ROOT"
 fi
 if [[ "$RELEASE_BRANCH" == codex/* ]]; then
-  node deploy/scripts/supabase-branch.mjs delete-preview --branch "$RELEASE_BRANCH" >&2
+  SUPABASE_PREVIEW_BRANCH="$(bash deploy/scripts/preview-slots.sh status | node -e '
+let raw = "";
+process.stdin.on("data", (chunk) => raw += chunk);
+process.stdin.on("end", () => {
+  const branch = process.argv[1];
+  const registry = JSON.parse(raw).registry;
+  for (const slot of ["A", "B", "C", "D", "E"]) {
+    const entry = registry[slot];
+    if (entry.branch === branch) {
+      console.log(entry.supabase_branch_name || "");
+      return;
+    }
+  }
+});
+' "$RELEASE_BRANCH")"
+  if [[ -n "$SUPABASE_PREVIEW_BRANCH" ]]; then
+    node deploy/scripts/supabase-branch.mjs delete-preview --branch "$RELEASE_BRANCH" --name "$SUPABASE_PREVIEW_BRANCH" >&2
+  else
+    node deploy/scripts/supabase-branch.mjs delete-preview --branch "$RELEASE_BRANCH" >&2
+  fi
 fi
 RELEASE_JSON="$(bash deploy/scripts/preview-slots.sh release "$RELEASE_BRANCH")"
 printf '%s\n' "$RELEASE_JSON"

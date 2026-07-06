@@ -131,7 +131,6 @@ if [[ "$ENVIRONMENT" == "prod" ]]; then
   export BRAI_WEB_TARGET="$DEPLOY_REPO/deploy/web"
   export BRAI_PUBLIC_SITE_TARGET="$DEPLOY_REPO/deploy/site"
   export BRAI_MOBILE_TARGET="$DEPLOY_REPO/deploy/mobile-update"
-  export BRAI_DB="$DEPLOY_REPO/data/brai.sqlite"
 fi
 if [[ -d "$SOURCE_ROOT" ]]; then
   find "$SOURCE_ROOT" -user "$(id -u)" -exec chmod u+rwX,g+rwX {} + || true
@@ -151,14 +150,12 @@ export BRAI_BRANCH BRAI_COMMIT
 export BRAI_NATIVE_APK_CHANGE
 export BRAI_ROOT="$SOURCE_ROOT"
 export BRAI_RELEASE_TARGET="$DEPLOY_REPO/deploy/releases"
-export BRAI_PROD_DB="$DEPLOY_REPO/data/brai.sqlite"
 export BRAI_PROD_WEB_VERSION_JSON="$DEPLOY_REPO/deploy/web/version.json"
-if [[ -f "/etc/brai/supabase-deploy.env" ]]; then
-  set -a
-  # shellcheck source=/dev/null
-  . /etc/brai/supabase-deploy.env
-  set +a
-fi
+[[ -r "/etc/brai/supabase-deploy.env" ]] || { echo "/etc/brai/supabase-deploy.env is required" >&2; exit 1; }
+set -a
+# shellcheck source=/dev/null
+. /etc/brai/supabase-deploy.env
+set +a
 if [[ "$ENVIRONMENT" == "prod" && -r "/etc/brai/brai-api.env" ]]; then
   set -a
   # shellcheck source=/dev/null
@@ -166,11 +163,13 @@ if [[ "$ENVIRONMENT" == "prod" && -r "/etc/brai/brai-api.env" ]]; then
   set +a
   export BRAI_PROD_DATABASE_URL="${BRAI_DATABASE_URL:-}"
 elif [[ "$ENVIRONMENT" == "prod" ]]; then
-  echo "Production runtime env is not readable by deploy user; systemd will load it on service restart."
+  echo "/etc/brai/brai-api.env is required and must be readable for production deploy" >&2
+  exit 1
 fi
-if [[ "$ENVIRONMENT" == "prod" && -n "${BRAI_DATABASE_URL:-}" ]]; then
-  node deploy/scripts/supabase-branch.mjs migrate --postgres-url "$BRAI_DATABASE_URL"
-  node deploy/scripts/postgres-smoke.mjs "$BRAI_DATABASE_URL" --expect-imported
+if [[ "$ENVIRONMENT" == "prod" ]]; then
+  : "${BRAI_DATABASE_URL:?BRAI_DATABASE_URL is required for production deploy}"
+  node deploy/scripts/supabase-branch.mjs migrate
+  node deploy/scripts/postgres-smoke.mjs "$BRAI_DATABASE_URL"
 fi
 if [[ "$ENVIRONMENT" == preview-* ]]; then
   node deploy/scripts/supabase-branch.mjs preview-env \
@@ -185,7 +184,11 @@ if [[ "$ENVIRONMENT" != "prod" && -f "$ENVS_ROOT/$ENV_PATH/brai-api.env" ]]; the
   # shellcheck source=/dev/null
   . "$ENVS_ROOT/$ENV_PATH/brai-api.env"
   set +a
+elif [[ "$ENVIRONMENT" != "prod" ]]; then
+  echo "$ENVS_ROOT/$ENV_PATH/brai-api.env is required for $ENVIRONMENT deploy" >&2
+  exit 1
 fi
+: "${BRAI_DATABASE_URL:?BRAI_DATABASE_URL is required after Supabase env setup}"
 if [[ "$BRAI_NATIVE_APK_CHANGE" == "true" ]]; then
   if [[ "$ENVIRONMENT" == preview-* ]]; then
     FLAVOR="preview$BRAI_PREVIEW_SLOT"
@@ -194,7 +197,7 @@ if [[ "$BRAI_NATIVE_APK_CHANGE" == "true" ]]; then
     deploy/scripts/build-android-env-apk.sh dev
   elif [[ "$ENVIRONMENT" == "prod" ]]; then
     deploy/scripts/build-android-env-apk.sh production
-    export BRAI_APP_VERSION="$(node deploy/scripts/resolve-app-version.mjs --environment prod --root "$SOURCE_ROOT" --db "${BRAI_DB:-}" --postgres-url "${BRAI_DATABASE_URL:-}")"
+    export BRAI_APP_VERSION="$(node deploy/scripts/resolve-app-version.mjs --environment prod --root "$SOURCE_ROOT")"
     deploy/scripts/build-nonproduction-apks.sh
   fi
 fi

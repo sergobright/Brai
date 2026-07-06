@@ -1,15 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
 import { BraiStore } from '../src/store.js';
 import { main, runDueSchedules } from '../src/scheduler-runner.js';
+import { createTestDatabase } from '../test-support/api.js';
 
 const AGENT_ID = 'test.scheduled.agent';
 
 test('scheduler claims due recurring schedule and advances it', async () => {
-  const fixture = createStore();
+  const fixture = await createStore();
   const now = new Date();
   let calls = 0;
   try {
@@ -47,12 +45,12 @@ test('scheduler claims due recurring schedule and advances it', async () => {
     assert.equal(aiLogData.inputs.some((input) => input.ref === 'path'), false);
     assert.equal(aiLogData.outputs.some((output) => output.ref === 'agent_schedules.status'), true);
   } finally {
-    fixture.close();
+    await fixture.close();
   }
 });
 
 test('scheduler skips locked schedule', async () => {
-  const fixture = createStore();
+  const fixture = await createStore();
   try {
     fixture.store.db.prepare(`
       UPDATE agent_schedules
@@ -74,12 +72,12 @@ test('scheduler skips locked schedule', async () => {
     assert.equal(scheduleRow(fixture.store).last_started_at_utc, null);
     assert.equal(fixture.store.db.prepare('SELECT COUNT(*) AS count FROM ai_logs').get().count, 0);
   } finally {
-    fixture.close();
+    await fixture.close();
   }
 });
 
 test('scheduler records failure and still advances recurring schedule', async () => {
-  const fixture = createStore();
+  const fixture = await createStore();
   const now = new Date();
   try {
     fixture.store.db.prepare(`
@@ -108,20 +106,20 @@ test('scheduler records failure and still advances recurring schedule', async ()
     assert.equal(aiLog.status, 'failed');
     assert.equal(JSON.parse(aiLog.json_data).metadata.error, 'boom');
   } finally {
-    fixture.close();
+    await fixture.close();
   }
 });
 
 test('postgres-only scheduler config refuses missing database URL', async () => {
   await assert.rejects(
-    () => main({ BRAI_DATA_STORE: 'postgres' }),
-    /BRAI_DATABASE_URL is required when BRAI_DATA_STORE=postgres/
+    () => main({}),
+    /BRAI_DATABASE_URL must be a postgres:\/\/ or postgresql:\/\/ URL/
   );
 });
 
-function createStore() {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'brai-scheduler-test-'));
-  const store = new BraiStore(path.join(tmp, 'brai.sqlite'));
+async function createStore() {
+  const database = await createTestDatabase();
+  const store = new BraiStore(database.url);
   const now = new Date().toISOString();
   store.db.prepare(`
     INSERT INTO agents (
@@ -162,9 +160,9 @@ function createStore() {
   `).run(AGENT_ID, AGENT_ID, 'active', null, 21600, now);
   return {
     store,
-    close() {
+    async close() {
       store.close();
-      fs.rmSync(tmp, { recursive: true, force: true });
+      await database.drop();
     }
   };
 }
