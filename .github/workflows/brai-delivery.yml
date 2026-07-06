@@ -56,9 +56,23 @@ jobs:
           node-version: '22'
       - run: git fetch origin +refs/heads/main:refs/remotes/origin/main
       - id: classify
+        continue-on-error: true
         run: node deploy/scripts/classify-delivery.mjs --github-output "$GITHUB_OUTPUT"
+      - name: Temporal delivery classification failed
+        if: steps.classify.outcome == 'failure' && github.event_name == 'push' && startsWith(github.ref, 'refs/heads/codex/')
+        run: deploy/scripts/ci-temporal-signal.sh preview --branch "$BRAI_BRANCH" --sha "$BRAI_COMMIT" --event delivery_classification_failed --source classify-delivery
+        env:
+          BRAI_DEPLOY_HOST: ${{ vars.BRAI_DEPLOY_HOST }}
+          BRAI_DEPLOY_USER: ${{ vars.BRAI_DEPLOY_USER }}
+          BRAI_DEPLOY_SSH_PORT: ${{ vars.BRAI_DEPLOY_SSH_PORT || '22' }}
+          BRAI_DEPLOY_SSH_KEY: ${{ secrets.BRAI_DEPLOY_SSH_KEY }}
+          BRAI_BRANCH: ${{ github.ref_name }}
+          BRAI_COMMIT: ${{ github.sha }}
+      - name: Fail closed after delivery classification failure
+        if: steps.classify.outcome == 'failure'
+        run: exit 1
       - name: Temporal delivery classified
-        if: github.event_name == 'push' && startsWith(github.ref, 'refs/heads/codex/')
+        if: steps.classify.outcome == 'success' && github.event_name == 'push' && startsWith(github.ref, 'refs/heads/codex/')
         run: deploy/scripts/ci-temporal-signal.sh preview --branch "$BRAI_BRANCH" --sha "$BRAI_COMMIT" --event delivery_classified --delivery-class "$BRAI_DELIVERY_CLASS" --source classify-delivery
         env:
           BRAI_DEPLOY_HOST: ${{ vars.BRAI_DEPLOY_HOST }}

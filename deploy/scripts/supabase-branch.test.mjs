@@ -58,3 +58,77 @@ test("preview env setup rewrites existing shell-unsafe values safely", () => {
   assert.match(contents, /^BRAI_DATABASE_URL='postgres:\/\/brai:brai@127\.0\.0\.1:5432\/brai\?options=-c\+search_path%3Dbrai_preview_supabase_only_runtime_e3117d5f%2Cpublic'$/m);
   assert.match(contents, /^BRAI_SUPABASE_BRANCH='brai_preview_supabase_only_runtime_e3117d5f'$/m);
 });
+
+test("branch database URL override requires explicit preview marker", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "brai-supabase-override-"));
+  const envFile = path.join(dir, "brai-api.env");
+  const baseEnv = {
+    ...process.env,
+    BRAI_SUPABASE_DRY_RUN: "true",
+    BRAI_ENVS_ROOT: dir,
+    BRAI_PREVIEW_REGISTRY: path.join(dir, "preview-slots.json"),
+    BRAI_PREVIEW_LOCK: path.join(dir, "preview-slots.lock"),
+    NODE_BIN: process.execPath,
+    SUPABASE_PROJECT_REF: "dry-run-project",
+    SUPABASE_BRANCH_DATABASE_URL: "postgres://brai:brai@127.0.0.1:5432/brai"
+  };
+
+  const denied = spawnSync("node", [
+    path.join(repoRoot, "deploy/scripts/supabase-branch.mjs"),
+    "preview-env",
+    "--branch",
+    "codex/supabase-only-runtime",
+    "--runtime-env",
+    envFile
+  ], {
+    cwd: repoRoot,
+    encoding: "utf8",
+    env: baseEnv
+  });
+  assert.notEqual(denied.status, 0);
+  assert.match(denied.stderr, /BRAI_ALLOW_SUPABASE_BRANCH_DATABASE_URL_OVERRIDE=true/);
+
+  const wrongMarker = spawnSync("node", [
+    path.join(repoRoot, "deploy/scripts/supabase-branch.mjs"),
+    "preview-env",
+    "--branch",
+    "codex/supabase-only-runtime",
+    "--runtime-env",
+    envFile
+  ], {
+    cwd: repoRoot,
+    encoding: "utf8",
+    env: {
+      ...baseEnv,
+      BRAI_ALLOW_SUPABASE_BRANCH_DATABASE_URL_OVERRIDE: "true"
+    }
+  });
+  assert.notEqual(wrongMarker.status, 0);
+  assert.match(wrongMarker.stderr, /expected branch\/schema marker/);
+
+  const allocation = spawnSync("bash", [
+    path.join(repoRoot, "deploy/scripts/preview-slots.sh"),
+    "allocate",
+    "codex/supabase-only-runtime",
+    "test-commit"
+  ], { cwd: repoRoot, encoding: "utf8", env: baseEnv });
+  assert.equal(allocation.status, 0, allocation.stderr || allocation.stdout);
+
+  const allowed = spawnSync("node", [
+    path.join(repoRoot, "deploy/scripts/supabase-branch.mjs"),
+    "preview-env",
+    "--branch",
+    "codex/supabase-only-runtime",
+    "--runtime-env",
+    envFile
+  ], {
+    cwd: repoRoot,
+    encoding: "utf8",
+    env: {
+      ...baseEnv,
+      BRAI_ALLOW_SUPABASE_BRANCH_DATABASE_URL_OVERRIDE: "true",
+      SUPABASE_BRANCH_DATABASE_URL: "postgres://brai:brai@127.0.0.1:5432/brai?options=-c%20search_path%3Dbrai-preview-supabase-only-runtime-e3117d5f"
+    }
+  });
+  assert.equal(allowed.status, 0, allowed.stderr || allowed.stdout);
+});

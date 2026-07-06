@@ -194,6 +194,7 @@ for index in "${!REQUIRED_BRANCHES[@]}"; do
     signal_temporal_preview "$branch" slot_release_started
     if BRAI_BRANCH="$branch" \
       BRAI_ACCEPTED_PREVIEW=true \
+      BRAI_REQUIRE_PREVIEW_SLOT_RELEASE=true \
         "$SCRIPT_DIR/ci-ssh-release-slot.sh"; then
       signal_temporal_preview "$branch" supabase_preview_released
       signal_temporal_preview "$branch" slot_released

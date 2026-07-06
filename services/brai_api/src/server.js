@@ -60,6 +60,9 @@ export function createBraiServer({
   codexTimeoutMs = null,
   inboundTitleGenerator = null,
   braiCmd = {},
+  branch = process.env.BRAI_BRANCH || null,
+  commit = process.env.BRAI_COMMIT || null,
+  databaseBranch = process.env.BRAI_SUPABASE_BRANCH || null,
   now = () => new Date(),
   logger = console
 }) {
@@ -116,7 +119,9 @@ export function createBraiServer({
         sendJson(req, res, 200, {
           ok: true,
           service: 'brai-api',
-          database: { dialect: 'postgres', branch: process.env.BRAI_SUPABASE_BRANCH || null }
+          database: { dialect: 'postgres', branch: databaseBranch },
+          branch,
+          commit
         });
         return;
       }
@@ -728,6 +733,7 @@ function jsonHeaders(req) {
       vary: 'Origin'
     };
   }
+  if (typeof origin === 'string') return BASE_JSON_HEADERS;
   return {
     ...BASE_JSON_HEADERS,
     'access-control-allow-origin': '*'
