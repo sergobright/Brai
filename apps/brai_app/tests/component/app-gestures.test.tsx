@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import { setupBraiAppTest, swipe } from "./app-test-support";
 import { BraiApp } from "@/features/app/BraiApp";
 import { installAndroidBackHandler } from "@/shared/platform/platform";
+import { saveInboxState } from "@/shared/storage/inboxStore";
+import { saveHistoryCache } from "@/shared/storage/syncStore";
 
 describe("BraiApp gestures", () => {
   setupBraiAppTest();
@@ -196,6 +198,99 @@ describe("BraiApp gestures", () => {
 
     await waitFor(() => expect(Number((backdrop as HTMLElement).style.getPropertyValue("--mobile-sheet-backdrop-opacity"))).toBeLessThan(1));
     expect((sheet as HTMLElement).style.getPropertyValue("--mobile-sheet-offset")).toBe("240px");
+  });
+
+  it("closes the mobile Focus history sheet from a downward row drag", async () => {
+    await saveHistoryCache({
+      sessions: [{
+        id: "history-drag-session",
+        started_at_utc: "2026-06-22T05:00:00.000Z",
+        ended_at_utc: "2026-06-22T06:00:00.000Z",
+        duration_seconds: 3600,
+      }],
+      groups: {},
+    });
+    render(<BraiApp initialSection="focus" />);
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Фокус" })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "История фокуса" }));
+
+    const sheet = await waitFor(() => {
+      const current = document.querySelector(".mobile-context-sheet");
+      expect(current).toBeInstanceOf(HTMLElement);
+      return current as HTMLElement;
+    });
+    Object.defineProperty(sheet, "getBoundingClientRect", {
+      configurable: true,
+      value: () => ({ bottom: 500, height: 400, left: 0, right: 360, top: 100, width: 360, x: 0, y: 100 }),
+    });
+    const rowButton = (await screen.findAllByRole("button", { name: /Редактировать фокус/ }))[0];
+
+    fireEvent.touchStart(rowButton, {
+      changedTouches: [{ identifier: 1, clientX: 200, clientY: 120 }],
+    });
+    fireEvent.touchMove(rowButton, {
+      changedTouches: [{ identifier: 1, clientX: 200, clientY: 340 }],
+    });
+    fireEvent.touchEnd(rowButton, {
+      changedTouches: [{ identifier: 1, clientX: 200, clientY: 340 }],
+    });
+
+    await waitFor(() => expect(document.querySelector(".mobile-context-sheet")).not.toBeInTheDocument());
+  });
+
+  it("closes a mobile Inbox detail sheet from a downward image attachment drag", async () => {
+    await saveInboxState({
+      server_time_utc: "2026-06-28T12:00:00.000Z",
+      server_revision: 7,
+      inbox: [{
+        id: "inbox-image-drag",
+        title: "Preview demo: картинка во входящих",
+        description_md: "Описание",
+        source: "telegram",
+        source_key: "chain-1",
+        response_required: true,
+        related_inbox_id: null,
+        record_type_id: 2,
+        item_date: null,
+        author: "",
+        preliminary_section: "",
+        urgency: "",
+        attachment_links: ["/v1/inbox/attachments/codex-inbox-image-previews-demo.png"],
+        explanation_text: "",
+        normalization_text: "",
+        is_normalized: false,
+        created_at_utc: "2026-06-28T10:00:00.000Z",
+        updated_at_utc: "2026-06-28T11:00:00.000Z",
+        deleted_at_utc: null,
+      }],
+    });
+    render(<BraiApp initialSection="inbox" />);
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Входящие" })).toBeInTheDocument());
+    fireEvent.click(await screen.findByRole("textbox", { name: "Название входящего: Preview demo: картинка во входящих" }));
+
+    const sheet = await waitFor(() => {
+      const current = document.querySelector(".actions-detail-panel.mobile");
+      expect(current).toBeInstanceOf(HTMLElement);
+      return current as HTMLElement;
+    });
+    Object.defineProperty(sheet, "getBoundingClientRect", {
+      configurable: true,
+      value: () => ({ bottom: 700, height: 600, left: 0, right: 360, top: 100, width: 360, x: 0, y: 100 }),
+    });
+    const image = await screen.findByRole("img", { name: "codex-inbox-image-previews-demo.png" });
+    expect(image).toHaveAttribute("draggable", "false");
+
+    fireEvent.touchStart(image, {
+      changedTouches: [{ identifier: 1, clientX: 180, clientY: 260 }],
+    });
+    fireEvent.touchMove(image, {
+      changedTouches: [{ identifier: 1, clientX: 180, clientY: 620 }],
+    });
+    fireEvent.touchEnd(image, {
+      changedTouches: [{ identifier: 1, clientX: 180, clientY: 620 }],
+    });
+
+    await waitFor(() => expect(document.querySelector(".actions-detail-panel.mobile")).not.toBeInTheDocument());
   });
 
   it("closes an open mobile sheet through the Android back bridge", async () => {

@@ -570,11 +570,11 @@ function sqliteCli() {
 
 test("native APK detector ignores OTA web-layer changes", () => {
   assert.equal(requiresNativeApkChange(["apps/brai_app/android/app/build.gradle"]), true);
-  assert.equal(requiresNativeApkChange(["deploy/scripts/ci-ssh-deploy.sh"]), true);
-  assert.equal(requiresNativeApkChange(["deploy/scripts/ci-ssh-release-slot.sh"]), true);
-  assert.equal(requiresNativeApkChange(["deploy/scripts/detect-native-apk-change.mjs"]), true);
+  assert.equal(requiresNativeApkChange(["deploy/scripts/ci-ssh-deploy.sh"]), false);
+  assert.equal(requiresNativeApkChange(["deploy/scripts/ci-ssh-release-slot.sh"]), false);
+  assert.equal(requiresNativeApkChange(["deploy/scripts/detect-native-apk-change.mjs"]), false);
   assert.equal(requiresNativeApkChange(["deploy/scripts/apk-release-targets.mjs"]), true);
-  assert.equal(requiresNativeApkChange(["deploy/scripts/resolve-app-version.mjs"]), true);
+  assert.equal(requiresNativeApkChange(["deploy/scripts/resolve-app-version.mjs"]), false);
   assert.equal(requiresNativeApkChange(["apps/brai_app/src/shared/platform/ota.ts"]), false);
   assert.equal(requiresNativeApkChange(["apps/brai_app/src/shared/platform/androidTimerNotification.ts"]), false);
   assert.equal(

@@ -20,6 +20,7 @@ import { ArchiveSection } from "./sections/actions/ArchiveSection";
 import { BraiCmdSection } from "./sections/brai-cmd/BraiCmdSection";
 import { EvilEyeSection } from "./sections/EvilEyeSection";
 import { EngineSection } from "./sections/engine/EngineSection";
+import { FactorySection } from "./sections/factory/FactorySection";
 import { FocusBackground, FocusContextPanelSheet, FocusSection } from "./sections/focus/FocusSection";
 import { InboxSection } from "./sections/inbox/InboxSection";
 import { SettingsSection } from "./sections/settings/SettingsSection";
@@ -61,7 +62,7 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
   }, [app.section, app.selectSection]);
 
   useEffect(() => installAndroidBackHandler(() => {
-    if (window.history.state?.braiMobileMenu || window.history.state?.braiMobileDockMenu || window.history.state?.braiMobileSheet || window.history.state?.braiActivityEditor || window.history.state?.braiMobileActionCreate || window.history.state?.braiInboxEditor || window.history.state?.braiMobileInboxCreate) return false;
+    if (window.history.state?.braiMobileMenu || window.history.state?.braiMobileDockMenu || window.history.state?.braiMobileSheet || window.history.state?.braiActivityEditor || window.history.state?.braiMobileActionCreate || window.history.state?.braiInboxEditor || window.history.state?.braiMobileInboxCreate || window.history.state?.braiFactoryLog) return false;
     if (sectionRef.current === "actions") return false;
     if (window.history.state?.braiSection === sectionRef.current) {
       window.history.back();
@@ -141,6 +142,8 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
           />
         ) : screenSection === "archive" ? (
           <ArchiveSection state={app.actions} localSnapshotReady={app.localSnapshotReady} onRestore={app.onRestoreAction} />
+        ) : screenSection === "factory" ? (
+          <FactorySection onMobileOverlayChange={app.setActionOverlayOpen} />
         ) : screenSection === "focus" ? (
           <FocusSection
             state={app.timer}

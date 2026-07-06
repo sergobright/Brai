@@ -1,21 +1,18 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createFixture, jsonRequest, TOKEN } from '../test-support/api.js';
 
 const PNG_BYTES = Buffer.from([
-  0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
-  0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
-  0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
-  0x08, 0x06, 0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4,
-  0x89, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x44, 0x41,
-  0x54, 0x78, 0x9c, 0x63, 0x00, 0x01, 0x00, 0x00,
-  0x05, 0x00, 0x01, 0x0d, 0x0a, 0x2d, 0xb4, 0x00,
-  0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae,
-  0x42, 0x60, 0x82
+  0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d,
+  0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+  0x08, 0x04, 0x00, 0x00, 0x00, 0xb5, 0x1c, 0x0c, 0x02, 0x00, 0x00, 0x00,
+  0x0b, 0x49, 0x44, 0x41, 0x54, 0x78, 0xda, 0x63, 0xfc, 0xff, 0x1f, 0x00,
+  0x03, 0x03, 0x02, 0x00, 0xef, 0xbf, 0xa7, 0xdb, 0x00, 0x00, 0x00, 0x00,
+  0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82
 ]);
 
 test('Brai Cmd access tokens, health, admin summary, and migrations work in Brai API', async () => {
@@ -213,6 +210,8 @@ test('Brai Cmd dictation accepts multipart audio and stores only usage metrics',
 
 test('Brai Cmd inbox route accepts Android access token and creates Inbox context items', async () => {
   const storageRoot = await mkdtemp(join(tmpdir(), 'brai-cmd-inbox-'));
+  const previousFfmpeg = process.env.BRAI_THUMBNAIL_FFMPEG_BIN;
+  process.env.BRAI_THUMBNAIL_FFMPEG_BIN = await fakeFfmpeg(storageRoot);
   const fixture = await createFixture(['2026-07-04T12:00:00.000Z'], {
     inboundStorageRoot: storageRoot,
     inboundTitleGenerator: async () => 'Команда с контекстом'
@@ -251,6 +250,11 @@ test('Brai Cmd inbox route accepts Android access token and creates Inbox contex
     assert.equal(item.source, 'brai-cmd');
     assert.equal(item.record_type_id, 1);
     assert.match(item.attachment_links[0], /^\/v1\/inbox\/attachments\/.+\.png$/);
+    const preview = await fetch(`${fixture.url}${item.attachment_links[0]}.thumb.jpg`, {
+      headers: { authorization: `Bearer ${TOKEN}` }
+    });
+    assert.equal(preview.status, 200);
+    assert.equal(preview.headers.get('content-type'), 'image/jpeg');
 
     const duplicate = await jsonRequest(fixture.url, '/v1/brai-cmd/inbox', {
       method: 'POST',
@@ -264,6 +268,8 @@ test('Brai Cmd inbox route accepts Android access token and creates Inbox contex
     assert.equal(fixture.store.db.prepare('SELECT COUNT(*) AS count FROM inbox').get().count, 1);
   } finally {
     await fixture.close();
+    if (previousFfmpeg === undefined) delete process.env.BRAI_THUMBNAIL_FFMPEG_BIN;
+    else process.env.BRAI_THUMBNAIL_FFMPEG_BIN = previousFfmpeg;
     await rm(storageRoot, { recursive: true, force: true });
   }
 });
@@ -327,4 +333,13 @@ async function dictate(baseUrl, token, deviceId, fields = {}) {
 
 function sha256(value) {
   return createHash('sha256').update(value).digest('hex');
+}
+
+async function fakeFfmpeg(dir) {
+  const file = join(dir, 'fake-ffmpeg');
+  await writeFile(file, `#!/usr/bin/env node
+require('node:fs').writeFileSync(process.argv.at(-1), Buffer.from([0xff, 0xd8, 0xff, 0xd9]));
+`);
+  await chmod(file, 0o700);
+  return file;
 }

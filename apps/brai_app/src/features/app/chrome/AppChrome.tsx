@@ -2,7 +2,7 @@
 
 import type { CSSProperties, FormEvent, ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
-import { CheckCircle2, KeyRound, Loader2, Lock, Mail, TriangleAlert, WifiOff, type LucideIcon } from "lucide-react";
+import { CheckCircle2, KeyRound, Loader2, Lock, Mail, TriangleAlert, WifiOff, X, type LucideIcon } from "lucide-react";
 import { ENVIRONMENT_BADGE_LABEL, isProductionEnvironment } from "@/shared/config/runtime";
 import { installAndroidBackHandler } from "@/shared/platform/platform";
 import type { SyncStatus } from "@/shared/types/timer";
@@ -120,14 +120,20 @@ export function MobileContextSheet({
   label,
   className,
   children,
+  contentInset = "balanced",
   onClose,
   onCloseStart,
+  scroll = true,
+  variant = "context",
 }: {
   label: string;
   className?: string;
   children: ReactNode;
+  contentInset?: "balanced" | "end" | "none";
   onClose: () => void;
   onCloseStart?: () => void;
+  scroll?: boolean;
+  variant?: "context" | "detail";
 }) {
   const suppressPopRef = useRef(false);
   const onCloseRef = useRef(onClose);
@@ -189,26 +195,55 @@ export function MobileContextSheet({
       />
       <aside
         ref={sheetRef}
-        className="mobile-context-sheet pointer-events-auto relative z-[1] grid max-h-full w-full min-w-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden rounded-t-2xl border-t border-border bg-card pb-[env(safe-area-inset-bottom)] pt-2 shadow-xl animate-[mobile-detail-sheet-in_180ms_ease-out] will-change-transform"
+        className={cx(
+          "pointer-events-auto relative z-[1] grid max-h-full w-full min-w-0 overflow-hidden rounded-t-2xl border-t border-border bg-card pb-[env(safe-area-inset-bottom)] shadow-xl animate-[mobile-detail-sheet-in_180ms_ease-out] will-change-transform",
+          variant === "detail"
+            ? "actions-detail-panel mobile h-full grid-rows-[auto_minmax(0,1fr)] gap-0 pt-1"
+            : "mobile-context-sheet grid-rows-[auto_minmax(0,1fr)] pt-2",
+        )}
         style={sheetStyle}
         aria-label={label}
         {...sheetDragHandlers}
         onClick={(event) => event.stopPropagation()}
       >
-        <header className="relative flex min-h-12 items-start justify-center pt-4">
+        <header className={cx("relative flex items-start justify-center", variant === "detail" ? "h-3 min-h-3 pt-0" : "min-h-12 pt-4")}>
           <button type="button" className="sr-only" aria-label={`Закрыть панель: ${label}`} onClick={closeSheet}>
             Закрыть
           </button>
           <div
-            className="mobile-context-drag-zone absolute left-1/2 top-0 flex h-6 w-32 -translate-x-1/2 touch-none cursor-grab items-start justify-center pt-1.5 active:cursor-grabbing"
+            className={cx(
+              "absolute left-1/2 top-0 flex w-32 -translate-x-1/2 touch-none cursor-grab items-start justify-center active:cursor-grabbing",
+              variant === "detail" ? "actions-detail-drag-zone h-3 pt-0.5" : "mobile-context-drag-zone h-6 pt-1.5",
+            )}
           >
-            <span className="mobile-context-grabber h-1 w-11 rounded-full bg-muted-foreground/30" aria-hidden="true" />
+            <span className={cx("h-1 w-11 rounded-full bg-muted-foreground/30", variant === "detail" ? "actions-detail-grabber" : "mobile-context-grabber")} aria-hidden="true" />
           </div>
-          <h2 className="m-0 text-lg font-semibold leading-tight">{label}</h2>
+          {variant === "context" ? <h2 className="m-0 text-lg font-semibold leading-tight">{label}</h2> : null}
         </header>
-        <ScrollArea className="min-h-0" contentInset="balanced">{children}</ScrollArea>
+        {scroll ? <ScrollArea className="min-h-0" contentInset={contentInset}>{children}</ScrollArea> : children}
+        {variant === "detail" ? <MobileDetailFloatingCloseButton ariaLabel={`Закрыть панель: ${label}`} onClick={closeSheet} /> : null}
       </aside>
     </div>
+  );
+}
+
+export function MobileDetailFloatingCloseButton({
+  ariaLabel = "Закрыть панель",
+  onClick,
+}: {
+  ariaLabel?: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      className="actions-detail-close fixed bottom-[calc(20px+env(safe-area-inset-bottom))] right-[18px] z-[2] grid h-[58px] w-[58px] place-items-center rounded-full border-0 bg-primary text-primary-foreground shadow-lg"
+      aria-label={ariaLabel}
+      title="Закрыть"
+      onClick={onClick}
+    >
+      <X className="h-7 w-7" aria-hidden="true" />
+    </button>
   );
 }
 

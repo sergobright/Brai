@@ -19,6 +19,7 @@ import { Button } from "@/shared/ui/button";
 import { hasMarkdownSyntax, MarkdownContent } from "@/shared/ui/markdown-content";
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/shared/ui/input-group";
 import { ScrollArea } from "@/shared/ui/scroll-area";
+import { MobileDetailFloatingCloseButton } from "../../chrome/AppChrome";
 import { cx, fitTextareaHeight, focusEditableEnd, plainEditableText, setPlainEditableText } from "../../appUtils";
 import { useMobileSheetDrag } from "../../hooks/useMobileSheetDrag";
 import { useMobileSheetTop } from "../../hooks/useMobileSheetTop";
@@ -261,7 +262,7 @@ export function InboxSection({
             : undefined
         }
       >
-        <ScrollArea className="actions-list-pane h-full min-h-0 min-w-0">
+        <ScrollArea className="actions-list-pane h-full min-h-0 min-w-0 max-[860px]:[&>[data-slot=scroll-area-viewport]>div]:pb-24">
           <form className="sticky top-0 z-[4] mb-[18px] max-[860px]:hidden" onSubmit={submitDesktop}>
             <InputGroup className="actions-add-form">
               <InputGroupInput
@@ -492,7 +493,8 @@ function InboxRow({
     <div
       ref={swipeRef}
       className={cx(
-        "action-row group relative grid min-h-[54px] max-h-[220px] grid-cols-[minmax(0,1fr)_44px] items-stretch overflow-hidden border-b border-border transition-[max-height,opacity,border-color,box-shadow] duration-150 [&:has(+_.action-row.selected)]:border-b-transparent max-[860px]:grid-cols-[minmax(0,1fr)_46px] max-[860px]:select-none max-[860px]:[touch-action:pan-y]",
+        "action-row group relative grid min-h-[54px] grid-cols-[minmax(0,1fr)_44px] items-stretch overflow-hidden border-b border-border transition-[max-height,opacity,border-color,box-shadow] duration-150 [&:has(+_.action-row.selected)]:border-b-transparent max-[860px]:grid-cols-[minmax(0,1fr)_46px] max-[860px]:select-none max-[860px]:[touch-action:pan-y]",
+        "max-h-[220px]",
         item.pending && "pending opacity-80",
         deleteOpen && "delete-open",
         dragging && "dragging",
@@ -902,19 +904,19 @@ function InboxDetailEditor({
       <DetailEmptyTab />
     );
   const closeButton = (
-    <button
-      type="button"
-      className={cx(
-        "actions-detail-close grid place-items-center rounded-full leading-none",
-        mode === "desktop" && "h-[34px] w-[34px] border border-border bg-secondary text-foreground",
-        mode === "mobile" && "fixed bottom-[calc(20px+env(safe-area-inset-bottom))] right-[18px] z-[2] h-[58px] w-[58px] border-0 bg-primary text-primary-foreground shadow-lg",
-      )}
-      aria-label={mode === "mobile" ? "Сохранить и закрыть" : "Закрыть редактор"}
-      title={mode === "mobile" ? "Сохранить" : "Закрыть"}
-      onClick={mode === "mobile" ? closeWithAnimation : closeEditor}
-    >
-      <X className={mode === "mobile" ? "h-7 w-7" : "h-4 w-4"} aria-hidden="true" />
-    </button>
+    mode === "mobile" ? (
+      <MobileDetailFloatingCloseButton ariaLabel="Сохранить и закрыть" onClick={closeWithAnimation} />
+    ) : (
+      <button
+        type="button"
+        className="actions-detail-close grid h-[34px] w-[34px] place-items-center rounded-full border border-border bg-secondary text-foreground"
+        aria-label="Закрыть редактор"
+        title="Закрыть"
+        onClick={closeEditor}
+      >
+        <X className="h-4 w-4" aria-hidden="true" />
+      </button>
+    )
   );
   const detailTitle = (
     <div className="actions-detail-title-block relative mb-2 mt-6 grid min-w-0">

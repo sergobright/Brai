@@ -174,6 +174,7 @@ describe("BraiApp inbox", () => {
 
     fireEvent.click(screen.getAllByRole("button", { name: "Входящие" }).at(-1) as HTMLElement);
     const title = await screen.findByRole("textbox", { name: "Название входящего: Входящее с файлами" });
+    expect(screen.queryByLabelText("Превью вложения photo.png")).not.toBeInTheDocument();
     fireEvent.click(title);
 
     expect(screen.getByRole("tab", { name: "Инфо" })).toHaveAttribute("aria-selected", "true");
@@ -182,7 +183,9 @@ describe("BraiApp inbox", () => {
     expect(screen.getByRole("tab", { name: "История" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Детали" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "БД" })).toBeInTheDocument();
-    expect(screen.getByLabelText("Прикрепленные файлы")).toBeInTheDocument();
+    const detailAttachments = screen.getByLabelText("Прикрепленные файлы");
+    expect(detailAttachments).toBeInTheDocument();
+    expect(within(detailAttachments).getByRole("img", { name: "photo.png" })).toHaveAttribute("src", "/api/v1/inbox/attachments/photo.png.thumb.jpg");
     expect(screen.getByRole("link", { name: /brief\.pdf/ })).toHaveAttribute("href", "/api/v1/inbox/attachments/brief.pdf");
     expect(screen.getByRole("link", { name: /brief\.pdf/ })).toHaveAttribute("download", "brief.pdf");
 

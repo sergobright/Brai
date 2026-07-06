@@ -1,4 +1,5 @@
 import { scopedUserId } from './user-scope.js';
+import { originalNameForImagePreview } from './inbound.js';
 
 const OWNED_TABLES = [
   'activities',
@@ -66,6 +67,8 @@ export const authUserMethods = {
     const userId = scopedUserId();
     if (!userId) return true;
     const link = `/v1/inbox/attachments/${name}`;
+    const originalName = originalNameForImagePreview(name);
+    const originalLink = originalName ? `/v1/inbox/attachments/${originalName}` : null;
     const rows = this.db
       .prepare(`
         SELECT attachment_links_json
@@ -75,7 +78,10 @@ export const authUserMethods = {
       `)
       .all(userId);
     // ponytail: attachment rows are small; switch to a normalized attachment table when volume matters.
-    return rows.some((row) => parseLinks(row.attachment_links_json).includes(link));
+    return rows.some((row) => {
+      const links = parseLinks(row.attachment_links_json);
+      return links.includes(link) || (originalLink ? links.includes(originalLink) : false);
+    });
   }
 };
 

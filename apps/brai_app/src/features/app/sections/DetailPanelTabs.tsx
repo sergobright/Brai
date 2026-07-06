@@ -14,8 +14,9 @@ import rawFieldReference from "./detailFieldReference.json";
 
 export type DetailPanelKind = "actions" | "inbox";
 export type DetailPanelTab = "info" | "links" | "ai" | "history" | "details" | "db";
+type DetailPanelTabItem<T extends string> = { id: T; label: string };
 
-const DETAIL_PANEL_TABS: Array<{ id: DetailPanelTab; label: string }> = [
+const DETAIL_PANEL_TABS: Array<DetailPanelTabItem<DetailPanelTab>> = [
   { id: "info", label: "Инфо" },
   { id: "links", label: "Связи" },
   { id: "ai", label: "AI" },
@@ -43,14 +44,16 @@ type DetailValueRow = { name: string; value: unknown };
 
 const fieldReference = rawFieldReference as DetailReference;
 
-export function DetailPanelTabBar({
+export function DetailPanelTabBar<T extends string = DetailPanelTab>({
   activeTab,
   className,
   onChange,
+  tabs = DETAIL_PANEL_TABS as Array<DetailPanelTabItem<T>>,
 }: {
-  activeTab: DetailPanelTab;
+  activeTab: T;
   className?: string;
-  onChange: (tab: DetailPanelTab) => void;
+  onChange: (tab: T) => void;
+  tabs?: Array<DetailPanelTabItem<T>>;
 }) {
   return (
     <div
@@ -58,7 +61,7 @@ export function DetailPanelTabBar({
       role="tablist"
       aria-label="Вкладки панели деталей"
     >
-      {DETAIL_PANEL_TABS.map((tab) => (
+      {tabs.map((tab) => (
         <button
           key={tab.id}
           type="button"
@@ -94,17 +97,29 @@ export function DetailAttachments({ links }: { links: string[] }) {
           const href = attachmentHref(link);
           const name = attachmentName(link);
           if (isImageAttachment(link)) {
+            const previewHref = attachmentHref(attachmentPreviewLink(link));
             return (
               <button
                 key={link}
                 type="button"
-                className="group grid min-w-0 overflow-hidden rounded-md border border-border bg-secondary/30 text-left transition-colors hover:border-primary focus-visible:outline-0 focus-visible:ring-2 focus-visible:ring-ring"
+                className="group grid min-w-0 overflow-hidden rounded-lg border border-border bg-secondary/30 text-left transition-colors hover:border-primary focus-visible:outline-0 focus-visible:ring-2 focus-visible:ring-ring"
                 aria-label={`Открыть вложение ${name}`}
                 onClick={() => setPreviewLink(link)}
               >
                 {/* Private attachment dimensions are unknown, so native img is the least surprising renderer. */}
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={href} alt={name} loading="lazy" className="max-h-48 w-full object-contain bg-background" />
+                <img
+                  src={previewHref}
+                  alt={name}
+                  loading="lazy"
+                  draggable={false}
+                  className="aspect-[16/10] w-full bg-muted object-cover [touch-action:pan-y]"
+                  onError={(event) => {
+                    if (event.currentTarget.dataset.fallback === "1") return;
+                    event.currentTarget.dataset.fallback = "1";
+                    event.currentTarget.src = href;
+                  }}
+                />
                 <span className="truncate px-2.5 py-2 text-sm text-muted-foreground group-hover:text-foreground">{name}</span>
               </button>
             );
@@ -150,6 +165,7 @@ export function DetailAttachments({ links }: { links: string[] }) {
           <img
             src={attachmentHref(previewLink)}
             alt={attachmentName(previewLink)}
+            draggable={false}
             className="max-h-full max-w-full object-contain"
             onClick={(event) => event.stopPropagation()}
           />
@@ -302,14 +318,14 @@ function itemValue(item: DetailItem, key: string): unknown {
   return (item as unknown as Record<string, unknown>)[key];
 }
 
-function attachmentHref(link: string): string {
+export function attachmentHref(link: string): string {
   if (/^https?:\/\//i.test(link)) return link;
   const path = link.startsWith("/") ? link : `/${link}`;
   const base = defaultApiBase().replace(/\/$/, "");
   return base ? `${base}${path}` : path;
 }
 
-function attachmentName(link: string): string {
+export function attachmentName(link: string): string {
   const clean = link.split("?")[0] ?? link;
   const name = clean.split("/").filter(Boolean).at(-1);
   if (!name) return "file";
@@ -320,6 +336,11 @@ function attachmentName(link: string): string {
   }
 }
 
-function isImageAttachment(link: string): boolean {
+export function isImageAttachment(link: string): boolean {
   return /\.(gif|jpe?g|png|webp)(?:$|\?)/i.test(link);
+}
+
+export function attachmentPreviewLink(link: string): string {
+  const [path, query] = link.split("?", 2);
+  return `${path}.thumb.jpg${query ? `?${query}` : ""}`;
 }

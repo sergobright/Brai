@@ -11,15 +11,12 @@ import {
 } from '../test-support/api.js';
 
 const PNG_BYTES = Buffer.from([
-  0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
-  0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
-  0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
-  0x08, 0x06, 0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4,
-  0x89, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x44, 0x41,
-  0x54, 0x78, 0x9c, 0x63, 0x00, 0x01, 0x00, 0x00,
-  0x05, 0x00, 0x01, 0x0d, 0x0a, 0x2d, 0xb4, 0x00,
-  0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae,
-  0x42, 0x60, 0x82
+  0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d,
+  0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+  0x08, 0x04, 0x00, 0x00, 0x00, 0xb5, 0x1c, 0x0c, 0x02, 0x00, 0x00, 0x00,
+  0x0b, 0x49, 0x44, 0x41, 0x54, 0x78, 0xda, 0x63, 0xfc, 0xff, 0x1f, 0x00,
+  0x03, 0x03, 0x02, 0x00, 0xef, 0xbf, 0xa7, 0xdb, 0x00, 0x00, 0x00, 0x00,
+  0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82
 ]);
 const IMAGE_BASE64 = PNG_BYTES.toString('base64');
 const PDF_BYTES = Buffer.from('%PDF-1.4\n1 0 obj\n<<>>\nendobj\n%%EOF\n');
@@ -57,6 +54,8 @@ test('inbound old URLs are not supported', async () => {
 
 test('inbound inbox POST creates an inbox row with explanation and attachment link', async () => {
   const storageRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'brai-inbound-files-'));
+  const previousFfmpeg = process.env.BRAI_THUMBNAIL_FFMPEG_BIN;
+  process.env.BRAI_THUMBNAIL_FFMPEG_BIN = fakeFfmpeg(storageRoot);
   const fixture = await createFixture(['2026-06-27T10:00:00.000Z'], {
     inboundStorageRoot: storageRoot,
     inboundTitleGenerator: async () => 'Снимок идеи'
@@ -87,13 +86,21 @@ test('inbound inbox POST creates an inbox row with explanation and attachment li
     assert.equal(response.body.state.inbox[0].record_type_id, 1);
     assert.equal(response.body.state.inbox[0].attachment_links.length, 1);
     assert.match(response.body.state.inbox[0].attachment_links[0], /^\/v1\/inbox\/attachments\/.+\.png$/);
-    assert.ok(fs.existsSync(path.join(storageRoot, path.basename(response.body.state.inbox[0].attachment_links[0]))));
+    const attachmentName = path.basename(response.body.state.inbox[0].attachment_links[0]);
+    assert.ok(fs.existsSync(path.join(storageRoot, attachmentName)));
+    assert.ok(fs.existsSync(path.join(storageRoot, `${attachmentName}.thumb.jpg`)));
     const file = await fetch(`${fixture.url}${response.body.state.inbox[0].attachment_links[0]}`, {
       headers: { authorization: `Bearer ${TOKEN}` }
     });
     assert.equal(file.status, 200);
     assert.equal(file.headers.get('content-type'), 'image/png');
     assert.deepEqual(Buffer.from(await file.arrayBuffer()), PNG_BYTES);
+    const preview = await fetch(`${fixture.url}${response.body.state.inbox[0].attachment_links[0]}.thumb.jpg`, {
+      headers: { authorization: `Bearer ${TOKEN}` }
+    });
+    assert.equal(preview.status, 200);
+    assert.equal(preview.headers.get('content-type'), 'image/jpeg');
+    assert.ok((await preview.arrayBuffer()).byteLength > 0);
 
     const duplicate = await inboundRequest(fixture.url, '/v1/', {
       method: 'POST',
@@ -115,6 +122,8 @@ test('inbound inbox POST creates an inbox row with explanation and attachment li
     assert.equal(JSON.parse(aiLogs[0].json_data).outputs.find((output) => output.ref === 'inbox.title').value, 'Снимок идеи');
   } finally {
     await fixture.close();
+    if (previousFfmpeg === undefined) delete process.env.BRAI_THUMBNAIL_FFMPEG_BIN;
+    else process.env.BRAI_THUMBNAIL_FFMPEG_BIN = previousFfmpeg;
     fs.rmSync(storageRoot, { recursive: true, force: true });
   }
 });
@@ -379,6 +388,15 @@ process.stdin.on('end', () => {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
+
+function fakeFfmpeg(dir) {
+  const file = path.join(dir, 'fake-ffmpeg');
+  fs.writeFileSync(file, `#!/usr/bin/env node
+require('node:fs').writeFileSync(process.argv.at(-1), Buffer.from([0xff, 0xd8, 0xff, 0xd9]));
+`);
+  fs.chmodSync(file, 0o700);
+  return file;
+}
 
 test('inbound inbox falls back to a local title when Codex title generation fails', async () => {
   const fixture = await createFixture(['2026-06-27T10:00:00.000Z'], {

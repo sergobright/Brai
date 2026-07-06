@@ -26,7 +26,9 @@ test("renders mobile and desktop navigation without starter content", async ({ p
 test("renders the mobile floating dock without inactive circular backgrounds", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "mobile", "mobile-only dock");
 
+  await page.addInitScript(() => window.localStorage.setItem("brai_theme_mode", "light"));
   await page.goto("/");
+  await expect(page.locator(".main-dock")).toHaveCSS("background-color", "rgb(247, 247, 243)");
   await expect(page.locator(".mobile-nav")).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
   const items = page.locator(".mobile-nav .nav-button");
   await expect(items).toHaveCount(3);

@@ -186,13 +186,20 @@ normalize_preview_artifacts() {
   return "$failed"
 }
 
+OTA_VERSION_ARGS=(
+  --environment "$ENVIRONMENT"
+  --root "$ROOT"
+  --db "$DB_PATH"
+  --prod-db "${BRAI_PROD_DB:-}"
+  --prod-web-version-json "${BRAI_PROD_WEB_VERSION_JSON:-}"
+  --mobile-target "$MOBILE_TARGET"
+)
+if [[ "$ENVIRONMENT" == preview-* && "$BRANCH" == codex/* ]]; then
+  OTA_VERSION_ARGS+=(--next-ota true)
+fi
+
 VERSION="${BRAI_APP_VERSION:-$("$NODE_BIN" "$SCRIPT_DIR/resolve-app-version.mjs" \
-  --environment "$ENVIRONMENT" \
-  --root "$ROOT" \
-  --db "$DB_PATH" \
-  --prod-db "${BRAI_PROD_DB:-}" \
-  --prod-web-version-json "${BRAI_PROD_WEB_VERSION_JSON:-}" \
-  --mobile-target "$MOBILE_TARGET")}"
+  "${OTA_VERSION_ARGS[@]}")}"
 
 if [[ "$ENVIRONMENT" == "prod" ]]; then
   BUNDLE_VERSION="${BRAI_MOBILE_BUNDLE_VERSION:-$VERSION}"
@@ -219,6 +226,14 @@ export NEXT_PUBLIC_BRAI_COMMIT="$COMMIT"
 export NEXT_PUBLIC_BRAI_OTA_CHANNEL="$DOMAIN/mobile-update"
 export NEXT_PUBLIC_BRAI_API="/api"
 export NEXT_PUBLIC_BRAI_ANDROID_API="$ANDROID_API"
+
+if [[ "$ENVIRONMENT" == preview-* && "$BRANCH" == codex/* && "${BRAI_NATIVE_APK_CHANGE:-false}" != "true" ]]; then
+  export BRAI_TARGET_APK_VERSION="$("$NODE_BIN" "$SCRIPT_DIR/resolve-required-apk-version.mjs" prod apkVersion)"
+  export BRAI_TARGET_APK_RELEASE_KEY="${SLOT,,}"
+  export BRAI_TARGET_APK_BUILD_KIND="stable"
+  export BRAI_TARGET_APK_PREVIEW_ITERATION="0"
+  export BRAI_TARGET_APK_VERSION_CODE="$BRAI_TARGET_APK_VERSION"
+fi
 
 "$SCRIPT_DIR/publish-client-web-layer.sh"
 
@@ -266,6 +281,9 @@ if command -v systemctl >/dev/null 2>&1 && [[ "${BRAI_RESTART_SERVICE:-true}" !=
 fi
 
 if [[ "$ENVIRONMENT" == preview-* ]]; then
+  if [[ "$BRANCH" == codex/* && "${BRAI_NATIVE_APK_CHANGE:-false}" != "true" ]]; then
+    "$SCRIPT_DIR/preview-slots.sh" clear-apk "$BRANCH" "$COMMIT" >/dev/null
+  fi
   echo "Marking preview slot ready..."
   "$SCRIPT_DIR/preview-slots.sh" ready "$BRANCH" "$COMMIT" >/dev/null
 fi
