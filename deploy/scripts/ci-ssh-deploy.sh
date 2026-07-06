@@ -166,6 +166,10 @@ if [[ "$ENVIRONMENT" == "prod" && -f "/etc/brai/brai-api.env" ]]; then
   set +a
   export BRAI_PROD_DATABASE_URL="${BRAI_DATABASE_URL:-}"
 fi
+if [[ "$ENVIRONMENT" == "prod" && -n "${BRAI_DATABASE_URL:-}" ]]; then
+  node deploy/scripts/supabase-branch.mjs migrate --postgres-url "$BRAI_DATABASE_URL"
+  node deploy/scripts/postgres-smoke.mjs "$BRAI_DATABASE_URL" --expect-imported
+fi
 if [[ "$ENVIRONMENT" == preview-* ]]; then
   node deploy/scripts/supabase-branch.mjs preview-env \
     --branch "$BRAI_BRANCH" \

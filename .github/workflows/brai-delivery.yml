@@ -363,31 +363,6 @@ jobs:
           BRAI_DEPLOY_SSH_PORT: ${{ vars.BRAI_DEPLOY_SSH_PORT || '22' }}
           BRAI_DEPLOY_SSH_KEY: ${{ secrets.BRAI_DEPLOY_SSH_KEY }}
           BRAI_COMMIT: ${{ github.sha }}
-      - run: npm --prefix services/brai_api ci
-      - id: supabase_prod_migration
-        run: |
-          node deploy/scripts/supabase-branch.mjs migrate --postgres-url "$BRAI_DATABASE_URL"
-          node deploy/scripts/postgres-smoke.mjs "$BRAI_DATABASE_URL" --expect-imported
-        env:
-          BRAI_DATABASE_URL: ${{ secrets.BRAI_PROD_DATABASE_URL }}
-          BRAI_EXPECT_IMPORTED: 'true'
-      - name: Temporal Supabase prod migration passed
-        run: deploy/scripts/ci-temporal-signal.sh promotion --target prod --sha "$BRAI_COMMIT" --event supabase_prod_migration_passed --source deploy-prod
-        env:
-          BRAI_DEPLOY_HOST: ${{ vars.BRAI_DEPLOY_HOST }}
-          BRAI_DEPLOY_USER: ${{ vars.BRAI_DEPLOY_USER }}
-          BRAI_DEPLOY_SSH_PORT: ${{ vars.BRAI_DEPLOY_SSH_PORT || '22' }}
-          BRAI_DEPLOY_SSH_KEY: ${{ secrets.BRAI_DEPLOY_SSH_KEY }}
-          BRAI_COMMIT: ${{ github.sha }}
-      - name: Temporal Supabase prod migration failed
-        if: failure() && steps.supabase_prod_migration.outcome == 'failure'
-        run: deploy/scripts/ci-temporal-signal.sh promotion --target prod --sha "$BRAI_COMMIT" --event supabase_prod_migration_failed --source deploy-prod
-        env:
-          BRAI_DEPLOY_HOST: ${{ vars.BRAI_DEPLOY_HOST }}
-          BRAI_DEPLOY_USER: ${{ vars.BRAI_DEPLOY_USER }}
-          BRAI_DEPLOY_SSH_PORT: ${{ vars.BRAI_DEPLOY_SSH_PORT || '22' }}
-          BRAI_DEPLOY_SSH_KEY: ${{ secrets.BRAI_DEPLOY_SSH_KEY }}
-          BRAI_COMMIT: ${{ github.sha }}
       - id: promote_accepted_previews
         run: deploy/scripts/ci-ssh-complete-accepted-previews.sh
         env:
@@ -430,6 +405,23 @@ jobs:
           BRAI_BRANCH: main
           BRAI_COMMIT: ${{ github.sha }}
           BRAI_BASE_COMMIT: ${{ github.event.before }}
+      - name: Temporal Supabase prod migration passed
+        run: deploy/scripts/ci-temporal-signal.sh promotion --target prod --sha "$BRAI_COMMIT" --event supabase_prod_migration_passed --source deploy-prod
+        env:
+          BRAI_DEPLOY_HOST: ${{ vars.BRAI_DEPLOY_HOST }}
+          BRAI_DEPLOY_USER: ${{ vars.BRAI_DEPLOY_USER }}
+          BRAI_DEPLOY_SSH_PORT: ${{ vars.BRAI_DEPLOY_SSH_PORT || '22' }}
+          BRAI_DEPLOY_SSH_KEY: ${{ secrets.BRAI_DEPLOY_SSH_KEY }}
+          BRAI_COMMIT: ${{ github.sha }}
+      - name: Temporal Supabase prod migration failed
+        if: failure() && steps.deploy_prod.outcome == 'failure'
+        run: deploy/scripts/ci-temporal-signal.sh promotion --target prod --sha "$BRAI_COMMIT" --event supabase_prod_migration_failed --source deploy-prod
+        env:
+          BRAI_DEPLOY_HOST: ${{ vars.BRAI_DEPLOY_HOST }}
+          BRAI_DEPLOY_USER: ${{ vars.BRAI_DEPLOY_USER }}
+          BRAI_DEPLOY_SSH_PORT: ${{ vars.BRAI_DEPLOY_SSH_PORT || '22' }}
+          BRAI_DEPLOY_SSH_KEY: ${{ secrets.BRAI_DEPLOY_SSH_KEY }}
+          BRAI_COMMIT: ${{ github.sha }}
       - id: release_accepted_previews
         run: deploy/scripts/ci-ssh-complete-accepted-previews.sh
         env:
