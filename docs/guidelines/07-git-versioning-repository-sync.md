@@ -47,7 +47,7 @@ Use one permission contract instead of ad hoc `chmod`/`chown` fixes:
 - ignored dependency directories (`node_modules` in the repo root, app, API, and Temporal packages) are generated agent workspace support, not source; main sync keeps them writable for `mark` so new task worktrees can link and use them without `EACCES`;
 - registered task worktrees under `.codex-worktrees/*` are agent workspaces and main sync does not change their ownership in normal flow;
 - deploy-owned env roots under `/srv/projects/brai-envs/*` are `brai-deploy:brai-deploy`, group-writable, and setgid;
-- production SQLite is owned by `brai:brai-deploy`; the DB, WAL, and SHM files are group-writable;
+- production runtime DB uses server-side Supabase Postgres credentials from protected env files; frozen legacy SQLite backups remain `brai:brai-deploy` and group-writable only for import/rollback tooling;
 - public web, OTA, and release artifacts are group-writable and public-readable;
 - accepted-preview promotion, OTA sync, preview slot release, and baseline APK rebuilds run from deploy-owned source roots under `/srv/projects/brai-envs/*/source`, not from the locked live checkout.
 - checkout-local CI/agent entrypoints for those operations must self-route into the deploy-owned source before reading runtime dependencies.
@@ -57,13 +57,13 @@ The canonical checks are:
 ```bash
 node scripts/brai-task.mjs access-contract --local
 node scripts/brai-task.mjs access-contract --server
-deploy/scripts/production-sqlite-maintenance.sh check
+deploy/scripts/postgres-smoke.mjs "$BRAI_DATABASE_URL" --expect-imported
 deploy/scripts/preview-slots.sh status
 ```
 
 Manual permission repair is only a break-glass operation through Ansible, `/srv/opt/brai-main-sync.sh`, `scripts/brai-task-repair-permissions.sh`, or deploy helpers such as `deploy/scripts/permissions.sh`. Do not make one-off `chmod/chown` commands part of normal delivery. Stale worktree root-locking is opt-in only with `BRAI_LOCK_STALE_WORKTREES=1`; do not use it in normal main sync or while an agent thread can still resume that worktree.
 Same-host operation cleanup uses `deploy/scripts/complete-operation-activities.sh --host-local ...`;
-it still writes SQLite only as the `brai` service user through the narrow sudoers command.
+it must write through the current runtime DB boundary and keep any legacy SQLite fallback restricted to frozen backup/import operations.
 
 ## Branch Reuse
 

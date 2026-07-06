@@ -410,13 +410,14 @@ try {
     const deploy = await readFile(path.join(workspaceRoot, "deploy/scripts/deploy-branch.sh"), "utf8");
     const playbook = await readFile(path.join(workspaceRoot, "deploy/ansible/brai.yml"), "utf8");
     const service = await readFile(path.join(workspaceRoot, "deploy/ansible/templates/brai-api.service.j2"), "utf8");
-    const resetBlock = deploy.slice(deploy.indexOf('if [[ "$ENVIRONMENT" == preview-*'));
+    const resetBlock = deploy.slice(deploy.indexOf('if [[ -z "$POSTGRES_URL" && "$ENVIRONMENT" == preview-*'));
 
     expect(service).toContain('Group={{ brai_deploy_user }}');
     expect(service).toContain('UMask=0002');
     expect(playbook).toContain("Ensure non-production data directories keep deploy setgid");
     expect(playbook).toContain('group: "{{ brai_deploy_user }}"');
     expect(playbook).toContain('mode: "2775"');
+    expect(resetBlock).toContain('[[ -z "$POSTGRES_URL" && "$ENVIRONMENT" == preview-*');
     expect(resetBlock).toContain("Preview SQLite reset failed");
     expect(resetBlock).toContain("brai-deploy:brai-deploy 2775");
     expect(resetBlock).toContain("find \"$TARGET_ROOT/data\" -type d -exec chmod 2775 {} +");

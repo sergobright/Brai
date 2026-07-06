@@ -8,22 +8,29 @@ import { fileURLToPath } from "node:url";
 const repoRoot = path.resolve(import.meta.dirname, "../..");
 const requireFromApi = createRequire(path.join(repoRoot, "services/brai_api/package.json"));
 const Database = requireFromApi("better-sqlite3");
+const { Pool } = requireFromApi("pg");
 
 if (path.resolve(process.argv[1] ?? "") === fileURLToPath(import.meta.url)) {
   const args = parseArgs(process.argv.slice(2));
-  console.log(resolveAppVersion({
+  const options = {
     kind: args.kind,
     root: args.root,
     environment: args.environment,
     db: args.db,
+    postgresUrl: args["postgres-url"] || process.env.BRAI_DATABASE_URL || "",
     prodDb: args["prod-db"],
+    prodPostgresUrl: args["prod-postgres-url"] || process.env.BRAI_PROD_DATABASE_URL || "",
     prodWebVersionJson: args["prod-web-version-json"],
     mobileTarget: args["mobile-target"],
     nextOta: args["next-ota"] === "true",
     nextApk: args["next-apk"] === "true",
     targetBranch: args["target-branch"],
     targetCommit: args["target-commit"],
-  }));
+  };
+  const value = options.postgresUrl || options.prodPostgresUrl
+    ? await resolveAppVersionAsync(options)
+    : resolveAppVersion(options);
+  console.log(value);
 }
 
 export function resolveAppVersion({
@@ -31,7 +38,9 @@ export function resolveAppVersion({
   root = process.env.BRAI_ROOT || path.resolve(import.meta.dirname, "../.."),
   environment = process.env.NEXT_PUBLIC_BRAI_ENVIRONMENT || "",
   db = "",
+  postgresUrl = "",
   prodDb = process.env.BRAI_PROD_DB || "",
+  prodPostgresUrl = process.env.BRAI_PROD_DATABASE_URL || "",
   prodWebVersionJson = "",
   mobileTarget = "",
   explicit = kind === "apk" ? process.env.BRAI_APK_VERSION || "" : process.env.BRAI_APP_VERSION || "",
@@ -40,6 +49,9 @@ export function resolveAppVersion({
   targetBranch = "",
   targetCommit = "",
 } = {}) {
+  if (postgresUrl || prodPostgresUrl) {
+    throw new Error("resolveAppVersion() is synchronous; use resolveAppVersionAsync() for Postgres URLs");
+  }
   if (kind === "apk") return validApkVersion(explicit || resolveApkVersion(db || prodDb, { nextApk, targetBranch, targetCommit }));
   if (explicit) return validOtaVersion(explicit);
 
@@ -59,6 +71,83 @@ export function resolveAppVersion({
   const deployedVersion = latestOtaVersion(deployedVersions);
   if (deployedVersion) return validOtaVersion(deployedVersion);
   throw new Error("Unable to resolve Brai X.Y.Z OTA version; set BRAI_APP_VERSION or provide build ledger/deployed mobile metadata");
+}
+
+export async function resolveAppVersionAsync(options = {}) {
+  const {
+    kind = "ota",
+    environment = process.env.NEXT_PUBLIC_BRAI_ENVIRONMENT || "",
+    postgresUrl = process.env.BRAI_DATABASE_URL || "",
+    prodPostgresUrl = process.env.BRAI_PROD_DATABASE_URL || "",
+    explicit = kind === "apk" ? process.env.BRAI_APK_VERSION || "" : process.env.BRAI_APP_VERSION || "",
+    nextOta = false,
+    nextApk = false,
+    targetBranch = "",
+    targetCommit = "",
+    prodWebVersionJson = "",
+    mobileTarget = "",
+  } = options;
+
+  if (!postgresUrl && !prodPostgresUrl) return resolveAppVersion(options);
+  if (kind === "apk") {
+    return validApkVersion(explicit || await resolveApkVersionPg(postgresUrl || prodPostgresUrl, { nextApk, targetBranch, targetCommit }));
+  }
+  if (explicit) return validOtaVersion(explicit);
+
+  const ledgerVersions = [
+    postgresUrl && await latestBuildOtaVersionPg(postgresUrl),
+    prodPostgresUrl && await latestBuildOtaVersionPg(prodPostgresUrl),
+  ];
+  const deployedVersions = [
+    environment !== "prod" && prodWebVersionJson && readVersionJson(prodWebVersionJson),
+    mobileTarget && latestMobileTargetVersion(mobileTarget),
+  ];
+  if (nextOta) return nextPatchVersion(latestOtaVersion([...ledgerVersions, ...deployedVersions]));
+
+  const ledgerVersion = latestOtaVersion(ledgerVersions);
+  if (ledgerVersion) return validOtaVersion(ledgerVersion);
+
+  const deployedVersion = latestOtaVersion(deployedVersions);
+  if (deployedVersion) return validOtaVersion(deployedVersion);
+  throw new Error("Unable to resolve Brai X.Y.Z OTA version; set BRAI_APP_VERSION or provide build ledger/deployed mobile metadata");
+}
+
+async function resolveApkVersionPg(databaseUrl, { nextApk = false, targetBranch = "", targetCommit = "" } = {}) {
+  if (!databaseUrl) return "1";
+  const pool = new Pool({ connectionString: databaseUrl, ssl: postgresSsl(databaseUrl) });
+  try {
+    const latest = await pool.query("SELECT COALESCE(MAX(version), 0) AS apk FROM build_versions WHERE version_type_id = 'apk'");
+    let apk = Number(latest.rows[0]?.apk || 0);
+    if (nextApk) {
+      const existing = targetCommit
+        ? await pool.query(`
+            SELECT version
+            FROM build_version_refs
+            WHERE version_type_id = 'apk'
+              AND target_branch = $1
+              AND target_commit = $2
+            ORDER BY version DESC
+            LIMIT 1
+          `, [targetBranch || "", targetCommit])
+        : null;
+      apk = Number(existing?.rows[0]?.version || 0) || apk + 1;
+    }
+    return String(apk || 1);
+  } finally {
+    await pool.end();
+  }
+}
+
+async function latestBuildOtaVersionPg(databaseUrl) {
+  if (!databaseUrl) return "";
+  const pool = new Pool({ connectionString: databaseUrl, ssl: postgresSsl(databaseUrl) });
+  try {
+    const build = await pool.query("SELECT COALESCE(MAX(version), 0) AS build FROM build_versions WHERE version_type_id = 'build'");
+    const value = Number(build.rows[0]?.build || 0);
+    return value > 0 ? `0.0.${value}` : "";
+  } finally {
+    await pool.end();
+  }
 }
 
 function resolveApkVersion(dbPath, { nextApk = false, targetBranch = "", targetCommit = "" } = {}) {
@@ -178,4 +267,11 @@ function parseArgs(values) {
     parsed[key.slice(2)] = values[index + 1] ?? "";
   }
   return parsed;
+}
+
+function postgresSsl(databaseUrl) {
+  const override = process.env.BRAI_DATABASE_SSL;
+  if (override === "false" || override === "0") return false;
+  if (override === "true" || override === "1") return { rejectUnauthorized: false };
+  return /supabase\.(?:co|com)|pooler\.supabase\.com/.test(databaseUrl) ? { rejectUnauthorized: false } : false;
 }

@@ -169,7 +169,7 @@ export const timerEventMethods = {
       .prepare(`
         SELECT i.*, a.title AS activity_title
         FROM focus_session_intervals i
-        LEFT JOIN activities a ON a.id = i.activity_id AND (a.user_id IS i.user_id OR a.user_id IS NULL)
+        LEFT JOIN activities a ON a.id = i.activity_id AND (a.user_id IS NOT DISTINCT FROM i.user_id OR a.user_id IS NULL)
         JOIN focus_sessions s ON s.id = i.focus_session_id
         WHERE i.ended_at_utc IS NULL
           AND s.deleted_at_utc IS NULL
@@ -186,7 +186,7 @@ export const timerEventMethods = {
       .prepare(`
         SELECT i.*, a.title AS activity_title
         FROM focus_session_intervals i
-        LEFT JOIN activities a ON a.id = i.activity_id AND (a.user_id IS i.user_id OR a.user_id IS NULL)
+        LEFT JOIN activities a ON a.id = i.activity_id AND (a.user_id IS NOT DISTINCT FROM i.user_id OR a.user_id IS NULL)
         WHERE i.focus_session_id = ?
           ${scope.clause}
         ORDER BY i.started_at_utc ASC, i.id ASC
@@ -358,7 +358,7 @@ export const timerEventMethods = {
       this.insertIgnoredEvent({
         eventId,
         deviceId,
-        clientSequence: -this.nextServerSequence(),
+        clientSequence: this.nextInvalidTimerClientSequence(deviceId),
         receivedAt,
         reason: 'invalid_client_sequence',
         rawEvent
@@ -544,6 +544,7 @@ export const timerEventMethods = {
 ,
 
   nextServerSequence() {
+    if (this.db.dialect === 'postgres') return this.nextPostgresCounter('timer_events.server_sequence');
     const row = this.db
       .prepare('SELECT COALESCE(MAX(server_sequence), 0) + 1 AS next FROM timer_events')
       .get();
@@ -552,12 +553,38 @@ export const timerEventMethods = {
 ,
 
   nextDeviceSequence(deviceId) {
+    if (this.db.dialect === 'postgres') return this.nextPostgresCounter(`timer_events.client_sequence.${deviceId}`);
     const row = this.db
       .prepare(
         'SELECT COALESCE(MAX(client_sequence), 0) + 1 AS next FROM timer_events WHERE device_id = ?'
       )
       .get(deviceId);
     return row.next;
+  }
+,
+
+  nextInvalidTimerClientSequence(deviceId) {
+    if (this.db.dialect === 'postgres') return -this.nextPostgresCounter(`timer_events.invalid_client_sequence.${deviceId}`);
+    return -this.nextServerSequence();
+  }
+,
+
+  nextPostgresCounter(name) {
+    this.db
+      .prepare(`
+        INSERT INTO sequence_counters (name, last_value)
+        VALUES (?, 0)
+        ON CONFLICT (name) DO NOTHING
+      `)
+      .run(name);
+    return this.db
+      .prepare(`
+        UPDATE sequence_counters
+        SET last_value = last_value + 1
+        WHERE name = ?
+        RETURNING last_value AS next
+      `)
+      .get(name).next;
   }
 ,
 

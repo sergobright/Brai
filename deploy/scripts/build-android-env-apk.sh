@@ -35,15 +35,17 @@ OTA_VERSION_ARGS=(
   --environment "$ENVIRONMENT" \
   --root "$ROOT" \
   --db "${BRAI_DB:-}" \
+  --postgres-url "${BRAI_DATABASE_URL:-}" \
   --prod-db "${BRAI_PROD_DB:-}" \
+  --prod-postgres-url "${BRAI_PROD_DATABASE_URL:-}" \
   --prod-web-version-json "${BRAI_PROD_WEB_VERSION_JSON:-}" \
   --mobile-target "$MOBILE_TARGET"
 )
-APK_VERSION_ARGS=(--kind apk --root "$ROOT" --db "${BRAI_DB:-${BRAI_PROD_DB:-}}")
+APK_VERSION_ARGS=(--kind apk --root "$ROOT" --db "${BRAI_DB:-${BRAI_PROD_DB:-}}" --postgres-url "${BRAI_DATABASE_URL:-${BRAI_PROD_DATABASE_URL:-}}")
 if [[ "$ENVIRONMENT" == preview-* && "${BRAI_BRANCH:-}" == codex/* && -n "${BRAI_COMMIT:-}" ]]; then
   APK_VERSION_ARGS+=(--next-apk true --target-branch "$BRAI_BRANCH" --target-commit "$BRAI_COMMIT")
 fi
-if [[ "$ENVIRONMENT" == "prod" && "${BRAI_RECORD_APK_LEDGER:-true}" != "false" && -n "${BRAI_DB:-}" && -z "${BRAI_APP_VERSION:-}" && -n "${BRAI_BRANCH:-}" && -n "${BRAI_COMMIT:-}" ]]; then
+if [[ "$ENVIRONMENT" == "prod" && "${BRAI_RECORD_APK_LEDGER:-true}" != "false" && ( -n "${BRAI_DATABASE_URL:-}" || -n "${BRAI_DB:-}" ) && -z "${BRAI_APP_VERSION:-}" && -n "${BRAI_BRANCH:-}" && -n "${BRAI_COMMIT:-}" ]]; then
   APK_LEDGER_RECORD=true
   APK_VERSION_ARGS+=(--next-apk true --target-branch "$BRAI_BRANCH" --target-commit "$BRAI_COMMIT")
 fi
@@ -114,14 +116,16 @@ if [[ "$APK_LEDGER_RECORD" == "true" ]]; then
 fi
 BRAI_RELEASE_ENV="$RELEASE_KEY" BRAI_APK_SOURCE="$APK" "$SCRIPT_DIR/publish-capacitor-apk.sh"
 if [[ "$APK_LEDGER_RECORD" == "true" ]]; then
+  : "${BRAI_DB:=$ROOT/data/brai.sqlite}"
   "$NODE_BIN" "$SCRIPT_DIR/record-shipped-apk-version.mjs" \
     --db "$BRAI_DB" \
+    --postgres-url "${BRAI_DATABASE_URL:-}" \
     --version "$BRAI_APK_VERSION" \
     --version-code "$BRAI_ANDROID_VERSION_CODE" \
     --target-branch "$BRAI_BRANCH" \
     --target-commit "$BRAI_COMMIT" \
     --released-at "$BRAI_PUBLISHED_AT"
-  LEDGER_VERSION="$("$NODE_BIN" "$SCRIPT_DIR/resolve-app-version.mjs" --kind apk --root "$ROOT" --db "$BRAI_DB")"
+  LEDGER_VERSION="$("$NODE_BIN" "$SCRIPT_DIR/resolve-app-version.mjs" --kind apk --root "$ROOT" --db "$BRAI_DB" --postgres-url "${BRAI_DATABASE_URL:-}")"
   if [[ "$LEDGER_VERSION" != "$BRAI_APK_VERSION" ]]; then
     echo "Published APK version $BRAI_APK_VERSION does not match ledger version $LEDGER_VERSION" >&2
     exit 1

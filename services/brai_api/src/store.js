@@ -1,4 +1,5 @@
 import Database from 'better-sqlite3';
+import { PostgresSyncDatabase, isPostgresUrl } from './postgres-sync-db.js';
 import { activityEventMethods } from './store-activity-events.js';
 import { authUserMethods } from './store-auth-users.js';
 import { braiCmdStoreMethods } from './store-brai-cmd.js';
@@ -11,8 +12,13 @@ import { timerEventMethods } from './store-timer-events.js';
 export { formatActivity, formatFocusInterval, formatSession, groupSessionsByDateHour } from './store-helpers.js';
 
 export class BraiStore {
-  constructor(dbPath) {
-    this.db = new Database(dbPath);
+  constructor(dbTarget) {
+    if (isPostgresUrl(dbTarget)) {
+      // ponytail: sync adapter preserves existing store API; replace with async store if DB throughput matters.
+      this.db = new PostgresSyncDatabase(dbTarget);
+      return;
+    }
+    this.db = new Database(dbTarget);
     this.db.pragma('journal_mode = WAL');
     this.db.pragma('foreign_keys = ON');
     this.migrate();

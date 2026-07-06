@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { BraiStore } from '../src/store.js';
-import { runDueSchedules } from '../src/scheduler-runner.js';
+import { main, runDueSchedules } from '../src/scheduler-runner.js';
 
 const AGENT_ID = 'test.scheduled.agent';
 
@@ -110,6 +110,13 @@ test('scheduler records failure and still advances recurring schedule', async ()
   } finally {
     fixture.close();
   }
+});
+
+test('postgres-only scheduler config refuses missing database URL', async () => {
+  await assert.rejects(
+    () => main({ BRAI_DATA_STORE: 'postgres' }),
+    /BRAI_DATABASE_URL is required when BRAI_DATA_STORE=postgres/
+  );
 });
 
 function createStore() {

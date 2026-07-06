@@ -44,10 +44,41 @@ NODE_PREFIX="${BRAI_NODE_PREFIX:-/srv/opt/node-v22.16.0/bin}"
 if [[ -d "$NODE_PREFIX" ]]; then
   export PATH="$NODE_PREFIX:$PATH"
 fi
+if [[ "$BRAI_TARGET_ENVIRONMENT" == "prod" && -f "/etc/brai/brai-api.env" ]]; then
+  set -a
+  # shellcheck source=/dev/null
+  . /etc/brai/brai-api.env
+  set +a
+fi
 
 accepted_build_recorded() {
   local source_root="$1"
   local target_db="$DEPLOY_REPO/data/brai.sqlite"
+  if [[ -n "${BRAI_DATABASE_URL:-}" ]]; then
+    [[ -r "$source_root/services/brai_api/package.json" ]] || return 1
+    node --input-type=module - "$source_root" "$BRAI_DATABASE_URL" "$BRAI_SOURCE_BRANCH" "$BRAI_TARGET_BRANCH" "$BRAI_TARGET_COMMIT" <<'NODE'
+const { createRequire } = await import("node:module");
+const [sourceRoot, databaseUrl, sourceBranch, targetBranch, targetCommit] = process.argv.slice(2);
+const require = createRequire(`${sourceRoot}/services/brai_api/package.json`);
+const { Pool } = require("pg");
+const pool = new Pool({ connectionString: databaseUrl, ssl: /supabase\.(?:co|com)|pooler\.supabase\.com/.test(databaseUrl) ? { rejectUnauthorized: false } : false });
+try {
+  const result = await pool.query(`
+    SELECT 1
+    FROM build_version_refs
+    WHERE version_type_id = 'build'
+      AND source_branch = $1
+      AND target_branch = $2
+      AND target_commit = $3
+    LIMIT 1
+  `, [sourceBranch, targetBranch, targetCommit]);
+  process.exit(result.rows.length ? 0 : 1);
+} finally {
+  await pool.end();
+}
+NODE
+    return
+  fi
   [[ -r "$source_root/services/brai_api/src/store.js" && -f "$target_db" ]] || return 1
   node --input-type=module - "$source_root" "$target_db" "$BRAI_SOURCE_BRANCH" "$BRAI_TARGET_BRANCH" "$BRAI_TARGET_COMMIT" <<'NODE'
 const { createRequire } = await import("node:module");

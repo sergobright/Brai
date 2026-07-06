@@ -21,7 +21,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
 
 export async function main(env = process.env) {
   const config = schedulerConfig(env);
-  const store = new BraiStore(config.dbPath);
+  const store = new BraiStore(config.databaseUrl || config.dbPath);
   try {
     return await runDueSchedules({
       store,
@@ -87,9 +87,14 @@ export async function runDueSchedules({ store, nowDate = new Date(), config = sc
 }
 
 function schedulerConfig(env = process.env) {
+  const databaseUrl = env.BRAI_DATABASE_URL?.trim() || '';
+  if (env.BRAI_DATA_STORE === 'postgres' && !databaseUrl) {
+    throw new Error('BRAI_DATABASE_URL is required when BRAI_DATA_STORE=postgres');
+  }
   return {
     env,
-    dbPath: env.BRAI_DB ?? path.join(serviceRoot, 'data', 'brai.sqlite'),
+    databaseUrl,
+    dbPath: env.BRAI_LEGACY_SQLITE_PATH ?? env.BRAI_DB ?? path.join(serviceRoot, 'data', 'brai.sqlite'),
     agentTimeoutMs: numberEnv(env.BRAI_SCHEDULER_AGENT_TIMEOUT_MS)
   };
 }

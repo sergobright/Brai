@@ -12,7 +12,7 @@ UMask=0002
 WorkingDirectory=/srv/projects/brai/services/brai_api
 EnvironmentFile=/etc/brai/brai-api.env
 Environment=BRAI_ROOT=/srv/projects/brai
-Environment=BRAI_DB=/srv/projects/brai/data/brai.sqlite
+Environment=BRAI_LEGACY_SQLITE_PATH=/srv/projects/brai/data/brai.sqlite
 ExecStart=/srv/opt/node-v22.16.0/bin/node src/scheduler-runner.js
 NoNewPrivileges=true
 PrivateTmp=true

@@ -2,6 +2,8 @@ import Database from 'better-sqlite3';
 import { betterAuth } from 'better-auth';
 import { emailOTP } from 'better-auth/plugins';
 import { Resend } from 'resend';
+import { Pool } from 'pg';
+import { isPostgresUrl } from './postgres-sync-db.js';
 
 const DEFAULT_FROM = 'Brai <auth@mail.brightos.world>';
 const OTP_EXPIRES_IN_SECONDS = 5 * 60;
@@ -31,15 +33,20 @@ const DEFAULT_ALLOWED_HOSTS = [
 
 export function createBraiAuth({
   dbPath,
+  databaseUrl = null,
   secret,
   baseURL,
   resendApiKey = null,
   fromEmail = DEFAULT_FROM,
   sendOtp = null
 }) {
-  const db = new Database(dbPath);
-  db.pragma('journal_mode = WAL');
-  db.pragma('foreign_keys = ON');
+  const db = databaseUrl && isPostgresUrl(databaseUrl)
+    ? new Pool({ connectionString: databaseUrl, ssl: postgresSsl(databaseUrl) })
+    : new Database(dbPath);
+  if (!databaseUrl || !isPostgresUrl(databaseUrl)) {
+    db.pragma('journal_mode = WAL');
+    db.pragma('foreign_keys = ON');
+  }
   const resend = resendApiKey ? new Resend(resendApiKey) : null;
   const sender = sendOtp ?? (async ({ email, otp }) => {
     if (!resend) {
@@ -80,8 +87,15 @@ export function createBraiAuth({
 
   return {
     auth,
-    close: () => db.close()
+    close: () => (typeof db.end === 'function' ? db.end() : db.close())
   };
+}
+
+function postgresSsl(databaseUrl) {
+  const override = process.env.BRAI_DATABASE_SSL;
+  if (override === 'false' || override === '0') return false;
+  if (override === 'true' || override === '1') return { rejectUnauthorized: false };
+  return /supabase\.(?:co|com)|pooler\.supabase\.com/.test(databaseUrl) ? { rejectUnauthorized: false } : false;
 }
 
 export function renderOtpEmail({ otp }) {

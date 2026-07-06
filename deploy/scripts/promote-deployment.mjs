@@ -10,8 +10,8 @@ const targetBranch = required(args, "target-branch");
 const targetCommit = required(args, "target-commit");
 const deployedAtUtc = args["deployed-at"] || new Date().toISOString();
 const ledgerOnly = args["ledger-only"] === "true";
-const targetDb = required(args, "target-db");
-fs.mkdirSync(path.dirname(targetDb), { recursive: true });
+const targetDb = databaseTarget(args, "target");
+if (!isPostgresUrl(targetDb)) fs.mkdirSync(path.dirname(targetDb), { recursive: true });
 const target = new BraiStore(targetDb);
 let source = null;
 
@@ -57,7 +57,7 @@ try {
 }
 
 function openSourceStore(values, targetEnvironment) {
-  const sourceDb = required(values, "source-db");
+  const sourceDb = databaseTarget(values, "source");
   try {
     return new BraiStore(sourceDb);
   } catch (error) {
@@ -139,4 +139,16 @@ function required(values, key) {
   const value = values[key];
   if (!value) throw new Error(`missing --${key}`);
   return value;
+}
+
+function databaseTarget(values, prefix) {
+  const arg = values[`${prefix}-postgres-url`] || values[`${prefix}-db`];
+  if (arg) return arg;
+  if (prefix === "target" && process.env.BRAI_DATABASE_URL) return process.env.BRAI_DATABASE_URL;
+  if (prefix === "source" && process.env.BRAI_SOURCE_DATABASE_URL) return process.env.BRAI_SOURCE_DATABASE_URL;
+  return required(values, `${prefix}-db`);
+}
+
+function isPostgresUrl(value) {
+  return /^postgres(?:ql)?:\/\//.test(String(value ?? ""));
 }

@@ -1,8 +1,9 @@
 # Branch Preview Environments
 
-Brai uses one VPS for six active app environments:
+Brai uses one VPS for seven active app environments:
 
 - Production: `app.brightos.world`, branch `main`;
+- Dev: `dev.brightos.world`, branch `dev`;
 - Preview A-E: `a.test.brightos.world` through `e.test.brightos.world`, branches `codex/*`;
 - Preview status: `previews.brightos.world`.
 
@@ -19,11 +20,21 @@ After the project owner accepts a preview, a dirty acceptance PR is resolved in 
 A pushed preview-class `codex/*` branch allocates or reuses a preview slot through `deploy/scripts/preview-slots.sh`, deploys that slot, and reports the slot URL. If all slots `A` through `E` are occupied, the branch enters the preview queue until a slot is released. No push means no slot/deploy/queue.
 `deploy/scripts/preview-slots.sh status` is read-only: it takes a shared lock and must not rewrite the slot registry or status page.
 
+Each preview slot uses its own Supabase preview branch. After slot allocation, CI creates or reuses
+`brai-preview-<safe-codex-branch>` with production data cloned into the branch, applies
+`supabase/migrations/*.sql`, writes the branch runtime DSN to
+`/srv/projects/brai-envs/<preview>/brai-api.env`, and records only `supabase_branch_name`,
+`supabase_branch_id`, and `supabase_branch_status` in `preview-slots.json`. Connection strings and
+tokens must never be written to the slot registry.
+
 If a `codex/*` pull request is closed without merge, GitHub Actions releases that branch's preview slot through the same `release-preview-slot` job used for deleted branches and manual releases. This covers superseded preview branches: the accepted replacement branch releases its own slot through production promotion, and the abandoned branch releases its slot when its PR closes.
+Slot release deletes the matching Supabase preview branch before freeing the Brai slot. A failed
+Supabase branch delete is a delivery blocker because preview branches contain protected production
+clone data.
 
 If the preview branch changes the Android native boundary, deploy also builds a slot-specific preview APK and records `brai-vN-previewM.apk`, APK `vN`, preview `M`, and `versionCode=N*10000+M` in the preview slot registry/status page. Preview OTA manifests then target the same release key, build kind, stable `N`, and preview `M`, so stale slot APKs block with an APK update screen instead of silently running an incompatible web bundle.
 
-Infrastructure/documentation-only branches can use the Temporal no-preview path when the delivery class is `infra-docs`. Strict technical-only branches can use the same no-preview path as `technical-no-preview` when the changed files are limited to tests, test configuration, or narrowly allowed agent-operation bookkeeping that is proven by CI rather than browser review. That path records `delivery_classified`, `no_preview_required`, `delivery_handoff_*`, and `auto_merge_*` events instead of allocating a slot. Temporal then marks `preview_deploy`, `accepted_preview_promotion`, and `slot_release` as `not_applicable`; after `pr_merged`, the branch lifecycle is complete without a slot.
+Infrastructure/documentation-only branches can use the Temporal no-preview path when the delivery class is `infra-docs`. Strict technical-only branches can use the same no-preview path as `technical-no-preview` when the changed files are limited to tests, test configuration, or narrowly allowed agent-operation bookkeeping that is proven by CI rather than browser review. That path records `delivery_classified`, `no_preview_required`, `delivery_handoff_*`, and `auto_merge_*` events instead of allocating a slot. Temporal then marks `supabase_preview`, `preview_deploy`, `accepted_preview_promotion`, `supabase_preview_release`, and `slot_release` as `not_applicable`; after `pr_merged`, the branch lifecycle is complete without a slot.
 
 Local dev server URLs are agent-only verification aids. The user-facing handoff for preview-class project changes is the preview slot URL after `deploy-preview` succeeds; if CI/deploy is not complete, report that blocker instead of asking the project owner to open `localhost` or `127.0.0.1`.
 
@@ -59,10 +70,10 @@ For broader drift, run the access contract instead of chasing individual modes:
 node scripts/brai-task.mjs access-contract --local
 node scripts/brai-task.mjs access-contract --server
 deploy/scripts/preview-slots.sh status
-deploy/scripts/production-sqlite-maintenance.sh check
+deploy/scripts/postgres-smoke.mjs "$BRAI_DATABASE_URL" --expect-imported
 ```
 
-`access-contract --local` checks guard sync, task metadata, writable caches, and Node/npm availability from the current checkout. `access-contract --server` also checks deploy-owned env roots, preview slot registry, prod source, deploy artifacts, main-sync tooling, and production SQLite permissions. A failed contract is a delivery blocker until fixed by Ansible, main-sync, or the official repair/helper scripts.
+`access-contract --local` checks guard sync, task metadata, writable caches, and Node/npm availability from the current checkout. `access-contract --server` also checks deploy-owned env roots, preview slot registry, prod source, deploy artifacts, main-sync tooling, and legacy backup/import permissions. A failed contract is a delivery blocker until fixed by Ansible, main-sync, or the official repair/helper scripts.
 
 Repository Codex hooks are defined in `.codex/hooks.json`:
 
@@ -145,17 +156,18 @@ Repository secret:
 ## Deploy User Boundary
 
 The deploy user needs write access to `/srv/projects/brai-envs/` for CI uploads,
-preview source checkouts, preview web/OTA outputs, SQLite deployment metadata, and preview slot state.
-For production deploys it also needs write access to the existing production web/OTA targets and
-Brai SQLite file:
+preview/dev source checkouts, preview/dev web/OTA outputs, per-environment runtime env files, and
+preview slot state. For production deploys it also needs write access to the existing production
+web/OTA targets:
 
 ```text
 /srv/projects/brai/deploy/web
 /srv/projects/brai/deploy/mobile-update
-/srv/projects/brai/data/brai.sqlite
-/srv/projects/brai/data/brai.sqlite-wal when present
-/srv/projects/brai/data/brai.sqlite-shm when present
 ```
+
+Runtime database writes go to Supabase Postgres through `BRAI_DATABASE_URL`. Production keeps
+`/srv/projects/brai/data/brai.sqlite` only as a frozen backup/import source after cutover, not as
+the live source of truth.
 
 The deploy user must not need read or write access to `/srv/projects/brai/.git`. Sudo should be limited to:
 
@@ -164,6 +176,7 @@ caddy validate --config /etc/caddy/Caddyfile
 systemctl reload caddy
 sudo -u brai /srv/projects/brai-envs/prod/source/deploy/scripts/complete-operation-activities.sh --local operation:agent-task:*
 systemctl restart brai-api.service
+systemctl restart brai-api-dev.service
 systemctl restart brai-api-preview-a.service
 systemctl restart brai-api-preview-b.service
 systemctl restart brai-api-preview-c.service
@@ -182,10 +195,29 @@ Ansible must preserve this same permission contract: `/srv/projects/brai` source
 `mark` source group under the main-sync lock, Node runtime entrypoints stay executable as `0755`,
 and deploy/preview artifact roots stay `2775` so future files inherit `brai-deploy`.
 
-### Production SQLite maintenance
+### Supabase and SQLite maintenance
+
+Supabase branch lifecycle credentials live outside Git on the VPS, normally in:
+
+```text
+/etc/brai/supabase-deploy.env
+SUPABASE_PROJECT_REF
+SUPABASE_ACCESS_TOKEN
+SUPABASE_CLI
+```
+
+Production runtime credentials live in `/etc/brai/brai-api.env`, including `BRAI_DATABASE_URL`.
+Preview and Dev runtime credentials live in `/srv/projects/brai-envs/<environment>/brai-api.env`
+and are deploy-writable so CI can update branch DSNs after Supabase branch creation.
+
+Use [Supabase Postgres Cutover](supabase-postgres-cutover.md) for final SQLite backup/import and
+production switch steps. Do not reopen production writes until the Postgres import marker and smoke
+checks pass.
+
+### Legacy SQLite maintenance
 
 Production SQLite maintenance goes through `deploy/scripts/production-sqlite-maintenance.sh`.
-It defaults to `/srv/projects/brai/data/brai.sqlite`, uses backups under
+It is now legacy/frozen-snapshot maintenance. It defaults to `/srv/projects/brai/data/brai.sqlite`, uses backups under
 `/srv/projects/brai/data/backups`, and uses `/srv/opt/android-sdk/platform-tools/sqlite3`.
 Run `check` for read-only inspection. Run `repair-permissions` as root when a validator
 finds owner/mode drift on the DB, WAL, SHM, or backup paths. Run write commands such as `backup` and `exec-sql`
@@ -198,14 +230,14 @@ same narrow maintenance boundary.
 Use `deploy/scripts/complete-operation-activities.sh <operation-activity-id>...` to
 mark Codex operation activities as `Done`. The default mode SSHes through
 `brai-deploy@localhost` and executes the helper from deploy-owned
-`/srv/projects/brai-envs/prod/source`, then re-enters as the `brai` service user
-for the SQLite write so WAL/SHM ownership stays `brai:brai-deploy`. It validates
-that every supplied id is an undeleted
-`activity_type_id='operation'` row authored by `Codex`, backs up before any write,
+`/srv/projects/brai-envs/prod/source`, then re-enters the protected runtime boundary.
+Legacy SQLite fallback writes are restricted to the same host/deploy context so WAL/SHM
+ownership stays `brai:brai-deploy`. It validates that every supplied id is an undeleted
+`activity_type_id='operation'` row authored by `Codex`, backs up before any legacy write,
 updates only `New` rows, and prints the verified rows. Reruns over already `Done` rows
-are read-only. Read-only SQLite checks from the Codex execution namespace are fine, but
-live SQLite writes must use the host deploy context; remapped `nobody:nogroup` ownership
-in the Codex namespace is not authoritative for runtime write permissions.
+are read-only. Read-only SQLite backup checks from the Codex execution namespace are fine,
+but legacy SQLite writes must use the host deploy context; remapped `nobody:nogroup`
+ownership in the Codex namespace is not authoritative for runtime write permissions.
 For same-host maintenance without a deploy SSH key, use `--host-local`; it still re-enters
 only through the narrow sudoers command as `brai`.
 
@@ -231,8 +263,8 @@ Production and preview services run from the source checkout uploaded into
 The limited `brai-deploy` user owns `/srv/projects/brai-envs`, publishes only the deployment
 artifacts above, and uses sudo only for Caddy validation, Caddy reload, and matching Brai API service restarts.
 The Brai runtime user also belongs to the `brai-deploy` group and API units run with
-`SupplementaryGroups=brai-deploy`, so SQLite files created by the runtime stay writable by deploy scripts
-without broadening the sudo boundary.
+`SupplementaryGroups=brai-deploy`, so legacy SQLite fallback/import files stay writable by deploy scripts
+without broadening the sudo boundary. Runtime DB access uses protected Supabase Postgres env values.
 
 Production Caddy routes keep `app.brightos.world` public: the app shell is not protected by
 Caddy Basic Auth, `/api/*` is proxied to the production Brai API without injected Bearer

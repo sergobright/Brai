@@ -8,6 +8,8 @@ brai_public_site_root: "{{ brai_repo }}/deploy/site"
 brai_syncthing_domain: sync.brightos.world
 brai_syncthing_gui_port: 8384
 brai_syncthing_sync_port: 22000
+brai_supabase_studio_domain: supabase.brightos.world
+brai_supabase_studio_port: 54323
 brai_syncthing_user: mark
 brai_syncthing_vault_path: /srv/projects/brai/vault
 brai_deploy_user: brai-deploy
@@ -25,6 +27,11 @@ brai_envs:
     path: prod
     api_port: 3020
     service: brai-api.service
+  dev:
+    domain: dev.brightos.world
+    path: dev
+    api_port: 3030
+    service: brai-api-dev.service
   preview-a:
     domain: a.test.brightos.world
     path: preview-a

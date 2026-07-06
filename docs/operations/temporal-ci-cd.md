@@ -37,11 +37,11 @@ Preview slots are still allocated and released by the existing slot scripts:
 4. Existing `checks` job runs unchanged.
 5. GitHub Actions signals `checks_passed` or `checks_failed`.
 6. Preview-class branches continue to `deploy-preview`, which waits for `temporal-worker-check`.
-7. GitHub Actions signals `preview_deploy_started`.
-8. Existing `deploy-preview` runs `deploy/scripts/ci-ssh-deploy.sh`.
-9. GitHub Actions signals `preview_deploy_passed` or `preview_deploy_failed`.
-10. A failed classification, check, or preview deploy leaves workflow state at `waiting_for_fix`.
-11. Accepted preview completion signals `pr_merged`, `accepted_preview_started`, `accepted_preview_promoted` or `accepted_preview_failed`, `slot_release_started`, and `slot_released` or `slot_release_failed`.
+7. GitHub Actions signals `preview_deploy_started` and `supabase_preview_started`.
+8. Existing `deploy-preview` runs `deploy/scripts/ci-ssh-deploy.sh`; the remote deploy creates or reuses the Supabase preview branch, applies migrations, updates the preview env file, deploys the app, and restarts the API.
+9. GitHub Actions signals `supabase_preview_passed` and `preview_deploy_passed`, or the matching failed events.
+10. A failed classification, check, Supabase preview branch, or preview deploy leaves workflow state at `waiting_for_fix`.
+11. Accepted preview completion signals `pr_merged`, `accepted_preview_started`, `accepted_preview_promoted` or `accepted_preview_failed`, `supabase_preview_release_started`, `supabase_preview_released` or `supabase_preview_release_failed`, `slot_release_started`, and `slot_released` or `slot_release_failed`.
 12. Manual release requires a real slot release. Delete-triggered release is idempotent: if the slot was already released, Temporal records `branch_deleted`. Closing a `codex/*` PR without merge also runs slot release; if no slot is found, Temporal still records `slot_released` so abandoned preview workflows do not stay in release-started state.
 
 Accepted PR conflict reconciliation does not add a separate Temporal gate. The agent resolves conflicts on the same `codex/*` branch and pushes a new head; the existing `branch_pushed`, `checks_*`, and `preview_deploy_*` events reset and reverify that head before `accept-preview.sh` enables auto-merge again.
@@ -90,24 +90,42 @@ requiring accepted-preview metadata promotion or preview slot release.
 - `auto_merge_started`, `auto_merge_enabled`, `auto_merge_failed`
 - `no_preview_required`
 - `checks_started`, `checks_passed`, `checks_failed`
+- `supabase_preview_started`, `supabase_preview_passed`, `supabase_preview_failed`
 - `preview_deploy_started`, `preview_deploy_passed`, `preview_deploy_failed`
 - `pr_merged`
 - `accepted_preview_started`, `accepted_preview_promoted`, `accepted_preview_failed`
 - `slot_release_started`, `slot_released`, `slot_release_failed`
+- `supabase_preview_release_started`, `supabase_preview_released`, `supabase_preview_release_failed`
 - `released`, `branch_deleted`
 
-The `state` query exposes `deliveryClass`, `handoff`, `autoMerge`, `tasks`, `missing`, `blocker`, and `blockers`. A new `branch_pushed` event resets the check/deploy/release checklist for the new SHA so old green state is not inherited. `delivery_classification_failed`, `delivery_handoff_failed`, `auto_merge_failed`, `checks_failed`, `preview_deploy_failed`, `accepted_preview_failed`, and `slot_release_failed` set `status` to `waiting_for_fix` and populate `blocker`.
+The `state` query exposes `deliveryClass`, `handoff`, `autoMerge`, `tasks`, `missing`, `blocker`, and `blockers`. A new `branch_pushed` event resets the check/deploy/release checklist for the new SHA so old green state is not inherited. `delivery_classification_failed`, `delivery_handoff_failed`, `auto_merge_failed`, `checks_failed`, `supabase_preview_failed`, `preview_deploy_failed`, `accepted_preview_failed`, `supabase_preview_release_failed`, and `slot_release_failed` set `status` to `waiting_for_fix` and populate `blocker`.
 
 ## PromotionWorkflow
 
 `PromotionWorkflow` tracks accepted preview promotion, target deploy, and preview slot release:
 
 - Workflow ID for production deploy: `brai:promotion:prod:<sha>`.
-- Prod signals: `prod_deploy_started`, `prod_version_recorded`, `accepted_previews_started`, `accepted_previews_passed`, `accepted_previews_failed`, `prod_deploy_passed`, `prod_deploy_failed`.
+- Workflow ID for Dev deploy: `brai:promotion:dev:<sha>`.
+- Prod signals: `prod_deploy_started`, `supabase_prod_migration_started`, `supabase_prod_migration_passed`, `supabase_prod_migration_failed`, `prod_version_recorded`, `accepted_previews_started`, `accepted_previews_passed`, `accepted_previews_failed`, `prod_deploy_passed`, `prod_deploy_failed`.
+- Dev signals: `dev_deploy_started`, `dev_supabase_migration_started`, `dev_supabase_migration_passed`, `dev_supabase_migration_failed`, `dev_version_recorded`, `dev_deploy_passed`, `dev_deploy_failed`.
 
-The production checklist requires accepted-preview metadata promotion, version/ledger recording, deployment, and preview-slot cleanup. During the post-deploy accepted-preview release step, occupied preview OTA manifests are republished from each preview slot's own source checkout so their `otaVersion` follows the production build ledger without replacing preview content with production content. `prod_deploy_passed` completes the promotion workflow only after prior required steps have succeeded in GitHub Actions. Russian human-readable `build_versions` release notes are part of the existing version/ledger recording step; changing their text source does not add a new Temporal gate.
+The production checklist requires Supabase migration/smoke, accepted-preview metadata promotion,
+version/ledger recording, deployment, and preview-slot cleanup. The production Supabase smoke
+requires the SQLite import marker so an empty baseline database cannot pass cutover by accident.
+During the post-deploy accepted-preview release step, occupied preview OTA manifests are republished
+from each preview slot's own source checkout so their `otaVersion` follows the production build
+ledger without replacing preview content with production content. `prod_deploy_passed` completes the
+promotion workflow only after prior required steps have succeeded in GitHub Actions. Russian
+human-readable `build_versions` release notes are part of the existing version/ledger recording
+step; changing their text source does not add a new Temporal gate.
 
-Deploy logic still lives in the existing scripts. Temporal is the required control ledger around those scripts; GitHub branch protection, merge queue, preview slot locking, and SQLite ledger writes remain the underlying authorities for their own data.
+Dev deploys are persistent-environment promotions from branch `dev`. They use the long-lived
+Supabase branch `brai-dev`, do not refresh from production automatically after the first clone, and
+do not require accepted-preview cleanup.
+
+Deploy logic still lives in the existing scripts. Temporal is the required control ledger around
+those scripts; GitHub branch protection, merge queue, preview slot locking, Supabase branch
+lifecycle, and Postgres ledger writes remain the underlying authorities for their own data.
 
 ## Worker Permissions
 
@@ -167,7 +185,9 @@ Then open `https://temporal.brightos.world` with the unified Caddy basic auth an
 - Temporal unavailable: the strict CI/CD job fails. Restart or repair `brai-temporal.service` / `brai-temporal-worker.service`, then rerun the failed GitHub Actions job.
 - Worker stopped: workflows remain in Temporal; restart `brai-temporal-worker.service`.
 - Failed preview deploy: query the workflow state and inspect `status`, `blocker`, `blockers`, and `tasks`, then fix and push the same `codex/*` branch.
+- Failed Supabase preview: check `/etc/brai/supabase-deploy.env`, Supabase Branching status, the per-env `brai-api.env`, and `deploy/scripts/supabase-branch.mjs` output, then rerun `deploy-preview`.
 - Failed accepted-preview cleanup: query both `brai:promotion:prod:<sha>` and the affected `brai:preview:<branch>` workflow. Fix metadata promotion or slot release, then rerun the failed `deploy-prod` job.
+- Failed production Supabase migration: run the cutover/import smoke from [Supabase Postgres Cutover](supabase-postgres-cutover.md), then rerun `deploy-prod`.
 - Failed production deploy: query `brai:promotion:prod:<sha>`, fix the deploy or ledger issue, then rerun the failed production job.
 - Stuck slot release: use `deploy/scripts/preview-slots.sh status` on the VPS source checkout, then rerun the existing release workflow or `deploy/scripts/ci-ssh-release-slot.sh`.
 - Wrong or sensitive event data: do not mutate Temporal history. Start a new corrected workflow only if the old history contains no secrets; if a secret was signaled, rotate it and treat the Temporal DB as exposed for that secret.

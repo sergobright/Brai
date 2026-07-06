@@ -65,6 +65,8 @@ else
   DB_PATH="$TARGET_ROOT/data/brai.sqlite"
   mkdir -p "$WEB_TARGET" "$MOBILE_TARGET" "$(dirname "$DB_PATH")"
 fi
+POSTGRES_URL="${BRAI_DATABASE_URL:-}"
+PROD_POSTGRES_URL="${BRAI_PROD_DATABASE_URL:-}"
 
 SERVICE_USER="${BRAI_SQLITE_SERVICE_USER:-brai}"
 SERVICE_GROUP="${BRAI_SQLITE_SERVICE_GROUP:-brai-deploy}"
@@ -136,7 +138,7 @@ RECOVERY
 }
 
 wait_for_preview_api() {
-  [[ "$ENVIRONMENT" == preview-* ]] || return 0
+  [[ "$ENVIRONMENT" == preview-* || "$ENVIRONMENT" == "dev" ]] || return 0
   [[ -n "$API_PORT" ]] || return 0
   local url="http://127.0.0.1:$API_PORT/health"
   local attempt
@@ -146,12 +148,12 @@ wait_for_preview_api() {
     fi
     sleep 0.5
   done
-  echo "Preview API health check failed: $url" >&2
+  echo "Preview API health check failed ($ENVIRONMENT): $url" >&2
   "${BRAI_SUDO:-sudo}" journalctl -u "$SERVICE_NAME" -n 80 --no-pager >&2 || true
   return 1
 }
 
-if [[ "$ENVIRONMENT" == preview-* && "$ALLOCATED_NEW" == "true" && "${BRAI_RESET_NEW_PREVIEW_DB:-true}" != "false" ]]; then
+if [[ -z "$POSTGRES_URL" && "$ENVIRONMENT" == preview-* && "$ALLOCATED_NEW" == "true" && "${BRAI_RESET_NEW_PREVIEW_DB:-true}" != "false" ]]; then
   case "$TARGET_ROOT" in
     "$ENVS_ROOT"/preview-*)
       find "$TARGET_ROOT" -user "$(id -u)" -exec chmod u+rwX,g+rwX {} + || true
@@ -190,7 +192,9 @@ OTA_VERSION_ARGS=(
   --environment "$ENVIRONMENT"
   --root "$ROOT"
   --db "$DB_PATH"
+  --postgres-url "$POSTGRES_URL"
   --prod-db "${BRAI_PROD_DB:-}"
+  --prod-postgres-url "$PROD_POSTGRES_URL"
   --prod-web-version-json "${BRAI_PROD_WEB_VERSION_JSON:-}"
   --mobile-target "$MOBILE_TARGET"
 )
@@ -248,6 +252,7 @@ if [[ "$ENVIRONMENT" != "prod" || "${BRAI_RECORD_PROD_BRANCH_DEPLOYMENT:-false}"
   echo "Recording deployment metadata..."
   if ! "$NODE_BIN" "$SCRIPT_DIR/record-deployment.mjs" \
     --db "$DB_PATH" \
+    --postgres-url "$POSTGRES_URL" \
     --environment "$ENVIRONMENT" \
     --slot "$SLOT" \
     --branch "$BRANCH" \

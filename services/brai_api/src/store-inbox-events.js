@@ -219,7 +219,7 @@ export const inboxEventMethods = {
       this.insertIgnoredInboxEvent({
         eventId,
         deviceId,
-        clientSequence: -this.nextInboxServerSequence(),
+        clientSequence: this.nextInvalidInboxClientSequence(deviceId),
         receivedAt,
         reason: 'invalid_client_sequence',
         rawEvent
@@ -363,6 +363,7 @@ export const inboxEventMethods = {
 ,
 
   nextInboxServerSequence() {
+    if (this.db.dialect === 'postgres') return this.nextPostgresCounter('inbox_events.server_sequence');
     const row = this.db
       .prepare('SELECT COALESCE(MAX(server_sequence), 0) + 1 AS next FROM inbox_events')
       .get();
@@ -370,7 +371,14 @@ export const inboxEventMethods = {
   }
 ,
 
+  nextInvalidInboxClientSequence(deviceId) {
+    if (this.db.dialect === 'postgres') return -this.nextPostgresCounter(`inbox_events.invalid_client_sequence.${deviceId}`);
+    return -this.nextInboxServerSequence();
+  }
+,
+
   nextInboxClientSequence(deviceId) {
+    if (this.db.dialect === 'postgres') return this.nextPostgresCounter(`inbox_events.client_sequence.${deviceId}`);
     const row = this.db
       .prepare('SELECT COALESCE(MAX(client_sequence), 0) + 1 AS next FROM inbox_events WHERE device_id = ?')
       .get(deviceId);
@@ -484,7 +492,7 @@ export const inboxEventMethods = {
             updated_at_utc = excluded.updated_at_utc,
             deleted_at_utc = excluded.deleted_at_utc,
             last_event_id = excluded.last_event_id
-          WHERE inbox.user_id IS excluded.user_id
+          WHERE inbox.user_id IS NOT DISTINCT FROM excluded.user_id
             OR inbox.user_id IS NULL
             OR excluded.user_id IS NULL
         `

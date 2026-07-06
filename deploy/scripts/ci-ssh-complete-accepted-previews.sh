@@ -190,12 +190,15 @@ for index in "${!REQUIRED_BRANCHES[@]}"; do
   fi
 
   if [[ "$MODE" == "all" || "$MODE" == "release" ]]; then
+    signal_temporal_preview "$branch" supabase_preview_release_started
     signal_temporal_preview "$branch" slot_release_started
     if BRAI_BRANCH="$branch" \
       BRAI_ACCEPTED_PREVIEW=true \
         "$SCRIPT_DIR/ci-ssh-release-slot.sh"; then
+      signal_temporal_preview "$branch" supabase_preview_released
       signal_temporal_preview "$branch" slot_released
     else
+      signal_temporal_preview "$branch" supabase_preview_release_failed "accepted preview Supabase release failed" || true
       signal_temporal_preview "$branch" slot_release_failed "accepted preview slot release failed"
       exit 1
     fi
@@ -216,10 +219,13 @@ cleanup_previously_accepted_preview() {
     signal_temporal_preview "$branch" accepted_preview_promoted || return 1
   fi
 
+  signal_temporal_preview "$branch" supabase_preview_release_started || return 1
   signal_temporal_preview "$branch" slot_release_started || return 1
   if BRAI_BRANCH="$branch" BRAI_ACCEPTED_PREVIEW=true "$SCRIPT_DIR/ci-ssh-release-slot.sh"; then
+    signal_temporal_preview "$branch" supabase_preview_released || return 1
     signal_temporal_preview "$branch" slot_released || return 1
   else
+    signal_temporal_preview "$branch" supabase_preview_release_failed "accepted preview cleanup Supabase release failed" || true
     signal_temporal_preview "$branch" slot_release_failed "accepted preview cleanup release failed" || true
     return 1
   fi

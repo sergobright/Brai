@@ -173,7 +173,7 @@ export const activityEventMethods = {
       this.insertIgnoredActivityEvent({
         eventId,
         deviceId,
-        clientSequence: -this.nextActivityServerSequence(),
+        clientSequence: this.nextInvalidActivityClientSequence(deviceId),
         receivedAt,
         reason: 'invalid_client_sequence',
         rawEvent
@@ -330,10 +330,17 @@ export const activityEventMethods = {
 ,
 
   nextActivityServerSequence() {
+    if (this.db.dialect === 'postgres') return this.nextPostgresCounter('activity_events.server_sequence');
     const row = this.db
       .prepare('SELECT COALESCE(MAX(server_sequence), 0) + 1 AS next FROM activity_events')
       .get();
     return row.next;
+  }
+,
+
+  nextInvalidActivityClientSequence(deviceId) {
+    if (this.db.dialect === 'postgres') return -this.nextPostgresCounter(`activity_events.invalid_client_sequence.${deviceId}`);
+    return -this.nextActivityServerSequence();
   }
 ,
 
@@ -485,7 +492,7 @@ export const activityEventMethods = {
             deleted_at_utc = excluded.deleted_at_utc,
             restored_at_utc = excluded.restored_at_utc,
             last_event_id = excluded.last_event_id
-          WHERE activities.user_id IS excluded.user_id
+          WHERE activities.user_id IS NOT DISTINCT FROM excluded.user_id
             OR activities.user_id IS NULL
             OR excluded.user_id IS NULL
         `
@@ -547,6 +554,9 @@ export const activityEventMethods = {
   applyLatestActivityReorder(reorderEvent) {
     const orderedIds = normalizeOrderedIds(parseJsonObject(reorderEvent.payload_json).ordered_ids);
     const scope = scopeSql();
+    const idFilter = orderedIds.length
+      ? `AND id NOT IN (${orderedIds.map(() => '?').join(', ')})`
+      : '';
     this.db
       .prepare(
         `
@@ -555,11 +565,11 @@ export const activityEventMethods = {
           WHERE deleted_at_utc IS NULL
             AND status = 'New'
             AND sort_order IS NOT NULL
-            AND id NOT IN (SELECT value FROM json_each(?))
+            ${idFilter}
             ${scope.clause}
         `
       )
-      .run(JSON.stringify(orderedIds), ...scope.params);
+      .run(...orderedIds, ...scope.params);
     return orderedIds;
   }
 ,

@@ -7,7 +7,7 @@ const apkVersion = apkCounter(required(args, "version"));
 const versionCode = required(args, "version-code");
 const targetBranch = required(args, "target-branch");
 const targetCommit = required(args, "target-commit");
-const store = new BraiStore(required(args, "db"));
+const store = new BraiStore(databaseTarget(args));
 
 try {
   const existing = store.findBuildVersionByTargetCommit({ targetBranch, targetCommit, versionTypeId: "apk" });
@@ -52,4 +52,8 @@ function required(values, key) {
   const value = values[key];
   if (!value) throw new Error(`missing --${key}`);
   return value;
+}
+
+function databaseTarget(values) {
+  return values["postgres-url"] || process.env.BRAI_DATABASE_URL || required(values, "db");
 }

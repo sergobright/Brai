@@ -64,8 +64,21 @@ test("new preview push resets checks and deploy gates for the new sha", () => {
   assert.equal(state.checks, "not_started");
   assert.equal(state.previewDeploy, "not_started");
   assert.equal(state.tasks.checks.status, "pending");
+  assert.equal(state.tasks.supabase_preview.status, "pending");
   assert.equal(state.tasks.preview_deploy.status, "pending");
   assert.equal(state.gates.complete, false);
+});
+
+test("late branch_pushed for the same sha preserves classification", () => {
+  const state = createPreviewState({ branch: "codex/infra-docs", sha: "d1" });
+  applyPreviewEvent(state, { type: "delivery_classified", sha: "d1", deliveryClass: "infra-docs" });
+  applyPreviewEvent(state, { type: "no_preview_required", sha: "d1" });
+  applyPreviewEvent(state, { type: "branch_pushed", sha: "d1" });
+
+  assert.equal(state.deliveryClass, "infra-docs");
+  assert.equal(state.tasks.delivery_classification.status, "passed");
+  assert.equal(state.tasks.supabase_preview.status, "not_applicable");
+  assert.equal(state.tasks.preview_deploy.status, "not_applicable");
 });
 
 test("slot release failure remains visible as a preview blocker", () => {
@@ -82,8 +95,11 @@ test("accepted preview release is not terminal before promotion metadata passed"
   const state = createPreviewState({ branch: "codex/fake", sha: "a1" });
   applyPreviewEvent(state, { type: "delivery_classified", sha: "a1", deliveryClass: "runtime-preview" });
   applyPreviewEvent(state, { type: "checks_passed", sha: "a1" });
+  applyPreviewEvent(state, { type: "supabase_preview_passed", sha: "a1" });
   applyPreviewEvent(state, { type: "preview_deploy_passed", sha: "a1", slot: "A" });
   applyPreviewEvent(state, { type: "pr_merged", sha: "a1" });
+  applyPreviewEvent(state, { type: "supabase_preview_release_started", sha: "a1", source: "complete-accepted-previews" });
+  applyPreviewEvent(state, { type: "supabase_preview_released", sha: "a1", source: "complete-accepted-previews" });
   applyPreviewEvent(state, { type: "slot_release_started", sha: "a1", source: "complete-accepted-previews" });
   applyPreviewEvent(state, { type: "slot_released", sha: "a1", source: "complete-accepted-previews" });
 
@@ -139,6 +155,8 @@ test("infra docs delivery completes without preview slot release", () => {
   assert.equal(state.slot, "");
   assert.equal(state.tasks.preview_deploy.status, "not_applicable");
   assert.equal(state.tasks.accepted_preview_promotion.status, "not_applicable");
+  assert.equal(state.tasks.supabase_preview.status, "not_applicable");
+  assert.equal(state.tasks.supabase_preview_release.status, "not_applicable");
   assert.equal(state.tasks.slot_release.status, "not_applicable");
   assert.equal(state.tasks.delivery_handoff.status, "passed");
   assert.equal(state.tasks.delivery_handoff.lastEvent, "delivery_handoff_passed");
@@ -162,6 +180,8 @@ test("technical no-preview delivery completes without preview slot release", () 
   assert.equal(state.previewDeploy, "not_applicable");
   assert.equal(state.tasks.preview_deploy.status, "not_applicable");
   assert.equal(state.tasks.accepted_preview_promotion.status, "not_applicable");
+  assert.equal(state.tasks.supabase_preview.status, "not_applicable");
+  assert.equal(state.tasks.supabase_preview_release.status, "not_applicable");
   assert.equal(state.tasks.slot_release.status, "not_applicable");
   assert.equal(state.tasks.accepted_for_target.status, "passed");
   assert.equal(state.terminal, true);
@@ -202,22 +222,26 @@ test("delivery classification, handoff, and auto merge failures block preview st
   assert.equal(autoMerge.blocker.task, "auto_merge");
 });
 
-test("dev promotion tracks accepted preview release blocker", () => {
+test("dev promotion completes after Supabase migration, version record, and deploy pass", () => {
   const state = createPromotionState({ target: "dev", sha: "b1" });
   applyPromotionEvent(state, { type: "dev_deploy_started", sha: "b1" });
+  applyPromotionEvent(state, { type: "dev_supabase_migration_started", sha: "b1" });
+  applyPromotionEvent(state, { type: "dev_supabase_migration_passed", sha: "b1" });
   applyPromotionEvent(state, { type: "dev_version_recorded", sha: "b1" });
-  applyPromotionEvent(state, { type: "accepted_previews_started", sha: "b1" });
-  applyPromotionEvent(state, { type: "accepted_previews_failed", sha: "b1" });
+  applyPromotionEvent(state, { type: "dev_deploy_passed", sha: "b1" });
 
-  assert.equal(state.status, "waiting_for_fix");
+  assert.equal(state.status, "dev_deploy_passed");
+  assert.equal(state.tasks.supabase_migration.status, "passed");
   assert.equal(state.tasks.version_recorded.status, "passed");
-  assert.equal(state.tasks.accepted_previews.status, "failed");
-  assert.equal(state.terminal, false);
+  assert.equal(state.tasks.accepted_previews.status, "not_applicable");
+  assert.equal(state.terminal, true);
 });
 
 test("prod promotion completes after accepted previews, version record, and deploy pass", () => {
   const state = createPromotionState({ target: "prod", sha: "c1" });
   applyPromotionEvent(state, { type: "prod_deploy_started", sha: "c1" });
+  applyPromotionEvent(state, { type: "supabase_prod_migration_started", sha: "c1" });
+  applyPromotionEvent(state, { type: "supabase_prod_migration_passed", sha: "c1" });
   applyPromotionEvent(state, { type: "accepted_previews_started", sha: "c1" });
   applyPromotionEvent(state, { type: "prod_version_recorded", sha: "c1" });
   applyPromotionEvent(state, { type: "accepted_previews_passed", sha: "c1" });
@@ -225,10 +249,35 @@ test("prod promotion completes after accepted previews, version record, and depl
 
   assert.equal(state.status, "prod_deploy_passed");
   assert.equal(state.tasks.deploy.status, "passed");
+  assert.equal(state.tasks.supabase_migration.status, "passed");
   assert.equal(state.tasks.version_recorded.status, "passed");
   assert.equal(state.tasks.accepted_previews.status, "passed");
   assert.equal(state.terminal, true);
   assert.equal(state.gates.complete, true);
+});
+
+test("runtime preview is ready only after checks, Supabase branch, and deploy pass", () => {
+  const state = createPreviewState({ branch: "codex/runtime", sha: "r1" });
+  applyPreviewEvent(state, { type: "checks_passed", sha: "r1" });
+  applyPreviewEvent(state, { type: "preview_deploy_passed", sha: "r1", slot: "C" });
+  assert.equal(state.status, "preview_deploy_passed");
+  assert.equal(state.gates.complete, false);
+
+  applyPreviewEvent(state, { type: "supabase_preview_started", sha: "r1" });
+  applyPreviewEvent(state, { type: "supabase_preview_passed", sha: "r1" });
+
+  assert.equal(state.status, "ready_for_review");
+  assert.equal(state.tasks.supabase_preview.status, "passed");
+});
+
+test("Supabase preview release failure blocks slot release completion", () => {
+  const state = createPreviewState({ branch: "codex/runtime", sha: "r2" });
+  applyPreviewEvent(state, { type: "supabase_preview_release_started", sha: "r2" });
+  applyPreviewEvent(state, { type: "supabase_preview_release_failed", sha: "r2", reason: "branch delete failed" });
+
+  assert.equal(state.status, "waiting_for_fix");
+  assert.equal(state.tasks.supabase_preview_release.status, "failed");
+  assert.equal(state.blocker.task, "supabase_preview_release");
 });
 
 test("prod promotion tracks accepted preview release blocker", () => {

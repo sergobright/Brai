@@ -13,8 +13,34 @@ SOURCE_SHORT_CHANGES="${BRAI_SOURCE_SHORT_CHANGES:?BRAI_SOURCE_SHORT_CHANGES is 
 SOURCE_DETAILS="${BRAI_SOURCE_DETAILED_CHANGES:?BRAI_SOURCE_DETAILED_CHANGES is required}"
 SOURCE_REASON="${BRAI_SOURCE_REASON:?BRAI_SOURCE_REASON is required}"
 TARGET_DB="${BRAI_DB:-$ROOT/data/brai.sqlite}"
+TARGET_POSTGRES_URL="${BRAI_DATABASE_URL:-}"
 
 accepted_build_recorded() {
+  if [[ -n "$TARGET_POSTGRES_URL" ]]; then
+    [[ -r "$ROOT/services/brai_api/package.json" ]] || return 1
+    "$NODE_BIN" --input-type=module - "$ROOT" "$TARGET_POSTGRES_URL" "$SOURCE_BRANCH" "$TARGET_BRANCH" "$TARGET_COMMIT" <<'NODE'
+const { createRequire } = await import("node:module");
+const [sourceRoot, databaseUrl, sourceBranch, targetBranch, targetCommit] = process.argv.slice(2);
+const require = createRequire(`${sourceRoot}/services/brai_api/package.json`);
+const { Pool } = require("pg");
+const pool = new Pool({ connectionString: databaseUrl, ssl: /supabase\.(?:co|com)|pooler\.supabase\.com/.test(databaseUrl) ? { rejectUnauthorized: false } : false });
+try {
+  const result = await pool.query(`
+    SELECT 1
+    FROM build_version_refs
+    WHERE version_type_id = 'build'
+      AND source_branch = $1
+      AND target_branch = $2
+      AND target_commit = $3
+    LIMIT 1
+  `, [sourceBranch, targetBranch, targetCommit]);
+  process.exit(result.rows.length ? 0 : 1);
+} finally {
+  await pool.end();
+}
+NODE
+    return
+  fi
   [[ -r "$ROOT/services/brai_api/src/store.js" && -f "$TARGET_DB" ]] || return 1
   "$NODE_BIN" --input-type=module - "$ROOT" "$TARGET_DB" "$SOURCE_BRANCH" "$TARGET_BRANCH" "$TARGET_COMMIT" <<'NODE'
 const { createRequire } = await import("node:module");
@@ -56,6 +82,10 @@ process.exit(1);
     exit 1
   fi
   SOURCE_DB="$ENVS_ROOT/preview-${SLOT,,}/data/brai.sqlite"
+  SOURCE_POSTGRES_URL=""
+  if [[ -f "$ENVS_ROOT/preview-${SLOT,,}/brai-api.env" ]]; then
+    SOURCE_POSTGRES_URL="$(env -i bash -c 'set -a; . "$1"; printf "%s" "${BRAI_DATABASE_URL:-}"' _ "$ENVS_ROOT/preview-${SLOT,,}/brai-api.env")"
+  fi
   TARGET_DOMAIN="app.brightos.world"
   SOURCE_COMMIT="$("$NODE_BIN" -e '
 const fs = require("node:fs");
@@ -71,7 +101,9 @@ fi
 
 "$NODE_BIN" "$SCRIPT_DIR/promote-deployment.mjs" \
   --source-db "$SOURCE_DB" \
+  --source-postgres-url "$SOURCE_POSTGRES_URL" \
   --target-db "$TARGET_DB" \
+  --target-postgres-url "$TARGET_POSTGRES_URL" \
   --source-branch "$SOURCE_BRANCH" \
   --target-environment "$TARGET_ENVIRONMENT" \
   --target-branch "$TARGET_BRANCH" \

@@ -153,13 +153,42 @@ export BRAI_ROOT="$SOURCE_ROOT"
 export BRAI_RELEASE_TARGET="$DEPLOY_REPO/deploy/releases"
 export BRAI_PROD_DB="$DEPLOY_REPO/data/brai.sqlite"
 export BRAI_PROD_WEB_VERSION_JSON="$DEPLOY_REPO/deploy/web/version.json"
+if [[ -f "/etc/brai/supabase-deploy.env" ]]; then
+  set -a
+  # shellcheck source=/dev/null
+  . /etc/brai/supabase-deploy.env
+  set +a
+fi
+if [[ "$ENVIRONMENT" == "prod" && -f "/etc/brai/brai-api.env" ]]; then
+  set -a
+  # shellcheck source=/dev/null
+  . /etc/brai/brai-api.env
+  set +a
+  export BRAI_PROD_DATABASE_URL="${BRAI_DATABASE_URL:-}"
+fi
+if [[ "$ENVIRONMENT" == preview-* ]]; then
+  node deploy/scripts/supabase-branch.mjs preview-env \
+    --branch "$BRAI_BRANCH" \
+    --runtime-env "$ENVS_ROOT/$ENV_PATH/brai-api.env"
+elif [[ "$ENVIRONMENT" == "dev" ]]; then
+  node deploy/scripts/supabase-branch.mjs dev-env \
+    --runtime-env "$ENVS_ROOT/$ENV_PATH/brai-api.env"
+fi
+if [[ "$ENVIRONMENT" != "prod" && -f "$ENVS_ROOT/$ENV_PATH/brai-api.env" ]]; then
+  set -a
+  # shellcheck source=/dev/null
+  . "$ENVS_ROOT/$ENV_PATH/brai-api.env"
+  set +a
+fi
 if [[ "$BRAI_NATIVE_APK_CHANGE" == "true" ]]; then
   if [[ "$ENVIRONMENT" == preview-* ]]; then
     FLAVOR="preview$BRAI_PREVIEW_SLOT"
     deploy/scripts/build-android-env-apk.sh "$FLAVOR"
+  elif [[ "$ENVIRONMENT" == "dev" ]]; then
+    deploy/scripts/build-android-env-apk.sh dev
   elif [[ "$ENVIRONMENT" == "prod" ]]; then
     deploy/scripts/build-android-env-apk.sh production
-    export BRAI_APP_VERSION="$(node deploy/scripts/resolve-app-version.mjs --environment prod --root "$SOURCE_ROOT" --db "${BRAI_DB:-}")"
+    export BRAI_APP_VERSION="$(node deploy/scripts/resolve-app-version.mjs --environment prod --root "$SOURCE_ROOT" --db "${BRAI_DB:-}" --postgres-url "${BRAI_DATABASE_URL:-}")"
     deploy/scripts/build-nonproduction-apks.sh
   fi
 fi
