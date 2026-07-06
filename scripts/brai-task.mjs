@@ -1541,6 +1541,7 @@ function deliveryClassForFile(file) {
     file === "supabase/migrations/0003_fix_rls_function_search_path.sql" ||
     file === "supabase/migrations/0004_empty_rls_function_search_path.sql"
   ) return "infra";
+  if (/^deploy\/scripts\/[^/]+\.test\.mjs$/.test(file)) return "technical";
   if (
     file === ".gitignore" ||
     file === ".github/workflows/brai-delivery.yml" ||

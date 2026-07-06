@@ -13,6 +13,8 @@ if (!databaseUrl) throw new Error("BRAI_DATABASE_URL, DATABASE_URL, or argv[2] i
 
 const pool = new Pool({ connectionString: databaseUrl, ssl: postgresSsl(databaseUrl) });
 try {
+  const runtimeSchema = await scalar("SELECT current_schema()");
+  const schemaParam = [runtimeSchema];
   const checks = await Promise.all([
     scalar("SELECT 1"),
     scalar("SELECT COUNT(*)::int FROM schema_migrations"),
@@ -27,7 +29,7 @@ try {
         SELECT 1
         FROM pg_proc p
         JOIN pg_namespace n ON n.oid = p.pronamespace
-        WHERE n.nspname = 'public'
+        WHERE n.nspname = $1
           AND p.proname = 'brai_enable_rls_for_new_public_tables'
           AND EXISTS (
             SELECT 1
@@ -36,24 +38,24 @@ try {
               AND translate(substring(config.value FROM length('search_path=') + 1), '"'' ', '') = ''
           )
       )::int
-    `),
+    `, schemaParam),
     scalar(`
       SELECT COUNT(*)::int
       FROM pg_class c
       JOIN pg_namespace n ON n.oid = c.relnamespace
-      WHERE n.nspname = 'public'
+      WHERE n.nspname = $1
         AND c.relkind IN ('r', 'p')
         AND c.relrowsecurity
-    `),
+    `, schemaParam),
     rows(`
       SELECT format('%I.%I', n.nspname, c.relname) AS table_name
       FROM pg_class c
       JOIN pg_namespace n ON n.oid = c.relnamespace
-      WHERE n.nspname = 'public'
+      WHERE n.nspname = $1
         AND c.relkind IN ('r', 'p')
         AND NOT c.relrowsecurity
       ORDER BY c.relname
-    `)
+    `, schemaParam)
   ]);
   const [
     ping,
@@ -78,10 +80,11 @@ try {
   if (rlsAutoTrigger !== 1) throw new Error("public table RLS auto-enable trigger is missing or disabled");
   if (rlsFunctionSearchPath !== 1) throw new Error("public table RLS auto-enable function search_path is mutable");
   if (publicTablesWithoutRls.length > 0) {
-    throw new Error(`Public tables without RLS: ${publicTablesWithoutRls.map((row) => row.table_name).join(", ")}`);
+    throw new Error(`Runtime tables without RLS in ${runtimeSchema}: ${publicTablesWithoutRls.map((row) => row.table_name).join(", ")}`);
   }
   console.log(JSON.stringify({
     ok: true,
+    runtimeSchema,
     migrations,
     supabaseMigrations,
     versionTypes,
@@ -97,13 +100,13 @@ try {
   await pool.end();
 }
 
-async function scalar(sql) {
-  const result = await pool.query(sql);
+async function scalar(sql, params = []) {
+  const result = await pool.query(sql, params);
   return Object.values(result.rows[0])[0];
 }
 
-async function rows(sql) {
-  const result = await pool.query(sql);
+async function rows(sql, params = []) {
+  const result = await pool.query(sql, params);
   return result.rows;
 }
 

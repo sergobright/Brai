@@ -20,6 +20,10 @@ INSERT INTO activities (
   '2026-07-06T00:00:00.000Z'
 )
 ON CONFLICT (id) DO UPDATE SET
+  activity_type_id = EXCLUDED.activity_type_id,
+  title = EXCLUDED.title,
   description_md = EXCLUDED.description_md,
+  author = EXCLUDED.author,
   reason = EXCLUDED.reason,
+  status = EXCLUDED.status,
   updated_at_utc = EXCLUDED.updated_at_utc;

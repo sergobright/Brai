@@ -132,7 +132,7 @@ function waitForBranch(name, projectRef) {
 
 function branchEnv(name, projectRef) {
   const explicit = process.env.SUPABASE_BRANCH_DATABASE_URL;
-  if (explicit) return { DATABASE_URL: explicit };
+  if (explicit) return { DATABASE_URL: checkedExplicitDatabaseUrl(explicit, name) };
   for (const outputArgs of [["-o", "env"], ["--output", "env"]]) {
     const result = runSupabase(["branches", "get", name, "--project-ref", projectRef, ...outputArgs], { allowFailure: true });
     const env = parseEnv(result.stdout);
@@ -141,6 +141,21 @@ function branchEnv(name, projectRef) {
   const details = branchDetails(name, projectRef);
   const databaseUrl = findDatabaseUrl(details);
   return databaseUrl ? { DATABASE_URL: databaseUrl } : {};
+}
+
+function checkedExplicitDatabaseUrl(databaseUrl, name) {
+  if (process.env.BRAI_ALLOW_SUPABASE_BRANCH_DATABASE_URL_OVERRIDE !== "true") {
+    throw new Error("SUPABASE_BRANCH_DATABASE_URL requires BRAI_ALLOW_SUPABASE_BRANCH_DATABASE_URL_OVERRIDE=true");
+  }
+  const text = String(databaseUrl);
+  if (!/^postgres(?:ql)?:\/\//.test(text)) {
+    throw new Error("SUPABASE_BRANCH_DATABASE_URL must be a Postgres URL");
+  }
+  const decoded = decodeURIComponent(text);
+  if (!decoded.includes(name)) {
+    throw new Error(`SUPABASE_BRANCH_DATABASE_URL must include expected branch/schema marker: ${name}`);
+  }
+  return text;
 }
 
 function branchDetails(name, projectRef) {

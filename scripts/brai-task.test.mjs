@@ -336,6 +336,7 @@ test("delivery classifier separates infra-docs from runtime preview", () => {
   assert.equal(deliveryClassForFile("deploy/scripts/preview-slots.sh"), "infra");
   assert.equal(deliveryClassForFile("deploy/scripts/permissions.sh"), "infra");
   assert.equal(deliveryClassForFile("deploy/scripts/postgres-smoke.mjs"), "infra");
+  assert.equal(deliveryClassForFile("deploy/scripts/supabase-branch.test.mjs"), "technical");
   assert.equal(deliveryClassForFile("deploy/scripts/prune-caddy-site-blocks.mjs"), "infra");
   assert.equal(deliveryClassForFile("deploy/scripts/publish-web.sh"), "infra");
   assert.equal(deliveryClassForFile("deploy/scripts/publish-client-web-layer.sh"), "infra");
@@ -372,6 +373,7 @@ test("delivery classifier separates infra-docs from runtime preview", () => {
   });
   assert.equal(classifyDelivery(["apps/brai_app/vitest.config.mts"]).deliveryClass, "technical-no-preview");
   assert.equal(classifyDelivery(["services/brai_api/test/api.auth-migrations.test.js"]).deliveryClass, "technical-no-preview");
+  assert.equal(classifyDelivery(["deploy/scripts/supabase-branch.test.mjs"]).deliveryClass, "technical-no-preview");
   assert.equal(
     classifyDelivery(["apps/brai_app/package.json"], {
       diffs: {
@@ -1665,7 +1667,7 @@ test("accepted preview stale cleanup is best effort", () => {
   assert.match(promoteScript, /target_commit = \$3/);
   assert.match(promoteScript, /already promoted for/);
   assert.match(requiredLoop, /exit 1/);
-  assert.doesNotMatch(requiredLoop, /BRAI_REQUIRE_PREVIEW_SLOT_RELEASE=true/);
+  assert.match(requiredLoop, /BRAI_REQUIRE_PREVIEW_SLOT_RELEASE=true/);
   assert.match(requiredLoop, /slot_released/);
   assert.match(script, /filter_cleanup_branches_to_active_previews/);
   assert.match(script, /Skipping \$skipped previously accepted previews with no active preview slot or queue entry/);

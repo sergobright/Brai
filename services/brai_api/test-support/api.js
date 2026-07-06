@@ -55,6 +55,9 @@ export async function createFixture(times, options = {}) {
     codexTimeoutMs: options.codexTimeoutMs,
     inboundTitleGenerator: options.inboundTitleGenerator,
     braiCmd: options.braiCmd,
+    branch: options.branch,
+    commit: options.commit,
+    databaseBranch: options.databaseBranch,
     now: () => new Date(times[Math.min(index++, times.length - 1)]),
     logger: options.logger ?? { error: () => {} }
   });

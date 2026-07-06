@@ -41,6 +41,42 @@ test('timer lifecycle stores duration and groups history', async () => {
   }
 });
 
+test('health exposes safe deployment metadata and CORS denies untrusted origins', async () => {
+  const fixture = await createFixture(['2026-06-12T06:00:00.000Z'], {
+    branch: 'codex/test-hardening',
+    commit: 'abc123',
+    databaseBranch: 'brai_preview_test'
+  });
+
+  try {
+    const health = await jsonRequest(fixture.url, '/health', {
+      headers: { origin: 'https://app.brightos.world' }
+    });
+    assert.equal(health.status, 200);
+    assert.equal(health.headers.get('access-control-allow-origin'), 'https://app.brightos.world');
+    assert.equal(health.body.database.dialect, 'postgres');
+    assert.equal(health.body.database.branch, 'brai_preview_test');
+    assert.equal(health.body.branch, 'codex/test-hardening');
+    assert.equal(health.body.commit, 'abc123');
+    assert.equal(JSON.stringify(health.body).includes('postgres://'), false);
+
+    const evilPreflight = await fetch(`${fixture.url}/auth/otp/verify`, {
+      method: 'OPTIONS',
+      headers: {
+        origin: 'https://evil.example',
+        'access-control-request-method': 'POST'
+      }
+    });
+    assert.equal(evilPreflight.status, 204);
+    assert.equal(evilPreflight.headers.get('access-control-allow-origin'), null);
+
+    const cliHealth = await jsonRequest(fixture.url, '/health');
+    assert.equal(cliHealth.headers.get('access-control-allow-origin'), '*');
+  } finally {
+    await fixture.close();
+  }
+});
+
 test('goal summary splits cross-midnight sessions', async () => {
   const fixture = await createFixture([
     '2026-06-12T20:30:00.000Z',
