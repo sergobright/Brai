@@ -6,7 +6,12 @@ types.setTypeParser(20, (value) => Number(value));
 
 const pool = new Pool({
   connectionString: workerData.databaseUrl,
-  ssl: workerData.ssl
+  ssl: workerData.ssl,
+  connectionTimeoutMillis: workerData.timeoutMs,
+  query_timeout: workerData.timeoutMs,
+  statement_timeout: workerData.timeoutMs,
+  lock_timeout: workerData.timeoutMs,
+  idle_in_transaction_session_timeout: workerData.timeoutMs
 });
 const transactions = new Map();
 

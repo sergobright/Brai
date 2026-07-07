@@ -126,7 +126,7 @@ For no-preview work, `node scripts/brai-task.mjs handoff` creates or reuses the 
 Preview acceptance flow:
 
 ```text
-codex/* accepted -> accept-preview.sh -> PR/merge queue into main -> production release/deploy -> release preview slot
+codex/* accepted -> accept-preview.sh -> PR/merge queue into main -> production release/deploy -> release preview slot -> delete accepted branch/worktree
 ```
 
 Temporal is the required CI/CD control ledger for this flow. See
@@ -140,6 +140,7 @@ Acceptance trigger:
 - If the acceptance PR is `mergeStateStatus: DIRTY` or `BEHIND`, `accept-preview.sh` writes `status=reconcile_required`. Run `node scripts/brai-task.mjs acceptance-reconcile <codex-branch>`, resolve conflicts if any, commit, push the same branch, rerun `node scripts/brai-task.mjs release-notes ...`, rerun `scripts/brai-preview-handoff.sh`, and rerun `deploy/scripts/accept-preview.sh <codex-branch>`. The original preview slot remains leased to that branch until production promotion releases it.
 - After starting acceptance, monitor GitHub Actions until production deploy and preview-slot release finish, or report the exact PR/check/merge-queue/deploy/release blocker. Accepted preview slots are released only by the successful `deploy-prod` post-step, after metadata promotion and production deploy; that step also republishes occupied preview OTA manifests from their own preview source checkouts so slot content stays preview-specific while `otaVersion` catches up to the production build ledger. Occupied preview OTA refreshes reuse the preview source checkout's existing static export and fail if it is missing instead of rebuilding the Next client. The first successful release attempt requires a real slot release and fails if the accepted branch did not release one.
 - If `deploy-prod` is rerun after the accepted preview was already promoted and its slot was already released, the rerun is idempotent: promotion succeeds only when the production build ledger already contains the accepted build for the same target commit, and the release step treats the already-free slot as released.
+- After the accepted preview slot release succeeds, CI runs best-effort accepted branch cleanup. It deletes eligible `codex/*` remote head refs through the GitHub API and asks `/srv/opt/brai-main-sync.sh --prune-accepted-branches ...` to remove matching clean local task worktrees under `.codex-worktrees/`. Cleanup never makes an accepted production deploy fail; skipped dirty, active, or mismatched worktrees are left for manual inspection or the next cleanup pass.
 
 ## Required GitHub Settings
 

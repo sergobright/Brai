@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { Worker } from 'node:worker_threads';
 
 const dirname = path.dirname(fileURLToPath(import.meta.url));
-const DEFAULT_TIMEOUT_MS = 30000;
+const DEFAULT_TIMEOUT_MS = 5000;
 
 export function isPostgresUrl(value) {
   return /^postgres(?:ql)?:\/\//.test(String(value ?? ''));
@@ -13,15 +13,15 @@ export function isPostgresUrl(value) {
 
 export class PostgresSyncDatabase {
   constructor(databaseUrl, {
-    timeoutMs = Number(process.env.BRAI_PG_SYNC_TIMEOUT_MS) || DEFAULT_TIMEOUT_MS,
+    timeoutMs = process.env.BRAI_PG_SYNC_TIMEOUT_MS,
     ssl = postgresSsl(databaseUrl)
   } = {}) {
     this.dialect = 'postgres';
-    this.timeoutMs = timeoutMs;
+    this.timeoutMs = postgresTimeoutMs(timeoutMs);
     this.currentTxId = null;
     this.tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'brai-pg-sync-'));
     this.worker = new Worker(path.join(dirname, 'postgres-sync-worker.js'), {
-      workerData: { databaseUrl, ssl },
+      workerData: { databaseUrl, ssl, timeoutMs: this.timeoutMs },
       execArgv: []
     });
     this.workerError = null;
@@ -99,6 +99,11 @@ export class PostgresSyncDatabase {
     }
     return payload.result;
   }
+}
+
+export function postgresTimeoutMs(value) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_TIMEOUT_MS;
 }
 
 class PostgresSyncStatement {
