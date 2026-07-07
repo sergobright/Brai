@@ -1675,6 +1675,7 @@ function isNoPreviewAcceptanceForHead(acceptance, branch, head) {
 
 function isTechnicalRuntimeChange(file, context) {
   if (file === "apps/brai_app/package.json") return isClientPackageTestScriptDiff(diffForFile(file, context));
+  if (file === "services/brai_api/src/index.js") return isApiStartupGuardDiff(diffForFile(file, context));
   return false;
 }
 
@@ -1687,6 +1688,20 @@ function changedDiffLines(diff) {
   return String(diff)
     .split("\n")
     .filter((line) => /^[+-](?![+-])/.test(line));
+}
+
+function isApiStartupGuardDiff(diff) {
+  const lines = changedDiffLines(diff).filter((line) => line.trim() !== "+");
+  const allowed = [
+    /^\+\s*if\s*\(\s*process\.env\.BRAI_[A-Z0-9_]+\s*\)\s*\{\s*$/,
+    /^\+\s*console\.error\(['"`][^'"`]*BRAI_[A-Z0-9_]+[^'"`]*['"`]\);\s*$/,
+    /^\+\s*process\.exit\(1\);\s*$/,
+    /^\+\s*\}\s*$/,
+  ];
+  return lines.length > 0 &&
+    lines.every((line) => allowed.some((pattern) => pattern.test(line))) &&
+    lines.some((line) => /process\.env\.BRAI_[A-Z0-9_]+/.test(line)) &&
+    lines.some((line) => /process\.exit\(1\)/.test(line));
 }
 
 function isClientPackageTestScriptDiff(diff) {

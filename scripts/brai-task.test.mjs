@@ -402,6 +402,48 @@ test("delivery classifier separates infra-docs from runtime preview", () => {
     }).deliveryClass,
     "runtime-preview",
   );
+  assert.equal(
+    classifyDelivery(["services/brai_api/src/index.js", "services/brai_api/test/api.runtime-env.test.js"], {
+      diffs: {
+        "services/brai_api/src/index.js": [
+          "+if (process.env.BRAI_INBOUND_STORAGE_ROOT) {",
+          "+  console.error('BRAI_INBOUND_STORAGE_ROOT is obsolete; use BRAI_INBOX_STORAGE_ROOT');",
+          "+  process.exit(1);",
+          "+}",
+        ].join("\n"),
+      },
+    }).deliveryClass,
+    "technical-no-preview",
+  );
+  assert.deepEqual(classifyDeployDelivery(["services/brai_api/src/index.js", "services/brai_api/test/api.runtime-env.test.js"], {
+    eventName: "push",
+    ref: "refs/heads/codex/api-startup-guard",
+    diffs: {
+      "services/brai_api/src/index.js": [
+        "+if (process.env.BRAI_INBOUND_STORAGE_ROOT) {",
+        "+  console.error('BRAI_INBOUND_STORAGE_ROOT is obsolete; use BRAI_INBOX_STORAGE_ROOT');",
+        "+  process.exit(1);",
+        "+}",
+      ].join("\n"),
+    },
+  }), {
+    delivery_class: "technical-no-preview",
+    requires_preview: false,
+    requires_dev_deploy: false,
+    auto_merge: true,
+  });
+  assert.equal(
+    classifyDelivery(["services/brai_api/src/index.js"], {
+      diffs: { "services/brai_api/src/index.js": "+server.on('request', handler);" },
+    }).deliveryClass,
+    "runtime-preview",
+  );
+  assert.equal(
+    classifyDelivery(["services/brai_api/src/index.js"], {
+      diffs: { "services/brai_api/src/index.js": "-  process.exit(1);" },
+    }).deliveryClass,
+    "runtime-preview",
+  );
   assert.equal(classifyDelivery(["apps/brai_app/src/app/page.tsx"]).deliveryClass, "runtime-preview");
   assert.equal(classifyDelivery(["docs/foo.md", "apps/brai_app/src/app/page.tsx"]).deliveryClass, "runtime-preview");
   assert.equal(classifyDelivery(["package.json"]).fallback, "unknown_path");
