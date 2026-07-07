@@ -1284,6 +1284,7 @@ test("infra docs workflow marks handoff passed only from the PR merge job", () =
   assert.match(recordMergeJob, /Cleanup accepted no-preview branch/);
   assert.match(recordMergeJob, /deploy\/scripts\/ci-cleanup-accepted-branches\.sh --branch "\$BRAI_BRANCH"/);
   assert.match(recordMergeJob, /continue-on-error: true/);
+  assert.match(recordMergeJob, /permissions:\n\s+contents: write/);
   assert.match(autoMergeJob, /BRAI_ACCEPT_NO_PREVIEW_ONLY/);
   assert.match(recordMergeJob, /event delivery_handoff_passed/);
   assert.match(recordMergeJob, /event pr_merged/);
@@ -1298,6 +1299,7 @@ test("delivery workflow serializes main sync after prod deploy", () => {
   const syncJob = workflow.slice(workflow.indexOf("sync-local-main-checkout:"), workflow.indexOf("record-infra-docs-merge:"));
 
   assert.match(deployProdJob, /id: deploy_prod/);
+  assert.match(deployProdJob, /permissions:\n\s+contents: write/);
   assert.match(deployProdJob, /Temporal prod deploy failed\n\s+if: failure\(\) && steps\.deploy_prod\.outcome == 'failure'/);
   assert.match(syncJob, /needs: deploy-prod/);
 });
