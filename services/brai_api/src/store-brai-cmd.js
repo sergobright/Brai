@@ -133,6 +133,28 @@ export const braiCmdStoreMethods = {
       row.transcriptChars,
       row.clientVersion
     );
+    this.recordLog?.({
+      dt: row.createdAt,
+      source: 'brai-cmd',
+      operation: 'brai_cmd.dictate',
+      status: row.success ? 'done' : 'failed',
+      severityText: row.success ? 'INFO' : 'ERROR',
+      message: row.success ? 'Brai Cmd request completed' : 'Brai Cmd request failed',
+      jsonData: {
+        access_token_id: row.accessTokenId,
+        error_code: row.errorCode || null,
+        audio_bytes: row.audioBytes,
+        audio_duration_ms: row.audioDurationMs,
+        provider: row.provider,
+        model: row.model,
+        fallback_used: Boolean(row.fallbackUsed),
+        transcription_ms: row.transcriptionMs,
+        post_processing_ms: row.postProcessingMs,
+        total_ms: row.totalMs,
+        transcript_chars: row.transcriptChars,
+        client_version: row.clientVersion
+      }
+    });
     return row;
   },
 

@@ -9,6 +9,7 @@ import {
   jsonRequest,
   onceOpen,
   request,
+  eventDomainCount,
   tableCount,
   waitFor
 } from '../test-support/api.js';
@@ -42,7 +43,7 @@ test('actions event sync is idempotent and returns canonical state', async () =>
     assert.equal(second.status, 200);
     assert.equal(second.body.server_revision, 1);
     assert.equal(second.body.state.activities.length, 1);
-    assert.equal(tableCount(fixture, 'activity_events'), 1);
+    assert.equal(eventDomainCount(fixture, 'activity'), 1);
 
     const state = await request(fixture.url, '/v1/activities');
     assert.equal(state.status, 200);
@@ -86,7 +87,7 @@ test('actions sync deletes activities idempotently', async () => {
     assert.equal(second.body.server_revision, 2);
     assert.equal(second.body.state.activities.length, 0);
     assert.equal(second.body.state.archived_activities.length, 1);
-    assert.equal(tableCount(fixture, 'activity_events'), 2);
+    assert.equal(eventDomainCount(fixture, 'activity'), 2);
     assert.equal(activityTypeCount(fixture, 'action'), 1);
 
     const legacy = await request(fixture.url, '/v1/actions');
@@ -134,7 +135,7 @@ test('actions sync restores archived activities to the active top', async () => 
       })
     });
     assert.equal(duplicate.body.server_revision, 5);
-    assert.equal(tableCount(fixture, 'activity_events'), 5);
+    assert.equal(eventDomainCount(fixture, 'activity'), 5);
   } finally {
     await fixture.close();
   }
@@ -307,7 +308,7 @@ test('actions sync manually reorders new activities', async () => {
       })
     });
     assert.equal(duplicate.body.server_revision, 5);
-    assert.equal(tableCount(fixture, 'activity_events'), 5);
+    assert.equal(eventDomainCount(fixture, 'activity'), 5);
   } finally {
     await fixture.close();
   }
@@ -428,7 +429,7 @@ test('actions sync preserves markdown descriptions and clears them', async () =>
       })
     });
     assert.equal(duplicate.body.server_revision, 3);
-    assert.equal(tableCount(fixture, 'activity_events'), 3);
+    assert.equal(eventDomainCount(fixture, 'activity'), 3);
   } finally {
     await fixture.close();
   }
@@ -506,7 +507,7 @@ test('future and malformed action events are stored as ignored', async () => {
       { event_id: 'bad-status', reason: 'invalid_status' }
     ]);
     assert.equal(response.body.state.activities.length, 0);
-    assert.equal(tableCount(fixture, 'activity_events'), 3);
+    assert.equal(eventDomainCount(fixture, 'activity'), 3);
     assert.equal(activityTypeCount(fixture, 'action'), 0);
   } finally {
     await fixture.close();
@@ -525,7 +526,7 @@ test('unauthorized action sync stores no actions or action events', async () => 
       })
     });
     assert.equal(response.status, 401);
-    assert.equal(tableCount(fixture, 'activity_events'), 0);
+    assert.equal(eventDomainCount(fixture, 'activity'), 0);
     assert.equal(activityTypeCount(fixture, 'action'), 0);
   } finally {
     await fixture.close();

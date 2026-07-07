@@ -8,6 +8,7 @@ import {
   TOKEN,
   createFixture,
   inboxRequest,
+  eventDomainCount,
   tableCount,
   waitFor
 } from '../test-support/api.js';
@@ -116,7 +117,7 @@ test('Inbox API POST creates an immediately visible row with explanation and att
     });
     assert.equal(duplicate.status, 200);
     assert.equal(tableCount(fixture, 'inbox'), 1);
-    assert.equal(tableCount(fixture, 'inbox_events'), 1);
+    assert.equal(eventDomainCount(fixture, 'inbox'), 1);
     assert.equal(tableCount(fixture, 'ai_logs'), 0);
   } finally {
     await fixture.close();
@@ -271,7 +272,7 @@ test('Inbox API rejects invalid api key without mutating inbox', async () => {
 
     assert.equal(response.status, 401);
     assert.equal(tableCount(fixture, 'inbox'), 0);
-    assert.equal(tableCount(fixture, 'inbox_events'), 0);
+    assert.equal(eventDomainCount(fixture, 'inbox'), 0);
   } finally {
     await fixture.close();
   }
@@ -323,7 +324,7 @@ test('Inbox API rejects invalid images without mutating inbox', async () => {
     assert.equal(response.status, 400);
     assert.equal(response.body.error, 'invalid_image');
     assert.equal(tableCount(fixture, 'inbox'), 0);
-    assert.equal(tableCount(fixture, 'inbox_events'), 0);
+    assert.equal(eventDomainCount(fixture, 'inbox'), 0);
   } finally {
     await fixture.close();
   }

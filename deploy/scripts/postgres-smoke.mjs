@@ -77,7 +77,9 @@ try {
   if (activityTypes !== 2) throw new Error("activity_types seed is incomplete");
   if (inboxTypes < 4) throw new Error("inbox_record_types seed is incomplete");
   if (counters !== 2) throw new Error("build_version_counters seed is incomplete");
-  if (rlsAutoTrigger !== 1) throw new Error("public table RLS auto-enable trigger is missing or disabled");
+  if (runtimeSchema === "public" && rlsAutoTrigger !== 1) {
+    throw new Error("public table RLS auto-enable trigger is missing or disabled");
+  }
   if (rlsFunctionSearchPath !== 1) throw new Error("public table RLS auto-enable function search_path is mutable");
   if (publicTablesWithoutRls.length > 0) {
     throw new Error(`Runtime tables without RLS in ${runtimeSchema}: ${publicTablesWithoutRls.map((row) => row.table_name).join(", ")}`);

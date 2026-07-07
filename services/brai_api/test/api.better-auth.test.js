@@ -89,7 +89,7 @@ test('email OTP signs in, claims legacy data, and isolates the next user', async
       1
     );
     assert.equal(
-      fixture.store.db.prepare('SELECT COUNT(*) AS count FROM timer_events WHERE user_id = ?').get(first.user.id).count,
+      fixture.store.db.prepare("SELECT COUNT(*) AS count FROM events WHERE event_domain = 'timer' AND user_id = ?").get(first.user.id).count,
       2
     );
 

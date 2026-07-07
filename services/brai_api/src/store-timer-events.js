@@ -9,7 +9,7 @@ import {
   sanitizeText,
   toNullableInteger
 } from './store-helpers.js';
-import { scopeSql, scopedUserId } from './user-scope.js';
+import { scopeSql } from './user-scope.js';
 
 const TIMER_EVENT_TYPES = new Set([
   'start',
@@ -150,11 +150,7 @@ export const timerEventMethods = {
 ,
 
   getServerRevision() {
-    const scope = scopeSql();
-    const row = this.db
-      .prepare(`SELECT COALESCE(MAX(server_sequence), 0) AS revision FROM timer_events WHERE ${scope.where}`)
-      .get(...scope.params);
-    return row.revision;
+    return this.getEventDomainRevision('timer');
   }
 ,
 
@@ -270,8 +266,24 @@ export const timerEventMethods = {
     });
     run();
 
+    const serverRevision = this.getServerRevision();
+    this.recordLog({
+      dt: receivedAt,
+      source: 'sync',
+      operation: 'timer.events_sync',
+      status: 'done',
+      eventDomain: 'timer',
+      deviceId,
+      message: 'Timer events sync',
+      jsonData: {
+        accepted_count: acknowledged.length - ignored.length,
+        ignored_count: ignored.length,
+        server_revision: serverRevision,
+        platform
+      }
+    });
     return {
-      server_revision: this.getServerRevision(),
+      server_revision: serverRevision,
       server_time_utc: receivedAt,
       acknowledged_event_ids: acknowledged,
       ignored_events: ignored
@@ -283,14 +295,12 @@ export const timerEventMethods = {
     const eventId = sanitizeText(rawEvent?.event_id);
     if (!eventId) return { event_id: null };
 
-    const existing = this.db
-      .prepare('SELECT event_id, status, ignore_reason FROM timer_events WHERE event_id = ?')
-      .get(eventId);
+    const existing = this.existingEvent('timer', eventId) ?? this.existingIgnoredEvent('timer', eventId);
     if (existing) {
       return {
         event_id: eventId,
         ignored:
-          existing.status === 'ignored'
+          existing.ignore_reason
             ? { event_id: eventId, reason: existing.ignore_reason ?? 'ignored' }
             : null
       };
@@ -309,11 +319,7 @@ export const timerEventMethods = {
       return { event_id: eventId, ignored: { event_id: eventId, reason: 'invalid_client_sequence' } };
     }
 
-    const existingSequence = this.db
-      .prepare(
-        'SELECT event_id FROM timer_events WHERE device_id = ? AND client_sequence = ?'
-      )
-      .get(deviceId, clientSequence);
+    const existingSequence = this.existingDeviceSequence('timer', deviceId, clientSequence);
     if (existingSequence) {
       return {
         event_id: eventId,
@@ -456,48 +462,54 @@ export const timerEventMethods = {
 ,
 
   insertEvent(event) {
-    this.db
-      .prepare(
-        `
-          INSERT INTO timer_events (
-            event_id, device_id, client_sequence, server_sequence, type,
-            occurred_at_utc, received_at_utc, local_timer_id, base_server_revision,
-            status, ignore_reason, payload_version, metadata_json, user_id
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-          ON CONFLICT(event_id) DO NOTHING
-        `
-      )
-      .run(
-        event.event_id,
-        event.device_id,
-        event.client_sequence,
-        this.nextServerSequence(),
-        event.type,
-        event.occurred_at_utc,
-        event.received_at_utc,
-        event.local_timer_id ?? null,
-        event.base_server_revision ?? null,
-        event.status,
-        event.ignore_reason ?? null,
-        event.payload_version,
-        event.metadata_json ?? null,
-        scopedUserId()
-      );
+    if (event.status === 'ignored') {
+      this.recordSyncIgnoredEvent({
+        domain: 'timer',
+        eventId: event.event_id,
+        deviceId: event.device_id,
+        clientSequence: event.client_sequence,
+        receivedAt: event.received_at_utc,
+        reason: event.ignore_reason ?? 'ignored',
+        rawEvent: parseJsonObject(event.metadata_json).raw_event ?? event
+      });
+    }
+    const subject = timerEventSubject(event);
+    this.insertEventRecord({
+      eventId: event.event_id,
+      eventDomain: 'timer',
+      eventType: event.type,
+      eventAction: `timer.${event.type}`,
+      title: `Timer ${event.type}`,
+      itemsId: subject.itemsId,
+      subjectType: subject.subjectType,
+      subjectId: subject.subjectId,
+      actorType: event.device_id === LEGACY_DEVICE_ID ? 'system' : 'user',
+      actorId: event.device_id,
+      deviceId: event.device_id,
+      clientSequence: event.client_sequence,
+      occurredAtUtc: event.occurred_at_utc,
+      receivedAtUtc: event.received_at_utc,
+      baseServerRevision: event.base_server_revision,
+      status: event.status,
+      ignoreReason: event.ignore_reason,
+      payloadVersion: event.payload_version,
+      payloadJson: event.metadata_json ?? '{}'
+    });
   }
 ,
 
   nextServerSequence() {
-    return this.nextPostgresCounter('timer_events.server_sequence');
+    return this.nextPostgresCounter('events.domain_sequence.timer');
   }
 ,
 
   nextDeviceSequence(deviceId) {
-    return this.nextPostgresCounter(`timer_events.client_sequence.${deviceId}`);
+    return this.nextPostgresCounter(`events.client_sequence.${deviceId}`);
   }
 ,
 
   nextInvalidTimerClientSequence(deviceId) {
-    return -this.nextPostgresCounter(`timer_events.invalid_client_sequence.${deviceId}`);
+    return -this.nextPostgresCounter(`events.invalid_client_sequence.${deviceId}`);
   }
 ,
 
@@ -525,10 +537,15 @@ export const timerEventMethods = {
     const events = this.db
       .prepare(
         `
-          SELECT * FROM timer_events
-          WHERE status = 'accepted'
+          SELECT event_id, device_id, client_sequence, domain_sequence AS server_sequence,
+            event_type AS type, occurred_at_utc, received_at_utc,
+            subject_id AS local_timer_id, base_server_revision, 'accepted' AS status,
+            NULL AS ignore_reason, payload_version, payload_json AS metadata_json, user_id
+          FROM events
+          WHERE event_domain = 'timer'
+            AND status = 'accepted'
           ${scope.clause}
-          ORDER BY occurred_at_utc ASC, server_sequence ASC, device_id ASC, event_id ASC
+          ORDER BY occurred_at_utc ASC, domain_sequence ASC, device_id ASC, id ASC
         `
       )
       .all(...scope.params);
@@ -832,3 +849,18 @@ export const timerEventMethods = {
   }
 
 };
+
+function timerEventSubject(event) {
+  const metadata = parseJsonObject(event.metadata_json);
+  const activityId = sanitizeText(metadata.activity_id) ?? sanitizeText(metadata.action_id);
+  if (activityId && (event.type === 'start_activity_focus' || event.type === 'switch_activity_focus' || event.type === 'stop_activity_focus')) {
+    return { subjectType: 'activity', subjectId: activityId, itemsId: activityId };
+  }
+  const focusSessionId = sanitizeText(metadata.focus_session_id) ?? sanitizeText(metadata.session_id);
+  if (focusSessionId) {
+    return { subjectType: 'focus_session', subjectId: focusSessionId, itemsId: focusSessionId };
+  }
+  const focusIntervalId = sanitizeText(metadata.focus_interval_id) ?? sanitizeText(metadata.interval_id);
+  if (focusIntervalId) return { subjectType: 'focus_interval', subjectId: focusIntervalId, itemsId: null };
+  return { subjectType: 'timer', subjectId: sanitizeText(event.local_timer_id), itemsId: null };
+}

@@ -29,11 +29,7 @@ export const inboxEventMethods = {
 ,
 
   getInboxServerRevision() {
-    const scope = scopeSql();
-    const row = this.db
-      .prepare(`SELECT COALESCE(MAX(server_sequence), 0) AS revision FROM inbox_events WHERE ${scope.where}`)
-      .get(...scope.params);
-    return row.revision;
+    return this.getEventDomainRevision('inbox');
   }
 ,
 
@@ -42,7 +38,7 @@ export const inboxEventMethods = {
     if (!id) return null;
     const scope = scopeSql();
     return this.db
-      .prepare(`SELECT inbox_id FROM inbox_events WHERE event_id = ?${scope.clause}`)
+      .prepare(`SELECT subject_id AS inbox_id FROM events WHERE event_id = ? AND event_domain = 'inbox'${scope.clause}`)
       .get(id, ...scope.params)?.inbox_id ?? null;
   }
 ,
@@ -281,8 +277,24 @@ export const inboxEventMethods = {
     });
     run();
 
+    const serverRevision = this.getInboxServerRevision();
+    this.recordLog({
+      dt: receivedAt,
+      source: 'sync',
+      operation: 'inbox.events_sync',
+      status: 'done',
+      eventDomain: 'inbox',
+      deviceId,
+      message: 'Inbox events sync',
+      jsonData: {
+        accepted_count: acceptedEvents.length,
+        ignored_count: ignored.length,
+        server_revision: serverRevision,
+        platform
+      }
+    });
     return {
-      server_revision: this.getInboxServerRevision(),
+      server_revision: serverRevision,
       server_time_utc: receivedAt,
       acknowledged_event_ids: acknowledged,
       ignored_events: ignored
@@ -294,14 +306,12 @@ export const inboxEventMethods = {
     const eventId = sanitizeText(rawEvent?.event_id);
     if (!eventId) return { event_id: null };
 
-    const existing = this.db
-      .prepare('SELECT event_id, status, ignore_reason FROM inbox_events WHERE event_id = ?')
-      .get(eventId);
+    const existing = this.existingEvent('inbox', eventId) ?? this.existingIgnoredEvent('inbox', eventId);
     if (existing) {
       return {
         event_id: eventId,
         ignored:
-          existing.status === 'ignored'
+          existing.ignore_reason
             ? { event_id: eventId, reason: existing.ignore_reason ?? 'ignored' }
             : null
       };
@@ -320,9 +330,7 @@ export const inboxEventMethods = {
       return { event_id: eventId, ignored: { event_id: eventId, reason: 'invalid_client_sequence' } };
     }
 
-    const existingSequence = this.db
-      .prepare('SELECT event_id FROM inbox_events WHERE device_id = ? AND client_sequence = ?')
-      .get(deviceId, clientSequence);
+    const existingSequence = this.existingDeviceSequence('inbox', deviceId, clientSequence);
     if (existingSequence) {
       return {
         event_id: eventId,
@@ -431,49 +439,52 @@ export const inboxEventMethods = {
 ,
 
   insertInboxEvent(event) {
-    const serverSequence = this.nextInboxServerSequence();
-    const result = this.db
-      .prepare(
-        `
-          INSERT INTO inbox_events (
-            event_id, device_id, client_sequence, server_sequence, inbox_id,
-            type, occurred_at_utc, received_at_utc, payload_json,
-            status, ignore_reason, payload_version, user_id
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-          ON CONFLICT(event_id) DO NOTHING
-        `
-      )
-      .run(
-        event.event_id,
-        event.device_id,
-        event.client_sequence,
-        serverSequence,
-        event.inbox_id ?? null,
-        event.type,
-        event.occurred_at_utc,
-        event.received_at_utc,
-        event.payload_json ?? null,
-        event.status,
-        event.ignore_reason ?? null,
-        event.payload_version,
-        scopedUserId()
-      );
-    return result.changes > 0 ? serverSequence : null;
+    if (event.status === 'ignored') {
+      this.recordSyncIgnoredEvent({
+        domain: 'inbox',
+        eventId: event.event_id,
+        deviceId: event.device_id,
+        clientSequence: event.client_sequence,
+        receivedAt: event.received_at_utc,
+        reason: event.ignore_reason ?? 'ignored',
+        rawEvent: parseJsonObject(event.payload_json).raw_event ?? event
+      });
+    }
+    return this.insertEventRecord({
+      eventId: event.event_id,
+      eventDomain: 'inbox',
+      eventType: event.type,
+      eventAction: `inbox.${event.type}`,
+      title: `Inbox ${event.type}`,
+      itemsId: event.inbox_id,
+      subjectType: 'inbox',
+      subjectId: event.inbox_id,
+      actorType: event.device_id === 'inbox-ai' ? 'agent' : 'user',
+      actorId: event.device_id,
+      deviceId: event.device_id,
+      clientSequence: event.client_sequence,
+      occurredAtUtc: event.occurred_at_utc,
+      receivedAtUtc: event.received_at_utc,
+      status: event.status,
+      ignoreReason: event.ignore_reason,
+      payloadVersion: event.payload_version,
+      payloadJson: event.payload_json ?? '{}'
+    });
   }
 ,
 
   nextInboxServerSequence() {
-    return this.nextPostgresCounter('inbox_events.server_sequence');
+    return this.nextPostgresCounter('events.domain_sequence.inbox');
   }
 ,
 
   nextInvalidInboxClientSequence(deviceId) {
-    return -this.nextPostgresCounter(`inbox_events.invalid_client_sequence.${deviceId}`);
+    return -this.nextPostgresCounter(`events.invalid_client_sequence.${deviceId}`);
   }
 ,
 
   nextInboxClientSequence(deviceId) {
-    return this.nextPostgresCounter(`inbox_events.client_sequence.${deviceId}`);
+    return this.nextPostgresCounter(`events.client_sequence.${deviceId}`);
   }
 ,
 
@@ -488,11 +499,14 @@ export const inboxEventMethods = {
     const events = this.db
       .prepare(
         `
-          SELECT * FROM inbox_events
-          WHERE status = 'accepted'
-            AND inbox_id = ?
+          SELECT event_id, subject_id AS inbox_id, event_type AS type,
+            occurred_at_utc, received_at_utc, domain_sequence AS server_sequence, payload_json, user_id
+          FROM events
+          WHERE event_domain = 'inbox'
+            AND status = 'accepted'
+            AND subject_id = ?
             ${scope.clause}
-          ORDER BY occurred_at_utc ASC, server_sequence ASC
+          ORDER BY occurred_at_utc ASC, domain_sequence ASC
         `
       )
       .all(inboxId, ...scope.params);
