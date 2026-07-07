@@ -38,6 +38,7 @@ test('accepted preview version recording creates idempotent build row with autho
       versions.map((row) => [row.version_type_id, row.version, row.included_in_version_id, row.short_changes]),
       [
         ['apk', 1, null, 'Первичная публичная APK-сборка.'],
+        ['apk', 2, null, 'Актуальная публичная APK-сборка v2.'],
         ['build', 1, null, 'Первичная публичная web/OTA-сборка.'],
         ['build', 2, null, accepted.sourceShortChanges],
       ]
@@ -67,6 +68,7 @@ test('release and canon version creation remain disabled', async () => {
       store.db.prepare('SELECT version_type_id, version FROM build_versions ORDER BY version_type_id, version').all(),
       [
         { version_type_id: 'apk', version: 1 },
+        { version_type_id: 'apk', version: 2 },
         { version_type_id: 'build', version: 1 },
       ]
     );
@@ -135,6 +137,7 @@ test('accepted preview promotion records deployment and required build ledger ro
         promoted.db.prepare('SELECT version_type_id, version FROM build_versions ORDER BY version_type_id, version').all(),
         [
           { version_type_id: 'apk', version: 1 },
+          { version_type_id: 'apk', version: 2 },
           { version_type_id: 'build', version: 1 },
           { version_type_id: 'build', version: 2 },
         ]
@@ -360,14 +363,14 @@ test('reset script resets APK row without deleting build history', async () => {
     });
     store.upsertBuildVersion({
       versionTypeId: 'apk',
-      version: 2,
+      version: 3,
       includedInVersionId: null,
-      shortChanges: 'Legacy APK 2.',
-      detailedChanges: 'Legacy APK 2.',
-      reason: 'Legacy APK 2.',
+      shortChanges: 'Legacy APK 3.',
+      detailedChanges: 'Legacy APK 3.',
+      reason: 'Legacy APK 3.',
       releasedAtUtc: now,
       targetBranch: 'main',
-      targetCommit: 'legacy-apk-2',
+      targetCommit: 'legacy-apk-3',
     });
     store.close();
 
@@ -381,18 +384,23 @@ test('reset script resets APK row without deleting build history', async () => {
     try {
       assert.deepEqual(
         reset.db.prepare('SELECT id FROM version_types ORDER BY id').all().map((row) => row.id),
-        ['apk', 'build']
+        ['apk', 'build', 'canon', 'release']
       );
       assert.deepEqual(
         reset.db.prepare('SELECT version_type_id, version, short_changes FROM build_versions ORDER BY version_type_id, version').all(),
         [
           { version_type_id: 'apk', version: 1, short_changes: 'Первичная публичная APK-сборка.' },
+          { version_type_id: 'apk', version: 2, short_changes: 'Актуальная публичная APK-сборка v2.' },
           { version_type_id: 'build', version: 1, short_changes: 'Первичная публичная web/OTA-сборка.' },
           { version_type_id: 'build', version: 2, short_changes: 'Accepted build.' },
+          { version_type_id: 'canon', version: 1, short_changes: 'Legacy canon.' },
+          { version_type_id: 'release', version: 1, short_changes: 'Legacy release.' },
         ]
       );
       assert.equal(reset.db.prepare("SELECT COUNT(*) AS count FROM build_version_refs WHERE version_type_id = 'apk'").get().count, 0);
+      assert.equal(reset.db.prepare("SELECT last_version FROM build_version_counters WHERE version_type_id = 'apk'").get().last_version, 2);
       assert.equal(reset.db.prepare("SELECT COUNT(*) AS count FROM build_version_refs WHERE version_type_id = 'build'").get().count, 1);
+      assert.equal(reset.db.prepare("SELECT COUNT(*) AS count FROM build_version_refs WHERE version_type_id IN ('canon', 'release')").get().count, 2);
     } finally {
       reset.close();
     }

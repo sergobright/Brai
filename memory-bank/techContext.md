@@ -26,9 +26,9 @@ Version baseline after the APK reset:
 
 - OTA/web version format: `X.Y.Z`
 - APK version format: `vN`
-- Initial APK: `v1`
-- Android `versionName`: `1`
-- Android `versionCode`: `1`
+- Current APK baseline: `v2`
+- Android `versionName`: `2`
+- Android `versionCode`: `2`
 - Release ledger table: `build_versions`
 - Runtime `build_versions` contains accepted `build` rows and the separate `apk` counter.
 - Accepted working-branch promotion into `main`: write the `build` row first, then record deployment metadata.

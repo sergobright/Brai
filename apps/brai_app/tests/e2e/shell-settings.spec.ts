@@ -32,16 +32,16 @@ test("opens Engine from the profile menu", async ({ page }) => {
         apk: {
           id: 52,
           version_type_id: "apk",
-          version: 1,
+          version: 2,
           included_in_version_id: null,
           short_changes: "Первичная публичная APK-сборка.",
-          detailed_changes: "APK v1.",
-          reason: "Начинаем APK-линейку заново.",
+          detailed_changes: "APK v2.",
+          reason: "Актуальная APK-линейка Brai.",
           released_at_utc: "2026-06-29T12:00:00.000Z",
           created_at_utc: "2026-06-29T12:00:00.000Z",
         },
       },
-      target_apk: { version: 1, file: "brai-v1.apk", release_url: "/releases/", capabilities: [] },
+      target_apk: { version: 2, file: "brai-v2.apk", release_url: "/releases/", capabilities: [] },
     }),
   }));
 
@@ -104,7 +104,7 @@ test("keeps Android Engine download progress compact on mobile", async ({ page }
         version: "0.11.52",
         ota_version: "0.11.52",
         latest: { canon: null, release: null, build: null, apk: null },
-        target_apk: { version: 1, file: "brai-v1.apk", release_url: "/releases/", capabilities: [] },
+        target_apk: { version: 2, file: "brai-v2.apk", release_url: "/releases/", capabilities: [] },
       } :
       path === "/v1/timer/state" ? {
         server_time_utc: now,

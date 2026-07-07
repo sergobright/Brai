@@ -9,9 +9,9 @@ test('version endpoint returns build ledger, APK line, and release-index OTA tar
         schemaVersion: 2,
         sections: {
           production: {
-            file: 'brai-v1.apk',
-            apkVersion: 1,
-            versionCode: 1,
+            file: 'brai-v2.apk',
+            apkVersion: 2,
+            versionCode: 2,
             publishedAt: '2026-06-30T20:23:42Z',
             capabilities: ['AccessibilityService', 'Overlay', 'Microphone', 'MediaProjection']
           }
@@ -22,9 +22,18 @@ test('version endpoint returns build ledger, APK line, and release-index OTA tar
       'manifest.json': JSON.stringify({
         schemaVersion: 2,
         otaVersion: '0.0.41',
-        targetApkVersion: 1
+        targetApkVersion: 2
       })
     }
+  });
+  fixture.store.upsertBuildVersion({
+    versionTypeId: 'apk',
+    version: 2,
+    includedInVersionId: null,
+    shortChanges: 'Актуальная публичная APK-сборка v2.',
+    detailedChanges: 'APK v2.',
+    reason: 'Актуальная APK-линейка Brai.',
+    releasedAtUtc: '2026-06-30T20:23:42Z',
   });
 
   try {
@@ -33,15 +42,15 @@ test('version endpoint returns build ledger, APK line, and release-index OTA tar
     assert.equal(response.status, 200);
     assert.equal(response.body.version, '0.0.41');
     assert.equal(response.body.ota_version, '0.0.41');
-    assert.deepEqual(response.body.parts, { canon: 0, release: 0, build: 1, apk: 1 });
+    assert.deepEqual(response.body.parts, { canon: 0, release: 0, build: 1, apk: 2 });
     assert.equal(response.body.latest.canon, null);
     assert.equal(response.body.latest.release, null);
     assert.equal(response.body.latest.build.version, 1);
-    assert.equal(response.body.latest.apk.version, 1);
+    assert.equal(response.body.latest.apk.version, 2);
     assert.deepEqual(response.body.target_apk, {
-      file: 'brai-v1.apk',
-      version: 1,
-      version_code: 1,
+      file: 'brai-v2.apk',
+      version: 2,
+      version_code: 2,
       release_key: 'production',
       apk_build_kind: 'stable',
       preview_iteration: null,
@@ -50,9 +59,9 @@ test('version endpoint returns build ledger, APK line, and release-index OTA tar
       capabilities: ['AccessibilityService', 'Overlay', 'Microphone', 'MediaProjection']
     });
     assert.deepEqual(response.body.apk_release, {
-      file: 'brai-v1.apk',
-      version: 1,
-      version_code: 1,
+      file: 'brai-v2.apk',
+      version: 2,
+      version_code: 2,
       release_key: 'production',
       apk_build_kind: 'stable',
       preview_iteration: null,

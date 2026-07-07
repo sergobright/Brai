@@ -797,11 +797,12 @@ INSERT INTO build_versions (
   created_at_utc
 ) VALUES
   ('build', 1, NULL, 'Первичная публичная web/OTA-сборка.', 'Начальная запись web/OTA-сборки Brai.', 'Начальное состояние runtime базы Brai.', now()::text, now()::text),
-  ('apk', 1, NULL, 'Первичная публичная APK-сборка.', 'Начальная запись APK-линии Brai.', 'Начальное состояние runtime базы Brai.', now()::text, now()::text)
+  ('apk', 1, NULL, 'Первичная публичная APK-сборка.', 'Начальная запись APK-линии Brai.', 'Начальное состояние runtime базы Brai.', now()::text, now()::text),
+  ('apk', 2, NULL, 'Актуальная публичная APK-сборка v2.', 'APK v2 использует Android versionName 2 и versionCode 2.', 'Ошибочные APK выше v2 удаляются, актуальная APK-линейка Brai продолжается с v2.', now()::text, now()::text)
 ON CONFLICT (version_type_id, version) DO NOTHING;
 
 INSERT INTO build_version_counters (version_type_id, last_version) VALUES
-  ('apk', 1),
+  ('apk', 2),
   ('build', 1)
 ON CONFLICT (version_type_id) DO UPDATE
 SET last_version = GREATEST(build_version_counters.last_version, excluded.last_version);

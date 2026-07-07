@@ -9,29 +9,25 @@ if (!dbTarget) throw new Error("missing --postgres-url or BRAI_DATABASE_URL");
 const store = new BraiStore(dbTarget);
 try {
   const releasedAtUtc = args["released-at"] || "2026-06-23T09:13:50Z";
-  store.db.transaction(() => {
-    store.db.prepare("DELETE FROM build_version_refs WHERE version_type_id = 'apk'").run();
-    store.db.prepare("DELETE FROM build_versions WHERE version_type_id = 'apk'").run();
-    store.db.prepare("DELETE FROM build_version_refs WHERE version_type_id IN ('release', 'canon')").run();
-    store.db.prepare("DELETE FROM build_versions WHERE version_type_id IN ('release', 'canon')").run();
-    store.db.prepare("DELETE FROM build_version_counters WHERE version_type_id IN ('release', 'canon')").run();
-    store.db.prepare("DELETE FROM version_types WHERE id IN ('release', 'canon')").run();
-    try {
-      store.db.prepare("UPDATE build_version_counters SET last_version = 0 WHERE version_type_id = 'apk'").run();
-    } catch (error) {
+    store.db.transaction(() => {
+      store.db.prepare("DELETE FROM build_version_refs WHERE version_type_id = 'apk' AND version > 2").run();
+      store.db.prepare("DELETE FROM build_versions WHERE version_type_id = 'apk' AND version > 2").run();
+      try {
+        store.db.prepare("UPDATE build_version_counters SET last_version = 2 WHERE version_type_id = 'apk'").run();
+      } catch (error) {
       if (!String(error?.message ?? error).includes("build_version_counters")) throw error;
     }
     store.upsertBuildVersion({
       versionTypeId: "apk",
-      version: 1,
+      version: 2,
       includedInVersionId: null,
-      shortChanges: "Первичная публичная APK-сборка.",
-      detailedChanges: "APK v1 использует Android versionName 1 и versionCode 1. В сборке объявлены AccessibilityService для доступа к экрану, overlay permission для плавающих кнопок, уведомления, микрофон и foreground service для MediaProjection/системного аудио там, где Android или ROM разрешает такие возможности.",
-      reason: "Старые APK полностью удаляются, APK-линейка Brai начинается заново с v1.",
+      shortChanges: "Актуальная публичная APK-сборка v2.",
+      detailedChanges: "APK v2 использует Android versionName 2 и versionCode 2. В сборке объявлены AccessibilityService для доступа к экрану, overlay permission для плавающих кнопок, уведомления, микрофон и foreground service для MediaProjection/системного аудио там, где Android или ROM разрешает такие возможности.",
+      reason: "Ошибочные APK выше v2 удаляются, актуальная APK-линейка Brai продолжается с v2.",
       releasedAtUtc,
     });
   })();
-  console.log(JSON.stringify({ ok: true, db: "postgres", apk: 1 }, null, 2));
+  console.log(JSON.stringify({ ok: true, db: "postgres", apk: 2 }, null, 2));
 } finally {
   store.close();
 }

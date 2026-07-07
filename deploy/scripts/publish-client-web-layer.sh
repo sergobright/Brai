@@ -43,7 +43,7 @@ fi
 "$NODE_BIN" -e '
 const fs = require("node:fs");
 const path = require("node:path");
-const [root, version] = process.argv.slice(1);
+const [root, version, androidVersionCode] = process.argv.slice(1);
 const outVersionFile = path.join(root, "apps/brai_app/out/version.json");
 const publicVersionFile = path.join(root, "apps/brai_app/public/version.json");
 const sourceFile = fs.existsSync(outVersionFile) ? outVersionFile : publicVersionFile;
@@ -52,9 +52,10 @@ const [major, release, build] = version.split(".").map(Number);
 Object.assign(parsed, {
   version,
   versionParts: { major, release, build },
+  androidVersionCode: Number(androidVersionCode || parsed.androidVersionCode || 1),
 });
 fs.writeFileSync(outVersionFile, `${JSON.stringify(parsed, null, 2)}\n`);
-' "$ROOT" "$VERSION"
+' "$ROOT" "$VERSION" "${BRAI_TARGET_APK_VERSION_CODE:-${BRAI_ANDROID_VERSION_CODE:-}}"
 "$NODE_BIN" "$SCRIPT_DIR/write-client-runtime-config.mjs"
 
 echo "Publishing browser web assets..."

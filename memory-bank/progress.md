@@ -9,7 +9,7 @@
 - Clean `main` was pushed to the public repository.
 - GitHub Actions deploys production from `main`; the current delivery loop uses `main` and `codex/*`.
 - Branch protection requires `public-guard` and `checks`.
-- APK versioning is reset to `v1`; OTA/web versioning uses `X.Y.Z`.
+- APK versioning baseline is `v2`; OTA/web versioning uses `X.Y.Z`.
 - Versioning is no longer coupled to GitHub PR numbers.
 - Runtime `build_versions` is the source of truth for accepted build rows and the separate APK line.
 

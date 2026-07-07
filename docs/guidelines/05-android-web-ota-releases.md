@@ -2,7 +2,7 @@
 
 Brai uses separate version lines for APK and OTA/web.
 
-- APK uses the public integer counter `vN`, starting at `v1`.
+- APK uses the public integer counter `vN`; the current public baseline is `v2`.
 - Android `versionName` is `N`; Android `versionCode` defaults to the same `N`.
 - Native-boundary preview builds reserve the next stable `N` for the task branch and use a global preview iteration `M`; their Android `versionCode` is `N * 10000 + M`.
 - Preview `M` is committed only after the preview deploy is fully ready; failed builds and failed deploys retry the same `M`.
@@ -10,7 +10,7 @@ Brai uses separate version lines for APK and OTA/web.
 - Preview APKs are transient separate applications from the stable Preview A-E baseline, so rejected preview APKs cannot update into accepted stable APKs.
 - OTA/web uses `X.Y.Z`; the old fourth public digit is not shown or compared.
 - `build_versions` stores accepted production build rows (`version_type_id='build'`) and a separate APK row (`version_type_id='apk'`).
-- APK reset affects only the APK line: after reset there is one APK row, `version_type_id='apk', version=1`; existing `build` rows remain.
+- APK reset affects only the APK line: after reset APK rows `version_type_id='apk', version IN (1, 2)` remain, APK rows above `2` are deleted, and existing `build` rows remain.
 - Accepted production promotion must create or reuse one `build_versions` build row before the workflow is considered complete.
 - Each accepted build row must store Russian `short_changes`, `detailed_changes`, and `reason` from explicit preview/release-note metadata.
 - Branch names, commits, domains, and deploy metadata belong in `build_version_refs` or `deployment_records`, not release-note text.

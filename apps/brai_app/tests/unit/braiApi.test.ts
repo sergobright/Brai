@@ -35,7 +35,7 @@ describe("BraiApi", () => {
           version: "0.11.52",
           ota_version: "0.11.52",
           latest: { canon: null, release: null, build: null, apk: null },
-          target_apk: { version: 1, file: "brai-v1.apk", release_url: "/releases/", capabilities: [] },
+          target_apk: { version: 2, file: "brai-v2.apk", release_url: "/releases/", capabilities: [] },
         }),
         { status: 200, headers: { "content-type": "application/json" } },
       ),
@@ -45,7 +45,7 @@ describe("BraiApi", () => {
 
     expect(fetchMock.mock.calls[0][0]).toBe("https://api.example.test/v1/version");
     expect(response.ota_version).toBe("0.11.52");
-    expect(response.target_apk?.file).toBe("brai-v1.apk");
+    expect(response.target_apk?.file).toBe("brai-v2.apk");
   });
 
   it("sends global stop metadata with synced timer events", async () => {

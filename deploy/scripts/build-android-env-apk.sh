@@ -112,7 +112,7 @@ fi
 "$NODE_BIN" -e '
 const fs = require("node:fs");
 const path = require("node:path");
-const [root, version] = process.argv.slice(1);
+const [root, version, androidVersionCode] = process.argv.slice(1);
 const outVersionFile = path.join(root, "apps/brai_app/out/version.json");
 const publicVersionFile = path.join(root, "apps/brai_app/public/version.json");
 const sourceFile = fs.existsSync(outVersionFile) ? outVersionFile : publicVersionFile;
@@ -121,9 +121,10 @@ const [major, release, build] = version.split(".").map(Number);
 Object.assign(parsed, {
   version,
   versionParts: { major, release, build },
+  androidVersionCode: Number(androidVersionCode),
 });
 fs.writeFileSync(outVersionFile, `${JSON.stringify(parsed, null, 2)}\n`);
-' "$ROOT" "$BRAI_APP_VERSION"
+' "$ROOT" "$BRAI_APP_VERSION" "$BRAI_ANDROID_VERSION_CODE"
 verify_version_json "$ROOT/apps/brai_app/out/version.json" "$BRAI_APP_VERSION"
 "$NODE_BIN" "$SCRIPT_DIR/write-client-runtime-config.mjs"
 (cd "$ROOT" && "$NPM_BIN" run app:cap:sync)
