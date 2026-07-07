@@ -1,8 +1,0 @@
-- [x] 1.1 Add scheduled agent Postgres schema, metadata, and migration marker.
-- [x] 1.2 Add a one-shot scheduler runner that claims due schedules and advances recurring intervals after success or failure.
-- [x] 1.3 Remove the legacy `TASKS.md` dedupe agent and schedule after agent tasks moved out of the root `TASKS.md` file.
-- [x] 1.4 Add systemd service and timer units for five-minute wakeups.
-- [x] 1.5 Add focused API tests for migration and schedule execution.
-- [x] 1.6 Run API, OpenSpec, public guard, and delivery checks before handoff.
-- [ ] 1.7 Verify live Postgres schedule rows and systemd timer after deployment.
-- [ ] 1.8 Archive this OpenSpec change after review/merge.

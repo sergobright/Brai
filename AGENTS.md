@@ -24,7 +24,7 @@ This file routes agents to the project rules.
 - Для preview-class финальный implementation response начинается строго с verified header из `scripts/brai-preview-handoff.sh`: `<slot emoji> Preview`, затем URL, branch, commit.
 - Если пользователь после preview говорит `Принято`, `принимаю`, `accepted` или эквивалент без отрицания, запускать `deploy/scripts/accept-preview.sh <codex-branch>` и мониторить PR/merge/prod deploy/slot release.
 - Короткие ссылки: [docs/DEVELOPMENT_GUIDELINES.md](docs/DEVELOPMENT_GUIDELINES.md), [docs/guidelines/07-git-versioning-repository-sync.md](docs/guidelines/07-git-versioning-repository-sync.md), [docs/operations/branch-preview-environments.md](docs/operations/branch-preview-environments.md), [docs/operations/temporal-ci-cd.md](docs/operations/temporal-ci-cd.md), [docs/checklists/CHECKLIST_REPOSITORY_SYNC.md](docs/checklists/CHECKLIST_REPOSITORY_SYNC.md).
-- Исключение: работа внутри `admin/` следует `admin/AGENTS.md`; это standalone admin project, не обычный preview-slot flow.
+- Работа внутри `admin/` следует `admin/AGENTS.md`; admin является частью основного Brai repo и обычного branch delivery flow, если локальные admin-правила не требуют отдельного deploy-шага.
 
 ## Final Preview Handoff
 

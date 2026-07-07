@@ -1,0 +1,39 @@
+{
+  "name": "brai-admin",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "dev": "next dev -H 127.0.0.1 -p ${PORT:-3040}",
+    "build": "next build",
+    "start": "next start -H 127.0.0.1 -p ${PORT:-3040}",
+    "lint": "eslint",
+    "live-deploy": "bash scripts/live-deploy.sh",
+    "sync-table-descriptions": "node scripts/sync-table-descriptions.mjs",
+    "self-check": "node scripts/self-check.mjs",
+    "visual-check": "node scripts/visual-check.mjs"
+  },
+  "dependencies": {
+    "@base-ui/react": "^1.6.0",
+    "geist": "^1.7.2",
+    "lucide-react": "^1.21.0",
+    "next": "16.2.9",
+    "pg": "^8.16.3",
+    "radix-ui": "^1.6.0",
+    "react": "19.2.4",
+    "react-dom": "19.2.4"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "16.2.9",
+    "tailwindcss": "^4",
+    "typescript": "^5"
+  }
+}
