@@ -192,19 +192,16 @@ tasks.register('validateBraiAndroidApiBundle') {
         if (!assetsDir.exists()) {
             throw new GradleException("Missing Capacitor web assets for ${commandFlavor}; run deploy/scripts/build-android-env-apk.sh ${commandFlavor}.")
         }
-        def textAssets = fileTree(assetsDir).matching {
-            include '**/*.html'
-            include '**/*.js'
-            include '**/*.json'
-            include '**/*.txt'
-        }.files
-        def productionAsset = textAssets.find { asset -> asset.getText('UTF-8').contains(braiProductionAndroidApi) }
-        if (productionAsset != null) {
-            throw new GradleException("Non-production Android build contains production API in ${productionAsset.name}. Rebuild web assets with NEXT_PUBLIC_BRAI_ANDROID_API=${expectedApi} before Gradle packaging.")
+        def runtimeConfigFile = file("$assetsDir/brai-runtime-config.js")
+        if (!runtimeConfigFile.exists()) {
+            throw new GradleException("Missing runtime config for ${commandFlavor}; run deploy/scripts/build-android-env-apk.sh ${commandFlavor}.")
         }
-        def expectedAsset = textAssets.find { asset -> asset.getText('UTF-8').contains(expectedApi) }
-        if (expectedAsset == null) {
-            throw new GradleException("Non-production Android build assets do not contain ${expectedApi}. Use deploy/scripts/build-android-env-apk.sh ${commandFlavor}.")
+        def runtimeConfig = runtimeConfigFile.getText('UTF-8')
+        if (runtimeConfig.contains(braiProductionAndroidApi)) {
+            throw new GradleException("Non-production runtime config contains production API. Rebuild runtime config with NEXT_PUBLIC_BRAI_ANDROID_API=${expectedApi} before Gradle packaging.")
+        }
+        if (!runtimeConfig.contains(expectedApi)) {
+            throw new GradleException("Non-production runtime config does not contain ${expectedApi}. Use deploy/scripts/build-android-env-apk.sh ${commandFlavor}.")
         }
     }
 }
