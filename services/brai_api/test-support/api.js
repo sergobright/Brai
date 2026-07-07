@@ -6,7 +6,7 @@ import { Pool } from 'pg';
 import { createBraiServer } from '../src/server.js';
 
 export const TOKEN = 'test-token';
-export const INBOUND_TOKEN = 'test-inbound-token';
+export const INBOX_API_KEY = 'test-inbox-api-key';
 export const WEB_PASSWORD = 'test-password';
 export const RELEASE_PASSWORD = 'release-password';
 export const SESSION_SECRET = 'test-session-secret';
@@ -43,8 +43,8 @@ export async function createFixture(times, options = {}) {
     authFromEmail: options.authFromEmail,
     sendOtp: options.sendOtp,
     releaseDir: options.releaseFiles || options.mobileFiles ? releaseDir : null,
-    inboundApiKey: options.inboundApiKey ?? options.inboundToken ?? INBOUND_TOKEN,
-    inboundStorageRoot: options.inboundStorageRoot ?? path.join(tmp, 'inbox-attachments'),
+    inboxApiKey: options.inboxApiKey ?? INBOX_API_KEY,
+    inboxStorageRoot: options.inboxStorageRoot ?? path.join(tmp, 'inbox-attachments'),
     vaultRoot: options.vaultRoot,
     syncthingGuiAddress: options.syncthingGuiAddress,
     syncthingApiKey: options.syncthingApiKey,
@@ -53,7 +53,9 @@ export async function createFixture(times, options = {}) {
     codexBin: options.codexBin,
     codexModel: options.codexModel,
     codexTimeoutMs: options.codexTimeoutMs,
-    inboundTitleGenerator: options.inboundTitleGenerator,
+    inboxImageDescriber: options.inboxImageDescriber,
+    inboxNormalizer: options.inboxNormalizer,
+    inboxAutoProcess: options.inboxAutoProcess ?? false,
     braiCmd: options.braiCmd,
     branch: options.branch,
     commit: options.commit,
@@ -92,7 +94,7 @@ export async function request(baseUrl, pathName, options = {}, authorized = true
   );
 }
 
-export async function inboundRequest(baseUrl, pathName, options = {}, authorized = true) {
+export async function inboxRequest(baseUrl, pathName, options = {}, authorized = true) {
   return jsonRequest(
     baseUrl,
     pathName,
@@ -100,7 +102,7 @@ export async function inboundRequest(baseUrl, pathName, options = {}, authorized
       ...options,
       headers: authorized
         ? {
-            'x-brai-api-key': INBOUND_TOKEN,
+            'x-brai-api-key': INBOX_API_KEY,
             ...(options.headers ?? {})
           }
         : options.headers

@@ -1,5 +1,5 @@
 import { scopedUserId } from './user-scope.js';
-import { originalNameForImagePreview } from './inbound.js';
+import { originalNameForImagePreview } from './inbox.js';
 
 const OWNED_TABLES = [
   'activities',

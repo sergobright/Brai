@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import {
   FUTURE_EVENT_TOLERANCE_MS,
   INBOX_EVENT_PAYLOAD_VERSION,
@@ -46,7 +47,17 @@ export const inboxEventMethods = {
   }
 ,
 
-  latestInboxIdForInbound({ source, sourceKey }) {
+  getInboxItem(inboxId) {
+    const id = sanitizeText(inboxId);
+    if (!id) return null;
+    const scope = scopeSql();
+    return formatInboxItem(this.db
+      .prepare(`SELECT * FROM inbox WHERE id = ?${scope.clause}`)
+      .get(id, ...scope.params));
+  }
+,
+
+  latestInboxIdForInbox({ source, sourceKey }) {
     const scope = scopeSql();
     const cleanSourceKey = sanitizeText(sourceKey);
     if (cleanSourceKey) {
@@ -94,7 +105,7 @@ export const inboxEventMethods = {
   }
 ,
 
-  createInboundInboxItem({
+  createInboxApiItem({
     eventId,
     inboxId,
     title,
@@ -109,14 +120,14 @@ export const inboxEventMethods = {
     nowIso
   }) {
     const receivedAt = nowIso ?? new Date().toISOString();
-    const deviceId = 'inbound-api';
+    const deviceId = 'inbox-api';
 
     const run = this.db.transaction(() => {
       this.upsertDevice(
         {
           device_id: deviceId,
           platform: 'server',
-          display_name: 'Inbound API'
+          display_name: 'Inbox API'
         },
         receivedAt,
         { lastSyncAtUtc: receivedAt, lastServerClockOffsetMs: 0 }
@@ -145,6 +156,88 @@ export const inboxEventMethods = {
       return result;
     });
     return run();
+  }
+,
+
+  createInboxNormalizationEvent({ inboxId, payload, nowIso }) {
+    const id = sanitizeText(inboxId);
+    if (!id) return { event_id: null };
+    const receivedAt = nowIso ?? new Date().toISOString();
+    const deviceId = 'inbox-ai';
+
+    const run = this.db.transaction(() => {
+      this.upsertDevice(
+        {
+          device_id: deviceId,
+          platform: 'server',
+          display_name: 'Inbox AI'
+        },
+        receivedAt,
+        { lastSyncAtUtc: receivedAt, lastServerClockOffsetMs: 0 }
+      );
+
+      const result = this.ingestInboxEvent(deviceId, {
+        event_id: `inbox:ai:${cryptoRandomId()}`,
+        client_sequence: this.nextInboxClientSequence(deviceId),
+        type: 'normalize',
+        inbox_id: id,
+        occurred_at_utc: receivedAt,
+        payload: payload && typeof payload === 'object' ? payload : {}
+      }, receivedAt);
+
+      if (result.accepted_event) this.projectAcceptedInboxEvents([result.accepted_event], receivedAt);
+      return result;
+    });
+    return run();
+  }
+,
+
+  listInboxClasses() {
+    return this.db
+      .prepare(
+        `
+          SELECT key, title, description, status
+          FROM inbox_classes
+          WHERE status IN ('active', 'candidate')
+          ORDER BY status ASC, title ASC, key ASC
+        `
+      )
+      .all();
+  }
+,
+
+  upsertInboxClass({ key, title, description = '', status = 'candidate', createdByAgentId = null, nowIso }) {
+    const cleanKey = sanitizeClassKey(key);
+    const cleanTitle = sanitizeText(title) ?? cleanKey;
+    if (!cleanKey || !cleanTitle) return null;
+    const cleanStatus = ['active', 'candidate', 'archived'].includes(status) ? status : 'candidate';
+    const updatedAt = nowIso ?? new Date().toISOString();
+    this.db
+      .prepare(
+        `
+          INSERT INTO inbox_classes (
+            key, title, description, status, created_by_agent_id, created_at_utc, updated_at_utc
+          ) VALUES (?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT(key) DO UPDATE SET
+            title = excluded.title,
+            description = excluded.description,
+            status = CASE
+              WHEN inbox_classes.status = 'active' THEN inbox_classes.status
+              ELSE excluded.status
+            END,
+            updated_at_utc = excluded.updated_at_utc
+        `
+      )
+      .run(
+        cleanKey,
+        cleanTitle,
+        sanitizeText(description) ?? '',
+        cleanStatus,
+        sanitizeText(createdByAgentId),
+        updatedAt,
+        updatedAt
+      );
+    return cleanKey;
   }
 ,
 
@@ -278,6 +371,13 @@ export const inboxEventMethods = {
       if (payload.title) payload.title = sanitizeText(payload.title);
       if (typeof payload.description_md === 'string') {
         payload.description_md = normalizeMarkdownSource(payload.description_md);
+      }
+      if (rawType === 'normalize') {
+        if (payload.preliminary_section) payload.preliminary_section = sanitizeClassKey(payload.preliminary_section);
+        if (typeof payload.normalization_text === 'string') {
+          payload.normalization_text = normalizeMarkdownSource(payload.normalization_text);
+        }
+        if (payload.is_normalized !== undefined) payload.is_normalized = normalizeBoolean(payload.is_normalized);
       }
     }
 
@@ -442,6 +542,23 @@ export const inboxEventMethods = {
         item.description_text = normalizeMarkdownSource(payload.description_md ?? '');
         item.updated_at_utc = event.occurred_at_utc;
         item.last_event_id = event.event_id;
+      } else if (event.type === 'normalize' && item) {
+        const title = sanitizeText(payload.title);
+        if (title) item.title = title;
+        if (typeof payload.description_md === 'string') {
+          item.description_text = normalizeMarkdownSource(payload.description_md);
+        }
+        if (payload.preliminary_section) {
+          item.preliminary_section = sanitizeClassKey(payload.preliminary_section);
+        }
+        if (typeof payload.normalization_text === 'string') {
+          item.normalization_text = normalizeMarkdownSource(payload.normalization_text);
+        }
+        if (payload.is_normalized !== undefined) {
+          item.is_normalized = normalizeBoolean(payload.is_normalized) ? 1 : 0;
+        }
+        item.updated_at_utc = event.occurred_at_utc;
+        item.last_event_id = event.event_id;
       } else if (event.type === 'delete' && item) {
         item.deleted_at_utc = event.occurred_at_utc;
         item.updated_at_utc = event.occurred_at_utc;
@@ -540,4 +657,13 @@ function normalizeBoolean(value) {
 function normalizeInboxRecordTypeId(value, fallback = 4) {
   const number = Number(value);
   return Number.isInteger(number) && number >= 1 && number <= 4 ? number : fallback;
+}
+
+function sanitizeClassKey(value) {
+  const text = typeof value === 'string' ? value.trim().toLowerCase() : '';
+  return /^[a-z][a-z0-9_-]{1,62}$/.test(text) ? text : '';
+}
+
+function cryptoRandomId() {
+  return crypto.randomUUID();
 }

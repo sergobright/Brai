@@ -6,7 +6,7 @@ import {
   SESSION_SECRET,
   actionEvent,
   createFixture,
-  inboundRequest,
+  inboxRequest,
   jsonRequest,
   request
 } from '../test-support/api.js';
@@ -44,8 +44,7 @@ test('email OTP signs in, claims legacy data, and isolates the next user', async
     '2026-07-01T10:20:02.000Z'
   ], {
     sessionSecret: SESSION_SECRET,
-    sendOtp: ({ email, otp }) => sentOtps.set(email, otp),
-    inboundTitleGenerator: async () => 'Attachment'
+    sendOtp: ({ email, otp }) => sentOtps.set(email, otp)
   });
 
   async function otpLogin(email) {
@@ -198,8 +197,7 @@ test('inbox attachment created for primary user is hidden from another user', as
     '2026-07-01T11:00:04.000Z'
   ], {
     sessionSecret: SESSION_SECRET,
-    sendOtp: ({ email, otp }) => sentOtps.set(email, otp),
-    inboundTitleGenerator: async () => 'Attachment'
+    sendOtp: ({ email, otp }) => sentOtps.set(email, otp)
   });
 
   async function otpLogin(email) {
@@ -218,7 +216,7 @@ test('inbox attachment created for primary user is hidden from another user', as
   try {
     const primaryCookie = await otpLogin('sergey@example.com');
     const secondaryCookie = await otpLogin('second@example.com');
-    const inbound = await inboundRequest(fixture.url, '/v1/', {
+    const inbox = await inboxRequest(fixture.url, '/v1/', {
       method: 'POST',
       body: JSON.stringify({
         text: 'Attachment body',
@@ -230,8 +228,8 @@ test('inbox attachment created for primary user is hidden from another user', as
         ]
       })
     });
-    assert.equal(inbound.status, 201);
-    const attachmentPath = inbound.body.attachment_links[0];
+    assert.equal(inbox.status, 201);
+    const attachmentPath = inbox.body.attachment_links[0];
     assert.match(attachmentPath, /^\/v1\/inbox\/attachments\//);
 
     const primaryDownload = await fetch(`${fixture.url}${attachmentPath}`, {

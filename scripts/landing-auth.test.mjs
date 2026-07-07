@@ -28,5 +28,5 @@ test('public landing exposes Sign In app button without secrets', async () => {
 
   const publicBundle = Object.values(files).join('\n');
   assert.doesNotMatch(publicBundle, /Bearer\s+[A-Za-z0-9._-]+/);
-  assert.doesNotMatch(publicBundle, /BRAI_(TOKEN|INBOUND|WEB_PASSWORD|SESSION_SECRET|INBOUND_TOKEN)/);
+  assert.doesNotMatch(publicBundle, /BRAI_(TOKEN|INBOX_API_KEY|WEB_PASSWORD|SESSION_SECRET)/);
 });

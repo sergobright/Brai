@@ -201,6 +201,16 @@ CREATE TABLE IF NOT EXISTS inbox_record_types (
   created_at_utc text NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS inbox_classes (
+  key text PRIMARY KEY,
+  title text NOT NULL,
+  description text NOT NULL DEFAULT '',
+  status text NOT NULL CHECK (status IN ('active', 'candidate', 'archived')),
+  created_by_agent_id text,
+  created_at_utc text NOT NULL,
+  updated_at_utc text NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS inbox (
   id text PRIMARY KEY,
   title text NOT NULL,
@@ -231,7 +241,7 @@ CREATE TABLE IF NOT EXISTS inbox_events (
   client_sequence integer NOT NULL,
   server_sequence integer NOT NULL UNIQUE,
   inbox_id text,
-  type text NOT NULL CHECK (type IN ('create', 'update_title', 'update_description', 'delete', 'invalid')),
+  type text NOT NULL CHECK (type IN ('create', 'update_title', 'update_description', 'normalize', 'delete', 'invalid')),
   occurred_at_utc text NOT NULL,
   received_at_utc text NOT NULL,
   payload_json text,
@@ -246,6 +256,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_inbox_events_server_sequence ON inbox_even
 CREATE INDEX IF NOT EXISTS idx_inbox_events_occurred ON inbox_events (occurred_at_utc);
 CREATE INDEX IF NOT EXISTS idx_inbox_events_inbox_occurred ON inbox_events (inbox_id, occurred_at_utc, server_sequence);
 CREATE INDEX IF NOT EXISTS idx_inbox_events_user_sequence ON inbox_events (user_id, server_sequence);
+CREATE INDEX IF NOT EXISTS idx_inbox_classes_status ON inbox_classes (status, title);
 CREATE INDEX IF NOT EXISTS idx_inbox_source_key_created ON inbox (source_key, created_at_utc);
 CREATE INDEX IF NOT EXISTS idx_inbox_record_type_created ON inbox (record_type_id, created_at_utc);
 CREATE INDEX IF NOT EXISTS idx_inbox_related ON inbox (related_inbox_id);
@@ -464,6 +475,10 @@ INSERT INTO schema_migrations (version, applied_at_utc, description)
 VALUES (47, now()::text, 'add Brai Cmd dictation runtime')
 ON CONFLICT (version) DO NOTHING;
 
+INSERT INTO schema_migrations (version, applied_at_utc, description)
+VALUES (48, now()::text, 'add Inbox AI processing')
+ON CONFLICT (version) DO NOTHING;
+
 INSERT INTO app_settings (key, value, updated_at_utc) VALUES
   ('goal_start_date', '2026-06-14', now()::text),
   ('goal_days', '15', now()::text),
@@ -477,11 +492,24 @@ INSERT INTO activity_types (id, title, description, created_at_utc) VALUES
 ON CONFLICT (id) DO UPDATE SET title = excluded.title, description = excluded.description;
 
 INSERT INTO inbox_record_types (id, key, title, description, created_at_utc) VALUES
-  (1, 'api_human_inbound', 'Входящее от человека по API', 'Внешний API запрос, инициированный человеком.', now()::text),
-  (2, 'api_agent_inbound', 'Входящее от агента по API', 'Внешний API запрос, инициированный агентом.', now()::text),
-  (3, 'internal_agent_inbound', 'Внутреннее входящее от агента', 'Внутренний агент Brai создал входящую запись.', now()::text),
+  (1, 'api_human_inbox', 'Входящее от человека по API', 'Внешний API запрос, инициированный человеком.', now()::text),
+  (2, 'api_agent_inbox', 'Входящее от агента по API', 'Внешний API запрос, инициированный агентом.', now()::text),
+  (3, 'internal_agent_inbox', 'Внутреннее входящее от агента', 'Внутренний агент Brai создал входящую запись.', now()::text),
   (4, 'interface_human_created', 'Человек добавил из интерфейса', 'Пользователь создал входящую запись в интерфейсе Brai.', now()::text)
 ON CONFLICT (id) DO UPDATE SET key = excluded.key, title = excluded.title, description = excluded.description;
+
+INSERT INTO inbox_classes (key, title, description, status, created_by_agent_id, created_at_utc, updated_at_utc) VALUES
+  ('idea', 'Идея', 'Мысль или концепция, которую стоит развить.', 'active', NULL, now()::text, now()::text),
+  ('wish', 'Желание', 'Пользователь выразил желание, намерение или будущую покупку.', 'active', NULL, now()::text, now()::text),
+  ('library', 'Сохранить в библиотеку', 'Материал, ссылку, изображение или фрагмент нужно сохранить для дальнейшего чтения.', 'active', NULL, now()::text, now()::text),
+  ('task', 'Задача', 'Нужно выполнить действие, проверить, подготовить или кому-то ответить.', 'active', NULL, now()::text, now()::text),
+  ('note', 'Заметка', 'Наблюдение, факт или короткая запись без явного действия.', 'active', NULL, now()::text, now()::text),
+  ('other', 'Другое', 'Входящее не подходит под остальные классы.', 'active', NULL, now()::text, now()::text)
+ON CONFLICT (key) DO UPDATE SET
+  title = excluded.title,
+  description = excluded.description,
+  status = excluded.status,
+  updated_at_utc = excluded.updated_at_utc;
 
 INSERT INTO agents (
   id,
@@ -539,6 +567,10 @@ ON CONFLICT (id) DO UPDATE SET
   output_description = excluded.output_description,
   interactions_description = excluded.interactions_description,
   side_effects_description = excluded.side_effects_description,
+  llm_provider = excluded.llm_provider,
+  llm_model = excluded.llm_model,
+  llm_prompt_template = excluded.llm_prompt_template,
+  llm_timeout_ms = excluded.llm_timeout_ms,
   fallback_description = excluded.fallback_description,
   source_module = excluded.source_module,
   updated_at_utc = excluded.updated_at_utc;
@@ -565,25 +597,64 @@ INSERT INTO agents (
   source_module,
   updated_at_utc
 ) VALUES (
-  'inbound.inbox.title_generator',
+  'inbox.image_describer',
   '1',
-  'inbound-api',
+  'inbox',
   'runtime',
   'active',
-  'Inbound Inbox title generator',
-  'Генерирует короткий заголовок для входящих записей, созданных через inbound API.',
-  'Срабатывает при успешном создании inbox item через inbound API, если title не передан явно.',
-  'Пропускается при explicit title или ошибке валидации запроса.',
-  'Текст, source, attachments metadata и normalized inbound payload.',
-  'Короткий title для inbox row и ai_logs audit trail.',
-  'Использует configured inboundTitleGenerator или локальный fallback title.',
-  'Пишет ai_logs и влияет на title создаваемой inbox записи.',
+  'Inbox image describer',
+  'Описывает картинки, приложенные к Inbox-записи, и сохраняет описание в normalization_text.',
+  'Срабатывает после создания Inbox-записи, если у нее есть image attachments.',
+  'Пропускается, если картинок нет, запись удалена или уже обработана.',
+  'Inbox id и локальные пути к сохраненным image attachments.',
+  'Фактическое русскоязычное описание изображения для последующей нормализации.',
+  'Вызывается из services/brai_api/src/inbox.js через Codex CLI или тестовый runtime hook.',
+  'Пишет normalize event и ai_logs; не меняет explanation_text.',
   '',
   '',
+  'Опиши изображение для Inbox на русском языке.
+Нужно детальное, фактическое описание: что видно, какой интерфейс/экран, важные тексты, объекты, состояния, числа и возможный пользовательский контекст.
+Не выдумывай невидимые детали. Верни только описание.',
+  60000,
+  'Если описание картинки не удалось получить, нормализация продолжает работу по тексту и пишет failed ai_log для этого шага.',
+  'services/brai_api/src/inbox.js',
+  now()::text
+),
+(
+  'inbox.normalizer',
+  '1',
+  'inbox',
+  'runtime',
+  'active',
+  'Inbox normalizer',
+  'Сопоставляет транскрипт, текстовый контекст и описание картинки, затем заполняет title, description_text, preliminary_section и normalization_text.',
+  'Срабатывает после создания Inbox-записи и после optional описания картинок.',
+  'Пропускается, если запись удалена или уже обработана.',
+  'Inbox explanation_text, description_text, normalization_text image block и список inbox_classes.',
+  'Короткий заголовок, понятное описание намерения пользователя, class key и технический разбор.',
+  'Вызывается из services/brai_api/src/inbox.js через Codex CLI или тестовый runtime hook.',
+  'Пишет normalize event, ai_logs и при необходимости candidate row в inbox_classes; не меняет explanation_text.',
   '',
-  NULL,
-  'Возвращает локально вычисленный заголовок, если внешний generator недоступен.',
-  'services/brai_api/src/inbound.js',
+  '',
+  'Разбери Inbox-запись на русском языке.
+Нужно сопоставить голосовой транскрипт, текстовый контекст и описание картинки.
+Верни только JSON без Markdown с полями:
+{"title":"короткий заголовок до 80 символов","description":"понятное описание чего хотел пользователь","class_key":"ключ класса","class_title":"русское название класса если ключ новый","class_description":"краткое описание класса если ключ новый","normalization":"технический разбор"}
+
+Доступные классы:
+{{classes}}
+
+Транскрипт:
+{{text}}
+
+Текстовый контекст:
+{{description}}
+
+Описание картинки:
+{{image_description}}',
+  60000,
+  'При ошибке использует локальный fallback: title из explanation_text, description из существующего текста и эвристический class key.',
+  'services/brai_api/src/inbox.js',
   now()::text
 )
 ON CONFLICT (id) DO UPDATE SET
@@ -599,6 +670,10 @@ ON CONFLICT (id) DO UPDATE SET
   output_description = excluded.output_description,
   interactions_description = excluded.interactions_description,
   side_effects_description = excluded.side_effects_description,
+  llm_provider = excluded.llm_provider,
+  llm_model = excluded.llm_model,
+  llm_prompt_template = excluded.llm_prompt_template,
+  llm_timeout_ms = excluded.llm_timeout_ms,
   fallback_description = excluded.fallback_description,
   source_module = excluded.source_module,
   updated_at_utc = excluded.updated_at_utc;
@@ -665,6 +740,13 @@ INSERT INTO table_descriptions (table_name, title, short_description, long_descr
     'Brai Cmd usage events',
     'Метрики выполнения Brai Cmd диктовки.',
     'Фиксирует counts, timings, provider/model metadata и ошибки без хранения исходного аудио или текста расшифровки.',
+    now()::text
+  ),
+  (
+    'inbox_classes',
+    'Inbox classes',
+    'Справочник предварительных классов Inbox-записей.',
+    'Используется Inbox normalizer для preliminary_section. Если подходящего класса нет, агент добавляет candidate row для последующего ручного утверждения.',
     now()::text
   )
 ON CONFLICT (table_name) DO UPDATE SET

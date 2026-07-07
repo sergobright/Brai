@@ -61,12 +61,12 @@
 
 ## API и auth
 
-- Internal API v1 требует Bearer auth или valid password-auth session cookie; external inbound API требует inbound API key.
+- Internal API v1 требует Bearer auth или valid password-auth session cookie; external Inbox API требует Inbox API key.
 - Browser web `/api/*` идёт через same-origin Caddy proxy and is authorized by Brai API session cookies or explicit Bearer auth; Caddy must not inject a private Bearer token for public browser routes.
 - Direct Capacitor Android uses password-auth session cookies against `https://api.brightos.world`.
-- Не embed private Bearer token или inbound API key в web bundle, OTA bundle или docs.
-- External inbound API contract is documented in `docs/api/inbound-api.md`.
-- Any inbound API route, payload, response, auth, MIME, limit, storage, DB mapping, title-generation, or error-code change must update `docs/api/inbound-api.md` in the same commit.
+- Не embed private Bearer token или Inbox API key в web bundle, OTA bundle или docs.
+- External Inbox API contract is documented in `docs/api/inbox-api.md`.
+- Any Inbox API route, payload, response, auth, MIME, limit, storage, DB mapping, processing, or error-code change must update `docs/api/inbox-api.md` in the same commit.
 
 ## Проверка
 

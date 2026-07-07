@@ -5,12 +5,13 @@ import http from 'node:http';
 import path from 'node:path';
 import { WebSocketServer } from 'ws';
 import {
-  INBOUND_BODY_LIMIT_BYTES,
-  hasInboundApiKey,
-  inboundRequestTarget,
-  receiveInboxInbound,
+  INBOX_BODY_LIMIT_BYTES,
+  hasInboxApiKey,
+  inboxRequestTarget,
+  processInboxItem,
+  receiveInbox,
   serveInboxAttachment
-} from './inbound.js';
+} from './inbox.js';
 import { createBraiAuth } from './auth.js';
 import {
   createBraiCmdRuntime,
@@ -42,8 +43,7 @@ export function createBraiServer({
   releasePassword = webPassword,
   sessionSecret = null,
   releaseDir = null,
-  inboundApiKey = null,
-  inboundToken = null,
+  inboxApiKey = null,
   vaultRoot = null,
   syncthingGuiAddress = null,
   syncthingApiKey = null,
@@ -54,11 +54,13 @@ export function createBraiServer({
   resendApiKey = null,
   authFromEmail = null,
   sendOtp = null,
-  inboundStorageRoot = path.join(dataRoot, 'inbox-attachments'),
+  inboxStorageRoot = path.join(dataRoot, 'inbox-attachments'),
   codexBin = 'codex',
   codexModel = null,
   codexTimeoutMs = null,
-  inboundTitleGenerator = null,
+  inboxImageDescriber = null,
+  inboxNormalizer = null,
+  inboxAutoProcess = true,
   braiCmd = {},
   branch = process.env.BRAI_BRANCH || null,
   commit = process.env.BRAI_COMMIT || null,
@@ -90,20 +92,37 @@ export function createBraiServer({
   });
   const { auth } = authRuntime;
   const sockets = new Set();
-  const inboundHandlers = new Map([
-    ['inbox', {
-      receive: (body, requestNow) => receiveInboxInbound({
-        store,
-        body,
-        storageRoot: inboundStorageRoot,
-        codexBin,
-        codexModel,
-        codexTimeoutMs,
-        titleGenerator: inboundTitleGenerator,
-        nowDate: requestNow
-      })
-    }]
-  ]);
+  const receiveInboxRequest = (body, requestNow) => receiveInbox({
+    store,
+    body,
+    storageRoot: inboxStorageRoot,
+    nowDate: requestNow
+  });
+  const processInboxLater = ({ ownerUserId, inboxId }) => {
+    if (!inboxAutoProcess || !inboxId) return;
+    setTimeout(() => {
+      void withUserScope(ownerUserId, async () => {
+        await processInboxItem({
+          store,
+          inboxId,
+          storageRoot: inboxStorageRoot,
+          codexBin,
+          codexModel,
+          codexTimeoutMs,
+          imageDescriber: inboxImageDescriber,
+          normalizer: inboxNormalizer,
+          nowDate: now()
+        });
+        const state = inboxState(store, now());
+        broadcast(sockets, { type: 'inbox_synced', inbox_state: state }, ownerUserId);
+      }).catch((error) => {
+        logger.error?.('Inbox AI processing failed', {
+          error: error instanceof Error ? error.message : String(error),
+          inboxId
+        });
+      });
+    }, 0);
+  };
 
   const server = http.createServer(async (req, res) => {
     try {
@@ -250,16 +269,15 @@ export function createBraiServer({
       }
 
       if (url.pathname === '/v1/') {
-        if (!hasInboundApiKey(req, inboundApiKey ?? inboundToken)) {
+        if (!hasInboxApiKey(req, inboxApiKey)) {
           sendJson(req, res, 401, { error: 'unauthorized' });
           return;
         }
 
         const requestNow = now();
-        const body = req.method === 'POST' ? await readJson(req, { limit: INBOUND_BODY_LIMIT_BYTES }) : {};
-        const target = inboundRequestTarget(req, body);
-        const inboundHandler = target ? inboundHandlers.get(target) : null;
-        if (!target || !inboundHandler) {
+        const body = req.method === 'POST' ? await readJson(req, { limit: INBOX_BODY_LIMIT_BYTES }) : {};
+        const target = inboxRequestTarget(req, body);
+        if (target !== 'inbox') {
           sendJson(req, res, 404, { error: 'unsupported_target' });
           return;
         }
@@ -271,10 +289,11 @@ export function createBraiServer({
 
         if (req.method === 'POST') {
           const ownerUserId = store.primaryUserId();
-          const result = await withUserScope(ownerUserId, () => inboundHandler.receive(body, requestNow));
+          const result = await withUserScope(ownerUserId, () => receiveInboxRequest(body, requestNow));
           const state = await withUserScope(ownerUserId, () => inboxState(store, requestNow));
           broadcast(sockets, { type: 'inbox_synced', inbox_state: state }, ownerUserId);
           sendJson(req, res, result.created ? 201 : 200, { ok: true, target, ...result, state });
+          if (result.created) processInboxLater({ ownerUserId, inboxId: result.inbox_id });
           return;
         }
 
@@ -294,19 +313,20 @@ export function createBraiServer({
         }
         const access = requireBraiCmdAccess(req, store);
         const requestNow = now();
-        const body = await readJson(req, { limit: INBOUND_BODY_LIMIT_BYTES });
+        const body = await readJson(req, { limit: INBOX_BODY_LIMIT_BYTES });
         const ownerUserId = store.primaryUserId();
-        const inboundBody = {
+        const inboxBody = {
           ...body,
           target: 'inbox',
           source: typeof body.source === 'string' && body.source.trim() ? body.source : 'brai-cmd',
           source_key: typeof body.source_key === 'string' && body.source_key.trim() ? body.source_key : access.id,
           record_type_id: body.record_type_id ?? 1
         };
-        const result = await withUserScope(ownerUserId, () => inboundHandlers.get('inbox').receive(inboundBody, requestNow));
+        const result = await withUserScope(ownerUserId, () => receiveInboxRequest(inboxBody, requestNow));
         const state = await withUserScope(ownerUserId, () => inboxState(store, requestNow));
         broadcast(sockets, { type: 'inbox_synced', inbox_state: state }, ownerUserId);
         sendJson(req, res, result.created ? 201 : 200, { ok: true, target: 'inbox', ...result, state });
+        if (result.created) processInboxLater({ ownerUserId, inboxId: result.inbox_id });
         return;
       }
 
@@ -363,12 +383,17 @@ export function createBraiServer({
         return;
       }
 
-      if (req.method === 'GET' && serveInboxAttachment(req, res, url, inboundStorageRoot, sendJson, store)) {
+      if (req.method === 'GET' && serveInboxAttachment(req, res, url, inboxStorageRoot, sendJson, store)) {
         return;
       }
 
       if (req.method === 'GET' && url.pathname === '/v1/inbox') {
         sendJson(req, res, 200, inboxState(store, now()));
+        return;
+      }
+
+      if (req.method === 'GET' && url.pathname === '/v1/ai-logs') {
+        sendJson(req, res, 200, { logs: store.listAiLogs({ limit: url.searchParams.get('limit') }) });
         return;
       }
 

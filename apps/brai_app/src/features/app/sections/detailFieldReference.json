@@ -59,23 +59,23 @@
       {
         "name": "id",
         "meaning": "Технический ID входящей записи",
-        "filledBy": "UI или inbound API"
+        "filledBy": "UI или Inbox API"
       },
       {
         "name": "title",
         "meaning": "Заголовок входящего",
-        "filledBy": "UI вводит; inbound генерирует из text"
+        "filledBy": "UI вводит; Inbox API сначала ставит fallback из text, затем inbox.normalizer может уточнить"
       },
       {
         "name": "description_text",
         "sourceKey": "description_md",
         "meaning": "Описание / основное содержимое, фактически Markdown-текст",
-        "filledBy": "UI редактирует; inbound берет description* / content*"
+        "filledBy": "UI редактирует; Inbox API берет description* / content*; inbox.normalizer пишет понятное описание намерения"
       },
       {
         "name": "source",
         "meaning": "Источник входящего",
-        "filledBy": "inbound, default inbound; UI пусто"
+        "filledBy": "Inbox API, default inbox; UI пусто"
       },
       {
         "name": "item_date",
@@ -90,7 +90,7 @@
       {
         "name": "preliminary_section",
         "meaning": "Предварительный раздел, куда это может попасть после разборки",
-        "filledBy": "Зарезервировано"
+        "filledBy": "inbox.normalizer, значение берется из inbox_classes или нового candidate class"
       },
       {
         "name": "urgency",
@@ -101,22 +101,22 @@
         "name": "attachment_links_json",
         "sourceKey": "attachment_links",
         "meaning": "JSON-массив ссылок на вложения",
-        "filledBy": "inbound attachments"
+        "filledBy": "Inbox API attachments"
       },
       {
         "name": "explanation_text",
         "meaning": "Пояснение / сырой текст входящего запроса",
-        "filledBy": "inbound text; из него делается title"
+        "filledBy": "Inbox API text; Brai CMD кладет сюда транскрипт"
       },
       {
         "name": "normalization_text",
         "meaning": "Текст нормализации: как разобрали/во что превратили",
-        "filledBy": "Зарезервировано"
+        "filledBy": "inbox.image_describer пишет описание картинки; inbox.normalizer добавляет технический разбор"
       },
       {
         "name": "is_normalized",
         "meaning": "Флаг уже нормализовано / обработано из Inbox",
-        "filledBy": "Зарезервировано, default 0"
+        "filledBy": "Default 0 при создании, inbox.normalizer ставит 1"
       },
       {
         "name": "created_at_utc",
@@ -126,7 +126,7 @@
       {
         "name": "updated_at_utc",
         "meaning": "Когда запись обновлена",
-        "filledBy": "create, edit, delete"
+        "filledBy": "create, edit, normalize, delete"
       },
       {
         "name": "deleted_at_utc",
@@ -141,17 +141,17 @@
       {
         "name": "source_key",
         "meaning": "Стабильный внешний ключ источника, для группировки цепочки",
-        "filledBy": "inbound source_key"
+        "filledBy": "Inbox API source_key"
       },
       {
         "name": "response_required",
         "meaning": "Нужен ли ответ",
-        "filledBy": "inbound boolean, пока для будущей маршрутизации ответа"
+        "filledBy": "Inbox API boolean, пока для будущей маршрутизации ответа"
       },
       {
         "name": "related_inbox_id",
         "meaning": "Ссылка на предыдущую Inbox-запись",
-        "filledBy": "inbound, если текст просит добавить/прикрепить к предыдущему"
+        "filledBy": "Inbox API, если текст просит добавить/прикрепить к предыдущему"
       },
       {
         "name": "record_type_id",

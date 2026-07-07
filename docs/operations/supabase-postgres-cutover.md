@@ -49,7 +49,7 @@ node deploy/scripts/supabase-branch.mjs migrate --postgres-url "$BRAI_DATABASE_U
 
 3. Run Postgres smoke.
 4. Ensure `/etc/brai/brai-api.env` sets `BRAI_DATABASE_URL`.
-5. Restart API/scheduler and smoke `/health`, auth/session, timer sync, activities sync, inbox/inbound, and `/v1/version`.
+5. Restart API/scheduler and smoke `/health`, auth/session, timer sync, activities sync, Inbox API, and `/v1/version`.
 6. Reopen writes only after smoke passes.
 
 ## Preview And Dev

@@ -25,6 +25,32 @@ export type AuthSession = {
   user?: AuthUser | null;
 };
 
+export type AiLogIoRow = {
+  ref: string;
+  value: unknown;
+};
+
+export type AiLogJsonData = {
+  inputs?: AiLogIoRow[];
+  outputs?: AiLogIoRow[];
+  usage?: { model?: string; prompt_tokens?: number; completion_tokens?: number };
+  timings_ms?: { total?: number; model?: number; postprocess?: number };
+  metadata?: Record<string, unknown>;
+  error_code?: string;
+};
+
+export type AiLog = {
+  id: number;
+  agent_id: string;
+  agent_version: string;
+  dt: string;
+  status: "done" | "failed";
+  json_data: AiLogJsonData;
+  ai_title: string;
+  flow_id: string | null;
+  flow_command: string | null;
+};
+
 /**
  * Wraps the Brai HTTP API with typed client methods.
  */
@@ -82,6 +108,10 @@ export class BraiApi {
 
   async inbox(): Promise<InboxState> {
     return this.request("/v1/inbox");
+  }
+
+  async aiLogs(limit = 50): Promise<{ logs: AiLog[] }> {
+    return this.request(`/v1/ai-logs?limit=${encodeURIComponent(String(limit))}`);
   }
 
   async version(): Promise<AppVersionState> {

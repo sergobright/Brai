@@ -16,4 +16,32 @@ export const aiLogMethods = {
     );
     return Number(info.lastInsertRowid);
   }
+,
+
+  listAiLogs({ limit = 50 } = {}) {
+    const rowLimit = Math.max(1, Math.min(Number(limit) || 50, 200));
+    return this.db
+      .prepare(
+        `
+          SELECT id, agent_id, agent_version, dt, status, json_data, ai_title, flow_id, flow_command
+          FROM ai_logs
+          ORDER BY dt DESC, id DESC
+          LIMIT ?
+        `
+      )
+      .all(rowLimit)
+      .map((row) => ({
+        ...row,
+        json_data: parseJsonObject(row.json_data)
+      }));
+  }
 };
+
+function parseJsonObject(value) {
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}

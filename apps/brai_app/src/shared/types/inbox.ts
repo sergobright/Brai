@@ -1,4 +1,4 @@
-export type InboxEventType = "create" | "update_title" | "update_description" | "delete";
+export type InboxEventType = "create" | "update_title" | "update_description" | "normalize" | "delete";
 
 export interface InboxItem {
   id: string;
@@ -26,6 +26,9 @@ export interface InboxItem {
 export interface InboxEventPayload {
   title?: string;
   description_md?: string;
+  preliminary_section?: string;
+  normalization_text?: string;
+  is_normalized?: boolean;
 }
 
 export interface PendingInboxEvent {

@@ -7,7 +7,7 @@
 
 ## Network
 
-- External inbound ports stay closed by default.
+- External network ports stay closed by default.
 - Only SSH `22/tcp`, HTTPS `443/tcp`, and HTTP `80/tcp` for redirects are expected by default. When Syncthing is explicitly enabled for `/srv/projects/brai/vault`, `22000/tcp` and `22000/udp` are the approved peer-sync exception.
 - App services bind to localhost behind Caddy.
 - Server host/IP values are configured outside the repository.

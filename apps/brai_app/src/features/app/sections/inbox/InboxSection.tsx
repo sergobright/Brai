@@ -417,6 +417,7 @@ function InboxRow({
 }) {
   const title = titleDraft ?? item.title;
   const preview = visibleDescriptionPreview(item.description_md);
+  const meta = inboxRowMeta(item);
   const typeIconId = useId();
   const [dragX, setDragX] = useState(0);
   const [dragging, setDragging] = useState(false);
@@ -538,6 +539,15 @@ function InboxRow({
             >
               {preview}
             </p>
+          ) : null}
+          {meta.length > 0 ? (
+            <div className="flex min-w-0 flex-wrap items-center gap-1.5 text-[11px] leading-4 text-muted-foreground/70">
+              {meta.map((label) => (
+                <span key={label} className="rounded border border-border bg-muted/35 px-1.5">
+                  {label}
+                </span>
+              ))}
+            </div>
           ) : null}
         </div>
       </div>
@@ -1037,6 +1047,13 @@ function InboxTypeIcon({ id }: { id: string }) {
     default:
       return <Sparkles className={className} aria-hidden="true" />;
   }
+}
+
+function inboxRowMeta(item: InboxItem) {
+  const meta: string[] = [];
+  if (!item.is_normalized && item.record_type_id !== 4) meta.push("AI обрабатывает");
+  if (item.preliminary_section) meta.push(`Класс: ${item.preliminary_section}`);
+  return meta;
 }
 
 function inboxTypeIndex(id: string) {

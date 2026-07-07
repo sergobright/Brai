@@ -63,7 +63,7 @@ scripts/use-node22.sh node scripts/brai-sandbox-check-mode.mjs -- <command>
 ## Security
 
 - Не хранить secrets в docs, Memory Bank, source, build artifacts или deployment registry.
-- Не embed Bearer tokens или inbound API keys в web/OTA bundles.
+- Не embed Bearer tokens или Inbox API keys в web/OTA bundles.
 - Auth boundaries, input validation, data-loss prevention и rollback behavior не упрощаются ради Ponytail.
 - Если проверка касается secrets, сканируй staged/generated content перед commit.
 

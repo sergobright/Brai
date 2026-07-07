@@ -3,6 +3,8 @@
 import type { CSSProperties, KeyboardEvent, PointerEvent } from "react";
 import { useEffect, useRef, useState } from "react";
 import { Bot, CheckCircle2, Clock3, Database, FileJson, GitBranch, Terminal, XCircle } from "lucide-react";
+import { BraiApi, type AiLog } from "@/shared/api/braiApi";
+import { defaultApiBase } from "@/shared/config/runtime";
 import { Badge } from "@/shared/ui/badge";
 import { Card } from "@/shared/ui/card";
 import { ScrollArea } from "@/shared/ui/scroll-area";
@@ -12,110 +14,7 @@ import { isMobileNavigationViewport } from "../../navigation/useSectionSwipeNavi
 import { DetailPanelTabBar } from "../DetailPanelTabs";
 import { ACTIONS_SPLIT_DEFAULT_PERCENT, ACTIONS_SPLIT_MIN_PERCENT, clampActionsSplitPercent } from "../actions/constants";
 
-type FactoryLogStatus = "done" | "failed";
 type FactoryDetailTab = "info" | "db" | "logs";
-
-type FactoryLog = {
-  id: number;
-  agent_id: string;
-  agent_version: string;
-  dt: string;
-  status: FactoryLogStatus;
-  ai_title: string;
-  flow_id: string | null;
-  flow_command: string | null;
-  json_data: {
-    inputs: Array<{ ref: string; value: string }>;
-    outputs: Array<{ ref: string; value: string }>;
-    usage?: { model: string; prompt_tokens: number; completion_tokens: number };
-    timings_ms?: { total: number; model: number; postprocess?: number };
-    error_code?: string;
-  };
-};
-
-const FACTORY_LOGS: FactoryLog[] = [
-  {
-    id: 1482,
-    agent_id: "inbound.inbox.title_generator",
-    agent_version: "3",
-    dt: "2026-07-05T13:42:18.000Z",
-    status: "done",
-    ai_title: "Сгенерирован заголовок для входящего",
-    flow_id: "inbox-telegram-742",
-    flow_command: "normalize_inbound",
-    json_data: {
-      inputs: [{ ref: "request.text", value: "Созвон с Павлом по складскому экрану, сегодня после 18:00" }],
-      outputs: [{ ref: "inbox.title", value: "Созвон по складскому экрану" }],
-      usage: { model: "gpt-5-mini", prompt_tokens: 418, completion_tokens: 42 },
-      timings_ms: { total: 1280, model: 1034, postprocess: 74 },
-    },
-  },
-  {
-    id: 1481,
-    agent_id: "brai-cmd.dictate.transcription",
-    agent_version: "1",
-    dt: "2026-07-05T13:37:04.000Z",
-    status: "done",
-    ai_title: "Расшифрована голосовая команда",
-    flow_id: "cmd-mobile-911",
-    flow_command: "dictate",
-    json_data: {
-      inputs: [{ ref: "request.audio", value: "12.4 сек, device Pixel 9" }],
-      outputs: [{ ref: "response.text", value: "Добавь в Factory отдельный поток логов AI и открой детали справа." }],
-      usage: { model: "gpt-4o-transcribe", prompt_tokens: 0, completion_tokens: 37 },
-      timings_ms: { total: 2190, model: 2012 },
-    },
-  },
-  {
-    id: 1480,
-    agent_id: "maintenance.daily_digest",
-    agent_version: "2",
-    dt: "2026-07-05T12:10:43.000Z",
-    status: "failed",
-    ai_title: "Дайджест остановлен на проверке источников",
-    flow_id: "daily-digest-2026-07-05",
-    flow_command: "summarize_day",
-    json_data: {
-      inputs: [{ ref: "table.activities", value: "34 записи за сутки" }],
-      outputs: [{ ref: "response.error", value: "Недостаточно свежих подтверждённых источников для публикации." }],
-      usage: { model: "gpt-5", prompt_tokens: 1834, completion_tokens: 96 },
-      timings_ms: { total: 4280, model: 3988 },
-      error_code: "source_quality_gate",
-    },
-  },
-  {
-    id: 1479,
-    agent_id: "scheduler.goal_rebalancer",
-    agent_version: "5",
-    dt: "2026-07-05T11:58:12.000Z",
-    status: "done",
-    ai_title: "Пересчитан производственный фокус",
-    flow_id: "focus-plan-391",
-    flow_command: "rebalance_goal",
-    json_data: {
-      inputs: [{ ref: "timer.sessions", value: "7 фокус-сессий за последние 48 часов" }],
-      outputs: [{ ref: "goal.recommendation", value: "Сместить 40 минут с админки на Factory preview." }],
-      usage: { model: "gpt-5-mini", prompt_tokens: 721, completion_tokens: 88 },
-      timings_ms: { total: 1660, model: 1392, postprocess: 45 },
-    },
-  },
-  {
-    id: 1478,
-    agent_id: "inbound.link_context",
-    agent_version: "2",
-    dt: "2026-07-05T11:31:29.000Z",
-    status: "done",
-    ai_title: "Извлечён контекст из ссылки",
-    flow_id: "link-pipeline-208",
-    flow_command: "extract_context",
-    json_data: {
-      inputs: [{ ref: "request.url", value: "https://brightos.world/admin/ops" }],
-      outputs: [{ ref: "inbox.description_md", value: "Техническая ссылка классифицирована как operational context." }],
-      usage: { model: "gpt-5-nano", prompt_tokens: 332, completion_tokens: 61 },
-      timings_ms: { total: 940, model: 811 },
-    },
-  },
-];
 const FACTORY_DETAIL_TABS: Array<{ id: FactoryDetailTab; label: string }> = [
   { id: "info", label: "Инфо" },
   { id: "db", label: "БД" },
@@ -123,21 +22,46 @@ const FACTORY_DETAIL_TABS: Array<{ id: FactoryDetailTab; label: string }> = [
 ];
 
 export function FactorySection({ onMobileOverlayChange }: { onMobileOverlayChange: (open: boolean) => void }) {
+  const [logs, setLogs] = useState<AiLog[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [selectedLogId, setSelectedLogId] = useState<number | null>(null);
   const [mobileLogId, setMobileLogId] = useState<number | null>(null);
   const [detailTab, setDetailTab] = useState<FactoryDetailTab>("info");
   const [splitPercent, setSplitPercent] = useState(ACTIONS_SPLIT_DEFAULT_PERCENT);
   const workspaceRef = useRef<HTMLDivElement | null>(null);
   const splitDragStyleRef = useRef<{ cursor: string; userSelect: string } | null>(null);
-  const selectedLog = FACTORY_LOGS.find((log) => log.id === selectedLogId) ?? null;
-  const mobileLog = FACTORY_LOGS.find((log) => log.id === mobileLogId) ?? null;
+  const selectedLog = logs.find((log) => log.id === selectedLogId) ?? null;
+  const mobileLog = logs.find((log) => log.id === mobileLogId) ?? null;
+
+  useEffect(() => {
+    let mounted = true;
+    new BraiApi(defaultApiBase())
+      .aiLogs()
+      .then(({ logs: nextLogs }) => {
+        if (!mounted) return;
+        setLogs(nextLogs);
+        setSelectedLogId((current) => (current != null && nextLogs.some((log) => log.id === current) ? current : (nextLogs[0]?.id ?? null)));
+      })
+      .catch(() => {
+        if (!mounted) return;
+        setLogs([]);
+        setLoadFailed(true);
+      })
+      .finally(() => {
+        if (mounted) setLoading(false);
+      });
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   useEffect(() => {
     onMobileOverlayChange(mobileLog != null);
     return () => onMobileOverlayChange(false);
   }, [mobileLog, onMobileOverlayChange]);
 
-  function openLog(log: FactoryLog) {
+  function openLog(log: AiLog) {
     setSelectedLogId(log.id);
     if (isMobileNavigationViewport()) setMobileLogId(log.id);
   }
@@ -200,16 +124,24 @@ export function FactorySection({ onMobileOverlayChange }: { onMobileOverlayChang
                 <p className="m-0 text-sm font-medium">AI_logs/</p>
                 <p className="m-0 text-xs text-muted-foreground">Последние производственные срабатывания</p>
               </div>
-              <Badge variant="outline">{FACTORY_LOGS.length}</Badge>
+              <Badge variant="outline">{logs.length}</Badge>
             </div>
-            {FACTORY_LOGS.map((log) => (
-              <FactoryLogCard
-                key={log.id}
-                log={log}
-                selected={selectedLogId === log.id}
-                onOpen={() => openLog(log)}
-              />
-            ))}
+            {loading ? (
+              <p className="m-0 rounded-md border border-border bg-muted/30 p-4 text-sm text-muted-foreground">Загрузка логов</p>
+            ) : loadFailed ? (
+              <p className="m-0 rounded-md border border-border bg-muted/30 p-4 text-sm text-muted-foreground">Логи недоступны</p>
+            ) : logs.length === 0 ? (
+              <p className="m-0 rounded-md border border-border bg-muted/30 p-4 text-sm text-muted-foreground">Логов пока нет</p>
+            ) : (
+              logs.map((log) => (
+                <FactoryLogCard
+                  key={log.id}
+                  log={log}
+                  selected={selectedLogId === log.id}
+                  onOpen={() => openLog(log)}
+                />
+              ))
+            )}
           </div>
         </ScrollArea>
 
@@ -239,8 +171,8 @@ export function FactorySection({ onMobileOverlayChange }: { onMobileOverlayChang
   );
 }
 
-function FactoryLogCard({ log, selected, onOpen }: { log: FactoryLog; selected: boolean; onOpen: () => void }) {
-  const output = log.json_data.outputs[0]?.value ?? "Нет output";
+function FactoryLogCard({ log, selected, onOpen }: { log: AiLog; selected: boolean; onOpen: () => void }) {
+  const output = formatLogValue(ioRows(log.json_data.outputs)[0]?.value ?? "Нет output");
   const StatusIcon = log.status === "done" ? CheckCircle2 : XCircle;
 
   return (
@@ -281,7 +213,7 @@ function FactoryLogCard({ log, selected, onOpen }: { log: FactoryLog; selected: 
   );
 }
 
-function FactoryDetailPanel({ activeTab, log, onTabChange }: { activeTab: FactoryDetailTab; log: FactoryLog | null; onTabChange: (tab: FactoryDetailTab) => void }) {
+function FactoryDetailPanel({ activeTab, log, onTabChange }: { activeTab: FactoryDetailTab; log: AiLog | null; onTabChange: (tab: FactoryDetailTab) => void }) {
   return (
     <aside className="grid h-full min-h-0 min-w-0 grid-rows-[minmax(0,1fr)] overflow-hidden pl-7 max-[860px]:hidden" aria-label="Подробности AI log" data-nav-swipe-exclusion>
       {log ? <FactoryLogDetails activeTab={activeTab} log={log} onTabChange={onTabChange} /> : <FactoryEmptyPanel />}
@@ -297,7 +229,7 @@ function FactoryEmptyPanel() {
   );
 }
 
-function FactoryMobileDetail({ activeTab, log, onClose, onTabChange }: { activeTab: FactoryDetailTab; log: FactoryLog; onClose: () => void; onTabChange: (tab: FactoryDetailTab) => void }) {
+function FactoryMobileDetail({ activeTab, log, onClose, onTabChange }: { activeTab: FactoryDetailTab; log: AiLog; onClose: () => void; onTabChange: (tab: FactoryDetailTab) => void }) {
   return (
     <MobileContextSheet label="Подробности AI log" onClose={onClose} scroll={false} variant="detail">
       <FactoryLogDetails activeTab={activeTab} log={log} mobile onTabChange={onTabChange} />
@@ -305,7 +237,7 @@ function FactoryMobileDetail({ activeTab, log, onClose, onTabChange }: { activeT
   );
 }
 
-function FactoryLogDetails({ activeTab, log, mobile = false, onTabChange }: { activeTab: FactoryDetailTab; log: FactoryLog; mobile?: boolean; onTabChange: (tab: FactoryDetailTab) => void }) {
+function FactoryLogDetails({ activeTab, log, mobile = false, onTabChange }: { activeTab: FactoryDetailTab; log: AiLog; mobile?: boolean; onTabChange: (tab: FactoryDetailTab) => void }) {
   const content =
     activeTab === "db" ? <FactoryDbDetails log={log} /> : activeTab === "logs" ? <FactoryRawLogs log={log} /> : <FactoryInfoDetails log={log} />;
 
@@ -319,7 +251,7 @@ function FactoryLogDetails({ activeTab, log, mobile = false, onTabChange }: { ac
   );
 }
 
-function FactoryInfoDetails({ log }: { log: FactoryLog }) {
+function FactoryInfoDetails({ log }: { log: AiLog }) {
   const StatusIcon = log.status === "done" ? CheckCircle2 : XCircle;
 
   return (
@@ -341,7 +273,7 @@ function FactoryInfoDetails({ log }: { log: FactoryLog }) {
           ["flow_id", log.flow_id ?? "—"],
           ["flow_command", log.flow_command ?? "—"],
           ["model", log.json_data.usage?.model ?? "—"],
-          ["duration", `${log.json_data.timings_ms?.total ?? 0} ms`],
+          ["duration", formatDuration(log.json_data.timings_ms?.total)],
         ]}
       />
 
@@ -352,13 +284,13 @@ function FactoryInfoDetails({ log }: { log: FactoryLog }) {
         </div>
       ) : null}
 
-      <FactoryIoBlock title="Inputs" rows={log.json_data.inputs} />
-      <FactoryIoBlock title="Outputs" rows={log.json_data.outputs} />
+      <FactoryIoBlock title="Inputs" rows={ioRows(log.json_data.inputs)} />
+      <FactoryIoBlock title="Outputs" rows={ioRows(log.json_data.outputs)} />
     </>
   );
 }
 
-function FactoryDbDetails({ log }: { log: FactoryLog }) {
+function FactoryDbDetails({ log }: { log: AiLog }) {
   return (
     <section className="grid gap-2">
       <div className="flex items-center gap-2 text-sm font-medium">
@@ -380,7 +312,7 @@ function FactoryDbDetails({ log }: { log: FactoryLog }) {
   );
 }
 
-function FactoryRawLogs({ log }: { log: FactoryLog }) {
+function FactoryRawLogs({ log }: { log: AiLog }) {
   return (
     <section className="grid gap-2">
       <div className="flex items-center gap-2 text-sm font-medium">
@@ -405,7 +337,7 @@ function DetailGrid({ items }: { items: Array<[string, string]> }) {
   );
 }
 
-function FactoryIoBlock({ title, rows }: { title: string; rows: Array<{ ref: string; value: string }> }) {
+function FactoryIoBlock({ title, rows }: { title: string; rows: Array<{ ref: string; value: unknown }> }) {
   return (
     <section className="grid gap-2">
       <h3 className="m-0 text-sm font-medium">{title}</h3>
@@ -413,7 +345,7 @@ function FactoryIoBlock({ title, rows }: { title: string; rows: Array<{ ref: str
         {rows.map((row) => (
           <div key={row.ref} className="grid gap-1 rounded-md border border-border bg-background p-3">
             <span className="text-xs font-medium text-muted-foreground">{row.ref}</span>
-            <p className="m-0 text-sm">{row.value}</p>
+            <p className="m-0 whitespace-pre-wrap break-words text-sm">{formatLogValue(row.value)}</p>
           </div>
         ))}
       </div>
@@ -434,6 +366,30 @@ function DetailRows({ rows }: { rows: Array<[string, string]> }) {
       ))}
     </dl>
   );
+}
+
+function ioRows(value: unknown): Array<{ ref: string; value: unknown }> {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((row) => {
+    if (!row || typeof row !== "object") return [];
+    const record = row as { ref?: unknown; value?: unknown };
+    return typeof record.ref === "string" ? [{ ref: record.ref, value: record.value }] : [];
+  });
+}
+
+function formatLogValue(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (value == null) return "—";
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
+function formatDuration(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? `${value} ms` : "—";
 }
 
 function formatFactoryTime(value: string) {

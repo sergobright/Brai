@@ -146,8 +146,7 @@ test('Brai Cmd inbox route accepts Android access token and creates Inbox contex
   const previousFfmpeg = process.env.BRAI_THUMBNAIL_FFMPEG_BIN;
   process.env.BRAI_THUMBNAIL_FFMPEG_BIN = await fakeFfmpeg(storageRoot);
   const fixture = await createFixture(['2026-07-04T12:00:00.000Z'], {
-    inboundStorageRoot: storageRoot,
-    inboundTitleGenerator: async () => 'Команда с контекстом'
+    inboxStorageRoot: storageRoot
   });
 
   try {
@@ -177,7 +176,7 @@ test('Brai Cmd inbox route accepts Android access token and creates Inbox contex
 
     assert.equal(response.status, 201);
     const item = response.body.state.inbox[0];
-    assert.equal(item.title, 'Команда с контекстом');
+    assert.equal(item.title, 'разбери экран');
     assert.equal(item.explanation_text, 'разбери экран');
     assert.equal(item.description_md, '{\n  "appLabel": "Telegram",\n  "page": {\n    "items": [\n      "hello"\n    ]\n  }\n}');
     assert.equal(item.source, 'brai-cmd');

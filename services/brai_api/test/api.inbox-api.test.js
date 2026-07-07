@@ -4,10 +4,12 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {
+  INBOX_API_KEY,
   TOKEN,
   createFixture,
-  inboundRequest,
-  tableCount
+  inboxRequest,
+  tableCount,
+  waitFor
 } from '../test-support/api.js';
 
 const PNG_BYTES = Buffer.from([
@@ -20,13 +22,13 @@ const PNG_BYTES = Buffer.from([
 ]);
 const IMAGE_BASE64 = PNG_BYTES.toString('base64');
 const PDF_BYTES = Buffer.from('%PDF-1.4\n1 0 obj\n<<>>\nendobj\n%%EOF\n');
-const TEXT_BYTES = Buffer.from('hello inbound file\n', 'utf8');
+const TEXT_BYTES = Buffer.from('hello inbox file\n', 'utf8');
 
-test('inbound short endpoint returns an api-key protected default inbox handshake', async () => {
+test('Inbox API short endpoint returns an api-key protected default handshake', async () => {
   const fixture = await createFixture(['2026-06-27T10:00:00.000Z']);
 
   try {
-    const response = await inboundRequest(fixture.url, '/v1/');
+    const response = await inboxRequest(fixture.url, '/v1/');
 
     assert.equal(response.status, 200);
     assert.deepEqual(response.body, { ok: true, target: 'inbox' });
@@ -35,12 +37,12 @@ test('inbound short endpoint returns an api-key protected default inbox handshak
   }
 });
 
-test('inbound old URLs are not supported', async () => {
+test('Inbox API old target URLs are not supported', async () => {
   const fixture = await createFixture(['2026-06-27T10:00:00.000Z']);
 
   try {
-    const shortOld = await inboundRequest(fixture.url, '/v1/in');
-    const targetOld = await inboundRequest(fixture.url, '/v1/in/inbox');
+    const shortOld = await inboxRequest(fixture.url, '/v1/in');
+    const targetOld = await inboxRequest(fixture.url, '/v1/in/inbox');
 
     assert.equal(shortOld.status, 404);
     assert.equal(targetOld.status, 404);
@@ -52,17 +54,16 @@ test('inbound old URLs are not supported', async () => {
   }
 });
 
-test('inbound inbox POST creates an inbox row with explanation and attachment link', async () => {
-  const storageRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'brai-inbound-files-'));
+test('Inbox API POST creates an immediately visible row with explanation and attachment link', async () => {
+  const storageRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'brai-inbox-files-'));
   const previousFfmpeg = process.env.BRAI_THUMBNAIL_FFMPEG_BIN;
   process.env.BRAI_THUMBNAIL_FFMPEG_BIN = fakeFfmpeg(storageRoot);
   const fixture = await createFixture(['2026-06-27T10:00:00.000Z'], {
-    inboundStorageRoot: storageRoot,
-    inboundTitleGenerator: async () => 'Снимок идеи'
+    inboxStorageRoot: storageRoot
   });
 
   try {
-    const response = await inboundRequest(fixture.url, '/v1/', {
+    const response = await inboxRequest(fixture.url, '/v1/', {
       method: 'POST',
       body: JSON.stringify({
         text: 'Положить это во входящие',
@@ -77,8 +78,10 @@ test('inbound inbox POST creates an inbox row with explanation and attachment li
     assert.equal(response.body.ok, true);
     assert.equal(response.body.target, 'inbox');
     assert.equal(response.body.state.inbox.length, 1);
-    assert.equal(response.body.state.inbox[0].title, 'Снимок идеи');
+    assert.equal(response.body.state.inbox[0].title, 'Положить это во входящие');
     assert.equal(response.body.state.inbox[0].explanation_text, 'Положить это во входящие');
+    assert.equal(response.body.state.inbox[0].normalization_text, '');
+    assert.equal(response.body.state.inbox[0].is_normalized, false);
     assert.equal(response.body.state.inbox[0].source, 'telegram');
     assert.equal(response.body.state.inbox[0].source_key, '');
     assert.equal(response.body.state.inbox[0].response_required, false);
@@ -102,7 +105,7 @@ test('inbound inbox POST creates an inbox row with explanation and attachment li
     assert.equal(preview.headers.get('content-type'), 'image/jpeg');
     assert.ok((await preview.arrayBuffer()).byteLength > 0);
 
-    const duplicate = await inboundRequest(fixture.url, '/v1/', {
+    const duplicate = await inboxRequest(fixture.url, '/v1/', {
       method: 'POST',
       body: JSON.stringify({
         text: 'Положить это во входящие',
@@ -114,12 +117,7 @@ test('inbound inbox POST creates an inbox row with explanation and attachment li
     assert.equal(duplicate.status, 200);
     assert.equal(tableCount(fixture, 'inbox'), 1);
     assert.equal(tableCount(fixture, 'inbox_events'), 1);
-    const aiLogs = fixture.store.db.prepare('SELECT agent_id, agent_version, status, json_data FROM ai_logs').all();
-    assert.equal(aiLogs.length, 1);
-    assert.equal(aiLogs[0].agent_id, 'inbound.inbox.title_generator');
-    assert.equal(aiLogs[0].agent_version, '1');
-    assert.equal(aiLogs[0].status, 'done');
-    assert.equal(JSON.parse(aiLogs[0].json_data).outputs.find((output) => output.ref === 'inbox.title').value, 'Снимок идеи');
+    assert.equal(tableCount(fixture, 'ai_logs'), 0);
   } finally {
     await fixture.close();
     if (previousFfmpeg === undefined) delete process.env.BRAI_THUMBNAIL_FFMPEG_BIN;
@@ -128,11 +126,11 @@ test('inbound inbox POST creates an inbox row with explanation and attachment li
   }
 });
 
-test('inbound short POST accepts destination from body or header', async () => {
+test('Inbox API accepts destination from body or header only when it is inbox', async () => {
   const fixture = await createFixture(['2026-06-27T10:00:00.000Z']);
 
   try {
-    const bodyTarget = await inboundRequest(fixture.url, '/v1/', {
+    const bodyTarget = await inboxRequest(fixture.url, '/v1/', {
       method: 'POST',
       headers: { 'x-brai-target': 'inbox' },
       body: JSON.stringify({
@@ -140,7 +138,7 @@ test('inbound short POST accepts destination from body or header', async () => {
         text: 'Пока не сохранять в неизвестное место'
       })
     });
-    const headerTarget = await inboundRequest(fixture.url, '/v1/', {
+    const headerTarget = await inboxRequest(fixture.url, '/v1/', {
       headers: { 'x-brai-target': 'finance' }
     });
 
@@ -154,15 +152,14 @@ test('inbound short POST accepts destination from body or header', async () => {
   }
 });
 
-test('inbound inbox accepts multiple attachments, description content, and metadata', async () => {
-  const storageRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'brai-inbound-files-'));
+test('Inbox API accepts multiple attachments, description content, and metadata', async () => {
+  const storageRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'brai-inbox-files-'));
   const fixture = await createFixture(['2026-06-27T10:00:00.000Z'], {
-    inboundStorageRoot: storageRoot,
-    inboundTitleGenerator: async () => 'Пакет файлов'
+    inboxStorageRoot: storageRoot
   });
 
   try {
-    const response = await inboundRequest(fixture.url, '/v1/', {
+    const response = await inboxRequest(fixture.url, '/v1/', {
       method: 'POST',
       body: JSON.stringify({
         text: 'Принять пачку вложений',
@@ -180,7 +177,7 @@ test('inbound inbox accepts multiple attachments, description content, and metad
 
     const item = response.body.state.inbox[0];
     assert.equal(response.status, 201);
-    assert.equal(item.title, 'Пакет файлов');
+    assert.equal(item.title, 'Принять пачку вложений');
     assert.equal(item.description_md, '{\n  "kind": "payload",\n  "count": 2\n}');
     assert.equal(item.source, 'agent-api');
     assert.equal(item.source_key, 'agent-42');
@@ -201,16 +198,14 @@ test('inbound inbox accepts multiple attachments, description content, and metad
   }
 });
 
-test('inbound inbox links attach-to-previous messages to the previous inbox item', async () => {
+test('Inbox API links attach-to-previous messages to the previous inbox item', async () => {
   const fixture = await createFixture([
     '2026-06-27T10:00:00.000Z',
     '2026-06-27T10:01:00.000Z'
-  ], {
-    inboundTitleGenerator: async (text) => text.includes('первую') ? 'Первая запись' : 'Дополнение'
-  });
+  ]);
 
   try {
-    const first = await inboundRequest(fixture.url, '/v1/', {
+    const first = await inboxRequest(fixture.url, '/v1/', {
       method: 'POST',
       body: JSON.stringify({
         text: 'создай первую запись',
@@ -218,7 +213,7 @@ test('inbound inbox links attach-to-previous messages to the previous inbox item
         source_key: 'chat-1'
       })
     });
-    const second = await inboundRequest(fixture.url, '/v1/', {
+    const second = await inboxRequest(fixture.url, '/v1/', {
       method: 'POST',
       body: JSON.stringify({
         text: 'прикрепи эти данные к предыдущему сообщению',
@@ -235,11 +230,11 @@ test('inbound inbox links attach-to-previous messages to the previous inbox item
   }
 });
 
-test('inbound inbox rejects unsupported API record types', async () => {
+test('Inbox API rejects unsupported API record types', async () => {
   const fixture = await createFixture(['2026-06-27T10:00:00.000Z']);
 
   try {
-    const response = await inboundRequest(fixture.url, '/v1/', {
+    const response = await inboxRequest(fixture.url, '/v1/', {
       method: 'POST',
       body: JSON.stringify({
         text: 'Не принимать неверный тип',
@@ -255,11 +250,11 @@ test('inbound inbox rejects unsupported API record types', async () => {
   }
 });
 
-test('inbound inbox rejects invalid api key without mutating inbox', async () => {
+test('Inbox API rejects invalid api key without mutating inbox', async () => {
   const fixture = await createFixture(['2026-06-27T10:00:00.000Z']);
 
   try {
-    const response = await inboundRequest(
+    const response = await inboxRequest(
       fixture.url,
       '/v1/',
       {
@@ -282,12 +277,12 @@ test('inbound inbox rejects invalid api key without mutating inbox', async () =>
   }
 });
 
-test('inbound inbox still accepts legacy bearer authorization', async () => {
+test('Inbox API accepts bearer authorization with the inbox api key', async () => {
   const fixture = await createFixture(['2026-06-27T10:00:00.000Z']);
 
   try {
-    const response = await inboundRequest(fixture.url, '/v1/', {
-      headers: { authorization: 'Bearer test-inbound-token' }
+    const response = await inboxRequest(fixture.url, '/v1/', {
+      headers: { authorization: `Bearer ${INBOX_API_KEY}` }
     }, false);
 
     assert.equal(response.status, 200);
@@ -297,11 +292,11 @@ test('inbound inbox still accepts legacy bearer authorization', async () => {
   }
 });
 
-test('inbound API returns unsupported target for unknown connectors', async () => {
+test('Inbox API returns unsupported target for unknown connectors', async () => {
   const fixture = await createFixture(['2026-06-27T10:00:00.000Z']);
 
   try {
-    const response = await inboundRequest(fixture.url, '/v1/', {
+    const response = await inboxRequest(fixture.url, '/v1/', {
       headers: { 'x-brai-target': 'finance' }
     });
 
@@ -312,11 +307,11 @@ test('inbound API returns unsupported target for unknown connectors', async () =
   }
 });
 
-test('inbound inbox rejects invalid images without mutating inbox', async () => {
+test('Inbox API rejects invalid images without mutating inbox', async () => {
   const fixture = await createFixture(['2026-06-27T10:00:00.000Z']);
 
   try {
-    const response = await inboundRequest(fixture.url, '/v1/', {
+    const response = await inboxRequest(fixture.url, '/v1/', {
       method: 'POST',
       body: JSON.stringify({
         text: 'Не сохранять',
@@ -334,58 +329,74 @@ test('inbound inbox rejects invalid images without mutating inbox', async () => 
   }
 });
 
-test('inbound inbox can use Codex CLI title generation', async () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'brai-fake-codex-'));
-  const fakeCodex = path.join(tmp, 'codex');
-  fs.writeFileSync(fakeCodex, `#!/usr/bin/env node
-const fs = require('node:fs');
-const args = process.argv.slice(2);
-const expected = ['--sandbox', 'read-only', '--ask-for-approval', 'never', '--model', 'gpt-5.4-mini', 'exec', '--ephemeral', '--skip-git-repo-check'];
-for (let i = 0; i < expected.length; i += 1) {
-  if (args[i] !== expected[i]) process.exit(2);
-}
-const outputIndex = args.indexOf('--output-last-message');
-if (outputIndex < 0 || !args[outputIndex + 1]) process.exit(3);
-let prompt = '';
-process.stdin.setEncoding('utf8');
-process.stdin.on('data', (chunk) => { prompt += chunk; });
-process.stdin.on('end', () => {
-  if (!prompt.includes('CUSTOM DB PROMPT')) process.exit(4);
-  if (!prompt.includes('Проверить генерацию заголовка через Codex CLI')) process.exit(5);
-  fs.writeFileSync(args[outputIndex + 1], 'Codex title');
-});
-`);
-  fs.chmodSync(fakeCodex, 0o700);
-  const fixture = await createFixture(['2026-06-27T10:00:00.000Z'], {
-    codexBin: fakeCodex,
-    codexModel: 'gpt-5.4-mini',
-    codexTimeoutMs: 1000
+test('Inbox AI processing describes images, normalizes text, and suggests a new class', async () => {
+  const storageRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'brai-inbox-ai-files-'));
+  const fixture = await createFixture([
+    '2026-06-27T10:00:00.000Z',
+    '2026-06-27T10:00:01.000Z',
+    '2026-06-27T10:00:02.000Z',
+    '2026-06-27T10:00:03.000Z'
+  ], {
+    inboxStorageRoot: storageRoot,
+    inboxAutoProcess: true,
+    inboxImageDescriber: async ({ imagePaths }) => {
+      assert.equal(imagePaths.length, 1);
+      return 'На картинке экран Telegram с сообщением про презентацию.';
+    },
+    inboxNormalizer: async ({ item, imageDescription, classes }) => {
+      assert.equal(item.explanation_text, 'Сделать из этого задачу');
+      assert.match(imageDescription, /Telegram/);
+      assert.ok(classes.some((entry) => entry.key === 'task'));
+      return {
+        title: 'Подготовить презентацию',
+        description: 'Пользователь хочет поставить задачу подготовить презентацию по экрану Telegram.',
+        class_key: 'follow_up',
+        class_title: 'Follow-up',
+        class_description: 'Нужно вернуться к вопросу позднее.',
+        normalization: 'Транскрипт просит сделать задачу; скрин уточняет контекст.'
+      };
+    }
   });
 
   try {
-    fixture.store.db
-      .prepare(`
-        UPDATE agents
-        SET llm_prompt_template = ?
-        WHERE id = 'inbound.inbox.title_generator'
-      `)
-      .run('CUSTOM DB PROMPT\n\n{{text}}');
-
-    const response = await inboundRequest(fixture.url, '/v1/', {
+    const response = await inboxRequest(fixture.url, '/v1/', {
       method: 'POST',
       body: JSON.stringify({
-        text: 'Проверить генерацию заголовка через Codex CLI',
+        text: 'Сделать из этого задачу',
         image_base64: IMAGE_BASE64,
-        image_mime: 'image/png'
+        image_mime: 'image/png',
+        idempotency_key: 'ai-1'
       })
     });
-
     assert.equal(response.status, 201);
-    assert.equal(response.body.state.inbox[0].title, 'Codex title');
-    assert.equal(fixture.store.db.prepare("SELECT status FROM ai_logs WHERE agent_id = 'inbound.inbox.title_generator'").get().status, 'done');
+    assert.equal(response.body.state.inbox[0].is_normalized, false);
+
+    await waitFor(() => fixture.store.db.prepare('SELECT is_normalized FROM inbox WHERE id = ?').get(response.body.inbox_id)?.is_normalized === 1);
+
+    const item = fixture.store.db.prepare('SELECT * FROM inbox WHERE id = ?').get(response.body.inbox_id);
+    assert.equal(item.title, 'Подготовить презентацию');
+    assert.equal(item.description_text, 'Пользователь хочет поставить задачу подготовить презентацию по экрану Telegram.');
+    assert.equal(item.preliminary_section, 'follow_up');
+    assert.match(item.normalization_text, /Описание картинки/);
+    assert.match(item.normalization_text, /экран Telegram/);
+    assert.match(item.normalization_text, /Транскрипт просит/);
+
+    const classRow = fixture.store.db.prepare("SELECT * FROM inbox_classes WHERE key = 'follow_up'").get();
+    assert.equal(classRow.status, 'candidate');
+    assert.equal(classRow.title, 'Follow-up');
+
+    const logs = fixture.store.db.prepare('SELECT agent_id, status FROM ai_logs ORDER BY id ASC').all();
+    assert.deepEqual(logs, [
+      { agent_id: 'inbox.image_describer', status: 'done' },
+      { agent_id: 'inbox.normalizer', status: 'done' }
+    ]);
+
+    const publicLogs = await requestAiLogs(fixture.url);
+    assert.equal(publicLogs.status, 200);
+    assert.equal(publicLogs.body.logs.length, 2);
   } finally {
     await fixture.close();
-    fs.rmSync(tmp, { recursive: true, force: true });
+    fs.rmSync(storageRoot, { recursive: true, force: true });
   }
 });
 
@@ -398,29 +409,9 @@ require('node:fs').writeFileSync(process.argv.at(-1), Buffer.from([0xff, 0xd8, 0
   return file;
 }
 
-test('inbound inbox falls back to a local title when Codex title generation fails', async () => {
-  const fixture = await createFixture(['2026-06-27T10:00:00.000Z'], {
-    inboundTitleGenerator: async () => {
-      throw new Error('codex unavailable');
-    }
+async function requestAiLogs(baseUrl) {
+  const response = await fetch(`${baseUrl}/v1/ai-logs`, {
+    headers: { authorization: `Bearer ${TOKEN}` }
   });
-
-  try {
-    const response = await inboundRequest(fixture.url, '/v1/', {
-      method: 'POST',
-      body: JSON.stringify({
-        text: 'Очень длинное сообщение для заголовка и контекста',
-        image_base64: IMAGE_BASE64,
-        image_mime: 'image/png'
-      })
-    });
-
-    assert.equal(response.status, 201);
-    assert.equal(response.body.state.inbox[0].title, 'Очень длинное сообщение для заголовка и контекста');
-    const aiLog = fixture.store.db.prepare("SELECT status, json_data FROM ai_logs WHERE agent_id = 'inbound.inbox.title_generator'").get();
-    assert.equal(aiLog.status, 'failed');
-    assert.equal(JSON.parse(aiLog.json_data).metadata.fallback_used, true);
-  } finally {
-    await fixture.close();
-  }
-});
+  return { status: response.status, body: await response.json() };
+}

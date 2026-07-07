@@ -1,0 +1,728 @@
+import crypto from 'node:crypto';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { spawn, spawnSync } from 'node:child_process';
+import { TextDecoder } from 'node:util';
+
+export const INBOX_BODY_LIMIT_BYTES = 16 * 1024 * 1024;
+
+const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+const PDF_SIGNATURE = Buffer.from('%PDF-');
+const MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024;
+const MAX_ATTACHMENT_TOTAL_BYTES = 12 * 1024 * 1024;
+const MAX_ATTACHMENTS = 10;
+const IMAGE_PREVIEW_SUFFIX = '.thumb.jpg';
+const IMAGE_PREVIEW_MAX_PX = 640;
+const UTF8_DECODER = new TextDecoder('utf-8', { fatal: true });
+const ATTACHMENT_TYPES = new Map([
+  ['image/png', { extension: 'png', valid: (bytes) => bytes.subarray(0, 8).equals(PNG_SIGNATURE) }],
+  ['image/jpeg', { extension: 'jpg', valid: (bytes) => bytes.length > 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff }],
+  ['image/webp', { extension: 'webp', valid: (bytes) => bytes.length > 12 && bytes.toString('ascii', 0, 4) === 'RIFF' && bytes.toString('ascii', 8, 12) === 'WEBP' }],
+  ['image/gif', { extension: 'gif', valid: (bytes) => bytes.toString('ascii', 0, 6) === 'GIF87a' || bytes.toString('ascii', 0, 6) === 'GIF89a' }],
+  ['application/pdf', { extension: 'pdf', valid: (bytes) => bytes.subarray(0, 5).equals(PDF_SIGNATURE) }],
+  ['text/plain', { extension: 'txt', valid: validUtf8Text }],
+  ['text/markdown', { extension: 'md', valid: validUtf8Text }],
+  ['text/csv', { extension: 'csv', valid: validUtf8Text }],
+  ['application/json', { extension: 'json', valid: validJson }],
+  ['application/vnd.openxmlformats-officedocument.wordprocessingml.document', { extension: 'docx', valid: validZip }],
+  ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', { extension: 'xlsx', valid: validZip }],
+  ['application/vnd.openxmlformats-officedocument.presentationml.presentation', { extension: 'pptx', valid: validZip }]
+]);
+for (const [mime, type] of ATTACHMENT_TYPES) type.mime = mime;
+const CONTENT_TYPES_BY_EXTENSION = new Map(
+  [...ATTACHMENT_TYPES.values()].map((type) => [type.extension, type.mime]).filter(([extension]) => extension)
+);
+const INBOX_IMAGE_AGENT_ID = 'inbox.image_describer';
+const INBOX_NORMALIZER_AGENT_ID = 'inbox.normalizer';
+const DEFAULT_IMAGE_PROMPT_TEMPLATE = [
+  'Опиши изображение для Inbox на русском языке.',
+  'Нужно детальное, фактическое описание: что видно, какой интерфейс/экран, важные тексты, объекты, состояния, числа и возможный пользовательский контекст.',
+  'Не выдумывай невидимые детали. Верни только описание.'
+].join('\n');
+const DEFAULT_NORMALIZER_PROMPT_TEMPLATE = [
+  'Разбери Inbox-запись на русском языке.',
+  'Нужно сопоставить голосовой транскрипт, текстовый контекст и описание картинки.',
+  'Верни только JSON без Markdown с полями:',
+  '{"title":"короткий заголовок до 80 символов","description":"понятное описание чего хотел пользователь","class_key":"ключ класса","class_title":"русское название класса если ключ новый","class_description":"краткое описание класса если ключ новый","normalization":"технический разбор"}',
+  '',
+  'Доступные классы:',
+  '{{classes}}',
+  '',
+  'Транскрипт:',
+  '{{text}}',
+  '',
+  'Текстовый контекст:',
+  '{{description}}',
+  '',
+  'Описание картинки:',
+  '{{image_description}}'
+].join('\n');
+
+export function inboxRequestTarget(req, body = {}) {
+  const target = inboxTarget(body?.target ?? body?.destination)
+    ?? inboxTarget(req.headers['x-brai-target'] ?? req.headers['x-brai-destination']);
+  if (!target) return 'inbox';
+  return target === 'inbox' ? 'inbox' : null;
+}
+
+export function hasInboxApiKey(req, apiKey) {
+  if (!apiKey) return false;
+  return req.headers['x-brai-api-key'] === apiKey
+    || req.headers['x-api-key'] === apiKey
+    || req.headers.authorization === `Bearer ${apiKey}`;
+}
+
+function inboxTarget(value) {
+  if (value == null || value === '') return null;
+  const target = optionalText(value);
+  if (target && !target.includes('/')) return target;
+  throwStatus('invalid_target', 400);
+}
+
+export async function receiveInbox({
+  store,
+  body,
+  storageRoot,
+  nowDate
+}) {
+  const text = requiredText(body?.text, 'text_required');
+  const descriptionText = optionalBodyText(body?.description_text)
+    ?? optionalBodyText(body?.description)
+    ?? structuredBodyText(body?.description)
+    ?? optionalBodyText(body?.content_text)
+    ?? structuredBodyText(body?.description_json)
+    ?? structuredBodyText(body?.content)
+    ?? '';
+  const attachments = decodeAttachments(body);
+  const nowIso = nowDate.toISOString();
+  const idempotencyKey = optionalText(body?.idempotency_key);
+  const stableId = idempotencyKey ? shortHash(idempotencyKey) : null;
+  const inboxId = stableId ? `inbox:api:${stableId}` : `inbox:api:${crypto.randomUUID()}`;
+  const eventId = stableId ? `inbox:api:${stableId}:create` : `inbox:api:${crypto.randomUUID()}:create`;
+  const existingInboxId = stableId ? store.inboxIdForEvent(eventId) : null;
+  if (existingInboxId) {
+    return { inbox_id: existingInboxId, created: false, attachment_links: [] };
+  }
+
+  const source = optionalText(body?.source) ?? 'inbox';
+  const sourceKey = optionalText(body?.source_key) ?? '';
+  const responseRequired = optionalBoolean(body?.response_required, 'invalid_response_required');
+  const recordTypeId = inboxRecordTypeId(body?.record_type_id ?? body?.record_type);
+  const relatedInboxId = referencesPreviousMessage(`${text}\n${descriptionText}`)
+    ? store.latestInboxIdForInbox({ source, sourceKey })
+    : null;
+  const attachmentLinks = [];
+  const writtenPaths = [];
+
+  try {
+    if (attachments.length > 0) fs.mkdirSync(storageRoot, { recursive: true });
+    attachments.forEach((attachment, index) => {
+      const suffix = String(index + 1).padStart(2, '0');
+      const fileName = `${compactTimestamp(nowDate)}-${stableId ?? crypto.randomUUID()}-${suffix}.${attachment.extension}`;
+      const filePath = path.join(storageRoot, fileName);
+      if (!fs.existsSync(filePath)) {
+        fs.writeFileSync(filePath, attachment.bytes, { flag: 'wx' });
+        writtenPaths.push(filePath);
+      }
+      if (attachment.mime?.startsWith('image/')) {
+        const previewPath = path.join(storageRoot, imagePreviewName(fileName));
+        if (createImagePreview(filePath, previewPath)) writtenPaths.push(previewPath);
+      }
+      attachmentLinks.push(`/v1/inbox/attachments/${fileName}`);
+    });
+    store.createInboxApiItem({
+      eventId,
+      inboxId,
+      title: fallbackTitle(text),
+      descriptionText,
+      explanationText: text,
+      attachmentLinks,
+      source,
+      sourceKey,
+      responseRequired,
+      relatedInboxId,
+      recordTypeId,
+      nowIso
+    });
+  } catch (error) {
+    for (const filePath of writtenPaths) fs.rmSync(filePath, { force: true });
+    throw error;
+  }
+
+  return {
+    inbox_id: inboxId,
+    created: true,
+    attachment_links: attachmentLinks
+  };
+}
+
+export async function processInboxItem({
+  store,
+  inboxId,
+  storageRoot,
+  codexBin,
+  codexModel,
+  codexTimeoutMs,
+  imageDescriber,
+  normalizer,
+  nowDate = new Date()
+}) {
+  if (!tryInboxLock(store, inboxId)) return { skipped: true, reason: 'locked' };
+  try {
+    const item = store.getInboxItem(inboxId);
+    if (!item || item.deleted_at_utc || item.is_normalized) {
+      return { skipped: true, reason: item ? 'already_normalized' : 'missing' };
+    }
+
+    const imageAgent = store.getAgent(INBOX_IMAGE_AGENT_ID);
+    const imagePaths = imagePathsForItem(item, storageRoot);
+    let imageDescription = '';
+    if (imagePaths.length > 0) {
+      const imageResult = await describeImages({
+        agent: imageAgent,
+        codexBin,
+        codexModel,
+        codexTimeoutMs,
+        imageDescriber,
+        imagePaths
+      });
+      imageDescription = imageResult.text;
+      store.createInboxNormalizationEvent({
+        inboxId,
+        payload: {
+          normalization_text: normalizeBlocks({
+            imageDescription,
+            analysis: item.normalization_text
+          })
+        },
+        nowIso: nowDate.toISOString()
+      });
+      recordInboxImageAiLog(store, {
+        agent: imageAgent,
+        dt: nowDate.toISOString(),
+        status: imageResult.status,
+        inboxId,
+        imagePaths,
+        imageDescription,
+        error: imageResult.error
+      });
+    }
+
+    const freshItem = store.getInboxItem(inboxId) ?? item;
+    const classes = store.listInboxClasses();
+    const normalizerAgent = store.getAgent(INBOX_NORMALIZER_AGENT_ID);
+    const normalizeResult = await normalizeInbox({
+      agent: normalizerAgent,
+      codexBin,
+      codexModel,
+      codexTimeoutMs,
+      normalizer,
+      item: freshItem,
+      classes,
+      imageDescription
+    });
+    const knownClass = classes.find((entry) => entry.key === normalizeResult.classKey);
+    if (!knownClass) {
+      store.upsertInboxClass({
+        key: normalizeResult.classKey,
+        title: normalizeResult.classTitle || normalizeResult.classKey,
+        description: normalizeResult.classDescription || 'Класс предложен AI-разбором Inbox.',
+        status: 'candidate',
+        createdByAgentId: INBOX_NORMALIZER_AGENT_ID,
+        nowIso: nowDate.toISOString()
+      });
+    }
+    const normalizationText = normalizeBlocks({
+      imageDescription,
+      analysis: normalizeResult.normalization
+    });
+    store.createInboxNormalizationEvent({
+      inboxId,
+      payload: {
+        title: normalizeResult.title,
+        description_md: normalizeResult.description,
+        preliminary_section: normalizeResult.classKey,
+        normalization_text: normalizationText,
+        is_normalized: true
+      },
+      nowIso: nowDate.toISOString()
+    });
+    recordInboxNormalizerAiLog(store, {
+      agent: normalizerAgent,
+      dt: nowDate.toISOString(),
+      status: normalizeResult.status,
+      inboxId,
+      item: freshItem,
+      classes,
+      imageDescription,
+      output: {
+        title: normalizeResult.title,
+        description: normalizeResult.description,
+        classKey: normalizeResult.classKey,
+        normalization: normalizationText
+      },
+      error: normalizeResult.error
+    });
+    return { ok: true, image_described: imagePaths.length > 0, class_key: normalizeResult.classKey };
+  } finally {
+    unlockInbox(store, inboxId);
+  }
+}
+
+export function serveInboxAttachment(req, res, url, storageRoot, sendJson, store = null) {
+  const prefix = '/v1/inbox/attachments/';
+  if (!url.pathname.startsWith(prefix)) return false;
+  const name = decodeURIComponent(url.pathname.slice(prefix.length));
+  if (!/^[a-zA-Z0-9_.-]+$/.test(name)) {
+    sendJson(req, res, 404, { error: 'not_found' });
+    return true;
+  }
+  if (store && !store.canReadInboxAttachment(name)) {
+    sendJson(req, res, 404, { error: 'not_found' });
+    return true;
+  }
+
+  const root = path.resolve(storageRoot);
+  const filePath = path.resolve(root, name);
+  if (!filePath.startsWith(root + path.sep) || !fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
+    sendJson(req, res, 404, { error: 'not_found' });
+    return true;
+  }
+
+  res.writeHead(200, {
+    'content-type': contentTypeForName(name),
+    'cache-control': 'private, max-age=86400'
+  });
+  fs.createReadStream(filePath).pipe(res);
+  return true;
+}
+
+export function imagePreviewName(name) {
+  return `${name}${IMAGE_PREVIEW_SUFFIX}`;
+}
+
+export function originalNameForImagePreview(name) {
+  return name.endsWith(IMAGE_PREVIEW_SUFFIX) ? name.slice(0, -IMAGE_PREVIEW_SUFFIX.length) : null;
+}
+
+function requiredText(value, message) {
+  const text = optionalText(value);
+  if (text) return text;
+  const error = new Error(message);
+  error.status = 400;
+  throw error;
+}
+
+function optionalText(value) {
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function optionalBodyText(value) {
+  return typeof value === 'string' ? value.trim() : null;
+}
+
+function structuredBodyText(value) {
+  if (value == null || typeof value === 'string') return optionalBodyText(value);
+  return JSON.stringify(value, null, 2);
+}
+
+function decodeAttachments(body) {
+  const rawAttachments = [];
+  if (body?.image_base64 !== undefined || body?.image_mime !== undefined) {
+    rawAttachments.push({
+      base64: body.image_base64,
+      mime: body.image_mime,
+      legacyImage: true
+    });
+  }
+
+  if (body?.attachments !== undefined) {
+    if (!Array.isArray(body.attachments)) throwStatus('invalid_attachments', 400);
+    for (const attachment of body.attachments) rawAttachments.push(attachment);
+  }
+
+  if (rawAttachments.length > MAX_ATTACHMENTS) throwStatus('too_many_attachments', 400);
+
+  let totalBytes = 0;
+  return rawAttachments.map((raw) => {
+    const legacyImage = raw?.legacyImage === true;
+    const mime = optionalText(raw?.mime ?? raw?.file_mime ?? raw?.image_mime);
+    const attachmentType = ATTACHMENT_TYPES.get(mime);
+    if (!attachmentType) {
+      throwStatus(legacyImage ? 'invalid_image_mime' : 'unsupported_attachment_mime', 400);
+    }
+
+    const source = optionalText(raw?.base64 ?? raw?.file_base64 ?? raw?.data_base64);
+    const bytes = decodeBase64(source);
+    if (!bytes) throwStatus(legacyImage ? 'invalid_image' : 'invalid_attachment', 400);
+    if (bytes.length > MAX_ATTACHMENT_BYTES) {
+      throwStatus(legacyImage ? 'image_too_large' : 'attachment_too_large', 413);
+    }
+    totalBytes += bytes.length;
+    if (totalBytes > MAX_ATTACHMENT_TOTAL_BYTES) throwStatus('attachments_too_large', 413);
+    if (!attachmentType.valid(bytes)) throwStatus(legacyImage ? 'invalid_image' : 'invalid_attachment', 400);
+    return { bytes, extension: attachmentType.extension, mime };
+  });
+}
+
+function createImagePreview(filePath, previewPath) {
+  if (fs.existsSync(previewPath)) return false;
+  const result = spawnSync(process.env.BRAI_THUMBNAIL_FFMPEG_BIN ?? 'ffmpeg', [
+    '-v',
+    'error',
+    '-y',
+    '-i',
+    filePath,
+    '-frames:v',
+    '1',
+    '-vf',
+    `scale='min(${IMAGE_PREVIEW_MAX_PX},iw)':'min(${IMAGE_PREVIEW_MAX_PX},ih)':force_original_aspect_ratio=decrease`,
+    '-q:v',
+    '5',
+    previewPath
+  ], { timeout: 5000 });
+  if (result.status === 0 && fs.existsSync(previewPath)) return true;
+  fs.rmSync(previewPath, { force: true });
+  return false;
+}
+
+function decodeBase64(value) {
+  if (!value) return null;
+  const source = value.replace(/^data:[^,]+,/, '').replace(/\s+/g, '');
+  if (!source || source.length % 4 !== 0 || !/^[A-Za-z0-9+/]+={0,2}$/.test(source)) return null;
+  const bytes = Buffer.from(source, 'base64');
+  return bytes.length > 0 ? bytes : null;
+}
+
+function validUtf8Text(bytes) {
+  if (bytes.includes(0)) return false;
+  try {
+    UTF8_DECODER.decode(bytes);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function validJson(bytes) {
+  if (!validUtf8Text(bytes)) return false;
+  try {
+    JSON.parse(bytes.toString('utf8'));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function validZip(bytes) {
+  return bytes.length > 4 && bytes[0] === 0x50 && bytes[1] === 0x4b && [0x03, 0x05, 0x07].includes(bytes[2]);
+}
+
+function optionalBoolean(value, message) {
+  if (value == null) return false;
+  if (value === true || value === 'true' || value === 1) return true;
+  if (value === false || value === 'false' || value === 0) return false;
+  throwStatus(message, 400);
+}
+
+function inboxRecordTypeId(value) {
+  if (value == null) return 1;
+  const number = Number(value);
+  if (number === 1 || number === 2) return number;
+  throwStatus('invalid_record_type', 400);
+}
+
+function referencesPreviousMessage(value) {
+  const text = value.toLocaleLowerCase('ru');
+  return /(предыдущ|прошл|previous|last)/.test(text) && /(прикреп|добав|attach|append)/.test(text);
+}
+
+function throwStatus(message, status) {
+  const error = new Error(message);
+  error.status = status;
+  throw error;
+}
+
+async function describeImages({ agent, codexBin, codexModel, codexTimeoutMs, imageDescriber, imagePaths }) {
+  try {
+    const text = imageDescriber
+      ? await imageDescriber({ imagePaths })
+      : await codexText({
+        codexBin,
+        codexModel: codexModel ?? optionalText(agent?.llm_model),
+        promptTemplate: optionalBodyText(agent?.llm_prompt_template) ?? DEFAULT_IMAGE_PROMPT_TEMPLATE,
+        timeoutMs: Number.isFinite(codexTimeoutMs) ? codexTimeoutMs : agent?.llm_timeout_ms,
+        images: imagePaths
+      });
+    const clean = cleanText(text);
+    return clean ? { text: clean, status: 'done', error: '' } : { text: '', status: 'failed', error: 'empty_image_description' };
+  } catch (error) {
+    return { text: '', status: 'failed', error: errorText(error) };
+  }
+}
+
+async function normalizeInbox({ agent, codexBin, codexModel, codexTimeoutMs, normalizer, item, classes, imageDescription }) {
+  const fallback = fallbackNormalization(item, classes, imageDescription);
+  try {
+    const output = normalizer
+      ? await normalizer({ item, classes, imageDescription })
+      : await codexText({
+        codexBin,
+        codexModel: codexModel ?? optionalText(agent?.llm_model),
+        promptTemplate: renderNormalizerPrompt(
+          optionalBodyText(agent?.llm_prompt_template) ?? DEFAULT_NORMALIZER_PROMPT_TEMPLATE,
+          item,
+          classes,
+          imageDescription
+        ),
+        timeoutMs: Number.isFinite(codexTimeoutMs) ? codexTimeoutMs : agent?.llm_timeout_ms
+      });
+    const parsed = typeof output === 'string' ? parseNormalizerJson(output) : output;
+    const normalized = cleanNormalization(parsed, fallback);
+    return { ...normalized, status: 'done', error: '' };
+  } catch (error) {
+    return { ...fallback, status: 'failed', error: errorText(error) };
+  }
+}
+
+function cleanNormalization(value, fallback) {
+  return {
+    title: cleanTitle(value?.title) || fallback.title,
+    description: cleanText(value?.description) || fallback.description,
+    classKey: cleanClassKey(value?.class_key ?? value?.classKey) || fallback.classKey,
+    classTitle: cleanText(value?.class_title ?? value?.classTitle),
+    classDescription: cleanText(value?.class_description ?? value?.classDescription),
+    normalization: cleanText(value?.normalization) || fallback.normalization
+  };
+}
+
+function fallbackNormalization(item, classes, imageDescription) {
+  const text = item.explanation_text || item.title || 'Входящее';
+  const description = cleanText(item.description_md) || text;
+  const classKey = heuristicClassKey(`${text}\n${description}\n${imageDescription}`, classes);
+  return {
+    title: fallbackTitle(text),
+    description,
+    classKey,
+    classTitle: '',
+    classDescription: '',
+    normalization: [
+      'Fallback-разбор Inbox.',
+      imageDescription ? `Описание картинки: ${imageDescription}` : '',
+      `Транскрипт: ${text}`
+    ].filter(Boolean).join('\n\n')
+  };
+}
+
+function heuristicClassKey(text, classes) {
+  const lower = text.toLocaleLowerCase('ru');
+  const candidates = [
+    [/задач|сдела|проверь|напомн|дедлайн|созвон|встреч/, 'task'],
+    [/иде[яю]|придум|можно бы|концеп/, 'idea'],
+    [/хочу|желан|купить|надо бы/, 'wish'],
+    [/сохран|библиотек|прочит|книг|ссылка|материал/, 'library'],
+    [/замет|note|наблюден/, 'note']
+  ];
+  for (const [pattern, key] of candidates) {
+    if (pattern.test(lower) && classes.some((entry) => entry.key === key)) return key;
+  }
+  return classes.some((entry) => entry.key === 'other') ? 'other' : (classes[0]?.key ?? 'other');
+}
+
+function renderNormalizerPrompt(template, item, classes, imageDescription) {
+  return template
+    .replaceAll('{{classes}}', JSON.stringify(classes, null, 2))
+    .replaceAll('{{text}}', item.explanation_text || '')
+    .replaceAll('{{description}}', item.description_md || '')
+    .replaceAll('{{image_description}}', imageDescription || '');
+}
+
+function parseNormalizerJson(value) {
+  const text = String(value ?? '').trim().replace(/^```(?:json)?\s*/i, '').replace(/```$/i, '').trim();
+  return JSON.parse(text);
+}
+
+function recordInboxImageAiLog(store, { agent, dt, status, inboxId, imagePaths, imageDescription, error }) {
+  store.recordAiLog({
+    agentId: INBOX_IMAGE_AGENT_ID,
+    agentVersion: agent?.version ?? '',
+    dt,
+    status,
+    aiTitle: status === 'done' ? 'Описал картинку Inbox' : 'Не описал картинку Inbox',
+    flowId: inboxId,
+    flowCommand: 'describe_image',
+    jsonData: {
+      schema: 'brai.ai_log.v1',
+      inputs: [
+        { ref: 'inbox.id', value: inboxId },
+        { ref: 'inbox.attachments.images', value: imagePaths.map((filePath) => path.basename(filePath)) }
+      ],
+      outputs: [
+        { ref: 'inbox.normalization_text.image_description', value: imageDescription }
+      ],
+      metadata: { error: error || null }
+    }
+  });
+}
+
+function recordInboxNormalizerAiLog(store, { agent, dt, status, inboxId, item, classes, imageDescription, output, error }) {
+  store.recordAiLog({
+    agentId: INBOX_NORMALIZER_AGENT_ID,
+    agentVersion: agent?.version ?? '',
+    dt,
+    status,
+    aiTitle: status === 'done' ? 'Разобрал Inbox-запись' : 'Fallback разбора Inbox-записи',
+    flowId: inboxId,
+    flowCommand: 'normalize',
+    jsonData: {
+      schema: 'brai.ai_log.v1',
+      inputs: [
+        { ref: 'inbox.id', value: inboxId },
+        { ref: 'inbox.explanation_text', value: item.explanation_text || '' },
+        { ref: 'inbox.description_text', value: item.description_md || '' },
+        { ref: 'inbox.normalization_text.image_description', value: imageDescription || '' },
+        { ref: 'inbox_classes.keys', value: classes.map((entry) => entry.key) }
+      ],
+      outputs: [
+        { ref: 'inbox.title', value: output.title },
+        { ref: 'inbox.description_text', value: output.description },
+        { ref: 'inbox.preliminary_section', value: output.classKey },
+        { ref: 'inbox.normalization_text', value: output.normalization }
+      ],
+      metadata: {
+        error: error || null,
+        fallback_used: status === 'failed'
+      }
+    }
+  });
+}
+
+function fallbackTitle(text) {
+  return cleanTitle(text.split(/\s+/).slice(0, 7).join(' ')) || 'Входящее';
+}
+
+function cleanTitle(value) {
+  if (typeof value !== 'string') return '';
+  return value
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .find(Boolean)
+    ?.replace(/^["'«“”]+|["'»“”]+$/g, '')
+    .slice(0, 80)
+    .trim() ?? '';
+}
+
+function cleanText(value) {
+  return typeof value === 'string' ? value.trim().slice(0, 8000) : '';
+}
+
+function cleanClassKey(value) {
+  const text = typeof value === 'string' ? value.trim().toLowerCase() : '';
+  return /^[a-z][a-z0-9_-]{1,62}$/.test(text) ? text : '';
+}
+
+function normalizeBlocks({ imageDescription, analysis }) {
+  return [
+    imageDescription ? `## Описание картинки\n\n${imageDescription}` : '',
+    analysis ? `## Разбор\n\n${analysis}` : ''
+  ].filter(Boolean).join('\n\n').trim();
+}
+
+function codexText({ codexBin = 'codex', codexModel = null, promptTemplate, timeoutMs = 3000, images = [] } = {}) {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'brai-inbox-ai-'));
+  const outputPath = path.join(tmp, 'output.txt');
+  const timeout = Number.isFinite(timeoutMs) ? timeoutMs : 3000;
+
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const args = [
+      '--sandbox',
+      'read-only',
+      '--ask-for-approval',
+      'never'
+    ];
+    for (const imagePath of images) args.push('--image', imagePath);
+    if (codexModel) args.push('--model', codexModel);
+    args.push(
+      'exec',
+      '--ephemeral',
+      '--skip-git-repo-check',
+      '--output-last-message',
+      outputPath,
+      '-'
+    );
+    const child = spawn(codexBin, args, { stdio: ['pipe', 'ignore', 'ignore'] });
+    const timer = setTimeout(() => {
+      child.kill('SIGKILL');
+      finish(reject, new Error('codex_inbox_timeout'));
+    }, timeout);
+
+    child.once('error', (error) => finish(reject, error));
+    child.once('close', (code) => {
+      if (code !== 0) {
+        finish(reject, new Error('codex_inbox_failed'));
+        return;
+      }
+      finish(resolve, fs.existsSync(outputPath) ? fs.readFileSync(outputPath, 'utf8') : '');
+    });
+    child.stdin.end(promptTemplate);
+
+    function finish(callback, value) {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      fs.rmSync(tmp, { recursive: true, force: true });
+      callback(value);
+    }
+  });
+}
+
+function errorText(error) {
+  return error instanceof Error ? error.message.slice(0, 1000) : String(error).slice(0, 1000);
+}
+
+function compactTimestamp(date) {
+  return date.toISOString().replace(/[:.]/g, '-');
+}
+
+function shortHash(value) {
+  return crypto.createHash('sha256').update(value).digest('hex').slice(0, 32);
+}
+
+function contentTypeForName(name) {
+  const extension = name.split('.').pop();
+  if (extension && CONTENT_TYPES_BY_EXTENSION.has(extension)) return CONTENT_TYPES_BY_EXTENSION.get(extension);
+  return 'application/octet-stream';
+}
+
+function imagePathsForItem(item, storageRoot) {
+  const root = path.resolve(storageRoot);
+  return item.attachment_links
+    .filter((link) => /\.(gif|jpe?g|png|webp)(?:$|\?)/i.test(link))
+    .map((link) => decodeURIComponent(path.basename(link.split('?')[0] ?? link)))
+    .filter((name) => /^[a-zA-Z0-9_.-]+$/.test(name))
+    .map((name) => path.resolve(root, name))
+    .filter((filePath) => filePath.startsWith(root + path.sep) && fs.existsSync(filePath) && fs.statSync(filePath).isFile());
+}
+
+function tryInboxLock(store, inboxId) {
+  try {
+    const value = store.db
+      .prepare('SELECT pg_try_advisory_lock(hashtext(?)) AS locked')
+      .get(`inbox:${inboxId}`)?.locked;
+    return value === true || value === 1;
+  } catch {
+    return true;
+  }
+}
+
+function unlockInbox(store, inboxId) {
+  try {
+    store.db
+      .prepare('SELECT pg_advisory_unlock(hashtext(?))')
+      .get(`inbox:${inboxId}`);
+  } catch {
+    // Some local adapters do not expose PostgreSQL advisory lock functions.
+  }
+}
