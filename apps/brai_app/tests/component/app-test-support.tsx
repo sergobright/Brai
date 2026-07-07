@@ -108,6 +108,7 @@ export function setupBraiAppTest() {
     Object.defineProperty(window, "innerWidth", { configurable: true, writable: true, value: 360 });
     window.history.replaceState(null, "", "/");
     window.localStorage.clear();
+    window.localStorage.setItem("brai_onboarding_state_v1", JSON.stringify({ complete: true, step: "login-check", history: [], path: null, profileVersion: null, voiceMode: null, name: "" }));
     document.cookie = "sidebar_state=; path=/; max-age=0";
     delete document.documentElement.dataset.sidebarState;
   });

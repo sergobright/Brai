@@ -7,6 +7,7 @@ import { installAndroidBackHandler } from "@/shared/platform/platform";
 import { getBraiLocalStorageItem, removeBraiLocalStorageItem, setBraiLocalStorageItem } from "@/shared/storage/localStorageKeys";
 import { ScrollArea } from "@/shared/ui/scroll-area";
 import { SidebarInset, SidebarProvider } from "@/shared/ui/sidebar";
+import { OnboardingFlow, shouldShowOnboarding } from "@/features/onboarding/OnboardingFlow";
 import { AppStartupSplash, SPLASH_MAX_VISIBLE_MS } from "./AppStartupSplash";
 import type { SectionId } from "./appModel";
 import { isPrimarySection, sectionIcon, sectionTitle } from "./appModel";
@@ -36,6 +37,7 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
   const app = useBraiAppState(initialSection);
   const [mobileDockMenu, setMobileDockMenu] = useState<"left" | "right" | null>(null);
   const [startupExpired, setStartupExpired] = useState(false);
+  const [onboardingVisible, setOnboardingVisible] = useState(() => process.env.NODE_ENV === "test" ? shouldShowOnboarding(false) : true);
   const dockOverflowOpen = mobileDockMenu != null;
   const [actionsMobileCreateDraft, setActionsMobileCreateDraft] = useStoredMobileCreateDraft(ACTIONS_MOBILE_CREATE_DRAFT_STORAGE_KEY);
   const [inboxMobileCreateDraft, setInboxMobileCreateDraft] = useStoredMobileCreateDraft(INBOX_MOBILE_CREATE_DRAFT_STORAGE_KEY);
@@ -59,6 +61,10 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
     });
   }
 
+  async function openNativeBraiCmdSettings() {
+    return await openBraiCmdSettings();
+  }
+
   useEffect(() => {
     sectionRef.current = app.section;
     selectSectionRef.current = app.selectSection;
@@ -68,6 +74,13 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
     const timeout = window.setTimeout(() => setStartupExpired(true), SPLASH_MAX_VISIBLE_MS);
     return () => window.clearTimeout(timeout);
   }, []);
+
+  useEffect(() => {
+    const timeout = window.setTimeout(() => {
+      setOnboardingVisible(shouldShowOnboarding(startupReady && app.displaySyncStatus === "auth_required"));
+    }, 0);
+    return () => window.clearTimeout(timeout);
+  }, [app.displaySyncStatus, startupReady]);
 
   useEffect(() => installAndroidBackHandler(() => {
     if (window.history.state?.braiMobileMenu || window.history.state?.braiMobileDockMenu || window.history.state?.braiMobileSheet || window.history.state?.braiActivityEditor || window.history.state?.braiMobileActionCreate || window.history.state?.braiInboxEditor || window.history.state?.braiMobileInboxCreate || window.history.state?.braiFactoryLog) return false;
@@ -188,6 +201,24 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
         ) : screenSection === "brai-cmd" ? (
           <BraiCmdSection />
         ) : null}
+      </>
+    );
+  }
+
+  if (onboardingVisible) {
+    return (
+      <>
+        <OnboardingFlow
+          authRequired={startupReady && app.displaySyncStatus === "auth_required"}
+          authMode={app.authMode}
+          busy={app.busy}
+          onDone={() => setOnboardingVisible(false)}
+          onLogin={app.onLogin}
+          onOpenNativeCmdSettings={openNativeBraiCmdSettings}
+          onRequestOtp={app.onRequestOtp}
+          onVerifyOtp={app.onVerifyOtp}
+        />
+        {startupExpired ? null : <AppStartupSplash ready={startupReady} />}
       </>
     );
   }

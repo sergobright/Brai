@@ -21,7 +21,8 @@ import com.getcapacitor.annotation.PermissionCallback;
 @CapacitorPlugin(
     name = "BraiAndroidCapabilities",
     permissions = {
-        @Permission(alias = "microphone", strings = { Manifest.permission.RECORD_AUDIO })
+        @Permission(alias = "microphone", strings = { Manifest.permission.RECORD_AUDIO }),
+        @Permission(alias = "notifications", strings = { Manifest.permission.POST_NOTIFICATIONS })
     }
 )
 public final class BraiAndroidCapabilitiesPlugin extends Plugin {
@@ -41,6 +42,20 @@ public final class BraiAndroidCapabilitiesPlugin extends Plugin {
 
     @PermissionCallback
     private void microphonePermissionResult(PluginCall call) {
+        call.resolve(stateJson());
+    }
+
+    @PluginMethod
+    public void requestNotifications(PluginCall call) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU || getPermissionState("notifications") == PermissionState.GRANTED) {
+            call.resolve(stateJson());
+            return;
+        }
+        requestPermissionForAlias("notifications", call, "notificationsPermissionResult");
+    }
+
+    @PermissionCallback
+    private void notificationsPermissionResult(PluginCall call) {
         call.resolve(stateJson());
     }
 
@@ -68,6 +83,8 @@ public final class BraiAndroidCapabilitiesPlugin extends Plugin {
         state.put("overlayGranted", canDrawOverlays());
         state.put("microphoneDeclared", hasRequestedPermission(Manifest.permission.RECORD_AUDIO));
         state.put("microphoneGranted", getPermissionState("microphone") == PermissionState.GRANTED);
+        state.put("notificationsDeclared", hasRequestedPermission(Manifest.permission.POST_NOTIFICATIONS));
+        state.put("notificationsGranted", Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU || getPermissionState("notifications") == PermissionState.GRANTED);
         state.put("microphoneForegroundServiceDeclared", hasRequestedPermission(Manifest.permission.FOREGROUND_SERVICE_MICROPHONE));
         state.put("mediaProjectionDeclared", hasRequestedPermission(Manifest.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION));
         state.put("mediaProjectionServiceDeclared", hasService(BraiMediaProjectionService.class));
