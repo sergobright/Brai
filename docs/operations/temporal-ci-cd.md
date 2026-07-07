@@ -52,6 +52,8 @@ Native-boundary preview deploys may build a slot-specific APK inside the existin
 
 Accepted `deploy-prod` reruns are idempotent after a partial success: if the preview slot was already released, promotion may pass only when the production build ledger already records the accepted branch for the target commit, and the release rerun records `slot_released` for the already-free slot instead of leaving the workflow blocked.
 
+Accepted branch/worktree cleanup is a post-release hygiene step, not a Temporal gate. It runs only after the accepted preview release or no-preview merge signal has passed, deletes remote refs through the GitHub API, and prunes clean local task worktrees through main-sync. Cleanup failures should be logged and retried by a later run instead of changing Temporal delivery status.
+
 ## Infra Docs No-preview Path
 
 Infrastructure/documentation-only branches can be classified as `deliveryClass=infra-docs`.

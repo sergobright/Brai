@@ -224,6 +224,14 @@ test("local main sync preserves runtime dirs and hard resets to origin main", ()
   assert.match(script, /REPO="\/srv\/projects\/brai"/);
   assert.match(script, /SOURCE_GROUP="\$\{BRAI_MAIN_SOURCE_GROUP:-mark\}"/);
   assert.match(script, /Usage: \$0 \[expected-main-commit\]/);
+  assert.match(script, /--prune-accepted-branches codex\/<branch>/);
+  assert.match(script, /prune_accepted_branches\(\)/);
+  assert.match(script, /\^codex\/\[A-Za-z0-9\._-\]\+\$/);
+  assert.match(script, /git_root_cmd worktree list --porcelain/);
+  assert.match(script, /"\$REPO\/\.codex-worktrees\/"\*/);
+  assert.match(script, /git_root_at "\$worktree_path" status --porcelain/);
+  assert.match(script, /git_root_cmd worktree remove --force "\$worktree_path"/);
+  assert.match(script, /git_root_cmd branch -D "\$branch"/);
   assert.match(script, /runuser -u "\$GIT_USER"/);
   assert.match(script, /core\.hooksPath=\/dev\/null/);
   assert.match(script, /git_cmd checkout -f -B "\$BRANCH" "origin\/\$BRANCH"/);
@@ -1273,6 +1281,9 @@ test("infra docs workflow marks handoff passed only from the PR merge job", () =
   const autoMergeJob = workflow.slice(workflow.indexOf("auto-merge-infra-docs:"), workflow.indexOf("deploy-prod:"));
   const recordMergeJob = workflow.slice(workflow.indexOf("record-infra-docs-merge:"), workflow.indexOf("release-preview-slot:"));
   assert.doesNotMatch(autoMergeJob, /event delivery_handoff_passed/);
+  assert.match(recordMergeJob, /Cleanup accepted no-preview branch/);
+  assert.match(recordMergeJob, /deploy\/scripts\/ci-cleanup-accepted-branches\.sh --branch "\$BRAI_BRANCH"/);
+  assert.match(recordMergeJob, /continue-on-error: true/);
   assert.match(autoMergeJob, /BRAI_ACCEPT_NO_PREVIEW_ONLY/);
   assert.match(recordMergeJob, /event delivery_handoff_passed/);
   assert.match(recordMergeJob, /event pr_merged/);
@@ -1737,6 +1748,9 @@ test("accept preview checks verified preview before PR actions", () => {
 
 test("accepted preview stale cleanup is best effort", () => {
   const script = fs.readFileSync(path.join(process.cwd(), "deploy/scripts/ci-ssh-complete-accepted-previews.sh"), "utf8");
+  const workflow = fs.readFileSync(path.join(process.cwd(), ".github/workflows/brai-delivery.yml"), "utf8");
+  const cleanupScript = fs.readFileSync(path.join(process.cwd(), "deploy/scripts/ci-cleanup-accepted-branches.sh"), "utf8");
+  const pruneScript = fs.readFileSync(path.join(process.cwd(), "deploy/scripts/ci-ssh-prune-accepted-branches.sh"), "utf8");
   const promoteScript = fs.readFileSync(path.join(process.cwd(), "deploy/scripts/ci-ssh-promote-deployment.sh"), "utf8");
   const otaSyncScript = fs.readFileSync(path.join(process.cwd(), "deploy/scripts/sync-occupied-preview-ota-manifests.sh"), "utf8");
   const requiredLoop = script.slice(script.indexOf('for index in "${!REQUIRED_BRANCHES[@]}"'), script.indexOf('if [[ "$MODE" == "promote" ]]'));
@@ -1754,6 +1768,14 @@ test("accepted preview stale cleanup is best effort", () => {
   assert.match(cleanupLoop, /cleanup_previously_accepted_preview/);
   assert.match(cleanupLoop, /Best-effort cleanup failed/);
   assert.doesNotMatch(cleanupLoop, /exit 1/);
+  assert.match(workflow, /Cleanup accepted preview branches/);
+  assert.match(workflow, /deploy\/scripts\/ci-cleanup-accepted-branches\.sh --recent-merged/);
+  assert.match(workflow, /continue-on-error: true/);
+  assert.match(cleanupScript, /BRAI_ACTIVE_PREVIEW_BRANCHES_JSON="\$ACTIVE_BRANCHES_JSON"/);
+  assert.match(cleanupScript, /cleanup-accepted-branches\.mjs/);
+  assert.match(cleanupScript, /ci-ssh-prune-accepted-branches\.sh/);
+  assert.match(cleanupScript, /skipping accepted branch cleanup/);
+  assert.match(pruneScript, /--prune-accepted-branches "\$@"/);
   assert.match(otaSyncScript, /PROD_SOURCE_ROOT="\$\{BRAI_PROD_SOURCE_ROOT:-\$ENVS_ROOT\/prod\/source\}"/);
   assert.match(otaSyncScript, /check_access\(\) \{/);
   assert.match(otaSyncScript, /\( "\$MODE" != "--local" \|\| "\$CHECK_ACCESS" == "true" \) && -n "\$\{BRAI_DEPLOY_HOST:-\}"/);

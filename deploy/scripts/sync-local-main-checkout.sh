@@ -10,8 +10,15 @@ SOURCE_GROUP="${BRAI_MAIN_SOURCE_GROUP:-mark}"
 RESCUE_ROOT="${BRAI_MAIN_RESCUE_ROOT:-/srv/projects/brai-rescue}"
 LOCK_FILE="${BRAI_MAIN_SYNC_LOCK:-/tmp/brai-main-checkout-sync.lock}"
 
-if [ "$#" -gt 1 ]; then
-  echo "Usage: $0 [expected-main-commit]" >&2
+PRUNE_MODE=0
+PRUNE_ACCEPTED_BRANCHES=()
+if [ "${1:-}" = "--prune-accepted-branches" ]; then
+  PRUNE_MODE=1
+  shift
+  PRUNE_ACCEPTED_BRANCHES=("$@")
+  EXPECTED_COMMIT=""
+elif [ "$#" -gt 1 ]; then
+  echo "Usage: $0 [expected-main-commit] | $0 --prune-accepted-branches codex/<branch>..." >&2
   exit 1
 fi
 
@@ -47,6 +54,90 @@ git_cmd() {
     "$@"
 }
 
+git_root_cmd() {
+  git \
+    -C "$REPO" \
+    -c safe.directory="$REPO" \
+    -c core.hooksPath=/dev/null \
+    -c core.fsmonitor=false \
+    -c protocol.file.allow=never \
+    -c protocol.ext.allow=never \
+    "$@"
+}
+
+git_root_at() {
+  local path="$1"
+  shift
+  git \
+    -C "$path" \
+    -c safe.directory="$path" \
+    -c core.hooksPath=/dev/null \
+    -c core.fsmonitor=false \
+    -c protocol.file.allow=never \
+    -c protocol.ext.allow=never \
+    "$@"
+}
+
+prune_accepted_branches() {
+  local branch line worktree_path current_path current_branch status
+  for branch in "$@"; do
+    if [[ ! "$branch" =~ ^codex/[A-Za-z0-9._-]+$ ]]; then
+      echo "Skipping invalid accepted branch cleanup target: $branch" >&2
+      continue
+    fi
+    worktree_path=""
+    current_path=""
+    current_branch=""
+    while IFS= read -r line; do
+      case "$line" in
+        "worktree "*)
+          if [ "$current_branch" = "$branch" ]; then
+            worktree_path="$current_path"
+            break
+          fi
+          current_path="${line#worktree }"
+          current_branch=""
+          ;;
+        "branch refs/heads/"*)
+          current_branch="${line#branch refs/heads/}"
+          ;;
+      esac
+    done < <(git_root_cmd worktree list --porcelain)
+    if [ -z "$worktree_path" ] && [ "$current_branch" = "$branch" ]; then
+      worktree_path="$current_path"
+    fi
+
+    if [ -z "$worktree_path" ]; then
+      echo "Skipping $branch: no registered local worktree."
+      continue
+    fi
+    case "$worktree_path" in
+      "$REPO/.codex-worktrees/"*) ;;
+      *)
+        echo "Skipping $branch: worktree path is outside .codex-worktrees: $worktree_path" >&2
+        continue
+        ;;
+    esac
+    if [ ! -d "$worktree_path" ]; then
+      echo "Skipping $branch: worktree path is missing: $worktree_path" >&2
+      continue
+    fi
+    status="$(git_root_at "$worktree_path" status --porcelain)"
+    if [ -n "$status" ]; then
+      echo "Skipping $branch: local worktree is dirty." >&2
+      continue
+    fi
+
+    git_root_cmd worktree remove --force "$worktree_path"
+    if git_root_cmd show-ref --verify --quiet "refs/heads/$branch"; then
+      git_root_cmd branch -D "$branch"
+    fi
+    chown -R "$GIT_USER:mark" .git
+    chown "$GIT_USER:mark" .codex-worktrees 2>/dev/null || true
+    echo "Pruned accepted branch worktree: $branch"
+  done
+}
+
 restore_task_state_access() {
   local task_state="$1/.brai-task"
   if [ ! -d "$task_state" ] || [ -L "$task_state" ]; then
@@ -80,6 +171,11 @@ exec 9>"$LOCK_FILE"
 flock 9
 
 cd "$REPO"
+
+if [ "$PRUNE_MODE" -eq 1 ]; then
+  prune_accepted_branches "${PRUNE_ACCEPTED_BRANCHES[@]}"
+  exit 0
+fi
 
 for exclude_pattern in /.agents/ /data/ /deploy/site/ /deploy/web/ /deploy/mobile-update/ /deploy/releases/; do
   grep -Fxq "$exclude_pattern" .git/info/exclude || printf '%s\n' "$exclude_pattern" >>.git/info/exclude

@@ -26,5 +26,6 @@
 - [ ] If all preview slots are occupied, report queued status and queue position/source when available.
 - [ ] If the project owner accepts the preview (`Принято`, `принимаю`, `accepted`, or equivalent, but not negated phrases like `пока не принято`), run `deploy/scripts/accept-preview.sh <codex-branch>` instead of replying with an acknowledgement; the script must verify the exact branch head before PR or merge actions.
 - [ ] For accepted preview work, verify the successful `deploy-prod` post-step promoted metadata and released the preview slot; treat a missing release as a blocker.
+- [ ] After accepted delivery completes, expect best-effort cleanup to delete the accepted `codex/*` remote branch and clean local task worktree; do not resume work on that branch.
 - [ ] Do not close permission operation tasks until the access contract is green; otherwise keep one open epic `operation:agent-task:codex-access-contract-guard`.
 - [ ] End with clean tracked `git status --short` and report preview letter + URL, or report queued/blocker status explicitly.

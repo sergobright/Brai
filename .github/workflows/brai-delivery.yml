@@ -474,6 +474,17 @@ jobs:
           BRAI_DEPLOY_SSH_PORT: ${{ vars.BRAI_DEPLOY_SSH_PORT || '22' }}
           BRAI_DEPLOY_SSH_KEY: ${{ secrets.BRAI_DEPLOY_SSH_KEY }}
           BRAI_COMMIT: ${{ github.sha }}
+      - name: Cleanup accepted preview branches
+        continue-on-error: true
+        run: deploy/scripts/ci-cleanup-accepted-branches.sh --recent-merged
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          BRAI_DEPLOY_HOST: ${{ vars.BRAI_DEPLOY_HOST }}
+          BRAI_DEPLOY_USER: ${{ vars.BRAI_DEPLOY_USER }}
+          BRAI_DEPLOY_SSH_PORT: ${{ vars.BRAI_DEPLOY_SSH_PORT || '22' }}
+          BRAI_DEPLOY_SSH_KEY: ${{ secrets.BRAI_DEPLOY_SSH_KEY }}
+          BRAI_TARGET_BRANCH: main
       - name: Temporal accepted previews release failed
         if: failure() && steps.release_accepted_previews.outcome == 'failure'
         run: deploy/scripts/ci-temporal-signal.sh promotion --target prod --sha "$BRAI_COMMIT" --event accepted_previews_failed --source deploy-prod
@@ -643,6 +654,18 @@ jobs:
           BRAI_PR_URL: ${{ github.event.pull_request.html_url }}
           BRAI_PR_MERGED_AT: ${{ github.event.pull_request.merged_at }}
           BRAI_DELIVERY_CLASS: ${{ contains(toJson(github.event.pull_request.labels), 'brai-delivery:technical-no-preview') && 'technical-no-preview' || 'infra-docs' }}
+      - name: Cleanup accepted no-preview branch
+        continue-on-error: true
+        run: deploy/scripts/ci-cleanup-accepted-branches.sh --branch "$BRAI_BRANCH"
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          BRAI_DEPLOY_HOST: ${{ vars.BRAI_DEPLOY_HOST }}
+          BRAI_DEPLOY_USER: ${{ vars.BRAI_DEPLOY_USER }}
+          BRAI_DEPLOY_SSH_PORT: ${{ vars.BRAI_DEPLOY_SSH_PORT || '22' }}
+          BRAI_DEPLOY_SSH_KEY: ${{ secrets.BRAI_DEPLOY_SSH_KEY }}
+          BRAI_TARGET_BRANCH: main
+          BRAI_BRANCH: ${{ github.event.pull_request.head.ref }}
 
   release-preview-slot:
     if: |
