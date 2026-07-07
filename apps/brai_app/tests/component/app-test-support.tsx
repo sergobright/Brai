@@ -9,7 +9,9 @@ const otaPlugin = vi.hoisted(() => ({
 }));
 
 const cmdPlugin = vi.hoisted(() => ({
+  getState: vi.fn(),
   openSettings: vi.fn(),
+  setVoiceOnlyMode: vi.fn(),
 }));
 
 const actionsWidgetPlugin = vi.hoisted(() => ({
@@ -46,7 +48,11 @@ export function setupBraiAppTest() {
     otaPlugin.checkForUpdates.mockReset();
     otaPlugin.markReady.mockReset();
     cmdPlugin.openSettings.mockReset();
+    cmdPlugin.getState.mockReset();
+    cmdPlugin.setVoiceOnlyMode.mockReset();
     cmdPlugin.openSettings.mockResolvedValue({});
+    cmdPlugin.getState.mockResolvedValue({ accessGranted: true });
+    cmdPlugin.setVoiceOnlyMode.mockResolvedValue({ voiceOnlyMode: true });
     actionsWidgetPlugin.acknowledgeStatusChanges.mockReset();
     actionsWidgetPlugin.addListener.mockReset();
     actionsWidgetPlugin.clear.mockReset();

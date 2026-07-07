@@ -50,6 +50,13 @@ public final class BraiCmdPlugin extends Plugin {
     }
 
     @PluginMethod
+    public void setVoiceOnlyMode(PluginCall call) {
+        ConfigStore config = new ConfigStore(getContext());
+        config.setOnboardingVoiceOnly(call.getBoolean("enabled", false));
+        call.resolve(stateJson());
+    }
+
+    @PluginMethod
     public void openAccessibilitySettings(PluginCall call) {
         startSettingsActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS));
         call.resolve(stateJson());
@@ -90,8 +97,11 @@ public final class BraiCmdPlugin extends Plugin {
     }
 
     private JSObject stateJson() {
+        ConfigStore config = new ConfigStore(getContext());
         JSObject state = new JSObject();
         state.put("native", true);
+        state.put("accessGranted", !config.getAuthToken().isBlank());
+        state.put("voiceOnlyMode", config.getOnboardingVoiceOnly());
         state.put("settingsDeclared", hasActivity(BraiCmdSettingsActivity.class));
         state.put("accessibilityServiceDeclared", hasService(BraiAccessibilityService.class));
         state.put("recordingServiceDeclared", hasService(RecordingService.class));

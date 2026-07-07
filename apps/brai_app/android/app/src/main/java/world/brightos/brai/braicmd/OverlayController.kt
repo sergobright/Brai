@@ -526,8 +526,9 @@ class OverlayController(private val service: BraiAccessibilityService) {
         (service.dp(BASE_SCREENSHOT_BUTTON_DP) * config.screenshotIconSizePercent / 100f).roundToInt()
 
     private fun contextButtonAllowed(): Boolean =
-        config.contextDeliveryMode == ContextDeliveryMode.Json ||
+        !config.onboardingVoiceOnly && (config.contextDeliveryMode == ContextDeliveryMode.Json ||
             (config.contextDeliveryMode == ContextDeliveryMode.Screenshot && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R)
+        )
 
     private fun geometry(): OverlayGeometry =
         OverlayGeometry(service, mainButtonSizePx(), screenshotButtonSizePx(), screenshotButtonGapPx, cancelSizePx, cancelGapPx)

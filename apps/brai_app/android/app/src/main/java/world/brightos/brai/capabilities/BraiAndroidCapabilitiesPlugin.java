@@ -77,6 +77,16 @@ public final class BraiAndroidCapabilitiesPlugin extends Plugin {
         call.resolve(stateJson());
     }
 
+    @PluginMethod
+    public void openAppSettings(PluginCall call) {
+        Intent intent = new Intent(
+            Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+            Uri.parse("package:" + getContext().getPackageName())
+        );
+        startSettingsActivity(intent);
+        call.resolve(stateJson());
+    }
+
     private JSObject stateJson() {
         JSObject state = new JSObject();
         state.put("overlayDeclared", hasRequestedPermission(Manifest.permission.SYSTEM_ALERT_WINDOW));

@@ -4,6 +4,7 @@ const plugin = vi.hoisted(() => ({
   getState: vi.fn(),
   requestMicrophone: vi.fn(),
   requestNotifications: vi.fn(),
+  openAppSettings: vi.fn(),
   openOverlaySettings: vi.fn(),
   openAccessibilitySettings: vi.fn(),
 }));
@@ -18,6 +19,7 @@ describe("Android capabilities bridge", () => {
     plugin.getState.mockReset();
     plugin.requestMicrophone.mockReset();
     plugin.requestNotifications.mockReset();
+    plugin.openAppSettings.mockReset();
     plugin.openOverlaySettings.mockReset();
     plugin.openAccessibilitySettings.mockReset();
     vi.unstubAllGlobals();
@@ -72,6 +74,20 @@ describe("Android capabilities bridge", () => {
       notificationsGranted: true,
     });
     expect(plugin.requestNotifications).toHaveBeenCalledTimes(1);
+  });
+
+  it("opens Android app settings through the native bridge", async () => {
+    vi.stubGlobal("Capacitor", {
+      isNativePlatform: () => true,
+      getPlatform: () => "android",
+    });
+    plugin.openAppSettings.mockResolvedValue({ accessibilityServiceEnabled: false });
+    const { openAndroidAppSettings } = await import("@/shared/platform/androidCapabilities");
+
+    await expect(openAndroidAppSettings()).resolves.toMatchObject({
+      accessibilityServiceEnabled: false,
+    });
+    expect(plugin.openAppSettings).toHaveBeenCalledTimes(1);
   });
 
   it("keeps callers alive when old APKs do not have the plugin", async () => {

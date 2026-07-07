@@ -218,7 +218,6 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
           onRequestOtp={app.onRequestOtp}
           onVerifyOtp={app.onVerifyOtp}
         />
-        {startupExpired ? null : <AppStartupSplash ready={startupReady} />}
       </>
     );
   }

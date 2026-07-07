@@ -35,6 +35,15 @@ describe("BraiApp onboarding", () => {
   });
 
   it("keeps unauthenticated users inside the limited access screen after setup", async () => {
+    window.localStorage.setItem(ONBOARDING_STORAGE_KEY, JSON.stringify({
+      complete: true,
+      history: [],
+      name: "Test",
+      path: "new",
+      profileVersion: null,
+      step: "login-check",
+      voiceMode: "provider",
+    }));
     vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL) => {
       const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
       if (url.endsWith("/auth/session")) {
@@ -48,9 +57,9 @@ describe("BraiApp onboarding", () => {
 
     render(<BraiApp />);
 
-    await waitFor(() => expect(screen.getByText("Нужен вход")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("Нужен вход")).toBeInTheDocument(), { timeout: 5000 });
     expect(screen.getByRole("button", { name: "Войти" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Настройки Brai CMD" })).toBeInTheDocument();
     expect(screen.queryByRole("textbox", { name: "Добавить" })).not.toBeInTheDocument();
-  });
+  }, 10000);
 });

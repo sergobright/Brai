@@ -76,6 +76,10 @@ class ConfigStore(context: Context) {
         }
         set(value) = prefs.edit().putString(AppConstants.KEY_POST_PROCESSING_PROMPT, value.trim()).apply()
 
+    var onboardingVoiceOnly: Boolean
+        get() = prefs.getBoolean(AppConstants.KEY_ONBOARDING_VOICE_ONLY, false)
+        set(value) = prefs.edit().putBoolean(AppConstants.KEY_ONBOARDING_VOICE_ONLY, value).apply()
+
     var mainIconOpacityPercent: Int
         get() = prefs.getInt(AppConstants.KEY_MAIN_ICON_OPACITY_PERCENT, AppConstants.DEFAULT_ICON_OPACITY_PERCENT)
             .coerceIn(AppConstants.MIN_ICON_OPACITY_PERCENT, AppConstants.MAX_ICON_OPACITY_PERCENT)

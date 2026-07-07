@@ -26,17 +26,17 @@ import {
 } from "lucide-react";
 import {
   getAndroidCapabilities,
+  openAndroidAppSettings,
   openAndroidAccessibilitySettings,
   openAndroidOverlaySettings,
   requestAndroidMicrophone,
   requestAndroidNotifications,
 } from "@/shared/platform/androidCapabilities";
+import { getBraiCmdState, setBraiCmdVoiceOnlyMode } from "@/shared/platform/braiCmd";
 import { isNativeShell, platformName } from "@/shared/platform/platform";
 import { Alert, AlertDescription, AlertTitle } from "@/shared/ui/alert";
 import { AnimatedShinyText } from "@/shared/ui/animated-shiny-text";
-import { Badge } from "@/shared/ui/badge";
 import { Button } from "@/shared/ui/button";
-import { Card, CardContent, CardFooter, CardHeader } from "@/shared/ui/card";
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/shared/ui/field";
 import { Input } from "@/shared/ui/input";
 import { Progress } from "@/shared/ui/progress";
@@ -108,6 +108,14 @@ export function OnboardingFlow({
     if (state.complete && !authRequired) onDone();
   }, [authRequired, onDone, state.complete]);
 
+  useEffect(() => {
+    if (state.step !== "training-dictate" && state.step !== "training-offline" && state.step !== "training-queue") return;
+    const timeout = window.setTimeout(() => {
+      document.querySelector<HTMLTextAreaElement>("[data-onboarding-training-input]")?.focus();
+    }, 80);
+    return () => window.clearTimeout(timeout);
+  }, [state.step]);
+
   async function refreshCapabilities() {
     const next = await getAndroidCapabilities();
     return next;
@@ -134,6 +142,7 @@ export function OnboardingFlow({
   }
 
   function completeSetup() {
+    void setBraiCmdVoiceOnlyMode(false);
     const nextState = { ...state, complete: true, step: "login-check" as const, history: [...state.history, state.step] };
     saveOnboardingState(nextState);
     setState(nextState);
@@ -230,6 +239,15 @@ export function OnboardingFlow({
     await refreshCapabilities();
   }
 
+  async function openAppSettings() {
+    if (!isAndroid) {
+      setMessage("В веб-просмотре карточка приложения недоступна.");
+      return;
+    }
+    await openAndroidAppSettings();
+    setMessage("Откройте меню с тремя точками и выберите «Разрешить ограниченные настройки».");
+  }
+
   async function checkAccessibility() {
     const next = await refreshCapabilities();
     if (!isAndroid || next?.accessibilityServiceEnabled) go("microphone");
@@ -248,6 +266,19 @@ export function OnboardingFlow({
     else setError("Уведомления не разрешены.");
   }
 
+  async function startTraining() {
+    if (isAndroid) {
+      const cmdState = await getBraiCmdState();
+      if (cmdState?.accessGranted === false) {
+        setError("Сначала откройте Brai CMD и получите доступ. После возврата нажмите «Обучение» еще раз.");
+        await onOpenNativeCmdSettings();
+        return;
+      }
+      await setBraiCmdVoiceOnlyMode(true);
+    }
+    go("training-dictate");
+  }
+
   async function openCmdSettings() {
     const opened = await onOpenNativeCmdSettings();
     if (!opened) go("cmd-settings");
@@ -258,11 +289,9 @@ export function OnboardingFlow({
   function renderStep(): ReactNode {
     if (state.step === "start") {
       return (
-        <div className="grid min-h-0 flex-1 content-between justify-items-center gap-8 py-8 text-center">
-          <div className="grid w-full max-w-sm place-items-center rounded-lg border bg-black p-5">
-            <Image className="h-auto w-56" src="/brand/brai-logo-transparent.svg" width="779" height="368" alt="Brai" priority draggable={false} />
-          </div>
-          <div className="grid gap-3">
+        <div className="grid justify-items-center gap-8 text-center">
+          <Image className="h-auto w-72 max-w-full" src="/brand/brai-logo-transparent.svg" width="779" height="368" alt="Brai" priority draggable={false} />
+          <div className="grid w-full gap-4">
             <p className="m-0 text-sm text-muted-foreground">Приложение скачано, но еще не подготовлено к работе.</p>
             <ShinyButton onClick={() => go("welcome-1")}>Приступить</ShinyButton>
           </div>
@@ -411,16 +440,16 @@ export function OnboardingFlow({
 
     if (state.step === "accessibility-why") return <InfoScreen icon={ShieldCheck} title="Специальные возможности" text="Они нужны, чтобы вставлять текст в поля, работать с буфером и выполнять действия на экране."><PrimaryButton onClick={() => go("accessibility-blocked")}>Продолжить</PrimaryButton></InfoScreen>;
     if (state.step === "accessibility-blocked") return <InfoScreen icon={Lock} title="Шаг 1: получить отказ" text="Откройте специальные возможности и попробуйте включить Brai. Android должен показать, что настройка заблокирована."><PrimaryButton onClick={openAccessibility}>Открыть</PrimaryButton><Button variant="outline" onClick={() => go("accessibility-restricted")}>Да, доступ заблокирован</Button></InfoScreen>;
-    if (state.step === "accessibility-restricted") return <InfoScreen icon={ShieldCheck} title="Шаг 2: снять ограничение" text="Откройте карточку приложения, нажмите меню с тремя точками и выберите «Разрешить ограниченные настройки»."><PrimaryButton onClick={() => go("accessibility-enable")}>Ограничение снято</PrimaryButton></InfoScreen>;
+    if (state.step === "accessibility-restricted") return <InfoScreen icon={ShieldCheck} title="Шаг 2: снять ограничение" text="Откройте карточку приложения, нажмите меню с тремя точками и выберите «Разрешить ограниченные настройки»."><PrimaryButton onClick={openAppSettings}>Открыть карточку приложения</PrimaryButton><Button className="min-h-12 rounded-full" variant="outline" onClick={() => go("accessibility-enable")}>Ограничение снято</Button></InfoScreen>;
     if (state.step === "accessibility-enable") return <InfoScreen icon={ShieldCheck} title="Шаг 3: включить доступ" text="Теперь снова откройте специальные возможности и включите Brai. После возврата мы проверим состояние."><PrimaryButton onClick={openAccessibility}>Открыть</PrimaryButton><Button variant="outline" onClick={checkAccessibility}>Проверить</Button></InfoScreen>;
 
     if (state.step === "microphone") return <PermissionScreen icon={Mic} title="Микрофон" text="Микрофон нужен для голосового ввода и команд."><PrimaryButton onClick={requestMic}>Разрешить микрофон</PrimaryButton></PermissionScreen>;
     if (state.step === "notifications") return <PermissionScreen icon={Bell} title="Уведомления" text="Уведомления нужны для фоновой записи, очереди и статуса отправки."><PrimaryButton onClick={requestNotifications}>Разрешить уведомления</PrimaryButton></PermissionScreen>;
 
-    if (state.step === "training-start") return <InfoScreen icon={CheckCircle2} title="Готово к обучению" text="Базовая настройка завершена. Осталось проверить голосовой сценарий в четыре шага."><PrimaryButton onClick={() => go("training-dictate")}>Обучение</PrimaryButton><Button variant="outline" onClick={completeSetup}>Пропустить</Button></InfoScreen>;
-    if (state.step === "training-dictate") return <TrainingDictate value={trainingText} onChange={setTrainingText} onNext={() => trainingText.trim() ? go("training-offline") : setError("Надиктуйте или введите текст для проверки.")} />;
-    if (state.step === "training-offline") return <TrainingOffline value={queuedText} onChange={setQueuedText} onNext={() => queuedText.trim() ? go("training-queue") : setError("Добавьте текст, который попадет в очередь.")} />;
-    if (state.step === "training-queue") return <TrainingQueue value={insertedText} queued={queuedText} onChange={setInsertedText} onNext={() => insertedText.trim() ? go("training-storage") : setError("Вставьте расшифрованный текст в поле.")} />;
+    if (state.step === "training-start") return <InfoScreen icon={CheckCircle2} title="Готово к обучению" text="Базовая настройка завершена. Осталось проверить голосовой сценарий в четыре шага."><PrimaryButton onClick={startTraining}>Обучение</PrimaryButton><Button variant="outline" onClick={completeSetup}>Пропустить</Button></InfoScreen>;
+    if (state.step === "training-dictate") return <TrainingDictate value={trainingText} onChange={setTrainingText} onNext={() => trainingText.trim() ? go("training-offline") : setError("Надиктуйте фразу через плавающую кнопку Brai CMD.")} />;
+    if (state.step === "training-offline") return <TrainingOffline value={queuedText} onChange={setQueuedText} onNext={() => queuedText.trim() ? go("training-queue") : setError("Надиктуйте сообщение через плавающую кнопку Brai CMD.")} />;
+    if (state.step === "training-queue") return <TrainingQueue value={insertedText} queued={queuedText} onChange={setInsertedText} onNext={() => insertedText.trim() ? go("training-storage") : setError("Вставьте результат через плавающую кнопку Brai CMD.")} />;
     if (state.step === "training-storage") return <InfoScreen icon={FileAudio} title="Хранилище аудиозаписей" text="Аудиозаписи могут храниться в защищенной очереди устройства до отправки на расшифровку. После успешной обработки они очищаются согласно настройкам Brai CMD."><PrimaryButton onClick={() => go("voice-ready")}>Продолжить</PrimaryButton></InfoScreen>;
 
     if (state.step === "voice-ready") return <InfoScreen icon={CheckCircle2} title="Голосовое управление настроено" text="Brai CMD готов принимать голос, работать с очередью и вставлять результат в поле."><PrimaryButton onClick={completeSetup}>Готово</PrimaryButton></InfoScreen>;
@@ -434,7 +463,6 @@ export function OnboardingFlow({
           title="Настройки Brai CMD"
           text="В Android этот пункт открывает нативные настройки команд поверх приложений, микрофона и доступа. В веб-версии Android-разрешения недоступны."
         >
-          <Badge variant="outline">Android</Badge>
           <PrimaryButton onClick={() => go("locked")}>Готово</PrimaryButton>
         </InfoScreen>
       );
@@ -444,34 +472,26 @@ export function OnboardingFlow({
   }
 
   return (
-    <main className="grid h-dvh min-h-0 bg-background text-foreground" data-onboarding-flow data-theme="dark" style={{ colorScheme: "dark" }}>
+    <main className="grid h-dvh min-h-0 bg-black text-foreground" data-onboarding-flow data-theme="dark" style={{ colorScheme: "dark" }}>
       <ScrollArea className="min-h-0">
-        <div className="mx-auto grid min-h-dvh w-full max-w-3xl grid-rows-[auto_minmax(0,1fr)] gap-4 px-4 py-4 sm:px-6 sm:py-6">
-          <header className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3">
-            <Button size="icon-sm" variant="ghost" aria-label="Назад" disabled={state.history.length === 0} onClick={back}>
+        <div className="mx-auto flex min-h-dvh w-full max-w-md flex-col gap-5 px-6 pb-[calc(env(safe-area-inset-bottom)+2rem)] pt-[calc(env(safe-area-inset-top)+2.75rem)] sm:max-w-2xl sm:px-8 sm:pt-8">
+          <header className="grid grid-cols-[2.75rem_minmax(0,1fr)_2.75rem] items-start gap-2">
+            <Button className="justify-self-start" size="icon-sm" variant="ghost" aria-label="Назад" disabled={state.history.length === 0} onClick={back}>
               <ChevronLeft aria-hidden="true" />
             </Button>
             <div className="min-w-0">
               <p className="m-0 text-xs font-medium uppercase text-muted-foreground">Ввод в эксплуатацию</p>
               <h1 className="m-0 truncate text-lg font-semibold">{screen.title}</h1>
             </div>
-            <Badge variant="outline">{Math.max(progress, 1)}%</Badge>
+            <span className="justify-self-end text-sm font-medium text-primary">{Math.max(progress, 1)}%</span>
           </header>
-          <Card className="min-h-0 overflow-hidden">
-            <CardHeader className="pb-3">
-              <Progress value={progress} aria-label="Прогресс настройки" />
-            </CardHeader>
-            <CardContent className="grid min-h-0 content-center gap-5">
-              {screen.description ? <p className="m-0 text-sm text-muted-foreground">{screen.description}</p> : null}
-              {error ? <StatusAlert tone="bad" title="Нужно проверить" text={error} /> : null}
-              {message ? <StatusAlert tone="ok" title="Готово" text={message} /> : null}
-              {body}
-            </CardContent>
-            <CardFooter className="justify-between border-t text-xs text-muted-foreground">
-              <span>{isAndroid ? "Android" : "Web preview"}</span>
-              <span>Brai CMD</span>
-            </CardFooter>
-          </Card>
+          <Progress value={progress} aria-label="Прогресс настройки" />
+          {screen.description ? <p className="m-0 text-sm text-muted-foreground">{screen.description}</p> : null}
+          {error ? <StatusAlert tone="bad" title="Нужно проверить" text={error} /> : null}
+          {message ? <StatusAlert tone="ok" title="Готово" text={message} /> : null}
+          <section className="flex min-h-0 flex-1 flex-col justify-center py-8">
+            {body}
+          </section>
         </div>
       </ScrollArea>
     </main>
@@ -480,20 +500,27 @@ export function OnboardingFlow({
 
 function ShinyButton({ children, onClick }: { children: ReactNode; onClick: () => void }) {
   return (
-    <Button size="lg" className="min-w-40" onClick={onClick}>
-      <AnimatedShinyText className="text-primary-foreground dark:text-primary-foreground">{children}</AnimatedShinyText>
+    <Button
+      size="lg"
+      variant="outline"
+      className="min-h-12 w-full overflow-hidden rounded-full border-primary/35 bg-primary/10 px-6 text-base shadow-lg shadow-primary/10 hover:bg-primary/15"
+      onClick={onClick}
+    >
+      <AnimatedShinyText shimmerWidth={140} className="font-semibold text-foreground/90 dark:text-foreground">
+        {children}
+      </AnimatedShinyText>
     </Button>
   );
 }
 
 function PrimaryButton(props: React.ComponentProps<typeof Button>) {
-  return <Button className={cx("justify-self-start", props.className)} {...props} />;
+  return <Button className={cx("min-h-12 w-full rounded-full sm:w-auto", props.className)} {...props} />;
 }
 
 function InfoBlock({ icon: Icon, title, text }: { icon: LucideIcon; title: string; text: string }) {
   return (
-    <div className="grid gap-3">
-      <span className="grid size-11 place-items-center rounded-lg border bg-card text-primary">
+    <div className="grid gap-4">
+      <span className="grid size-12 place-items-center rounded-full border border-primary/25 bg-primary/10 text-primary">
         <Icon className="size-5" aria-hidden="true" />
       </span>
       <div className="grid gap-2">
@@ -506,10 +533,10 @@ function InfoBlock({ icon: Icon, title, text }: { icon: LucideIcon; title: strin
 
 function InfoScreen({ children, eyebrow, icon, text, title }: { children: ReactNode; eyebrow?: string; icon: LucideIcon; text: string; title: string }) {
   return (
-    <div className="grid gap-5">
-      {eyebrow ? <Badge className="justify-self-start" variant="outline">{eyebrow}</Badge> : null}
+    <div className="grid gap-6">
+      {eyebrow ? <p className="m-0 text-sm font-medium text-muted-foreground">{eyebrow}</p> : null}
       <InfoBlock icon={icon} title={title} text={text} />
-      <div className="flex flex-wrap gap-2">{children}</div>
+      <div className="grid gap-3 sm:flex sm:flex-wrap">{children}</div>
     </div>
   );
 }
@@ -520,7 +547,7 @@ function ChoiceScreen({ choices, text, title }: { choices: Array<{ icon: LucideI
       <InfoBlock icon={Radio} title={title} text={text} />
       <div className="grid gap-3 sm:grid-cols-2">
         {choices.map((choice) => (
-          <button key={choice.title} type="button" className="grid min-h-36 content-start gap-3 rounded-lg border bg-card p-4 text-left transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40" onClick={choice.onClick}>
+          <button key={choice.title} type="button" className="grid min-h-36 content-start gap-3 rounded-lg border border-primary/20 bg-primary/5 p-4 text-left transition-colors hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40" onClick={choice.onClick}>
             <choice.icon className="size-5 text-primary" aria-hidden="true" />
             <span className="text-base font-semibold">{choice.title}</span>
             <span className="text-sm leading-5 text-muted-foreground">{choice.text}</span>
@@ -541,7 +568,7 @@ function PermissionScreen({ children, icon, text, title }: { children: ReactNode
 
 function DemoPlaceholder({ label }: { label: string }) {
   return (
-    <div className="grid aspect-video place-items-center rounded-lg border bg-muted text-sm text-muted-foreground">
+    <div className="grid aspect-video place-items-center rounded-lg border border-dashed border-primary/25 bg-primary/5 text-sm text-muted-foreground">
       {label}
     </div>
   );
@@ -668,8 +695,8 @@ function TrainingDictate({ onChange, onNext, value }: { value: string; onChange:
   return (
     <div className="grid gap-4">
       <InfoBlock icon={Mic} title="Шаг 1: голос в поле" text="Надиктуйте фразу. Она должна появиться в поле ввода." />
-      <Textarea value={value} placeholder="Например: запиши идею для встречи" aria-label="Текст после диктовки" onChange={(event) => onChange(event.target.value)} />
-      <PrimaryButton onClick={onNext}>Вставилось</PrimaryButton>
+      <VoiceOnlyTextarea value={value} placeholder="Здесь появится результат голосового ввода" ariaLabel="Результат голосового ввода" onChange={onChange} />
+      {value.trim() ? <PrimaryButton onClick={onNext}>Да, вставилось</PrimaryButton> : null}
     </div>
   );
 }
@@ -678,8 +705,8 @@ function TrainingOffline({ onChange, onNext, value }: { value: string; onChange:
   return (
     <div className="grid gap-4">
       <InfoBlock icon={WifiOff} title="Шаг 2: очередь без связи" text="Имитируем отсутствие связи: надиктованное сообщение должно попасть в очередь." />
-      <Textarea value={value} placeholder="Текст для очереди" aria-label="Текст в очереди" onChange={(event) => onChange(event.target.value)} />
-      <PrimaryButton onClick={onNext}>Сообщение в очереди</PrimaryButton>
+      <VoiceOnlyTextarea value={value} placeholder="Здесь появится сообщение для очереди" ariaLabel="Текст в очереди" onChange={onChange} />
+      {value.trim() ? <PrimaryButton onClick={onNext}>Сообщение в очереди</PrimaryButton> : null}
     </div>
   );
 }
@@ -693,9 +720,27 @@ function TrainingQueue({ onChange, onNext, queued, value }: { queued: string; va
         <AlertTitle>В очереди</AlertTitle>
         <AlertDescription>{queued}</AlertDescription>
       </Alert>
-      <Textarea value={value} placeholder="Вставьте результат расшифровки" aria-label="Результат из очереди" onChange={(event) => onChange(event.target.value)} />
-      <PrimaryButton onClick={onNext}>Данные вставлены</PrimaryButton>
+      <VoiceOnlyTextarea value={value} placeholder="Здесь появится результат из очереди" ariaLabel="Результат из очереди" onChange={onChange} />
+      {value.trim() ? <PrimaryButton onClick={onNext}>Данные вставлены</PrimaryButton> : null}
     </div>
+  );
+}
+
+function VoiceOnlyTextarea({ ariaLabel, onChange, placeholder, value }: { ariaLabel: string; placeholder: string; value: string; onChange: (value: string) => void }) {
+  return (
+    <Textarea
+      data-onboarding-training-input
+      autoFocus
+      value={value}
+      placeholder={placeholder}
+      aria-label={ariaLabel}
+      onChange={(event) => onChange(event.target.value)}
+      onKeyDown={(event) => {
+        if (event.key === "Tab" || event.key === "Escape") return;
+        event.preventDefault();
+      }}
+      onPaste={(event) => event.preventDefault()}
+    />
   );
 }
 
@@ -715,7 +760,7 @@ function screenMeta(step: OnboardingStep): { title: string; description?: string
   if (step === "cmd-settings") return { title: "Настройки Brai CMD" };
   if (step.startsWith("training")) return { title: "Обучение" };
   if (step === "voice-choice" || step === "provider-key" || step === "local-server" || step === "cloud-privacy") return { title: "Голосовой модуль" };
-  if (step === "overlay" || step.startsWith("accessibility") || step === "microphone" || step === "notifications") return { title: "Системные разрешения" };
+  if (step === "overlay" || step.startsWith("accessibility") || step === "microphone" || step === "notifications") return { title: "Разрешения" };
   if (step.startsWith("welcome")) return { title: "Приветствие" };
   return { title: "Настройка Brai" };
 }

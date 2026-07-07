@@ -21,6 +21,7 @@ type BraiAndroidCapabilitiesPlugin = {
   getState(): Promise<BraiAndroidCapabilitiesState>;
   requestMicrophone(): Promise<BraiAndroidCapabilitiesState>;
   requestNotifications(): Promise<BraiAndroidCapabilitiesState>;
+  openAppSettings(): Promise<BraiAndroidCapabilitiesState>;
   openOverlaySettings(): Promise<BraiAndroidCapabilitiesState>;
   openAccessibilitySettings(): Promise<BraiAndroidCapabilitiesState>;
 };
@@ -49,6 +50,15 @@ export async function requestAndroidNotifications(): Promise<BraiAndroidCapabili
   if (!isNativeAndroid()) return null;
   try {
     return await BraiAndroidCapabilities.requestNotifications();
+  } catch {
+    return null;
+  }
+}
+
+export async function openAndroidAppSettings(): Promise<BraiAndroidCapabilitiesState | null> {
+  if (!isNativeAndroid()) return null;
+  try {
+    return await BraiAndroidCapabilities.openAppSettings();
   } catch {
     return null;
   }
