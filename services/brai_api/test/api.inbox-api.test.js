@@ -400,12 +400,14 @@ function fakeCodex(expectedImageDir) {
   const file = path.join(expectedImageDir, 'fake-codex');
   fs.writeFileSync(file, `#!/usr/bin/env node
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const args = process.argv.slice(2);
 const execIndex = args.indexOf('exec');
 const imageIndex = args.indexOf('--image');
 if (imageIndex >= 0 && (execIndex < 0 || imageIndex < execIndex)) throw new Error('--image must be an exec option');
-if (imageIndex >= 0 && args[args.indexOf('--cd') + 1] !== ${JSON.stringify(expectedImageDir)}) throw new Error('--cd must point at image dir');
+if (imageIndex >= 0 && args[args.indexOf('--cd') + 1] !== os.tmpdir()) throw new Error('--cd must avoid project image dir');
+if (imageIndex >= 0 && path.dirname(args[imageIndex + 1]) !== ${JSON.stringify(expectedImageDir)}) throw new Error('--image must be absolute storage path');
 const outputPath = args[args.indexOf('--output-last-message') + 1];
 if (!outputPath) throw new Error('missing output path');
 const output = imageIndex >= 0

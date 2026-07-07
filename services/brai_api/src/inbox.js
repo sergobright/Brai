@@ -681,7 +681,7 @@ function codexText({ codexBin = 'codex', codexModel = null, promptTemplate, time
       '--skip-git-repo-check'
     );
     if (images.length > 0) {
-      args.push('--cd', path.dirname(images[0]));
+      args.push('--cd', os.tmpdir());
       for (const imagePath of images) args.push('--image', imagePath);
     }
     args.push(
