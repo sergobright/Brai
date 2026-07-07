@@ -197,7 +197,9 @@ export async function processInboxItem({
         inboxId,
         imagePaths,
         imageDescription,
-        error: imageResult.error
+        error: imageResult.error,
+        model: imageResult.model,
+        durationMs: imageResult.durationMs
       });
       if (imageResult.status !== 'done') return { ok: false, reason: 'image_description_failed' };
       store.createInboxNormalizationEvent({
@@ -236,7 +238,9 @@ export async function processInboxItem({
         classes,
         imageDescription,
         output: normalizeResult.output,
-        error: normalizeResult.error
+        error: normalizeResult.error,
+        model: normalizeResult.model,
+        durationMs: normalizeResult.durationMs
       });
       return { ok: false, reason: 'normalizer_failed' };
     }
@@ -280,7 +284,9 @@ export async function processInboxItem({
         classKey: normalizeResult.classKey,
         normalization: normalizationText
       },
-      error: normalizeResult.error
+      error: normalizeResult.error,
+      model: normalizeResult.model,
+      durationMs: normalizeResult.durationMs
     });
     return { ok: true, image_described: imagePaths.length > 0, class_key: normalizeResult.classKey };
   } finally {
@@ -463,31 +469,38 @@ function throwStatus(message, status) {
 }
 
 async function describeImages({ agent, codexBin, codexModel, codexFallbackModel, codexTimeoutMs, imageDescriber, imagePaths }) {
+  const startedAt = Date.now();
+  const model = codexModel ?? optionalText(agent?.llm_model) ?? '';
   try {
-    const text = imageDescriber
-      ? await imageDescriber({ imagePaths })
+    const result = imageDescriber
+      ? { text: await imageDescriber({ imagePaths }), model }
       : await codexTextWithModelRetry({
         codexBin,
-        codexModel: codexModel ?? optionalText(agent?.llm_model),
+        codexModel: model || null,
         codexFallbackModel,
         promptTemplate: optionalBodyText(agent?.llm_prompt_template) ?? DEFAULT_IMAGE_PROMPT_TEMPLATE,
         timeoutMs: Number.isFinite(codexTimeoutMs) ? codexTimeoutMs : agent?.llm_timeout_ms,
         images: imagePaths
       });
-    const clean = cleanText(text);
-    return clean ? { text: clean, status: 'done', error: '' } : { text: '', status: 'failed', error: 'empty_image_description' };
+    const clean = cleanText(result.text);
+    const durationMs = Date.now() - startedAt;
+    if (!clean) return { text: '', status: 'failed', error: 'empty_image_description', model: result.model, durationMs };
+    if (imageDescriptionRefused(clean)) return { text: '', status: 'failed', error: 'image_description_refused', model: result.model, durationMs };
+    return { text: clean, status: 'done', error: '', model: result.model, durationMs };
   } catch (error) {
-    return { text: '', status: 'failed', error: errorText(error) };
+    return { text: '', status: 'failed', error: errorText(error), model, durationMs: Date.now() - startedAt };
   }
 }
 
 async function normalizeInbox({ agent, codexBin, codexModel, codexFallbackModel, codexTimeoutMs, normalizer, item, classes, imageDescription }) {
+  const startedAt = Date.now();
+  const model = codexModel ?? optionalText(agent?.llm_model) ?? '';
   try {
-    const output = normalizer
-      ? await normalizer({ item, classes, imageDescription })
+    const result = normalizer
+      ? { text: await normalizer({ item, classes, imageDescription }), model }
       : await codexTextWithModelRetry({
         codexBin,
-        codexModel: codexModel ?? optionalText(agent?.llm_model),
+        codexModel: model || null,
         codexFallbackModel,
         promptTemplate: renderNormalizerPrompt(
           optionalBodyText(agent?.llm_prompt_template) ?? DEFAULT_NORMALIZER_PROMPT_TEMPLATE,
@@ -497,13 +510,15 @@ async function normalizeInbox({ agent, codexBin, codexModel, codexFallbackModel,
         ),
         timeoutMs: Number.isFinite(codexTimeoutMs) ? codexTimeoutMs : agent?.llm_timeout_ms
       });
-    const parsed = typeof output === 'string' ? parseNormalizerJson(output) : output;
+    const parsed = typeof result.text === 'string' ? parseNormalizerJson(result.text) : result.text;
     const normalized = cleanNormalization(parsed);
-    return { ...normalized, status: 'done', error: '' };
+    return { ...normalized, status: 'done', error: '', model: result.model, durationMs: Date.now() - startedAt };
   } catch (error) {
     return {
       status: 'failed',
       error: errorText(error),
+      model,
+      durationMs: Date.now() - startedAt,
       output: {
         title: '',
         description: '',
@@ -542,7 +557,7 @@ function parseNormalizerJson(value) {
   return JSON.parse(text);
 }
 
-function recordInboxImageAiLog(store, { agent, dt, status, inboxId, imagePaths, imageDescription, error }) {
+function recordInboxImageAiLog(store, { agent, dt, status, inboxId, imagePaths, imageDescription, error, model, durationMs }) {
   store.recordAiLog({
     agentId: INBOX_IMAGE_AGENT_ID,
     agentVersion: agent?.version ?? '',
@@ -560,12 +575,14 @@ function recordInboxImageAiLog(store, { agent, dt, status, inboxId, imagePaths, 
       outputs: [
         { ref: 'inbox.normalization_text.image_description', value: imageDescription }
       ],
+      usage: usageBlock(model),
+      timings_ms: timingsBlock(durationMs),
       metadata: { error: error || null }
     }
   });
 }
 
-function recordInboxNormalizerAiLog(store, { agent, dt, status, inboxId, item, classes, imageDescription, output, error }) {
+function recordInboxNormalizerAiLog(store, { agent, dt, status, inboxId, item, classes, imageDescription, output, error, model, durationMs }) {
   store.recordAiLog({
     agentId: INBOX_NORMALIZER_AGENT_ID,
     agentVersion: agent?.version ?? '',
@@ -589,6 +606,8 @@ function recordInboxNormalizerAiLog(store, { agent, dt, status, inboxId, item, c
         { ref: 'inbox.preliminary_section', value: output.classKey },
         { ref: 'inbox.normalization_text', value: output.normalization }
       ],
+      usage: usageBlock(model),
+      timings_ms: timingsBlock(durationMs),
       metadata: {
         error: error || null
       }
@@ -633,7 +652,7 @@ async function codexTextWithModelRetry({ codexFallbackModel = null, ...input }) 
   let lastError = null;
   for (const model of models) {
     try {
-      return await codexText({ ...input, codexModel: model });
+      return { text: await codexText({ ...input, codexModel: model }), model: model ?? '' };
     } catch (error) {
       lastError = error;
     }
@@ -648,6 +667,7 @@ function codexText({ codexBin = 'codex', codexModel = null, promptTemplate, time
 
   return new Promise((resolve, reject) => {
     let settled = false;
+    let stderr = '';
     const args = [
       '--sandbox',
       'read-only',
@@ -664,16 +684,19 @@ function codexText({ codexBin = 'codex', codexModel = null, promptTemplate, time
       outputPath,
       '-'
     );
-    const child = spawn(codexBin, args, { stdio: ['pipe', 'ignore', 'ignore'] });
+    const child = spawn(codexBin, args, { stdio: ['pipe', 'ignore', 'pipe'] });
     const timer = setTimeout(() => {
       child.kill('SIGKILL');
       finish(reject, new Error('codex_inbox_timeout'));
     }, timeout);
 
+    child.stderr?.on('data', (chunk) => {
+      stderr = `${stderr}${chunk}`.slice(-4000);
+    });
     child.once('error', (error) => finish(reject, error));
     child.once('close', (code) => {
       if (code !== 0) {
-        finish(reject, new Error('codex_inbox_failed'));
+        finish(reject, new Error(cleanCodexError(stderr) || 'codex_inbox_failed'));
         return;
       }
       finish(resolve, fs.existsSync(outputPath) ? fs.readFileSync(outputPath, 'utf8') : '');
@@ -688,6 +711,29 @@ function codexText({ codexBin = 'codex', codexModel = null, promptTemplate, time
       callback(value);
     }
   });
+}
+
+function usageBlock(model) {
+  const clean = cleanText(model);
+  return clean ? { model: clean } : {};
+}
+
+function timingsBlock(durationMs) {
+  return Number.isFinite(durationMs) ? { total: Math.max(0, Math.round(durationMs)) } : {};
+}
+
+function imageDescriptionRefused(value) {
+  const text = value.toLocaleLowerCase('ru');
+  return /^(к сожалению,?\s*)?(я\s+)?(не могу|не удалось|не способен|cannot|can't|unable).{0,160}(изображ|картин|image|файл|file|обработ|разобрат|access|read)/i.test(text);
+}
+
+function cleanCodexError(value) {
+  return cleanText(value)
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .slice(-3)
+    .join(' ');
 }
 
 function errorText(error) {

@@ -1051,7 +1051,9 @@ function InboxTypeIcon({ id }: { id: string }) {
 
 function inboxRowMeta(item: InboxItem) {
   const meta: string[] = [];
-  if (!item.is_normalized) meta.push("AI обрабатывает");
+  if (!item.is_normalized) {
+    meta.push(item.ai_processing_status === "failed" ? `Ошибка AI: ${item.ai_processing_error || "обработка не выполнена"}` : "AI обрабатывает");
+  }
   if (item.preliminary_section) meta.push(`Класс: ${item.preliminary_section}`);
   return meta;
 }

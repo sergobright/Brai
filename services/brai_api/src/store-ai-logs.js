@@ -34,6 +34,29 @@ export const aiLogMethods = {
         ...row,
         json_data: parseJsonObject(row.json_data)
       }));
+  },
+
+  listLatestInboxAiLogs(inboxIds = []) {
+    const ids = [...new Set(inboxIds.filter((id) => typeof id === 'string' && id.trim()).map((id) => id.trim()))];
+    if (ids.length === 0) return [];
+    const placeholders = ids.map(() => '?').join(', ');
+    const rows = this.db
+      .prepare(
+        `
+          SELECT id, agent_id, agent_version, dt, status, json_data, ai_title, flow_id, flow_command
+          FROM ai_logs
+          WHERE flow_id IN (${placeholders})
+            AND agent_id IN ('inbox.image_describer', 'inbox.normalizer')
+          ORDER BY dt DESC, id DESC
+        `
+      )
+      .all(...ids);
+    const seen = new Set();
+    return rows.flatMap((row) => {
+      if (!row.flow_id || seen.has(row.flow_id)) return [];
+      seen.add(row.flow_id);
+      return [{ ...row, json_data: parseJsonObject(row.json_data) }];
+    });
   }
 };
 

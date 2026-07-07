@@ -168,6 +168,8 @@ export function projectInboxState(
         explanation_text: "",
         normalization_text: "",
         is_normalized: false,
+        ai_processing_status: null,
+        ai_processing_error: null,
         created_at_utc: occurredAtUtc,
         updated_at_utc: occurredAtUtc,
         deleted_at_utc: null,
@@ -231,6 +233,8 @@ function normalizeInboxItem(item: InboxItem): InboxItem {
     item_date: item.item_date ?? null,
     deleted_at_utc: item.deleted_at_utc ?? null,
     is_normalized: Boolean(item.is_normalized),
+    ai_processing_status: item.ai_processing_status === "failed" ? "failed" : null,
+    ai_processing_error: typeof item.ai_processing_error === "string" ? item.ai_processing_error : null,
   };
 }
 

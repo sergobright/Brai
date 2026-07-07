@@ -633,11 +633,38 @@ function normalizeOtaVersion(value) {
 }
 
 export function inboxState(store, nowDate) {
+  const inbox = store.listInbox();
   return {
     server_time_utc: nowDate.toISOString(),
     server_revision: store.getInboxServerRevision(),
-    inbox: store.listInbox()
+    inbox: addInboxAiProcessingState(store, inbox)
   };
+}
+
+function addInboxAiProcessingState(store, inbox) {
+  const pendingIds = inbox.filter((item) => !item.is_normalized).map((item) => item.id);
+  const logs = new Map(store.listLatestInboxAiLogs(pendingIds).map((log) => [log.flow_id, log]));
+  return inbox.map((item) => {
+    const log = logs.get(item.id);
+    if (!log || log.status !== 'failed') return item;
+    return {
+      ...item,
+      ai_processing_status: 'failed',
+      ai_processing_error: inboxAiFailureText(log)
+    };
+  });
+}
+
+function inboxAiFailureText(log) {
+  const metadata = log.json_data?.metadata;
+  return cleanShortText(log.ai_title)
+    || cleanShortText(metadata?.error_message)
+    || cleanShortText(metadata?.error)
+    || 'Ошибка AI-обработки';
+}
+
+function cleanShortText(value) {
+  return typeof value === 'string' ? value.trim().replace(/\s+/g, ' ').slice(0, 120) : '';
 }
 
 function actionsCompatState(state) {

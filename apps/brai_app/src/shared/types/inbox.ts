@@ -17,6 +17,8 @@ export interface InboxItem {
   explanation_text: string;
   normalization_text: string;
   is_normalized: boolean;
+  ai_processing_status?: "failed" | null;
+  ai_processing_error?: string | null;
   created_at_utc: string;
   updated_at_utc: string;
   deleted_at_utc: string | null;

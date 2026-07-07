@@ -339,6 +339,7 @@ test('Inbox AI processing describes images, normalizes text, and suggests a new 
   ], {
     inboxStorageRoot: storageRoot,
     inboxAutoProcess: true,
+    codexModel: 'test-model',
     inboxImageDescriber: async ({ imagePaths }) => {
       assert.equal(imagePaths.length, 1);
       return 'На картинке экран Telegram с сообщением про презентацию.';
@@ -394,6 +395,8 @@ test('Inbox AI processing describes images, normalizes text, and suggests a new 
     const publicLogs = await requestAiLogs(fixture.url);
     assert.equal(publicLogs.status, 200);
     assert.equal(publicLogs.body.logs.length, 2);
+    assert.equal(publicLogs.body.logs.every((log) => log.json_data.usage.model === 'test-model'), true);
+    assert.equal(publicLogs.body.logs.every((log) => Number.isFinite(log.json_data.timings_ms.total)), true);
   } finally {
     await fixture.close();
     fs.rmSync(storageRoot, { recursive: true, force: true });

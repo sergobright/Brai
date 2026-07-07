@@ -160,6 +160,9 @@ test('inbox AI failure leaves item unnormalized', async () => {
     const log = fixture.store.db.prepare("SELECT status, json_data FROM ai_logs WHERE agent_id = 'inbox.normalizer'").get();
     assert.equal(log.status, 'failed');
     assert.equal(JSON.parse(log.json_data).metadata.error, 'model unavailable');
+    const state = await request(fixture.url, '/v1/inbox');
+    assert.equal(state.body.inbox[0].ai_processing_status, 'failed');
+    assert.equal(state.body.inbox[0].ai_processing_error, 'Не разобрал Inbox-запись');
   } finally {
     await fixture.close();
   }
