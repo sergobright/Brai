@@ -9,6 +9,7 @@ import {
   onceOpen,
   request,
   syncEvent,
+  eventDomainCount,
   tableCount,
   waitFor
 } from '../test-support/api.js';
@@ -182,7 +183,7 @@ test('event sync is idempotent and returns canonical state', async () => {
     const history = await request(fixture.url, '/v1/sessions');
     assert.equal(history.body.sessions.length, 1);
     assert.equal(history.body.sessions[0].duration_seconds, 3600);
-    assert.equal(tableCount(fixture, 'timer_events'), 2);
+    assert.equal(eventDomainCount(fixture, 'timer'), 2);
   } finally {
     await fixture.close();
   }
@@ -817,10 +818,10 @@ test('future and malformed sync events are stored as ignored and excluded from c
       { event_id: 'invalid-type', reason: 'invalid_type' }
     ]);
     assert.equal(response.body.state.active_session, null);
-    assert.equal(tableCount(fixture, 'timer_events'), 2);
+    assert.equal(eventDomainCount(fixture, 'timer'), 2);
     assert.equal(
       fixture.store.db
-        .prepare('SELECT status FROM timer_events WHERE event_id = ?')
+        .prepare("SELECT status FROM events WHERE event_domain = 'timer' AND event_id = ?")
         .get('future-start').status,
       'ignored'
     );
@@ -842,7 +843,7 @@ test('unauthorized event sync stores no devices or events', async () => {
     });
     assert.equal(response.status, 401);
     assert.equal(tableCount(fixture, 'timer_devices'), 0);
-    assert.equal(tableCount(fixture, 'timer_events'), 0);
+    assert.equal(eventDomainCount(fixture, 'timer'), 0);
   } finally {
     await fixture.close();
   }

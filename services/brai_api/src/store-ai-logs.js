@@ -2,8 +2,8 @@ export const aiLogMethods = {
   recordAiLog(input) {
     const info = this.db.prepare(`
       INSERT INTO ai_logs (
-        agent_id, agent_version, dt, status, json_data, ai_title, flow_id, flow_command
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        agent_id, agent_version, dt, status, json_data, ai_title, flow_id, flow_command, trace_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       input.agentId,
       input.agentVersion,
@@ -12,8 +12,24 @@ export const aiLogMethods = {
       JSON.stringify(input.jsonData ?? {}),
       input.aiTitle,
       input.flowId ?? null,
-      input.flowCommand ?? null
+      input.flowCommand ?? null,
+      input.traceId ?? null
     );
+    this.recordLog?.({
+      dt: input.dt ?? new Date().toISOString(),
+      traceId: input.traceId,
+      source: 'ai',
+      operation: `ai.${input.agentId}`,
+      status: input.status === 'failed' ? 'failed' : 'done',
+      severityText: input.status === 'failed' ? 'ERROR' : 'INFO',
+      message: input.aiTitle,
+      jsonData: {
+        agent_id: input.agentId,
+        agent_version: input.agentVersion,
+        flow_id: input.flowId ?? null,
+        flow_command: input.flowCommand ?? null
+      }
+    });
     return Number(info.lastInsertRowid);
   }
 ,
@@ -23,7 +39,7 @@ export const aiLogMethods = {
     return this.db
       .prepare(
         `
-          SELECT id, agent_id, agent_version, dt, status, json_data, ai_title, flow_id, flow_command
+          SELECT id, agent_id, agent_version, dt, status, json_data, ai_title, flow_id, flow_command, trace_id
           FROM ai_logs
           ORDER BY dt DESC, id DESC
           LIMIT ?
@@ -43,7 +59,7 @@ export const aiLogMethods = {
     const rows = this.db
       .prepare(
         `
-          SELECT id, agent_id, agent_version, dt, status, json_data, ai_title, flow_id, flow_command
+          SELECT id, agent_id, agent_version, dt, status, json_data, ai_title, flow_id, flow_command, trace_id
           FROM ai_logs
           WHERE flow_id IN (${placeholders})
             AND agent_id IN ('inbox.image_describer', 'inbox.normalizer')
