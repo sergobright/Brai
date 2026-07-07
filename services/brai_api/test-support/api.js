@@ -186,6 +186,12 @@ export function activityTypeCount(fixture, activityTypeId) {
     .get(activityTypeId).count);
 }
 
+export function eventDomainCount(fixture, eventDomain) {
+  return Number(fixture.store.db
+    .prepare('SELECT COUNT(*) AS count FROM events WHERE event_domain = ?')
+    .get(eventDomain).count);
+}
+
 export async function createTestDatabase() {
   const baseUrl = process.env.BRAI_TEST_DATABASE_URL?.trim();
   if (!baseUrl) throw new Error('BRAI_TEST_DATABASE_URL is required for API tests');

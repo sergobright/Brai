@@ -49,6 +49,42 @@ export type AiLog = {
   ai_title: string;
   flow_id: string | null;
   flow_command: string | null;
+  trace_id?: string | null;
+};
+
+export type EventLogRow = {
+  id: string;
+  event_domain: string;
+  event_id: string;
+  event_type: string;
+  event_action: string;
+  title: string;
+  items_id: string | null;
+  subject_type: string;
+  subject_id: string | null;
+  actor_type: string;
+  actor_id: string | null;
+  occurred_at_utc: string;
+  received_at_utc: string;
+  status: "accepted" | "ignored";
+  ignore_reason: string | null;
+  payload_json: Record<string, unknown>;
+  trace_id: string | null;
+};
+
+export type TechnicalLog = {
+  id: number;
+  trace_id: string | null;
+  dt: string;
+  severity_text: string;
+  service: string;
+  source: string;
+  operation: string;
+  status: "started" | "done" | "failed" | "skipped";
+  duration_ms: number | null;
+  message: string;
+  json_data: Record<string, unknown>;
+  expires_at_utc: string;
 };
 
 /**
@@ -112,6 +148,14 @@ export class BraiApi {
 
   async aiLogs(limit = 50): Promise<{ logs: AiLog[] }> {
     return this.request(`/v1/ai-logs?limit=${encodeURIComponent(String(limit))}`);
+  }
+
+  async events(limit = 100): Promise<{ events: EventLogRow[] }> {
+    return this.request(`/v1/events?limit=${encodeURIComponent(String(limit))}`);
+  }
+
+  async logs(limit = 100): Promise<{ logs: TechnicalLog[] }> {
+    return this.request(`/v1/logs?limit=${encodeURIComponent(String(limit))}`);
   }
 
   async version(): Promise<AppVersionState> {

@@ -57,11 +57,7 @@ export const activityEventMethods = {
 ,
 
   getActivityServerRevision() {
-    const scope = scopeSql();
-    const row = this.db
-      .prepare(`SELECT COALESCE(MAX(server_sequence), 0) AS revision FROM activity_events WHERE ${scope.where}`)
-      .get(...scope.params);
-    return row.revision;
+    return this.getEventDomainRevision('activity');
   }
 ,
 
@@ -106,8 +102,24 @@ export const activityEventMethods = {
     });
     run();
 
+    const serverRevision = this.getActivityServerRevision();
+    this.recordLog({
+      dt: receivedAt,
+      source: 'sync',
+      operation: 'activity.events_sync',
+      status: 'done',
+      eventDomain: 'activity',
+      deviceId,
+      message: 'Activity events sync',
+      jsonData: {
+        accepted_count: acceptedEvents.length,
+        ignored_count: ignored.length,
+        server_revision: serverRevision,
+        platform
+      }
+    });
     return {
-      server_revision: this.getActivityServerRevision(),
+      server_revision: serverRevision,
       server_time_utc: receivedAt,
       acknowledged_event_ids: acknowledged,
       ignored_events: ignored
@@ -155,14 +167,12 @@ export const activityEventMethods = {
     const eventId = sanitizeText(rawEvent?.event_id);
     if (!eventId) return { event_id: null };
 
-    const existing = this.db
-      .prepare('SELECT event_id, status, ignore_reason FROM activity_events WHERE event_id = ?')
-      .get(eventId);
+    const existing = this.existingEvent('activity', eventId) ?? this.existingIgnoredEvent('activity', eventId);
     if (existing) {
       return {
         event_id: eventId,
         ignored:
-          existing.status === 'ignored'
+          existing.ignore_reason
             ? { event_id: eventId, reason: existing.ignore_reason ?? 'ignored' }
             : null
       };
@@ -181,11 +191,7 @@ export const activityEventMethods = {
       return { event_id: eventId, ignored: { event_id: eventId, reason: 'invalid_client_sequence' } };
     }
 
-    const existingSequence = this.db
-      .prepare(
-        'SELECT event_id FROM activity_events WHERE device_id = ? AND client_sequence = ?'
-      )
-      .get(deviceId, clientSequence);
+    const existingSequence = this.existingDeviceSequence('activity', deviceId, clientSequence);
     if (existingSequence) {
       return {
         event_id: eventId,
@@ -298,44 +304,47 @@ export const activityEventMethods = {
 ,
 
   insertActivityEvent(event) {
-    const serverSequence = this.nextActivityServerSequence();
-    const result = this.db
-      .prepare(
-        `
-          INSERT INTO activity_events (
-            event_id, device_id, client_sequence, server_sequence, activity_id,
-            change_type, occurred_at_utc, received_at_utc, payload_json,
-            status, ignore_reason, payload_version, user_id
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-          ON CONFLICT(event_id) DO NOTHING
-        `
-      )
-      .run(
-        event.event_id,
-        event.device_id,
-        event.client_sequence,
-        serverSequence,
-        event.activity_id ?? null,
-        event.change_type,
-        event.occurred_at_utc,
-        event.received_at_utc,
-        event.payload_json ?? null,
-        event.status,
-        event.ignore_reason ?? null,
-        event.payload_version,
-        scopedUserId()
-      );
-    return result.changes > 0 ? serverSequence : null;
+    if (event.status === 'ignored') {
+      this.recordSyncIgnoredEvent({
+        domain: 'activity',
+        eventId: event.event_id,
+        deviceId: event.device_id,
+        clientSequence: event.client_sequence,
+        receivedAt: event.received_at_utc,
+        reason: event.ignore_reason ?? 'ignored',
+        rawEvent: parseJsonObject(event.payload_json).raw_event ?? event
+      });
+    }
+    return this.insertEventRecord({
+      eventId: event.event_id,
+      eventDomain: 'activity',
+      eventType: event.change_type,
+      eventAction: `activity.${event.change_type}`,
+      title: `Activity ${event.change_type}`,
+      itemsId: event.change_type === 'reorder' ? null : event.activity_id,
+      subjectType: event.change_type === 'reorder' ? 'activity_list' : 'activity',
+      subjectId: event.change_type === 'reorder' ? null : event.activity_id,
+      actorType: 'user',
+      actorId: event.device_id,
+      deviceId: event.device_id,
+      clientSequence: event.client_sequence,
+      occurredAtUtc: event.occurred_at_utc,
+      receivedAtUtc: event.received_at_utc,
+      status: event.status,
+      ignoreReason: event.ignore_reason,
+      payloadVersion: event.payload_version,
+      payloadJson: event.payload_json ?? '{}'
+    });
   }
 ,
 
   nextActivityServerSequence() {
-    return this.nextPostgresCounter('activity_events.server_sequence');
+    return this.nextPostgresCounter('events.domain_sequence.activity');
   }
 ,
 
   nextInvalidActivityClientSequence(deviceId) {
-    return -this.nextPostgresCounter(`activity_events.invalid_client_sequence.${deviceId}`);
+    return -this.nextPostgresCounter(`events.invalid_client_sequence.${deviceId}`);
   }
 ,
 
@@ -371,12 +380,15 @@ export const activityEventMethods = {
     const events = this.db
       .prepare(
         `
-          SELECT * FROM activity_events
-          WHERE status = 'accepted'
-            AND activity_id = ?
-            AND change_type != 'reorder'
+          SELECT event_id, subject_id AS activity_id, event_type AS change_type,
+            occurred_at_utc, received_at_utc, domain_sequence AS server_sequence, payload_json, user_id
+          FROM events
+          WHERE event_domain = 'activity'
+            AND status = 'accepted'
+            AND subject_id = ?
+            AND event_type != 'reorder'
             ${scope.clause}
-          ORDER BY occurred_at_utc ASC, server_sequence ASC
+          ORDER BY occurred_at_utc ASC, domain_sequence ASC
         `
       )
       .all(activityId, ...scope.params);
@@ -514,10 +526,12 @@ export const activityEventMethods = {
     return this.db
       .prepare(
         `
-          SELECT * FROM activity_events
-          WHERE status = 'accepted' AND change_type = 'reorder'
+          SELECT event_id, subject_id AS activity_id, event_type AS change_type,
+            occurred_at_utc, received_at_utc, domain_sequence AS server_sequence, payload_json, user_id
+          FROM events
+          WHERE event_domain = 'activity' AND event_type = 'reorder' AND status = 'accepted'
             ${scope.clause}
-          ORDER BY occurred_at_utc DESC, server_sequence DESC
+          ORDER BY occurred_at_utc DESC, domain_sequence DESC
           LIMIT 1
         `
       )
@@ -530,15 +544,18 @@ export const activityEventMethods = {
     return this.db
       .prepare(
         `
-          SELECT * FROM activity_events
-          WHERE status = 'accepted'
-            AND change_type = 'reorder'
+          SELECT event_id, subject_id AS activity_id, event_type AS change_type,
+            occurred_at_utc, received_at_utc, domain_sequence AS server_sequence, payload_json, user_id
+          FROM events
+          WHERE event_domain = 'activity'
+            AND status = 'accepted'
+            AND event_type = 'reorder'
             AND (
               occurred_at_utc > ?
-              OR (occurred_at_utc = ? AND server_sequence > ?)
+              OR (occurred_at_utc = ? AND domain_sequence > ?)
             )
             ${scope.clause}
-          ORDER BY occurred_at_utc DESC, server_sequence DESC
+          ORDER BY occurred_at_utc DESC, domain_sequence DESC
           LIMIT 1
         `
       )
@@ -574,10 +591,13 @@ export const activityEventMethods = {
     const events = this.db
       .prepare(
         `
-          SELECT * FROM activity_events
-          WHERE status = 'accepted'
+          SELECT event_id, subject_id AS activity_id, event_type AS change_type,
+            occurred_at_utc, received_at_utc, domain_sequence AS server_sequence, payload_json, user_id
+          FROM events
+          WHERE event_domain = 'activity'
+            AND status = 'accepted'
             ${scope.clause}
-          ORDER BY occurred_at_utc ASC, server_sequence ASC
+          ORDER BY occurred_at_utc ASC, domain_sequence ASC
         `
       )
       .all(...scope.params);

@@ -127,6 +127,10 @@ export function createBraiServer({
   };
 
   const server = http.createServer(async (req, res) => {
+    const requestStartedAt = Date.now();
+    const traceId = crypto.randomUUID();
+    let requestPath = req.url ?? '/';
+    let requestUserId = null;
     try {
       if (req.method === 'OPTIONS') {
         res.writeHead(204, jsonHeaders(req));
@@ -135,6 +139,29 @@ export function createBraiServer({
       }
 
       const url = new URL(req.url ?? '/', 'http://localhost');
+      requestPath = url.pathname;
+      res.setHeader('x-brai-trace-id', traceId);
+      res.on('finish', () => {
+        try {
+          store.recordLog({
+            traceId,
+            source: 'api',
+            operation: `${req.method ?? 'GET'} ${requestPath}`,
+            status: res.statusCode >= 500 ? 'failed' : 'done',
+            severityText: res.statusCode >= 500 ? 'ERROR' : 'INFO',
+            durationMs: Date.now() - requestStartedAt,
+            userId: requestUserId,
+            message: `${res.statusCode} ${requestPath}`,
+            jsonData: {
+              method: req.method ?? 'GET',
+              path: requestPath,
+              status_code: res.statusCode
+            }
+          });
+        } catch (error) {
+          logger.error?.('request log failed', { error: error instanceof Error ? error.message : String(error) });
+        }
+      });
       if (req.method === 'GET' && url.pathname === '/health') {
         store.db.prepare('SELECT 1 AS ok').get();
         sendJson(req, res, 200, {
@@ -338,6 +365,7 @@ export function createBraiServer({
       }
 
       const authContext = await authenticateRequest(req, token, url, sessionSecret, now, auth, store);
+      requestUserId = authContext.userId;
       if (!authContext.authorized) {
         sendJson(req, res, 401, { error: 'unauthorized' });
         return;
@@ -391,6 +419,16 @@ export function createBraiServer({
 
       if (req.method === 'GET' && url.pathname === '/v1/inbox') {
         sendJson(req, res, 200, inboxState(store, now()));
+        return;
+      }
+
+      if (req.method === 'GET' && url.pathname === '/v1/events') {
+        sendJson(req, res, 200, { events: store.listEvents({ limit: url.searchParams.get('limit') }) });
+        return;
+      }
+
+      if (req.method === 'GET' && url.pathname === '/v1/logs') {
+        sendJson(req, res, 200, { logs: store.listLogs({ limit: url.searchParams.get('limit') }) });
         return;
       }
 

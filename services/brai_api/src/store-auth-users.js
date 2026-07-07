@@ -4,8 +4,10 @@ import { originalNameForImagePreview } from './inbox.js';
 const OWNED_TABLES = [
   'activities',
   'activity_events',
+  'events',
   'inbox',
   'inbox_events',
+  'logs',
   'timer_events',
   'focus_sessions',
   'focus_session_intervals'

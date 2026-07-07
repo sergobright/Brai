@@ -4,6 +4,7 @@ import {
   createFixture,
   inboxEvent,
   request,
+  eventDomainCount,
   tableCount,
   waitFor
 } from '../test-support/api.js';
@@ -45,7 +46,7 @@ test('inbox sync is idempotent and returns canonical state', async () => {
     });
     assert.equal(second.status, 200);
     assert.equal(second.body.server_revision, 2);
-    assert.equal(tableCount(fixture, 'inbox_events'), 2);
+    assert.equal(eventDomainCount(fixture, 'inbox'), 2);
 
     const state = await request(fixture.url, '/v1/inbox');
     assert.equal(state.status, 200);
@@ -72,7 +73,7 @@ test('inbox sync deletes items without a foreign-key dependency on inbox rows', 
     assert.equal(response.status, 200);
     assert.deepEqual(response.body.ignored_events, []);
     assert.equal(tableCount(fixture, 'inbox'), 0);
-    assert.equal(tableCount(fixture, 'inbox_events'), 1);
+    assert.equal(eventDomainCount(fixture, 'inbox'), 1);
   } finally {
     await fixture.close();
   }

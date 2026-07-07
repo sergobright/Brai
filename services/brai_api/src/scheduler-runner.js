@@ -33,6 +33,17 @@ export async function main(env = process.env) {
 
 export async function runDueSchedules({ store, nowDate = new Date(), config = schedulerConfig(), logger = console, agents = AGENTS } = {}) {
   const nowIso = nowDate.toISOString();
+  const purgedLogs = store.purgeExpiredLogs?.(nowIso) ?? 0;
+  if (purgedLogs > 0) {
+    store.recordLog?.({
+      dt: nowIso,
+      source: 'scheduler',
+      operation: 'logs.retention_purge',
+      status: 'done',
+      message: `Purged ${purgedLogs} expired logs`,
+      jsonData: { purged_logs: purgedLogs }
+    });
+  }
   const rows = store.db.prepare(`
     SELECT s.*, a.kind, a.title AS agent_title, a.version AS agent_version,
       a.llm_model, a.llm_prompt_template, a.llm_timeout_ms

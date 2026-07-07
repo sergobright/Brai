@@ -5,6 +5,7 @@ import { braiCmdStoreMethods } from './store-brai-cmd.js';
 import { aiLogMethods } from './store-ai-logs.js';
 import { inboxEventMethods } from './store-inbox-events.js';
 import { deploymentMethods } from './store-deployments.js';
+import { eventsLogsMethods } from './store-events-logs.js';
 import { readModelMethods } from './store-read-models.js';
 import { timerEventMethods } from './store-timer-events.js';
 export { formatActivity, formatFocusInterval, formatSession, groupSessionsByDateHour } from './store-helpers.js';
@@ -24,6 +25,7 @@ Object.assign(
   braiCmdStoreMethods,
   aiLogMethods,
   deploymentMethods,
+  eventsLogsMethods,
   timerEventMethods,
   activityEventMethods,
   inboxEventMethods,
