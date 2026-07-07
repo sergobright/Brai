@@ -1,6 +1,0 @@
-- [x] 1.1 Add the `inbox` SQLite table, entity registry row, schema metadata, and migration marker.
-- [x] 1.2 Cover the migration with an API schema test.
-- [x] 1.3 Add inbox event-log sync without FK dependency on inbox rows.
-- [x] 1.4 Add the Inbox navigation item, page, list, creation flow, and Markdown detail editor.
-- [x] 1.5 Run API, app, and OpenSpec validation.
-- [ ] 1.6 Archive the OpenSpec change after review/merge.

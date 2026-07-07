@@ -9,9 +9,9 @@ node_modules/
 *.log
 
 # Local secrets and runtime data
-/admin/
 /data/
 /vault/
+openspec/changes/
 .env
 .env.*
 !.env.example
