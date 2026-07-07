@@ -478,7 +478,11 @@ test("native APK detector ignores OTA web-layer changes", () => {
   assert.equal(requiresNativeApkChange(["deploy/scripts/ci-ssh-deploy.sh"]), false);
   assert.equal(requiresNativeApkChange(["deploy/scripts/ci-ssh-release-slot.sh"]), false);
   assert.equal(requiresNativeApkChange(["deploy/scripts/detect-native-apk-change.mjs"]), false);
-  assert.equal(requiresNativeApkChange(["deploy/scripts/apk-release-targets.mjs"]), true);
+  assert.equal(requiresNativeApkChange(["deploy/scripts/apk-release-targets.mjs"]), false);
+  assert.equal(requiresNativeApkChange(["deploy/scripts/build-android-env-apk.sh"]), false);
+  assert.equal(requiresNativeApkChange(["deploy/scripts/build-nonproduction-apks.sh"]), false);
+  assert.equal(requiresNativeApkChange(["deploy/scripts/resolve-android-env.mjs"]), false);
+  assert.equal(requiresNativeApkChange(["deploy/environments.json"]), true);
   assert.equal(requiresNativeApkChange(["deploy/scripts/resolve-app-version.mjs"]), false);
   assert.equal(requiresNativeApkChange(["apps/brai_app/src/shared/platform/ota.ts"]), false);
   assert.equal(requiresNativeApkChange(["apps/brai_app/src/shared/platform/androidTimerNotification.ts"]), false);

@@ -16,7 +16,7 @@ Brai uses separate version lines for APK and OTA/web.
 - Branch names, commits, domains, and deploy metadata belong in `build_version_refs` or `deployment_records`, not release-note text.
 - Manual `release` and `canon` rows are disabled unless a future explicit requirement restores them.
 
-Build and publish a release APK only when native Android code, Capacitor config, permissions, signing, manifest values, application id, SDK versions, icons, splash assets, native plugins, or native compatibility boundaries change.
+Build and publish a release APK only when native Android code, Capacitor config, permissions, signing, manifest values, application id, SDK versions, icons, splash assets, native plugins, or native compatibility boundaries change. Changes to APK build/deploy orchestration scripts alone do not require a new APK unless they are paired with a real native-boundary input change or an explicitly forced native APK deploy.
 
 ## Release Page
 
