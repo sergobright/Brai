@@ -90,7 +90,8 @@ const OnboardingChromeContext = createContext<{
 });
 
 const startButtonDelayMs = process.env.NODE_ENV === "test" ? 1 : 3000;
-const screenTransitionDelayMs = process.env.NODE_ENV === "test" ? 0 : 780;
+const startupLogoDelayMs = process.env.NODE_ENV === "test" ? 0 : 220;
+const screenTransitionDelayMs = process.env.NODE_ENV === "test" ? 0 : 280;
 const startLogoGlareDelayMs = 1000;
 const startLogoGlareDurationMs = 1000;
 const providerOptions = ["Groq", "OpenAI", "Deepgram", "AssemblyAI"] as const;
@@ -154,6 +155,7 @@ export function OnboardingFlow({
   const [queueInserted, setQueueInserted] = useState(false);
   const [screenTransitioning, setScreenTransitioning] = useState(false);
   const [startupSplashVisible, setStartupSplashVisible] = useState(startButtonDelayMs > 0);
+  const [startupLogoVisible, setStartupLogoVisible] = useState(startupLogoDelayMs === 0);
   const [permissionFallbackStep, setPermissionFallbackStep] = useState<OnboardingStep | null>(null);
   const stepRef = useRef<OnboardingStep>(state.step);
   const stateRef = useRef<OnboardingState>(state);
@@ -170,10 +172,12 @@ export function OnboardingFlow({
       stepRef.current = next.step;
       setState(next);
     }, 0);
+    const logoTimer = window.setTimeout(() => setStartupLogoVisible(true), startupLogoDelayMs);
     const splashTimer = window.setTimeout(() => setStartupSplashVisible(false), startButtonDelayMs);
     void refreshCapabilities();
     return () => {
       window.clearTimeout(loadTimer);
+      window.clearTimeout(logoTimer);
       window.clearTimeout(splashTimer);
     };
   }, [authRequired]);
@@ -333,7 +337,8 @@ export function OnboardingFlow({
     const next = { ...current, step };
     saveOnboardingState(next);
     stateRef.current = next;
-    setState(next);
+    stepRef.current = step;
+    if (!current.step.startsWith("welcome-") || !step.startsWith("welcome-")) setState(next);
   }
 
   function completeSetup() {
@@ -563,7 +568,6 @@ export function OnboardingFlow({
 
   const body = renderStep();
   const previousStep = previousOnboardingStep(state);
-  const isWelcomeStep = state.step.startsWith("welcome-");
   const statusText = error || message || statusPromptForStep(state.step);
   const chrome = {
     canBack: Boolean(previousStep),
@@ -783,38 +787,46 @@ export function OnboardingFlow({
   if (startupSplashVisible || state.step === "start") {
     return (
       <OnboardingChromeContext.Provider value={chrome}>
-        <main className={cx("fixed inset-0 overflow-hidden bg-black text-foreground transition-opacity duration-700 ease-out", screenTransitioning ? "opacity-0" : "opacity-100")} data-onboarding-flow data-theme="dark" style={{ colorScheme: "dark" }}>
+        <main className={cx("fixed inset-0 overflow-hidden bg-black text-foreground transition-opacity duration-300 ease-out", screenTransitioning ? "opacity-0" : "opacity-100")} data-onboarding-flow data-theme="dark" style={{ colorScheme: "dark" }}>
           <style>{startButtonCss}</style>
           <div className="pointer-events-none absolute inset-0 grid place-items-center">
-            <GlareHover
-              width="min(20rem, calc(100vw - 3rem))"
-              height="auto"
-              background="transparent"
-              borderColor="transparent"
-              borderRadius="0"
-              className="border-0"
-              glareAngle={18}
-              glareOpacity={1}
-              glareSize={64}
-              glareMaskImage="/brand/brai-logo-transparent.svg"
-              transitionDuration={startLogoGlareDurationMs}
-              autoPlayDelayMs={reduceMotion ? undefined : startLogoGlareDelayMs}
-              interactive={false}
-              playOnce
-              style={{ aspectRatio: "779 / 368" }}
+            <div
+              className="transition-opacity duration-300 ease-out"
+              style={{
+                width: "min(20rem, calc(100vw - 3rem))",
+                aspectRatio: "779 / 368",
+                opacity: startupLogoVisible ? 1 : 0,
+              }}
             >
-              {/* eslint-disable-next-line @next/next/no-img-element -- stable startup geometry matters here more than Next image optimization. */}
-              <img
-                className="block h-full w-full select-none object-contain"
-                src="/brand/brai-logo-transparent.svg"
-                alt="Brai"
-                width="779"
-                height="368"
-                decoding="sync"
-                fetchPriority="high"
-                draggable={false}
-              />
-            </GlareHover>
+              <GlareHover
+                width="100%"
+                height="100%"
+                background="transparent"
+                borderColor="transparent"
+                borderRadius="0"
+                className="border-0"
+                glareAngle={18}
+                glareOpacity={1}
+                glareSize={64}
+                glareMaskImage="/brand/brai-logo-transparent.svg"
+                transitionDuration={startLogoGlareDurationMs}
+                autoPlayDelayMs={reduceMotion ? undefined : startLogoGlareDelayMs}
+                interactive={false}
+                playOnce
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element -- stable startup geometry matters here more than Next image optimization. */}
+                <img
+                  className="block h-full w-full select-none object-contain"
+                  src="/brand/brai-logo-transparent.svg"
+                  alt="Brai"
+                  width="779"
+                  height="368"
+                  decoding="sync"
+                  fetchPriority="high"
+                  draggable={false}
+                />
+              </GlareHover>
+            </div>
           </div>
           <div
             className={cx(
@@ -839,9 +851,8 @@ export function OnboardingFlow({
       <main className="fixed inset-0 min-h-0 overflow-hidden bg-black text-foreground" data-onboarding-flow data-theme="dark" style={{ colorScheme: "dark" }}>
         <div
           className={cx(
-            "mx-auto flex h-dvh w-full max-w-md flex-col px-6 pb-0 sm:max-w-2xl sm:px-6",
-            isWelcomeStep ? "pt-0" : "pt-[calc(env(safe-area-inset-top)+1.5rem)] sm:pt-6",
-            "transition-opacity duration-700 ease-out",
+            "mx-auto flex h-dvh w-full max-w-md flex-col px-6 pb-0 pt-[calc(env(safe-area-inset-top)+1.5rem)] sm:max-w-2xl sm:px-6 sm:pt-6",
+            "transition-opacity duration-300 ease-out",
             screenTransitioning ? "pointer-events-none opacity-0" : "opacity-100",
           )}
         >
@@ -887,20 +898,56 @@ function PrimaryButton({ children, className, disabled, icon, iconClassName, ton
   const { screenIcon: ContextIcon, transitionActive } = useContext(OnboardingChromeContext);
   const Icon = icon === undefined ? ContextIcon : icon;
   const danger = tone === "danger";
+  const [pressed, setPressed] = useState(false);
+  const pressTimerRef = useRef<number | null>(null);
+  const { onPointerDown, onPointerLeave, onPointerUp, ...buttonProps } = props;
+
+  function holdPressed() {
+    if (disabled) return;
+    setPressed(true);
+    if (pressTimerRef.current != null) window.clearTimeout(pressTimerRef.current);
+    pressTimerRef.current = window.setTimeout(() => {
+      setPressed(false);
+      pressTimerRef.current = null;
+    }, 160);
+  }
+
+  function releasePressed() {
+    if (pressTimerRef.current != null) return;
+    setPressed(false);
+  }
+
+  useEffect(() => () => {
+    if (pressTimerRef.current != null) window.clearTimeout(pressTimerRef.current);
+  }, []);
+
   return (
     <Button
       size="lg"
       variant="outline"
       className={cx(
-        "group min-h-12 w-full overflow-hidden rounded-full px-5 text-base font-semibold shadow-lg transition-all duration-200 active:scale-[0.98] disabled:shadow-none disabled:active:scale-100",
+        "group min-h-12 w-full overflow-hidden rounded-full px-5 text-base font-semibold shadow-lg transition-all duration-150 active:scale-[0.97] disabled:shadow-none disabled:active:scale-100",
         danger
           ? "border-destructive/45 bg-destructive/10 text-destructive shadow-destructive/10 disabled:border-destructive/45 disabled:bg-destructive/10 disabled:opacity-100"
-          : "border-primary/35 bg-primary/10 text-foreground shadow-primary/10 hover:bg-primary/15 active:border-primary/60 active:bg-primary/20 active:shadow-primary/20 disabled:border-muted/30 disabled:bg-muted/20 disabled:opacity-60 disabled:hover:bg-muted/20",
-        transitionActive && !disabled ? "scale-[0.98] border-primary/60 bg-primary/20 shadow-primary/20" : "",
+          : "border-primary/35 bg-primary/10 text-foreground shadow-primary/10 hover:bg-primary/15 active:border-primary/80 active:bg-primary/30 active:shadow-primary/30 disabled:border-muted/30 disabled:bg-muted/20 disabled:opacity-60 disabled:hover:bg-muted/20",
+        (transitionActive || pressed) && !disabled ? "scale-[0.97] border-primary/90 bg-primary/35 shadow-primary/40" : "",
         className,
       )}
       disabled={disabled}
-      {...props}
+      onPointerDown={(event) => {
+        if (!disabled && "vibrate" in navigator) navigator.vibrate(8);
+        holdPressed();
+        onPointerDown?.(event);
+      }}
+      onPointerLeave={(event) => {
+        releasePressed();
+        onPointerLeave?.(event);
+      }}
+      onPointerUp={(event) => {
+        releasePressed();
+        onPointerUp?.(event);
+      }}
+      {...buttonProps}
     >
       {Icon ? <Icon className={cx("size-4 transition-all", iconClassName)} aria-hidden="true" /> : null}
       <AnimatedShinyText shimmerWidth={160} className={cx("min-w-0 flex-1 text-center text-base font-semibold via-black dark:via-white", danger ? "text-destructive/80 dark:text-destructive/80" : disabled ? "text-muted-foreground/70 dark:text-muted-foreground/70" : "text-foreground/85 dark:text-foreground/90")}>
@@ -957,14 +1004,6 @@ function StepActions({ children }: { children: ReactNode }) {
         {mainAction}
       </div>
     </div>
-  );
-}
-
-function BackCircleButton({ onClick }: { onClick: () => void }) {
-  return (
-    <Button type="button" variant="outline" className="size-12 rounded-full border-primary/20 bg-transparent p-0 transition-all duration-200 hover:bg-primary/10 active:scale-[0.96] active:bg-primary/15" aria-label="Назад" onClick={onClick}>
-      <ChevronLeft className="size-5" aria-hidden="true" />
-    </Button>
   );
 }
 
@@ -1041,16 +1080,14 @@ function WelcomeCarousel({ currentStep, onStart, onStepChange }: { currentStep: 
     };
   }, [api, onStepChange]);
 
-  const { canBack, onBack } = useContext(OnboardingChromeContext);
-
   return (
-    <div className="relative min-h-0 flex-1 overflow-hidden">
-      <div className="absolute inset-x-0 top-1/2 -translate-y-1/2 overflow-hidden">
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+      <div className="grid min-h-0 flex-1 content-start gap-5 overflow-hidden pt-[clamp(3rem,10dvh,7rem)]">
         <Carousel setApi={setApi} opts={{ align: "start" }} className="w-full min-w-0 overflow-hidden" aria-label="Приветствие Brai" data-nav-swipe-exclusion>
-          <CarouselContent className="ml-0">
+          <CarouselContent>
             {welcomeSlides.map(({ icon: Icon, step, text, title }, index) => (
-              <CarouselItem key={step} className="basis-full px-2">
-                <Card className="grid h-[min(72dvh,calc(100dvh-15rem))] w-full min-w-0 content-center gap-6 overflow-hidden rounded-2xl border-primary/15 bg-card/80 p-6 shadow-none">
+              <CarouselItem key={step} className="basis-full">
+                <Card className="grid h-[min(66dvh,calc(100dvh-18rem))] w-full min-w-0 content-center gap-6 overflow-hidden rounded-2xl border-primary/15 bg-card/80 p-6 shadow-none">
                   <p className="m-0 text-sm font-medium text-muted-foreground">Карточка {index + 1} из 4</p>
                   <InfoBlock icon={Icon} title={title} text={text} />
                 </Card>
@@ -1058,18 +1095,15 @@ function WelcomeCarousel({ currentStep, onStart, onStepChange }: { currentStep: 
             ))}
           </CarouselContent>
         </Carousel>
-      </div>
-      <div className="absolute inset-x-0 bottom-0 grid gap-5" style={{ paddingBottom: "calc(env(safe-area-inset-bottom) + 1.5rem)" }}>
         <div className="flex justify-center gap-2" aria-hidden="true">
           {welcomeSlides.map((slide, index) => (
             <span key={slide.step} className={cx("h-2 rounded-full transition-all duration-300", index === current ? "w-6 bg-primary" : "w-2 bg-muted-foreground/30")} />
           ))}
         </div>
-        <div className={cx("grid gap-3", canBack ? "grid-cols-[3rem_minmax(0,1fr)]" : "grid-cols-1")}>
-          {canBack ? <BackCircleButton onClick={onBack} /> : null}
-          <PrimaryButton className={canStart ? "" : "invisible"} disabled={!canStart} aria-hidden={!canStart} tabIndex={canStart ? 0 : -1} onClick={onStart}>Начать</PrimaryButton>
-        </div>
       </div>
+      <StepActions>
+        <PrimaryButton className={canStart ? "" : "invisible"} disabled={!canStart} aria-hidden={!canStart} tabIndex={canStart ? 0 : -1} onClick={onStart}>Начать</PrimaryButton>
+      </StepActions>
     </div>
   );
 }
