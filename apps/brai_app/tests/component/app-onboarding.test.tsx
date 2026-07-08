@@ -21,13 +21,16 @@ describe("BraiApp onboarding", () => {
   it("renders the first welcome cards without carousel arrow buttons", async () => {
     window.localStorage.removeItem(ONBOARDING_STORAGE_KEY);
 
-    render(<BraiApp />);
+    const { container } = render(<BraiApp />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Приступить" }));
     expect(screen.getByText("Brai рядом с вашим экраном")).toBeInTheDocument();
     expect(screen.getByText("Голос превращается в действие")).toBeInTheDocument();
     expect(screen.getByText("Идеи не теряются")).toBeInTheDocument();
     expect(screen.getByText("Пора настроить основу")).toBeInTheDocument();
+    expect(container.querySelector('[data-slot="carousel-content"] > div')).toHaveClass("ml-0");
+    expect(screen.getByText("Карточка 1 из 4").closest('[data-slot="carousel-item"]')).toHaveClass("pl-0");
+    expect(screen.getByText("Карточка 1 из 4").closest(".min-h-96")).toHaveClass("w-full", "overflow-hidden");
     expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Previous slide" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Next slide" })).not.toBeInTheDocument();

@@ -957,13 +957,13 @@ function StepActions({ children }: { children: ReactNode }) {
 
 function InfoBlock({ icon: Icon, title, text }: { icon: LucideIcon; title: string; text: string }) {
   return (
-    <div className="grid gap-4">
+    <div className="grid min-w-0 gap-4">
       <span className="grid size-11 place-items-center rounded-full border border-primary/25 bg-primary/10 text-primary">
         <Icon className="size-5" aria-hidden="true" />
       </span>
-      <div className="grid gap-2">
-        <h2 className="m-0 text-2xl font-semibold leading-tight">{title}</h2>
-        <p className="m-0 text-sm leading-5 text-muted-foreground">{text}</p>
+      <div className="grid min-w-0 gap-2">
+        <h2 className="m-0 break-words text-2xl font-semibold leading-tight">{title}</h2>
+        <p className="m-0 break-words text-sm leading-5 text-muted-foreground">{text}</p>
       </div>
     </div>
   );
@@ -1030,11 +1030,11 @@ function WelcomeCarousel({ currentStep, onStart, onStepChange }: { currentStep: 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
       <div className="grid min-h-0 flex-1 content-center overflow-hidden py-4">
-        <Carousel setApi={setApi} opts={{ align: "start" }} className="w-full" aria-label="Приветствие Brai" data-nav-swipe-exclusion>
-          <CarouselContent>
+        <Carousel setApi={setApi} opts={{ align: "start" }} className="w-full min-w-0 overflow-hidden" aria-label="Приветствие Brai" data-nav-swipe-exclusion>
+          <CarouselContent className="ml-0">
             {welcomeSlides.map(({ icon: Icon, step, text, title }, index) => (
-              <CarouselItem key={step}>
-                <Card className="grid min-h-72 content-center gap-6 rounded-2xl border-primary/15 bg-card/80 p-6 shadow-none">
+              <CarouselItem key={step} className="basis-full pl-0">
+                <Card className="grid min-h-96 w-full min-w-0 content-center gap-6 overflow-hidden rounded-2xl border-primary/15 bg-card/80 p-6 shadow-none">
                   <p className="m-0 text-sm font-medium text-muted-foreground">Карточка {index + 1} из 4</p>
                   <InfoBlock icon={Icon} title={title} text={text} />
                 </Card>
