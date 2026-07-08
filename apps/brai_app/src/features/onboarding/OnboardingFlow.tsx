@@ -71,21 +71,56 @@ type OnboardingFlowProps = {
 
 type CheckStatus = "idle" | "checking" | "ready";
 
-const cloudHealthPath = "/v1/brai-cmd/health";
 const startButtonDelayMs = process.env.NODE_ENV === "test" ? 0 : 3000;
 const logoFrameClass = "relative aspect-[779/368] w-64 max-w-[78vw] sm:w-80";
 const providerOptions = ["Groq", "OpenAI", "Deepgram", "AssemblyAI"] as const;
 const manualConfirmDelayMs = 3000;
+const verificationMinVisibleMs = process.env.NODE_ENV === "test" ? 1 : 1000;
 const startButtonCss = `
+@keyframes brai-onboarding-logo-in {
+  0% { opacity: 0; }
+  100% { opacity: 1; }
+}
+
+@keyframes brai-onboarding-logo-shimmer {
+  0%, 35% { opacity: 0; transform: translateX(-140%); }
+  55% { opacity: .32; }
+  80%, 100% { opacity: 0; transform: translateX(140%); }
+}
+
 @keyframes brai-onboarding-start-button {
   0% { opacity: 0; pointer-events: none; }
   100% { opacity: 1; pointer-events: auto; }
+}
+
+.brai-onboarding-logo-frame {
+  opacity: 0;
+  animation: brai-onboarding-logo-in 700ms ease-out 120ms both;
+}
+
+.brai-onboarding-logo-frame::after {
+  content: "";
+  position: absolute;
+  inset: -8%;
+  pointer-events: none;
+  background: linear-gradient(105deg, transparent 35%, rgba(255,255,255,.28) 50%, transparent 65%);
+  animation: brai-onboarding-logo-shimmer 2600ms ease-in-out 900ms infinite;
 }
 `;
 
 export function shouldShowOnboarding(authRequired: boolean): boolean {
   const state = loadOnboardingState();
   return !state.complete || authRequired;
+}
+
+function loadInitialOnboardingState(authRequired: boolean): OnboardingState {
+  const loaded = loadOnboardingState();
+  return loaded.complete && authRequired ? { ...loaded, step: "locked", history: [] } : loaded;
+}
+
+async function waitForMinimumVerificationTime(startedAt: number) {
+  const remaining = verificationMinVisibleMs - (Date.now() - startedAt);
+  if (remaining > 0) await new Promise((resolve) => window.setTimeout(resolve, remaining));
 }
 
 export function OnboardingFlow({
@@ -121,10 +156,7 @@ export function OnboardingFlow({
   const screen = screenMeta(state.step);
 
   useEffect(() => {
-    const timeout = window.setTimeout(() => {
-      const loaded = loadOnboardingState();
-      setState(loaded.complete && authRequired ? { ...loaded, step: "locked", history: [] } : loaded);
-    }, 0);
+    const timeout = window.setTimeout(() => setState(loadInitialOnboardingState(authRequired)), 0);
     void refreshCapabilities();
     return () => window.clearTimeout(timeout);
   }, [authRequired]);
@@ -269,15 +301,20 @@ export function OnboardingFlow({
     setError("");
     setMessage("");
     setCheckingStep(step);
+    const startedAt = Date.now();
+    let ok = false;
     try {
-      const ok = await verify();
-      if (ok) setReadyStep(step);
-      else setError(errorText);
+      ok = await verify();
     } catch {
-      setError(errorText);
-    } finally {
-      setCheckingStep(null);
+      ok = false;
     }
+    await waitForMinimumVerificationTime(startedAt);
+    if (ok) {
+      setReadyStep(step);
+    } else {
+      setError(errorText);
+    }
+    setCheckingStep(null);
   }
 
   function choosePath(path: "new" | "existing") {
@@ -335,17 +372,6 @@ export function OnboardingFlow({
       const response = await fetch(url.href, { method: "GET" });
       return response.ok;
     }, "Сервер не ответил на проверку. Проверьте URL и доступность health endpoint.");
-  }
-
-  async function testCloudVoice() {
-    if (readyStep === "cloud-privacy") {
-      go("overlay");
-      return;
-    }
-    await runVerification("cloud-privacy", async () => {
-      const response = await fetch(cloudHealthPath);
-      return response.ok;
-    }, "Облачный модуль сейчас недоступен. Можно вернуться и выбрать другой способ.");
   }
 
   async function openOverlay() {
@@ -583,7 +609,7 @@ export function OnboardingFlow({
       );
     }
 
-    if (state.step === "cloud-privacy") return <InfoScreen icon={Cloud} title="Приватность облака" text="Аудио проходит через серверы Brai для расшифровки. Мы не храним содержимое запросов."><CheckActionButton status={checkStatus("cloud-privacy")} onClick={testCloudVoice} /></InfoScreen>;
+    if (state.step === "cloud-privacy") return <InfoScreen icon={Cloud} title="Приватность облака" text="Аудио проходит через серверы Brai для расшифровки. Мы не храним содержимое запросов."><PrimaryButton onClick={() => go("overlay")}>Продолжить</PrimaryButton></InfoScreen>;
 
     if (state.step === "overlay") {
       return (
@@ -635,22 +661,24 @@ export function OnboardingFlow({
 
   if (state.step === "start") {
     return (
-      <main className="relative h-dvh overflow-hidden bg-black text-foreground" data-onboarding-flow data-theme="dark" style={{ colorScheme: "dark" }}>
+      <main className="fixed inset-0 overflow-hidden bg-black text-foreground" data-onboarding-flow data-theme="dark" style={{ colorScheme: "dark" }}>
         <style>{startButtonCss}</style>
-        <div className={cx("absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2", logoFrameClass)}>
-          <Image
-            className="object-contain"
-            src="/brand/brai-logo-transparent.svg"
-            alt="Brai"
-            fill
-            sizes="(min-width: 640px) 20rem, 16rem"
-            priority
-            draggable={false}
-          />
+        <div className="absolute inset-0 grid place-items-center">
+          <div className={cx("brai-onboarding-logo-frame overflow-hidden", logoFrameClass)}>
+            <Image
+              className="object-contain"
+              src="/brand/brai-logo-transparent.svg"
+              alt="Brai"
+              fill
+              sizes="(min-width: 640px) 20rem, 16rem"
+              priority
+              draggable={false}
+            />
+          </div>
         </div>
         <div
           className={cx(
-            "absolute inset-x-6 bottom-[calc(env(safe-area-inset-bottom)+3rem)] mx-auto max-w-md",
+            "absolute inset-x-6 bottom-[calc(env(safe-area-inset-bottom)+2rem)] mx-auto max-w-md",
             startButtonDelayMs === 0 ? "pointer-events-auto" : "pointer-events-none",
           )}
           style={{
@@ -665,9 +693,9 @@ export function OnboardingFlow({
   }
 
   return (
-    <main className="grid h-dvh min-h-0 bg-black text-foreground" data-onboarding-flow data-theme="dark" style={{ colorScheme: "dark" }}>
-      <ScrollArea className="min-h-0">
-        <div className="mx-auto flex min-h-dvh w-full max-w-md flex-col gap-5 px-6 pb-[calc(env(safe-area-inset-bottom)+2rem)] pt-[calc(env(safe-area-inset-top)+2.75rem)] sm:max-w-2xl sm:px-8 sm:pt-8">
+    <main className="fixed inset-0 grid min-h-0 bg-black text-foreground" data-onboarding-flow data-theme="dark" style={{ colorScheme: "dark" }}>
+      <ScrollArea className="min-h-0" contentInset="none">
+        <div className="mx-auto flex min-h-dvh w-full max-w-md flex-col gap-5 px-6 pb-0 pt-[calc(env(safe-area-inset-top)+2.75rem)] sm:max-w-2xl sm:px-6 sm:pt-8">
           <header className="grid grid-cols-[2.75rem_minmax(0,1fr)_2.75rem] items-start gap-2">
             <Button className="justify-self-start" size="icon-sm" variant="ghost" aria-label="Назад" disabled={state.history.length === 0} onClick={back}>
               <ChevronLeft aria-hidden="true" />
@@ -678,11 +706,16 @@ export function OnboardingFlow({
             </div>
             <span className="justify-self-end text-sm font-medium text-primary">{Math.max(progress, 1)}%</span>
           </header>
-          <Progress value={progress} aria-label="Прогресс настройки" />
+          <div className="relative">
+            <Progress value={progress} aria-label="Прогресс настройки" />
+            {error || message ? (
+              <div className="pointer-events-none absolute inset-x-0 top-7 z-10">
+                {error ? <StatusAlert tone="bad" title="Нужно проверить" text={error} /> : <StatusAlert tone="ok" title="Готово" text={message} />}
+              </div>
+            ) : null}
+          </div>
           {screen.description ? <p className="m-0 text-sm text-muted-foreground">{screen.description}</p> : null}
-          {error ? <StatusAlert tone="bad" title="Нужно проверить" text={error} /> : null}
-          {message ? <StatusAlert tone="ok" title="Готово" text={message} /> : null}
-          <section className="flex min-h-0 flex-1 flex-col py-4">
+          <section className="flex min-h-0 flex-1 flex-col pb-0 pt-4">
             {body}
           </section>
         </div>
@@ -758,7 +791,7 @@ function StepScreen({ actions, children }: { actions?: ReactNode; children: Reac
 }
 
 function StepActions({ children }: { children: ReactNode }) {
-  return <div className="grid gap-3 pb-2 pt-6">{children}</div>;
+  return <div className="grid gap-3 pb-[calc(env(safe-area-inset-bottom)+2rem)] pt-6">{children}</div>;
 }
 
 function InfoBlock({ icon: Icon, title, text }: { icon: LucideIcon; title: string; text: string }) {

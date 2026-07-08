@@ -4,7 +4,7 @@ import { GeistSans } from "geist/font/sans";
 import { resolveBraiIconAssets } from "@/shared/config/appIcons";
 import "./globals.css";
 
-const appInitScript = `(function(){try{var root=document.documentElement;var theme=window.localStorage.getItem("brai_theme_mode")||window.localStorage.getItem("bright_os_theme_mode");var systemDark=window.matchMedia&&window.matchMedia("(prefers-color-scheme: dark)").matches;root.dataset.theme=theme==="dark"||theme==="light"?theme:(systemDark?"dark":"light");root.dataset.sidebarState="collapsed";}catch(error){}})();`;
+const appInitScript = `(function(){try{var root=document.documentElement;var onboarding=window.localStorage.getItem("brai_onboarding_state_v1");var onboardingComplete=false;if(onboarding){try{onboardingComplete=!!JSON.parse(onboarding).complete;}catch(error){}}if(!onboardingComplete){root.dataset.theme="dark";root.dataset.sidebarState="collapsed";return;}var theme=window.localStorage.getItem("brai_theme_mode")||window.localStorage.getItem("bright_os_theme_mode");var systemDark=window.matchMedia&&window.matchMedia("(prefers-color-scheme: dark)").matches;root.dataset.theme=theme==="dark"||theme==="light"?theme:(systemDark?"dark":"light");root.dataset.sidebarState="collapsed";}catch(error){}})();`;
 const iconAssets = resolveBraiIconAssets();
 
 export const metadata: Metadata = {
@@ -31,7 +31,7 @@ export const viewport: Viewport = {
   initialScale: 1,
   viewportFit: "cover",
   themeColor: [
-    { media: "(prefers-color-scheme: light)", color: "#e6e6e6" },
+    { media: "(prefers-color-scheme: light)", color: "#000000" },
     { media: "(prefers-color-scheme: dark)", color: "#000000" },
   ],
 };

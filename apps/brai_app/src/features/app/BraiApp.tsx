@@ -82,6 +82,10 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
     return () => window.clearTimeout(timeout);
   }, [app.displaySyncStatus, startupReady]);
 
+  useEffect(() => {
+    document.documentElement.dataset.theme = onboardingVisible ? "dark" : app.theme;
+  }, [app.theme, onboardingVisible]);
+
   useEffect(() => installAndroidBackHandler(() => {
     if (window.history.state?.braiMobileMenu || window.history.state?.braiMobileDockMenu || window.history.state?.braiMobileSheet || window.history.state?.braiActivityEditor || window.history.state?.braiMobileActionCreate || window.history.state?.braiInboxEditor || window.history.state?.braiMobileInboxCreate || window.history.state?.braiFactoryLog) return false;
     if (sectionRef.current === "actions") return false;

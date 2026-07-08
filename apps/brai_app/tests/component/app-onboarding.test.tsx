@@ -100,12 +100,31 @@ describe("BraiApp onboarding", () => {
     expect(screen.getByRole("button", { name: "Проверить" })).toBeDisabled();
   });
 
+  it("does not run a fake check on the cloud privacy screen", async () => {
+    window.localStorage.setItem(ONBOARDING_STORAGE_KEY, JSON.stringify({
+      complete: false,
+      history: ["voice-choice"],
+      name: "Test",
+      path: "new",
+      profileVersion: "cloud",
+      step: "cloud-privacy",
+      voiceMode: "cloud",
+    }));
+
+    render(<BraiApp />);
+
+    expect(await screen.findByText("Приватность облака")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Проверить" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Продолжить" }));
+    expect(await screen.findByText("Поверх других приложений")).toBeInTheDocument();
+  });
+
   it("checks overlay permission before continuing", async () => {
     stubAndroidCapacitor();
     androidCapabilitiesPlugin.getState
       .mockResolvedValueOnce({ overlayGranted: false })
-      .mockResolvedValueOnce({ overlayGranted: false })
-      .mockResolvedValueOnce({ overlayGranted: true });
+      .mockImplementationOnce(() => new Promise((resolve) => window.setTimeout(() => resolve({ overlayGranted: false }), 20)))
+      .mockImplementationOnce(() => new Promise((resolve) => window.setTimeout(() => resolve({ overlayGranted: true }), 20)));
     window.localStorage.setItem(ONBOARDING_STORAGE_KEY, JSON.stringify({
       complete: false,
       history: ["cloud-privacy"],
@@ -122,6 +141,7 @@ describe("BraiApp onboarding", () => {
     expect(checkButton).toBeEnabled();
     expect(screen.queryByText("Готово")).not.toBeInTheDocument();
     fireEvent.click(checkButton);
+    expect(screen.getByRole("button", { name: "Проверка" })).toBeDisabled();
     expect(await screen.findByText("Разрешение поверх экрана еще не включено.")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Проверить" }));
     expect(await screen.findByRole("button", { name: "Продолжить" })).toBeInTheDocument();
@@ -129,31 +149,34 @@ describe("BraiApp onboarding", () => {
 
   it("delays manual accessibility confirmation after opening settings", async () => {
     vi.useFakeTimers();
-    stubAndroidCapacitor();
-    window.localStorage.setItem(ONBOARDING_STORAGE_KEY, JSON.stringify({
-      complete: false,
-      history: ["accessibility-why"],
-      name: "Test",
-      path: "new",
-      profileVersion: "cloud",
-      step: "accessibility-blocked",
-      voiceMode: "cloud",
-    }));
+    try {
+      stubAndroidCapacitor();
+      window.localStorage.setItem(ONBOARDING_STORAGE_KEY, JSON.stringify({
+        complete: false,
+        history: ["accessibility-why"],
+        name: "Test",
+        path: "new",
+        profileVersion: "cloud",
+        step: "accessibility-blocked",
+        voiceMode: "cloud",
+      }));
 
-    render(<BraiApp />);
-    await act(async () => {
-      vi.runOnlyPendingTimers();
-    });
+      render(<BraiApp />);
+      await act(async () => {
+        vi.runOnlyPendingTimers();
+      });
 
-    const confirmButton = screen.getByRole("button", { name: "Да, доступ заблокирован" });
-    expect(confirmButton).toBeDisabled();
-    fireEvent.click(screen.getByRole("button", { name: "Открыть" }));
-    expect(confirmButton).toBeDisabled();
-    act(() => vi.advanceTimersByTime(2999));
-    expect(confirmButton).toBeDisabled();
-    act(() => vi.advanceTimersByTime(1));
-    expect(confirmButton).toBeEnabled();
-    vi.useRealTimers();
+      const confirmButton = screen.getByRole("button", { name: "Да, доступ заблокирован" });
+      expect(confirmButton).toBeDisabled();
+      fireEvent.click(screen.getByRole("button", { name: "Открыть" }));
+      expect(confirmButton).toBeDisabled();
+      act(() => vi.advanceTimersByTime(2999));
+      expect(confirmButton).toBeDisabled();
+      act(() => vi.advanceTimersByTime(1));
+      expect(confirmButton).toBeEnabled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("does not pass voice training from manually typed text", async () => {
