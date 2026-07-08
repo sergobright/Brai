@@ -30,7 +30,7 @@ describe("BraiApp onboarding", () => {
     expect(screen.getByText("Пора настроить основу")).toBeInTheDocument();
     expect(container.querySelector('[data-slot="carousel-content"] > div')).toHaveClass("ml-0");
     expect(screen.getByText("Карточка 1 из 4").closest('[data-slot="carousel-item"]')).toHaveClass("px-2");
-    expect(screen.getByText("Карточка 1 из 4").closest(".min-h-\\[72dvh\\]")).toHaveClass("w-full", "overflow-hidden");
+    expect(screen.getByText("Карточка 1 из 4").closest('[data-slot="card"]')).toHaveClass("h-[min(72dvh,calc(100dvh-15rem))]", "w-full", "overflow-hidden");
     expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Previous slide" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Next slide" })).not.toBeInTheDocument();

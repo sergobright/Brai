@@ -1,6 +1,5 @@
 "use client";
 
-import Image from "next/image";
 import { Children, createContext, type FormEvent, type ReactNode, useContext, useEffect, useRef, useState } from "react";
 import { useReducedMotion } from "motion/react";
 import {
@@ -91,8 +90,7 @@ const OnboardingChromeContext = createContext<{
 });
 
 const startButtonDelayMs = process.env.NODE_ENV === "test" ? 1 : 3000;
-const screenTransitionDelayMs = process.env.NODE_ENV === "test" ? 0 : 280;
-const logoClassName = "h-auto w-64 sm:w-80";
+const screenTransitionDelayMs = process.env.NODE_ENV === "test" ? 0 : 780;
 const startLogoGlareDelayMs = 1000;
 const startLogoGlareDurationMs = 1000;
 const providerOptions = ["Groq", "OpenAI", "Deepgram", "AssemblyAI"] as const;
@@ -565,6 +563,7 @@ export function OnboardingFlow({
 
   const body = renderStep();
   const previousStep = previousOnboardingStep(state);
+  const isWelcomeStep = state.step.startsWith("welcome-");
   const statusText = error || message || statusPromptForStep(state.step);
   const chrome = {
     canBack: Boolean(previousStep),
@@ -784,15 +783,16 @@ export function OnboardingFlow({
   if (startupSplashVisible || state.step === "start") {
     return (
       <OnboardingChromeContext.Provider value={chrome}>
-        <main className={cx("fixed inset-0 overflow-hidden bg-black text-foreground transition-opacity duration-300 ease-out", screenTransitioning ? "opacity-0" : "opacity-100")} data-onboarding-flow data-theme="dark" style={{ colorScheme: "dark" }}>
+        <main className={cx("fixed inset-0 overflow-hidden bg-black text-foreground transition-opacity duration-700 ease-out", screenTransitioning ? "opacity-0" : "opacity-100")} data-onboarding-flow data-theme="dark" style={{ colorScheme: "dark" }}>
           <style>{startButtonCss}</style>
           <div className="pointer-events-none absolute inset-0 grid place-items-center">
             <GlareHover
-              width="auto"
+              width="min(20rem, calc(100vw - 3rem))"
               height="auto"
               background="transparent"
               borderColor="transparent"
               borderRadius="0"
+              className="border-0"
               glareAngle={18}
               glareOpacity={1}
               glareSize={64}
@@ -801,14 +801,17 @@ export function OnboardingFlow({
               autoPlayDelayMs={reduceMotion ? undefined : startLogoGlareDelayMs}
               interactive={false}
               playOnce
+              style={{ aspectRatio: "779 / 368" }}
             >
-              <Image
-                className={cx(logoClassName, reduceMotion ? "" : "animate-in fade-in-0 zoom-in-95 duration-1000")}
+              {/* eslint-disable-next-line @next/next/no-img-element -- stable startup geometry matters here more than Next image optimization. */}
+              <img
+                className="block h-full w-full select-none object-contain"
                 src="/brand/brai-logo-transparent.svg"
                 alt="Brai"
                 width="779"
                 height="368"
-                priority
+                decoding="sync"
+                fetchPriority="high"
                 draggable={false}
               />
             </GlareHover>
@@ -836,8 +839,9 @@ export function OnboardingFlow({
       <main className="fixed inset-0 min-h-0 overflow-hidden bg-black text-foreground" data-onboarding-flow data-theme="dark" style={{ colorScheme: "dark" }}>
         <div
           className={cx(
-            "mx-auto flex h-dvh w-full max-w-md flex-col px-6 pb-0 pt-[calc(env(safe-area-inset-top)+1.5rem)] sm:max-w-2xl sm:px-6 sm:pt-6",
-            "transition-opacity duration-300 ease-out",
+            "mx-auto flex h-dvh w-full max-w-md flex-col px-6 pb-0 sm:max-w-2xl sm:px-6",
+            isWelcomeStep ? "pt-0" : "pt-[calc(env(safe-area-inset-top)+1.5rem)] sm:pt-6",
+            "transition-opacity duration-700 ease-out",
             screenTransitioning ? "pointer-events-none opacity-0" : "opacity-100",
           )}
         >
@@ -956,6 +960,14 @@ function StepActions({ children }: { children: ReactNode }) {
   );
 }
 
+function BackCircleButton({ onClick }: { onClick: () => void }) {
+  return (
+    <Button type="button" variant="outline" className="size-12 rounded-full border-primary/20 bg-transparent p-0 transition-all duration-200 hover:bg-primary/10 active:scale-[0.96] active:bg-primary/15" aria-label="Назад" onClick={onClick}>
+      <ChevronLeft className="size-5" aria-hidden="true" />
+    </Button>
+  );
+}
+
 function InfoBlock({ icon: Icon, title, text }: { icon: LucideIcon; title: string; text: string }) {
   return (
     <div className="grid min-w-0 gap-4">
@@ -1009,6 +1021,7 @@ function WelcomeCarousel({ currentStep, onStart, onStepChange }: { currentStep: 
   useEffect(() => {
     if (!api) return;
     const index = welcomeStepIndex(currentStep);
+    if (api.selectedScrollSnap() === index) return;
     api.scrollTo(index, true);
   }, [api, currentStep]);
 
@@ -1028,14 +1041,16 @@ function WelcomeCarousel({ currentStep, onStart, onStepChange }: { currentStep: 
     };
   }, [api, onStepChange]);
 
+  const { canBack, onBack } = useContext(OnboardingChromeContext);
+
   return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-      <div className="grid min-h-0 flex-1 content-end gap-5 overflow-hidden py-0">
+    <div className="relative min-h-0 flex-1 overflow-hidden">
+      <div className="absolute inset-x-0 top-1/2 -translate-y-1/2 overflow-hidden">
         <Carousel setApi={setApi} opts={{ align: "start" }} className="w-full min-w-0 overflow-hidden" aria-label="Приветствие Brai" data-nav-swipe-exclusion>
           <CarouselContent className="ml-0">
             {welcomeSlides.map(({ icon: Icon, step, text, title }, index) => (
               <CarouselItem key={step} className="basis-full px-2">
-                <Card className="grid min-h-[72dvh] w-full min-w-0 content-center gap-6 overflow-hidden rounded-2xl border-primary/15 bg-card/80 p-6 shadow-none">
+                <Card className="grid h-[min(72dvh,calc(100dvh-15rem))] w-full min-w-0 content-center gap-6 overflow-hidden rounded-2xl border-primary/15 bg-card/80 p-6 shadow-none">
                   <p className="m-0 text-sm font-medium text-muted-foreground">Карточка {index + 1} из 4</p>
                   <InfoBlock icon={Icon} title={title} text={text} />
                 </Card>
@@ -1043,15 +1058,18 @@ function WelcomeCarousel({ currentStep, onStart, onStepChange }: { currentStep: 
             ))}
           </CarouselContent>
         </Carousel>
+      </div>
+      <div className="absolute inset-x-0 bottom-0 grid gap-5" style={{ paddingBottom: "calc(env(safe-area-inset-bottom) + 1.5rem)" }}>
         <div className="flex justify-center gap-2" aria-hidden="true">
           {welcomeSlides.map((slide, index) => (
             <span key={slide.step} className={cx("h-2 rounded-full transition-all duration-300", index === current ? "w-6 bg-primary" : "w-2 bg-muted-foreground/30")} />
           ))}
         </div>
+        <div className={cx("grid gap-3", canBack ? "grid-cols-[3rem_minmax(0,1fr)]" : "grid-cols-1")}>
+          {canBack ? <BackCircleButton onClick={onBack} /> : null}
+          <PrimaryButton className={canStart ? "" : "invisible"} disabled={!canStart} aria-hidden={!canStart} tabIndex={canStart ? 0 : -1} onClick={onStart}>Начать</PrimaryButton>
+        </div>
       </div>
-      <StepActions>
-        <PrimaryButton className={canStart ? "" : "invisible"} disabled={!canStart} aria-hidden={!canStart} tabIndex={canStart ? 0 : -1} onClick={onStart}>Начать</PrimaryButton>
-      </StepActions>
     </div>
   );
 }
