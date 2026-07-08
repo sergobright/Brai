@@ -105,8 +105,13 @@ test("server access contract checks operation helper sudo boundary", () => {
   assert.match(script, /operationHelperRemoteAccessCheck/);
   assert.match(script, /BRAI_DEPLOY_SSH_KEY_FILE/);
   assert.match(sudoers, /ALL=\(\{\{ brai_service_user \}\}\) NOPASSWD:/);
+  assert.match(sudoers, /create-operation-activity\.sh --local \*/);
   assert.match(sudoers, /complete-operation-activities\.sh --local \*/);
   assert.match(sudoers, /brai_operation_maintainers/);
+});
+
+test("delivery classifier keeps operation helper changes in infra", () => {
+  assert.equal(deliveryClassForFile("deploy/scripts/create-operation-activity.sh"), "infra");
 });
 
 test("task base refresh commands are hard blocked", () => {
@@ -208,6 +213,7 @@ test("main checkout lock preserves agent worktrees by default", () => {
   assert.match(script, /sudo chmod 0751 "\$root"/);
   assert.match(script, /sudo chmod u=rwx,g=rx,o=x "\$root\/deploy"/);
   assert.match(script, /complete-operation-activities\.sh/);
+  assert.match(script, /create-operation-activity\.sh/);
   assert.match(script, /sync-occupied-preview-ota-manifests\.sh/);
   assert.match(script, /sudo chmod u=rwx,g=rx,o=x "\$root\/deploy\/scripts"/);
   assert.match(script, /sudo chgrp brai-deploy "\$deploy_tool"/);
@@ -247,6 +253,7 @@ test("local main sync preserves runtime dirs and hard resets to origin main", ()
   assert.match(script, /BRAI_LOCK_STALE_WORKTREES:-0/);
   assert.match(script, /chmod u=rwx,g=rx,o=x deploy/);
   assert.match(script, /complete-operation-activities\.sh/);
+  assert.match(script, /create-operation-activity\.sh/);
   assert.match(script, /sync-occupied-preview-ota-manifests\.sh/);
   assert.match(script, /preserve_agent_dependency_paths/);
   assert.match(script, /apps\/brai_app\/node_modules/);

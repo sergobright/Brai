@@ -9,38 +9,42 @@ const root = process.env.BRAI_ROOT ?? path.resolve(import.meta.dirname, "../..")
 const releaseDir = process.env.BRAI_RELEASE_TARGET ?? path.join(root, "deploy/releases");
 const indexPath = path.join(releaseDir, "releases.json");
 const targets = apkReleaseTargets(root);
-const releaseKey = required(args, "release");
-const fileName = required(args, "file");
-const filePath = path.join(releaseDir, fileName);
-const target = apkReleaseTargetByKey(releaseKey, root);
-const apkBuildKind = args["build-kind"] === "preview" ? "preview" : "stable";
-const previewIteration = Number(args["preview-iteration"] ?? 0);
-
-if (!target) throw new Error(`unknown release section: ${releaseKey}`);
-if (!fs.existsSync(filePath)) throw new Error(`missing APK file: ${fileName}`);
-if (apkBuildKind === "preview" && (!Number.isInteger(previewIteration) || previewIteration <= 0)) {
-  throw new Error("preview APK release requires --preview-iteration");
-}
-
 const data = readIndex();
-data.sections[releaseKey] = {
-  ...sectionDefaults(target),
-  title: apkBuildKind === "preview" ? previewTitle(target) : target.androidApp,
-  applicationId: applicationIdForBuild(target, apkBuildKind),
-  file: fileName,
-  apkVersion: Number(required(args, "apk-version")),
-  versionCode: Number(required(args, "version-code")),
-  releaseKey,
-  apkBuildKind,
-  previewIteration: apkBuildKind === "preview" ? previewIteration : null,
-  publishedAt: required(args, "published-at"),
-  sizeBytes: fs.statSync(filePath).size,
-  sha256: sha256(filePath),
-  capabilities: apkCapabilities(),
-};
+if (args["render-only"] === "true") {
+  renderReleasePage(data, path.join(releaseDir, "index.html"));
+} else {
+  const releaseKey = required(args, "release");
+  const fileName = required(args, "file");
+  const filePath = path.join(releaseDir, fileName);
+  const target = apkReleaseTargetByKey(releaseKey, root);
+  const apkBuildKind = args["build-kind"] === "preview" ? "preview" : "stable";
+  const previewIteration = Number(args["preview-iteration"] ?? 0);
 
-writeJson(indexPath, data);
-renderReleasePage(data, path.join(releaseDir, "index.html"));
+  if (!target) throw new Error(`unknown release section: ${releaseKey}`);
+  if (!fs.existsSync(filePath)) throw new Error(`missing APK file: ${fileName}`);
+  if (apkBuildKind === "preview" && (!Number.isInteger(previewIteration) || previewIteration <= 0)) {
+    throw new Error("preview APK release requires --preview-iteration");
+  }
+
+  data.sections[releaseKey] = {
+    ...sectionDefaults(target),
+    title: apkBuildKind === "preview" ? previewTitle(target) : target.androidApp,
+    applicationId: applicationIdForBuild(target, apkBuildKind),
+    file: fileName,
+    apkVersion: Number(required(args, "apk-version")),
+    versionCode: Number(required(args, "version-code")),
+    releaseKey,
+    apkBuildKind,
+    previewIteration: apkBuildKind === "preview" ? previewIteration : null,
+    publishedAt: required(args, "published-at"),
+    sizeBytes: fs.statSync(filePath).size,
+    sha256: sha256(filePath),
+    capabilities: apkCapabilities(),
+  };
+
+  writeJson(indexPath, data);
+  renderReleasePage(data, path.join(releaseDir, "index.html"));
+}
 
 function readIndex() {
   const existing = fs.existsSync(indexPath) ? JSON.parse(fs.readFileSync(indexPath, "utf8")) : {};
@@ -167,10 +171,16 @@ function apkCapabilities() {
 
 function parseArgs(values) {
   const parsed = {};
-  for (let index = 0; index < values.length; index += 2) {
+  for (let index = 0; index < values.length; index += 1) {
     const key = values[index];
     if (!key?.startsWith("--")) throw new Error(`invalid argument: ${key}`);
-    parsed[key.slice(2)] = values[index + 1] ?? "";
+    const next = values[index + 1];
+    if (next && !next.startsWith("--")) {
+      parsed[key.slice(2)] = next;
+      index += 1;
+    } else {
+      parsed[key.slice(2)] = "true";
+    }
   }
   return parsed;
 }

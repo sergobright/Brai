@@ -318,6 +318,8 @@ describe("mobile OTA publish scripts", () => {
     const ciDeploy = await readFile(path.join(workspaceRoot, "deploy/scripts/ci-ssh-deploy.sh"), "utf8");
 
     expect(deployBranch).toContain('BRAI_DATABASE_URL="$POSTGRES_URL" BRAI_PROD_DATABASE_URL="$PROD_POSTGRES_URL" "$NODE_BIN" "$SCRIPT_DIR/resolve-app-version.mjs"');
+    expect(deployBranch).toContain('if [[ -f "$RELEASE_TARGET/releases.json" ]]; then');
+    expect(deployBranch).toContain('"$SCRIPT_DIR/update-release-index.mjs" --render-only');
     expect(deployBranch).not.toContain('--postgres-url "$POSTGRES_URL"');
     expect(deployBranch).not.toContain('--prod-postgres-url "$PROD_POSTGRES_URL"');
     expect(deployBranch).not.toContain("--db");
@@ -915,6 +917,49 @@ describe("mobile OTA publish scripts", () => {
     expect(html).not.toContain("versionCode");
     expect(html).not.toContain("applicationId");
     expect(html).not.toContain("AccessibilityService");
+  });
+
+  it("can re-render the release page from releases.json without a new APK publish", async () => {
+    const root = await fixtureRoot("brai-release-page-rerender-");
+    const releaseDir = path.join(root, "deploy/releases");
+    await mkdir(releaseDir, { recursive: true });
+    await mkdir(path.join(root, "deploy"), { recursive: true });
+    await copyFile(
+      path.join(workspaceRoot, "deploy/environments.json"),
+      path.join(root, "deploy/environments.json"),
+    );
+    await writeFile(
+      path.join(releaseDir, "releases.json"),
+      `${JSON.stringify({
+        schemaVersion: 2,
+        sections: {
+          production: {
+            title: "Brai",
+            androidApp: "Brai",
+            applicationId: "world.brightos.brai",
+            releaseKey: "production",
+            file: "brai-v7.apk",
+            apkVersion: 7,
+            versionCode: 7,
+            apkBuildKind: "stable",
+            previewIteration: null,
+            publishedAt: "2026-06-23T09:13:50Z",
+            sizeBytes: 123,
+            sha256: "abc",
+            capabilities: [],
+          },
+        },
+      }, null, 2)}\n`,
+    );
+
+    await execFileAsync("node", [path.join(workspaceRoot, "deploy/scripts/update-release-index.mjs"), "--render-only"], {
+      env: { ...process.env, BRAI_ROOT: root, BRAI_RELEASE_TARGET: releaseDir },
+    });
+
+    const html = await readFile(path.join(releaseDir, "index.html"), "utf8");
+    expect(html).toContain("<h2>Brai</h2>");
+    expect(html).toContain('<p class="version">v7</p>');
+    expect(html).toContain('<a class="download" href="./brai-v7.apk">Скачать</a>');
   });
 });
 

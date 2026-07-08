@@ -1617,6 +1617,7 @@ function deliveryClassForFile(file) {
       "deploy/scripts/ci-ssh-sync-main-checkout.sh",
       "deploy/scripts/cleanup-accepted-branches.mjs",
       "deploy/scripts/complete-operation-activities.sh",
+      "deploy/scripts/create-operation-activity.sh",
       "deploy/scripts/deploy-branch.sh",
       "deploy/scripts/detect-native-apk-change.mjs",
       "deploy/scripts/generate-android-preview-icons.sh",

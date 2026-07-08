@@ -163,6 +163,13 @@ fi
 
 "$SCRIPT_DIR/publish-client-web-layer.sh"
 
+if [[ "$ENVIRONMENT" == "prod" ]]; then
+  RELEASE_TARGET="${BRAI_RELEASE_TARGET:-$ROOT/deploy/releases}"
+  if [[ -f "$RELEASE_TARGET/releases.json" ]]; then
+    BRAI_RELEASE_TARGET="$RELEASE_TARGET" "$NODE_BIN" "$SCRIPT_DIR/update-release-index.mjs" --render-only
+  fi
+fi
+
 if [[ "$ENVIRONMENT" != "prod" ]]; then
   echo "Normalizing preview artifact roots..."
   if ! normalize_preview_artifacts; then

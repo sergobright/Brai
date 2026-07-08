@@ -23,6 +23,13 @@ export function sandboxCheckMode(command, env = process.env) {
     };
   }
 
+  if (/\bgit add\b/.test(text) || /\bgit commit\b/.test(text)) {
+    return {
+      mode: "require_escalated",
+      reason: "Git index and commit writes can hit authoritative .git ownership and lock boundaries outside the sandbox.",
+    };
+  }
+
   if (/\bplaywright\b.*\btest\b/.test(text) || /\bnpm run app:e2e\b/.test(text)) {
     return {
       mode: "require_escalated",
@@ -55,7 +62,7 @@ export function sandboxCheckMode(command, env = process.env) {
     };
   }
 
-  if (/\bnpm --prefix services\/brai_api (run )?test\b/.test(text)) {
+  if (/\bnpm --prefix services\/brai_api (run )?test\b/.test(text) || /\bscripts\/brai-api-test\.sh\b/.test(text)) {
     return {
       mode: "require_escalated",
       reason: "Brai API tests bind local 127.0.0.1 listeners during the suite.",
@@ -76,17 +83,21 @@ export function sandboxCheckMode(command, env = process.env) {
     };
   }
 
-  if (/\bscripts\/brai-preview-handoff\.sh\b/.test(text) || /\bnode scripts\/brai-task\.mjs (handoff|preview)\b/.test(text)) {
+  if (
+    /\bscripts\/brai-preview-handoff\.sh\b/.test(text) ||
+    /\bdeploy\/scripts\/accept-preview\.sh\b/.test(text) ||
+    /\bnode scripts\/brai-task\.mjs (acceptance-reconcile|handoff|preview)\b/.test(text)
+  ) {
     return {
       mode: "require_escalated",
-      reason: "Brai handoff verifies Git metadata and GitHub delivery state; sandboxed Git/network state is not authoritative.",
+      reason: "Brai delivery handoff and acceptance commands need authoritative Git metadata and GitHub delivery state.",
     };
   }
 
-  if (/\bdeploy\/scripts\/complete-operation-activities\.sh\b/.test(text)) {
+  if (/\bdeploy\/scripts\/(complete-operation-activities|create-operation-activity)\.sh\b/.test(text)) {
     return {
       mode: "require_escalated",
-      reason: "complete-operation-activities enters the host deploy boundary and may write the live runtime DB.",
+      reason: "Operation activity helpers enter the host deploy boundary and may write the live runtime DB.",
     };
   }
 
