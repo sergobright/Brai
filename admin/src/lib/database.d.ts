@@ -100,6 +100,7 @@ export function readDatabaseView(options?: {
   pageSize?: number;
   sortDirection?: DbSortDirection;
 }): Promise<DbView>;
+export function readPrimaryUserId(databaseUrl?: string): Promise<string | null>;
 export function listTables(db: DbQuery): Promise<DbTable[]>;
 export function readColumns(db: DbQuery, tableName: string): Promise<DbColumn[]>;
 export function readIndexes(db: DbQuery, tableName: string): Promise<DbIndex[]>;

@@ -11,7 +11,9 @@
       "androidFlavor": "production",
       "applicationId": "world.brightos.brai",
       "apiPort": 3020,
+      "adminPort": 3040,
       "serviceName": "brai-api.service",
+      "adminServiceName": "brai-admin.service",
       "path": "prod",
       "releaseKey": "production"
     },
@@ -24,7 +26,9 @@
       "androidFlavor": "dev",
       "applicationId": "world.brightos.brai.dev",
       "apiPort": 3030,
+      "adminPort": 3041,
       "serviceName": "brai-api-dev.service",
+      "adminServiceName": "brai-admin-dev.service",
       "path": "dev",
       "releaseKey": "dev"
     },
@@ -37,7 +41,9 @@
       "androidFlavor": "previewA",
       "applicationId": "world.brightos.brai.preview.a",
       "apiPort": 3031,
+      "adminPort": 3042,
       "serviceName": "brai-api-preview-a.service",
+      "adminServiceName": "brai-admin-preview-a.service",
       "path": "preview-a",
       "releaseKey": "a"
     },
@@ -50,7 +56,9 @@
       "androidFlavor": "previewB",
       "applicationId": "world.brightos.brai.preview.b",
       "apiPort": 3032,
+      "adminPort": 3043,
       "serviceName": "brai-api-preview-b.service",
+      "adminServiceName": "brai-admin-preview-b.service",
       "path": "preview-b",
       "releaseKey": "b"
     },
@@ -63,7 +71,9 @@
       "androidFlavor": "previewC",
       "applicationId": "world.brightos.brai.preview.c",
       "apiPort": 3033,
+      "adminPort": 3044,
       "serviceName": "brai-api-preview-c.service",
+      "adminServiceName": "brai-admin-preview-c.service",
       "path": "preview-c",
       "releaseKey": "c"
     },
@@ -76,7 +86,9 @@
       "androidFlavor": "previewD",
       "applicationId": "world.brightos.brai.preview.d",
       "apiPort": 3034,
+      "adminPort": 3045,
       "serviceName": "brai-api-preview-d.service",
+      "adminServiceName": "brai-admin-preview-d.service",
       "path": "preview-d",
       "releaseKey": "d"
     },
@@ -89,7 +101,9 @@
       "androidFlavor": "previewE",
       "applicationId": "world.brightos.brai.preview.e",
       "apiPort": 3035,
+      "adminPort": 3046,
       "serviceName": "brai-api-preview-e.service",
+      "adminServiceName": "brai-admin-preview-e.service",
       "path": "preview-e",
       "releaseKey": "e"
     }

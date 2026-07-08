@@ -134,6 +134,7 @@ if [ "$WORKSPACE_ONLY" -eq 1 ]; then
     ".config" \
     ".npm" \
     "node_modules" \
+    "admin/node_modules" \
     "apps/brai_app/node_modules" \
     "services/brai_api/node_modules" \
     "services/brai_temporal/node_modules" \

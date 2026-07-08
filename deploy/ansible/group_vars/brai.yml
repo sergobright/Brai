@@ -28,35 +28,49 @@ brai_envs:
     domain: app.brightos.world
     path: prod
     api_port: 3020
+    admin_port: 3040
     service: brai-api.service
+    admin_service: brai-admin.service
   dev:
     domain: dev.brightos.world
     path: dev
     api_port: 3030
+    admin_port: 3041
     service: brai-api-dev.service
+    admin_service: brai-admin-dev.service
   preview-a:
     domain: a.test.brightos.world
     path: preview-a
     api_port: 3031
+    admin_port: 3042
     service: brai-api-preview-a.service
+    admin_service: brai-admin-preview-a.service
   preview-b:
     domain: b.test.brightos.world
     path: preview-b
     api_port: 3032
+    admin_port: 3043
     service: brai-api-preview-b.service
+    admin_service: brai-admin-preview-b.service
   preview-c:
     domain: c.test.brightos.world
     path: preview-c
     api_port: 3033
+    admin_port: 3044
     service: brai-api-preview-c.service
+    admin_service: brai-admin-preview-c.service
   preview-d:
     domain: d.test.brightos.world
     path: preview-d
     api_port: 3034
+    admin_port: 3045
     service: brai-api-preview-d.service
+    admin_service: brai-admin-preview-d.service
   preview-e:
     domain: e.test.brightos.world
     path: preview-e
     api_port: 3035
+    admin_port: 3046
     service: brai-api-preview-e.service
+    admin_service: brai-admin-preview-e.service
 brai_preview_status_domain: previews.brightos.world

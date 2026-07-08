@@ -146,6 +146,7 @@ umask 0002
 npm ci
 npm --prefix apps/brai_app ci
 npm --prefix services/brai_api ci
+npm --prefix admin ci
 export BRAI_BRANCH BRAI_COMMIT
 export BRAI_NATIVE_APK_CHANGE
 export BRAI_ROOT="$SOURCE_ROOT"

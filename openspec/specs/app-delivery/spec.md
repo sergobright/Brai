@@ -220,3 +220,23 @@ Brai SHALL record deployment metadata for production and preview environments.
 - **WHEN** a branch deploy succeeds
 - **THEN** the target environment database records environment, slot when applicable, branch, commit, domain, web/OTA version, APK version when applicable, deployment time, and reason
 - **AND** preview metadata can be promoted directly into production through accepted branch flow
+
+### Requirement: Brai Admin is served under each app environment
+Brai SHALL serve the technical admin panel at `/admin` inside each Brai runtime
+environment domain instead of a standalone admin subdomain.
+
+#### Scenario: Production admin is requested
+- **WHEN** `https://app.brightos.world/admin` is requested
+- **THEN** Caddy routes the request to the production admin service before the web catch-all
+- **AND** Caddy does not apply Basic Auth to the production admin route
+- **AND** the admin app grants access only to the Brai primary user account
+
+#### Scenario: Non-production admin is requested
+- **WHEN** `/admin` is requested on the Dev or Preview A-E environment domains
+- **THEN** Caddy applies the unified Basic Auth directive before proxying to the matching admin service
+- **AND** the admin app grants access only to the Brai primary user account for that environment database
+
+#### Scenario: Old admin subdomain is removed
+- **WHEN** Brai managed Caddy routes are installed
+- **THEN** `admin.brightos.world` and `http://admin.brightos.world` are removed from unmanaged Brai site blocks
+- **AND** no standalone admin Caddy site remains required

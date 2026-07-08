@@ -124,6 +124,17 @@ export async function readDatabaseView({
   }
 }
 
+export async function readPrimaryUserId(databaseUrl = resolveDatabaseUrl()) {
+  const db = openReadOnlyDatabase(databaseUrl);
+  try {
+    const result = await db.query("SELECT value FROM app_settings WHERE key = $1 LIMIT 1", ["primary_user_id"]);
+    const value = result.rows[0]?.value;
+    return typeof value === "string" && value ? value : null;
+  } finally {
+    await db.close();
+  }
+}
+
 export async function listTables(db) {
   const result = await db.query(`
     SELECT table_name AS name,

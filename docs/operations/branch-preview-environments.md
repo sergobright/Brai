@@ -183,6 +183,13 @@ systemctl restart brai-api-preview-b.service
 systemctl restart brai-api-preview-c.service
 systemctl restart brai-api-preview-d.service
 systemctl restart brai-api-preview-e.service
+systemctl restart brai-admin.service
+systemctl restart brai-admin-dev.service
+systemctl restart brai-admin-preview-a.service
+systemctl restart brai-admin-preview-b.service
+systemctl restart brai-admin-preview-c.service
+systemctl restart brai-admin-preview-d.service
+systemctl restart brai-admin-preview-e.service
 ```
 
 The Ansible sudoers template is `deploy/ansible/templates/brai-deploy-sudoers.j2`.
@@ -242,27 +249,31 @@ ansible-playbook -i deploy/ansible/inventory.example.ini deploy/ansible/brai.yml
 ```
 
 The current local VPS setup keeps the existing production service name `brai-api.service`.
-Production and preview services run from the source checkout uploaded into
-`/srv/projects/brai-envs/<environment>/source/services/brai_api` as the configured service user/group.
+Production and preview API services run from the source checkout uploaded into
+`/srv/projects/brai-envs/<environment>/source/services/brai_api`; Admin services run from the
+matching `/srv/projects/brai-envs/<environment>/source/admin` checkout as the configured service user/group.
 The limited `brai-deploy` user owns `/srv/projects/brai-envs`, publishes only the deployment
-artifacts above, and uses sudo only for Caddy validation, Caddy reload, and matching Brai API service restarts.
+artifacts above, and uses sudo only for Caddy validation, Caddy reload, and matching Brai API/Admin service restarts.
 The Brai runtime user also belongs to the `brai-deploy` group and API units run with
 `SupplementaryGroups=brai-deploy` for deploy artifact coordination without broadening the sudo
 boundary. Runtime DB access uses protected Supabase Postgres env values.
 
 Production Caddy routes keep `app.brightos.world` public: the app shell is not protected by
 Caddy Basic Auth, `/api/*` is proxied to the production Brai API without injected Bearer
-headers, `/mobile-update/*` remains public for Android OTA, and retired live URLs
+headers, `/admin` is proxied to Brai Admin without Caddy Basic Auth but still requires the
+Brai primary-user account gate, `/mobile-update/*` remains public for Android OTA, and retired live URLs
 `/timer*` and `/history*` stay 404 unless a later accepted requirement brings them back.
 Application auth owns browser sessions and `/v1/*` data access. Before installing the
 managed Brai block, Ansible prunes unmanaged top-level `brightos.world` and
-`app.brightos.world` blocks from `/etc/caddy/Caddyfile`; the separate `api.brightos.world`
-block remains outside this managed block because Android direct API traffic still uses it.
+`app.brightos.world` blocks plus the retired `admin.brightos.world` blocks from
+`/etc/caddy/Caddyfile`; the separate `api.brightos.world` block remains outside this managed
+block because Android direct API traffic still uses it.
 
 Preview Caddy routes keep the app shell protected with the unified Caddy Basic Auth login, but
 `/mobile-update/*` stays public for Android OTA and `/api/*` is proxied to the matching Brai API without
-Caddy Basic Auth or injected bearer headers. Brai API auth remains responsible for `/v1/*` data access,
-so newly installed Preview A-E apps may need their own in-app login session before sync turns green.
+Caddy Basic Auth or injected bearer headers. `/admin` is also behind unified Caddy Basic Auth and then
+the Brai primary-user account gate. Brai API auth remains responsible for `/v1/*` data access, so newly
+installed Preview A-E apps may need their own in-app login session before sync turns green.
 
 If an environment exists before its first CI deploy, publish a baseline web/OTA layer without changing APK versions:
 

@@ -9,4 +9,5 @@
 {% endfor %}
 {% for name, env in brai_envs.items() %}
 {{ brai_deploy_user }} ALL=(root) NOPASSWD: /bin/systemctl restart {{ env.service }}
+{{ brai_deploy_user }} ALL=(root) NOPASSWD: /bin/systemctl restart {{ env.admin_service }}
 {% endfor %}

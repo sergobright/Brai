@@ -75,6 +75,11 @@ http://{{ brai_envs.prod.domain }} {
     file_server
   }
 
+  @admin path /admin /admin/*
+  handle @admin {
+    reverse_proxy 127.0.0.1:{{ brai_envs.prod.admin_port }}
+  }
+
   handle_path /api/* {
     reverse_proxy 127.0.0.1:{{ brai_envs.prod.api_port }}
   }
@@ -119,6 +124,12 @@ http://{{ env.domain }} {
 
   handle /releases* {
     reverse_proxy 127.0.0.1:{{ env.api_port }}
+  }
+
+  @admin path /admin /admin/*
+  handle @admin {
+    {{ brai_basic_auth_directive }}
+    reverse_proxy 127.0.0.1:{{ env.admin_port }}
   }
 
   handle_path /mobile-update/* {

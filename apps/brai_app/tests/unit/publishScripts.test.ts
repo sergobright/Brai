@@ -244,13 +244,18 @@ describe("mobile OTA publish scripts", () => {
 
   it("keeps production app public and protects only preview web shells in Caddy", async () => {
     const template = await readFile(path.join(workspaceRoot, "deploy/ansible/templates/Caddyfile.j2"), "utf8");
+    const playbook = await readFile(path.join(workspaceRoot, "deploy/ansible/brai.yml"), "utf8");
     const nonProductionStart = template.indexOf("{% for name, env in brai_envs.items() if name != 'prod' %}");
     expect(nonProductionStart).toBeGreaterThanOrEqual(0);
     const productionTemplate = template.slice(template.indexOf("{{ brai_envs.prod.domain }} {"), nonProductionStart);
     const nonProductionTemplate = template.slice(nonProductionStart);
     const productionApiBlock = productionTemplate.slice(
       productionTemplate.indexOf("handle_path /api/*"),
-      productionTemplate.indexOf("handle /releases*"),
+      productionTemplate.indexOf("handle_path /mobile-update/*"),
+    );
+    const productionAdminBlock = productionTemplate.slice(
+      productionTemplate.indexOf("handle @admin"),
+      productionTemplate.indexOf("handle_path /api/*"),
     );
     const productionShellBlock = productionTemplate.slice(
       productionTemplate.indexOf("handle {"),
@@ -261,6 +266,10 @@ describe("mobile OTA publish scripts", () => {
       nonProductionTemplate.indexOf("handle /releases*"),
     );
     const mobileIndex = nonProductionTemplate.indexOf("handle_path /mobile-update/*");
+    const adminBlock = nonProductionTemplate.slice(
+      nonProductionTemplate.indexOf("handle @admin"),
+      mobileIndex,
+    );
     const mobileBlock = nonProductionTemplate.slice(mobileIndex, nonProductionTemplate.indexOf("handle {"));
     const webShellBlock = nonProductionTemplate.slice(
       nonProductionTemplate.indexOf("handle {"),
@@ -270,14 +279,22 @@ describe("mobile OTA publish scripts", () => {
     expect(productionTemplate).toContain("{{ brai_envs.prod.domain }}");
     expect(productionApiBlock).not.toContain("brai_basic_auth_directive");
     expect(productionApiBlock).not.toContain("header_up Authorization");
+    expect(productionAdminBlock).toContain("brai_envs.prod.admin_port");
+    expect(productionAdminBlock).not.toContain("brai_basic_auth_directive");
+    expect(productionTemplate).toContain("@admin path /admin /admin/*");
+    expect(productionTemplate.indexOf("handle @admin")).toBeLessThan(productionTemplate.indexOf("handle {"));
     expect(productionShellBlock).not.toContain("brai_basic_auth_directive");
     expect(nonProductionTemplate).not.toMatch(/\{\{ env\.domain \}\} \{\n\s+\{\{ brai_basic_auth_directive \}\}/);
     expect(apiBlock).not.toContain("brai_basic_auth_directive");
     expect(apiBlock).not.toContain("header_up Authorization");
+    expect(adminBlock).toContain("brai_basic_auth_directive");
+    expect(adminBlock).toContain("env.admin_port");
+    expect(nonProductionTemplate).toContain("@admin path /admin /admin/*");
     expect(mobileIndex).toBeGreaterThan(nonProductionTemplate.indexOf("handle /releases*"));
     expect(mobileIndex).toBeLessThan(nonProductionTemplate.indexOf("handle {"));
     expect(mobileBlock).toContain('header /manifest.json Cache-Control "no-store"');
     expect(webShellBlock).toContain("brai_basic_auth_directive");
+    expect(playbook.match(/{{ brai_supabase_studio_domain }}/g)?.length ?? 0).toBeGreaterThanOrEqual(6);
   });
 
   it("uses the public API endpoint for production Android bundles", async () => {
@@ -307,10 +324,13 @@ describe("mobile OTA publish scripts", () => {
   it("marks preview ready only after the service restart succeeds", async () => {
     const deployBranch = await readFile(path.join(workspaceRoot, "deploy/scripts/deploy-branch.sh"), "utf8");
     const restartIndex = deployBranch.indexOf('"${BRAI_SUDO:-sudo}" systemctl restart "$SERVICE_NAME"');
+    const adminRestartIndex = deployBranch.indexOf('"${BRAI_SUDO:-sudo}" systemctl restart "$ADMIN_SERVICE_NAME"');
     const readyIndex = deployBranch.indexOf('"$SCRIPT_DIR/preview-slots.sh" ready "$BRANCH" "$COMMIT"');
 
     expect(restartIndex).toBeGreaterThan(0);
+    expect(adminRestartIndex).toBeGreaterThan(restartIndex);
     expect(readyIndex).toBeGreaterThan(restartIndex);
+    expect(readyIndex).toBeGreaterThan(adminRestartIndex);
   });
 
   it("resolves OTA app versions from the build ledger before deployed files", async () => {
@@ -361,15 +381,26 @@ describe("mobile OTA publish scripts", () => {
 
   it("keeps preview runtime Supabase env mandatory and artifacts writable by the deploy group", async () => {
     const deploy = await readFile(path.join(workspaceRoot, "deploy/scripts/deploy-branch.sh"), "utf8");
+    const ciDeploy = await readFile(path.join(workspaceRoot, "deploy/scripts/ci-ssh-deploy.sh"), "utf8");
     const playbook = await readFile(path.join(workspaceRoot, "deploy/ansible/brai.yml"), "utf8");
     const service = await readFile(path.join(workspaceRoot, "deploy/ansible/templates/brai-api.service.j2"), "utf8");
+    const adminService = await readFile(path.join(workspaceRoot, "deploy/ansible/templates/brai-admin.service.j2"), "utf8");
+    const sudoers = await readFile(path.join(workspaceRoot, "deploy/ansible/templates/brai-deploy-sudoers.j2"), "utf8");
 
     expect(deploy).toContain(': "${POSTGRES_URL:?BRAI_DATABASE_URL is required for $ENVIRONMENT deploy}"');
+    expect(deploy).toContain("(cd \"$ROOT/admin\" && npm run build)");
+    expect(ciDeploy).toContain("npm --prefix admin ci");
     expect(service).toContain("EnvironmentFile={{ brai_env_root }}/{{ item.value.path }}/brai-api.env");
     expect(service).not.toContain("EnvironmentFile=-");
     expect(service).not.toContain("BRAI_LEGACY_SQLITE_PATH");
     expect(service).toContain('Group={{ brai_deploy_user }}');
     expect(service).toContain('UMask=0002');
+    expect(adminService).toContain("WorkingDirectory={{ brai_env_root }}/{{ item.value.path }}/source/admin");
+    expect(adminService).toContain("EnvironmentFile={{ brai_env_root }}/{{ item.value.path }}/brai-api.env");
+    expect(adminService).toContain("NODE_ENV=production");
+    expect(adminService).toContain("BRAI_ADMIN_API_BASE=http://127.0.0.1:{{ item.value.api_port }}");
+    expect(adminService).toContain("-p {{ item.value.admin_port }}");
+    expect(sudoers).toContain("systemctl restart {{ env.admin_service }}");
     expect(playbook).toContain("Ensure non-production data directories keep deploy setgid");
     expect(playbook).toContain('group: "{{ brai_deploy_user }}"');
     expect(playbook).toContain('mode: "2775"');

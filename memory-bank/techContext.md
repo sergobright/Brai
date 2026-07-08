@@ -9,6 +9,7 @@ Stack:
 - shadcn-compatible local UI primitives
 - GitHub Actions for CI/CD
 - Ansible/Caddy/systemd for self-hosted environments
+- Brai Admin runs as per-environment localhost-only Next.js services behind Caddy.
 
 Common checks:
 

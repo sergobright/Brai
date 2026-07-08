@@ -13,6 +13,7 @@ Deployment branch classes:
 Security boundaries:
 
 - Browser web uses same-origin `/api`.
+- Brai Admin is served as `/admin` inside each environment; prod uses the primary-user account gate, dev/preview also use Caddy Basic Auth.
 - Android uses the configured environment API endpoint.
 - Release signing uses environment variables only.
 - GitHub Actions receives deploy credentials through repository secrets and variables.
