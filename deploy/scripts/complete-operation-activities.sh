@@ -227,6 +227,15 @@ try {
   await pool.end();
 }
 NODE
+  local log_json
+  if log_json="$("$NODE_BIN" -e 'const ids = JSON.parse(process.argv[1] || "[]"); console.log(JSON.stringify({ activity_ids: ids, activity_count: ids.length }));' "$ids_json")"; then
+    "$NODE_BIN" "$ROOT/deploy/scripts/record-runtime-log.mjs" \
+      --source deploy \
+      --operation operation_activity.complete \
+      --status done \
+      --message "Completed Codex operation activities" \
+      --json "$log_json" >/dev/null 2>&1 || true
+  fi
 }
 
 if [[ "$CHECK_ACCESS" -eq 1 ]]; then

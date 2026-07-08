@@ -12,7 +12,7 @@ export const deploymentMethods = {
     reason,
     deployedAtUtc,
   }) {
-    this.db
+    const deployment = this.db
       .prepare(`
         INSERT INTO deployment_records (
           environment,
@@ -29,8 +29,9 @@ export const deploymentMethods = {
           created_at_utc
         )
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        RETURNING id
       `)
-      .run(
+      .get(
         environment,
         slot,
         branch,
@@ -44,6 +45,23 @@ export const deploymentMethods = {
         deployedAtUtc,
         new Date().toISOString(),
       );
+    safeRecordLog(this, {
+      dt: deployedAtUtc,
+      source: 'deploy',
+      operation: 'deployment.recorded',
+      status: 'done',
+      message: 'Deployment recorded',
+      jsonData: {
+        deployment_record_id: deployment?.id ?? null,
+        environment,
+        slot,
+        branch,
+        commit: shortSha(commit),
+        domain,
+        web_ota_version: webOtaVersion,
+        apk_version: apkVersion
+      }
+    });
   },
 
   listDeploymentRecords({ environment = null } = {}) {
@@ -81,6 +99,20 @@ export const deploymentMethods = {
       targetBranch,
       targetCommit,
     });
+    safeRecordLog(this, {
+      dt: releasedAtUtc,
+      source: 'version',
+      operation: 'version.build_recorded',
+      status: 'done',
+      message: 'Build version recorded',
+      jsonData: {
+        version,
+        target_branch: targetBranch,
+        target_commit: shortSha(targetCommit),
+        source_branch: sourceBranch,
+        source_commit: shortSha(sourceCommit)
+      }
+    });
     return { versionTypeId: 'build', version };
   },
 
@@ -107,6 +139,21 @@ export const deploymentMethods = {
       sourceCommit,
       targetBranch,
       targetCommit,
+    });
+    safeRecordLog(this, {
+      dt: releasedAtUtc,
+      source: 'version',
+      operation: 'version.apk_recorded',
+      status: 'done',
+      message: 'APK version recorded',
+      jsonData: {
+        version,
+        version_code: versionCode,
+        target_branch: targetBranch,
+        target_commit: shortSha(targetCommit),
+        source_branch: sourceBranch,
+        source_commit: shortSha(sourceCommit)
+      }
     });
     return { versionTypeId: 'apk', version };
   },
@@ -309,4 +356,17 @@ function requireLedgerText(value, field) {
   const text = String(value ?? '').trim();
   if (!text) throw new Error(`missing accepted build ${field}`);
   return text;
+}
+
+function shortSha(value) {
+  const text = String(value ?? '').trim();
+  return text ? text.slice(0, 12) : null;
+}
+
+function safeRecordLog(store, input) {
+  try {
+    store.recordLog?.(input);
+  } catch {
+    // Deployment/version ledgers must remain writable even if optional runtime logging fails.
+  }
 }

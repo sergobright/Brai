@@ -44,7 +44,7 @@ export const authUserMethods = {
 
     const run = this.db.transaction(() => {
       const existing = this.primaryUserId();
-      if (existing) return existing;
+      if (existing) return { userId: existing, claimed: false };
 
       this.db
         .prepare(`
@@ -55,13 +55,30 @@ export const authUserMethods = {
         .run(userId, nowIso);
 
       const claimed = this.primaryUserId();
-      if (claimed !== userId) return claimed;
+      if (claimed !== userId) return { userId: claimed, claimed: false };
+      let claimedRows = 0;
       for (const table of OWNED_TABLES) {
-        this.db.prepare(`UPDATE ${table} SET user_id = ? WHERE user_id IS NULL`).run(userId);
+        claimedRows += this.db.prepare(`UPDATE ${table} SET user_id = ? WHERE user_id IS NULL`).run(userId).changes;
       }
-      return userId;
+      return { userId, claimed: true, claimedRows };
     });
-    return run();
+    const result = run();
+    if (result.claimed) {
+      try {
+        this.recordLog?.({
+          dt: nowIso,
+          source: 'auth',
+          operation: 'auth.claim_first_user',
+          status: 'done',
+          userId: result.userId,
+          message: 'First user claimed',
+          jsonData: { owned_tables: OWNED_TABLES.length, claimed_rows: result.claimedRows ?? 0 }
+        });
+      } catch {
+        // Logging must not break first-login ownership transfer.
+      }
+    }
+    return result.userId;
   }
 ,
 

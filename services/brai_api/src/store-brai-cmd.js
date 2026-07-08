@@ -14,6 +14,13 @@ export const braiCmdStoreMethods = {
         value = excluded.value,
         updated_at_utc = excluded.updated_at_utc
     `).run(registrationEnabled ? 'true' : 'false', new Date().toISOString());
+    safeRecordLog(this, {
+      source: 'brai-cmd',
+      operation: 'brai_cmd.admin_settings_update',
+      status: 'done',
+      message: 'Brai Cmd admin settings updated',
+      jsonData: { registration_enabled: Boolean(registrationEnabled) }
+    });
     return this.braiCmdSettings();
   },
 
@@ -51,6 +58,20 @@ export const braiCmdStoreMethods = {
       record.clientVersion,
       record.appPackage
     );
+    safeRecordLog(this, {
+      dt: record.createdAt,
+      source: 'brai-cmd',
+      operation: 'brai_cmd.access_request',
+      status: 'done',
+      message: 'Brai Cmd access token issued',
+      jsonData: {
+        access_token_id: record.id,
+        source: record.source,
+        device_bound: Boolean(record.deviceIdHash),
+        client_version_present: Boolean(record.clientVersion),
+        app_package_present: Boolean(record.appPackage)
+      }
+    });
     return { token, record };
   },
 
@@ -89,6 +110,17 @@ export const braiCmdStoreMethods = {
     const row = this.db.prepare('SELECT * FROM brai_cmd_access_tokens WHERE id = ?').get(id);
     if (!row) return null;
     this.db.prepare("UPDATE brai_cmd_access_tokens SET status = 'revoked' WHERE id = ?").run(id);
+    safeRecordLog(this, {
+      source: 'brai-cmd',
+      operation: 'brai_cmd.token_revoke',
+      status: 'done',
+      message: 'Brai Cmd token revoked',
+      jsonData: {
+        access_token_id: id,
+        previous_status: row.status,
+        device_bound: Boolean(row.device_id_hash)
+      }
+    });
     return formatBraiCmdToken({ ...row, status: 'revoked' });
   },
 
@@ -142,6 +174,8 @@ export const braiCmdStoreMethods = {
       message: row.success ? 'Brai Cmd request completed' : 'Brai Cmd request failed',
       jsonData: {
         access_token_id: row.accessTokenId,
+        request_id: cleanMetadata(input.requestId) || null,
+        route: cleanMetadata(input.route) || null,
         error_code: row.errorCode || null,
         audio_bytes: row.audioBytes,
         audio_duration_ms: row.audioDurationMs,
@@ -152,7 +186,9 @@ export const braiCmdStoreMethods = {
         post_processing_ms: row.postProcessingMs,
         total_ms: row.totalMs,
         transcript_chars: row.transcriptChars,
-        client_version: row.clientVersion
+        client_version: row.clientVersion,
+        post_processing_requested: Boolean(input.postProcessingRequested),
+        context_requested: Boolean(input.contextRequested)
       }
     });
     return row;
@@ -271,6 +307,14 @@ function cleanMetadata(value) {
 function safeNumber(value) {
   const number = Number(value ?? 0);
   return Number.isFinite(number) ? Math.max(0, Math.round(number)) : 0;
+}
+
+function safeRecordLog(store, input) {
+  try {
+    store.recordLog?.(input);
+  } catch {
+    // Brai Cmd token lifecycle must not depend on optional operation logging.
+  }
 }
 
 function emptyUsage() {

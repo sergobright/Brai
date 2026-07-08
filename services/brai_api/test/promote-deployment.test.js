@@ -46,6 +46,15 @@ test('accepted preview version recording creates idempotent build row with autho
     assert.equal(versions.find((row) => row.version_type_id === 'build' && row.version === 2).detailed_changes, accepted.sourceDetails);
     assert.equal(versions.find((row) => row.version_type_id === 'build' && row.version === 2).reason, accepted.sourceReason);
     assert.equal(store.db.prepare('SELECT COUNT(*) AS count FROM build_version_refs').get().count, 1);
+    const log = store.db.prepare("SELECT status, json_data FROM logs WHERE operation = 'version.build_recorded'").get();
+    assert.equal(log.status, 'done');
+    assert.deepEqual(JSON.parse(log.json_data), {
+      version: 2,
+      target_branch: 'main',
+      target_commit: 'def456',
+      source_branch: 'codex/example',
+      source_commit: 'abc123'
+    });
   } finally {
     store.close();
     await drop();
@@ -152,6 +161,12 @@ test('accepted preview promotion records deployment and required build ledger ro
       assert.equal(records[0].commit_sha, 'merge-target-dir');
       assert.equal(records[0].web_ota_version, '0.0.2');
       assert.match(records[0].detailed_changes, /codex\/build-ledger@abc-target-dir/);
+      const logs = promoted.db
+        .prepare("SELECT operation, status, json_data FROM logs WHERE operation IN ('deployment.recorded', 'version.build_recorded') ORDER BY operation")
+        .all()
+        .map((row) => ({ ...row, json_data: JSON.parse(row.json_data) }));
+      assert.equal(logs.some((log) => log.operation === 'deployment.recorded' && log.json_data.deployment_record_id === records[0].id), true);
+      assert.equal(logs.some((log) => log.operation === 'version.build_recorded' && log.json_data.version === 2), true);
     } finally {
       promoted.close();
     }

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createFixture, request } from '../test-support/api.js';
+import { createFixture, RELEASE_PASSWORD, request, SESSION_SECRET, textRequest } from '../test-support/api.js';
 
 test('version endpoint returns build ledger, APK line, and release-index OTA target', async () => {
   const fixture = await createFixture(['2026-06-29T12:00:00.000Z'], {
@@ -123,6 +123,51 @@ test('version endpoint requires auth', async () => {
     const response = await request(fixture.url, '/v1/version', {}, false);
 
     assert.equal(response.status, 401);
+  } finally {
+    await fixture.close();
+  }
+});
+
+test('release login and APK serving write compact runtime logs', async () => {
+  const fixture = await createFixture([
+    '2026-06-29T12:10:00.000Z',
+    '2026-06-29T12:10:01.000Z',
+    '2026-06-29T12:10:02.000Z'
+  ], {
+    releasePassword: RELEASE_PASSWORD,
+    sessionSecret: SESSION_SECRET,
+    releaseFiles: { 'brai.apk': 'fake-apk' }
+  });
+
+  try {
+    const unauthorized = await fetch(`${fixture.url}/releases/brai.apk`, { redirect: 'manual' });
+    assert.equal(unauthorized.status, 303);
+
+    const login = await textRequest(fixture.url, '/releases/login', {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: `password=${encodeURIComponent(RELEASE_PASSWORD)}`,
+      redirect: 'manual'
+    });
+    assert.equal(login.status, 303);
+    const cookie = login.headers.get('set-cookie');
+    assert.match(cookie, /brai_session=/);
+
+    const apk = await fetch(`${fixture.url}/releases/brai.apk`, { headers: { cookie } });
+    assert.equal(apk.status, 200);
+    assert.equal(await apk.text(), 'fake-apk');
+    const missing = await fetch(`${fixture.url}/releases/missing.apk`, { headers: { cookie } });
+    assert.equal(missing.status, 404);
+
+    const logs = fixture.store.db
+      .prepare("SELECT source, operation, status, reason, json_data FROM logs WHERE source IN ('auth', 'release') ORDER BY id ASC")
+      .all()
+      .map((row) => ({ ...row, json_data: JSON.parse(row.json_data) }));
+    assert.equal(logs.some((log) => log.operation === 'auth.denied' && log.reason === 'release_session_required'), true);
+    assert.equal(logs.some((log) => log.operation === 'release.login' && log.status === 'done'), true);
+    assert.equal(logs.some((log) => log.operation === 'release.file_served' && log.status === 'done' && log.json_data.extension === 'apk'), true);
+    assert.equal(logs.some((log) => log.operation === 'release.file_served' && log.status === 'failed' && log.reason === 'not_found'), true);
+    assert.equal(JSON.stringify(logs).includes(RELEASE_PASSWORD), false);
   } finally {
     await fixture.close();
   }

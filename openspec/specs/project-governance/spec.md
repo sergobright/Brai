@@ -100,6 +100,15 @@ Brai SHALL treat the server Supabase Postgres `table_descriptions` table as the 
 - **THEN** the same change updates `table_descriptions`
 - **AND** content-only row changes do not require `table_descriptions` updates
 
+### Requirement: Runtime operation logging uses logs
+Brai SHALL use the server Postgres `logs` table for compact non-AI runtime and operation facts, while `ai_logs` remains dedicated to AI-agent executions.
+
+#### Scenario: Runtime operation pattern changes
+- **WHEN** a runtime/API/sync/deploy/admin/auth/background/native/server side effect is added or changed
+- **THEN** the same change evaluates and updates the relevant `logs` writer, reader, metadata, and tests when useful
+- **AND** the log row stores bounded summaries such as operation, status, reason, duration, correlation ids, counts, and compact flags
+- **AND** secrets, credentials, tokens, cookies, OTP, passwords, raw payloads, full stdout/stderr, base64, transcripts, file paths, and large AI outputs are not stored in `logs`
+
 ### Requirement: Database foreign keys use parent table names
 Brai SHALL name any new or renamed database foreign-key column that references `<parent_table>.id` as `<parent_table>_id`.
 

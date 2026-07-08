@@ -5,10 +5,12 @@ BRANCH="${BRAI_MAIN_BRANCH:-main}"
 EXPECTED_COMMIT="${1:-${BRAI_COMMIT:-}}"
 REPO="/srv/projects/brai"
 REMOTE_URL="${BRAI_MAIN_REMOTE_URL:-git@github.com:sergobright/Brai.git}"
+NODE_BIN="${NODE_BIN:-node}"
 GIT_USER="${BRAI_MAIN_GIT_USER:-mark}"
 SOURCE_GROUP="${BRAI_MAIN_SOURCE_GROUP:-mark}"
 RESCUE_ROOT="${BRAI_MAIN_RESCUE_ROOT:-/srv/projects/brai-rescue}"
 LOCK_FILE="${BRAI_MAIN_SYNC_LOCK:-/tmp/brai-main-checkout-sync.lock}"
+API_ENV_FILE="${BRAI_API_ENV_FILE:-/etc/brai/brai-api.env}"
 
 PRUNE_MODE=0
 PRUNE_ACCEPTED_BRANCHES=()
@@ -76,6 +78,27 @@ git_root_at() {
     -c protocol.file.allow=never \
     -c protocol.ext.allow=never \
     "$@"
+}
+
+record_runtime_log() {
+  local source="$1"
+  local operation="$2"
+  local status="$3"
+  local message="$4"
+  local json="$5"
+  command -v "$NODE_BIN" >/dev/null 2>&1 || return 0
+  if [ -z "${BRAI_DATABASE_URL:-}" ] && [ -r "$API_ENV_FILE" ]; then
+    set -a
+    # shellcheck source=/dev/null
+    . "$API_ENV_FILE"
+    set +a
+  fi
+  "$NODE_BIN" "$REPO/deploy/scripts/record-runtime-log.mjs" \
+    --source "$source" \
+    --operation "$operation" \
+    --status "$status" \
+    --message "$message" \
+    --json "$json" >/dev/null 2>&1 || true
 }
 
 prune_accepted_branches() {
@@ -174,6 +197,11 @@ cd "$REPO"
 
 if [ "$PRUNE_MODE" -eq 1 ]; then
   prune_accepted_branches "${PRUNE_ACCEPTED_BRANCHES[@]}"
+  if command -v "$NODE_BIN" >/dev/null 2>&1; then
+    if prune_json="$("$NODE_BIN" -e 'const branches = process.argv.slice(1); console.log(JSON.stringify({ branch_count: branches.length, branches }));' "${PRUNE_ACCEPTED_BRANCHES[@]}")"; then
+      record_runtime_log deploy accepted_worktree.prune done "Pruned accepted branch worktrees" "$prune_json"
+    fi
+  fi
   exit 0
 fi
 
@@ -200,6 +228,11 @@ if [ -n "$(git_cmd status --porcelain)" ]; then
     tar --null -czf "$RESCUE_DIR/untracked.tar.gz" --files-from "$RESCUE_DIR/untracked.zlist"
   fi
   echo "Rescued dirty local checkout state to $RESCUE_DIR"
+  if command -v "$NODE_BIN" >/dev/null 2>&1; then
+    if rescue_json="$("$NODE_BIN" -e 'console.log(JSON.stringify({ branch: process.argv[1], commit: process.argv[2], untracked_present: process.argv[3] === "1" }));' "$CURRENT_BRANCH" "$(git_cmd rev-parse --short HEAD)" "$([ -s "$RESCUE_DIR/untracked.zlist" ] && printf 1 || printf 0)")"; then
+      record_runtime_log deploy main_checkout.dirty_rescue done "Rescued dirty local checkout before sync" "$rescue_json"
+    fi
+  fi
 fi
 
 find "$REPO" \
@@ -300,6 +333,7 @@ if [ "${BRAI_MAIN_SYNC_LOCK_CHECKOUT:-1}" = "1" ]; then
     done
     for deploy_tool in \
       deploy/scripts/complete-operation-activities.sh \
+      deploy/scripts/record-runtime-log.mjs \
       deploy/scripts/sync-occupied-preview-ota-manifests.sh
     do
       if [ -f "$deploy_tool" ]; then
@@ -331,4 +365,9 @@ if [ "${BRAI_MAIN_SYNC_LOCK_CHECKOUT:-1}" = "1" ]; then
   fi
 fi
 
+if command -v "$NODE_BIN" >/dev/null 2>&1; then
+  if sync_json="$("$NODE_BIN" -e 'console.log(JSON.stringify({ branch: process.argv[1], commit: process.argv[2].slice(0, 12) }));' "$BRANCH" "$TARGET_COMMIT")"; then
+    record_runtime_log deploy main_checkout.sync done "Synced main checkout" "$sync_json"
+  fi
+fi
 echo "Synced $REPO to origin/$BRANCH@$TARGET_COMMIT"

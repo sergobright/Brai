@@ -23,7 +23,7 @@ Each procedural rule must have one canonical home. Other files may only route to
 | Source-of-truth or docs changes | [01-sources-of-truth.md](guidelines/01-sources-of-truth.md) |
 | UI, shadcn, icons, visual QA | [02-ui-shadcn-radix-visual-rules.md](guidelines/02-ui-shadcn-radix-visual-rules.md), [12-ui-icons-visual-qa.md](guidelines/12-ui-icons-visual-qa.md) |
 | Next.js/Capacitor client | [03-next-capacitor-client.md](guidelines/03-next-capacitor-client.md) |
-| API, Postgres, sync, migrations | [04-api-data-sync-migrations.md](guidelines/04-api-data-sync-migrations.md) |
+| API, Postgres, sync, migrations, runtime logs | [04-api-data-sync-migrations.md](guidelines/04-api-data-sync-migrations.md) |
 | Android, web, OTA, releases | [05-android-web-ota-releases.md](guidelines/05-android-web-ota-releases.md) |
 | Tests, security, QA | [06-testing-security-qa.md](guidelines/06-testing-security-qa.md) |
 | Git, versions, repository sync | [07-git-versioning-repository-sync.md](guidelines/07-git-versioning-repository-sync.md) |

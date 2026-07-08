@@ -105,6 +105,13 @@ if [[ "$CHECK_ACCESS" == "true" ]]; then
 fi
 
 if [[ ! -f "$REGISTRY" ]]; then
+  BRAI_DATABASE_URL="$PROD_POSTGRES_URL" "$NODE_BIN" "$ROOT/deploy/scripts/record-runtime-log.mjs" \
+    --source deploy \
+    --operation preview_ota_manifest.sync \
+    --status skipped \
+    --reason missing_registry \
+    --message "Skipped preview OTA manifest sync because registry is missing" \
+    --json "{}" >/dev/null 2>&1 || true
   echo "Preview slot registry is missing: $REGISTRY"
   exit 0
 fi
@@ -121,6 +128,13 @@ for (const slot of ["A", "B", "C", "D", "E"]) {
 ' "$REGISTRY")
 
 if [[ "${#OCCUPIED_SLOTS[@]}" -eq 0 ]]; then
+  BRAI_DATABASE_URL="$PROD_POSTGRES_URL" "$NODE_BIN" "$ROOT/deploy/scripts/record-runtime-log.mjs" \
+    --source deploy \
+    --operation preview_ota_manifest.sync \
+    --status skipped \
+    --reason no_occupied_slots \
+    --message "No occupied preview slots to sync" \
+    --json "{}" >/dev/null 2>&1 || true
   echo "No occupied preview slots to sync."
   exit 0
 fi
@@ -146,3 +160,12 @@ for slot in "${OCCUPIED_SLOTS[@]}"; do
       "$source_root/deploy/scripts/publish-environment-web-layer.sh" "preview-$slot_lower"
   )
 done
+
+if sync_json="$("$NODE_BIN" -e 'console.log(JSON.stringify({ version: process.argv[1], slots: process.argv.slice(2) }));' "$VERSION" "${OCCUPIED_SLOTS[@]}")"; then
+  BRAI_DATABASE_URL="$PROD_POSTGRES_URL" "$NODE_BIN" "$ROOT/deploy/scripts/record-runtime-log.mjs" \
+    --source deploy \
+    --operation preview_ota_manifest.sync \
+    --status done \
+    --message "Synced occupied preview OTA manifests" \
+    --json "$sync_json" >/dev/null 2>&1 || true
+fi

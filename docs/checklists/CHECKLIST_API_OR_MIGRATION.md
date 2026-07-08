@@ -8,6 +8,7 @@
 - [ ] Runtime не добавляет SQLite fallback, `BRAI_DB`, `BRAI_DATA_STORE`, локальные DB paths или import scripts.
 - [ ] Есть Supabase migration file и marker в Postgres migration history, если меняется schema.
 - [ ] `table_descriptions` schema проверена в целевой DB; обновлены `table_name`, `title`, `short_description`, `long_description`, `updated_at_utc` для schema metadata changes. Пропуск допустим только для content-only изменений строк.
+- [ ] Для runtime/API/sync/deploy/admin/auth/background side effects проверено, нужен ли новый или изменённый compact `logs` writer/reader/test; `ai_logs` не используется для non-AI событий.
 - [ ] Migration idempotent.
 - [ ] Backup нужен и сделан перед live-risk change.
 - [ ] Auth boundary не ослаблен.

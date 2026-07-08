@@ -30,6 +30,12 @@ test('Brai Cmd access tokens, health, admin summary, and migrations work in Brai
     const denied = await fetch(`${fixture.url}/v1/health`);
     assert.equal(denied.status, 401);
 
+    const invalidAccess = await jsonRequest(fixture.url, '/v1/access/request', {
+      method: 'POST',
+      body: JSON.stringify({ displayName: 'No Device' })
+    });
+    assert.equal(invalidAccess.status, 400);
+
     const access = await jsonRequest(fixture.url, '/v1/access/request', {
       method: 'POST',
       body: JSON.stringify({
@@ -65,6 +71,34 @@ test('Brai Cmd access tokens, health, admin summary, and migrations work in Brai
     assert.equal(admin.status, 200);
     const summary = await admin.json();
     assert.equal(summary.totals.activeTokens, 1);
+
+    const settings = await fetch(`${fixture.url}/v1/brai-cmd/admin/settings`, {
+      method: 'PUT',
+      headers: {
+        authorization: `Bearer ${TOKEN}`,
+        'content-type': 'application/json'
+      },
+      body: JSON.stringify({ registrationEnabled: false })
+    });
+    assert.equal(settings.status, 200);
+
+    const revoked = await fetch(`${fixture.url}/v1/brai-cmd/admin/tokens/${tokenRows[0].id}/revoke`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${TOKEN}` }
+    });
+    assert.equal(revoked.status, 200);
+
+    const logs = fixture.store.db
+      .prepare("SELECT operation, status, reason, json_data FROM logs WHERE source = 'brai-cmd' ORDER BY id ASC")
+      .all()
+      .map((row) => ({ ...row, json_data: JSON.parse(row.json_data) }));
+    assert.equal(logs.some((log) => log.operation === 'brai_cmd.access_denied' && log.reason === 'unauthorized'), true);
+    assert.equal(logs.some((log) => log.operation === 'brai_cmd.access_request' && log.reason === 'missing_device_id'), true);
+    assert.equal(logs.some((log) => log.operation === 'brai_cmd.access_request' && log.status === 'done'), true);
+    assert.equal(logs.some((log) => log.operation === 'brai_cmd.admin_settings_update'), true);
+    assert.equal(logs.some((log) => log.operation === 'brai_cmd.token_revoke'), true);
+    assert.equal(JSON.stringify(logs).includes(access.body.token), false);
+    assert.equal(JSON.stringify(logs).includes('device-1'), false);
   } finally {
     await fixture.close();
   }
@@ -136,6 +170,20 @@ test('Brai Cmd dictation accepts multipart audio and stores only usage metrics',
     assert.equal(aiLogs.every((row) => row.status === 'done'), true);
     assert.equal(JSON.parse(aiLogs[0].json_data).outputs.find((output) => output.ref === 'response.text').value, 'processed transcript');
     assert.equal(JSON.parse(aiLogs[1].json_data).outputs.find((output) => output.ref === 'response.text').value, 'context reply');
+
+    const runtimeLogs = fixture.store.db
+      .prepare("SELECT json_data FROM logs WHERE operation = 'brai_cmd.dictate' ORDER BY id ASC")
+      .all()
+      .map((row) => JSON.parse(row.json_data));
+    assert.equal(runtimeLogs.length, 2);
+    assert.equal(runtimeLogs[0].route, '/v1/dictate');
+    assert.equal(Boolean(runtimeLogs[0].request_id), true);
+    assert.equal(runtimeLogs[0].post_processing_requested, true);
+    assert.equal(runtimeLogs[0].context_requested, false);
+    assert.equal(runtimeLogs[1].post_processing_requested, false);
+    assert.equal(runtimeLogs[1].context_requested, true);
+    assert.equal(JSON.stringify(runtimeLogs).includes('processed transcript'), false);
+    assert.equal(JSON.stringify(runtimeLogs).includes('raw transcript'), false);
   } finally {
     await fixture.close();
   }
@@ -197,7 +245,29 @@ test('Brai Cmd inbox route accepts Android access token and creates Inbox contex
       body: JSON.stringify({ text: 'разбери экран', idempotency_key: 'cmd-1' })
     });
     assert.equal(duplicate.status, 200);
+    const invalid = await jsonRequest(fixture.url, '/v1/brai-cmd/inbox', {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${access.body.token}`,
+        'x-brai-cmd-device-id': 'cmd-device'
+      },
+      body: JSON.stringify({ idempotency_key: 'cmd-invalid' })
+    });
+    assert.equal(invalid.status, 400);
     assert.equal(fixture.store.db.prepare('SELECT COUNT(*) AS count FROM inbox').get().count, 1);
+    const ingestLogs = fixture.store.db
+      .prepare("SELECT status, reason, json_data FROM logs WHERE operation = 'inbox.ingest' ORDER BY id ASC")
+      .all()
+      .map((row) => ({ ...row, json_data: JSON.parse(row.json_data) }));
+    assert.deepEqual(ingestLogs.map((log) => [log.status, log.reason]), [
+      ['done', null],
+      ['skipped', 'duplicate'],
+      ['failed', 'text_required']
+    ]);
+    assert.equal(ingestLogs[0].json_data.route, '/v1/brai-cmd/inbox');
+    assert.equal(ingestLogs[0].json_data.attachment_count, 1);
+    assert.equal(ingestLogs[0].json_data.image_count, 1);
+    assert.equal(JSON.stringify(ingestLogs).includes('разбери экран'), false);
   } finally {
     await fixture.close();
     if (previousFfmpeg === undefined) delete process.env.BRAI_THUMBNAIL_FFMPEG_BIN;

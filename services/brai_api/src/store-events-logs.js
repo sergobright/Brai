@@ -121,7 +121,7 @@ export const eventsLogsMethods = {
       clientSequence,
       reason,
       message: `${domain}.${reason}`,
-      jsonData: { domain, raw_event: rawEvent }
+      jsonData: ignoredEventSummary(domain, rawEvent)
     });
   },
 
@@ -193,6 +193,18 @@ export const eventsLogsMethods = {
 
 function boundedLimit(limit) {
   return Math.max(1, Math.min(Number(limit) || 100, MAX_LOG_LIMIT));
+}
+
+function ignoredEventSummary(domain, rawEvent) {
+  const event = rawEvent && typeof rawEvent === 'object' && !Array.isArray(rawEvent) ? rawEvent : {};
+  const payload = event.payload && typeof event.payload === 'object' && !Array.isArray(event.payload) ? event.payload : null;
+  return {
+    domain,
+    type: sanitizeText(event.type) ?? sanitizeText(event.change_type) ?? null,
+    has_payload: Boolean(payload),
+    payload_keys: payload ? Object.keys(payload).sort().slice(0, 20) : [],
+    raw_key_count: Object.keys(event).length
+  };
 }
 
 function itemRoleTypeId(subjectType) {

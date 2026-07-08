@@ -129,8 +129,13 @@ function escapeHtml(value) {
     .replaceAll("'", '&#39;');
 }
 
-export function serveRelease(req, res, url, releaseDir, sendJson) {
+export function serveRelease(req, res, url, releaseDir, sendJson, store = null) {
   if (!releaseDir) {
+    recordReleaseFileLog(store, {
+      status: 'failed',
+      reason: 'releases_not_configured',
+      requested: url.pathname
+    });
     sendJson(req, res, 404, { error: 'releases_not_configured' });
     return;
   }
@@ -140,10 +145,30 @@ export function serveRelease(req, res, url, releaseDir, sendJson) {
   const root = path.resolve(releaseDir);
   const filePath = path.resolve(root, requested);
   if (!filePath.startsWith(root + path.sep) && filePath !== root) {
+    recordReleaseFileLog(store, {
+      status: 'failed',
+      reason: 'forbidden',
+      requested
+    });
     sendJson(req, res, 403, { error: 'forbidden' });
     return;
   }
-  if (!fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
+  if (!fs.existsSync(filePath)) {
+    recordReleaseFileLog(store, {
+      status: 'failed',
+      reason: 'not_found',
+      requested
+    });
+    sendJson(req, res, 404, { error: 'not_found' });
+    return;
+  }
+  const stat = fs.statSync(filePath);
+  if (!stat.isFile()) {
+    recordReleaseFileLog(store, {
+      status: 'failed',
+      reason: 'not_file',
+      requested
+    });
     sendJson(req, res, 404, { error: 'not_found' });
     return;
   }
@@ -153,6 +178,37 @@ export function serveRelease(req, res, url, releaseDir, sendJson) {
     : filePath.endsWith('.apk')
       ? 'application/vnd.android.package-archive'
       : 'application/octet-stream';
+  if (filePath.endsWith('.apk')) {
+    res.once('finish', () => recordReleaseFileLog(store, {
+      status: 'done',
+      requested,
+      bytes: stat.size
+    }));
+  }
   res.writeHead(200, { 'content-type': contentType });
   fs.createReadStream(filePath).pipe(res);
+}
+
+function recordReleaseFileLog(store, { status, reason = null, requested, bytes = null }) {
+  try {
+    store?.recordLog?.({
+      source: 'release',
+      operation: 'release.file_served',
+      status,
+      severityText: status === 'failed' ? 'WARN' : 'INFO',
+      reason,
+      message: status === 'failed' ? 'Release file request failed' : 'Release APK served',
+      jsonData: {
+        requested: safeReleaseRequestName(requested),
+        extension: path.extname(requested || '').slice(1) || null,
+        bytes
+      }
+    });
+  } catch {
+    // Release serving must not depend on optional logging.
+  }
+}
+
+function safeReleaseRequestName(value) {
+  return path.basename(String(value ?? '')).slice(0, 120) || null;
 }

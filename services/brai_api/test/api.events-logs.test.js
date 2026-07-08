@@ -80,6 +80,18 @@ test('global events and technical logs are queryable without mixing AI outputs i
     assert.equal(logs.status, 200);
     assert.equal(logs.body.logs.some((log) => log.operation === 'activity.events_sync'), true);
     assert.equal(JSON.stringify(logs.body).includes('SECRET_AI_OUTPUT'), false);
+    fixture.store.recordSyncIgnoredEvent({
+      domain: 'inbox',
+      eventId: 'ignored-secret-event',
+      deviceId: 'device-secret',
+      clientSequence: 99,
+      receivedAt: '2026-07-07T10:00:02.000Z',
+      reason: 'malformed',
+      rawEvent: { type: 'create', payload: { text: 'RAW_SECRET_TEXT', image_base64: 'RAW_SECRET_BASE64' } }
+    });
+    const ignored = fixture.store.db.prepare("SELECT json_data FROM logs WHERE operation = 'sync.event_ignored' AND event_id = ?").get('ignored-secret-event');
+    assert.equal(JSON.stringify(ignored).includes('RAW_SECRET'), false);
+    assert.deepEqual(JSON.parse(ignored.json_data).payload_keys, ['image_base64', 'text']);
 
     const unauthorizedEvents = await request(fixture.url, '/v1/events', {}, false);
     assert.equal(unauthorizedEvents.status, 401);
@@ -112,6 +124,44 @@ test('technical log retention purges only expired logs', async () => {
     assert.equal(fixture.store.purgeExpiredLogs('2026-07-07T10:00:00.000Z'), 1);
     const rows = fixture.store.db.prepare("SELECT operation FROM logs WHERE source = 'test' ORDER BY operation").all();
     assert.deepEqual(rows.map((row) => row.operation), ['fresh.log']);
+  } finally {
+    await fixture.close();
+  }
+});
+
+test('auth denied and direct timer endpoints write compact runtime logs', async () => {
+  const fixture = await createFixture([
+    '2026-07-07T11:00:00.000Z',
+    '2026-07-07T11:00:01.000Z',
+    '2026-07-07T11:00:02.000Z',
+    '2026-07-07T11:00:03.000Z'
+  ]);
+
+  try {
+    const denied = await request(fixture.url, '/v1/events', {}, false);
+    assert.equal(denied.status, 401);
+
+    const start = await request(fixture.url, '/v1/timer/start', { method: 'POST' });
+    assert.equal(start.status, 201);
+    const duplicateStart = await request(fixture.url, '/v1/timer/start', { method: 'POST' });
+    assert.equal(duplicateStart.status, 200);
+    const stop = await request(fixture.url, '/v1/timer/stop', { method: 'POST' });
+    assert.equal(stop.status, 200);
+
+    const rows = fixture.store.db
+      .prepare("SELECT operation, status, reason, json_data FROM logs WHERE source IN ('auth', 'timer') ORDER BY id ASC")
+      .all()
+      .map((row) => ({ ...row, json_data: JSON.parse(row.json_data) }));
+    assert.equal(rows.some((row) => row.operation === 'auth.denied' && row.reason === 'unauthorized'), true);
+    assert.deepEqual(
+      rows.filter((row) => row.operation.startsWith('timer.')).map((row) => [row.operation, row.status, row.reason]),
+      [
+        ['timer.start_endpoint', 'done', null],
+        ['timer.start_endpoint', 'skipped', 'already_active'],
+        ['timer.stop_endpoint', 'done', null]
+      ]
+    );
+    assert.equal(rows.some((row) => row.json_data.password || row.json_data.token || row.json_data.cookie), false);
   } finally {
     await fixture.close();
   }

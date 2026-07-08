@@ -8,6 +8,7 @@ export const DEFAULT_SORT_DIRECTION = "desc";
 const CREATED_COLUMN_NAMES = ["created_at_utc", "created_at", "createdAt", "created_on", "creation_date"];
 const USER_TABLE_NAMES = new Set(["activities", "app_settings", "inbox"]);
 const USER_TABLE_PREFIXES = ["activity_", "focus_", "timer_"];
+const SYSTEM_TABLE_NAMES = new Set(["items", "logs"]);
 const SYSTEM_TABLE_PREFIXES = ["schema_", "table_", "build_", "deployment_", "version_", "agent_", "ai_", "brai_cmd_"];
 const POSTGRES_PROTOCOLS = new Set(["postgres:", "postgresql:"]);
 
@@ -33,7 +34,7 @@ export function quoteIdentifier(name) {
 export function classifyTableGroup(tableName) {
   const name = String(tableName);
   if (USER_TABLE_NAMES.has(name) || USER_TABLE_PREFIXES.some((prefix) => name.startsWith(prefix))) return "user";
-  if (name === "items") return "system";
+  if (SYSTEM_TABLE_NAMES.has(name)) return "system";
   return SYSTEM_TABLE_PREFIXES.some((prefix) => name.startsWith(prefix)) ? "system" : "user";
 }
 
@@ -91,7 +92,7 @@ export async function readDatabaseView({
     }
 
     const columns = await readColumns(client, selected.name);
-    const rowSort = resolveRowSort(columns, sortDirection);
+    const rowSort = resolveRowSort(columns, sortDirection, selected.name);
     const rowCount = selected.rowCount;
     const pageCount = Math.max(1, Math.ceil(rowCount / pageSize));
     const safePage = Math.min(Math.max(toPositiveInteger(page, 1), 1), pageCount);
@@ -348,11 +349,12 @@ async function readRows(db, tableName, sort, pageSize, offset) {
   return result.rows;
 }
 
-function resolveRowSort(columns, sortDirection) {
+function resolveRowSort(columns, sortDirection, tableName = "") {
   const direction = sortDirection === "asc" ? "asc" : "desc";
+  const logsDtColumn = tableName === "logs" ? columns.find((column) => column.name === "dt") : null;
   const createdColumn = CREATED_COLUMN_NAMES.map((name) => columns.find((column) => column.name === name)).find(Boolean);
   const idColumn = columns.find((column) => column.name.toLowerCase() === "id" && isNumericColumn(column));
-  return { column: (createdColumn ?? idColumn)?.name ?? null, direction };
+  return { column: (logsDtColumn ?? createdColumn ?? idColumn)?.name ?? null, direction };
 }
 
 function isNumericColumn(column) {

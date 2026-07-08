@@ -2,7 +2,7 @@
 
 ## Назначение
 
-Этот guideline нужен перед изменением `services/brai_api`, Supabase/Postgres schema, sync endpoints, canonical replay, migrations или client data contracts.
+Этот guideline нужен перед изменением `services/brai_api`, Supabase/Postgres schema, sync endpoints, canonical replay, migrations, runtime logs или client data contracts.
 
 ## Источники данных
 
@@ -14,6 +14,14 @@
 - Main work entities живут identity-уровнем в таблице `items`; временные роли сущностей живут в `item_roles`, справочник ролей - в `item_role_types`.
 - Server schema metadata регистрируется в таблице `table_descriptions`.
 - Runtime AI-агенты регистрируются в таблице `agents`.
+
+## Runtime logs
+
+- `logs` - общая компактная non-AI runtime/operation таблица для auth, API outcomes, sync, deploy, scheduler, admin и shell operations; `ai_logs` используется только AI-агентами.
+- При любом изменении runtime/API/sync/deploy/admin/auth/background/native/server side effect всегда проверь, нужен ли новый или изменённый `logs` writer, reader, admin metadata и test.
+- Логируй один bounded summary на operation/batch: operation/status/reason/duration/correlation ids/counts/compact flags. Если есть durable ledger, `logs` хранит summary и ссылки на ledger ids.
+- Не пиши secrets, credentials, tokens, cookies, OTP, passwords, raw payloads, full stdout/stderr, base64, file paths, transcripts, большие AI outputs или пользовательский контент без явной необходимости.
+- Если меняются поля, статусы или смысл операции, обнови `json_data` так, чтобы максимум пользы помещался в минимальный объём.
 
 ## Runtime schema verification
 

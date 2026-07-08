@@ -33,9 +33,16 @@ export async function main(env = process.env) {
 
 export async function runDueSchedules({ store, nowDate = new Date(), config = schedulerConfig(), logger = console, agents = AGENTS } = {}) {
   const nowIso = nowDate.toISOString();
-  const purgedLogs = store.purgeExpiredLogs?.(nowIso) ?? 0;
+  let purgedLogs = 0;
+  let purgeFailed = false;
+  try {
+    purgedLogs = store.purgeExpiredLogs?.(nowIso) ?? 0;
+  } catch (error) {
+    purgeFailed = true;
+    logger.error?.(`logs.retention_purge: ${error instanceof Error ? error.message : String(error)}`);
+  }
   if (purgedLogs > 0) {
-    store.recordLog?.({
+    safeRecordLog(store, {
       dt: nowIso,
       source: 'scheduler',
       operation: 'logs.retention_purge',
@@ -81,15 +88,37 @@ export async function runDueSchedules({ store, nowDate = new Date(), config = sc
       if (!runAgent) throw new Error(`unknown scheduled agent: ${row.agent_id}`);
       const output = await runAgent({ schedule: row, config, timeoutMs, nowDate });
       const finish = finishSchedule(store, row, new Date(), null);
-      recordScheduledAgentAiLog(store, { row, finish, status: 'done', output });
+      safeRecordScheduledAgentAiLog(store, logger, { row, finish, status: 'done', output });
       logger.log(`${row.id}: ${output?.skipped ? 'skipped' : 'completed'}`);
       results.push({ id: row.id, ok: true, output });
     } catch (error) {
       const finish = finishSchedule(store, row, new Date(), error);
-      recordScheduledAgentAiLog(store, { row, finish, status: 'failed', error });
+      safeRecordScheduledAgentAiLog(store, logger, { row, finish, status: 'failed', error });
       logger.error(`${row.id}: ${error instanceof Error ? error.message : String(error)}`);
       results.push({ id: row.id, ok: false, error });
     }
+  }
+  if (rows.length > 0 || purgedLogs > 0 || purgeFailed) {
+    const failed = results.filter((result) => !result.ok).length;
+    const skipped = results.filter((result) => result.output?.skipped).length;
+    safeRecordLog(store, {
+      dt: nowIso,
+      source: 'scheduler',
+      operation: 'scheduler.run_due_schedules',
+      status: failed > 0 || purgeFailed ? 'failed' : 'done',
+      severityText: failed > 0 || purgeFailed ? 'ERROR' : 'INFO',
+      reason: purgeFailed ? 'retention_purge_failed' : rows.length > 0 && results.length === 0 ? 'claim_race' : null,
+      message: 'Scheduler due run summary',
+      jsonData: {
+        due_schedules: rows.length,
+        claimed_schedules: results.length,
+        completed_schedules: results.filter((result) => result.ok && !result.output?.skipped).length,
+        skipped_schedules: skipped,
+        failed_schedules: failed,
+        purged_logs: purgedLogs,
+        retention_purge_failed: purgeFailed
+      }
+    });
   }
   return results;
 }
@@ -156,6 +185,14 @@ function recordScheduledAgentAiLog(store, { row, finish, status, output, error }
   });
 }
 
+function safeRecordScheduledAgentAiLog(store, logger, input) {
+  try {
+    recordScheduledAgentAiLog(store, input);
+  } catch (error) {
+    logger.error?.(`scheduled agent AI log failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
 function numberEnv(value) {
   if (value == null || value === '') return null;
   const number = Number(value);
@@ -166,4 +203,12 @@ function errorText(error) {
   if (!error) return '';
   const text = error instanceof Error ? error.message : String(error);
   return text.slice(0, MAX_ERROR_LENGTH);
+}
+
+function safeRecordLog(store, input) {
+  try {
+    store.recordLog?.(input);
+  } catch {
+    // Scheduler execution must not fail because optional runtime logging failed.
+  }
 }

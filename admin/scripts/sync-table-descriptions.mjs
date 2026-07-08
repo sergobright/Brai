@@ -48,6 +48,13 @@ const DESCRIPTIONS = [
       "Хранит главные рабочие сущности Brai. Сейчас здесь зарегистрирована сущность activities.\nНужна как стабильный справочник для схемы, API и технических решений, чтобы они ссылались на общий id сущности.",
   },
   {
+    table_name: "logs",
+    title: "Логи",
+    short_description: "Компактный журнал runtime-операций.",
+    long_description:
+      "Хранит компактные non-AI runtime и operation факты: auth/API outcomes, sync summaries, deploy/version/scheduler/admin события и shell operations.\nAI-agent executions пишутся в ai_logs, а logs хранит только bounded summaries, correlation ids, counts и flags без secrets, raw payloads и больших outputs.",
+  },
+  {
     table_name: "schema_migrations",
     title: "Миграции",
     short_description: "Журнал изменений схемы.",

@@ -93,11 +93,12 @@ export function createBraiServer({
   });
   const { auth } = authRuntime;
   const sockets = new Set();
-  const receiveInboxRequest = (body, requestNow) => receiveInbox({
+  const receiveInboxRequest = (body, requestNow, logContext = {}) => receiveInbox({
     store,
     body,
     storageRoot: inboxStorageRoot,
-    nowDate: requestNow
+    nowDate: requestNow,
+    logContext
   });
   const processInboxLater = ({ ownerUserId, inboxId }) => {
     if (!inboxAutoProcess || !inboxId) return;
@@ -192,13 +193,48 @@ export function createBraiServer({
         const body = await readJson(req);
         const email = cleanEmail(body.email);
         if (!email) {
+          recordRuntimeLog(store, logger, {
+            traceId,
+            source: 'auth',
+            operation: 'auth.otp_send',
+            status: 'failed',
+            severityText: 'WARN',
+            reason: 'email_required',
+            message: 'OTP send rejected',
+            jsonData: { route: url.pathname, email_present: Boolean(body.email) }
+          });
           sendJson(req, res, 400, { error: 'email_required' });
           return;
         }
-        const response = await auth.api.sendVerificationOTP({
-          body: { email, type: 'sign-in' },
-          headers: requestHeaders(req),
-          asResponse: true
+        let response;
+        try {
+          response = await auth.api.sendVerificationOTP({
+            body: { email, type: 'sign-in' },
+            headers: requestHeaders(req),
+            asResponse: true
+          });
+        } catch (error) {
+          recordRuntimeLog(store, logger, {
+            traceId,
+            source: 'auth',
+            operation: 'auth.otp_send',
+            status: 'failed',
+            severityText: 'ERROR',
+            reason: 'provider_exception',
+            message: 'OTP send provider failed',
+            jsonData: { route: url.pathname, error_name: error instanceof Error ? error.name : 'Error' }
+          });
+          throw error;
+        }
+        recordRuntimeLog(store, logger, {
+          traceId,
+          source: 'auth',
+          operation: 'auth.otp_send',
+          status: response.ok ? 'done' : 'failed',
+          severityText: response.ok ? 'INFO' : 'WARN',
+          reason: response.ok ? null : 'provider_rejected',
+          message: 'OTP send completed',
+          jsonData: { route: url.pathname, status_code: response.status, email_present: true }
         });
         await relayAuthResponse(req, res, response);
         return;
@@ -209,14 +245,39 @@ export function createBraiServer({
         const email = cleanEmail(body.email);
         const otp = typeof body.otp === 'string' ? body.otp.trim() : '';
         if (!email || !otp) {
+          recordRuntimeLog(store, logger, {
+            traceId,
+            source: 'auth',
+            operation: 'auth.otp_verify',
+            status: 'failed',
+            severityText: 'WARN',
+            reason: 'email_otp_required',
+            message: 'OTP verify rejected',
+            jsonData: { route: url.pathname, email_present: Boolean(email), otp_present: Boolean(otp) }
+          });
           sendJson(req, res, 400, { error: 'email_otp_required' });
           return;
         }
-        const response = await auth.api.signInEmailOTP({
-          body: { email, otp, name: cleanName(body.name) ?? email },
-          headers: requestHeaders(req),
-          asResponse: true
-        });
+        let response;
+        try {
+          response = await auth.api.signInEmailOTP({
+            body: { email, otp, name: cleanName(body.name) ?? email },
+            headers: requestHeaders(req),
+            asResponse: true
+          });
+        } catch (error) {
+          recordRuntimeLog(store, logger, {
+            traceId,
+            source: 'auth',
+            operation: 'auth.otp_verify',
+            status: 'failed',
+            severityText: 'ERROR',
+            reason: 'provider_exception',
+            message: 'OTP verify provider failed',
+            jsonData: { route: url.pathname, error_name: error instanceof Error ? error.name : 'Error' }
+          });
+          throw error;
+        }
         const text = await response.text();
         const payload = parseJson(text);
         if (response.ok && payload?.user?.id) {
@@ -228,11 +289,37 @@ export function createBraiServer({
               userId: payload.user.id,
               email: payload.user.email ?? null
             });
+            recordRuntimeLog(store, logger, {
+              traceId,
+              source: 'auth',
+              operation: 'auth.otp_verify',
+              status: 'failed',
+              severityText: 'ERROR',
+              userId: payload.user.id,
+              reason: 'vault_prepare_failed',
+              message: 'OTP verify vault preparation failed',
+              jsonData: { route: url.pathname, status_code: 503 }
+            });
             sendJson(req, res, 503, { error: 'vault_prepare_failed' });
             return;
           }
           store.claimFirstUser(payload.user.id, now().toISOString());
         }
+        recordRuntimeLog(store, logger, {
+          traceId,
+          source: 'auth',
+          operation: 'auth.otp_verify',
+          status: response.ok ? 'done' : 'failed',
+          severityText: response.ok ? 'INFO' : 'WARN',
+          userId: response.ok ? payload?.user?.id : null,
+          reason: response.ok ? null : 'provider_rejected',
+          message: 'OTP verify completed',
+          jsonData: {
+            route: url.pathname,
+            status_code: response.status,
+            user_created_or_authenticated: Boolean(payload?.user?.id)
+          }
+        });
         relayAuthText(req, res, response, text, payload);
         return;
       }
@@ -240,17 +327,36 @@ export function createBraiServer({
       if (url.pathname === '/auth/login' && req.method === 'POST') {
         const body = await readJson(req);
         if (!webPassword || body.password !== webPassword) {
+          recordRuntimeLog(store, logger, {
+            traceId,
+            source: 'auth',
+            operation: 'auth.login',
+            status: 'failed',
+            severityText: 'WARN',
+            reason: 'invalid_password',
+            message: 'Legacy auth login rejected',
+            jsonData: { route: url.pathname, password_present: Boolean(body.password) }
+          });
           sendJson(req, res, 401, { error: 'invalid_password' });
           return;
         }
 
         const cookie = createSessionCookie(sessionSecret, now(), shouldUseSecureCookie(req));
+        recordRuntimeLog(store, logger, {
+          traceId,
+          source: 'auth',
+          operation: 'auth.login',
+          status: 'done',
+          message: 'Legacy auth login completed',
+          jsonData: { route: url.pathname, secure_cookie: shouldUseSecureCookie(req) }
+        });
         sendJson(req, res, 200, { authenticated: true, user: publicAuthUser(store.primaryUser()) }, { 'set-cookie': cookie });
         return;
       }
 
       if (url.pathname === '/auth/logout' && req.method === 'POST') {
         const cookies = [clearSessionCookie(shouldUseSecureCookie(req))];
+        let signOutFailed = false;
         try {
           const response = await auth.api.signOut({
             headers: requestHeaders(req),
@@ -258,8 +364,18 @@ export function createBraiServer({
           });
           cookies.push(...setCookieHeaders(response.headers));
         } catch {
+          signOutFailed = true;
           // Legacy cookie cleanup still completes logout for clients that never had Better Auth.
         }
+        recordRuntimeLog(store, logger, {
+          traceId,
+          source: 'auth',
+          operation: 'auth.logout',
+          status: 'done',
+          reason: signOutFailed ? 'better_auth_signout_failed' : null,
+          message: 'Auth logout completed',
+          jsonData: { route: url.pathname, legacy_cookie_cleared: true }
+        });
         sendJson(req, res, 200, { authenticated: false, user: null }, { 'set-cookie': cookies });
         return;
       }
@@ -267,6 +383,16 @@ export function createBraiServer({
       if (url.pathname === '/releases/login' && req.method === 'POST') {
         const password = await readPassword(req);
         if (!releasePassword || password !== releasePassword) {
+          recordRuntimeLog(store, logger, {
+            traceId,
+            source: 'release',
+            operation: 'release.login',
+            status: 'failed',
+            severityText: 'WARN',
+            reason: 'invalid_password',
+            message: 'Release login rejected',
+            jsonData: { route: url.pathname, password_present: Boolean(password) }
+          });
           sendReleaseLoginPage(res, {
             status: 401,
             error: 'Неверный пароль'
@@ -275,12 +401,34 @@ export function createBraiServer({
         }
 
         const cookie = createSessionCookie(sessionSecret, now(), shouldUseSecureCookie(req));
+        recordRuntimeLog(store, logger, {
+          traceId,
+          source: 'release',
+          operation: 'release.login',
+          status: 'done',
+          message: 'Release login completed',
+          jsonData: { route: url.pathname, secure_cookie: shouldUseSecureCookie(req) }
+        });
         redirect(res, '/releases/', { 'set-cookie': cookie });
         return;
       }
 
       if (url.pathname.startsWith('/releases')) {
         if (!hasValidSession(req, sessionSecret, now())) {
+          recordRuntimeLog(store, logger, {
+            traceId,
+            source: 'auth',
+            operation: 'auth.denied',
+            status: 'failed',
+            severityText: 'WARN',
+            reason: 'release_session_required',
+            message: 'Release request denied',
+            jsonData: {
+              method: req.method ?? 'GET',
+              path: url.pathname,
+              session_cookie_present: Boolean(req.headers.cookie)
+            }
+          });
           if (req.method === 'GET' && (url.pathname === '/releases' || url.pathname === '/releases/')) {
             sendReleaseLoginPage(res);
           } else {
@@ -288,7 +436,7 @@ export function createBraiServer({
           }
           return;
         }
-        serveRelease(req, res, url, releaseDir, sendJson);
+        serveRelease(req, res, url, releaseDir, sendJson, store);
         return;
       }
 
@@ -299,6 +447,21 @@ export function createBraiServer({
 
       if (url.pathname === '/v1/') {
         if (!hasInboxApiKey(req, inboxApiKey)) {
+          recordRuntimeLog(store, logger, {
+            traceId,
+            source: 'auth',
+            operation: 'auth.denied',
+            status: 'failed',
+            severityText: 'WARN',
+            reason: 'invalid_inbox_api_key',
+            message: 'Inbox API request unauthorized',
+            jsonData: {
+              method: req.method ?? 'GET',
+              path: url.pathname,
+              api_key_header_present: Boolean(req.headers['x-brai-api-key'] || req.headers['x-api-key']),
+              bearer_present: Boolean(req.headers.authorization)
+            }
+          });
           sendJson(req, res, 401, { error: 'unauthorized' });
           return;
         }
@@ -318,7 +481,7 @@ export function createBraiServer({
 
         if (req.method === 'POST') {
           const ownerUserId = store.primaryUserId();
-          const result = await withUserScope(ownerUserId, () => receiveInboxRequest(body, requestNow));
+          const result = await withUserScope(ownerUserId, () => receiveInboxRequest(body, requestNow, { route: url.pathname }));
           const state = await withUserScope(ownerUserId, () => inboxState(store, requestNow));
           broadcast(sockets, { type: 'inbox_synced', inbox_state: state }, ownerUserId);
           sendJson(req, res, result.created ? 201 : 200, { ok: true, target, ...result, state });
@@ -351,7 +514,7 @@ export function createBraiServer({
           source_key: typeof body.source_key === 'string' && body.source_key.trim() ? body.source_key : access.id,
           record_type_id: body.record_type_id ?? 1
         };
-        const result = await withUserScope(ownerUserId, () => receiveInboxRequest(inboxBody, requestNow));
+        const result = await withUserScope(ownerUserId, () => receiveInboxRequest(inboxBody, requestNow, { route: url.pathname }));
         const state = await withUserScope(ownerUserId, () => inboxState(store, requestNow));
         broadcast(sockets, { type: 'inbox_synced', inbox_state: state }, ownerUserId);
         sendJson(req, res, result.created ? 201 : 200, { ok: true, target: 'inbox', ...result, state });
@@ -367,16 +530,47 @@ export function createBraiServer({
       const authContext = await authenticateRequest(req, token, url, sessionSecret, now, auth, store);
       requestUserId = authContext.userId;
       if (!authContext.authorized) {
+        recordRuntimeLog(store, logger, {
+          traceId,
+          source: 'auth',
+          operation: 'auth.denied',
+          status: 'failed',
+          severityText: 'WARN',
+          reason: 'unauthorized',
+          message: 'API request unauthorized',
+          jsonData: {
+            method: req.method ?? 'GET',
+            path: url.pathname,
+            bearer_present: Boolean(req.headers.authorization),
+            session_cookie_present: Boolean(req.headers.cookie)
+          }
+        });
         sendJson(req, res, 401, { error: 'unauthorized' });
         return;
       }
       if (requiresTrustedOrigin(req, authContext) && !isTrustedAppOrigin(req.headers.origin)) {
+        recordRuntimeLog(store, logger, {
+          traceId,
+          source: 'auth',
+          operation: 'auth.denied',
+          status: 'failed',
+          severityText: 'WARN',
+          userId: authContext.userId,
+          reason: 'forbidden_origin',
+          message: 'API request forbidden by origin policy',
+          jsonData: {
+            method: req.method ?? 'GET',
+            path: url.pathname,
+            session_based: Boolean(authContext.sessionBased),
+            origin_present: Boolean(req.headers.origin)
+          }
+        });
         sendJson(req, res, 403, { error: 'forbidden_origin' });
         return;
       }
 
       if (isBraiCmdAdminRoute(url.pathname)) {
-        await handleBraiCmdAdminRoute({ req, res, url, store, sendJson });
+        await withUserScope(authContext.userId, () => handleBraiCmdAdminRoute({ req, res, url, store, sendJson }));
         return;
       }
 
@@ -486,6 +680,20 @@ export function createBraiServer({
         const requestNow = now();
         const result = store.startTimer(requestNow.toISOString());
         const body = { ...timerState(store, requestNow), created: result.created };
+        recordRuntimeLog(store, logger, {
+          traceId,
+          dt: requestNow.toISOString(),
+          source: 'timer',
+          operation: 'timer.start_endpoint',
+          status: result.created ? 'done' : 'skipped',
+          reason: result.created ? null : 'already_active',
+          message: result.created ? 'Timer started from endpoint' : 'Timer start skipped',
+          jsonData: {
+            created: Boolean(result.created),
+            active_session_id: result.session?.id ?? null,
+            server_revision: body.server_revision
+          }
+        });
         broadcast(sockets, { type: 'timer_started', state: body }, scopedUserId());
         sendJson(req, res, result.created ? 201 : 200, body);
         return;
@@ -502,6 +710,21 @@ export function createBraiServer({
         if (result.stopped) {
           broadcast(sockets, { type: 'timer_stopped', state: body }, scopedUserId());
         }
+        recordRuntimeLog(store, logger, {
+          traceId,
+          dt: requestNow.toISOString(),
+          source: 'timer',
+          operation: 'timer.stop_endpoint',
+          status: result.stopped ? 'done' : 'skipped',
+          reason: result.stopped ? null : 'no_active_session',
+          message: result.stopped ? 'Timer stopped from endpoint' : 'Timer stop skipped',
+          jsonData: {
+            stopped: Boolean(result.stopped),
+            completed_session_id: result.session?.id ?? null,
+            duration_seconds: result.session?.duration_seconds ?? null,
+            server_revision: body.server_revision
+          }
+        });
         sendJson(req, res, result.stopped ? 200 : 409, body);
         return;
       }
@@ -537,9 +760,20 @@ export function createBraiServer({
   const wss = new WebSocketServer({ noServer: true });
   server.on('upgrade', (req, socket, head) => {
     void (async () => {
+      const traceId = crypto.randomUUID();
       const url = new URL(req.url ?? '/', 'http://localhost');
       const authContext = await authenticateRequest(req, token, url, sessionSecret, now, auth, store);
       if (url.pathname !== '/v1/live' || !authContext.authorized) {
+        recordRuntimeLog(store, logger, {
+          traceId,
+          source: 'auth',
+          operation: 'auth.websocket',
+          status: 'failed',
+          severityText: 'WARN',
+          reason: url.pathname === '/v1/live' ? 'unauthorized' : 'wrong_path',
+          message: 'WebSocket upgrade rejected',
+          jsonData: { path: url.pathname, authorized: Boolean(authContext.authorized) }
+        });
         socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
         socket.destroy();
         return;
@@ -548,6 +782,15 @@ export function createBraiServer({
       wss.handleUpgrade(req, socket, head, (ws) => {
         ws.userId = authContext.userId;
         sockets.add(ws);
+        recordRuntimeLog(store, logger, {
+          traceId,
+          source: 'auth',
+          operation: 'auth.websocket',
+          status: 'done',
+          userId: authContext.userId,
+          message: 'WebSocket connected',
+          jsonData: { path: url.pathname }
+        });
         withUserScope(authContext.userId, () => {
           const currentActivitiesState = activitiesState(store, now());
           ws.send(JSON.stringify({
@@ -562,6 +805,14 @@ export function createBraiServer({
         ws.on('error', () => sockets.delete(ws));
       });
     })().catch(() => {
+      recordRuntimeLog(store, logger, {
+        source: 'auth',
+        operation: 'auth.websocket',
+        status: 'failed',
+        severityText: 'WARN',
+        reason: 'upgrade_error',
+        message: 'WebSocket upgrade failed'
+      });
       socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
       socket.destroy();
     });
@@ -866,6 +1117,14 @@ function requiresTrustedOrigin(req, authContext) {
 function redirect(res, location, extraHeaders = {}) {
   res.writeHead(303, { location, ...extraHeaders });
   res.end();
+}
+
+function recordRuntimeLog(store, logger, input) {
+  try {
+    store.recordLog(input);
+  } catch (error) {
+    logger.error?.('runtime log failed', { error: error instanceof Error ? error.message : String(error) });
+  }
 }
 
 function broadcast(sockets, payload, targetUserId = null) {

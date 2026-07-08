@@ -41,6 +41,14 @@ REMOTE
 }
 
 if ! ACTIVE_BRANCHES_JSON="$(active_preview_branches_json)"; then
+  "$NODE_BIN" "$SCRIPT_DIR/record-runtime-log.mjs" \
+    --source deploy \
+    --operation accepted_branch.cleanup \
+    --status skipped \
+    --severity WARN \
+    --reason active_preview_inspection_failed \
+    --message "Skipped accepted branch cleanup because active previews could not be inspected" \
+    --json "{}" >/dev/null 2>&1 || true
   echo "Warning: could not inspect active preview branches; skipping accepted branch cleanup." >&2
   exit 0
 fi
@@ -50,10 +58,34 @@ mapfile -t CLEANUP_BRANCHES < <(
 )
 
 if [[ "${#CLEANUP_BRANCHES[@]}" -eq 0 ]]; then
+  "$NODE_BIN" "$SCRIPT_DIR/record-runtime-log.mjs" \
+    --source deploy \
+    --operation accepted_branch.cleanup \
+    --status skipped \
+    --reason no_eligible_branches \
+    --message "No accepted branches eligible for cleanup" \
+    --json "{}" >/dev/null 2>&1 || true
   echo "No accepted branches eligible for cleanup."
   exit 0
 fi
 
+cleanup_json="{}"
+cleanup_json="$("$NODE_BIN" -e 'const branches = process.argv.slice(1); console.log(JSON.stringify({ branch_count: branches.length, branches }));' "${CLEANUP_BRANCHES[@]}")" || cleanup_json="{}"
 if ! "$SCRIPT_DIR/ci-ssh-prune-accepted-branches.sh" "${CLEANUP_BRANCHES[@]}"; then
+  "$NODE_BIN" "$SCRIPT_DIR/record-runtime-log.mjs" \
+    --source deploy \
+    --operation accepted_branch.cleanup \
+    --status failed \
+    --severity WARN \
+    --reason local_cleanup_failed \
+    --message "Accepted branch cleanup failed after remote cleanup" \
+    --json "$cleanup_json" >/dev/null 2>&1 || true
   echo "Warning: local accepted worktree cleanup failed; remote branch cleanup already completed where possible." >&2
+else
+  "$NODE_BIN" "$SCRIPT_DIR/record-runtime-log.mjs" \
+    --source deploy \
+    --operation accepted_branch.cleanup \
+    --status done \
+    --message "Accepted branches cleaned up" \
+    --json "$cleanup_json" >/dev/null 2>&1 || true
 fi

@@ -93,7 +93,7 @@ export async function handleBraiCmdPublicRoute({ req, res, url, store, runtime, 
       url.pathname === '/v1/airwhisper/dictate'
     )) {
       const access = requireBraiCmdAccess(req, store);
-      await handleDictate({ req, res, store, runtime, access, sendJson });
+      await handleDictate({ req, res, store, runtime, access, sendJson, route: url.pathname });
       return;
     }
 
@@ -141,23 +141,59 @@ export function requireBraiCmdAccess(req, store) {
   const token = bearerToken(req);
   const deviceId = headerValue(req, 'x-brai-cmd-device-id') || headerValue(req, 'x-airwhisper-device-id');
   const clientVersion = headerValue(req, 'x-brai-cmd-client-version') || headerValue(req, 'x-airwhisper-client-version');
-  if (!token) throw new BraiCmdHttpError(401, 'Missing bearer token', 'unauthorized');
-  if (!deviceId) throw new BraiCmdHttpError(400, 'Missing device id', 'missing_device_id');
+  if (!token) {
+    recordBraiCmdAccessDenied(store, req, 'unauthorized', 401, { tokenPresent: false, deviceIdPresent: Boolean(deviceId), clientVersionPresent: Boolean(clientVersion) });
+    throw new BraiCmdHttpError(401, 'Missing bearer token', 'unauthorized');
+  }
+  if (!deviceId) {
+    recordBraiCmdAccessDenied(store, req, 'missing_device_id', 400, { tokenPresent: true, deviceIdPresent: false, clientVersionPresent: Boolean(clientVersion) });
+    throw new BraiCmdHttpError(400, 'Missing device id', 'missing_device_id');
+  }
   const access = store.authenticateBraiCmdAccess(token, deviceId, clientVersion);
-  if (!access) throw new BraiCmdHttpError(401, 'Invalid bearer token', 'unauthorized');
+  if (!access) {
+    recordBraiCmdAccessDenied(store, req, 'unauthorized', 401, { tokenPresent: true, deviceIdPresent: true, clientVersionPresent: Boolean(clientVersion) });
+    throw new BraiCmdHttpError(401, 'Invalid bearer token', 'unauthorized');
+  }
   return access;
 }
 
 async function handleAccessRequest({ req, res, store, sendJson }) {
   if (!store.braiCmdSettings().registrationEnabled) {
+    safeRecordLog(store, {
+      source: 'brai-cmd',
+      operation: 'brai_cmd.access_request',
+      status: 'failed',
+      severityText: 'WARN',
+      reason: 'registration_paused',
+      message: 'Brai Cmd access request rejected',
+      jsonData: { route: requestPath(req) }
+    });
     throw new BraiCmdHttpError(403, 'Пока регистрация новых пользователей приостановлена. Обратитесь в поддержку.', 'registration_paused');
   }
 
-  const body = await readJsonBody(req, 64 * 1024);
+  let body;
+  try {
+    body = await readJsonBody(req, 64 * 1024);
+  } catch (error) {
+    recordBraiCmdAccessRequestFailure(store, req, errorCode(error), Number.isInteger(error?.status) ? error.status : 400, {});
+    throw error;
+  }
   const displayName = stringField(body, 'displayName');
   const deviceId = stringField(body, 'deviceId');
-  if (!displayName) throw new BraiCmdHttpError(400, 'Введите имя', 'display_name_required');
-  if (!deviceId) throw new BraiCmdHttpError(400, 'Missing device id', 'missing_device_id');
+  if (!displayName) {
+    recordBraiCmdAccessRequestFailure(store, req, 'display_name_required', 400, {
+      displayNamePresent: false,
+      deviceIdPresent: Boolean(deviceId)
+    });
+    throw new BraiCmdHttpError(400, 'Введите имя', 'display_name_required');
+  }
+  if (!deviceId) {
+    recordBraiCmdAccessRequestFailure(store, req, 'missing_device_id', 400, {
+      displayNamePresent: true,
+      deviceIdPresent: false
+    });
+    throw new BraiCmdHttpError(400, 'Missing device id', 'missing_device_id');
+  }
 
   const issued = store.issueBraiCmdAccess({
     displayName,
@@ -173,7 +209,7 @@ async function handleAccessRequest({ req, res, store, sendJson }) {
   });
 }
 
-async function handleDictate({ req, res, store, runtime, access, sendJson }) {
+async function handleDictate({ req, res, store, runtime, access, sendJson, route = null }) {
   const started = Date.now();
   const requestId = randomUUID();
   const { config, deps } = runtime;
@@ -255,7 +291,11 @@ async function handleDictate({ req, res, store, runtime, access, sendJson }) {
       postProcessingMs,
       totalMs,
       transcriptChars: text.length,
-      clientVersion
+      clientVersion,
+      requestId,
+      route,
+      postProcessingRequested: Boolean(postProcessingPrompt),
+      contextRequested: Boolean(contextEnabled)
     });
     recordBraiCmdAiLog(store, {
       agent,
@@ -309,7 +349,11 @@ async function handleDictate({ req, res, store, runtime, access, sendJson }) {
       postProcessingMs,
       totalMs: Date.now() - started,
       transcriptChars: 0,
-      clientVersion
+      clientVersion,
+      requestId,
+      route,
+      postProcessingRequested: Boolean(postProcessingPrompt),
+      contextRequested: Boolean(contextEnabled)
     });
     if (!aiLogWritten) {
       recordBraiCmdAiLog(store, {
@@ -704,6 +748,57 @@ function parseContentLength(req) {
   if (!value) return null;
   const parsed = Number.parseInt(value, 10);
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+}
+
+function requestPath(req) {
+  try {
+    return new URL(req.url ?? '/', 'http://localhost').pathname;
+  } catch {
+    return '/';
+  }
+}
+
+function recordBraiCmdAccessDenied(store, req, reason, statusCode, flags) {
+  safeRecordLog(store, {
+    source: 'brai-cmd',
+    operation: 'brai_cmd.access_denied',
+    status: 'failed',
+    severityText: 'WARN',
+    reason,
+    message: 'Brai Cmd access denied',
+    jsonData: {
+      route: requestPath(req),
+      status_code: statusCode,
+      token_present: Boolean(flags.tokenPresent),
+      device_id_present: Boolean(flags.deviceIdPresent),
+      client_version_present: Boolean(flags.clientVersionPresent)
+    }
+  });
+}
+
+function recordBraiCmdAccessRequestFailure(store, req, reason, statusCode, flags) {
+  safeRecordLog(store, {
+    source: 'brai-cmd',
+    operation: 'brai_cmd.access_request',
+    status: 'failed',
+    severityText: 'WARN',
+    reason,
+    message: 'Brai Cmd access request rejected',
+    jsonData: {
+      route: requestPath(req),
+      status_code: statusCode,
+      display_name_present: Boolean(flags.displayNamePresent),
+      device_id_present: Boolean(flags.deviceIdPresent)
+    }
+  });
+}
+
+function safeRecordLog(store, input) {
+  try {
+    store.recordLog?.(input);
+  } catch {
+    // Access control behavior must not depend on optional logging.
+  }
 }
 
 function errorCode(error) {

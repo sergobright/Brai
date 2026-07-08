@@ -15,6 +15,7 @@
 - [ ] Не добавлены hardcoded product colors, static arbitrary radii/shadows, arbitrary font classes, arbitrary font-size classes, new font families или custom card recipes.
 - [ ] Theme UI не добавляет arbitrary accent/color picker по умолчанию; используются standard shadcn theme modes/tokens.
 - [ ] Tests/selectors не завязаны на visual-only class names вроде `.panel`, `.chart-panel`, `.metric`, `.settings-card`, `.auth-panel`, `.empty-state`.
+- [ ] Если клиент меняет server call, sync или native boundary, проверено, нужно ли обновить server-side `logs` writer/fields/test.
 - [ ] Существенные новые/измененные экспортируемые hooks, model/API/storage/platform/time helpers имеют короткий JSDoc-комментарий.
 - [ ] `npm run app:test` выполнен или есть объяснение, почему не запускался.
 - [ ] `npm run app:lint` выполнен или есть объяснение.

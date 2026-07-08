@@ -84,7 +84,23 @@ export async function receiveInbox({
   store,
   body,
   storageRoot,
-  nowDate
+  nowDate,
+  logContext = {}
+}) {
+  try {
+    return await receiveInboxInner({ store, body, storageRoot, nowDate, logContext });
+  } catch (error) {
+    recordInboxIngestFailure(store, { nowIso: nowDate.toISOString(), body, logContext, error });
+    throw error;
+  }
+}
+
+async function receiveInboxInner({
+  store,
+  body,
+  storageRoot,
+  nowDate,
+  logContext
 }) {
   const text = requiredText(body?.text, 'text_required');
   const descriptionText = optionalBodyText(body?.description_text)
@@ -100,13 +116,28 @@ export async function receiveInbox({
   const stableId = idempotencyKey ? shortHash(idempotencyKey) : null;
   const inboxId = stableId ? `inbox:api:${stableId}` : `inbox:api:${crypto.randomUUID()}`;
   const eventId = stableId ? `inbox:api:${stableId}:create` : `inbox:api:${crypto.randomUUID()}:create`;
+  const source = optionalText(body?.source) ?? 'inbox';
+  const sourceKey = optionalText(body?.source_key) ?? '';
   const existingInboxId = stableId ? store.inboxIdForEvent(eventId) : null;
   if (existingInboxId) {
+    recordInboxIngestLog(store, {
+      nowIso,
+      body,
+      attachments,
+      source,
+      sourceKey,
+      recordTypeId: safeInboxRecordTypeId(body?.record_type_id ?? body?.record_type),
+      responseRequired: safeOptionalBoolean(body?.response_required),
+      idempotencyKey,
+      logContext,
+      inboxId: existingInboxId,
+      eventId,
+      created: false,
+      reason: 'duplicate'
+    });
     return { inbox_id: existingInboxId, created: false, attachment_links: [] };
   }
 
-  const source = optionalText(body?.source) ?? 'inbox';
-  const sourceKey = optionalText(body?.source_key) ?? '';
   const responseRequired = optionalBoolean(body?.response_required, 'invalid_response_required');
   const recordTypeId = inboxRecordTypeId(body?.record_type_id ?? body?.record_type);
   const relatedInboxId = referencesPreviousMessage(`${text}\n${descriptionText}`)
@@ -127,7 +158,24 @@ export async function receiveInbox({
       }
       if (attachment.mime?.startsWith('image/')) {
         const previewPath = path.join(storageRoot, imagePreviewName(fileName));
+        const previewExisted = fs.existsSync(previewPath);
         if (createImagePreview(filePath, previewPath)) writtenPaths.push(previewPath);
+        else if (!previewExisted) {
+          safeRecordLog(store, {
+            dt: nowIso,
+            source: 'inbox',
+            operation: 'inbox.attachment_preview',
+            status: 'failed',
+            severityText: 'WARN',
+            reason: 'preview_failed',
+            message: 'Inbox attachment preview failed',
+            jsonData: {
+              attachment_index: index + 1,
+              mime: attachment.mime,
+              route: logContext.route ?? null
+            }
+          });
+        }
       }
       attachmentLinks.push(`/v1/inbox/attachments/${fileName}`);
     });
@@ -150,11 +198,98 @@ export async function receiveInbox({
     throw error;
   }
 
+  recordInboxIngestLog(store, {
+    nowIso,
+    body,
+    attachments,
+    source,
+    sourceKey,
+    recordTypeId,
+    responseRequired,
+    idempotencyKey,
+    logContext,
+    inboxId,
+    eventId,
+    created: true
+  });
   return {
     inbox_id: inboxId,
     created: true,
     attachment_links: attachmentLinks
   };
+}
+
+function recordInboxIngestLog(store, {
+  nowIso,
+  body,
+  attachments,
+  source,
+  sourceKey,
+  recordTypeId,
+  responseRequired,
+  idempotencyKey,
+  logContext,
+  inboxId,
+  eventId,
+  created,
+  reason = null
+}) {
+  safeRecordLog(store, {
+    dt: nowIso,
+    source: 'inbox',
+    operation: 'inbox.ingest',
+    status: created ? 'done' : 'skipped',
+    itemsId: inboxId,
+    eventDomain: 'inbox',
+    eventId,
+    reason,
+    message: created ? 'Inbox item ingested' : 'Inbox ingest skipped',
+    jsonData: {
+      route: logContext.route ?? null,
+      client_source: source,
+      source_key_present: Boolean(sourceKey),
+      text_present: typeof body?.text === 'string' && body.text.trim().length > 0,
+      description_present: Boolean(body?.description_text || body?.description || body?.content_text || body?.description_json || body?.content),
+      response_required: responseRequired === true,
+      record_type_id: recordTypeId,
+      idempotency_key_present: Boolean(idempotencyKey),
+      created,
+      attachment_count: attachments.length,
+      attachment_bytes: attachments.reduce((sum, attachment) => sum + attachment.bytes.length, 0),
+      image_count: attachments.filter((attachment) => attachment.mime?.startsWith('image/')).length,
+      legacy_image_present: body?.image_base64 !== undefined || body?.image_mime !== undefined
+    }
+  });
+}
+
+function recordInboxIngestFailure(store, { nowIso, body, logContext, error }) {
+  safeRecordLog(store, {
+    dt: nowIso,
+    source: 'inbox',
+    operation: 'inbox.ingest',
+    status: 'failed',
+    severityText: 'WARN',
+    reason: error instanceof Error ? error.message : 'inbox_ingest_failed',
+    message: 'Inbox ingest rejected',
+    jsonData: {
+      route: logContext.route ?? null,
+      status_code: Number.isInteger(error?.status) ? error.status : null,
+      target_present: Boolean(body?.target || body?.destination),
+      text_present: typeof body?.text === 'string' && body.text.trim().length > 0,
+      attachments_present: Array.isArray(body?.attachments) ? body.attachments.length > 0 : body?.attachments !== undefined,
+      legacy_image_present: body?.image_base64 !== undefined || body?.image_mime !== undefined,
+      idempotency_key_present: Boolean(optionalText(body?.idempotency_key)),
+      response_required_present: body?.response_required !== undefined
+    }
+  });
+}
+
+function safeRecordLog(store, input) {
+  try {
+    store.recordLog?.(input);
+  } catch {
+    // Logging must not change Inbox ingest semantics.
+  }
 }
 
 export async function processInboxItem({
@@ -450,11 +585,27 @@ function optionalBoolean(value, message) {
   throwStatus(message, 400);
 }
 
+function safeOptionalBoolean(value) {
+  try {
+    return optionalBoolean(value, 'invalid_response_required');
+  } catch {
+    return null;
+  }
+}
+
 function inboxRecordTypeId(value) {
   if (value == null) return 1;
   const number = Number(value);
   if (number === 1 || number === 2) return number;
   throwStatus('invalid_record_type', 400);
+}
+
+function safeInboxRecordTypeId(value) {
+  try {
+    return inboxRecordTypeId(value);
+  } catch {
+    return null;
+  }
 }
 
 function referencesPreviousMessage(value) {
