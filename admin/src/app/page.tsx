@@ -1,7 +1,8 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
-import { ArrowDownUp, CalendarClock, ChevronDown, ChevronFirst, ChevronLast, ChevronLeft, ChevronRight, Database, Table2, Workflow } from "lucide-react";
+import { ArrowDownUp, CalendarClock, ChevronDown, ChevronFirst, ChevronLast, ChevronLeft, ChevronRight, Command, Database, Table2, Workflow } from "lucide-react";
 import { AnimatedThemeToggler } from "@/shared/ui/animated-theme-toggler";
+import { BraiCmdAdminSection } from "@/app/BraiCmdAdminSection";
 import { Badge } from "@/shared/ui/badge";
 import { ButtonLink } from "@/shared/ui/button";
 import { Card, CardContent, CardDescription, CardFrame, CardHeader, CardTitle } from "@/shared/ui/card";
@@ -10,13 +11,14 @@ import { ScrollArea } from "@/shared/ui/scroll-area";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/shared/ui/table";
 import { formatBytes, formatCell } from "@/lib/format";
 import { PAGE_SIZE, readDatabaseView } from "@/lib/database";
+import { readBraiCmdAdminSummary } from "@/lib/braiCmdSummary";
 import type { DbForeignKey, DbIncomingForeignKey, DbSortDirection, DbTable, DbView } from "@/lib/database";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 type SearchParams = Promise<Record<string, string | string[] | undefined>>;
-type SectionName = "database" | "handlers" | "schedules";
+type SectionName = "database" | "handlers" | "schedules" | "brai-cmd";
 type TabName = "rows" | "relations" | "columns" | "indexes";
 
 export default async function Home({ searchParams }: { searchParams: SearchParams }) {
@@ -32,6 +34,7 @@ export default async function Home({ searchParams }: { searchParams: SearchParam
     pageSize: PAGE_SIZE,
     sortDirection,
   });
+  const braiCmdSummary = activeSection === "brai-cmd" ? await readBraiCmdAdminSummary() : null;
   const selectedName = view.selectedTable?.name ?? "";
 
   return (
@@ -41,6 +44,8 @@ export default async function Home({ searchParams }: { searchParams: SearchParam
         <HandlersRail count={view.rowCount} />
       ) : activeSection === "schedules" ? (
         <SchedulesRail count={view.selectedTable?.name === "handler_schedules" ? view.rowCount : 0} />
+      ) : activeSection === "brai-cmd" && braiCmdSummary ? (
+        <BraiCmdRail summary={braiCmdSummary} />
       ) : (
         <TableRail selectedName={selectedName} stats={view.stats} tables={view.tables} />
       )}
@@ -51,6 +56,8 @@ export default async function Home({ searchParams }: { searchParams: SearchParam
               <HandlersSection rows={view.selectedTable?.name === "handlers" ? view.rows : []} />
             ) : activeSection === "schedules" ? (
               <SchedulesSection sortDirection={sortDirection} view={view} />
+            ) : activeSection === "brai-cmd" && braiCmdSummary ? (
+              <BraiCmdAdminSection summary={braiCmdSummary} />
             ) : view.selectedTable ? (
               <>
                 <EntityHeader description={view.tableDescription} tableName={view.selectedTable.name} />
@@ -159,6 +166,15 @@ function PrimaryRail({ activeSection }: { activeSection: SectionName }) {
           <CalendarClock className="size-5" />
           <span className="sr-only">Расписания автоматизаций</span>
         </ButtonLink>
+        <ButtonLink
+          aria-current={activeSection === "brai-cmd" ? "page" : undefined}
+          href="/?section=brai-cmd"
+          size="icon-lg"
+          variant={activeSection === "brai-cmd" ? "default" : "outline"}
+        >
+          <Command className="size-5" />
+          <span className="sr-only">Brai Cmd</span>
+        </ButtonLink>
       </nav>
       <AnimatedThemeToggler
         aria-label="Переключить тему"
@@ -166,6 +182,35 @@ function PrimaryRail({ activeSection }: { activeSection: SectionName }) {
         title="Переключить тему"
         variant="circle"
       />
+    </aside>
+  );
+}
+
+function BraiCmdRail({ summary }: { summary: Awaited<ReturnType<typeof readBraiCmdAdminSummary>> }) {
+  const items = [
+    ["Активные", summary.totals.activeTokens],
+    ["Запросы", summary.totals.requests],
+    ["Ошибки", summary.totals.errors],
+  ];
+
+  return (
+    <aside className="grid min-h-0 border-b bg-card md:border-b-0 md:border-r">
+      <div className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)] gap-3 p-3">
+        <header className="grid gap-1">
+          <div className="text-sm font-semibold">Brai Cmd</div>
+          <div className="text-xs text-muted-foreground">{summary.recentUsage.length} последних событий</div>
+        </header>
+        <Card className="p-3">
+          <dl className="m-0 grid gap-2">
+            {items.map(([label, value]) => (
+              <div className="flex items-center justify-between gap-3 border-b pb-2 last:border-b-0 last:pb-0" key={label}>
+                <dt className="text-xs text-muted-foreground">{label}</dt>
+                <dd className="m-0 text-sm font-medium">{value}</dd>
+              </div>
+            ))}
+          </dl>
+        </Card>
+      </div>
     </aside>
   );
 }
@@ -829,7 +874,8 @@ function parseTab(value: string | undefined): TabName {
 
 function parseSection(value: string | undefined): SectionName {
   if (value === "schedules") return "schedules";
-  return value === "handlers" ? "handlers" : "database";
+  if (value === "handlers") return "handlers";
+  return value === "brai-cmd" ? "brai-cmd" : "database";
 }
 
 function fixedSectionTable(section: SectionName) {
