@@ -547,6 +547,22 @@ test("native APK detector ignores OTA web-layer changes", () => {
   assert.equal(requiresNativeApkChange(["deploy/scripts/build-nonproduction-apks.sh"]), false);
   assert.equal(requiresNativeApkChange(["deploy/scripts/resolve-android-env.mjs"]), false);
   assert.equal(requiresNativeApkChange(["deploy/environments.json"]), true);
+  assert.equal(
+    requiresNativeApkChange(
+      ["deploy/environments.json"],
+      "",
+      '+      "adminPort": 3045,\n+      "adminServiceName": "brai-admin-preview-d.service",\n',
+    ),
+    false,
+  );
+  assert.equal(
+    requiresNativeApkChange(
+      ["deploy/environments.json"],
+      "",
+      '-      "androidFlavor": "previewD",\n+      "androidFlavor": "previewDWork",\n',
+    ),
+    true,
+  );
   assert.equal(requiresNativeApkChange(["deploy/scripts/resolve-app-version.mjs"]), false);
   assert.equal(requiresNativeApkChange(["apps/brai_app/src/shared/platform/ota.ts"]), false);
   assert.equal(requiresNativeApkChange(["apps/brai_app/src/shared/platform/androidTimerNotification.ts"]), false);
