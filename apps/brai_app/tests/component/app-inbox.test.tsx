@@ -185,14 +185,20 @@ describe("BraiApp inbox", () => {
     expect(screen.getByRole("tab", { name: "БД" })).toBeInTheDocument();
     const detailAttachments = screen.getByLabelText("Прикрепленные файлы");
     expect(detailAttachments).toBeInTheDocument();
-    expect(within(detailAttachments).getByRole("img", { name: "photo.png" })).toHaveAttribute("src", "/api/v1/inbox/attachments/photo.png.thumb.jpg");
-    expect(screen.getByRole("link", { name: /brief\.pdf/ })).toHaveAttribute("href", "/api/v1/inbox/attachments/brief.pdf");
-    expect(screen.getByRole("link", { name: /brief\.pdf/ })).toHaveAttribute("download", "brief.pdf");
-
+    const attachmentImage = within(detailAttachments).getByRole("img", { name: "photo.png" });
+    expect(attachmentImage).toHaveAttribute("src", "/api/v1/inbox/attachments/photo.png.thumb.jpg");
     fireEvent.click(screen.getByRole("button", { name: "Открыть вложение photo.png" }));
     expect(screen.getByRole("dialog", { name: "photo.png" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Закрыть вложение" }));
     expect(screen.queryByRole("dialog", { name: "photo.png" })).not.toBeInTheDocument();
+    fireEvent.error(attachmentImage);
+    expect(attachmentImage).toHaveAttribute("src", "/api/v1/inbox/attachments/photo.png");
+    fireEvent.error(attachmentImage);
+    expect(within(detailAttachments).queryByRole("img", { name: "photo.png" })).not.toBeInTheDocument();
+    expect(within(detailAttachments).getByText("Файл недоступен")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Недоступное вложение photo.png" })).toBeDisabled();
+    expect(screen.getByRole("link", { name: /brief\.pdf/ })).toHaveAttribute("href", "/api/v1/inbox/attachments/brief.pdf");
+    expect(screen.getByRole("link", { name: /brief\.pdf/ })).toHaveAttribute("download", "brief.pdf");
 
     fireEvent.click(screen.getByRole("tab", { name: "Детали" }));
     expect(screen.getByRole("tab", { name: "Детали" })).toHaveAttribute("aria-selected", "true");
