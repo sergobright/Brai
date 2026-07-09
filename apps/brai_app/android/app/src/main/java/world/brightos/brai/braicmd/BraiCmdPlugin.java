@@ -55,6 +55,12 @@ public final class BraiCmdPlugin extends Plugin {
     }
 
     @PluginMethod
+    public void vibratePress(PluginCall call) {
+        Haptics.INSTANCE.buttonPress(getContext());
+        call.resolve(stateJson());
+    }
+
+    @PluginMethod
     public void openSettings(PluginCall call) {
         Intent intent = new Intent(getContext(), BraiCmdSettingsActivity.class)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);

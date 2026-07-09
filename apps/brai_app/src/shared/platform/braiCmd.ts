@@ -3,6 +3,7 @@ import { isNativeShell, platformName } from "@/shared/platform/platform";
 
 type BraiCmdPlugin = {
   getState(): Promise<BraiCmdState>;
+  vibratePress(): Promise<BraiCmdState>;
   openSettings(): Promise<unknown>;
   ensureAccess(options: { displayName: string }): Promise<BraiCmdState>;
   setAccessKey(options: { token: string; displayName: string }): Promise<BraiCmdState>;
@@ -71,6 +72,18 @@ export async function setBraiCmdVoiceOnlyMode(enabled: boolean): Promise<BraiCmd
   } catch {
     return null;
   }
+}
+
+export async function vibrateBraiCmdPress(): Promise<void> {
+  if (isNativeAndroid()) {
+    try {
+      await BraiCmd.vibratePress();
+      return;
+    } catch {
+      // Fall through to the browser vibration API when the native bridge is unavailable.
+    }
+  }
+  if (typeof navigator !== "undefined" && "vibrate" in navigator) navigator.vibrate(16);
 }
 
 export async function setBraiCmdQueuePausedMode(enabled: boolean): Promise<BraiCmdState | null> {

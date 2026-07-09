@@ -28,9 +28,10 @@ describe("BraiApp onboarding", () => {
     expect(screen.getByText("Голос превращается в действие")).toBeInTheDocument();
     expect(screen.getByText("Идеи не теряются")).toBeInTheDocument();
     expect(screen.getByText("Пора настроить основу")).toBeInTheDocument();
-    expect(container.querySelector('[data-slot="carousel-content"] > div')).toHaveClass("-ml-4");
-    expect(screen.getByText("Карточка 1 из 4").closest('[data-slot="carousel-item"]')).toHaveClass("pl-4");
-    expect(screen.getByText("Карточка 1 из 4").closest('[data-slot="card"]')).toHaveClass("h-[min(66dvh,calc(100dvh-18rem))]", "w-full", "overflow-hidden");
+    expect(container.querySelector('[data-slot="carousel-content"]')).toHaveClass("h-full");
+    expect(container.querySelector('[data-slot="carousel-content"] > div')).toHaveClass("-ml-4", "h-full", "w-full", "touch-pan-y");
+    expect(screen.getByText("Карточка 1 из 4").closest('[data-slot="carousel-item"]')).toHaveClass("h-full", "pl-4");
+    expect(screen.getByText("Карточка 1 из 4").closest('[data-slot="card"]')).toHaveClass("h-full", "w-full", "overflow-hidden");
     expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Previous slide" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Next slide" })).not.toBeInTheDocument();

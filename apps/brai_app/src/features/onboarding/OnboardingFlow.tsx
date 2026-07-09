@@ -37,7 +37,7 @@ import {
   requestAndroidMicrophone,
   requestAndroidNotifications,
 } from "@/shared/platform/androidCapabilities";
-import { ensureBraiCmdAccess, listenBraiCmdOnboardingEvents, retryBraiCmdQueue, setBraiCmdAccessKey, setBraiCmdQueuePausedMode, setBraiCmdVoiceOnlyMode } from "@/shared/platform/braiCmd";
+import { ensureBraiCmdAccess, listenBraiCmdOnboardingEvents, retryBraiCmdQueue, setBraiCmdAccessKey, setBraiCmdQueuePausedMode, setBraiCmdVoiceOnlyMode, vibrateBraiCmdPress } from "@/shared/platform/braiCmd";
 import { installAndroidBackHandler, isNativeShell, platformName } from "@/shared/platform/platform";
 import { AnimatedShinyText } from "@/shared/ui/animated-shiny-text";
 import { Button } from "@/shared/ui/button";
@@ -851,7 +851,7 @@ export function OnboardingFlow({
       <main className="fixed inset-0 min-h-0 overflow-hidden bg-black text-foreground" data-onboarding-flow data-theme="dark" style={{ colorScheme: "dark" }}>
         <div
           className={cx(
-            "mx-auto flex h-dvh w-full max-w-md flex-col px-6 pb-0 pt-[calc(env(safe-area-inset-top)+1.5rem)] sm:max-w-2xl sm:px-6 sm:pt-6",
+            "mx-auto flex h-dvh w-full max-w-md flex-col px-6 pb-0 pt-[calc(env(safe-area-inset-top)+1.5rem)] [@media(max-height:700px)]:px-4 [@media(max-height:700px)]:pt-[calc(env(safe-area-inset-top)+0.5rem)] sm:max-w-2xl sm:px-6 sm:pt-6",
             "transition-opacity duration-300 ease-out",
             screenTransitioning ? "pointer-events-none opacity-0" : "opacity-100",
           )}
@@ -926,7 +926,7 @@ function PrimaryButton({ children, className, disabled, icon, iconClassName, ton
       size="lg"
       variant="outline"
       className={cx(
-        "group min-h-12 w-full overflow-hidden rounded-full px-5 text-base font-semibold shadow-lg transition-all duration-150 active:scale-[0.97] disabled:shadow-none disabled:active:scale-100",
+        "group min-h-12 w-full overflow-hidden rounded-full px-5 text-base font-semibold shadow-lg transition-all duration-150 active:scale-[0.97] disabled:shadow-none disabled:active:scale-100 [@media(max-height:800px)_and_(min-aspect-ratio:2/3)]:min-h-10 [@media(max-height:800px)_and_(min-aspect-ratio:2/3)]:text-sm",
         danger
           ? "border-destructive/45 bg-destructive/10 text-destructive shadow-destructive/10 disabled:border-destructive/45 disabled:bg-destructive/10 disabled:opacity-100"
           : "border-primary/35 bg-primary/10 text-foreground shadow-primary/10 hover:bg-primary/15 active:border-primary/80 active:bg-primary/30 active:shadow-primary/30 disabled:border-muted/30 disabled:bg-muted/20 disabled:opacity-60 disabled:hover:bg-muted/20",
@@ -935,7 +935,7 @@ function PrimaryButton({ children, className, disabled, icon, iconClassName, ton
       )}
       disabled={disabled}
       onPointerDown={(event) => {
-        if (!disabled && "vibrate" in navigator) navigator.vibrate(8);
+        if (!disabled) void vibrateBraiCmdPress();
         holdPressed();
         onPointerDown?.(event);
       }}
@@ -992,12 +992,12 @@ function StepActions({ children }: { children: ReactNode }) {
   if (!statusText && !mainAction && !canBack) return null;
 
   return (
-    <div className="grid shrink-0 gap-3 pt-5" style={{ paddingBottom: "calc(env(safe-area-inset-bottom) + 1.5rem)" }}>
+    <div className="grid shrink-0 gap-3 pb-[calc(env(safe-area-inset-bottom)+1.5rem)] pt-5 [@media(max-height:700px)]:gap-2 [@media(max-height:700px)]:pb-[calc(env(safe-area-inset-bottom)+0.5rem)] [@media(max-height:700px)]:pt-2 [@media(max-height:800px)_and_(min-aspect-ratio:2/3)]:pb-[calc(env(safe-area-inset-bottom)+0.25rem)] [@media(max-height:800px)_and_(min-aspect-ratio:2/3)]:pt-1">
       {statusText ? <StatusCard text={statusText} tone={statusTone} /> : null}
       {extraActions.length ? <div className="grid gap-2">{extraActions}</div> : null}
       <div className={cx("grid gap-3", canBack && mainAction ? "grid-cols-[3rem_minmax(0,1fr)]" : canBack ? "grid-cols-[3rem]" : "grid-cols-1")}>
         {canBack ? (
-          <Button type="button" variant="outline" className="size-12 rounded-full border-primary/20 bg-transparent p-0 transition-all duration-200 hover:bg-primary/10 active:scale-[0.96] active:bg-primary/15" aria-label="Назад" onClick={onBack}>
+          <Button type="button" variant="outline" className="size-12 rounded-full border-primary/20 bg-transparent p-0 transition-all duration-200 hover:bg-primary/10 active:scale-[0.96] active:bg-primary/15 [@media(max-height:800px)_and_(min-aspect-ratio:2/3)]:size-10" aria-label="Назад" onClick={onBack}>
             <ChevronLeft className="size-5" aria-hidden="true" />
           </Button>
         ) : null}
@@ -1007,15 +1007,15 @@ function StepActions({ children }: { children: ReactNode }) {
   );
 }
 
-function InfoBlock({ icon: Icon, title, text }: { icon: LucideIcon; title: string; text: string }) {
+function InfoBlock({ compactOnShort = false, icon: Icon, title, text }: { compactOnShort?: boolean; icon: LucideIcon; title: string; text: string }) {
   return (
-    <div className="grid min-w-0 gap-4">
-      <span className="grid size-11 place-items-center rounded-full border border-primary/25 bg-primary/10 text-primary">
-        <Icon className="size-5" aria-hidden="true" />
+    <div className={cx("grid min-w-0 gap-4", compactOnShort ? "[@media(max-height:700px)]:gap-2 [@media(max-height:650px)]:gap-1.5 [@media(max-height:800px)_and_(min-aspect-ratio:2/3)]:gap-1" : "")}>
+      <span className={cx("grid size-11 place-items-center rounded-full border border-primary/25 bg-primary/10 text-primary", compactOnShort ? "[@media(max-height:700px)]:size-9 [@media(max-height:650px)]:size-8 [@media(max-height:800px)_and_(min-aspect-ratio:2/3)]:hidden" : "")}>
+        <Icon className={cx("size-5", compactOnShort ? "[@media(max-height:700px)]:size-4 [@media(max-height:650px)]:size-3.5" : "")} aria-hidden="true" />
       </span>
-      <div className="grid min-w-0 gap-2">
-        <h2 className="m-0 break-words text-2xl font-semibold leading-tight">{title}</h2>
-        <p className="m-0 break-words text-sm leading-5 text-muted-foreground">{text}</p>
+      <div className={cx("grid min-w-0 gap-2", compactOnShort ? "[@media(max-height:800px)_and_(min-aspect-ratio:2/3)]:gap-1" : "")}>
+        <h2 className={cx("m-0 break-words text-2xl font-semibold leading-tight", compactOnShort ? "[@media(max-height:700px)]:text-xl [@media(max-height:650px)]:text-lg [@media(max-height:800px)_and_(min-aspect-ratio:2/3)]:text-base" : "")}>{title}</h2>
+        <p className={cx("m-0 break-words text-sm leading-5 text-muted-foreground", compactOnShort ? "[@media(max-height:700px)]:text-xs [@media(max-height:700px)]:leading-4 [@media(max-height:650px)]:text-[0.72rem] [@media(max-height:650px)]:leading-[0.95rem] [@media(max-height:800px)_and_(min-aspect-ratio:2/3)]:text-[0.68rem] [@media(max-height:800px)_and_(min-aspect-ratio:2/3)]:leading-[0.82rem]" : "")}>{text}</p>
       </div>
     </div>
   );
@@ -1082,14 +1082,14 @@ function WelcomeCarousel({ currentStep, onStart, onStepChange }: { currentStep: 
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-      <div className="grid min-h-0 flex-1 content-start gap-5 overflow-hidden pt-[clamp(3rem,10dvh,7rem)]">
-        <Carousel setApi={setApi} opts={{ align: "start" }} className="w-full min-w-0 overflow-hidden" aria-label="Приветствие Brai" data-nav-swipe-exclusion>
-          <CarouselContent>
+      <div className="grid min-h-0 flex-1 grid-rows-[minmax(0,1fr)_auto] gap-5 overflow-hidden pt-[clamp(3rem,10dvh,7rem)] [@media(max-height:700px)]:gap-2 [@media(max-height:700px)]:pt-2 [@media(max-height:650px)]:pt-1">
+        <Carousel setApi={setApi} opts={{ align: "start" }} className="h-full w-full min-w-0 overflow-hidden" aria-label="Приветствие Brai" data-nav-swipe-exclusion>
+          <CarouselContent viewportClassName="h-full" className="h-full w-full touch-pan-y">
             {welcomeSlides.map(({ icon: Icon, step, text, title }, index) => (
-              <CarouselItem key={step} className="basis-full">
-                <Card className="grid h-[min(66dvh,calc(100dvh-18rem))] w-full min-w-0 content-center gap-6 overflow-hidden rounded-2xl border-primary/15 bg-card/80 p-6 shadow-none">
-                  <p className="m-0 text-sm font-medium text-muted-foreground">Карточка {index + 1} из 4</p>
-                  <InfoBlock icon={Icon} title={title} text={text} />
+              <CarouselItem key={step} className="h-full basis-full">
+                <Card className="grid h-full w-full min-w-0 content-center gap-6 overflow-hidden rounded-2xl border-primary/15 bg-card/80 p-6 shadow-none [@media(max-height:700px)]:gap-3 [@media(max-height:700px)]:p-4 [@media(max-height:650px)]:gap-2 [@media(max-height:650px)]:p-3 [@media(max-height:800px)_and_(min-aspect-ratio:2/3)]:gap-1.5">
+                  <p className="m-0 text-sm font-medium text-muted-foreground [@media(max-height:700px)]:text-xs [@media(max-height:650px)]:text-[0.72rem] [@media(max-height:800px)_and_(min-aspect-ratio:2/3)]:text-[0.68rem]">Карточка {index + 1} из 4</p>
+                  <InfoBlock compactOnShort icon={Icon} title={title} text={text} />
                 </Card>
               </CarouselItem>
             ))}

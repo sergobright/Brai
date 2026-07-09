@@ -9,6 +9,7 @@ const plugin = vi.hoisted(() => ({
   setAccessKey: vi.fn(),
   setQueuePausedMode: vi.fn(),
   setVoiceOnlyMode: vi.fn(),
+  vibratePress: vi.fn(),
 }));
 
 vi.mock("@capacitor/core", () => ({
@@ -26,12 +27,13 @@ describe("Brai CMD bridge", () => {
     plugin.setAccessKey.mockReset();
     plugin.setQueuePausedMode.mockReset();
     plugin.setVoiceOnlyMode.mockReset();
+    plugin.vibratePress.mockReset();
     vi.unstubAllGlobals();
   });
 
   it("does nothing outside Android native shell", async () => {
     vi.stubGlobal("Capacitor", undefined);
-    const { ensureBraiCmdAccess, getBraiCmdState, listenBraiCmdOnboardingEvents, retryBraiCmdQueue, setBraiCmdAccessKey, setBraiCmdQueuePausedMode, setBraiCmdVoiceOnlyMode } = await import("@/shared/platform/braiCmd");
+    const { ensureBraiCmdAccess, getBraiCmdState, listenBraiCmdOnboardingEvents, retryBraiCmdQueue, setBraiCmdAccessKey, setBraiCmdQueuePausedMode, setBraiCmdVoiceOnlyMode, vibrateBraiCmdPress } = await import("@/shared/platform/braiCmd");
 
     await expect(getBraiCmdState()).resolves.toBeNull();
     await expect(ensureBraiCmdAccess("Test")).resolves.toBeNull();
@@ -40,9 +42,11 @@ describe("Brai CMD bridge", () => {
     await expect(setBraiCmdVoiceOnlyMode(true)).resolves.toBeNull();
     await expect(setBraiCmdQueuePausedMode(true)).resolves.toBeNull();
     await expect(retryBraiCmdQueue()).resolves.toBeNull();
+    await expect(vibrateBraiCmdPress()).resolves.toBeUndefined();
     expect(plugin.getState).not.toHaveBeenCalled();
     expect(plugin.addListener).not.toHaveBeenCalled();
     expect(plugin.setVoiceOnlyMode).not.toHaveBeenCalled();
+    expect(plugin.vibratePress).not.toHaveBeenCalled();
   });
 
   it("reads access state from Android native bridge", async () => {
@@ -69,6 +73,18 @@ describe("Brai CMD bridge", () => {
 
     await expect(setBraiCmdVoiceOnlyMode(true)).resolves.toMatchObject({ voiceOnlyMode: true });
     expect(plugin.setVoiceOnlyMode).toHaveBeenCalledWith({ enabled: true });
+  });
+
+  it("uses Android native haptics for onboarding button presses", async () => {
+    vi.stubGlobal("Capacitor", {
+      isNativePlatform: () => true,
+      getPlatform: () => "android",
+    });
+    plugin.vibratePress.mockResolvedValue({});
+    const { vibrateBraiCmdPress } = await import("@/shared/platform/braiCmd");
+
+    await expect(vibrateBraiCmdPress()).resolves.toBeUndefined();
+    expect(plugin.vibratePress).toHaveBeenCalledWith();
   });
 
   it("prepares access and queue controls through Android native bridge", async () => {
