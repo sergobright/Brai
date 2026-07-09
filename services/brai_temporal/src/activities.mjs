@@ -114,7 +114,9 @@ async function withSourceCheckout({ branch, sha }, callback) {
   try {
     const origin = await runCommand("git", ["-C", ROOT, "remote", "get-url", "origin"]);
     const remote = await fetchRemote(origin.stdout.trim(), tempRoot);
-    await runCommand("git", ["clone", "--no-checkout", ROOT, checkout]);
+    await runCommand("git", ["clone", "--no-checkout", cloneSourceForRemote(remote), checkout], {
+      env: { ...process.env, ...remote.env }
+    });
     await runCommand("git", ["-C", checkout, "remote", "set-url", "origin", remote.url]);
     const directCheckout = await runCommand("git", ["-C", checkout, "checkout", "--detach", sha], { allowFailure: true });
     if (directCheckout.code !== 0) {
@@ -125,6 +127,10 @@ async function withSourceCheckout({ branch, sha }, callback) {
   } finally {
     await rm(tempRoot, { recursive: true, force: true });
   }
+}
+
+export function cloneSourceForRemote(remote) {
+  return Object.keys(remote.env ?? {}).length > 0 ? remote.url : ROOT;
 }
 
 async function fetchBranch(checkout, branch, remote) {
