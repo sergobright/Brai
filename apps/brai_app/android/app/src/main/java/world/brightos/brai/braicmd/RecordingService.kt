@@ -27,6 +27,7 @@ class RecordingService : Service() {
     private var conversationContext: VisibleConversationContext? = null
     private var screenshotFile: File? = null
     private var inboxDelivery = false
+    private var inboxTextPrefix = ""
     private var amplitudeTicker: Runnable? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -39,7 +40,8 @@ class RecordingService : Service() {
             else -> startRecording(
                 VisibleConversationContext.fromIntent(intent),
                 screenshotFileFromIntent(intent),
-                intent?.getBooleanExtra(EXTRA_INBOX_DELIVERY, false) == true
+                intent?.getBooleanExtra(EXTRA_INBOX_DELIVERY, false) == true,
+                intent?.getStringExtra(EXTRA_INBOX_TEXT_PREFIX).orEmpty()
             )
         }
         return START_NOT_STICKY
@@ -52,16 +54,17 @@ class RecordingService : Service() {
             val pendingFile = finalizeRecording(unfinishedFile)
             ConversationContextStore.save(pendingFile, conversationContext)
             screenshotFile?.let { ScreenshotContextStore.save(pendingFile, it) }
-            if (inboxDelivery) InboxPayloadStore.mark(pendingFile)
+            if (inboxDelivery) InboxPayloadStore.mark(pendingFile, inboxTextPrefix)
         }
         outputFile = null
         conversationContext = null
         screenshotFile = null
         inboxDelivery = false
+        inboxTextPrefix = ""
         super.onDestroy()
     }
 
-    private fun startRecording(context: VisibleConversationContext?, screenshot: File?, deliverToInbox: Boolean) {
+    private fun startRecording(context: VisibleConversationContext?, screenshot: File?, deliverToInbox: Boolean, textPrefix: String) {
         if (recorder != null) {
             screenshot?.delete()
             return
@@ -69,6 +72,7 @@ class RecordingService : Service() {
         conversationContext = context
         screenshotFile = screenshot?.takeIf { it.isFile && it.length() > 0L }
         inboxDelivery = deliverToInbox
+        inboxTextPrefix = textPrefix.trim()
         startRecordingForeground()
 
         val file = File(recordingsDir().apply { mkdirs() }, "brai-cmd-${System.currentTimeMillis()}.recording.m4a")
@@ -85,7 +89,7 @@ class RecordingService : Service() {
             recorder = mediaRecorder
             outputFile = file
             ScreenshotContextStore.save(file, screenshotFile)
-            if (inboxDelivery) InboxPayloadStore.mark(file)
+            if (inboxDelivery) InboxPayloadStore.mark(file, inboxTextPrefix)
             screenshotFile = null
             BraiCmdBus.post(RecorderState.Recording(0))
             startAmplitudeTicker()
@@ -142,6 +146,7 @@ class RecordingService : Service() {
         outputFile = null
         conversationContext = null
         inboxDelivery = false
+        inboxTextPrefix = ""
         screenshotFile?.delete()
         screenshotFile = null
         recordingFile?.let { ConversationContextStore.delete(it) }
@@ -220,7 +225,7 @@ class RecordingService : Service() {
                             )
                             return@Thread
                         }
-                        deliverToInbox(client, file, finalText)
+                        deliverToInbox(client, file, inboxText(file, finalText))
                         markAudioComplete(file)
                         inboxDelivered = true
                     } else {
@@ -307,6 +312,12 @@ class RecordingService : Service() {
         } catch (error: Throwable) {
             throw InboxDeliveryException(error.message ?: "Входящие не отвечают")
         }
+    }
+
+    private fun inboxText(file: File, text: String): String {
+        val prefix = InboxPayloadStore.readTextPrefix(file)
+        if (prefix.isBlank()) return text
+        return "$prefix\n$text".trim()
     }
 
     private fun postPendingState(message: String, reason: PendingReason) {
@@ -484,13 +495,15 @@ class RecordingService : Service() {
         private const val ACTION_RETRY = "world.brightos.brai.braicmd.RETRY_RECORDINGS"
         private const val EXTRA_SCREENSHOT_PATH = "world.brightos.brai.braicmd.extra.SCREENSHOT_PATH"
         private const val EXTRA_INBOX_DELIVERY = "world.brightos.brai.braicmd.extra.INBOX_DELIVERY"
+        private const val EXTRA_INBOX_TEXT_PREFIX = "world.brightos.brai.braicmd.extra.INBOX_TEXT_PREFIX"
         private val uploadInProgress = AtomicBoolean(false)
 
         fun start(
             context: Context,
             conversationContext: VisibleConversationContext? = null,
             screenshotFile: File? = null,
-            deliverToInbox: Boolean = false
+            deliverToInbox: Boolean = false,
+            inboxTextPrefix: String = ""
         ) {
             val intent = Intent(context, RecordingService::class.java).setAction(ACTION_START)
             VisibleConversationContext.putInto(intent, conversationContext)
@@ -498,6 +511,7 @@ class RecordingService : Service() {
                 intent.putExtra(EXTRA_SCREENSHOT_PATH, screenshotFile.absolutePath)
             }
             intent.putExtra(EXTRA_INBOX_DELIVERY, deliverToInbox)
+            if (inboxTextPrefix.isNotBlank()) intent.putExtra(EXTRA_INBOX_TEXT_PREFIX, inboxTextPrefix.trim())
             try {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) context.startForegroundService(intent) else context.startService(intent)
             } catch (error: Throwable) {

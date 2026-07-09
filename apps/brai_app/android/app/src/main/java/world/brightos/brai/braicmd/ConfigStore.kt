@@ -112,6 +112,26 @@ class ConfigStore(context: Context) {
             .putInt(AppConstants.KEY_SCREENSHOT_ICON_SIZE_PERCENT, value.coerceIn(AppConstants.MIN_ICON_SIZE_PERCENT, AppConstants.MAX_ICON_SIZE_PERCENT))
             .apply()
 
+    var contextActionIdeaEnabled: Boolean
+        get() = contextActionEnabled(AppConstants.KEY_CONTEXT_ACTION_IDEA_ENABLED)
+        set(value) = setContextActionEnabled(AppConstants.KEY_CONTEXT_ACTION_IDEA_ENABLED, value)
+
+    var contextActionScreenshotEnabled: Boolean
+        get() = contextActionEnabled(AppConstants.KEY_CONTEXT_ACTION_SCREENSHOT_ENABLED)
+        set(value) = setContextActionEnabled(AppConstants.KEY_CONTEXT_ACTION_SCREENSHOT_ENABLED, value)
+
+    var contextActionScreenshotVoiceEnabled: Boolean
+        get() = contextActionEnabled(AppConstants.KEY_CONTEXT_ACTION_SCREENSHOT_VOICE_ENABLED)
+        set(value) = setContextActionEnabled(AppConstants.KEY_CONTEXT_ACTION_SCREENSHOT_VOICE_ENABLED, value)
+
+    var contextActionChatEnabled: Boolean
+        get() = contextActionEnabled(AppConstants.KEY_CONTEXT_ACTION_CHAT_ENABLED)
+        set(value) = setContextActionEnabled(AppConstants.KEY_CONTEXT_ACTION_CHAT_ENABLED, value)
+
+    var contextActionSaveEnabled: Boolean
+        get() = contextActionEnabled(AppConstants.KEY_CONTEXT_ACTION_SAVE_ENABLED)
+        set(value) = setContextActionEnabled(AppConstants.KEY_CONTEXT_ACTION_SAVE_ENABLED, value)
+
     fun registerChangeListener(listener: SharedPreferences.OnSharedPreferenceChangeListener) =
         prefs.registerOnSharedPreferenceChangeListener(listener)
 
@@ -127,6 +147,13 @@ class ConfigStore(context: Context) {
             .putInt(AppConstants.KEY_BUTTON_X, x)
             .putInt(AppConstants.KEY_BUTTON_Y, y)
             .apply()
+    }
+
+    private fun contextActionEnabled(key: String): Boolean =
+        prefs.getBoolean(key, AppConstants.DEFAULT_CONTEXT_ACTION_ENABLED)
+
+    private fun setContextActionEnabled(key: String, value: Boolean) {
+        prefs.edit().putBoolean(key, value).apply()
     }
 
     private fun migrateLegacyPreferences() {

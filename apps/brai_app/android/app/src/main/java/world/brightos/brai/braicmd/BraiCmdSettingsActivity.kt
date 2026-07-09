@@ -21,8 +21,6 @@ import android.view.accessibility.AccessibilityManager
 import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
-import android.widget.RadioButton
-import android.widget.RadioGroup
 import android.widget.ScrollView
 import android.widget.Switch
 import android.widget.TextView
@@ -294,32 +292,65 @@ class BraiCmdSettingsActivity : Activity() {
             setTextColor(COLOR_TEXT)
         })
         card.addView(TextView(this).apply {
-            text = "Дополнительная кнопка отправляет голосовую команду и один выбранный тип контекста."
+            text = "Показывать дополнительные кнопки контекста."
             textSize = 13f
             setTextColor(COLOR_MUTED)
             setPadding(0, ui.dp(2), 0, ui.dp(8))
         })
-        val jsonId = View.generateViewId()
-        val screenshotId = View.generateViewId()
-        card.addView(RadioGroup(this).apply {
-            orientation = LinearLayout.VERTICAL
-            addView(contextRadioButton(jsonId, "JSON страницы", "Видимый текст и структура текущего экрана."))
-            addView(contextRadioButton(screenshotId, "Скриншот", "Картинка текущего экрана как вложение."))
-            check(if (config.contextDeliveryMode == ContextDeliveryMode.Screenshot) screenshotId else jsonId)
-            setOnCheckedChangeListener { _, checkedId ->
-                config.contextDeliveryMode = if (checkedId == screenshotId) ContextDeliveryMode.Screenshot else ContextDeliveryMode.Json
-            }
-        })
+        card.addView(contextSwitchRow(
+            title = "Идея голосом",
+            subtitle = "Голосовая заметка без снимка экрана.",
+            checked = config.contextActionIdeaEnabled
+        ) { config.contextActionIdeaEnabled = it })
+        card.addView(contextSwitchRow(
+            title = "Скриншот",
+            subtitle = "Картинка текущего экрана.",
+            checked = config.contextActionScreenshotEnabled
+        ) { config.contextActionScreenshotEnabled = it })
+        card.addView(contextSwitchRow(
+            title = "Скриншот + голос",
+            subtitle = "Снимок экрана с голосовой командой.",
+            checked = config.contextActionScreenshotVoiceEnabled
+        ) { config.contextActionScreenshotVoiceEnabled = it })
+        card.addView(contextSwitchRow(
+            title = "Контекст чата",
+            subtitle = "Видимый текст и структура текущего чата.",
+            checked = config.contextActionChatEnabled
+        ) { config.contextActionChatEnabled = it })
+        card.addView(contextSwitchRow(
+            title = "Сохранить контекст",
+            subtitle = "Отдельная отправка текущего контекста.",
+            checked = config.contextActionSaveEnabled
+        ) { config.contextActionSaveEnabled = it })
         root.addView(card, ui.matchWrap())
     }
 
-    private fun contextRadioButton(idValue: Int, title: String, subtitle: String): RadioButton =
-        RadioButton(this).apply {
-            id = idValue
-            text = "$title\n$subtitle"
-            textSize = 14f
-            setTextColor(COLOR_TEXT)
-            setPadding(0, ui.dp(4), 0, ui.dp(4))
+    private fun contextSwitchRow(title: String, subtitle: String, checked: Boolean, onChecked: (Boolean) -> Unit): View =
+        LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, ui.dp(6), 0, ui.dp(6))
+
+            val textColumn = LinearLayout(context).apply {
+                orientation = LinearLayout.VERTICAL
+            }
+            textColumn.addView(TextView(context).apply {
+                text = title
+                textSize = 14f
+                typeface = Typeface.DEFAULT_BOLD
+                setTextColor(COLOR_TEXT)
+            })
+            textColumn.addView(TextView(context).apply {
+                text = subtitle
+                textSize = 13f
+                setTextColor(COLOR_MUTED)
+                setPadding(0, ui.dp(2), ui.dp(10), 0)
+            })
+            addView(textColumn, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+            addView(Switch(context).apply {
+                isChecked = checked
+                setOnCheckedChangeListener { _, value -> onChecked(value) }
+            })
         }
 
     private fun addSettingsCard(root: LinearLayout) {

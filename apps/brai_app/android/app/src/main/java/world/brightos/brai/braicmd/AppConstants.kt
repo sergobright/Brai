@@ -22,6 +22,11 @@ object AppConstants {
     const val KEY_MAIN_ICON_SIZE_PERCENT = "main_icon_size_percent"
     const val KEY_SCREENSHOT_ICON_OPACITY_PERCENT = "screenshot_icon_opacity_percent"
     const val KEY_SCREENSHOT_ICON_SIZE_PERCENT = "screenshot_icon_size_percent"
+    const val KEY_CONTEXT_ACTION_IDEA_ENABLED = "context_action_idea_enabled"
+    const val KEY_CONTEXT_ACTION_SCREENSHOT_ENABLED = "context_action_screenshot_enabled"
+    const val KEY_CONTEXT_ACTION_SCREENSHOT_VOICE_ENABLED = "context_action_screenshot_voice_enabled"
+    const val KEY_CONTEXT_ACTION_CHAT_ENABLED = "context_action_chat_enabled"
+    const val KEY_CONTEXT_ACTION_SAVE_ENABLED = "context_action_save_enabled"
 
     const val DEFAULT_SERVER_URL = BuildConfig.BRAI_ANDROID_API
     const val DEFAULT_HEADER_CONTEXT_ENABLED = true
@@ -32,6 +37,7 @@ object AppConstants {
     const val DEFAULT_ICON_SIZE_PERCENT = 100
     const val MIN_ICON_SIZE_PERCENT = 70
     const val MAX_ICON_SIZE_PERCENT = 130
+    const val DEFAULT_CONTEXT_ACTION_ENABLED = true
     const val DEFAULT_POST_PROCESSING_PROMPT =
         "Исправь пунктуацию, заглавные буквы и очевидные ошибки распознавания речи. " +
             "Не меняй смысл, стиль и язык текста. Верни только готовый текст."
