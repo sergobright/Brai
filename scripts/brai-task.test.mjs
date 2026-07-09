@@ -75,6 +75,7 @@ test("read-only classifier allows diagnostics and rejects disguised writes", () 
   assert.equal(isReadOnlyShellCommand("stat -c %U:%G:%a deploy/scripts/preview-slots.sh"), true);
   assert.equal(isReadOnlyShellCommand("git worktree list --porcelain"), true);
   assert.equal(isReadOnlyShellCommand("node scripts/brai-task.mjs access-contract --local"), true);
+  assert.equal(isReadOnlyShellCommand("node scripts/brai-task.mjs access-contract --server"), false);
   assert.equal(isReadOnlyShellCommand("scripts/brai-guard-sync-check.sh --check"), true);
   assert.equal(isReadOnlyShellCommand("git diff --output=/tmp/diff.txt"), false);
   assert.equal(isReadOnlyShellCommand("rg --pre cat TODO"), false);
@@ -98,7 +99,8 @@ test("server access contract checks deploy ownership instead of agent write acce
 test("server access contract checks operation helper sudo boundary", () => {
   const script = fs.readFileSync(new URL("./brai-task.mjs", import.meta.url), "utf8");
   const sudoers = fs.readFileSync(new URL("../deploy/ansible/templates/brai-deploy-sudoers.j2", import.meta.url), "utf8");
-  assert.match(script, /commandCheck\("operation helper host-local sudo"/);
+  assert.match(script, /commandCheck\("operation create helper host-local sudo"/);
+  assert.match(script, /commandCheck\("operation complete helper host-local sudo"/);
   assert.match(script, /commandCheck\("accepted preview OTA sync access"/);
   assert.match(script, /sync-occupied-preview-ota-manifests\.sh/);
   assert.match(script, /BRAI_PROD_SOURCE_ROOT: path\.join\(envsRoot, "prod\/source"\)/);
@@ -176,10 +178,10 @@ test("hook analysis blocks base refresh inside an active task branch", () => {
   }
 });
 
-test("hook analysis allows official acceptance reconcile command", () => {
+test("hook analysis allows official acceptance reconcile command with escalation", () => {
   const result = analyzeHookInput(JSON.stringify({
     tool_name: "functions.exec_command",
-    tool_input: { cmd: "node scripts/brai-task.mjs acceptance-reconcile codex/foo" },
+    tool_input: { cmd: "node scripts/brai-task.mjs acceptance-reconcile codex/foo", sandbox_permissions: "require_escalated" },
   }));
   assert.equal(result.ok, true);
   assert.equal(result.write, true);
@@ -309,6 +311,20 @@ test("hook analysis allows read-only shell and official task starter", () => {
 
   const nonCodexManual = analyzeHookInput(JSON.stringify({ tool_name: "functions.exec_command", tool_input: { cmd: "git switch main" } }));
   assert.equal(nonCodexManual.manualCodexBranch, true);
+});
+
+test("hook analysis blocks known host-only commands without escalation", () => {
+  const blocked = analyzeHookInput(JSON.stringify({ tool_name: "functions.exec_command", tool_input: { cmd: "npm run app:build" } }));
+  assert.equal(blocked.ok, true);
+  assert.match(blocked.blockedReason, /sandbox_permissions=require_escalated/);
+
+  const escalated = analyzeHookInput(JSON.stringify({
+    tool_name: "functions.exec_command",
+    tool_input: { cmd: "npm run app:build", sandbox_permissions: "require_escalated" },
+  }));
+  assert.equal(escalated.ok, true);
+  assert.equal(escalated.write, true);
+  assert.equal(escalated.blockedReason, undefined);
 });
 
 test("hook analysis blocks stale repo-local task starter", () => {
@@ -475,7 +491,7 @@ test("delivery classifier separates infra-docs from runtime preview", () => {
 test("operation activity completion helper has a narrow shell contract", () => {
   const helper = fs.readFileSync(path.resolve(import.meta.dirname, "../deploy/scripts/complete-operation-activities.sh"), "utf8");
   assert.match(helper, /set -euo pipefail/);
-  assert.match(helper, /DEPLOY_REPO="\$\{BRAI_DEPLOY_REPO:-\/srv\/projects\/brai-envs\/prod\/source\}"/);
+  assert.match(helper, /BRAI_OPERATION_HELPER_REPO/);
   assert.match(helper, /--host-local/);
   assert.match(helper, /sudo -n -u "\$SERVICE_USER"/);
   assert.match(helper, /BRAI_DATABASE_URL is required/);
@@ -491,12 +507,47 @@ test("operation activity completion helper has a narrow shell contract", () => {
   assert.doesNotMatch(helper, /SQLite|sqlite|BRAI_DB|\.backup/);
 });
 
+test("operation activity creation helper rejects placeholder payloads before DB access", () => {
+  const result = spawnSync("bash", [
+    "deploy/scripts/create-operation-activity.sh",
+    "--local",
+    "--id",
+    "operation:agent-task:short",
+    "--title",
+    "Fix",
+    "--reason",
+    "trap",
+    "--description",
+    "x",
+  ], {
+    cwd: path.resolve(import.meta.dirname, ".."),
+    encoding: "utf8",
+  });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /Operation title is too short/);
+});
+
 test("production client publish also refreshes the public landing", () => {
   const script = fs.readFileSync(path.resolve(import.meta.dirname, "../deploy/scripts/publish-client-web-layer.sh"), "utf8");
   assert.match(script, /if \[\[ "\$ENVIRONMENT" == "prod" \]\]; then/);
   assert.match(script, /BRAI_WEB_SOURCE="\$ROOT\/landing\/public"/);
   assert.match(script, /BRAI_PUBLIC_SITE_TARGET:-\$ROOT\/deploy\/site/);
   assert.match(script, /"\$SCRIPT_DIR\/publish-web\.sh"/);
+});
+
+test("publish permission helper normalizes entire bounded artifact trees", () => {
+  const script = fs.readFileSync(path.resolve(import.meta.dirname, "../deploy/scripts/permissions.sh"), "utf8");
+  assert.doesNotMatch(script, /-user "\$\(id -u\)"/);
+  assert.match(script, /find "\$target" -type d -exec chmod 2775/);
+  assert.match(script, /find "\$target" -type f -exec chmod 0664/);
+});
+
+test("API test wrapper can read protected test env through brai-deploy group", () => {
+  const script = fs.readFileSync(path.resolve(import.meta.dirname, "brai-api-test.sh"), "utf8");
+  assert.match(script, /BRAI_TEST_ENV_FILE:-\/etc\/brai\/brai-test\.env/);
+  assert.match(script, /sg brai-deploy -c "test -r '\$TEST_ENV_FILE'"/);
+  assert.match(script, /\. <\(sg brai-deploy -c "cat '\$TEST_ENV_FILE'"\)/);
+  assert.match(script, /--test-concurrency=1/);
 });
 
 test("operation activity completion helper rejects unsafe ids", () => {

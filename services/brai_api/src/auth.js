@@ -2,7 +2,7 @@ import { betterAuth } from 'better-auth';
 import { emailOTP } from 'better-auth/plugins';
 import { Resend } from 'resend';
 import { Pool } from 'pg';
-import { isPostgresUrl } from './postgres-sync-db.js';
+import { isPostgresUrl, postgresPoolMax } from './postgres-sync-db.js';
 
 const DEFAULT_FROM = 'Brai <auth@mail.brightos.world>';
 const OTP_EXPIRES_IN_SECONDS = 5 * 60;
@@ -39,7 +39,11 @@ export function createBraiAuth({
   sendOtp = null
 }) {
   if (!isPostgresUrl(databaseUrl)) throw new Error('BRAI_DATABASE_URL must be a postgres:// or postgresql:// URL');
-  const db = new Pool({ connectionString: databaseUrl, ssl: postgresSsl(databaseUrl) });
+  const db = new Pool({
+    connectionString: databaseUrl,
+    ssl: postgresSsl(databaseUrl),
+    max: postgresPoolMax(process.env.BRAI_PG_POOL_MAX)
+  });
   const resend = resendApiKey ? new Resend(resendApiKey) : null;
   const sender = sendOtp ?? (async ({ email, otp }) => {
     if (!resend) {

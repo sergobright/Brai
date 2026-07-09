@@ -7,6 +7,7 @@ types.setTypeParser(20, (value) => Number(value));
 const pool = new Pool({
   connectionString: workerData.databaseUrl,
   ssl: workerData.ssl,
+  max: workerData.poolMax,
   connectionTimeoutMillis: workerData.timeoutMs,
   query_timeout: workerData.timeoutMs,
   statement_timeout: workerData.timeoutMs,

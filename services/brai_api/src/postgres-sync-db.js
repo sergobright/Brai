@@ -6,6 +6,7 @@ import { Worker } from 'node:worker_threads';
 
 const dirname = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_TIMEOUT_MS = 5000;
+const DEFAULT_POOL_MAX = 10;
 
 export function isPostgresUrl(value) {
   return /^postgres(?:ql)?:\/\//.test(String(value ?? ''));
@@ -14,6 +15,7 @@ export function isPostgresUrl(value) {
 export class PostgresSyncDatabase {
   constructor(databaseUrl, {
     timeoutMs = process.env.BRAI_PG_SYNC_TIMEOUT_MS,
+    poolMax = process.env.BRAI_PG_POOL_MAX,
     ssl = postgresSsl(databaseUrl)
   } = {}) {
     this.dialect = 'postgres';
@@ -21,7 +23,7 @@ export class PostgresSyncDatabase {
     this.currentTxId = null;
     this.tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'brai-pg-sync-'));
     this.worker = new Worker(path.join(dirname, 'postgres-sync-worker.js'), {
-      workerData: { databaseUrl, ssl, timeoutMs: this.timeoutMs },
+      workerData: { databaseUrl, ssl, timeoutMs: this.timeoutMs, poolMax: postgresPoolMax(poolMax) },
       execArgv: []
     });
     this.workerError = null;
@@ -104,6 +106,11 @@ export class PostgresSyncDatabase {
 export function postgresTimeoutMs(value) {
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_TIMEOUT_MS;
+}
+
+export function postgresPoolMax(value) {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : DEFAULT_POOL_MAX;
 }
 
 class PostgresSyncStatement {
