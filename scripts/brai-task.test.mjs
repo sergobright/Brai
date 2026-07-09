@@ -582,11 +582,15 @@ test("publish permission helper normalizes entire bounded artifact trees", () =>
 
 test("API test wrapper can read protected test env through brai-deploy group", () => {
   const script = fs.readFileSync(path.resolve(import.meta.dirname, "brai-api-test.sh"), "utf8");
+  const useNode = fs.readFileSync(path.resolve(import.meta.dirname, "use-node22.sh"), "utf8");
   const workflow = fs.readFileSync(path.resolve(import.meta.dirname, "../.github/workflows/brai-delivery.yml"), "utf8");
   assert.match(script, /BRAI_TEST_ENV_FILE:-\/etc\/brai\/brai-test\.env/);
   assert.match(script, /sg brai-deploy -c "test -r '\$TEST_ENV_FILE'"/);
   assert.match(script, /\. <\(sg brai-deploy -c "cat '\$TEST_ENV_FILE'"\)/);
   assert.match(script, /--test-concurrency=1/);
+  assert.match(useNode, /\$\{CI:-\}" == "true"/);
+  assert.match(useNode, /NODE_BIN="\$\(command -v node\)"/);
+  assert.match(useNode, /"\$NODE_BIN" "\$ROOT\/scripts\/require-node22\.mjs"/);
   assert.match(workflow, /run: scripts\/brai-api-test\.sh/);
 });
 
