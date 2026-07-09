@@ -11,5 +11,7 @@
 - Before behavior/responsibility/architecture search, call SocratiCode `codebase_status` for the active project path; if the index is ready, use `codebase_search` before reading files.
 - Use `rg`/shell search for exact strings, file discovery, and other non-semantic inspection.
 - Keep `.socraticodecontextartifacts.json` aligned with agent-facing docs, OpenSpec, and Memory Bank so rules and requirements are searchable as context artifacts.
-- Run `npm run socraticode:ensure` once in a repo/worktree when the shared index is missing, incomplete, or stale; after that the SocratiCode watcher keeps the shared index current on file changes.
-- Run `npm run socraticode:preflight` when SocratiCode behavior, agent rules, OpenSpec routing, or repository context indexing changes; it must verify the MCP config, shared index, and active watcher state.
+- SocratiCode for `/srv/projects/brai` is an always-on runtime service: `brai-socraticode-watcher.service` runs `scripts/brai-socraticode-watcher.mjs`, catches up the shared index, starts file watching, and self-heals every 60 seconds.
+- Run `npm run socraticode:ensure` when the shared index, code graph, context artifacts, or watcher are missing, incomplete, or stale; it performs safe catch-up and restarts watching.
+- Run `npm run socraticode:preflight` when SocratiCode behavior, agent rules, OpenSpec routing, or repository context indexing changes; it must verify the MCP config, canonical `codebase_brightos_brai` index, context artifacts, code graph freshness, and active watcher state.
+- Implementation handoff is fail-closed when the task marker has no successful SocratiCode usage marker. If the work truly only used exact string or file discovery, record the explicit fallback with `node scripts/brai-task.mjs socraticode-exact-only --reason "<why exact inspection was sufficient>"`.

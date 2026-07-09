@@ -79,12 +79,13 @@ deploy/scripts/postgres-smoke.mjs "$BRAI_DATABASE_URL"
 Repository Codex hooks are defined in `.codex/hooks.json`:
 
 - `PreToolUse` recursively inspects namespaced, custom, and nested tool calls such as `functions.apply_patch`, `custom_tool_call`, and `multi_tool_use.parallel`. Before a valid task state exists, only explicitly read-only shell commands and the official task starter are allowed; unknown shell commands are treated as write-like and blocked.
+- Safe SocratiCode codebase tools such as `codebase_status`, `codebase_search`, `codebase_context_search`, graph queries, and symbol queries mark the local task as having used SocratiCode. Destructive SocratiCode maintenance tools are blocked by the guard.
 - The local `.brai-task/` marker must come from `scripts/brai-task-start.sh` (`mode: new`) or an explicit same-thread `node scripts/brai-task.mjs follow-up` (`mode: follow-up`). Automatically created or manual markers are invalid for project-file writes.
 - The `.brai-task/task.json` `base` SHA is the frozen task base for follow-up, commit, push, and handoff checks. The guard blocks manual `origin/main` refresh commands in active `codex/*` task branches.
 - When Codex provides a thread id, the marker must match the current thread. A different or missing thread id blocks project-file writes, commits, and pushes; start a new task branch instead of continuing the auto-selected branch.
 - Manual creation or switching of `codex/*` branches through `git switch`, `git checkout`, `git branch`, or `git worktree` is blocked; use the task starter or same-thread follow-up marker instead.
 - If the current branch or its remote head is already included in `origin/main`, it is treated as accepted work and cannot receive more project-file changes. Start a new task branch even if Codex Desktop selected the old branch by default.
-- `pre-commit` marks local write intent, and `Stop` derives implementation work from Git state: dirty files, staged changes, local commits or diff against `origin/main`, marker validity, and the exact preview receipt for the current `HEAD`.
+- `pre-commit` marks local write intent, and `Stop` derives implementation work from Git state: dirty files, staged changes, local commits or diff against `origin/main`, marker validity, SocratiCode usage or exact-only fallback, and the exact preview/delivery receipt for the current `HEAD`.
 - `node scripts/brai-task.mjs doctor --strict` prints the same guard state and exits nonzero when the checkout is not ready for handoff.
 
 Codex requires new or changed repo hooks to be reviewed and trusted through `/hooks`; that trust is local Codex security state and is not committed to Git.

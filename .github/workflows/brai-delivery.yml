@@ -149,8 +149,7 @@ jobs:
       - run: node --test scripts/*.test.mjs deploy/scripts/*.test.mjs
       - run: npm --prefix apps/brai_app run lint
       - run: npm --prefix apps/brai_app run test -- --fileParallelism=false
-      - run: node --test
-        working-directory: services/brai_api
+      - run: scripts/brai-api-test.sh
         env:
           BRAI_TEST_DATABASE_URL: postgres://brai:brai@127.0.0.1:5432/brai_test
       - run: npm --prefix admin run lint

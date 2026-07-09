@@ -8,6 +8,9 @@ test("sandbox helper marks Next and API commands as requiring escalation", () =>
   assert.equal(sandboxCheckMode(["npm", "run", "app:dev"]).mode, "require_escalated");
   assert.equal(sandboxCheckMode(["npm", "--prefix", "apps/brai_app", "run", "build"]).mode, "require_escalated");
   assert.equal(sandboxCheckMode(["npm", "--prefix", "apps/brai_app", "run", "dev"]).mode, "require_escalated");
+  assert.equal(sandboxCheckMode(["npm", "--prefix", "admin", "run", "build"]).mode, "require_escalated");
+  assert.equal(sandboxCheckMode(["npm", "--prefix", "admin", "run", "dev"]).mode, "require_escalated");
+  assert.equal(sandboxCheckMode(["npm", "--prefix", "admin", "run", "start"]).mode, "require_escalated");
   assert.equal(sandboxCheckMode(["npm", "--prefix", "services/brai_api", "test"]).mode, "require_escalated");
   assert.equal(sandboxCheckMode(["npm", "--prefix", "services/brai_api", "run", "test"]).mode, "require_escalated");
   assert.equal(sandboxCheckMode(["scripts/brai-api-test.sh"]).mode, "require_escalated");
@@ -53,4 +56,7 @@ test("sandbox helper marks browser and Android commands", () => {
   assert.equal(sandboxCheckMode(["npm", "run", "android:build:release"]).mode, "require_escalated");
   assert.equal(sandboxCheckMode(["deploy/scripts/build-android-env-apk.sh", "production"]).mode, "require_escalated");
   assert.equal(sandboxCheckMode(["apps/brai_app/android/gradlew", ":app:testProductionDebugUnitTest"]).mode, "require_escalated");
+  assert.equal(sandboxCheckMode(["adb", "devices"]).mode, "require_escalated");
+  assert.equal(sandboxCheckMode(["emulator", "-list-avds"]).mode, "require_escalated");
+  assert.equal(sandboxCheckMode(["scripts/brai-task-start.sh", "sample-task"]).mode, "require_escalated");
 });

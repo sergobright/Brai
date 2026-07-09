@@ -38,7 +38,19 @@ export function sandboxCheckMode(command, env = process.env) {
   }
 
   if (
+    /\bscripts\/brai-task-start\.sh\b/.test(text) ||
+    /\bnode scripts\/brai-task\.mjs start\b/.test(text)
+  ) {
+    return {
+      mode: "require_escalated",
+      reason: "Brai task starter reads and writes authoritative Git/worktree metadata.",
+    };
+  }
+
+  if (
     /\bgradlew?\b/.test(text) ||
+    /\badb\b/.test(text) ||
+    /\bemulator\b/.test(text) ||
     /\bandroid:(build:release|release|debug)\b/.test(text) ||
     /\bapp:cap:sync\b/.test(text) ||
     /\bbuild-android-env-apk\.sh\b/.test(text)
@@ -52,6 +64,7 @@ export function sandboxCheckMode(command, env = process.env) {
   if (
     /\bnpm run app:(build|dev)\b/.test(text) ||
     /\bnpm --prefix apps\/brai_app run (build|dev)\b/.test(text) ||
+    /\bnpm --prefix admin run (build|dev|start)\b/.test(text) ||
     /\bnext (build|dev)\b/.test(text) ||
     /\bpublish-(client-web-layer|web|mobile-bundle|capacitor-apk)\.sh\b/.test(text) ||
     /\bnpm run publish:(client-web-layer|web|mobile-bundle|apk)\b/.test(text)
