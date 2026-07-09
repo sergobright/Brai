@@ -15,6 +15,24 @@ http://{{ brai_public_site_domain }} {
   file_server
 }
 
+http://{{ brai_adr_domain }} {
+  redir https://{{ brai_adr_domain }}{uri} permanent
+}
+
+{{ brai_adr_domain }} {
+  {{ brai_basic_auth_directive }}
+  encode zstd gzip
+  tls {
+    issuer acme {
+      disable_http_challenge
+    }
+  }
+
+  root * {{ brai_adr_root }}
+  try_files {path} {path}.html {path}/ /index.html
+  file_server
+}
+
 http://{{ brai_syncthing_domain }} {
   redir https://{{ brai_syncthing_domain }}{uri} permanent
 }

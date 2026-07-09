@@ -16,6 +16,11 @@
       "description": "Accepted and proposed OpenSpec requirements for Brai."
     },
     {
+      "name": "architecture-decisions",
+      "path": "./docs/adr",
+      "description": "Architecture Decision Records for Brai architecture rationale, alternatives, consequences, and confirmation checks."
+    },
+    {
       "name": "memory-bank",
       "path": "./memory-bank",
       "description": "Durable Brai project context, decisions, architecture notes, and progress."

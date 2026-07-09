@@ -9,8 +9,9 @@ This document is the index for project rules. `AGENTS.md` routes here; detailed 
 3. `docs/guidelines/`
 4. `openspec/specs/`
 5. `openspec/changes/`
-6. `memory-bank/`
-7. Real repository state
+6. `docs/adr/`
+7. `memory-bank/`
+8. Real repository state
 
 ## Rule Ownership
 
@@ -21,6 +22,7 @@ Each procedural rule must have one canonical home. Other files may only route to
 | Task | Guideline |
 | --- | --- |
 | Source-of-truth or docs changes | [01-sources-of-truth.md](guidelines/01-sources-of-truth.md) |
+| Architecture decisions and rationale | [01-sources-of-truth.md](guidelines/01-sources-of-truth.md), [10-agent-tools-openspec.md](guidelines/10-agent-tools-openspec.md), [docs/adr](adr/) |
 | UI, shadcn, icons, visual QA | [02-ui-shadcn-radix-visual-rules.md](guidelines/02-ui-shadcn-radix-visual-rules.md), [12-ui-icons-visual-qa.md](guidelines/12-ui-icons-visual-qa.md) |
 | Next.js/Capacitor client | [03-next-capacitor-client.md](guidelines/03-next-capacitor-client.md) |
 | API, Postgres, sync, migrations, runtime logs | [04-api-data-sync-migrations.md](guidelines/04-api-data-sync-migrations.md) |

@@ -22,6 +22,7 @@
 - `deploy/ansible/` и `deploy/environments.json` - one-VPS production/preview environment setup and routing source.
 - `docs/operations/branch-preview-environments.md` - branch preview workflow, CI secrets, deploy-user boundary and branch protection steps.
 - `openspec/` - accepted/planned requirements.
+- `docs/adr/` - architecture decision records and rationale, rendered by Log4brains.
 - `memory-bank/` - фактический контекст и решения.
 - `.socraticode.json` - committed SocratiCode `projectId` so the main checkout and task worktrees share one semantic index.
 - `.socraticodecontextartifacts.json` - SocratiCode context artifact registry for agent rules, docs, OpenSpec, and Memory Bank.
@@ -49,6 +50,10 @@
 - `npm run android:build:release` - release APK build.
 - `npm run openspec:guard` - проверка, что завершённые OpenSpec changes не оставлены активными.
 - `npm run openspec:validate` - completed-change guard плюс strict OpenSpec validation.
+- `npm run adr:list` - список Architecture Decision Records через Log4brains.
+- `npm run adr:preview` - локальный Log4brains preview для ADR.
+- `npm run adr:build` - сборка статического ADR-сайта.
+- `npm run publish:adr` - сборка и публикация ADR-сайта в защищённый `adr.brightos.world`.
 - `scripts/brai-guard-sync-check.sh --check` - проверка, что installed Brai guard copy в `/srv/opt` совпадает с repo `scripts/brai-task.mjs`.
 - `npm run socraticode:ensure` - создать/догнать shared SocratiCode index для текущего worktree path и поднять watcher.
 - `npm run socraticode:preflight` - проверка, что SocratiCode подключён, shared index complete, context artifacts объявлены, и watcher активен для текущего project path.

@@ -160,11 +160,12 @@ Repository secret:
 The deploy user needs write access to `/srv/projects/brai-envs/` for CI uploads,
 preview/dev source checkouts, preview/dev web/OTA outputs, per-environment runtime env files, and
 preview slot state. For production deploys it also needs write access to the existing production
-web/OTA targets:
+web/OTA and ADR static-site targets:
 
 ```text
 /srv/projects/brai/deploy/web
 /srv/projects/brai/deploy/mobile-update
+/srv/projects/brai-envs/prod/adr
 ```
 
 Runtime database writes go to Supabase Postgres through `BRAI_DATABASE_URL`. SQLite files are not
@@ -194,7 +195,7 @@ systemctl restart brai-admin-preview-e.service
 
 The Ansible sudoers template is `deploy/ansible/templates/brai-deploy-sudoers.j2`.
 
-Deploy scripts normalize public web, OTA, release, and preview slot files through
+Deploy scripts normalize public web, OTA, release, ADR, and preview slot files through
 `deploy/scripts/permissions.sh`. New publish paths must use that helper or Ansible-owned
 equivalent logic so they preserve group-write instead of resetting trees to `go=rX`.
 Accepted-preview release and OTA sync must execute from `/srv/projects/brai-envs/*/source`;

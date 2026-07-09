@@ -312,6 +312,14 @@
         group: "{{ brai_deploy_user }}"
         mode: "2775"
 
+    - name: Create ADR site directory
+      ansible.builtin.file:
+        path: "{{ brai_adr_root }}"
+        state: directory
+        owner: "{{ brai_deploy_user }}"
+        group: "{{ brai_deploy_user }}"
+        mode: "2775"
+
     - name: Ensure public landing root exists
       ansible.builtin.file:
         path: "{{ brai_public_site_root }}"
