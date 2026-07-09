@@ -35,7 +35,7 @@ database state before the slot is reused.
 
 If the preview branch changes the Android native boundary, deploy also builds a slot-specific preview APK and records `brai-<slot>-vN-previewM.apk`, APK `vN`, branch-local preview `M`, and `versionCode=N*10000+M` in the preview slot registry/status page. Preview OTA manifests then target the same release key, build kind, stable `N`, and preview `M`, so stale slot APKs block with an APK update screen instead of silently running an incompatible web bundle.
 
-Infrastructure/documentation-only branches can use the Temporal no-preview path when the delivery class is `infra-docs`. Strict technical-only branches can use the same no-preview path as `technical-no-preview` when the changed files are limited to tests, test configuration, or narrowly allowed agent-operation bookkeeping that is proven by CI rather than browser review. That path records `delivery_classified`, `no_preview_required`, `delivery_handoff_*`, and `auto_merge_*` events instead of allocating a slot. Temporal then marks `supabase_preview`, `preview_deploy`, `accepted_preview_promotion`, `supabase_preview_release`, and `slot_release` as `not_applicable`; after `pr_merged`, the branch lifecycle is complete without a slot.
+Infrastructure/documentation-only branches can use the Temporal no-preview path when the delivery class is `infra-docs`. Strict technical-only branches can use the same no-preview path as `technical-no-preview` when the changed files are limited to tests, test configuration, or narrowly allowed agent-operation bookkeeping that is proven by CI rather than browser review. That path records `delivery_classified` and `no_preview_required`, then dispatches Temporal handoff/merge activities instead of allocating a slot. Temporal marks `supabase_preview`, `preview_deploy`, `accepted_preview_promotion`, `supabase_preview_release`, and `slot_release` as `not_applicable`; after `no_preview_merged`, the branch lifecycle is complete without a slot.
 
 Local dev server URLs are agent-only verification aids. The user-facing handoff for preview-class project changes is the preview slot URL after `deploy-preview` succeeds; if CI/deploy is not complete, report that blocker instead of asking the project owner to open `localhost` or `127.0.0.1`.
 
@@ -79,12 +79,13 @@ deploy/scripts/postgres-smoke.mjs "$BRAI_DATABASE_URL"
 Repository Codex hooks are defined in `.codex/hooks.json`:
 
 - `PreToolUse` recursively inspects namespaced, custom, and nested tool calls such as `functions.apply_patch`, `custom_tool_call`, and `multi_tool_use.parallel`. Before a valid task state exists, only explicitly read-only shell commands and the official task starter are allowed; unknown shell commands are treated as write-like and blocked.
+- Safe SocratiCode codebase tools such as `codebase_status`, `codebase_search`, `codebase_context_search`, graph queries, and symbol queries mark the local task as having used SocratiCode. Destructive SocratiCode maintenance tools are blocked by the guard.
 - The local `.brai-task/` marker must come from `scripts/brai-task-start.sh` (`mode: new`) or an explicit same-thread `node scripts/brai-task.mjs follow-up` (`mode: follow-up`). Automatically created or manual markers are invalid for project-file writes.
 - The `.brai-task/task.json` `base` SHA is the frozen task base for follow-up, commit, push, and handoff checks. The guard blocks manual `origin/main` refresh commands in active `codex/*` task branches.
 - When Codex provides a thread id, the marker must match the current thread. A different or missing thread id blocks project-file writes, commits, and pushes; start a new task branch instead of continuing the auto-selected branch.
 - Manual creation or switching of `codex/*` branches through `git switch`, `git checkout`, `git branch`, or `git worktree` is blocked; use the task starter or same-thread follow-up marker instead.
 - If the current branch or its remote head is already included in `origin/main`, it is treated as accepted work and cannot receive more project-file changes. Start a new task branch even if Codex Desktop selected the old branch by default.
-- `pre-commit` marks local write intent, and `Stop` derives implementation work from Git state: dirty files, staged changes, local commits or diff against `origin/main`, marker validity, and the exact preview receipt for the current `HEAD`.
+- `pre-commit` marks local write intent, and `Stop` derives implementation work from Git state: dirty files, staged changes, local commits or diff against `origin/main`, marker validity, SocratiCode usage or exact-only fallback, and the exact preview/delivery receipt for the current `HEAD`.
 - `node scripts/brai-task.mjs doctor --strict` prints the same guard state and exits nonzero when the checkout is not ready for handoff.
 
 Codex requires new or changed repo hooks to be reviewed and trusted through `/hooks`; that trust is local Codex security state and is not committed to Git.
@@ -129,9 +130,9 @@ Preview acceptance flow:
 codex/* accepted -> accept-preview.sh -> PR/merge queue into main -> production release/deploy -> release preview slot -> delete accepted branch/worktree
 ```
 
-Temporal is the required CI/CD control ledger for this flow. See
-[Temporal CI/CD Orchestration](temporal-ci-cd.md). GitHub Actions still runs the existing checks and deploy scripts, but strict Temporal signals gate the critical transitions. Failed Temporal recording is a blocker, not a reason to bypass checks, deploy jobs, slot registry, or branch protection.
-If this flow changes, update the Temporal workflow state, signals, tests, and the Temporal CI/CD document in the same branch; required delivery work must not live only in GitHub Actions or shell scripts.
+Temporal is the required CI/CD orchestrator for this flow. See
+[Temporal CI/CD Orchestration](temporal-ci-cd.md). GitHub Actions still runs checks and reports external facts, but deploy/release/promotion/cleanup side effects run as Temporal activities. Failed Temporal dispatch or a Temporal blocker is not a reason to bypass checks, deploy jobs, slot registry, or branch protection.
+If this flow changes, update the Temporal workflow state, dispatch/events, tests, and the Temporal CI/CD document in the same branch; required delivery work must not live only in GitHub Actions or shell scripts.
 
 Acceptance trigger:
 
@@ -175,6 +176,10 @@ The deploy user must not need read or write access to `/srv/projects/brai/.git`.
 ```text
 caddy validate --config /etc/caddy/Caddyfile
 systemctl reload caddy
+/srv/opt/brai-main-sync.sh *
+sudo -u brai /srv/opt/node-v22.16.0/bin/npm --prefix /srv/projects/brai/services/brai_temporal ci
+systemctl restart brai-temporal-worker.service
+systemd-run --unit=brai-temporal-worker-delayed-restart --on-active=* --collect /bin/systemctl restart brai-temporal-worker.service
 sudo -u brai /srv/projects/brai-envs/prod/source/deploy/scripts/complete-operation-activities.sh --local operation:agent-task:*
 systemctl restart brai-api.service
 systemctl restart brai-api-dev.service

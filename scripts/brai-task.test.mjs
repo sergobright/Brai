@@ -20,6 +20,7 @@ import {
   isManualCodexBranchCommand,
   isReadOnlyShellCommand,
   isSensitivePath,
+  isSocraticodeTool,
   isTaskBaseRefreshCommand,
   isWriteLikeCommand,
   linkDependencyDirs,
@@ -28,6 +29,7 @@ import {
   taskWorktreeParent,
   validateTaskMarker,
   validateTaskThread,
+  validateSocraticodeRequirement,
   validateDeliveryReceipt,
   validatePreviewReceipt,
   validatePushUpdate,
@@ -147,6 +149,46 @@ test("hook analysis detects namespaced custom and nested write tools", () => {
   }
 });
 
+test("hook analysis marks safe SocratiCode codebase tools as semantic use", () => {
+  assert.equal(isSocraticodeTool("mcp__socraticode.codebase_status"), true);
+  assert.equal(isSocraticodeTool("codebase_search"), true);
+
+  for (const tool_name of [
+    "mcp__socraticode.codebase_status",
+    "mcp__socraticode.codebase_search",
+    "mcp__socraticode.codebase_context_search",
+    "mcp__socraticode.codebase_graph_status",
+    "codebase_status",
+  ]) {
+    const result = analyzeHookInput(JSON.stringify({ tool_name, tool_input: { projectPath: "/srv/projects/brai" } }));
+    assert.equal(result.ok, true);
+    assert.equal(result.write, false);
+    assert.equal(result.socraticodeUse, true);
+  }
+
+  const destructive = analyzeHookInput(JSON.stringify({ tool_name: "mcp__socraticode.codebase_remove", tool_input: { projectPath: "/srv/projects/brai" } }));
+  assert.equal(destructive.ok, false);
+  assert.match(destructive.reason, /destructive SocratiCode/);
+});
+
+test("SocratiCode requirement blocks implementation handoff without marker", () => {
+  assert.deepEqual(validateSocraticodeRequirement({}, false), { ok: true, required: false });
+  assert.match(validateSocraticodeRequirement({}, true).message, /must use SocratiCode/);
+  assert.deepEqual(validateSocraticodeRequirement({ socraticodeUsedAt: "2026-07-09T00:00:00.000Z" }, true), {
+    ok: true,
+    required: true,
+    mode: "used",
+  });
+  assert.deepEqual(validateSocraticodeRequirement({
+    socraticodeFallbackAt: "2026-07-09T00:00:00.000Z",
+    socraticodeFallbackReason: "Only exact rg inspection was needed.",
+  }, true), {
+    ok: true,
+    required: true,
+    mode: "exact-only",
+  });
+});
+
 test("hook analysis blocks base refresh inside an active task branch", () => {
   const repo = fs.mkdtempSync(path.join(os.tmpdir(), "brai-task-base-refresh-"));
   const previous = process.cwd();
@@ -169,6 +211,7 @@ test("hook analysis blocks base refresh inside an active task branch", () => {
         mode: "new",
         base,
         createdAt: "2026-06-26T00:00:00.000Z",
+        socraticodeUsedAt: "2026-06-26T00:00:30.000Z",
       })}\n`,
     );
     process.chdir(repo);
@@ -375,6 +418,8 @@ test("delivery classifier separates infra-docs from runtime preview", () => {
   assert.equal(deliveryClassForFile("services/brai_api/test/api.auth-migrations.test.js"), "technical");
   assert.equal(deliveryClassForFile("deploy/environments.json"), "infra");
   assert.equal(deliveryClassForFile("deploy/ansible/brai.yml"), "infra");
+  assert.equal(deliveryClassForFile("deploy/systemd/brai-socraticode-watcher.service"), "infra");
+  assert.equal(deliveryClassForFile("deploy/systemd/brai-temporal-worker.service"), "infra");
   assert.equal(deliveryClassForFile("deploy/scripts/apk-release-targets.mjs"), "infra");
   assert.equal(deliveryClassForFile("deploy/scripts/build-nonproduction-apks.sh"), "infra");
   assert.equal(deliveryClassForFile("deploy/scripts/resolve-deploy-env.mjs"), "infra");
@@ -406,6 +451,7 @@ test("delivery classifier separates infra-docs from runtime preview", () => {
 
   assert.equal(classifyDelivery(["docs/foo.md"]).deliveryClass, "infra-docs");
   assert.equal(classifyDelivery([".github/workflows/brai-delivery.yml"]).deliveryClass, "infra-docs");
+  assert.equal(classifyDelivery(["deploy/systemd/brai-socraticode-watcher.service"]).deliveryClass, "infra-docs");
   assert.equal(classifyDelivery(["deploy/scripts/complete-operation-activities.sh"]).deliveryClass, "infra-docs");
   assert.equal(classifyDelivery(["deploy/scripts/list-operation-activities.sh"]).deliveryClass, "infra-docs");
   assert.equal(classifyDelivery(["supabase/migrations/0002_enable_rls_public_tables.sql"]).deliveryClass, "infra-docs");
@@ -755,6 +801,7 @@ test("task marker must come from task start or explicit follow-up", () => {
     mode: "new",
     base: "1111111111111111111111111111111111111111",
     createdAt: "2026-06-26T00:00:00.000Z",
+        socraticodeUsedAt: "2026-06-26T00:00:30.000Z",
   };
   assert.deepEqual(validateTaskMarker(marker, "codex/foo"), { ok: true });
   assert.deepEqual(validateTaskMarker({ ...marker, mode: "follow-up" }, "codex/foo"), { ok: true });
@@ -793,6 +840,7 @@ test("follow-up keeps the original task base after origin-main advances", () => 
       mode: "new",
       base,
       createdAt: "2026-06-26T00:00:00.000Z",
+        socraticodeUsedAt: "2026-06-26T00:00:30.000Z",
     })}\n`,
   );
   git(["checkout", "-b", "main", base], repo);
@@ -834,6 +882,7 @@ test("task state rejects a branch with another task marker", () => {
         mode: "new",
         base: git(["rev-parse", "HEAD"], repo).stdout.trim(),
         createdAt: "2026-06-26T00:00:00.000Z",
+        socraticodeUsedAt: "2026-06-26T00:00:30.000Z",
         writeIntentAt: "2026-06-26T00:01:00.000Z",
         ...(process.env.CODEX_THREAD_ID ? { threadId: process.env.CODEX_THREAD_ID } : {}),
       })}\n`,
@@ -881,6 +930,7 @@ test("task state keeps the original task base when origin-main advances", () => 
         mode: "new",
         base,
         createdAt: "2026-06-26T00:00:00.000Z",
+        socraticodeUsedAt: "2026-06-26T00:00:30.000Z",
         writeIntentAt: "2026-06-26T00:01:00.000Z",
         ...(process.env.CODEX_THREAD_ID ? { threadId: process.env.CODEX_THREAD_ID } : {}),
       })}\n`,
@@ -925,6 +975,18 @@ test("task starter runs scoped repair and preflight after installed guard", () =
   assert.match(script, /brai-task\.mjs" preflight --strict/);
 });
 
+test("SocratiCode watcher service is an always-on repo-managed daemon", () => {
+  const unit = fs.readFileSync(new URL("../deploy/systemd/brai-socraticode-watcher.service", import.meta.url), "utf8");
+  const script = fs.readFileSync(new URL("./brai-socraticode-watcher.mjs", import.meta.url), "utf8");
+
+  assert.match(unit, /User=mark/);
+  assert.match(unit, /WorkingDirectory=\/srv\/projects\/brai/);
+  assert.match(unit, /Restart=always/);
+  assert.match(unit, /ExecStart=\/srv\/opt\/node-v22\.16\.0\/bin\/node \/srv\/projects\/brai\/scripts\/brai-socraticode-watcher\.mjs/);
+  assert.match(script, /runSocraticodeCheck\(\{ mode: "ensure"/);
+  assert.match(script, /60_000/);
+});
+
 test("task starter creates writable nested worktrees from repo and supports legacy task roots", () => {
   assert.equal(taskWorktreeParent("/srv/projects/brai"), "/srv/projects/brai/.codex-worktrees");
   assert.equal(taskWorktreeParent("/srv/projects/brai/.codex-worktrees/existing-task"), "/srv/projects/brai/.codex-worktrees");
@@ -955,6 +1017,7 @@ test("task starter blocks another open branch in the same Codex thread", () => {
         mode: "new",
         base: "1111111111111111111111111111111111111111",
         createdAt: "2026-06-26T00:00:00.000Z",
+        socraticodeUsedAt: "2026-06-26T00:00:30.000Z",
         threadId: "thread-a",
       })}\n`,
     );
@@ -1002,6 +1065,7 @@ test("task starter ignores squash-merged infra docs branches with delivery recei
           mode: "new",
           base: "1111111111111111111111111111111111111111",
           createdAt: "2026-06-26T00:00:00.000Z",
+        socraticodeUsedAt: "2026-06-26T00:00:30.000Z",
           threadId: "thread-a",
         })}\n`,
       );
@@ -1063,6 +1127,7 @@ test("task starter does not ignore infra docs delivery receipt for the wrong com
         mode: "new",
         base: "1111111111111111111111111111111111111111",
         createdAt: "2026-06-26T00:00:00.000Z",
+        socraticodeUsedAt: "2026-06-26T00:00:30.000Z",
         threadId: "thread-a",
       })}\n`,
     );
@@ -1256,6 +1321,7 @@ test("task state blocks local implementation work without exact preview receipt"
         mode: "new",
         base,
         createdAt: "2026-06-26T00:00:00.000Z",
+        socraticodeUsedAt: "2026-06-26T00:00:30.000Z",
         ...(process.env.CODEX_THREAD_ID ? { threadId: process.env.CODEX_THREAD_ID } : {}),
       })}\n`,
     );
@@ -1310,6 +1376,7 @@ test("task state allows infra-docs work with exact delivery receipt", () => {
         mode: "new",
         base,
         createdAt: "2026-06-26T00:00:00.000Z",
+        socraticodeUsedAt: "2026-06-26T00:00:30.000Z",
         ...(process.env.CODEX_THREAD_ID ? { threadId: process.env.CODEX_THREAD_ID } : {}),
       })}\n`,
     );
@@ -1362,6 +1429,61 @@ test("task state allows infra-docs work with exact delivery receipt", () => {
   }
 });
 
+test("task state blocks handoff receipts when SocratiCode was not used", () => {
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), "brai-task-socraticode-required-"));
+  const previous = process.cwd();
+  try {
+    git(["init"], repo);
+    git(["config", "user.email", "test@example.invalid"], repo);
+    git(["config", "user.name", "Brai Test"], repo);
+    fs.writeFileSync(path.join(repo, ".gitignore"), ".brai-task/\n");
+    fs.writeFileSync(path.join(repo, "base.txt"), "base\n");
+    git(["add", ".gitignore", "base.txt"], repo);
+    git(["commit", "-m", "base"], repo);
+    git(["checkout", "-b", "codex/foo"], repo);
+    const base = git(["rev-parse", "HEAD"], repo).stdout.trim();
+    git(["update-ref", "refs/remotes/origin/main", base], repo);
+    fs.mkdirSync(path.join(repo, ".brai-task"));
+    fs.writeFileSync(
+      path.join(repo, ".brai-task", "task.json"),
+      `${JSON.stringify({
+        branch: "codex/foo",
+        mode: "new",
+        base,
+        createdAt: "2026-06-26T00:00:00.000Z",
+        ...(process.env.CODEX_THREAD_ID ? { threadId: process.env.CODEX_THREAD_ID } : {}),
+      })}\n`,
+    );
+    fs.mkdirSync(path.join(repo, "docs"), { recursive: true });
+    fs.writeFileSync(path.join(repo, "docs", "change.md"), "change\n");
+    git(["add", "docs/change.md"], repo);
+    git(["commit", "-m", "docs change"], repo);
+    const head = git(["rev-parse", "HEAD"], repo).stdout.trim();
+    fs.writeFileSync(
+      path.join(repo, ".brai-task", "delivery-handoff.json"),
+      `${JSON.stringify({
+        receiptType: "brai-delivery-handoff-v1",
+        branch: "codex/foo",
+        commit: head,
+        deliveryClass: "infra-docs",
+        prNumber: 7,
+        prUrl: "https://github.example/pr/7",
+        prState: "MERGED",
+        mergedAt: "2026-06-26T00:00:00Z",
+        runId: 123,
+        verifiedAt: "2026-06-26T00:00:00.000Z",
+      })}\n`,
+    );
+    process.chdir(repo);
+
+    const state = deriveTaskState();
+    assert.equal(state.ok, false);
+    assert.match(state.message, /must use SocratiCode/);
+  } finally {
+    process.chdir(previous);
+  }
+});
+
 test("delivery handoff blocks open infra-docs PRs without writing a receipt", () => {
   for (const mergeStateStatus of ["BEHIND", "BLOCKED", "DIRTY"]) {
     const fixture = setupInfraDocsHandoffFixture({ prState: "OPEN", mergeStateStatus, autoMerge: true });
@@ -1403,30 +1525,30 @@ test("delivery handoff does not write a receipt when a required delivery job fai
 
 test("infra docs workflow marks handoff passed only from the PR merge job", () => {
   const workflow = fs.readFileSync(new URL("../.github/workflows/brai-delivery.yml", import.meta.url), "utf8");
+  const workflows = fs.readFileSync(new URL("../services/brai_temporal/src/workflows.mjs", import.meta.url), "utf8");
   const autoMergeJob = workflow.slice(workflow.indexOf("auto-merge-infra-docs:"), workflow.indexOf("deploy-prod:"));
   const recordMergeJob = workflow.slice(workflow.indexOf("record-infra-docs-merge:"), workflow.indexOf("release-preview-slot:"));
   assert.doesNotMatch(autoMergeJob, /event delivery_handoff_passed/);
-  assert.match(recordMergeJob, /Cleanup accepted no-preview branch/);
-  assert.match(recordMergeJob, /deploy\/scripts\/ci-cleanup-accepted-branches\.sh --branch "\$BRAI_BRANCH"/);
-  assert.match(recordMergeJob, /continue-on-error: true/);
   assert.match(recordMergeJob, /permissions:\n\s+contents: write/);
-  assert.match(autoMergeJob, /BRAI_ACCEPT_NO_PREVIEW_ONLY/);
-  assert.match(recordMergeJob, /event delivery_handoff_passed/);
-  assert.match(recordMergeJob, /event pr_merged/);
+  assert.match(autoMergeJob, /dispatch-no-preview-handoff/);
+  assert.match(recordMergeJob, /dispatch-no-preview-merged/);
+  assert.match(workflows, /delivery_handoff_passed/);
+  assert.match(workflows, /cleanupAcceptedBranches\(\{ branch: state\.branch \}\)/);
+  assert.match(workflows, /eventLike\(request, "pr_merged"\)/);
   assert.match(recordMergeJob, /brai-delivery:technical-no-preview/);
-  assert.ok(recordMergeJob.indexOf("event delivery_handoff_passed") < recordMergeJob.indexOf("event pr_merged"));
   assert.match(recordMergeJob, /BRAI_PR_MERGED_AT/);
 });
 
-test("delivery workflow serializes main sync after prod deploy", () => {
+test("delivery workflow dispatches prod deploy through Temporal and bootstraps worker changes", () => {
   const workflow = fs.readFileSync(new URL("../.github/workflows/brai-delivery.yml", import.meta.url), "utf8");
-  const deployProdJob = workflow.slice(workflow.indexOf("deploy-prod:"), workflow.indexOf("sync-local-main-checkout:"));
-  const syncJob = workflow.slice(workflow.indexOf("sync-local-main-checkout:"), workflow.indexOf("record-infra-docs-merge:"));
+  const deployProdJob = workflow.slice(workflow.indexOf("deploy-prod:"), workflow.indexOf("deploy-dev:"));
 
-  assert.match(deployProdJob, /id: deploy_prod/);
   assert.match(deployProdJob, /permissions:\n\s+contents: write/);
-  assert.match(deployProdJob, /Temporal prod deploy failed\n\s+if: failure\(\) && steps\.deploy_prod\.outcome == 'failure'/);
-  assert.match(syncJob, /needs: deploy-prod/);
+  assert.match(deployProdJob, /id: temporal_worker_restart/);
+  assert.match(deployProdJob, /Bootstrap Temporal worker for orchestration changes/);
+  assert.match(deployProdJob, /ci-ssh-sync-main-checkout\.sh/);
+  assert.match(deployProdJob, /dispatch-promotion --target prod/);
+  assert.doesNotMatch(workflow, /sync-local-main-checkout:/);
 });
 
 test("delivery workflow releases preview slots for unmerged closed codex PRs", () => {
@@ -1436,7 +1558,9 @@ test("delivery workflow releases preview slots for unmerged closed codex PRs", (
   assert.match(releaseJob, /github\.event\.pull_request\.merged == false/);
   assert.match(releaseJob, /github\.event\.pull_request\.head\.ref/);
   assert.match(releaseJob, /github\.event\.pull_request\.head\.sha/);
-  assert.match(releaseJob, /steps\.release_slot\.outputs\.released == 'true' \|\| github\.event_name == 'pull_request'/);
+  assert.match(releaseJob, /dispatch-release-preview/);
+  assert.match(releaseJob, /BRAI_CLOSE_OUTCOME/);
+  assert.match(releaseJob, /abandoned_closed/);
 });
 
 test("delivery handoff writes infra-docs receipt only for merged PRs", () => {
@@ -1512,6 +1636,7 @@ test("no-preview acceptance diffs ignore reconciled main-only runtime paths", ()
         mode: "new",
         base,
         createdAt: "2026-06-26T00:00:00.000Z",
+        socraticodeUsedAt: "2026-06-26T00:00:30.000Z",
         ...(process.env.CODEX_THREAD_ID ? { threadId: process.env.CODEX_THREAD_ID } : {}),
       })}\n`,
     );
@@ -1595,6 +1720,7 @@ test("task state allows exact delivery receipt after infra-docs branch was squas
         mode: "new",
         base,
         createdAt: "2026-06-26T00:00:00.000Z",
+        socraticodeUsedAt: "2026-06-26T00:00:30.000Z",
         ...(process.env.CODEX_THREAD_ID ? { threadId: process.env.CODEX_THREAD_ID } : {}),
       })}\n`,
     );
@@ -1664,6 +1790,7 @@ test("task state rejects same-thread writes after local acceptance marker", () =
         mode: "new",
         base,
         createdAt: "2026-06-26T00:00:00.000Z",
+        socraticodeUsedAt: "2026-06-26T00:00:30.000Z",
         ...(process.env.CODEX_THREAD_ID ? { threadId: process.env.CODEX_THREAD_ID } : {}),
       })}\n`,
     );
@@ -1748,6 +1875,7 @@ test("acceptance reconcile merges current main into the same accepted branch", (
         mode: "new",
         base,
         createdAt: "2026-06-26T00:00:00.000Z",
+        socraticodeUsedAt: "2026-06-26T00:00:30.000Z",
         ...(process.env.CODEX_THREAD_ID ? { threadId: process.env.CODEX_THREAD_ID } : {}),
       })}\n`,
     );
@@ -1829,6 +1957,7 @@ test("task state rejects squash-merged branch by merged PR head oid", () => {
         mode: "new",
         base,
         createdAt: "2026-06-26T00:00:00.000Z",
+        socraticodeUsedAt: "2026-06-26T00:00:30.000Z",
         ...(process.env.CODEX_THREAD_ID ? { threadId: process.env.CODEX_THREAD_ID } : {}),
       })}\n`,
     );
@@ -1876,6 +2005,7 @@ test("accept preview checks verified preview before PR actions", () => {
 test("accepted preview stale cleanup is best effort", () => {
   const script = fs.readFileSync(path.join(process.cwd(), "deploy/scripts/ci-ssh-complete-accepted-previews.sh"), "utf8");
   const workflow = fs.readFileSync(path.join(process.cwd(), ".github/workflows/brai-delivery.yml"), "utf8");
+  const temporalWorkflow = fs.readFileSync(path.join(process.cwd(), "services/brai_temporal/src/workflows.mjs"), "utf8");
   const cleanupScript = fs.readFileSync(path.join(process.cwd(), "deploy/scripts/ci-cleanup-accepted-branches.sh"), "utf8");
   const pruneScript = fs.readFileSync(path.join(process.cwd(), "deploy/scripts/ci-ssh-prune-accepted-branches.sh"), "utf8");
   const promoteScript = fs.readFileSync(path.join(process.cwd(), "deploy/scripts/ci-ssh-promote-deployment.sh"), "utf8");
@@ -1895,9 +2025,8 @@ test("accepted preview stale cleanup is best effort", () => {
   assert.match(cleanupLoop, /cleanup_previously_accepted_preview/);
   assert.match(cleanupLoop, /Best-effort cleanup failed/);
   assert.doesNotMatch(cleanupLoop, /exit 1/);
-  assert.match(workflow, /Cleanup accepted preview branches/);
-  assert.match(workflow, /deploy\/scripts\/ci-cleanup-accepted-branches\.sh --recent-merged/);
-  assert.match(workflow, /continue-on-error: true/);
+  assert.match(workflow, /dispatch-promotion --target prod/);
+  assert.match(temporalWorkflow, /cleanupAcceptedBranches\(\{ recentMerged: true \}\)/);
   assert.match(cleanupScript, /BRAI_ACTIVE_PREVIEW_BRANCHES_JSON="\$ACTIVE_BRANCHES_JSON"/);
   assert.match(cleanupScript, /cleanup-accepted-branches\.mjs/);
   assert.match(cleanupScript, /ci-ssh-prune-accepted-branches\.sh/);
@@ -1975,6 +2104,7 @@ function setupInfraDocsHandoffFixture({ prState, mergeStateStatus = "CLEAN", aut
       mode: "new",
       base,
       createdAt: "2026-06-26T00:00:00.000Z",
+        socraticodeUsedAt: "2026-06-26T00:00:30.000Z",
       ...(process.env.CODEX_THREAD_ID ? { threadId: process.env.CODEX_THREAD_ID } : {}),
     })}\n`,
   );
@@ -2063,6 +2193,7 @@ function setupPreviewHandoffFixture() {
       mode: "new",
       base,
       createdAt: "2026-06-26T00:00:00.000Z",
+        socraticodeUsedAt: "2026-06-26T00:00:30.000Z",
       ...(process.env.CODEX_THREAD_ID ? { threadId: process.env.CODEX_THREAD_ID } : {}),
     })}\n`,
   );

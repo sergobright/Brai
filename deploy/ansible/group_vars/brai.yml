@@ -22,6 +22,11 @@ brai_service_group: brai
 brai_protected_env_dir: /etc/brai
 brai_api_env_source: /etc/brai/brai-api.env
 brai_supabase_deploy_env_source: /etc/brai/supabase-deploy.env
+brai_temporal_worker_env_source: /etc/brai/brai-temporal-worker.env
+brai_temporal_deploy_host: 127.0.0.1
+brai_temporal_deploy_ssh_port: 22
+brai_temporal_deploy_ssh_key_path: /etc/brai/brai-temporal-deploy-ssh-key
+brai_temporal_github_token_path: /etc/brai/brai-temporal-github-token
 brai_basic_auth_directive: "import brai_unified_basic_auth"
 brai_envs:
   prod:

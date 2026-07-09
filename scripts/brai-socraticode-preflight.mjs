@@ -7,6 +7,8 @@ import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const SOCRATICODE_DIST = "/srv/opt/socraticode/node_modules/socraticode/dist";
+const EXPECTED_PROJECT_ID = "brightos_brai";
+const EXPECTED_COLLECTION = `codebase_${EXPECTED_PROJECT_ID}`;
 export const REQUIRED_FILES = [
   ".socraticode.json",
   ".socraticodecontextartifacts.json",
@@ -78,10 +80,12 @@ export function validateCodexConfig() {
   }
 }
 
-async function loadSocraticodeModules() {
+export async function loadSocraticodeModules() {
   const importFromDist = (file) => import(pathToFileURL(path.join(SOCRATICODE_DIST, file)).href);
   const [
     config,
+    contextArtifacts,
+    codeGraph,
     docker,
     embeddingConfig,
     embeddingProvider,
@@ -91,6 +95,8 @@ async function loadSocraticodeModules() {
     watcher,
   ] = await Promise.all([
     importFromDist("config.js"),
+    importFromDist("services/context-artifacts.js"),
+    importFromDist("services/code-graph.js"),
     importFromDist("services/docker.js"),
     importFromDist("services/embedding-config.js"),
     importFromDist("services/embedding-provider.js"),
@@ -103,14 +109,20 @@ async function loadSocraticodeModules() {
   return {
     collectionName: config.collectionName,
     ensureOllamaReady: ollama.ensureOllamaReady,
+    ensureArtifactsIndexed: contextArtifacts.ensureArtifactsIndexed,
     ensureQdrantReady: docker.ensureQdrantReady,
+    getArtifactStatusSummary: contextArtifacts.getArtifactStatusSummary,
     getCollectionInfo: qdrant.getCollectionInfo,
     getEmbeddingConfig: embeddingConfig.getEmbeddingConfig,
     getEmbeddingProvider: embeddingProvider.getEmbeddingProvider,
+    getGraphStatus: codeGraph.getGraphStatus,
+    getLastCompleted: indexer.getLastCompleted,
+    getProjectMetadata: qdrant.getProjectMetadata,
     getPersistedIndexingStatus: indexer.getPersistedIndexingStatus,
     indexProject: indexer.indexProject,
     isWatchedByAnyProcess: watcher.isWatchedByAnyProcess,
     projectIdFromPath: config.projectIdFromPath,
+    rebuildGraph: codeGraph.rebuildGraph,
     startWatching: watcher.startWatching,
     updateProjectIndex: indexer.updateProjectIndex,
   };
@@ -140,6 +152,85 @@ async function ensureWatcherFresh(root, socraticode, report) {
   }
 }
 
+export function assertExpectedProject({ root, committedProjectId, effectiveProjectId, collection }) {
+  if (committedProjectId !== EXPECTED_PROJECT_ID || effectiveProjectId !== EXPECTED_PROJECT_ID || collection !== EXPECTED_COLLECTION) {
+    throw new Error(
+      `SocratiCode must use the shared Brai index for ${root}.\n` +
+        `expectedProjectId=${EXPECTED_PROJECT_ID} committedProjectId=${committedProjectId} ` +
+        `effectiveProjectId=${effectiveProjectId} collection=${collection}`,
+    );
+  }
+}
+
+export function assertLastOperationHealthy(lastCompleted) {
+  if (lastCompleted?.error) {
+    throw new Error(
+      `SocratiCode last ${lastCompleted.type || "indexing"} operation failed: ${lastCompleted.error}.\n` +
+        "Run npm run socraticode:ensure to catch up the shared index.",
+    );
+  }
+}
+
+export async function assertContextArtifactsFresh(root, socraticode) {
+  const summary = await socraticode.getArtifactStatusSummary(root);
+  if (!summary) {
+    throw new Error("SocratiCode context artifacts are not configured.");
+  }
+  if (summary.indexedCount !== summary.configuredCount) {
+    throw new Error(
+      `SocratiCode context artifacts are incomplete for ${root}: ${summary.indexedCount}/${summary.configuredCount} indexed.\n` +
+        "Run npm run socraticode:ensure to re-index context artifacts.",
+    );
+  }
+}
+
+export async function ensureContextArtifactsFresh(root, socraticode, report) {
+  const result = await socraticode.ensureArtifactsIndexed(root);
+  if (result.errors.length) {
+    throw new Error(
+      `SocratiCode context artifact indexing failed for ${root}:\n` +
+        result.errors.map((item) => `- ${item.name}: ${item.error}`).join("\n"),
+    );
+  }
+  if (result.reindexed.length) {
+    report(`SocratiCode: context artifacts re-indexed: ${result.reindexed.join(", ")}`);
+  }
+  await assertContextArtifactsFresh(root, socraticode);
+}
+
+export function isGraphStale({ metadata, graph }) {
+  if (!metadata?.lastIndexedAt || !graph?.lastBuiltAt) return true;
+  return Date.parse(graph.lastBuiltAt) < Date.parse(metadata.lastIndexedAt);
+}
+
+export async function assertGraphFresh(root, collection, socraticode) {
+  const metadata = await socraticode.getProjectMetadata(collection);
+  const graph = await socraticode.getGraphStatus(root);
+  if (!metadata) {
+    throw new Error(`SocratiCode metadata is missing for collection ${collection}. Run npm run socraticode:ensure.`);
+  }
+  if (!graph) {
+    throw new Error(`SocratiCode code graph is missing for ${root}. Run npm run socraticode:ensure.`);
+  }
+  if (isGraphStale({ metadata, graph })) {
+    throw new Error(
+      `SocratiCode code graph is stale for ${root}.\n` +
+        `lastIndexedAt=${metadata.lastIndexedAt} lastBuiltAt=${graph.lastBuiltAt}\n` +
+        "Run npm run socraticode:ensure to rebuild the graph.",
+    );
+  }
+}
+
+export async function ensureGraphFresh(root, collection, socraticode, report) {
+  const metadata = await socraticode.getProjectMetadata(collection);
+  const graph = await socraticode.getGraphStatus(root);
+  if (!metadata || !graph || isGraphStale({ metadata, graph })) {
+    report(`SocratiCode: rebuilding code graph for ${root}`);
+    await socraticode.rebuildGraph(root);
+  }
+  await assertGraphFresh(root, collection, socraticode);
+}
+
 export async function assertWatcherActive(root, isWatchedByAnyProcess) {
   if (await isWatchedByAnyProcess(root)) return;
   throw new Error(
@@ -159,6 +250,7 @@ export async function runSocraticodeCheck(options = {}) {
   const socraticode = await loadSocraticodeModules();
   const effectiveProjectId = socraticode.projectIdFromPath(root);
   const collection = socraticode.collectionName(effectiveProjectId);
+  assertExpectedProject({ root, committedProjectId, effectiveProjectId, collection });
 
   if (mode === "ensure") {
     await ensureEmbeddingReady(socraticode, report);
@@ -185,7 +277,11 @@ export async function runSocraticodeCheck(options = {}) {
       );
     }
 
+    await ensureContextArtifactsFresh(root, socraticode, report);
+    await ensureGraphFresh(root, collection, socraticode, report);
     await ensureWatcherFresh(root, socraticode, report);
+    // startWatching() performs its own catch-up update, so graph freshness must be checked after it too.
+    await ensureGraphFresh(root, collection, socraticode, report);
     console.log(
       `SocratiCode ensure OK for ${root} ` +
         `(projectId=${effectiveProjectId}, committedProjectId=${committedProjectId}, collection=${collection})`,
@@ -222,6 +318,9 @@ export async function runSocraticodeCheck(options = {}) {
     );
   }
 
+  assertLastOperationHealthy(socraticode.getLastCompleted(root));
+  await assertContextArtifactsFresh(root, socraticode);
+  await assertGraphFresh(root, collection, socraticode);
   await assertWatcherActive(root, socraticode.isWatchedByAnyProcess);
   console.log(
     `SocratiCode preflight OK for ${root} ` +

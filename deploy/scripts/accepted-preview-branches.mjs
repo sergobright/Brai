@@ -31,10 +31,14 @@ export function acceptedPreviewBranches(pulls, targetBranch = "main") {
 }
 
 export function acceptedPreviewReleaseNotes(pulls, targetBranch = "main") {
-  return acceptedPreviewPulls(pulls, targetBranch).map(({ branch, pull }) => ({
-    branch,
-    releaseNotes: requiredReleaseNotesFromPull(pull, branch),
-  }));
+  return acceptedPreviewPulls(pulls, targetBranch).map(({ branch, pull }) => {
+    const sha = pull?.head?.sha ?? pull?.headRefOid ?? pull?.head_sha ?? "";
+    return {
+      branch,
+      ...(sha ? { sha } : {}),
+      releaseNotes: requiredReleaseNotesFromPull(pull, branch),
+    };
+  });
 }
 
 function acceptedPreviewPulls(pulls, targetBranch = "main") {

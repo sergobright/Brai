@@ -124,6 +124,33 @@ test("preview deploy retry clears stale task blocker", () => {
   assert.equal(state.blocker, null);
 });
 
+test("preview deploy request clears stale deploy blockers before activity starts", () => {
+  const state = createPreviewState({ branch: "codex/fake", sha: "a1" });
+  applyPreviewEvent(state, { type: "supabase_preview_failed", sha: "a1" });
+  applyPreviewEvent(state, { type: "preview_deploy_failed", sha: "a1" });
+
+  assert.equal(state.status, "waiting_for_fix");
+  assert.equal(state.blockers.length, 2);
+
+  applyPreviewEvent(state, { type: "preview_deploy_requested", sha: "a1" });
+
+  assert.equal(state.status, "preview_deploy_requested");
+  assert.equal(state.tasks.supabase_preview.status, "pending");
+  assert.equal(state.tasks.preview_deploy.status, "pending");
+  assert.equal(state.blocker, null);
+});
+
+test("preview deploy request does not hide unrelated check blocker", () => {
+  const state = createPreviewState({ branch: "codex/fake", sha: "a1" });
+  applyPreviewEvent(state, { type: "checks_failed", sha: "a1" });
+
+  applyPreviewEvent(state, { type: "preview_deploy_requested", sha: "a1" });
+
+  assert.equal(state.status, "preview_deploy_requested");
+  assert.equal(state.blocker.task, "checks");
+  assert.equal(state.tasks.checks.status, "failed");
+});
+
 test("infra docs delivery completes without preview slot release", () => {
   const state = createPreviewState({ branch: "codex/infra-docs", sha: "d1" });
   applyPreviewEvent(state, { type: "delivery_classified", sha: "d1", deliveryClass: "infra-docs" });
@@ -161,7 +188,7 @@ test("infra docs delivery completes without preview slot release", () => {
   assert.equal(state.tasks.delivery_handoff.status, "passed");
   assert.equal(state.tasks.delivery_handoff.lastEvent, "delivery_handoff_passed");
   assert.equal(state.tasks.accepted_for_target.status, "passed");
-  assert.equal(state.status, "accepted_for_target");
+  assert.equal(state.status, "no_preview_merged");
   assert.equal(state.terminal, true);
   assert.equal(state.gates.complete, true);
 });
@@ -185,6 +212,7 @@ test("technical no-preview delivery completes without preview slot release", () 
   assert.equal(state.tasks.slot_release.status, "not_applicable");
   assert.equal(state.tasks.accepted_for_target.status, "passed");
   assert.equal(state.terminal, true);
+  assert.equal(state.status, "no_preview_merged");
 });
 
 test("infra docs PR merge does not complete without handoff passed", () => {
@@ -291,4 +319,47 @@ test("prod promotion tracks accepted preview release blocker", () => {
   assert.equal(state.tasks.version_recorded.status, "passed");
   assert.equal(state.tasks.accepted_previews.status, "failed");
   assert.equal(state.terminal, false);
+});
+
+test("promotion request clears stale promotion blockers before activity starts", () => {
+  const state = createPromotionState({ target: "prod", sha: "c4" });
+  applyPromotionEvent(state, { type: "prod_deploy_started", sha: "c4" });
+  applyPromotionEvent(state, { type: "accepted_previews_started", sha: "c4" });
+  applyPromotionEvent(state, { type: "accepted_previews_failed", sha: "c4" });
+  applyPromotionEvent(state, { type: "prod_deploy_failed", sha: "c4" });
+
+  assert.equal(state.status, "waiting_for_fix");
+  assert.equal(state.blockers.length, 2);
+
+  applyPromotionEvent(state, { type: "promotion_requested", sha: "c4" });
+
+  assert.equal(state.status, "promotion_requested");
+  assert.equal(state.tasks.accepted_previews.status, "pending");
+  assert.equal(state.tasks.deploy.status, "pending");
+  assert.equal(state.blocker, null);
+});
+
+test("explicit terminal preview outcomes close stale lifecycles", () => {
+  const abandoned = createPreviewState({ branch: "codex/abandoned", sha: "a1" });
+  applyPreviewEvent(abandoned, { type: "slot_release_started", sha: "a1" });
+  applyPreviewEvent(abandoned, { type: "abandoned_closed", sha: "a1", source: "release-preview-slot" });
+
+  assert.equal(abandoned.status, "abandoned_closed");
+  assert.equal(abandoned.terminal, true);
+  assert.equal(abandoned.tasks.slot_release.status, "passed");
+
+  const superseded = createPreviewState({ branch: "codex/old", sha: "s1" });
+  applyPreviewEvent(superseded, { type: "superseded_closed", sha: "s1", source: "recovery" });
+
+  assert.equal(superseded.status, "superseded_closed");
+  assert.equal(superseded.terminal, true);
+});
+
+test("superseded promotion reaches terminal state", () => {
+  const state = createPromotionState({ target: "prod", sha: "old" });
+  applyPromotionEvent(state, { type: "prod_deploy_started", sha: "old" });
+  applyPromotionEvent(state, { type: "superseded_closed", sha: "old", source: "recovery" });
+
+  assert.equal(state.status, "superseded_closed");
+  assert.equal(state.terminal, true);
 });

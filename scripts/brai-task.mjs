@@ -46,6 +46,7 @@ const PREVIEW_SLOT_EMOJI = { A: "🅰️", B: "🅱️", C: "🅲", D: "🅳", E
 const DELIVERY_RECEIPT_VERSION = "brai-delivery-handoff-v1";
 const ACCEPTANCE_RECEIPT_VERSION = "brai-acceptance-v1";
 const RELEASE_NOTES_VERSION = "brai-release-notes-v1";
+const SOCRATICODE_EXACT_ONLY_REASON_MIN = 16;
 const DEFAULT_INFRA_DOCS_HANDOFF_WAIT_MS = 180000;
 const DEFAULT_INFRA_DOCS_HANDOFF_POLL_MS = 10000;
 const DEFAULT_PREVIEW_HANDOFF_WAIT_MS = 1800000;
@@ -81,12 +82,14 @@ export {
   isBlockingAcceptanceReceipt,
   isReadOnlyShellCommand,
   isSensitivePath,
+  isSocraticodeTool,
   isWriteLikeCommand,
   linkDependencyDirs,
   findOpenTaskForThread,
   parseHookInput,
   taskStartGuidance,
   taskWorktreeParent,
+  validateSocraticodeRequirement,
   validateTaskMarker,
   validateTaskThread,
   validateDeliveryReceipt,
@@ -111,6 +114,9 @@ function runCli([command, ...args]) {
         break;
       case "pre-tool-use":
         preToolUse();
+        break;
+      case "socraticode-exact-only":
+        markSocraticodeExactOnly(args);
         break;
       case "pre-commit":
         preCommit();
@@ -149,7 +155,7 @@ function runCli([command, ...args]) {
         accessContract(args);
         break;
       default:
-        throw new Error("usage: brai-task.mjs start <slug>|follow-up [branch]|acceptance-reconcile [branch]|pre-tool-use|pre-commit|pre-push <remote>|stop|classify [--base <ref>] [--head <ref>] [--github-output]|handoff [branch]|preview [branch]|release-notes --short <text> --details <text> --reason <text>|require-delivery [branch] [sha]|require-preview [branch] [sha]|doctor [--strict]|preflight [--strict]|access-contract --local|--server");
+        throw new Error("usage: brai-task.mjs start <slug>|follow-up [branch]|acceptance-reconcile [branch]|pre-tool-use|pre-commit|pre-push <remote>|stop|classify [--base <ref>] [--head <ref>] [--github-output]|handoff [branch]|preview [branch]|release-notes --short <text> --details <text> --reason <text>|require-delivery [branch] [sha]|require-preview [branch] [sha]|doctor [--strict]|preflight [--strict]|access-contract --local|--server|socraticode-exact-only --reason <text>");
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -294,6 +300,7 @@ function acceptanceReconcile(branchArg) {
 function preToolUse() {
   const analysis = analyzeHookInput(readStdin());
   if (!analysis.ok) return blockHook(analysis.reason);
+  if (analysis.socraticodeUse) markSocraticodeUsed();
   if (analysis.manualCodexBranch) {
     return blockHook(`Manual branch or worktree commands are blocked.\n\n${taskStartGuidance()}`);
   }
@@ -315,6 +322,28 @@ function preToolUse() {
 
   markWriteIntent();
   return allowHook();
+}
+
+function markSocraticodeExactOnly(args = []) {
+  const reasonIndex = args.indexOf("--reason");
+  const reason = reasonIndex >= 0 ? args.slice(reasonIndex + 1).join(" ").trim() : args.join(" ").trim();
+  if (reason.length < SOCRATICODE_EXACT_ONLY_REASON_MIN) {
+    throw new Error(`Exact-only SocratiCode fallback needs a concrete reason (${SOCRATICODE_EXACT_ONLY_REASON_MIN}+ chars).`);
+  }
+  const validation = validateTaskBranch({ requireExpectedUpstream: false });
+  if (!validation.ok) throw new Error(validation.message);
+  const reuse = validateBranchReuse({ allowRemote: false });
+  if (!reuse.ok) throw new Error(reuse.message);
+
+  const root = git("rev-parse", "--show-toplevel");
+  const marker = readTaskMarker();
+  writeTaskMarker(root, withThreadId({
+    ...marker,
+    branch: currentBranch(),
+    socraticodeFallbackAt: new Date().toISOString(),
+    socraticodeFallbackReason: reason,
+  }));
+  console.log("Marked SocratiCode exact-only fallback.");
 }
 
 function preCommit() {
@@ -381,13 +410,15 @@ function stopHook() {
 }
 
 function previewHandoff(branchArg) {
-  const classification = classifyDelivery(diffFromTaskBase());
+  const changedFiles = diffFromTaskBase();
+  const classification = classifyDelivery(changedFiles);
   if (isNoPreviewDeliveryClass(classification.deliveryClass)) {
     throw new Error(`This branch is ${classification.deliveryClass} and does not use preview handoff. Run: node scripts/brai-task.mjs handoff`);
   }
   if (classification.deliveryClass === DELIVERY_CLASS.BLOCKED) {
     throw new Error(`Blocked delivery paths cannot be handed off:\n${classification.paths.blocked.map((file) => `- ${file}`).join("\n")}`);
   }
+  requireSocraticodeForHandoff(changedFiles);
   const branch = branchArg ?? currentBranch();
   if (!CODEX_BRANCH_RE.test(branch)) throw new Error(`Preview handoff requires codex/* branch, got: ${branch}`);
   if (branch !== currentBranch()) throw new Error(`Current branch is ${currentBranch()}, not ${branch}`);
@@ -428,7 +459,8 @@ function deliveryHandoff(branchArg) {
   if (branch !== currentBranch()) throw new Error(`Current branch is ${currentBranch()}, not ${branch}`);
   const head = git("rev-parse", "HEAD");
   const acceptance = readAcceptanceReceipt();
-  let classification = classifyDelivery(diffFromTaskBase(), { branch, head });
+  const changedFiles = diffFromTaskBase();
+  let classification = classifyDelivery(changedFiles, { branch, head });
   classification = classifyAcceptedNoPreviewDelivery(classification, acceptance, branch, head);
   if (classification.deliveryClass === DELIVERY_CLASS.RUNTIME_PREVIEW) {
     previewHandoff(branchArg);
@@ -441,6 +473,7 @@ function deliveryHandoff(branchArg) {
     console.log("No Brai delivery work to hand off.");
     return;
   }
+  requireSocraticodeForHandoff(changedFiles);
 
   fetchTaskBranch(branch);
   const remoteSha = git("rev-parse", `origin/${branch}`);
@@ -914,6 +947,7 @@ function deriveTaskState() {
       CODEX_BRANCH_RE.test(branch),
   );
   const hasImplementationWork = Boolean(status.trim() || marker?.writeIntentAt || changedFiles.length || commitsAhead > 0);
+  const socraticode = validateSocraticodeRequirement(marker, hasImplementationWork);
   const remoteSha = CODEX_BRANCH_RE.test(branch) ? gitMaybe("rev-parse", `origin/${branch}`) : "";
   const pushed = Boolean(remoteSha && remoteSha === head);
   const phase = deriveTaskPhase({ markerValid, marker, status, commitsAhead, changedFiles, pushed, receiptValidation });
@@ -934,6 +968,7 @@ function deriveTaskState() {
     commitsAhead,
     pushed,
     hasImplementationWork,
+    socraticode,
   };
 
   if (status.trim()) {
@@ -946,6 +981,7 @@ function deriveTaskState() {
   if (!hasImplementationWork) return base;
   if (!validation.ok && !completedWithReceipt) return { ...base, ok: false, message: validation.message };
   if (!reuse.ok && !completedWithReceipt) return { ...base, ok: false, message: reuse.message };
+  if (!socraticode.ok) return { ...base, ok: false, message: socraticode.message };
   if (classification.deliveryClass === DELIVERY_CLASS.BLOCKED) {
     return {
       ...base,
@@ -961,6 +997,32 @@ function deriveTaskState() {
     };
   }
   return base;
+}
+
+function validateSocraticodeRequirement(marker, hasImplementationWork) {
+  if (!hasImplementationWork) return { ok: true, required: false };
+  if (marker?.socraticodeUsedAt) return { ok: true, required: true, mode: "used" };
+  if (marker?.socraticodeFallbackAt && String(marker?.socraticodeFallbackReason ?? "").trim()) {
+    return { ok: true, required: true, mode: "exact-only" };
+  }
+  return {
+    ok: false,
+    required: true,
+    message:
+      "Brai implementation work must use SocratiCode before handoff.\n\n" +
+      "Call SocratiCode first, for example codebase_status plus codebase_search/codebase_context_search. " +
+      "If this task truly only used exact string/file inspection, run: " +
+      "node scripts/brai-task.mjs socraticode-exact-only --reason \"<why rg/file reads were sufficient>\"",
+  };
+}
+
+function requireSocraticodeForHandoff(changedFiles = diffFromTaskBase()) {
+  const status = gitMaybe("status", "--porcelain") ?? "";
+  const commitsAhead = Number(gitMaybe("rev-list", "--count", `${acceptedBaseRef()}..HEAD`) ?? 0);
+  const marker = readTaskMarker();
+  const hasImplementationWork = Boolean(status.trim() || marker?.writeIntentAt || changedFiles.length || commitsAhead > 0);
+  const validation = validateSocraticodeRequirement(marker, hasImplementationWork);
+  if (!validation.ok) throw new Error(validation.message);
 }
 
 function deriveTaskPhase({ markerValid, marker, status, commitsAhead, changedFiles, pushed, receiptValidation }) {
@@ -1367,6 +1429,7 @@ function analyzeHookInput(source) {
   let write = false;
   let officialTaskStarter = false;
   let officialAcceptanceReconcile = false;
+  let socraticodeUse = false;
   for (const call of calls) {
     const classified = classifyToolCall(call);
     if (!classified.ok) return { ...classified, write: true };
@@ -1374,6 +1437,7 @@ function analyzeHookInput(source) {
     if (classified.manualCodexBranch) return { ok: true, write: true, manualCodexBranch: true };
     officialTaskStarter ||= Boolean(classified.officialTaskStarter);
     officialAcceptanceReconcile ||= Boolean(classified.officialAcceptanceReconcile);
+    socraticodeUse ||= Boolean(classified.socraticodeUse);
     write ||= Boolean(classified.write);
   }
   const result = {
@@ -1383,6 +1447,7 @@ function analyzeHookInput(source) {
     manualCodexBranch: false,
   };
   if (officialAcceptanceReconcile && !officialTaskStarter) result.officialAcceptanceReconcile = true;
+  if (socraticodeUse) result.socraticodeUse = true;
   return result;
 }
 
@@ -1413,6 +1478,7 @@ function toolInputFrom(input) {
 function classifyToolCall({ tool, input }) {
   const nestedName = typeof input?.name === "string" ? input.name : "";
   const effectiveTool = tool === "custom_tool_call" && nestedName ? nestedName : tool;
+  if (isSocraticodeTool(effectiveTool)) return classifySocraticodeTool(effectiveTool);
   if (isPatchTool(effectiveTool)) return { ok: true, write: true };
   if (isShellTool(effectiveTool)) {
     const commandText = String(input?.cmd ?? input?.command ?? "");
@@ -1454,6 +1520,26 @@ function classifyToolCall({ tool, input }) {
     return { ok: true, write: isWriteLikeCommand(commandText) };
   }
   return { ok: false, reason: `Brai does not recognize hook tool ${tool}; blocking fail-closed.` };
+}
+
+function normalizeToolName(tool) {
+  return String(tool || "").replace(/\./g, "__");
+}
+
+function isSocraticodeTool(tool) {
+  const normalized = normalizeToolName(tool);
+  return (
+    (normalized.includes("socraticode") && normalized.includes("codebase_")) ||
+    /^codebase_[A-Za-z0-9_]+$/.test(normalized)
+  );
+}
+
+function classifySocraticodeTool(tool) {
+  const normalized = normalizeToolName(tool);
+  if (/codebase_(remove|context_remove|graph_remove|stop)(?:__|$)/.test(normalized)) {
+    return { ok: false, reason: `Brai blocks destructive SocratiCode tool ${tool}; use an explicit maintenance command instead.` };
+  }
+  return { ok: true, write: false, socraticodeUse: true };
 }
 
 function isPatchTool(tool) {
@@ -1688,6 +1774,7 @@ function deliveryClassForFile(file) {
     file === "apps/brai_app/tests/unit/publishScripts.test.ts" ||
     file.startsWith("admin/deploy/") ||
     file.startsWith("deploy/ansible/") ||
+    file.startsWith("deploy/systemd/") ||
     file.startsWith(".githooks/") ||
     file.startsWith("scripts/brai-") ||
     file.startsWith("scripts/check-open-openspec-changes") ||
@@ -1972,6 +2059,17 @@ function markWriteIntent() {
   const root = git("rev-parse", "--show-toplevel");
   const marker = readTaskMarker();
   writeTaskMarker(root, withThreadId({ ...marker, branch: currentBranch(), writeIntentAt: new Date().toISOString() }));
+}
+
+function markSocraticodeUsed() {
+  const root = gitMaybe("rev-parse", "--show-toplevel");
+  if (!root) return;
+  const branch = currentBranch();
+  const marker = readTaskMarker();
+  if (!CODEX_BRANCH_RE.test(branch) || !validateTaskMarker(marker, branch).ok) return;
+  if (!validateTaskThread(marker, currentThreadId()).ok) return;
+  if (marker?.socraticodeUsedAt) return;
+  writeTaskMarker(root, withThreadId({ ...marker, branch, socraticodeUsedAt: new Date().toISOString() }));
 }
 
 function withThreadId(marker) {

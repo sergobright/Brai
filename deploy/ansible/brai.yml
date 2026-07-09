@@ -82,6 +82,55 @@
         - brai-env-contract
         - targeted-infra-apply
 
+    - name: Check Brai Temporal worker secret reference files exist
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      register: brai_temporal_secret_ref_files
+      loop:
+        - "{{ brai_temporal_deploy_ssh_key_path }}"
+        - "{{ brai_temporal_github_token_path }}"
+      tags:
+        - brai-env-contract
+        - targeted-infra-apply
+
+    - name: Refuse to create Brai Temporal worker secrets from source
+      ansible.builtin.fail:
+        msg: "{{ item.item }} is missing; create it on the server outside Git, then rerun this playbook."
+      loop: "{{ brai_temporal_secret_ref_files.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+      when: not item.stat.exists
+      tags:
+        - brai-env-contract
+        - targeted-infra-apply
+
+    - name: Ensure Brai Temporal worker secret reference permissions
+      ansible.builtin.file:
+        path: "{{ item.item }}"
+        state: file
+        owner: root
+        group: "{{ brai_deploy_user }}"
+        mode: "0640"
+      loop: "{{ brai_temporal_secret_ref_files.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+      when: item.stat.exists
+      tags:
+        - brai-env-contract
+        - targeted-infra-apply
+
+    - name: Install Brai Temporal worker environment contract
+      ansible.builtin.template:
+        src: templates/brai-temporal-worker.env.j2
+        dest: "{{ brai_temporal_worker_env_source }}"
+        owner: root
+        group: "{{ brai_deploy_user }}"
+        mode: "0640"
+      notify: Restart Brai Temporal worker
+      tags:
+        - brai-env-contract
+        - targeted-infra-apply
+
     - name: Create environment root
       ansible.builtin.file:
         path: "{{ brai_env_root }}"
@@ -423,6 +472,17 @@
         group: root
         mode: "0755"
 
+    - name: Install Brai Temporal worker systemd unit
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../systemd/brai-temporal-worker.service"
+        dest: /etc/systemd/system/brai-temporal-worker.service
+        owner: root
+        group: root
+        mode: "0644"
+      notify:
+        - Reload systemd
+        - Restart Brai Temporal worker
+
     - name: Validate generated Brai Caddy routes against current host config
       block:
         - name: Create temporary Caddy validation file
@@ -580,3 +640,8 @@
       ansible.builtin.systemd_service:
         name: caddy
         state: reloaded
+
+    - name: Restart Brai Temporal worker
+      ansible.builtin.systemd_service:
+        name: brai-temporal-worker.service
+        state: restarted
