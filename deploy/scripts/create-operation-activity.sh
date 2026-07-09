@@ -7,7 +7,7 @@ NODE_BIN="${NODE_BIN:-node}"
 SERVICE_USER="${BRAI_SERVICE_USER:-brai}"
 DEPLOY_USER="${BRAI_DEPLOY_USER:-brai-deploy}"
 DEPLOY_HOST="${BRAI_DEPLOY_HOST:-localhost}"
-DEPLOY_REPO="${BRAI_DEPLOY_REPO:-/srv/projects/brai-envs/prod/source}"
+DEPLOY_REPO="${BRAI_OPERATION_HELPER_REPO:-${BRAI_DEPLOY_REPO:-/srv/projects/brai-envs/prod/source}}"
 SSH_PORT="${BRAI_DEPLOY_SSH_PORT:-22}"
 SSH_KEY_FILE="${BRAI_DEPLOY_SSH_KEY_FILE:-${HOME:-}/.ssh/brai_deploy_ed25519}"
 API_ENV_FILE="${BRAI_API_ENV_FILE:-/etc/brai/brai-api.env}"
@@ -86,12 +86,24 @@ validate_payload() {
     echo "Operation title is required" >&2
     exit 1
   fi
+  if [[ "${#TITLE}" -lt 8 ]]; then
+    echo "Operation title is too short" >&2
+    exit 1
+  fi
   if [[ -z "$REASON" ]]; then
     echo "Operation reason is required" >&2
     exit 1
   fi
+  if [[ "${#REASON}" -lt 12 ]]; then
+    echo "Operation reason is too short" >&2
+    exit 1
+  fi
   if [[ -z "$DESCRIPTION" ]]; then
     echo "Operation description is required" >&2
+    exit 1
+  fi
+  if [[ "${#DESCRIPTION}" -lt 20 ]]; then
+    echo "Operation description is too short" >&2
     exit 1
   fi
 }
@@ -161,7 +173,7 @@ DEPLOY_REPO="$1"
 SERVICE_USER="$2"
 HELPER="$DEPLOY_REPO/deploy/scripts/create-operation-activity.sh"
 test -x "$HELPER"
-sudo -n -l -u "$SERVICE_USER" "$HELPER" --local --id operation:agent-task:access-contract-probe --title x --reason x --description x >/dev/null
+sudo -n -l -u "$SERVICE_USER" "$HELPER" --local --id operation:agent-task:access-contract-probe --title "Access probe" --reason "Access contract probe" --description "Access contract helper probe" >/dev/null
 sudo -n -u "$SERVICE_USER" "$HELPER" --local --check-access
 REMOTE
 }
@@ -169,7 +181,7 @@ REMOTE
 check_host_local_access() {
   local helper="$DEPLOY_REPO/deploy/scripts/create-operation-activity.sh"
   test -x "$helper"
-  sudo -n -l -u "$SERVICE_USER" "$helper" --local --id operation:agent-task:access-contract-probe --title x --reason x --description x >/dev/null
+  sudo -n -l -u "$SERVICE_USER" "$helper" --local --id operation:agent-task:access-contract-probe --title "Access probe" --reason "Access contract probe" --description "Access contract helper probe" >/dev/null
   sudo -n -u "$SERVICE_USER" "$helper" --local --check-access
 }
 
@@ -230,22 +242,39 @@ try {
     FOR UPDATE
   `, [payload.id]);
   let created = 0;
+  let activityId = payload.id;
   if (existing.rows.length === 0) {
-    const insert = await client.query(`
-      INSERT INTO activities (
-        id,
-        activity_type_id,
-        title,
-        description_md,
-        author,
-        reason,
-        status,
-        created_at_utc,
-        updated_at_utc
-      ) VALUES ($1, 'operation', $2, $3, 'Codex', $4, 'New', $5, $5)
-      ON CONFLICT (id) DO NOTHING
-    `, [payload.id, payload.title, payload.description, payload.reason, now]);
-    created = insert.rowCount;
+    const duplicate = await client.query(`
+      SELECT id
+      FROM activities
+      WHERE activity_type_id = 'operation'
+        AND author = 'Codex'
+        AND deleted_at_utc IS NULL
+        AND status = 'New'
+        AND lower(btrim(title)) = lower(btrim($1))
+      ORDER BY created_at_utc ASC, id ASC
+      LIMIT 1
+      FOR UPDATE
+    `, [payload.title]);
+    if (duplicate.rows.length) {
+      activityId = duplicate.rows[0].id;
+    } else {
+      const insert = await client.query(`
+        INSERT INTO activities (
+          id,
+          activity_type_id,
+          title,
+          description_md,
+          author,
+          reason,
+          status,
+          created_at_utc,
+          updated_at_utc
+        ) VALUES ($1, 'operation', $2, $3, 'Codex', $4, 'New', $5, $5)
+        ON CONFLICT (id) DO NOTHING
+      `, [payload.id, payload.title, payload.description, payload.reason, now]);
+      created = insert.rowCount;
+    }
   } else {
     const row = existing.rows[0];
     const typeCheck = await client.query(`
@@ -265,8 +294,8 @@ try {
       AND activity_type_id = 'operation'
       AND author = 'Codex'
       AND deleted_at_utc IS NULL
-  `, [payload.id]);
-  if (createdRow.rows.length !== 1) throw new Error(`Expected one active Codex operation activity for ${payload.id}.`);
+  `, [activityId]);
+  if (createdRow.rows.length !== 1) throw new Error(`Expected one active Codex operation activity for ${activityId}.`);
   await client.query("COMMIT");
   console.log(`created=${created}`);
   console.table(createdRow.rows);

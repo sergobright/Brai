@@ -589,7 +589,8 @@ function serverAccessContract(root = process.env.BRAI_ROOT ?? "/srv/projects/bra
   const protectedEnvDir = process.env.BRAI_PROTECTED_ENV_DIR ?? "/etc/brai";
   const apiEnvFile = process.env.BRAI_API_ENV_FILE ?? path.join(protectedEnvDir, "brai-api.env");
   const supabaseDeployEnvFile = process.env.BRAI_SUPABASE_DEPLOY_ENV_FILE ?? path.join(protectedEnvDir, "supabase-deploy.env");
-  const localOperationHelper = path.join(root, "deploy/scripts/complete-operation-activities.sh");
+  const localCreateOperationHelper = path.join(root, "deploy/scripts/create-operation-activity.sh");
+  const localCompleteOperationHelper = path.join(root, "deploy/scripts/complete-operation-activities.sh");
   const acceptedPreviewOtaHelper = path.join(root, "deploy/scripts/sync-occupied-preview-ota-manifests.sh");
   const checks = [
     commandCheck("guard sync", [path.join(root, "scripts/brai-guard-sync-check.sh"), "--check"], { cwd: root }),
@@ -636,7 +637,8 @@ function serverAccessContract(root = process.env.BRAI_ROOT ?? "/srv/projects/bra
       requiredModeBits: 0o640,
       forbiddenModeBits: 0o137,
     }),
-    commandCheck("operation helper host-local sudo", [localOperationHelper, "--host-local", "--check-access"], { cwd: root }),
+    commandCheck("operation create helper host-local sudo", [localCreateOperationHelper, "--host-local", "--check-access"], { cwd: root }),
+    commandCheck("operation complete helper host-local sudo", [localCompleteOperationHelper, "--host-local", "--check-access"], { cwd: root }),
     commandCheck("accepted preview OTA sync access", [acceptedPreviewOtaHelper, "--check-access"], {
       cwd: root,
       env: {
@@ -652,7 +654,17 @@ function serverAccessContract(root = process.env.BRAI_ROOT ?? "/srv/projects/bra
       deploySshPort,
       deployUser,
       deployHost,
-      localOperationHelper,
+      localOperationHelper: localCreateOperationHelper,
+      checkName: "operation create helper remote ssh",
+      root,
+    }),
+    operationHelperRemoteAccessCheck({
+      deployIdentityFile,
+      deploySshPort,
+      deployUser,
+      deployHost,
+      localOperationHelper: localCompleteOperationHelper,
+      checkName: "operation complete helper remote ssh",
       root,
     }),
     pathCheck("deploy artifacts", path.join(deployRepo, "deploy"), { requireRead: true, expectDirectory: true }),
@@ -669,6 +681,7 @@ function operationHelperRemoteAccessCheck({
   deployUser,
   deployHost,
   localOperationHelper,
+  checkName = "operation helper remote ssh",
   root,
 }) {
   const hasDeploySshSecret = Boolean(
@@ -678,13 +691,13 @@ function operationHelperRemoteAccessCheck({
   );
   if (!hasDeploySshSecret) {
     return {
-      name: "operation helper remote ssh",
+      name: checkName,
       ok: true,
       skipped: true,
       reason: "deploy SSH key is not configured in this shell; host-local sudo check covers same-host maintenance.",
     };
   }
-  return commandCheck("operation helper remote ssh", [localOperationHelper, "--check-access"], {
+  return commandCheck(checkName, [localOperationHelper, "--check-access"], {
     cwd: root,
     env: {
       ...process.env,
@@ -1393,6 +1406,16 @@ function classifyToolCall({ tool, input }) {
   if (isShellTool(effectiveTool)) {
     const commandText = String(input?.cmd ?? input?.command ?? "");
     if (!commandText.trim()) return { ok: false, reason: `Shell tool ${effectiveTool} did not include a command; blocking fail-closed.` };
+    const sandboxMode = sandboxCheckMode(commandText);
+    if (sandboxMode.mode === "require_escalated" && input?.sandbox_permissions !== "require_escalated") {
+      return {
+        ok: true,
+        write: true,
+        blockedReason:
+          `This Brai command must run with sandbox_permissions=require_escalated before it creates a false sandbox failure.\n\n` +
+          `${sandboxMode.reason}`,
+      };
+    }
     if (isUnsafeRepoTaskStarterCommand(commandText)) {
       return { ok: true, write: true, blockedReason: `Repo-local task starter is stale in this checkout.\n\n${taskStartGuidance()}` };
     }
@@ -1450,7 +1473,7 @@ function isInstalledTaskStarterSegment(segment) {
 }
 
 function isRepoTaskStarterSegment(segment) {
-  return /^(?:scripts\/brai-task-start\.sh|(?:\S+\/)?scripts\/brai-task-start\.sh|scripts\/use-node22\.sh\s+node\s+scripts\/brai-task\.mjs\s+start|node\s+scripts\/brai-task\.mjs\s+start)\s+[a-z0-9][a-z0-9._-]*$/.test(segment);
+  return /^(?:scripts\/brai-task-start\.sh|(?:\S+\/)?scripts\/brai-task-start\.sh)\s+[a-z0-9][a-z0-9._-]*$/.test(segment);
 }
 
 function repoTaskStarterIsStable() {
@@ -1494,13 +1517,50 @@ function isReadOnlyShellSegment(segment) {
     /^git\s+worktree\s+list(?:\s+--porcelain)?$/,
     /^git\s+config\s+(?:--get|get)\s+[A-Za-z0-9_.-]+$/,
     /^node\s+scripts\/brai-task\.mjs\s+classify(?:\s+--(?:base|head)\s+[-A-Za-z0-9_./:@]+|\s+--github-output)*$/,
-    /^node\s+scripts\/brai-task\.mjs\s+(?:preflight|access-contract)(?:\s+--(?:strict|local|server))*$/,
+    /^node\s+scripts\/brai-task\.mjs\s+preflight(?:\s+--strict)?$/,
+    /^node\s+scripts\/brai-task\.mjs\s+access-contract\s+--local$/,
     /^scripts\/use-node22\.sh\s+node\s+scripts\/brai-task\.mjs\s+classify(?:\s+--(?:base|head)\s+[-A-Za-z0-9_./:@]+|\s+--github-output)*$/,
     /^node\s+scripts\/brai-task\.mjs\s+doctor(?:\s+--strict)?$/,
-    /^scripts\/use-node22\.sh\s+node\s+scripts\/brai-task\.mjs\s+(?:preflight|access-contract)(?:\s+--(?:strict|local|server))*$/,
+    /^scripts\/use-node22\.sh\s+node\s+scripts\/brai-task\.mjs\s+preflight(?:\s+--strict)?$/,
+    /^scripts\/use-node22\.sh\s+node\s+scripts\/brai-task\.mjs\s+access-contract\s+--local$/,
     /^scripts\/use-node22\.sh\s+node\s+scripts\/brai-task\.mjs\s+doctor(?:\s+--strict)?$/,
     /^scripts\/brai-guard-sync-check\.sh\s+--check$/,
   ].some((pattern) => pattern.test(segment));
+}
+
+function sandboxCheckMode(commandText) {
+  const text = splitShellSegments(commandText).join(" ").replace(/\s+/g, " ").trim();
+  if (
+    /\bgit add\b/.test(text) ||
+    /\bgit commit\b/.test(text) ||
+    /\bplaywright\b.*\btest\b/.test(text) ||
+    /\bnpm run app:e2e\b/.test(text) ||
+    /\bgradlew?\b/.test(text) ||
+    /\bandroid:(build:release|release|debug)\b/.test(text) ||
+    /\bapp:cap:sync\b/.test(text) ||
+    /\bbuild-android-env-apk\.sh\b/.test(text) ||
+    /\bnpm run app:(build|dev)\b/.test(text) ||
+    /\bnpm --prefix apps\/brai_app run (build|dev)\b/.test(text) ||
+    /\bnext (build|dev)\b/.test(text) ||
+    /\bpublish-(client-web-layer|web|mobile-bundle|capacitor-apk)\.sh\b/.test(text) ||
+    /\bnpm run publish:(client-web-layer|web|mobile-bundle|apk)\b/.test(text) ||
+    /\bnpm --prefix services\/brai_api (run )?test\b/.test(text) ||
+    /\bscripts\/brai-api-test\.sh\b/.test(text) ||
+    /\bnpm run socraticode:(preflight|ensure)\b/.test(text) ||
+    /\bnode scripts\/brai-task\.mjs access-contract --server\b/.test(text) ||
+    /\bscripts\/brai-preview-handoff\.sh\b/.test(text) ||
+    /\bdeploy\/scripts\/accept-preview\.sh\b/.test(text) ||
+    /\bnode scripts\/brai-task\.mjs (acceptance-reconcile|handoff|preview)\b/.test(text) ||
+    /\bdeploy\/scripts\/(complete-operation-activities|create-operation-activity)\.sh\b/.test(text)
+  ) {
+    return { mode: "require_escalated", reason: "Brai host/Git/runtime boundaries for this command are not authoritative inside the Codex sandbox." };
+  }
+  if (/\bnode\s+deploy\/scripts\/classify-delivery\.mjs\b/.test(text)) {
+    return text.includes(" --file ") || process.env.BRAI_CHANGED_FILES?.trim()
+      ? { mode: "sandbox", reason: "classify-delivery has explicit changed files." }
+      : { mode: "require_escalated", reason: "classify-delivery without explicit files reads Git metadata." };
+  }
+  return { mode: "sandbox", reason: "no known escalation rule matches this command." };
 }
 
 function isManualCodexBranchCommand(commandText) {
