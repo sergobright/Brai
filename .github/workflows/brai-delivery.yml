@@ -145,6 +145,7 @@ jobs:
       - run: npm ci
       - run: npm --prefix apps/brai_app ci
       - run: npm --prefix services/brai_api ci
+      - run: npm --prefix admin ci
       - run: node --test scripts/*.test.mjs deploy/scripts/*.test.mjs
       - run: npm --prefix apps/brai_app run lint
       - run: npm --prefix apps/brai_app run test -- --fileParallelism=false
@@ -152,6 +153,11 @@ jobs:
         working-directory: services/brai_api
         env:
           BRAI_TEST_DATABASE_URL: postgres://brai:brai@127.0.0.1:5432/brai_test
+      - run: npm --prefix admin run lint
+      - run: npm --prefix admin run self-check
+        env:
+          BRAI_TEST_DATABASE_URL: postgres://brai:brai@127.0.0.1:5432/brai_test
+      - run: npm --prefix admin run build
       - name: Temporal checks passed
         if: success() && github.event_name == 'push' && startsWith(github.ref, 'refs/heads/codex/')
         run: deploy/scripts/ci-temporal-signal.sh preview --branch "$BRAI_BRANCH" --sha "$BRAI_COMMIT" --event checks_passed --source github-checks

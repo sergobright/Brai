@@ -57,6 +57,32 @@ test("preview env setup rewrites existing shell-unsafe values safely", () => {
   assert.doesNotMatch(contents, /BRAI_DATA_STORE|BRAI_LEGACY_SQLITE_PATH|BROKEN NON ASSIGNMENT/);
   assert.match(contents, /^BRAI_DATABASE_URL='postgres:\/\/brai:brai@127\.0\.0\.1:5432\/brai\?options=-c\+search_path%3Dbrai_preview_supabase_only_runtime_e3117d5f%2Cpublic'$/m);
   assert.match(contents, /^BRAI_SUPABASE_BRANCH='brai_preview_supabase_only_runtime_e3117d5f'$/m);
+  assert.match(contents, /^BRAI_TEST_AUTO_LOGIN='true'$/m);
+});
+
+test("dev env setup enables test auto-login", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "brai-supabase-dev-env-"));
+  const envFile = path.join(dir, "brai-api.env");
+  const result = spawnSync("node", [
+    path.join(repoRoot, "deploy/scripts/supabase-branch.mjs"),
+    "dev-env",
+    "--runtime-env",
+    envFile
+  ], {
+    cwd: repoRoot,
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      BRAI_SUPABASE_DRY_RUN: "true",
+      SUPABASE_SELF_HOSTED: "true",
+      SUPABASE_SELF_HOSTED_DATABASE_URL: "postgres://brai:brai@127.0.0.1:5432/brai"
+    }
+  });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+
+  const contents = fs.readFileSync(envFile, "utf8");
+  assert.match(contents, /^BRAI_SUPABASE_BRANCH='brai_dev'$/m);
+  assert.match(contents, /^BRAI_TEST_AUTO_LOGIN='true'$/m);
 });
 
 test("branch database URL override requires explicit preview marker", () => {

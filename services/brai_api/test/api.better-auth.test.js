@@ -13,6 +13,21 @@ import {
 import { renderOtpEmail } from '../src/auth.js';
 import { createUserVaultPreparer } from '../src/server.js';
 
+function seedPrimaryUser(fixture, id = 'test-user') {
+  fixture.store.db
+    .prepare(`
+      INSERT INTO "user" ("id", "name", "email", "emailVerified", "createdAt", "updatedAt")
+      VALUES (?, ?, ?, true, ?, ?)
+    `)
+    .run(id, 'Test User', `${id}@example.com`, '2026-07-01T09:00:00.000Z', '2026-07-01T09:00:00.000Z');
+  fixture.store.db
+    .prepare(`
+      INSERT INTO app_settings (key, value, updated_at_utc)
+      VALUES ('primary_user_id', ?, ?)
+    `)
+    .run(id, '2026-07-01T09:00:00.000Z');
+}
+
 test('email OTP message renders the reusable responsive card', () => {
   const message = renderOtpEmail({ otp: '<123456>' });
 
@@ -30,6 +45,45 @@ test('email OTP message renders the reusable responsive card', () => {
   assert.doesNotMatch(message.html, /<123456>/);
   assert.match(message.text, /<123456>/);
   assert.match(message.text, /Brai · brightos\.world/);
+});
+
+test('test auto-login mints a normal session only when explicitly enabled', async () => {
+  const locked = await createFixture(['2026-07-01T09:00:00.000Z'], {
+    sessionSecret: SESSION_SECRET
+  });
+  try {
+    seedPrimaryUser(locked, 'locked-user');
+    const session = await jsonRequest(locked.url, '/auth/session');
+    assert.equal(session.status, 200);
+    assert.equal(session.body.authenticated, false);
+    assert.equal(session.headers.get('set-cookie'), null);
+  } finally {
+    await locked.close();
+  }
+
+  const fixture = await createFixture([
+    '2026-07-01T09:10:00.000Z',
+    '2026-07-01T09:10:01.000Z'
+  ], {
+    sessionSecret: SESSION_SECRET,
+    testAutoLogin: true
+  });
+  try {
+    seedPrimaryUser(fixture);
+    const session = await jsonRequest(fixture.url, '/auth/session');
+    assert.equal(session.status, 200);
+    assert.equal(session.body.authenticated, true);
+    assert.equal(session.body.user.id, 'test-user');
+    const cookie = session.headers.get('set-cookie');
+    assert.match(cookie, /^brai_session=/);
+
+    const activities = await jsonRequest(fixture.url, '/v1/activities', {
+      headers: { cookie }
+    });
+    assert.equal(activities.status, 200);
+  } finally {
+    await fixture.close();
+  }
 });
 
 test('email OTP signs in, claims legacy data, and isolates the next user', async () => {

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { headers } from "next/headers";
 import type { ReactNode } from "react";
 import { ArrowDownUp, CalendarClock, ChevronDown, ChevronFirst, ChevronLast, ChevronLeft, ChevronRight, Command, Database, Table2, Workflow } from "lucide-react";
 import { AnimatedThemeToggler } from "@/shared/ui/animated-theme-toggler";
@@ -10,7 +11,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/shared/ui
 import { ScrollArea } from "@/shared/ui/scroll-area";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/shared/ui/table";
 import { formatBytes, formatCell } from "@/lib/format";
-import { PAGE_SIZE, readDatabaseView } from "@/lib/database";
+import { PAGE_SIZE, readDatabaseView, readPrimaryUserId } from "@/lib/database";
 import { readBraiCmdAdminSummary } from "@/lib/braiCmdSummary";
 import type { DbForeignKey, DbIncomingForeignKey, DbSortDirection, DbTable, DbView } from "@/lib/database";
 
@@ -18,10 +19,17 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 type SearchParams = Promise<Record<string, string | string[] | undefined>>;
+type AdminAccess = { status: "allowed" | "forbidden" | "not_configured" | "signed_out" | "unavailable" };
+type AdminSessionResponse = { authenticated?: boolean; user?: { id?: unknown } | null };
+type RequestHeaders = { get(name: string): string | null };
 type SectionName = "database" | "handlers" | "schedules" | "brai-cmd";
 type TabName = "rows" | "relations" | "columns" | "indexes";
 
 export default async function Home({ searchParams }: { searchParams: SearchParams }) {
+  const requestHeaders = await headers();
+  const access = await readAdminAccess(requestHeaders);
+  if (access.status !== "allowed") return <AdminAccessPanel loginHref={resolveLoginHref(requestHeaders)} status={access.status} />;
+
   const params = await searchParams;
   const requestedTable = first(params.table);
   const requestedPage = Number(first(params.page) ?? "1");
@@ -87,6 +95,86 @@ export default async function Home({ searchParams }: { searchParams: SearchParam
           </div>
         </ScrollArea>
       </section>
+    </main>
+  );
+}
+
+async function readAdminAccess(requestHeaders: RequestHeaders): Promise<AdminAccess> {
+  try {
+    const userId = await readAuthenticatedUserId(requestHeaders);
+    if (!userId) return { status: "signed_out" };
+
+    const primaryUserId = await readPrimaryUserId();
+    if (!primaryUserId) return { status: "not_configured" };
+    return { status: userId === primaryUserId ? "allowed" : "forbidden" };
+  } catch (error) {
+    console.error("Brai Admin auth check failed", error);
+    return { status: "unavailable" };
+  }
+}
+
+async function readAuthenticatedUserId(requestHeaders: RequestHeaders) {
+  const cookie = requestHeaders.get("cookie");
+  if (!cookie) return null;
+
+  const response = await fetch(`${resolveAdminApiBase()}/auth/session`, {
+    cache: "no-store",
+    headers: { cookie },
+  });
+  if (!response.ok) throw new Error(`Brai API session check failed: ${response.status}`);
+
+  const session = (await response.json()) as AdminSessionResponse;
+  const userId = session.authenticated ? session.user?.id : null;
+  return typeof userId === "string" && userId ? userId : null;
+}
+
+function resolveAdminApiBase() {
+  const value = process.env.BRAI_ADMIN_API_BASE ?? "http://127.0.0.1:3020";
+  const url = new URL(value);
+  if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error("BRAI_ADMIN_API_BASE must be an HTTP URL");
+  return url.href.replace(/\/+$/, "");
+}
+
+function resolveLoginHref(requestHeaders: RequestHeaders) {
+  const host = requestHeaders.get("x-forwarded-host") ?? requestHeaders.get("host");
+  if (!host) return "/";
+  const proto = requestHeaders.get("x-forwarded-proto") ?? (host.startsWith("127.") || host.startsWith("localhost") ? "http" : "https");
+  return `${proto}://${host}/`;
+}
+
+function AdminAccessPanel({ loginHref, status }: { loginHref: string; status: Exclude<AdminAccess["status"], "allowed"> }) {
+  const copy = {
+    forbidden: {
+      title: "Доступ закрыт",
+      text: "Админка доступна только основному аккаунту Brai.",
+    },
+    not_configured: {
+      title: "Основной аккаунт не задан",
+      text: "Сначала войдите в основное приложение, чтобы Brai назначил primary user.",
+    },
+    signed_out: {
+      title: "Требуется вход",
+      text: "Войдите в основной аккаунт Brai, затем вернитесь в админку.",
+    },
+    unavailable: {
+      title: "Админка временно недоступна",
+      text: "Не удалось проверить сессию через Brai API.",
+    },
+  }[status];
+
+  return (
+    <main className="grid min-h-dvh place-items-center bg-background p-4 text-foreground">
+      <Card className="grid w-full max-w-md gap-4 p-6">
+        <div className="grid gap-2">
+          <h1 className="m-0 text-xl font-semibold">{copy.title}</h1>
+          <p className="m-0 text-sm leading-6 text-muted-foreground">{copy.text}</p>
+        </div>
+        {status === "signed_out" || status === "not_configured" ? (
+          <a className="inline-flex h-9 items-center justify-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90" href={loginHref}>
+            Войти в Brai
+          </a>
+        ) : null}
+      </Card>
     </main>
   );
 }

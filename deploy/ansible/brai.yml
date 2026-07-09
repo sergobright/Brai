@@ -403,6 +403,18 @@
         label: "{{ item.value.service }}"
       notify: Reload systemd
 
+    - name: Install Brai Admin systemd units
+      ansible.builtin.template:
+        src: templates/brai-admin.service.j2
+        dest: "/etc/systemd/system/{{ item.value.admin_service }}"
+        owner: root
+        group: root
+        mode: "0644"
+      loop: "{{ brai_envs | dict2items | list }}"
+      loop_control:
+        label: "{{ item.value.admin_service }}"
+      notify: Reload systemd
+
     - name: Install Brai main checkout sync script
       ansible.builtin.copy:
         src: "{{ playbook_dir }}/../scripts/sync-local-main-checkout.sh"
@@ -445,6 +457,14 @@
               - "http://{{ brai_envs.prod.domain }}"
               - "--site"
               - "{{ brai_envs.prod.domain }}"
+              - "--site"
+              - "http://{{ brai_supabase_studio_domain }}"
+              - "--site"
+              - "{{ brai_supabase_studio_domain }}"
+              - "--site"
+              - "http://admin.brightos.world"
+              - "--site"
+              - "admin.brightos.world"
           changed_when: false
 
         - name: Validate generated Brai managed Caddy block
@@ -480,6 +500,14 @@
           - "http://{{ brai_envs.prod.domain }}"
           - "--site"
           - "{{ brai_envs.prod.domain }}"
+          - "--site"
+          - "http://{{ brai_supabase_studio_domain }}"
+          - "--site"
+          - "{{ brai_supabase_studio_domain }}"
+          - "--site"
+          - "http://admin.brightos.world"
+          - "--site"
+          - "admin.brightos.world"
           - "--check"
       register: brai_caddy_prune_check
       changed_when: (brai_caddy_prune_check.stdout | from_json).changed
@@ -503,6 +531,14 @@
           - "http://{{ brai_envs.prod.domain }}"
           - "--site"
           - "{{ brai_envs.prod.domain }}"
+          - "--site"
+          - "http://{{ brai_supabase_studio_domain }}"
+          - "--site"
+          - "{{ brai_supabase_studio_domain }}"
+          - "--site"
+          - "http://admin.brightos.world"
+          - "--site"
+          - "admin.brightos.world"
       register: brai_caddy_prune
       changed_when: (brai_caddy_prune.stdout | from_json).changed
       check_mode: false

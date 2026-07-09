@@ -38,7 +38,7 @@ Preview slots are still allocated and released by the existing slot scripts:
 5. GitHub Actions signals `checks_passed` or `checks_failed`.
 6. Preview-class branches continue to `deploy-preview`, which waits for `temporal-worker-check`.
 7. GitHub Actions signals `preview_deploy_started` and `supabase_preview_started`.
-8. Existing `deploy-preview` runs `deploy/scripts/ci-ssh-deploy.sh`; the remote deploy creates or reuses the Supabase preview branch, applies migrations, updates the preview env file, deploys the app, and restarts the API.
+8. Existing `deploy-preview` runs `deploy/scripts/ci-ssh-deploy.sh`; the remote deploy creates or reuses the Supabase preview branch, applies migrations, updates the preview env file, deploys the app, and restarts the API/Admin services.
 9. GitHub Actions signals `supabase_preview_passed` and `preview_deploy_passed`, or the matching failed events.
 10. A failed classification, check, Supabase preview branch, or preview deploy leaves workflow state at `waiting_for_fix`.
 11. Accepted preview completion signals `pr_merged`, `accepted_preview_started`, `accepted_preview_promoted` or `accepted_preview_failed`, `supabase_preview_release_started`, `supabase_preview_released` or `supabase_preview_release_failed`, `slot_release_started`, and `slot_released` or `slot_release_failed`.

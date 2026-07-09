@@ -66,6 +66,7 @@ export function createBraiServer({
   branch = process.env.BRAI_BRANCH || null,
   commit = process.env.BRAI_COMMIT || null,
   databaseBranch = process.env.BRAI_SUPABASE_BRANCH || null,
+  testAutoLogin = false,
   now = () => new Date(),
   logger = console
 }) {
@@ -184,6 +185,14 @@ export function createBraiServer({
         if (hasValidSession(req, sessionSecret, now())) {
           sendJson(req, res, 200, { authenticated: true, user: publicAuthUser(store.primaryUser()) });
           return;
+        }
+        if (testAutoLogin && sessionSecret) {
+          const primary = store.primaryUser();
+          if (primary?.id) {
+            const cookie = createSessionCookie(sessionSecret, now(), shouldUseSecureCookie(req));
+            sendJson(req, res, 200, { authenticated: true, user: publicAuthUser(primary) }, { 'set-cookie': cookie });
+            return;
+          }
         }
         sendJson(req, res, 200, { authenticated: false, user: null });
         return;

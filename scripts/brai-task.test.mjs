@@ -219,6 +219,7 @@ test("main checkout lock preserves agent worktrees by default", () => {
   assert.match(script, /sudo chgrp brai-deploy "\$deploy_tool"/);
   assert.match(script, /sudo chmod u=rwx,g=rx,o=rx "\$deploy_tool"/);
   assert.match(script, /preserve_agent_dependency_paths/);
+  assert.match(script, /admin\/node_modules/);
   assert.match(script, /apps\/brai_app\/node_modules/);
   assert.match(script, /Writable task worktree parent/);
 });
@@ -256,6 +257,7 @@ test("local main sync preserves runtime dirs and hard resets to origin main", ()
   assert.match(script, /create-operation-activity\.sh/);
   assert.match(script, /sync-occupied-preview-ota-manifests\.sh/);
   assert.match(script, /preserve_agent_dependency_paths/);
+  assert.match(script, /admin\/node_modules/);
   assert.match(script, /apps\/brai_app\/node_modules/);
   assert.ok(script.match(/-type l -prune -o/g)?.length >= 4);
   assert.match(script, /chmod u=rwx,g=rx,o=x deploy\/scripts/);
@@ -336,6 +338,11 @@ test("sensitive paths are rejected for commits", () => {
 
 test("delivery classifier separates infra-docs from runtime preview", () => {
   assert.equal(deliveryClassForFile("apps/brai_app/src/app/page.tsx"), "runtime");
+  assert.equal(deliveryClassForFile("admin/src/app/page.tsx"), "runtime");
+  assert.equal(deliveryClassForFile("admin/next.config.ts"), "runtime");
+  assert.equal(deliveryClassForFile("admin/package.json"), "runtime");
+  assert.equal(deliveryClassForFile("admin/scripts/self-check.mjs"), "technical");
+  assert.equal(deliveryClassForFile("admin/deploy/brai-admin.service"), "infra");
   assert.equal(deliveryClassForFile("services/brai_api/src/server.js"), "runtime");
   assert.equal(deliveryClassForFile("docs/operations/branch-preview-environments.md"), "docs");
   assert.equal(deliveryClassForFile("openspec/specs/repository-operations/spec.md"), "docs");
@@ -540,6 +547,22 @@ test("native APK detector ignores OTA web-layer changes", () => {
   assert.equal(requiresNativeApkChange(["deploy/scripts/build-nonproduction-apks.sh"]), false);
   assert.equal(requiresNativeApkChange(["deploy/scripts/resolve-android-env.mjs"]), false);
   assert.equal(requiresNativeApkChange(["deploy/environments.json"]), true);
+  assert.equal(
+    requiresNativeApkChange(
+      ["deploy/environments.json"],
+      "",
+      '+      "adminPort": 3045,\n+      "adminServiceName": "brai-admin-preview-d.service",\n',
+    ),
+    false,
+  );
+  assert.equal(
+    requiresNativeApkChange(
+      ["deploy/environments.json"],
+      "",
+      '-      "androidFlavor": "previewD",\n+      "androidFlavor": "previewDWork",\n',
+    ),
+    true,
+  );
   assert.equal(requiresNativeApkChange(["deploy/scripts/resolve-app-version.mjs"]), false);
   assert.equal(requiresNativeApkChange(["apps/brai_app/src/shared/platform/ota.ts"]), false);
   assert.equal(requiresNativeApkChange(["apps/brai_app/src/shared/platform/androidTimerNotification.ts"]), false);

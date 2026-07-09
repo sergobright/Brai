@@ -6,8 +6,9 @@ import { fileURLToPath } from "node:url";
 const nativePrefixes = [
   "apps/brai_app/android/",
   "apps/brai_app/capacitor.config",
-  "deploy/environments.json",
 ];
+const environmentFile = "deploy/environments.json";
+const nativeEnvironmentPattern = /^\s*[+-]\s*"(displayLabel|domain|androidApp|androidFlavor|applicationId|releaseKey)"\s*:/m;
 const nativePackageFiles = new Set([
   "apps/brai_app/package.json",
   "apps/brai_app/package-lock.json",
@@ -27,12 +28,20 @@ if (path.resolve(process.argv[1] ?? "") === fileURLToPath(import.meta.url)) {
   const packageDiff = files.some((file) => nativePackageFiles.has(file))
     ? execFileSync("git", ["diff", "--unified=0", range, "--", ...nativePackageFiles], { encoding: "utf8" })
     : "";
-  console.log(requiresNativeApkChange(files, packageDiff) ? "true" : "false");
+  const environmentDiff = files.includes(environmentFile)
+    ? execFileSync("git", ["diff", "--unified=0", range, "--", environmentFile], { encoding: "utf8" })
+    : "";
+  console.log(requiresNativeApkChange(files, packageDiff, environmentDiff) ? "true" : "false");
 }
 
-export function requiresNativeApkChange(files, packageDiff = "") {
+export function requiresNativeApkChange(files, packageDiff = "", environmentDiff = "") {
   return files.some((file) => nativePrefixes.some((prefix) => file.startsWith(prefix)))
-    || nativePackagePattern.test(packageDiff);
+    || nativePackagePattern.test(packageDiff)
+    || (files.includes(environmentFile) && requiresNativeEnvironmentChange(environmentDiff));
+}
+
+function requiresNativeEnvironmentChange(diff) {
+  return diff ? nativeEnvironmentPattern.test(diff) : true;
 }
 
 function diffRange(branchName, base) {

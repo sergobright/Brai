@@ -18,6 +18,12 @@ const LEGACY_DATABASE_ENV_KEYS = new Set([
   "BRAI_DB",
   "BRAI_LEGACY_SQLITE_PATH",
 ]);
+const MIGRATION_TABLES = new Set(["schema_migrations", "supabase_migration_files"]);
+const TEST_DATA_COPY_EXCLUDED_TABLES = new Set([
+  "account",
+  "session",
+  "verification"
+]);
 
 if (command === "preview-env") {
   const branch = required(args, "branch");
@@ -29,12 +35,14 @@ if (command === "preview-env") {
   assertBranchReady(name, details, databaseUrl);
   upsertEnvFile(envFile, {
     BRAI_DATABASE_URL: databaseUrl,
-    BRAI_SUPABASE_BRANCH: name
+    BRAI_SUPABASE_BRANCH: name,
+    BRAI_TEST_AUTO_LOGIN: "true"
   });
   await applyMigrations(databaseUrl);
-  await applyPreviewSeed(databaseUrl);
+  const seededFromProduction = await seedTestDataFromProduction(databaseUrl);
+  if (!seededFromProduction) await applyPreviewSeed(databaseUrl);
   updatePreviewRegistry(branch, name, details);
-  console.log(JSON.stringify({ ok: true, branch: name, id: branchId(details), status: branchStatus(details), envFile }, null, 2));
+  console.log(JSON.stringify({ ok: true, branch: name, id: branchId(details), status: branchStatus(details), envFile, seededFromProduction }, null, 2));
 } else if (command === "dev-env") {
   const envFile = required(args, "runtime-env");
   const name = args.name || (isSelfHosted() ? "brai_dev" : "brai-dev");
@@ -44,10 +52,12 @@ if (command === "preview-env") {
   assertBranchReady(name, details, databaseUrl);
   upsertEnvFile(envFile, {
     BRAI_DATABASE_URL: databaseUrl,
-    BRAI_SUPABASE_BRANCH: name
+    BRAI_SUPABASE_BRANCH: name,
+    BRAI_TEST_AUTO_LOGIN: "true"
   });
   await applyMigrations(databaseUrl);
-  console.log(JSON.stringify({ ok: true, branch: name, envFile }, null, 2));
+  const seededFromProduction = await seedTestDataFromProduction(databaseUrl);
+  console.log(JSON.stringify({ ok: true, branch: name, envFile, seededFromProduction }, null, 2));
 } else if (command === "delete-preview") {
   const branch = required(args, "branch");
   const name = args.name || (isSelfHosted() ? previewSchemaName(branch) : previewBranchName(branch));
@@ -208,6 +218,117 @@ async function applyPreviewSeed(databaseUrl) {
   } finally {
     await pool.end();
   }
+}
+
+async function seedTestDataFromProduction(targetDatabaseUrl) {
+  if (process.env.BRAI_SUPABASE_SEED_FROM_PROD === "false") return false;
+  if (!isSelfHosted()) return false;
+  if (process.env.BRAI_SUPABASE_DRY_RUN === "true") return true;
+  const sourceDatabaseUrl = process.env.BRAI_PROD_DATABASE_URL || process.env.BRAI_DATABASE_URL || "";
+  if (!sourceDatabaseUrl) throw new Error("BRAI_PROD_DATABASE_URL is required to seed test data from production");
+
+  const sourceSchema = searchPathSchema(sourceDatabaseUrl);
+  const targetSchema = searchPathSchema(targetDatabaseUrl);
+  if (sourceSchema === targetSchema) {
+    throw new Error(`Refusing to seed test data: source and target schema are both ${sourceSchema}`);
+  }
+
+  const adminUrl = selfHostedDatabaseUrl();
+  const pool = new Pool({ connectionString: adminUrl, ssl: postgresSsl(adminUrl) });
+  try {
+    await copySchemaData(pool, { sourceSchema, targetSchema });
+  } finally {
+    await pool.end();
+  }
+  return true;
+}
+
+async function copySchemaData(pool, { sourceSchema, targetSchema }) {
+  const targetTables = await schemaTables(pool, targetSchema);
+  const truncatableTables = targetTables.filter((table) => !MIGRATION_TABLES.has(table));
+  if (truncatableTables.length === 0) return;
+
+  const sourceTables = new Set(await schemaTables(pool, sourceSchema));
+  const copyTables = orderedTables(
+    truncatableTables.filter((table) => sourceTables.has(table) && !TEST_DATA_COPY_EXCLUDED_TABLES.has(table))
+  );
+
+  await pool.query("BEGIN");
+  try {
+    await pool.query(`TRUNCATE TABLE ${truncatableTables.map((table) => qualifiedTable(targetSchema, table)).join(", ")} RESTART IDENTITY CASCADE`);
+    for (const table of copyTables) {
+      const columns = await commonColumns(pool, sourceSchema, targetSchema, table);
+      if (columns.length === 0) continue;
+      const columnList = columns.map(quoteIdentifier).join(", ");
+      await pool.query(`
+        INSERT INTO ${qualifiedTable(targetSchema, table)} (${columnList})
+        OVERRIDING SYSTEM VALUE
+        SELECT ${columnList}
+        FROM ${qualifiedTable(sourceSchema, table)}
+      `);
+    }
+    await pool.query("COMMIT");
+  } catch (error) {
+    await pool.query("ROLLBACK");
+    throw error;
+  }
+}
+
+async function schemaTables(pool, schema) {
+  const result = await pool.query(`
+    SELECT table_name
+    FROM information_schema.tables
+    WHERE table_schema = $1
+      AND table_type = 'BASE TABLE'
+    ORDER BY table_name
+  `, [schema]);
+  return result.rows.map((row) => row.table_name);
+}
+
+async function commonColumns(pool, sourceSchema, targetSchema, table) {
+  const result = await pool.query(`
+    SELECT target.column_name
+    FROM information_schema.columns target
+    JOIN information_schema.columns source
+      ON source.table_schema = $1
+     AND source.table_name = target.table_name
+     AND source.column_name = target.column_name
+    WHERE target.table_schema = $2
+      AND target.table_name = $3
+    ORDER BY target.ordinal_position
+  `, [sourceSchema, targetSchema, table]);
+  return result.rows.map((row) => row.column_name);
+}
+
+function orderedTables(tables) {
+  const order = new Map(migrationTableOrder().map((table, index) => [table, index]));
+  return [...tables].sort((left, right) => {
+    const leftOrder = order.get(left) ?? Number.MAX_SAFE_INTEGER;
+    const rightOrder = order.get(right) ?? Number.MAX_SAFE_INTEGER;
+    return leftOrder - rightOrder || left.localeCompare(right);
+  });
+}
+
+function migrationTableOrder() {
+  const migrationsDir = path.join(root, "supabase/migrations");
+  const names = [];
+  for (const entry of fs.readdirSync(migrationsDir).filter((name) => name.endsWith(".sql")).sort()) {
+    const sql = fs.readFileSync(path.join(migrationsDir, entry), "utf8");
+    for (const match of sql.matchAll(/CREATE TABLE IF NOT EXISTS\s+("[^"]+"|[a-z_][a-z0-9_]*)/gi)) {
+      names.push(match[1].replace(/^"|"$/g, "").replaceAll('""', '"'));
+    }
+  }
+  return names;
+}
+
+function searchPathSchema(databaseUrl) {
+  const options = new URL(databaseUrl).searchParams.get("options") || "";
+  const match = options.match(/search_path=([^,\s]+)/);
+  return match?.[1] || "public";
+}
+
+function qualifiedTable(schema, table) {
+  return `${quoteIdentifier(schema)}.${quoteIdentifier(table)}`;
 }
 
 function runSupabase(args, { allowFailure = false } = {}) {

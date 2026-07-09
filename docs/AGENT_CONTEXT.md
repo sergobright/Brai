@@ -17,7 +17,7 @@
 - `apps/brai_app/android/app/src/main/java/world/brightos/brai/` - native Android код приложения; `ota/`, `timer/`, and `capabilities/` - частые точки входа.
 - `services/brai_api/` - Node API, WebSocket/HTTP server и Supabase Postgres-backed store.
 - `services/brai_temporal/` - Temporal worker/client для required CI/CD control ledger preview и promotion flows.
-- `admin/` - техническая admin-панель для protected admin subdomain.
+- `admin/` - техническая admin-панель, доступная как `/admin` внутри prod/dev/preview окружений.
 - `deploy/scripts/` - publish scripts; `deploy/systemd/` - service units; `deploy/web/` и `deploy/mobile-update/bundles/` - опубликованные артефакты.
 - `deploy/ansible/` и `deploy/environments.json` - one-VPS production/preview environment setup and routing source.
 - `docs/operations/branch-preview-environments.md` - branch preview workflow, CI secrets, deploy-user boundary and branch protection steps.

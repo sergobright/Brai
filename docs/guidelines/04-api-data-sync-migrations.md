@@ -57,7 +57,7 @@
 - Каждый runtime AI-агент при фактическом срабатывании пишет ровно одну строку в `ai_logs`: `agent_id`, `agent_version`, UTC `dt`, `status`, единый `json_data`, короткий русский `ai_title`, и nullable `flow_id`/`flow_command`.
 - Migration должна быть idempotent для повторного запуска.
 - Не меняй canonical data shape без проверки API consumers и client cache projection.
-- Preview `codex/*` использует отдельную schema-only Supabase preview branch, применяет все migrations и idempotent `supabase/preview_seed.sql` с тестовыми данными. Dev использует долгоживущую `brai-dev` branch без automatic prod refresh.
+- Preview `codex/*` и Dev используют отдельные Supabase/Postgres schemas, применяют все migrations и при каждой пересборке тестового окружения refresh-ят данные из production DB. `supabase/preview_seed.sql` остаётся fallback seed для flow без self-hosted prod source. Dev/Preview включают `BRAI_TEST_AUTO_LOGIN=true`; production никогда не включает тестовый auto-login.
 
 ## Sync rules
 

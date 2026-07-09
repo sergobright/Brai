@@ -1,0 +1,28 @@
+[Unit]
+Description=Brai Admin {{ item.key }}
+After=network.target {{ item.value.service }}
+
+[Service]
+Type=simple
+WorkingDirectory={{ brai_env_root }}/{{ item.value.path }}/source/admin
+{% if item.key == 'prod' %}
+EnvironmentFile={{ brai_api_env_source }}
+{% else %}
+EnvironmentFile={{ brai_env_root }}/{{ item.value.path }}/brai-api.env
+{% endif %}
+ExecStart=/usr/bin/env NODE_ENV=production PORT={{ item.value.admin_port }} BRAI_ADMIN_API_BASE=http://127.0.0.1:{{ item.value.api_port }} {{ brai_node_bin }} node_modules/next/dist/bin/next start -H 127.0.0.1 -p {{ item.value.admin_port }}
+Restart=always
+RestartSec=3
+User={{ brai_service_user }}
+{% if item.key == 'prod' %}
+Group={{ brai_service_group }}
+{% else %}
+Group={{ brai_deploy_user }}
+{% endif %}
+SupplementaryGroups={{ brai_service_group }} {{ brai_deploy_user }}
+UMask=0002
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

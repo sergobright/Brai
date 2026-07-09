@@ -10,6 +10,7 @@ const PROTECTED_PATH_RE =
   /(^|\/)(\.env(\.|$)|.*\.(sqlite|sqlite3|db|jks|keystore|pem|key|p12|pfx|apk|aab|zip)$|google-services\.json|.*(service-account|credentials|secrets).*\.json$)|^(data\/|deploy\/(site|web|mobile-update|releases)\/)/;
 const DEPENDENCY_DIRS = [
   "node_modules",
+  "admin/node_modules",
   "apps/brai_app/node_modules",
   "services/brai_api/node_modules",
   "services/brai_temporal/node_modules",
@@ -29,6 +30,8 @@ const WORKSPACE_WRITABLE_DIRS = [
   ".playwright-browsers",
   "test-results",
   "landing",
+  "admin/.next",
+  "admin/node_modules",
   "apps/brai_app/.next",
   "apps/brai_app/out",
   "apps/brai_app/output",
@@ -1596,6 +1599,7 @@ function deliveryClassForFile(file) {
     file === ".codex/hooks.json" ||
     file === "deploy/environments.json" ||
     file === "apps/brai_app/tests/unit/publishScripts.test.ts" ||
+    file.startsWith("admin/deploy/") ||
     file.startsWith("deploy/ansible/") ||
     file.startsWith(".githooks/") ||
     file.startsWith("scripts/brai-") ||
@@ -1644,6 +1648,7 @@ function deliveryClassForFile(file) {
     return "infra";
   }
   if (
+    file.startsWith("admin/scripts/") ||
     file.startsWith("apps/brai_app/tests/") ||
     file.startsWith("services/brai_api/test/") ||
     file.startsWith("services/brai_api/test-support/") ||
@@ -1654,6 +1659,10 @@ function deliveryClassForFile(file) {
     return "technical";
   }
   if (
+    file === "admin/package.json" ||
+    file === "admin/package-lock.json" ||
+    file === "admin/next.config.ts" ||
+    file.startsWith("admin/src/") ||
     file.startsWith("apps/brai_app/") ||
     file.startsWith("services/brai_api/") ||
     file.startsWith("assets/brand/")

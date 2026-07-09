@@ -40,12 +40,16 @@ The live Brai API service SHALL run with the supported Brai Node.js runtime inst
 - **AND** the test suite passes without a native `SIGSEGV`
 
 ### Requirement: One VPS hosts production and preview services behind Caddy
-Brai SHALL host production and preview Brai API services on localhost-only ports behind Caddy.
+Brai SHALL host production and preview Brai API and Admin services on localhost-only
+ports behind Caddy.
 
 #### Scenario: Environment services are installed
 - **WHEN** server automation is applied
-- **THEN** production uses `127.0.0.1:3020`
-- **AND** preview slots use `127.0.0.1:3031` through `127.0.0.1:3035`
+- **THEN** production API uses `127.0.0.1:3020`
+- **AND** production Admin uses `127.0.0.1:3040`
+- **AND** Dev Admin uses `127.0.0.1:3041`
+- **AND** Preview A-E Admin uses `127.0.0.1:3042` through `127.0.0.1:3046`
+- **AND** preview API slots use `127.0.0.1:3031` through `127.0.0.1:3035`
 - **AND** Caddy exposes only HTTPS/HTTP entrypoints externally while app services remain localhost-only
 
 ### Requirement: Deployment credentials stay outside source

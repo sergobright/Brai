@@ -27,6 +27,10 @@ api.brightos.world {
   reverse_proxy 127.0.0.1:3020
 }
 
+admin.brightos.world {
+  reverse_proxy 127.0.0.1:3040
+}
+
 # BEGIN BRAI DEV/PREVIEW ENVIRONMENTS
 brightos.world {
   root * /srv/projects/brai/deploy/site
@@ -37,12 +41,13 @@ brightos.world {
 
   const result = pruneCaddySiteBlocks(source, {
     managedMarker: 'BRAI DEV/PREVIEW ENVIRONMENTS',
-    sites: ['http://brightos.world', 'brightos.world']
+    sites: ['http://brightos.world', 'brightos.world', 'admin.brightos.world']
   });
 
   assert.equal(result.changed, true);
-  assert.deepEqual(result.removed, ['http://brightos.world', 'brightos.world']);
+  assert.deepEqual(result.removed, ['http://brightos.world', 'brightos.world', 'admin.brightos.world']);
   assert.doesNotMatch(result.output, /landing\/public/);
+  assert.doesNotMatch(result.output, /127\.0\.0\.1:3040/);
   assert.match(result.output, /api\.brightos\.world/);
   assert.match(result.output, /# BEGIN BRAI DEV\/PREVIEW ENVIRONMENTS\nbrightos\.world/);
 });

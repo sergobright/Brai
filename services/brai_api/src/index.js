@@ -39,6 +39,7 @@ const parsedCodexTimeoutMs = Number(process.env.BRAI_CODEX_TIMEOUT_MS);
 const codexTimeoutMs = Number.isFinite(parsedCodexTimeoutMs) ? parsedCodexTimeoutMs : null;
 const releaseDir =
   process.env.BRAI_RELEASE_DIR ?? path.resolve(serviceRoot, '..', '..', 'deploy', 'releases');
+const testAutoLogin = /^(1|true|yes)$/i.test(process.env.BRAI_TEST_AUTO_LOGIN ?? '');
 
 if (!token) {
   console.error('BRAI_TOKEN is required');
@@ -77,6 +78,7 @@ const runtime = createBraiServer({
   codexModel,
   codexFallbackModel,
   codexTimeoutMs,
+  testAutoLogin,
   braiCmd: {
     config: braiCmdConfigFromEnv(process.env)
   }

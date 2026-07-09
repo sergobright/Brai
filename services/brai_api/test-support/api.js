@@ -61,6 +61,7 @@ export async function createFixture(times, options = {}) {
     branch: options.branch,
     commit: options.commit,
     databaseBranch: options.databaseBranch,
+    testAutoLogin: options.testAutoLogin,
     now: () => new Date(times[Math.min(index++, times.length - 1)]),
     logger: options.logger ?? { error: () => {} }
   });

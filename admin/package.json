@@ -10,8 +10,7 @@
     "dev": "next dev -H 127.0.0.1 -p ${PORT:-3040}",
     "build": "next build",
     "start": "next start -H 127.0.0.1 -p ${PORT:-3040}",
-    "lint": "eslint",
-    "live-deploy": "bash scripts/live-deploy.sh",
+    "lint": "eslint .",
     "sync-table-descriptions": "node scripts/sync-table-descriptions.mjs",
     "self-check": "node scripts/self-check.mjs",
     "visual-check": "node scripts/visual-check.mjs"
