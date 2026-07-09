@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -11,10 +11,11 @@ export async function deployBranch({ branch, sha, baseSha = "" }) {
   assertSafeBranch(branch);
   assertSafeSha(sha);
 
-  return withSourceCheckout({ branch, sha }, async (cwd) => {
+  return withSourceCheckout({ branch, sha }, async (cwd, gitEnv) => {
     const result = await runExistingScript("deploy/scripts/ci-ssh-deploy.sh", [], {
       cwd,
       env: await deployEnv({
+        ...gitEnv,
         BRAI_BRANCH: branch,
         BRAI_COMMIT: sha,
         BRAI_BASE_COMMIT: baseSha
@@ -31,10 +32,11 @@ export async function enableNoPreviewAutoMerge({ branch, sha }) {
   assertSafeBranch(branch);
   assertSafeSha(sha);
 
-  return withSourceCheckout({ branch, sha }, async (cwd) =>
+  return withSourceCheckout({ branch, sha }, async (cwd, gitEnv) =>
     runExistingScript("deploy/scripts/accept-preview.sh", [branch], {
       cwd,
       env: await deployEnv({
+        ...gitEnv,
         BRAI_BRANCH: branch,
         BRAI_ACCEPT_NO_PREVIEW_ONLY: "true",
         BRAI_ACCEPT_ALLOW_DETACHED_ROOT: "true"
@@ -48,10 +50,11 @@ export async function completeAcceptedPreviews({ targetBranch = "main", targetEn
   assertSafeSha(targetCommit);
   if (!["all", "promote", "release"].includes(mode)) throw new Error(`Unsupported accepted preview mode: ${mode}`);
 
-  return withSourceCheckout({ branch: targetBranch, sha: targetCommit }, async (cwd) =>
+  return withSourceCheckout({ branch: targetBranch, sha: targetCommit }, async (cwd, gitEnv) =>
     runExistingScript("deploy/scripts/ci-ssh-complete-accepted-previews.sh", [], {
       cwd,
       env: await deployEnv({
+        ...gitEnv,
         BRAI_TARGET_BRANCH: targetBranch,
         BRAI_TARGET_ENVIRONMENT: targetEnvironment,
         BRAI_TARGET_COMMIT: targetCommit,
@@ -110,25 +113,56 @@ async function withSourceCheckout({ branch, sha }, callback) {
   const checkout = path.join(tempRoot, "source");
   try {
     const origin = await runCommand("git", ["-C", ROOT, "remote", "get-url", "origin"]);
+    const remote = await fetchRemote(origin.stdout.trim(), tempRoot);
     await runCommand("git", ["clone", "--no-checkout", ROOT, checkout]);
-    await runCommand("git", ["-C", checkout, "remote", "set-url", "origin", origin.stdout.trim()]);
-    await fetchBranch(checkout, branch);
-    await runCommand("git", ["-C", checkout, "checkout", "--detach", sha]);
-    return await callback(checkout);
+    await runCommand("git", ["-C", checkout, "remote", "set-url", "origin", remote.url]);
+    const directCheckout = await runCommand("git", ["-C", checkout, "checkout", "--detach", sha], { allowFailure: true });
+    if (directCheckout.code !== 0) {
+      await fetchBranch(checkout, branch, remote);
+      await runCommand("git", ["-C", checkout, "checkout", "--detach", sha]);
+    }
+    return await callback(checkout, remote.env);
   } finally {
     await rm(tempRoot, { recursive: true, force: true });
   }
 }
 
-async function fetchBranch(checkout, branch) {
+async function fetchBranch(checkout, branch, remote) {
   await runCommand("git", [
     "-C",
     checkout,
     "fetch",
     "--no-tags",
-    "origin",
+    remote.url,
     `+refs/heads/${branch}:refs/remotes/origin/${branch}`
-  ]);
+  ], { env: { ...process.env, ...remote.env } });
+}
+
+async function fetchRemote(origin, tempRoot) {
+  const token = await githubToken();
+  const githubMatch = origin.match(/^git@github\.com:([^/]+\/[^/]+?)(?:\.git)?$/) ??
+    origin.match(/^https:\/\/github\.com\/([^/]+\/[^/]+?)(?:\.git)?$/);
+  if (!token || !githubMatch) return { url: origin, env: {} };
+
+  const askpass = path.join(tempRoot, "git-askpass.sh");
+  await writeFile(askpass, "#!/usr/bin/env bash\nprintf '%s\\n' \"$BRAI_TEMPORAL_GIT_PASSWORD\"\n", { mode: 0o700 });
+  await chmod(askpass, 0o700);
+  return {
+    url: `https://x-access-token@github.com/${githubMatch[1]}.git`,
+    env: {
+      GIT_ASKPASS: askpass,
+      GIT_TERMINAL_PROMPT: "0",
+      BRAI_TEMPORAL_GIT_PASSWORD: token.trim()
+    }
+  };
+}
+
+async function githubToken() {
+  if (process.env.GITHUB_TOKEN) return process.env.GITHUB_TOKEN;
+  if (process.env.GH_TOKEN) return process.env.GH_TOKEN;
+  if (process.env.BRAI_TEMPORAL_GITHUB_TOKEN) return process.env.BRAI_TEMPORAL_GITHUB_TOKEN;
+  if (process.env.BRAI_TEMPORAL_GITHUB_TOKEN_PATH) return readTextSecret(process.env.BRAI_TEMPORAL_GITHUB_TOKEN_PATH);
+  return "";
 }
 
 async function deployEnv(extra = {}) {
