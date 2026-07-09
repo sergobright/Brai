@@ -4,6 +4,7 @@ brai_node_root: /srv/opt/node-v22.16.0
 brai_node_bin: /srv/opt/node-v22.16.0/bin/node
 brai_caddyfile: /etc/caddy/Caddyfile
 brai_public_site_domain: brightos.world
+brai_github_repository: sergobright/Brai
 brai_public_site_root: "{{ brai_repo }}/deploy/site"
 brai_syncthing_domain: sync.brightos.world
 brai_syncthing_gui_port: 8384

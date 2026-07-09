@@ -167,6 +167,7 @@ BRAI_TEMPORAL_DEPLOY_SSH_PORT=22
 BRAI_TEMPORAL_DEPLOY_REPO=/srv/projects/brai
 BRAI_TEMPORAL_DEPLOY_SSH_KEY_PATH=/etc/brai/brai-temporal-deploy-ssh-key
 BRAI_TEMPORAL_GITHUB_TOKEN_PATH=/etc/brai/brai-temporal-github-token
+GITHUB_REPOSITORY=sergobright/Brai
 ```
 
 Do not add those values to repository docs.
