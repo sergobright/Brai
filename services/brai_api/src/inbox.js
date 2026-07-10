@@ -923,7 +923,7 @@ function failedNormalization(error, model, durationMs, validationFailed) {
 
 function cleanNormalization(value) {
   const normalized = {
-    title: cleanTitle(value?.title),
+    title: cleanNormalizedTitle(value?.title),
     description: cleanText(value?.description),
     classKey: cleanClassKey(value?.class_key ?? value?.classKey),
     classTitle: cleanText(value?.class_title ?? value?.classTitle),
@@ -934,6 +934,12 @@ function cleanNormalization(value) {
     throw new Error('invalid_normalizer_output');
   }
   return normalized;
+}
+
+function cleanNormalizedTitle(value) {
+  const title = cleanTitle(value);
+  const guillemets = title.match(/[«»]/g)?.length ?? 0;
+  return guillemets % 2 === 0 ? title : title.replace(/[«»]/g, '');
 }
 
 function renderNormalizerPrompt(template, item, classes, imageDescription, validationError = '') {

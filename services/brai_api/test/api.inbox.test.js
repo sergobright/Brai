@@ -161,7 +161,7 @@ test('inbox sync create schedules AI processing', async () => {
       assert.equal(imageDescription, '');
       assert.ok(classes.some((entry) => entry.key === 'note'));
       return {
-        title: 'Нормализованная заметка',
+        title: 'Нормализованная «заметка',
         description: 'Пользователь добавил заметку и хочет сохранить контекст.',
         class_key: 'note',
         class_title: '',
