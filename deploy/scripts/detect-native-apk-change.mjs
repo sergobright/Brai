@@ -44,11 +44,11 @@ function requiresNativeEnvironmentChange(diff) {
   return diff ? nativeEnvironmentPattern.test(diff) : true;
 }
 
-function diffRange(branchName, base) {
+export function diffRange(branchName, base, referenceExists = refExists) {
+  if (branchName.startsWith("codex/") && referenceExists(acceptedBaseRef())) return `${acceptedBaseRef()}...HEAD`;
   if (base && !/^0{40}$/.test(base)) return `${base}..HEAD`;
-  if (branchName.startsWith("codex/") && refExists(acceptedBaseRef())) return `${acceptedBaseRef()}...HEAD`;
   if (branchName === "dev" || branchName === "main") return "HEAD^..HEAD";
-  return refExists("HEAD^") ? "HEAD^..HEAD" : null;
+  return referenceExists("HEAD^") ? "HEAD^..HEAD" : null;
 }
 
 function acceptedBaseRef() {

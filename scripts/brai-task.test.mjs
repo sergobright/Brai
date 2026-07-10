@@ -38,7 +38,7 @@ import {
 } from "./brai-task.mjs";
 import { acceptedPreviewBranches } from "../deploy/scripts/accepted-preview-branches.mjs";
 import { classifyDeployDelivery } from "../deploy/scripts/classify-delivery.mjs";
-import { requiresNativeApkChange } from "../deploy/scripts/detect-native-apk-change.mjs";
+import { diffRange, requiresNativeApkChange } from "../deploy/scripts/detect-native-apk-change.mjs";
 
 test("valid codex task branch names are strict", () => {
   assert.equal(CODEX_BRANCH_RE.test("codex/enforce-branch-preview-guards"), true);
@@ -714,6 +714,13 @@ test("native APK detector ignores OTA web-layer changes", () => {
   assert.equal(
     requiresNativeApkChange(["apps/brai_app/package.json"], '+    "@capacitor/app": "7.0.0",\n'),
     true,
+  );
+});
+
+test("native APK detector keeps the full codex branch diff across follow-up pushes", () => {
+  assert.equal(
+    diffRange("codex/native-change", "incremental-follow-up-sha", () => true),
+    "origin/main...HEAD",
   );
 });
 
