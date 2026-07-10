@@ -3,7 +3,6 @@ import { describe, expect, it, vi } from "vitest";
 import { openProfileMenuItem, setupBraiAppTest, stubAndroidCapacitor } from "./app-test-support";
 import { BraiApp } from "@/features/app/BraiApp";
 import { FocusSection } from "@/features/app/sections/focus/FocusSection";
-import { BraiApi } from "@/shared/api/braiApi";
 import { pendingEvents, saveGoalCache, saveHistoryCache } from "@/shared/storage/syncStore";
 import { emptyGoal, emptyHistory } from "@/shared/types/timer";
 import { shouldSnapSlidingNumber } from "@/shared/ui/sliding-number";
@@ -30,9 +29,9 @@ describe("BraiApp shell", () => {
 
   it("uses explicit email-only login on Preview web", async () => {
     window.__BRAI_RUNTIME_CONFIG__ = { environment: "preview-a", previewSlot: "A" };
-    vi.spyOn(BraiApi.prototype, "session").mockResolvedValue({ authenticated: false, user: null });
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      if (url.endsWith("/auth/session")) return unauthenticatedSessionResponse();
       if (url.endsWith("/auth/test-email-login")) {
         return new Response(JSON.stringify({ error: "invalid_email" }), {
           status: 401,
@@ -61,7 +60,7 @@ describe("BraiApp shell", () => {
   it("keeps Android login password-only", async () => {
     stubAndroidCapacitor();
     window.__BRAI_RUNTIME_CONFIG__ = { environment: "preview-a", previewSlot: "A" };
-    vi.spyOn(BraiApi.prototype, "session").mockResolvedValue({ authenticated: false, user: null });
+    stubUnauthenticatedSessionFetch();
 
     render(<BraiApp />);
 
@@ -71,7 +70,7 @@ describe("BraiApp shell", () => {
 
   it("keeps production Web on the OTP flow", async () => {
     window.__BRAI_RUNTIME_CONFIG__ = { environment: "prod" };
-    vi.spyOn(BraiApi.prototype, "session").mockResolvedValue({ authenticated: false, user: null });
+    stubUnauthenticatedSessionFetch();
 
     render(<BraiApp />);
 
@@ -1014,6 +1013,17 @@ function jsonResponse(body: unknown, status = 200): Response {
 
 function authSessionResponse(): Response {
   return jsonResponse({ authenticated: true, user: { id: "test-user", email: "test@example.com", name: "Test" } });
+}
+
+function unauthenticatedSessionResponse(): Response {
+  return jsonResponse({ authenticated: false, user: null });
+}
+
+function stubUnauthenticatedSessionFetch() {
+  vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+    if (requestUrl(input).endsWith("/auth/session")) return unauthenticatedSessionResponse();
+    return Promise.reject(new Error("offline"));
+  }));
 }
 
 function emptyInboxResponse(): Response {
