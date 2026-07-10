@@ -22,6 +22,16 @@ test("production seed reapplies only explicitly marked idempotent migrations", (
   assert.ok(seedFunction.indexOf("copySchemaData") < seedFunction.indexOf("reapplyPostProductionSeedMigrations"));
 });
 
+test("workflow diagram seed stores real newlines for Kroki", () => {
+  const migration = fs.readFileSync(
+    path.join(repoRoot, "supabase/migrations/0010_agent_role_normalization_workflows.sql"),
+    "utf8"
+  );
+
+  assert.ok(migration.includes("$mermaid$flowchart LR\n"));
+  assert.equal(migration.includes("flowchart LR\\n"), false);
+});
+
 test("preview env setup rewrites existing shell-unsafe values safely", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "brai-supabase-env-"));
   const envFile = path.join(dir, "brai-api.env");

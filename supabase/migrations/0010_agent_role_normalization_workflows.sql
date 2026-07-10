@@ -139,7 +139,12 @@ INSERT INTO workflow_definitions (
   'active',
   'brai-inbox-normalization',
   '["ingest","raw_normalizer","apply_normalized_raw"]',
-  'flowchart LR\n  ingest["ingest"] --> normalizer["raw_normalizer"]\n  normalizer -->|valid JSON| apply["apply_normalized_raw"]\n  normalizer -->|validation error, max 3| normalizer\n  normalizer -->|3 failures| review["needs_review"]\n  apply --> done["completed"]',
+  $mermaid$flowchart LR
+  ingest["ingest"] --> normalizer["raw_normalizer"]
+  normalizer -->|valid JSON| apply["apply_normalized_raw"]
+  normalizer -->|validation error, max 3| normalizer
+  normalizer -->|3 failures| review["needs_review"]
+  apply --> done["completed"]$mermaid$,
   'brai.inbox.raw.v1',
   '{"type":"object","required":["inbox_id"],"properties":{"inbox_id":{"type":"string","minLength":1}},"additionalProperties":false}',
   'brai.inbox.normalized.v1',
