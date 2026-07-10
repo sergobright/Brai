@@ -168,6 +168,15 @@ export function projectInboxState(
         explanation_text: "",
         normalization_text: "",
         is_normalized: false,
+        item_roles_id: null,
+        initial_event_id: null,
+        workflow_execution_id: null,
+        workflow_status: "queued",
+        workflow_step: "ingest",
+        workflow_attempt_count: 0,
+        workflow_last_error: null,
+        temporal_workflow_id: null,
+        temporal_run_id: null,
         ai_processing_status: null,
         ai_processing_error: null,
         created_at_utc: occurredAtUtc,
@@ -233,7 +242,20 @@ function normalizeInboxItem(item: InboxItem): InboxItem {
     item_date: item.item_date ?? null,
     deleted_at_utc: item.deleted_at_utc ?? null,
     is_normalized: Boolean(item.is_normalized),
-    ai_processing_status: item.ai_processing_status === "failed" ? "failed" : null,
+    item_roles_id: Number.isInteger(item.item_roles_id) ? item.item_roles_id : null,
+    initial_event_id: item.initial_event_id ?? null,
+    workflow_execution_id: Number.isInteger(item.workflow_execution_id) ? item.workflow_execution_id : null,
+    workflow_status: ["queued", "running", "completed", "failed", "needs_review"].includes(item.workflow_status ?? "")
+      ? item.workflow_status
+      : null,
+    workflow_step: item.workflow_step ?? null,
+    workflow_attempt_count: Number.isInteger(item.workflow_attempt_count) ? item.workflow_attempt_count : 0,
+    workflow_last_error: item.workflow_last_error ?? null,
+    temporal_workflow_id: item.temporal_workflow_id ?? null,
+    temporal_run_id: item.temporal_run_id ?? null,
+    ai_processing_status: ["running", "failed", "needs_review"].includes(item.ai_processing_status ?? "")
+      ? item.ai_processing_status
+      : null,
     ai_processing_error: typeof item.ai_processing_error === "string" ? item.ai_processing_error : null,
   };
 }

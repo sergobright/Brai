@@ -29,6 +29,9 @@ describe("inbox store", () => {
       description_md: "строка\n2",
       source: "",
       is_normalized: false,
+      item_roles_id: null,
+      workflow_status: "queued",
+      workflow_step: "ingest",
       pending: true,
     });
     expect("status" in item).toBe(false);

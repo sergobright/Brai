@@ -6,7 +6,7 @@ import type {
   TimerSyncResponse,
 } from "@/shared/types/timer";
 import type { ActivitiesState, ActivitiesSyncResponse, PendingActivityEvent } from "@/shared/types/activities";
-import type { InboxState, InboxSyncResponse, PendingInboxEvent } from "@/shared/types/inbox";
+import type { InboxState, InboxSyncResponse, InboxWorkflowDetails, PendingInboxEvent } from "@/shared/types/inbox";
 
 interface RequestOptions extends RequestInit {
   json?: unknown;
@@ -144,6 +144,10 @@ export class BraiApi {
 
   async inbox(): Promise<InboxState> {
     return this.request("/v1/inbox");
+  }
+
+  async inboxWorkflow(inboxId: string): Promise<InboxWorkflowDetails> {
+    return this.request(`/v1/inbox/${encodeURIComponent(inboxId)}/workflow`);
   }
 
   async aiLogs(limit = 50): Promise<{ logs: AiLog[] }> {

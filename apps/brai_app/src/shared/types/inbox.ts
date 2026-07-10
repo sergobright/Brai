@@ -17,12 +17,50 @@ export interface InboxItem {
   explanation_text: string;
   normalization_text: string;
   is_normalized: boolean;
-  ai_processing_status?: "failed" | null;
+  item_roles_id?: number | null;
+  initial_event_id?: string | null;
+  workflow_execution_id?: number | null;
+  workflow_status?: "queued" | "running" | "completed" | "failed" | "needs_review" | null;
+  workflow_step?: string | null;
+  workflow_attempt_count?: number;
+  workflow_last_error?: string | null;
+  temporal_workflow_id?: string | null;
+  temporal_run_id?: string | null;
+  ai_processing_status?: "running" | "failed" | "needs_review" | null;
   ai_processing_error?: string | null;
   created_at_utc: string;
   updated_at_utc: string;
   deleted_at_utc: string | null;
   pending?: boolean;
+}
+
+export interface InboxWorkflowDetails {
+  execution: {
+    workflow_id: string;
+    run_id: string | null;
+    status: "queued" | "running" | "completed" | "failed" | "needs_review";
+    current_step: string;
+    attempt_count: number;
+    last_error: string | null;
+  };
+  definition: {
+    id: string;
+    version: number;
+    title: string;
+    task_queue: string;
+    steps: string[];
+    input_schema_version: string;
+    output_schema_version: string;
+  } | null;
+  attempts: Array<{
+    id: number;
+    agent_id: string;
+    dt: string;
+    status: "done" | "failed";
+    ai_title: string;
+    attempt_number: number | null;
+    json_data: { metadata?: { error?: unknown } };
+  }>;
 }
 
 export interface InboxEventPayload {

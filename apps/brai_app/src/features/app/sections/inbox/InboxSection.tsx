@@ -2,7 +2,7 @@
 
 import type { CSSProperties, FormEvent, KeyboardEvent, MouseEvent, PointerEvent } from "react";
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
-import { BookOpen, FilePenLine, FileText, Inbox, Link2, Mail, MessageSquare, Pencil, Plus, Sparkles, Trash2, X } from "lucide-react";
+import { BookOpen, CheckCircle2, FilePenLine, FileText, Inbox, Link2, LoaderCircle, Mail, MessageSquare, Pencil, Plus, Sparkles, Trash2, X, XCircle } from "lucide-react";
 import { useSwipeable } from "react-swipeable";
 import {
   cleanTitle,
@@ -14,7 +14,9 @@ import {
   visibleDescriptionPreview,
 } from "@/shared/activities/text";
 import { installAndroidBackHandler } from "@/shared/platform/platform";
-import type { InboxItem, InboxState } from "@/shared/types/inbox";
+import { BraiApi } from "@/shared/api/braiApi";
+import { defaultApiBase } from "@/shared/config/runtime";
+import type { InboxItem, InboxState, InboxWorkflowDetails } from "@/shared/types/inbox";
 import { Button } from "@/shared/ui/button";
 import { hasMarkdownSyntax, MarkdownContent } from "@/shared/ui/markdown-content";
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/shared/ui/input-group";
@@ -544,6 +546,7 @@ function InboxRow({
             <div className="flex min-w-0 flex-wrap items-center gap-1.5 text-[11px] leading-4 text-muted-foreground/70">
               {meta.map((label) => (
                 <span key={label} className="rounded border border-border bg-muted/35 px-1.5">
+                  {label === "AI-working" ? <LoaderCircle className="mr-1 inline size-3 animate-spin" aria-hidden="true" /> : null}
                   {label}
                 </span>
               ))}
@@ -904,7 +907,9 @@ function InboxDetailEditor({
     </div>
   );
   const detailContent =
-    activeTab === "history" ? (
+    activeTab === "ai" ? (
+      <InboxAiProcessPanel item={item} />
+    ) : activeTab === "history" ? (
       <DetailHistory kind="inbox" item={item} />
     ) : activeTab === "details" ? (
       <DetailFields kind="inbox" item={item} />
@@ -1031,6 +1036,84 @@ function InboxDetailEditor({
   );
 }
 
+function InboxAiProcessPanel({ item }: { item: InboxItem }) {
+  const [details, setDetails] = useState<InboxWorkflowDetails | null>(null);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let active = true;
+    void new BraiApi(defaultApiBase()).inboxWorkflow(item.id)
+      .then((value) => {
+        if (active) {
+          setDetails(value);
+          setError("");
+        }
+      })
+      .catch((reason) => {
+        if (active) setError(reason instanceof Error ? reason.message : "Не удалось загрузить workflow");
+      });
+    return () => {
+      active = false;
+    };
+  }, [item.id, item.temporal_run_id, item.workflow_attempt_count, item.workflow_status]);
+
+  if (error) return <p className="m-0 py-4 text-sm text-destructive" role="alert">{error}</p>;
+  if (!details) {
+    return (
+      <div className="flex items-center gap-2 py-4 text-sm text-muted-foreground">
+        <LoaderCircle className="size-4 animate-spin" aria-hidden="true" />
+        Загружаю AI process
+      </div>
+    );
+  }
+
+  const failed = details.execution.status === "failed" || details.execution.status === "needs_review";
+  return (
+    <ScrollArea className="min-h-0" role="tabpanel">
+      <div className="grid gap-4 py-4">
+        <div className="grid gap-2 rounded-lg border border-border p-3 text-sm">
+          <div className="flex items-center gap-2 font-medium">
+            {failed ? <XCircle className="size-4 text-destructive" aria-hidden="true" /> : details.execution.status === "completed" ? <CheckCircle2 className="size-4 text-primary" aria-hidden="true" /> : <LoaderCircle className="size-4 animate-spin text-primary" aria-hidden="true" />}
+            {details.execution.status}
+          </div>
+          <div className="text-muted-foreground">Шаг: {details.execution.current_step}</div>
+          <div className="text-muted-foreground">Попытки: {details.execution.attempt_count}</div>
+          {details.execution.last_error ? <div className="text-destructive">{details.execution.last_error}</div> : null}
+        </div>
+
+        <div className="grid gap-2">
+          <h3 className="m-0 text-sm font-semibold">Шаги workflow</h3>
+          {(details.definition?.steps ?? []).map((step) => (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground" key={step}>
+              <CheckCircle2 className="size-3.5" aria-hidden="true" />
+              {step}
+            </div>
+          ))}
+        </div>
+
+        <div className="grid gap-2">
+          <h3 className="m-0 text-sm font-semibold">AI executions</h3>
+          {details.attempts.length ? details.attempts.map((attempt) => (
+            <div className="grid gap-1 rounded-lg border border-border p-3 text-sm" key={attempt.id}>
+              <div className="flex items-center justify-between gap-3">
+                <span className="font-medium">{attempt.agent_id}</span>
+                <span className="text-xs text-muted-foreground">#{attempt.attempt_number ?? 1}</span>
+              </div>
+              <div className={attempt.status === "failed" ? "text-destructive" : "text-muted-foreground"}>{attempt.ai_title}</div>
+              {typeof attempt.json_data.metadata?.error === "string" ? <div className="text-xs text-destructive">{attempt.json_data.metadata.error}</div> : null}
+            </div>
+          )) : <p className="m-0 text-sm text-muted-foreground">AI ещё не запускался.</p>}
+        </div>
+
+        <dl className="m-0 grid gap-1 text-xs text-muted-foreground">
+          <div><dt className="inline font-medium text-foreground">Workflow ID: </dt><dd className="inline break-all">{details.execution.workflow_id}</dd></div>
+          <div><dt className="inline font-medium text-foreground">Run ID: </dt><dd className="inline break-all">{details.execution.run_id || "—"}</dd></div>
+        </dl>
+      </div>
+    </ScrollArea>
+  );
+}
+
 function InboxTypeIcon({ id }: { id: string }) {
   const className = "h-[18px] w-[18px]";
   switch (inboxTypeIndex(id)) {
@@ -1051,10 +1134,10 @@ function InboxTypeIcon({ id }: { id: string }) {
 
 function inboxRowMeta(item: InboxItem) {
   const meta: string[] = [];
-  if (!item.is_normalized) {
-    meta.push(item.ai_processing_status === "failed" ? `Ошибка AI: ${item.ai_processing_error || "обработка не выполнена"}` : "AI обрабатывает");
-  }
-  if (item.preliminary_section) meta.push(`Класс: ${item.preliminary_section}`);
+  if (item.ai_processing_status === "failed") meta.push(`Ошибка AI: ${item.ai_processing_error || "обработка не выполнена"}`);
+  else if (item.ai_processing_status === "needs_review") meta.push(`needs_review: ${item.ai_processing_error || "требуется проверка"}`);
+  else if (!item.item_roles_id || item.ai_processing_status === "running") meta.push("AI-working");
+  else if (item.preliminary_section) meta.push(item.preliminary_section);
   return meta;
 }
 

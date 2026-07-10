@@ -83,6 +83,11 @@ test('Inbox API POST creates an immediately visible row with explanation and att
     assert.equal(response.body.state.inbox[0].explanation_text, 'Положить это во входящие');
     assert.equal(response.body.state.inbox[0].normalization_text, '');
     assert.equal(response.body.state.inbox[0].is_normalized, false);
+    assert.equal(response.body.state.inbox[0].item_roles_id, null);
+    assert.ok(response.body.state.inbox[0].initial_event_id);
+    assert.equal(response.body.state.inbox[0].workflow_status, 'queued');
+    assert.equal(tableCount(fixture, 'items'), 0);
+    assert.equal(tableCount(fixture, 'item_roles'), 0);
     assert.equal(response.body.state.inbox[0].source, 'telegram');
     assert.equal(response.body.state.inbox[0].source_key, '');
     assert.equal(response.body.state.inbox[0].response_required, false);
@@ -112,6 +117,7 @@ test('Inbox API POST creates an immediately visible row with explanation and att
         text: 'Положить это во входящие',
         image_base64: IMAGE_BASE64,
         image_mime: 'image/png',
+        source: 'telegram',
         idempotency_key: 'message-1'
       })
     });
@@ -119,6 +125,13 @@ test('Inbox API POST creates an immediately visible row with explanation and att
     assert.equal(tableCount(fixture, 'inbox'), 1);
     assert.equal(eventDomainCount(fixture, 'inbox'), 1);
     assert.equal(tableCount(fixture, 'ai_logs'), 0);
+
+    const conflict = await inboxRequest(fixture.url, '/v1/', {
+      method: 'POST',
+      body: JSON.stringify({ text: 'Другой payload', idempotency_key: 'message-1' })
+    });
+    assert.equal(conflict.status, 409);
+    assert.equal(conflict.body.error, 'idempotency_conflict');
   } finally {
     await fixture.close();
     if (previousFfmpeg === undefined) delete process.env.BRAI_THUMBNAIL_FFMPEG_BIN;

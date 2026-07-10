@@ -19,7 +19,7 @@ Brai SHALL expose a universal Inbox API at `/v1/` where omitted destination defa
 - **AND** no Inbox data is mutated
 
 ### Requirement: Inbox receives text and attachments before AI processing
-Brai SHALL support `POST /v1/` for the default Inbox connector and SHALL persist the Inbox record before scheduling AI processing.
+Brai SHALL support `POST /v1/` for the default Inbox connector and SHALL persist a raw Inbox role record before scheduling AI normalization.
 
 #### Scenario: Inbox payload is received
 - **WHEN** an external app sends text with the Inbox API key
@@ -27,40 +27,48 @@ Brai SHALL support `POST /v1/` for the default Inbox connector and SHALL persist
 - **AND** optional description content is stored in `inbox.description_text`
 - **AND** optional legacy `image_base64`/`image_mime` or `attachments[]` files are saved as attachments
 - **AND** each attachment path is stored in the Inbox attachment links
-- **AND** the response state includes the new Inbox item before AI processing completes
+- **AND** the response state includes the new raw Inbox record before AI processing completes
+- **AND** the response does not require `items` or `item_roles` to exist yet
 
 #### Scenario: Inbox payload includes metadata
 - **WHEN** an external app sends optional `source`, `source_key`, `response_required`, `record_type_id`, or `idempotency_key`
-- **THEN** supported metadata is stored on the Inbox record
-- **AND** repeated requests with the same `idempotency_key` do not create duplicate Inbox records
+- **THEN** supported metadata is stored on the raw Inbox record
+- **AND** repeated requests with the same `idempotency_key` and payload do not create duplicate Inbox records or duplicate workflows
+- **AND** repeated requests with the same `idempotency_key` and different payload fail explicitly
 - **AND** Inbox API accepts record type `1` for human API Inbox writes and `2` for agent API Inbox writes
 
 #### Scenario: Inbox payload asks to attach to the previous message
 - **WHEN** an external app sends text that asks to attach the data to the previous message
-- **THEN** the API still creates a new Inbox record
+- **THEN** the API still creates a new raw Inbox record
 - **AND** the new record stores a reference to the previous Inbox record from the same source key or source
 
 #### Scenario: Inbox request is unauthorized
 - **WHEN** an Inbox request omits the valid Inbox API key
 - **THEN** the API returns `401`
-- **AND** no Inbox data or attachment file is created
+- **AND** no Inbox data, workflow, event, log, item, role, or attachment file is created
 
 ### Requirement: Inbox AI processing normalizes saved records
-Brai SHALL process newly saved Inbox records asynchronously through image description and normalization agents.
+Brai SHALL process newly saved Inbox records asynchronously through the normalization workflow.
 
 #### Scenario: Image attachments are present
-- **WHEN** a saved Inbox record has image attachments
+- **WHEN** a saved Inbox record has image attachments that require visual description
 - **THEN** `inbox.image_describer` describes the images
-- **AND** the description is stored through a `normalize` event in `normalization_text`
-- **AND** an `ai_logs` row is written for the image agent
+- **AND** an `ai_logs` row is written for each real image agent execution
+- **AND** the image description becomes input to the structured normalization step
+
+#### Scenario: Image attachments are absent or unnecessary
+- **WHEN** a saved Inbox record has no image attachments requiring visual description
+- **THEN** the workflow skips `inbox.image_describer`
+- **AND** the rest of normalization can continue
 
 #### Scenario: Record is normalized
 - **WHEN** a saved Inbox record is processed
-- **THEN** `inbox.normalizer` reads `explanation_text`, `description_text`, image description, and `inbox_classes`
-- **AND** it writes a title, user-facing description, `preliminary_section`, `normalization_text`, and `is_normalized = true`
-- **AND** it does not overwrite `explanation_text`
-- **AND** an `ai_logs` row is written for the normalizer
+- **THEN** `inbox.normalizer` reads `explanation_text`, `description_text`, image description when present, and `inbox_classes`
+- **AND** it returns structured JSON with title, user-facing description, preliminary type, and normalization text
+- **AND** it does not directly mutate `inbox`, `items`, `item_roles`, or events
+- **AND** the apply script writes the final title, description, preliminary type, entity, role, events, and logs
+- **AND** an `ai_logs` row is written for each real normalizer execution
 
 #### Scenario: No class fits
 - **WHEN** the normalizer proposes a class key that is not in `inbox_classes`
-- **THEN** Brai creates a candidate class row for later review
+- **THEN** Brai creates or records a candidate class for later review through the apply/mutation path

@@ -61,6 +61,7 @@ export function createBraiServer({
   codexTimeoutMs = null,
   inboxImageDescriber = null,
   inboxNormalizer = null,
+  inboxWorkflowStarter = null,
   inboxAutoProcess = true,
   braiCmd = {},
   branch = process.env.BRAI_BRANCH || null,
@@ -105,21 +106,44 @@ export function createBraiServer({
     if (!inboxAutoProcess || !inboxId) return;
     setTimeout(() => {
       void withUserScope(ownerUserId, async () => {
-        await processInboxItem({
-          store,
-          inboxId,
-          storageRoot: inboxStorageRoot,
-          codexBin,
-          codexModel,
-          codexFallbackModel,
-          codexTimeoutMs,
-          imageDescriber: inboxImageDescriber,
-          normalizer: inboxNormalizer,
-          nowDate: now()
-        });
+        const started = inboxWorkflowStarter
+          ? await inboxWorkflowStarter({ ownerUserId, inboxId })
+          : await processInboxItem({
+              store,
+              inboxId,
+              storageRoot: inboxStorageRoot,
+              codexBin,
+              codexModel,
+              codexFallbackModel,
+              codexTimeoutMs,
+              imageDescriber: inboxImageDescriber,
+              normalizer: inboxNormalizer,
+              nowDate: now()
+            });
+        if (started?.completion) await started.completion;
         const state = inboxState(store, now());
         broadcast(sockets, { type: 'inbox_synced', inbox_state: state }, ownerUserId);
       }).catch((error) => {
+        try {
+          withUserScope(ownerUserId, () => {
+            const execution = store.getInboxWorkflowExecution(inboxId);
+            if (execution) {
+              store.failInboxWorkflow({
+                inboxId,
+                workflowId: execution.workflow_id,
+                runId: execution.run_id,
+                reason: error instanceof Error ? error.message : String(error),
+                step: execution.current_step,
+                nowIso: now().toISOString()
+              });
+            }
+          });
+        } catch (statusError) {
+          logger.error?.('Inbox workflow failure status update failed', {
+            error: statusError instanceof Error ? statusError.message : String(statusError),
+            inboxId
+          });
+        }
         logger.error?.('Inbox AI processing failed', {
           error: error instanceof Error ? error.message : String(error),
           inboxId
@@ -625,6 +649,16 @@ export function createBraiServer({
         return;
       }
 
+      const inboxWorkflowMatch = req.method === 'GET'
+        ? url.pathname.match(/^\/v1\/inbox\/([^/]+)\/workflow$/)
+        : null;
+      if (inboxWorkflowMatch) {
+        const inboxId = decodeURIComponent(inboxWorkflowMatch[1]);
+        const details = store.getInboxWorkflowDetails(inboxId);
+        sendJson(req, res, details ? 200 : 404, details ?? { error: 'not_found' });
+        return;
+      }
+
       if (req.method === 'GET' && url.pathname === '/v1/events') {
         sendJson(req, res, 200, { events: store.listEvents({ limit: url.searchParams.get('limit') }) });
         return;
@@ -940,29 +974,23 @@ export function inboxState(store, nowDate) {
 }
 
 function addInboxAiProcessingState(store, inbox) {
-  const pendingIds = inbox.filter((item) => !item.is_normalized).map((item) => item.id);
-  const logs = new Map(store.listLatestInboxAiLogs(pendingIds).map((log) => [log.flow_id, log]));
   return inbox.map((item) => {
-    const log = logs.get(item.id);
-    if (!log || log.status !== 'failed') return item;
+    if (item.workflow_status === 'failed' || item.workflow_status === 'needs_review') {
+      return {
+        ...item,
+        ai_processing_status: item.workflow_status,
+        ai_processing_error: item.workflow_last_error || 'Ошибка AI-обработки'
+      };
+    }
+    if (item.workflow_status === 'queued' || item.workflow_status === 'running') {
+      return { ...item, ai_processing_status: 'running', ai_processing_error: null };
+    }
     return {
       ...item,
-      ai_processing_status: 'failed',
-      ai_processing_error: inboxAiFailureText(log)
+      ai_processing_status: null,
+      ai_processing_error: null
     };
   });
-}
-
-function inboxAiFailureText(log) {
-  const metadata = log.json_data?.metadata;
-  return cleanShortText(log.ai_title)
-    || cleanShortText(metadata?.error_message)
-    || cleanShortText(metadata?.error)
-    || 'Ошибка AI-обработки';
-}
-
-function cleanShortText(value) {
-  return typeof value === 'string' ? value.trim().replace(/\s+/g, ' ').slice(0, 120) : '';
 }
 
 function actionsCompatState(state) {

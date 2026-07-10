@@ -202,7 +202,12 @@ export async function createTestDatabase() {
   try {
     await client.query(`CREATE SCHEMA ${quoteIdent(schema)}`);
     await client.query(`SET search_path TO ${quoteIdent(schema)}`);
-    await client.query(fs.readFileSync(path.resolve(import.meta.dirname, '../../../supabase/migrations/0001_brai_baseline.sql'), 'utf8'));
+    for (const migration of [
+      '0001_brai_baseline.sql',
+      '0010_agent_role_normalization_workflows.sql'
+    ]) {
+      await client.query(fs.readFileSync(path.resolve(import.meta.dirname, '../../../supabase/migrations', migration), 'utf8'));
+    }
   } catch (error) {
     await dropTestSchema(baseUrl, schema).catch(() => {});
     throw error;

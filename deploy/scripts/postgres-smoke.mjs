@@ -22,6 +22,22 @@ try {
     scalar("SELECT COUNT(*)::int FROM version_types WHERE id IN ('apk', 'build')"),
     scalar("SELECT COUNT(*)::int FROM activity_types WHERE id IN ('action', 'operation')"),
     scalar("SELECT COUNT(*)::int FROM inbox_record_types"),
+    scalar("SELECT COUNT(*)::int FROM role_statuses WHERE id IN ('active', 'ended', 'deleted')"),
+    scalar("SELECT COUNT(*)::int FROM role_contracts"),
+    scalar("SELECT COUNT(*)::int FROM workflow_definitions WHERE id = 'inbox.raw-normalization' AND version = 1"),
+    scalar(`
+      SELECT COUNT(*)::int
+      FROM information_schema.columns
+      WHERE table_schema = current_schema()
+        AND (table_name, column_name) IN (
+          ('inbox', 'item_roles_id'),
+          ('inbox', 'initial_event_id'),
+          ('inbox', 'workflow_execution_id'),
+          ('events', 'item_roles_id'),
+          ('ai_logs', 'workflow_id'),
+          ('ai_logs', 'attempt_number')
+        )
+    `),
     scalar("SELECT COUNT(*)::int FROM build_version_counters WHERE version_type_id IN ('apk', 'build')"),
     scalar("SELECT COUNT(*)::int FROM pg_event_trigger WHERE evtname = 'brai_enable_rls_for_new_public_tables' AND evtenabled IN ('O', 'R', 'A')"),
     scalar(`
@@ -64,6 +80,10 @@ try {
     versionTypes,
     activityTypes,
     inboxTypes,
+    roleStatuses,
+    roleContracts,
+    inboxWorkflowDefinitions,
+    workflowColumns,
     counters,
     rlsAutoTrigger,
     rlsFunctionSearchPath,
@@ -76,6 +96,10 @@ try {
   if (versionTypes !== 2) throw new Error("version_types seed is incomplete");
   if (activityTypes !== 2) throw new Error("activity_types seed is incomplete");
   if (inboxTypes < 4) throw new Error("inbox_record_types seed is incomplete");
+  if (roleStatuses !== 3) throw new Error("role_statuses seed is incomplete");
+  if (roleContracts < 3) throw new Error("role_contracts seed is incomplete");
+  if (inboxWorkflowDefinitions !== 1) throw new Error("Inbox workflow definition is missing");
+  if (workflowColumns !== 6) throw new Error("Agent role workflow columns are incomplete");
   if (counters !== 2) throw new Error("build_version_counters seed is incomplete");
   if (runtimeSchema === "public" && rlsAutoTrigger !== 1) {
     throw new Error("public table RLS auto-enable trigger is missing or disabled");
@@ -92,6 +116,10 @@ try {
     versionTypes,
     activityTypes,
     inboxTypes,
+    roleStatuses,
+    roleContracts,
+    inboxWorkflowDefinitions,
+    workflowColumns,
     counters,
     rlsAutoTrigger,
     rlsFunctionSearchPath,

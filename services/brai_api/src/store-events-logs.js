@@ -11,17 +11,31 @@ export const eventsLogsMethods = {
     const rawEventId = sanitizeText(event.eventId) ?? sanitizeText(event.id);
     if (!rawEventId || !eventDomain || !eventType) return null;
     const id = sanitizeText(event.id) ?? `${eventDomain}:${rawEventId}`;
-    const itemsId = sanitizeText(event.itemsId);
-    if (itemsId) this.ensureEventItem(itemsId, event);
+    const requestedItemsId = sanitizeText(event.itemsId);
+    const itemsId = requestedItemsId
+      ? this.db.prepare('SELECT id FROM items WHERE id = ?').get(requestedItemsId)?.id ?? null
+      : null;
+    const subjectType = sanitizeText(event.subjectType) ?? eventDomain;
+    const itemRolesId = Number.isInteger(event.itemRolesId)
+      ? event.itemRolesId
+      : itemsId
+        ? this.db.prepare(`
+            SELECT r.id
+            FROM item_roles r
+            JOIN item_role_types t ON t.id = r.item_role_types_id
+            WHERE r.items_id = ? AND r.status = 'active' AND t.title_system = ?
+            LIMIT 1
+          `).get(itemsId, subjectType)?.id ?? null
+        : null;
     const domainSequence = event.domainSequence ?? this.nextPostgresCounter(`events.domain_sequence.${eventDomain}`);
     const serverSequence = event.serverSequence ?? this.nextPostgresCounter('events.server_sequence');
     const result = this.db.prepare(`
       INSERT INTO events (
-        id, event_domain, event_id, event_type, event_action, title, items_id, subject_type, subject_id,
+        id, event_domain, event_id, event_type, event_action, title, items_id, item_roles_id, subject_type, subject_id,
         actor_type, actor_id, device_id, client_sequence, server_sequence, domain_sequence, status, ignore_reason,
         occurred_at_utc, received_at_utc, base_server_revision, payload_version, payload_json,
         trace_id, created_at_utc, user_id
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO NOTHING
     `).run(
       id,
@@ -31,7 +45,8 @@ export const eventsLogsMethods = {
       sanitizeText(event.eventAction) ?? `${eventDomain}.${eventType}`,
       sanitizeText(event.title) ?? `${eventDomain}.${eventType}`,
       itemsId,
-      sanitizeText(event.subjectType) ?? eventDomain,
+      itemRolesId,
+      subjectType,
       sanitizeText(event.subjectId),
       sanitizeText(event.actorType) ?? 'user',
       sanitizeText(event.actorId),
@@ -51,25 +66,6 @@ export const eventsLogsMethods = {
       scopedUserId()
     );
     return result.changes > 0 ? domainSequence : null;
-  },
-
-  ensureEventItem(itemsId, event = {}) {
-    const nowIso = event.occurredAtUtc ?? event.receivedAtUtc ?? new Date().toISOString();
-    this.db.prepare(`
-      INSERT INTO items (id, user_id, title, description, author, created_at_utc, updated_at_utc, deleted_at_utc)
-      VALUES (?, ?, ?, '', '', ?, ?, NULL)
-      ON CONFLICT(id) DO NOTHING
-    `).run(itemsId, scopedUserId(), sanitizeText(event.title) ?? '', nowIso, nowIso);
-    const roleId = itemRoleTypeId(event.subjectType);
-    if (!roleId) return;
-    this.db.prepare(`
-      INSERT INTO item_roles (items_id, item_role_types_id, active_from_utc, active_to_utc, status, metadata_json)
-      SELECT ?, ?, ?, NULL, 'active', '{}'
-      WHERE NOT EXISTS (
-        SELECT 1 FROM item_roles
-        WHERE items_id = ? AND item_role_types_id = ? AND status = 'active'
-      )
-    `).run(itemsId, roleId, nowIso, itemsId, roleId);
   },
 
   getEventDomainRevision(domain) {
@@ -205,11 +201,4 @@ function ignoredEventSummary(domain, rawEvent) {
     payload_keys: payload ? Object.keys(payload).sort().slice(0, 20) : [],
     raw_key_count: Object.keys(event).length
   };
-}
-
-function itemRoleTypeId(subjectType) {
-  if (subjectType === 'activity') return 1;
-  if (subjectType === 'inbox') return 2;
-  if (subjectType === 'focus_session') return 3;
-  return null;
 }

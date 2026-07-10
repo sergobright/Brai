@@ -242,9 +242,23 @@ test('Brai Cmd inbox route accepts Android access token and creates Inbox contex
         authorization: `Bearer ${access.body.token}`,
         'x-brai-cmd-device-id': 'cmd-device'
       },
-      body: JSON.stringify({ text: 'разбери экран', idempotency_key: 'cmd-1' })
+      body: JSON.stringify({
+        text: 'разбери экран',
+        description_json: { appLabel: 'Telegram', page: { items: ['hello'] } },
+        attachments: [{ base64: PNG_BYTES.toString('base64'), mime: 'image/png', name: 'screen.png' }],
+        idempotency_key: 'cmd-1'
+      })
     });
     assert.equal(duplicate.status, 200);
+    const conflict = await jsonRequest(fixture.url, '/v1/brai-cmd/inbox', {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${access.body.token}`,
+        'x-brai-cmd-device-id': 'cmd-device'
+      },
+      body: JSON.stringify({ text: 'другой payload', idempotency_key: 'cmd-1' })
+    });
+    assert.equal(conflict.status, 409);
     const invalid = await jsonRequest(fixture.url, '/v1/brai-cmd/inbox', {
       method: 'POST',
       headers: {
@@ -262,6 +276,7 @@ test('Brai Cmd inbox route accepts Android access token and creates Inbox contex
     assert.deepEqual(ingestLogs.map((log) => [log.status, log.reason]), [
       ['done', null],
       ['skipped', 'duplicate'],
+      ['failed', 'idempotency_conflict'],
       ['failed', 'text_required']
     ]);
     assert.equal(ingestLogs[0].json_data.route, '/v1/brai-cmd/inbox');

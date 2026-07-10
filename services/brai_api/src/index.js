@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { braiCmdConfigFromEnv } from './brai-cmd.js';
+import { createInboxWorkflowRuntime } from './inbox-workflow-runtime.js';
 import { isPostgresUrl } from './postgres-sync-db.js';
 import { createBraiServer } from './server.js';
 
@@ -56,6 +57,14 @@ if (!sessionSecret) {
   process.exit(1);
 }
 
+const inboxWorkflow = await createInboxWorkflowRuntime({
+  databaseUrl,
+  storageRoot: inboxStorageRoot,
+  codexBin,
+  codexModel,
+  codexFallbackModel,
+  codexTimeoutMs
+});
 const runtime = createBraiServer({
   databaseUrl,
   dataRoot,
@@ -78,6 +87,7 @@ const runtime = createBraiServer({
   codexModel,
   codexFallbackModel,
   codexTimeoutMs,
+  inboxWorkflowStarter: inboxWorkflow.start,
   testAutoLogin,
   braiCmd: {
     config: braiCmdConfigFromEnv(process.env)
@@ -90,6 +100,7 @@ runtime.server.listen(port, '127.0.0.1', () => {
 for (const signal of ['SIGINT', 'SIGTERM']) {
   process.on(signal, async () => {
     await runtime.close();
+    await inboxWorkflow.close();
     process.exit(0);
   });
 }

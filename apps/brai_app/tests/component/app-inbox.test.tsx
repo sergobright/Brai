@@ -163,6 +163,17 @@ describe("BraiApp inbox", () => {
           explanation_text: "Сырой текст",
           normalization_text: "",
           is_normalized: false,
+          item_roles_id: null,
+          initial_event_id: "inbox:initial-event",
+          workflow_execution_id: 17,
+          workflow_status: "running",
+          workflow_step: "raw_normalizer",
+          workflow_attempt_count: 1,
+          workflow_last_error: null,
+          temporal_workflow_id: "brai:inbox:inbox-tabs",
+          temporal_run_id: "run-17",
+          ai_processing_status: "running",
+          ai_processing_error: null,
           created_at_utc: "2026-06-28T10:00:00.000Z",
           updated_at_utc: "2026-06-28T11:00:00.000Z",
           deleted_at_utc: null,
@@ -170,9 +181,44 @@ describe("BraiApp inbox", () => {
       ],
     });
 
+    const baseFetch = globalThis.fetch;
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      if (url.endsWith("/v1/inbox/inbox-tabs/workflow")) {
+        return new Response(JSON.stringify({
+          definition: {
+            id: "inbox.raw-normalization",
+            version: 1,
+            title: "Inbox raw normalization",
+            description: "",
+            task_queue: "brai-inbox-normalization",
+            steps: ["ingest", "raw_normalizer", "apply_normalized_raw"],
+          },
+          execution: {
+            workflow_id: "brai:inbox:inbox-tabs",
+            run_id: "run-17",
+            status: "running",
+            current_step: "raw_normalizer",
+            attempt_count: 1,
+            last_error: null,
+          },
+          attempts: [{
+            id: 41,
+            agent_id: "inbox.normalizer",
+            status: "done",
+            ai_title: "AI normalization",
+            attempt_number: 1,
+            json_data: { metadata: {} },
+          }],
+        }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      return baseFetch(input, init);
+    }));
+
     render(<BraiApp />);
 
     fireEvent.click(screen.getAllByRole("button", { name: "Входящие" }).at(-1) as HTMLElement);
+    expect(await screen.findByText("AI-working")).toBeInTheDocument();
     const title = await screen.findByRole("textbox", { name: "Название входящего: Входящее с файлами" });
     expect(screen.queryByLabelText("Превью вложения photo.png")).not.toBeInTheDocument();
     fireEvent.click(title);
@@ -199,6 +245,11 @@ describe("BraiApp inbox", () => {
     expect(screen.getByRole("button", { name: "Недоступное вложение photo.png" })).toBeDisabled();
     expect(screen.getByRole("link", { name: /brief\.pdf/ })).toHaveAttribute("href", "/api/v1/inbox/attachments/brief.pdf");
     expect(screen.getByRole("link", { name: /brief\.pdf/ })).toHaveAttribute("download", "brief.pdf");
+
+    fireEvent.click(screen.getByRole("tab", { name: "AI" }));
+    expect(await screen.findByText("raw_normalizer")).toBeInTheDocument();
+    expect(screen.getByText("inbox.normalizer")).toBeInTheDocument();
+    expect(screen.getByText("brai:inbox:inbox-tabs")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("tab", { name: "Детали" }));
     expect(screen.getByRole("tab", { name: "Детали" })).toHaveAttribute("aria-selected", "true");

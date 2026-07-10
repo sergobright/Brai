@@ -1,6 +1,7 @@
 [Unit]
 Description=Brai API
-After=network.target
+Wants=brai-temporal.service
+After=network.target brai-temporal.service
 
 [Service]
 Type=simple

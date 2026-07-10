@@ -43,7 +43,7 @@ Response:
 | `response_required` | `inbox.response_required` | Boolean. |
 | `record_type_id` | `inbox.record_type_id` | Внешний API принимает только `1` или `2`; default `1`. |
 | `attachments[]` | `inbox.attachment_links_json` | Whitelisted MIME attachments, включая изображения. |
-| `idempotency_key` | `inbox_events.event_id` | Повторный запрос не создаёт дубль. |
+| `idempotency_key` | `inbox.ingest_idempotency_hash` | Тот же key + тот же payload возвращает существующую запись; другой payload получает `409`. Исходный key не хранится. |
 
 Legacy image shortcut всё ещё поддерживается для Android compatibility:
 
@@ -70,15 +70,14 @@ Brai CMD отправляет:
 
 ## Processing
 
-После создания записи server schedules Inbox AI processing:
+После создания записи server создаёт raw Inbox role row без `item_roles_id`, первый event без role link и запускает environment-local Temporal workflow `InboxNormalizationWorkflow`:
 
-1. `inbox.image_describer` смотрит image attachments и пишет описание картинки в `normalization_text` через `normalize` event.
-2. `inbox.normalizer` сопоставляет `explanation_text`, `description_text` и описание картинки, затем пишет:
-   - `title`
-   - `description_text`
-   - `preliminary_section`
-   - `normalization_text`
-   - `is_normalized = 1`
+1. `ingest` сохраняет raw row, initial event, compact log и `workflow_executions` row; `items`/`item_roles` ещё не создаются.
+2. `raw_normalizer` при необходимости вызывает `inbox.image_describer`, затем вызывает `inbox.normalizer`. Агенты возвращают данные activity-коду и не мутируют domain tables.
+3. JSON normalizer валидируется. Schema errors получают до трёх реальных AI executions с контекстом предыдущей ошибки; каждый call пишет отдельный `ai_logs`.
+4. `apply_normalized_raw` в одной idempotent transaction создаёт `items`, `item_roles`, обновляет Inbox, заполняет initial event `item_roles_id`, пишет final domain event/log и завершает workflow read model.
+
+DB/business errors останавливают workflow без повторного LLM call. Product UI читает compact status из `workflow_executions`; детали доступны через `GET /v1/inbox/<inbox-id>/workflow`.
 
 `explanation_text` не перезаписывается: это source transcript/raw request.
 
@@ -98,13 +97,13 @@ Attachment storage root:
 BRAI_INBOX_STORAGE_ROOT=/srv/projects/brai/data/inbox-attachments
 ```
 
-Optional Codex model retry:
+Optional model для второй/третьей validation-попытки:
 
 ```env
 BRAI_CODEX_FALLBACK_MODEL=gpt-5
 ```
 
-Если основная модель не вернула валидный результат, server может один раз повторить запрос другой моделью. Локальной эвристической нормализации нет: при ошибке запись остаётся `is_normalized = false`, ошибка видна в `ai_logs`, а `/v1/inbox` отдаёт `ai_processing_status = "failed"` и короткое `ai_processing_error` для ленты Inbox.
+Локальной эвристической нормализации нет. После трёх schema-validation failures запись остаётся raw, workflow получает `needs_review`; execution/business failure получает `failed`. `/v1/inbox` отдаёт `AI-working`, `failed` или `needs_review` state из database read model.
 
 Attachments доступны через:
 
@@ -147,4 +146,5 @@ inbox.normalizer
 | 400 | `unsupported_attachment_mime` | MIME attachment не разрешён. |
 | 400 | `invalid_attachment` / `invalid_image` | Base64 или bytes не проходят проверку. |
 | 401 | `unauthorized` | Нет Inbox API key или он неверный. |
+| 409 | `idempotency_conflict` | Тот же `idempotency_key` повторён с другим payload. |
 | 413 | `request_too_large` / `attachment_too_large` / `attachments_too_large` | Превышены лимиты. |
