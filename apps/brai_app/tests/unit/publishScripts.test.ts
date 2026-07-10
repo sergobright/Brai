@@ -247,7 +247,7 @@ describe("mobile OTA publish scripts", () => {
     const playbook = await readFile(path.join(workspaceRoot, "deploy/ansible/brai.yml"), "utf8");
     const nonProductionStart = template.indexOf("{% for name, env in brai_envs.items() if name != 'prod' %}");
     expect(nonProductionStart).toBeGreaterThanOrEqual(0);
-    const productionTemplate = template.slice(template.indexOf("{{ brai_envs.prod.domain }} {"), nonProductionStart);
+    const productionTemplate = template.slice(template.indexOf("{{ brai_envs.prod.domain }}"), nonProductionStart);
     const nonProductionTemplate = template.slice(nonProductionStart);
     const productionApiBlock = productionTemplate.slice(
       productionTemplate.indexOf("handle_path /api/*"),
