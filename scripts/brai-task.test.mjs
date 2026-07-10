@@ -2002,11 +2002,12 @@ test("accept preview checks verified preview before PR actions", () => {
   assert.ok(script.indexOf('cd "$ROOT"') < script.indexOf("ensure_acceptance_marker_writable"));
 });
 
-test("accepted preview stale cleanup is best effort", () => {
+test("accepted preview stale cleanup is required", () => {
   const script = fs.readFileSync(path.join(process.cwd(), "deploy/scripts/ci-ssh-complete-accepted-previews.sh"), "utf8");
   const workflow = fs.readFileSync(path.join(process.cwd(), ".github/workflows/brai-delivery.yml"), "utf8");
   const temporalWorkflow = fs.readFileSync(path.join(process.cwd(), "services/brai_temporal/src/workflows.mjs"), "utf8");
   const cleanupScript = fs.readFileSync(path.join(process.cwd(), "deploy/scripts/ci-cleanup-accepted-branches.sh"), "utf8");
+  const releaseScript = fs.readFileSync(path.join(process.cwd(), "deploy/scripts/ci-ssh-release-slot.sh"), "utf8");
   const pruneScript = fs.readFileSync(path.join(process.cwd(), "deploy/scripts/ci-ssh-prune-accepted-branches.sh"), "utf8");
   const promoteScript = fs.readFileSync(path.join(process.cwd(), "deploy/scripts/ci-ssh-promote-deployment.sh"), "utf8");
   const otaSyncScript = fs.readFileSync(path.join(process.cwd(), "deploy/scripts/sync-occupied-preview-ota-manifests.sh"), "utf8");
@@ -2021,16 +2022,23 @@ test("accepted preview stale cleanup is best effort", () => {
   assert.match(requiredLoop, /BRAI_REQUIRE_PREVIEW_SLOT_RELEASE=true/);
   assert.match(requiredLoop, /slot_released/);
   assert.match(script, /filter_cleanup_branches_to_active_previews/);
+  assert.match(script, /accepted preview cleanup cannot continue safely/);
   assert.match(script, /Skipping \$skipped previously accepted previews with no active preview slot or queue entry/);
   assert.match(cleanupLoop, /cleanup_previously_accepted_preview/);
-  assert.match(cleanupLoop, /Best-effort cleanup failed/);
-  assert.doesNotMatch(cleanupLoop, /exit 1/);
+  assert.match(cleanupLoop, /Required cleanup failed/);
+  assert.match(cleanupLoop, /exit 1/);
+  assert.match(releaseScript, /cleanup-test-schemas\.mjs --branch "\$RELEASE_BRANCH" --legacy-before-hours 24/);
   assert.match(workflow, /dispatch-promotion --target prod/);
   assert.match(temporalWorkflow, /cleanupAcceptedBranches\(\{ recentMerged: true \}\)/);
   assert.match(cleanupScript, /BRAI_ACTIVE_PREVIEW_BRANCHES_JSON="\$ACTIVE_BRANCHES_JSON"/);
   assert.match(cleanupScript, /cleanup-accepted-branches\.mjs/);
+  assert.match(cleanupScript, /cleanup-accepted-branches\.mjs" --dry-run/);
+  assert.match(cleanupScript, /ci-ssh-release-slot\.sh/);
   assert.match(cleanupScript, /ci-ssh-prune-accepted-branches\.sh/);
-  assert.match(cleanupScript, /skipping accepted branch cleanup/);
+  assert.match(cleanupScript, /accepted branch cleanup cannot continue safely/);
+  assert.match(cleanupScript, /Local accepted worktree cleanup failed/);
+  assert.match(temporalWorkflow, /delivery_handoff_failed/);
+  assert.doesNotMatch(temporalWorkflow, /Cleanup is hygiene/);
   assert.match(pruneScript, /--prune-accepted-branches "\$@"/);
   assert.match(otaSyncScript, /PROD_SOURCE_ROOT="\$\{BRAI_PROD_SOURCE_ROOT:-\$ENVS_ROOT\/prod\/source\}"/);
   assert.match(otaSyncScript, /check_access\(\) \{/);

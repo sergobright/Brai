@@ -52,7 +52,7 @@ Native-boundary preview deploys may build a slot-specific APK inside the existin
 
 Accepted `deploy-prod` reruns are idempotent after a partial success: if the preview slot was already released, promotion may pass only when the production build ledger already records the accepted branch for the target commit, and the release rerun records `slot_released` for the already-free slot instead of leaving the workflow blocked.
 
-Accepted branch/worktree cleanup is a post-release hygiene step, not a Temporal gate. It runs as a Temporal activity only after accepted preview release or no-preview merge has passed, deletes remote refs through the GitHub API, and prunes clean local task worktrees through main-sync. Cleanup failures should be logged and retried by a later run instead of changing Temporal delivery status.
+Branch cleanup is a required Temporal gate. Preview/test database schemas are removed before the preview slot can be released. After release, accepted-branch cleanup deletes remote refs through the GitHub API and prunes clean local task worktrees through main-sync. A database, branch, or worktree cleanup command failure keeps the workflow non-terminal at `waiting_for_fix`; rerunning the same delivery is idempotent.
 
 ## Infra Docs No-preview Path
 
@@ -220,7 +220,7 @@ Then open `https://temporal.brightos.world` with the unified Caddy basic auth an
 - Worker stopped: workflows remain in Temporal; restart `brai-temporal-worker.service`.
 - Failed preview deploy: query the workflow state and inspect `status`, `blocker`, `blockers`, and `tasks`, then fix and push the same `codex/*` branch.
 - Failed Supabase preview: check `/etc/brai/supabase-deploy.env`, self-hosted schema creation, the per-env `brai-api.env`, and `deploy/scripts/supabase-branch.mjs` output, then rerun `deploy-preview`.
-- Failed accepted-preview cleanup: query both `brai:promotion:prod:<sha>` and the affected `brai:preview:<branch>` workflow. Fix metadata promotion or slot release, then rerun the failed `deploy-prod` job.
+- Failed accepted-preview cleanup: query both `brai:promotion:prod:<sha>` and the affected `brai:preview:<branch>` workflow. Check preview/test schema deletion, remote branch cleanup, and local worktree pruning; then rerun the failed `deploy-prod` job.
 - Failed production Supabase migration: run the cutover/import smoke from [Supabase Postgres Cutover](supabase-postgres-cutover.md), then rerun `deploy-prod`.
 - Failed production deploy: query `brai:promotion:prod:<sha>`, fix the deploy or ledger issue, then rerun the failed production job.
 - Stuck slot release: use `deploy/scripts/preview-slots.sh status` on the VPS source checkout, then rerun the existing release workflow or `deploy/scripts/ci-ssh-release-slot.sh`.
