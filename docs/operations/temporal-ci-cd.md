@@ -8,6 +8,8 @@ Inbox normalization is a product workflow and does not run on the CI/CD worker q
 
 The API starts `InboxNormalizationWorkflow` with stable id `brai:inbox:<inbox-id>`. Workflow code is deterministic; Postgres, file, and LLM work runs only in Activities. `workflow_executions` is the compact product/Admin read model, while Temporal history remains the durable orchestration record. The global `brai-temporal-worker.service` continues to poll only `brai-preview` and `brai-promotion`.
 
+On startup, each API environment reconciles raw Inbox executions still marked `queued`. Starting with the same workflow id is idempotent, so a process crash between Postgres ingest and Temporal start cannot strand the raw record.
+
 ## Process Change Rule
 
 Any change to Brai CI/CD must update the Temporal contract in the same branch when the change adds, removes, reorders, or changes an operation that must always happen, can block delivery, or needs manual recovery. Do not add a hidden deploy side effect only inside a shell script or GitHub Actions step.

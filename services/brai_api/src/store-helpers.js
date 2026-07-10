@@ -23,7 +23,6 @@ export const INBOX_EVENT_TYPES = new Set([
   'create',
   'update_title',
   'update_description',
-  'normalize',
   'delete'
 ]);
 export const ACTIVITY_STATUSES = new Set(['New', 'Done']);

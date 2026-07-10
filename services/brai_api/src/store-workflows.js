@@ -33,6 +33,7 @@ export const workflowStoreMethods = {
   ensureInboxWorkflowExecution({ inboxId, nowIso }) {
     const id = sanitizeText(inboxId);
     if (!id) return null;
+    if (!this.getInboxItem(id)) return null;
     const now = nowIso ?? new Date().toISOString();
     const workflowId = inboxWorkflowId(id);
     const row = this.db.prepare(`
@@ -42,6 +43,7 @@ export const workflowStoreMethods = {
         last_error, started_at_utc, completed_at_utc, created_at_utc, updated_at_utc, user_id
       ) VALUES (?, ?, ?, NULL, 'inbox', ?, 'queued', 'ingest', 0, NULL, NULL, NULL, ?, ?, ?)
       ON CONFLICT(workflow_id) DO UPDATE SET updated_at_utc = workflow_executions.updated_at_utc
+      WHERE workflow_executions.user_id IS NOT DISTINCT FROM excluded.user_id
       RETURNING *
     `).get(
       INBOX_WORKFLOW_DEFINITION_ID,
@@ -52,12 +54,29 @@ export const workflowStoreMethods = {
       now,
       scopedUserId()
     );
+    if (!row) throw businessError('workflow_id_conflict');
+    const scope = scopeSql();
     this.db.prepare(`
       UPDATE inbox
       SET workflow_execution_id = ?, updated_at_utc = updated_at_utc
-      WHERE id = ? AND workflow_execution_id IS NULL
-    `).run(row.id, id);
+      WHERE id = ? AND workflow_execution_id IS NULL ${scope.clause}
+    `).run(row.id, id, ...scope.params);
     return row;
+  },
+
+  listQueuedInboxWorkflowStarts({ limit = 100 } = {}) {
+    const rowLimit = Math.max(1, Math.min(Number(limit) || 100, 500));
+    return this.db.prepare(`
+      SELECT w.raw_record_id AS inbox_id, w.user_id AS owner_user_id
+      FROM workflow_executions w
+      JOIN inbox i ON i.id = w.raw_record_id
+      WHERE w.role_contract_id = 'inbox'
+        AND w.status = 'queued'
+        AND i.item_roles_id IS NULL
+        AND i.deleted_at_utc IS NULL
+      ORDER BY w.created_at_utc, w.id
+      LIMIT ?
+    `).all(rowLimit);
   },
 
   getInboxWorkflowExecution(inboxId) {
@@ -132,7 +151,10 @@ export const workflowStoreMethods = {
   applyNormalizedInbox({ inboxId, workflowId, runId, normalized, normalizationText, nowIso }) {
     const id = sanitizeText(inboxId);
     if (!id) throw businessError('inbox_id_required');
+    const operationId = sanitizeText(workflowId);
+    if (!operationId) throw businessError('workflow_id_required');
     const now = nowIso ?? new Date().toISOString();
+    const eventPayload = normalizedEventPayload({ workflowId: operationId, normalized, normalizationText });
     const run = this.db.transaction(() => {
       const inbox = this.getInboxItem(id);
       if (!inbox) throw businessError('raw_record_missing');
@@ -144,8 +166,19 @@ export const workflowStoreMethods = {
         execution.workflow_definition_id !== INBOX_WORKFLOW_DEFINITION_ID
         || execution.workflow_definition_version !== INBOX_WORKFLOW_DEFINITION_VERSION
       ) throw businessError('stale_workflow_version');
+      if (execution.workflow_id !== operationId) throw businessError('workflow_id_conflict');
 
       if (inbox.item_roles_id) {
+        const existingEvent = this.db.prepare(`
+          SELECT item_roles_id, payload_json
+          FROM events
+          WHERE id = ? AND event_domain = 'inbox' AND subject_id = ?
+        `).get(`inbox:${operationId}:normalized`, id);
+        if (
+          !existingEvent
+          || existingEvent.item_roles_id !== inbox.item_roles_id
+          || JSON.stringify(parseJsonObject(existingEvent.payload_json)) !== JSON.stringify(eventPayload)
+        ) throw businessError('idempotency_conflict');
         return { ok: true, idempotent: true, items_id: id, item_roles_id: inbox.item_roles_id };
       }
 
@@ -157,29 +190,29 @@ export const workflowStoreMethods = {
       `).get(INBOX_WORKFLOW_DEFINITION_ID, INBOX_WORKFLOW_DEFINITION_VERSION);
       if (!contract) throw businessError('role_contract_missing');
 
+      if (this.db.prepare('SELECT id FROM items WHERE id = ?').get(id)) {
+        throw businessError('item_id_conflict');
+      }
+
       this.db.prepare(`
         INSERT INTO items (id, user_id, title, description, author, created_at_utc, updated_at_utc, deleted_at_utc)
         VALUES (?, ?, ?, ?, ?, ?, ?, NULL)
-        ON CONFLICT(id) DO NOTHING
       `).run(id, scopedUserId(), normalized.title, normalized.description, inbox.author ?? '', now, now);
 
-      let role = this.db.prepare(`
-        SELECT id FROM item_roles
-        WHERE items_id = ? AND item_role_types_id = ? AND status = 'active'
-        LIMIT 1
-      `).get(id, contract.item_role_types_id);
-      if (!role) {
-        role = this.db.prepare(`
-          INSERT INTO item_roles (
-            items_id, item_role_types_id, active_from_utc, active_to_utc, status, metadata_json
-          ) VALUES (?, ?, ?, NULL, 'active', '{}')
-          RETURNING id
-        `).get(id, contract.item_role_types_id, now);
-      }
+      const role = this.db.prepare(`
+        INSERT INTO item_roles (
+          items_id, item_role_types_id, active_from_utc, active_to_utc, status, metadata_json
+        ) VALUES (?, ?, ?, NULL, 'active', '{}')
+        RETURNING id
+      `).get(id, contract.item_role_types_id, now);
 
       const initialEventId = inbox.initial_event_id;
       if (!initialEventId) throw businessError('initial_event_missing');
-      const initialEvent = this.db.prepare('SELECT item_roles_id FROM events WHERE id = ?').get(initialEventId);
+      const initialEvent = this.db.prepare(`
+        SELECT item_roles_id
+        FROM events
+        WHERE id = ? AND event_domain = 'inbox' AND subject_id = ?
+      `).get(initialEventId, id);
       if (!initialEvent) throw businessError('initial_event_missing');
       if (initialEvent.item_roles_id && initialEvent.item_roles_id !== role.id) {
         throw businessError('initial_event_role_conflict');
@@ -196,26 +229,25 @@ export const workflowStoreMethods = {
         });
       }
 
-      this.db.prepare(`
-        UPDATE items
-        SET title = ?, description = ?, updated_at_utc = ?
-        WHERE id = ?
-      `).run(normalized.title, normalized.description, now, id);
-      this.db.prepare(`
+      const linkedInbox = this.db.prepare(`
         UPDATE inbox
         SET title = ?, description_text = ?, preliminary_section = ?, normalization_text = ?,
           is_normalized = 1, item_roles_id = ?, updated_at_utc = ?
         WHERE id = ? AND item_roles_id IS NULL
       `).run(normalized.title, normalized.description, normalized.classKey, normalizationText, role.id, now, id);
+      if (linkedInbox.changes !== 1) throw businessError('raw_record_link_conflict');
       this.db.prepare(`
         UPDATE events
         SET item_roles_id = ?
-        WHERE id = ? AND item_roles_id IS NULL
-      `).run(role.id, initialEventId);
+        WHERE event_domain = 'inbox'
+          AND subject_id = ?
+          AND status = 'accepted'
+          AND item_roles_id IS NULL
+      `).run(role.id, id);
 
-      this.insertEventRecord({
-        id: `inbox:${workflowId}:normalized`,
-        eventId: `${workflowId}:normalized`,
+      const normalizedEventSequence = this.insertEventRecord({
+        id: `inbox:${operationId}:normalized`,
+        eventId: `${operationId}:normalized`,
         eventDomain: 'inbox',
         eventType: 'normalized',
         eventAction: 'inbox.normalized',
@@ -229,8 +261,9 @@ export const workflowStoreMethods = {
         occurredAtUtc: now,
         receivedAtUtc: now,
         payloadVersion: 1,
-        payloadJson: JSON.stringify({ schema: 'brai.inbox.normalized-event.v1', workflow_id: workflowId })
+        payloadJson: JSON.stringify(eventPayload)
       });
+      if (!normalizedEventSequence) throw businessError('normalized_event_conflict');
 
       this.db.prepare(`
         UPDATE workflow_executions
@@ -238,7 +271,7 @@ export const workflowStoreMethods = {
           current_step = 'apply_normalized_raw', last_error = NULL,
           completed_at_utc = ?, updated_at_utc = ?
         WHERE id = ?
-      `).run(workflowId, runId, now, now, execution.id);
+      `).run(operationId, runId, now, now, execution.id);
       this.recordLog({
         dt: now,
         source: 'workflow',
@@ -246,9 +279,9 @@ export const workflowStoreMethods = {
         status: 'done',
         itemsId: id,
         eventDomain: 'inbox',
-        eventId: `${workflowId}:normalized`,
+        eventId: `${operationId}:normalized`,
         message: 'Inbox normalization applied',
-        jsonData: { workflow_id: workflowId, run_id: runId, inbox_id: id, item_roles_id: role.id }
+        jsonData: { workflow_id: operationId, run_id: runId, inbox_id: id, item_roles_id: role.id }
       });
       return { ok: true, idempotent: false, items_id: id, item_roles_id: role.id };
     });
@@ -283,4 +316,18 @@ function businessError(code) {
   const error = new Error(code);
   error.businessError = true;
   return error;
+}
+
+function normalizedEventPayload({ workflowId, normalized, normalizationText }) {
+  return {
+    schema: 'brai.inbox.normalized-event.v1',
+    workflow_id: workflowId,
+    title: normalized.title,
+    description_md: normalized.description,
+    preliminary_section: normalized.classKey,
+    class_title: normalized.classTitle || '',
+    class_description: normalized.classDescription || '',
+    normalization_text: normalizationText,
+    is_normalized: true
+  };
 }

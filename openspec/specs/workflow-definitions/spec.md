@@ -1,7 +1,8 @@
 # workflow-definitions Specification
 
 ## Purpose
-TBD - created by archiving change agent-role-normalization-workflows. Update Purpose after archive.
+Define versioned product workflow definitions, Temporal orchestration boundaries, persisted execution status, and diagrams derived from process data.
+
 ## Requirements
 ### Requirement: Workflow definitions are process source of truth
 Brai SHALL treat workflow definitions as the source of truth for agent/data processes.

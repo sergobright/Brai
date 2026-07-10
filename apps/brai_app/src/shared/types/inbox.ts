@@ -1,4 +1,4 @@
-export type InboxEventType = "create" | "update_title" | "update_description" | "normalize" | "delete";
+export type InboxEventType = "create" | "update_title" | "update_description" | "delete";
 
 export interface InboxItem {
   id: string;

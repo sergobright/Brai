@@ -247,7 +247,12 @@ describe("BraiApp inbox", () => {
     expect(screen.getByRole("link", { name: /brief\.pdf/ })).toHaveAttribute("download", "brief.pdf");
 
     fireEvent.click(screen.getByRole("tab", { name: "AI" }));
-    expect(await screen.findByText("raw_normalizer")).toBeInTheDocument();
+    expect((await screen.findByText("ingest")).closest("[data-workflow-step-state]"))
+      .toHaveAttribute("data-workflow-step-state", "completed");
+    expect(screen.getByText("raw_normalizer").closest("[data-workflow-step-state]"))
+      .toHaveAttribute("data-workflow-step-state", "running");
+    expect(screen.getByText("apply_normalized_raw").closest("[data-workflow-step-state]"))
+      .toHaveAttribute("data-workflow-step-state", "pending");
     expect(screen.getByText("inbox.normalizer")).toBeInTheDocument();
     expect(screen.getByText("brai:inbox:inbox-tabs")).toBeInTheDocument();
 

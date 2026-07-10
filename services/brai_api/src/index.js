@@ -65,6 +65,7 @@ const inboxWorkflow = await createInboxWorkflowRuntime({
   codexFallbackModel,
   codexTimeoutMs
 });
+await inboxWorkflow.recoverQueued();
 const runtime = createBraiServer({
   databaseUrl,
   dataRoot,

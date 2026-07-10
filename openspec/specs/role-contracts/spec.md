@@ -1,7 +1,8 @@
 # role-contracts Specification
 
 ## Purpose
-TBD - created by archiving change agent-role-normalization-workflows. Update Purpose after archive.
+Define versioned role contracts as the structured source of lifecycle, payload, schema, workflow, ownership, and event rules for agents and operators.
+
 ## Requirements
 ### Requirement: Role contracts define every role type
 Brai SHALL maintain a role contract for every role type used by agents or workflows.

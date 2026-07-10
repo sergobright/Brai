@@ -8,7 +8,7 @@ export const DEFAULT_SORT_DIRECTION = "desc";
 const CREATED_COLUMN_NAMES = ["created_at_utc", "created_at", "createdAt", "created_on", "creation_date"];
 const USER_TABLE_NAMES = new Set(["activities", "app_settings", "inbox"]);
 const USER_TABLE_PREFIXES = ["activity_", "focus_", "timer_"];
-const SYSTEM_TABLE_NAMES = new Set(["items", "logs"]);
+const SYSTEM_TABLE_NAMES = new Set(["events", "item_roles", "item_role_types", "items", "logs"]);
 const SYSTEM_TABLE_PREFIXES = ["schema_", "table_", "build_", "deployment_", "version_", "agent_", "ai_", "role_", "workflow_", "brai_cmd_"];
 const POSTGRES_PROTOCOLS = new Set(["postgres:", "postgresql:"]);
 

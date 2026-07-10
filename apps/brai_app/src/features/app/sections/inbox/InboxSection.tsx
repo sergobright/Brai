@@ -2,7 +2,7 @@
 
 import type { CSSProperties, FormEvent, KeyboardEvent, MouseEvent, PointerEvent } from "react";
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
-import { BookOpen, CheckCircle2, FilePenLine, FileText, Inbox, Link2, LoaderCircle, Mail, MessageSquare, Pencil, Plus, Sparkles, Trash2, X, XCircle } from "lucide-react";
+import { BookOpen, CheckCircle2, Circle, FilePenLine, FileText, Inbox, Link2, LoaderCircle, Mail, MessageSquare, Pencil, Plus, Sparkles, Trash2, X, XCircle } from "lucide-react";
 import { useSwipeable } from "react-swipeable";
 import {
   cleanTitle,
@@ -1068,6 +1068,11 @@ function InboxAiProcessPanel({ item }: { item: InboxItem }) {
   }
 
   const failed = details.execution.status === "failed" || details.execution.status === "needs_review";
+  const steps = details.definition?.steps ?? [];
+  const currentStep = details.execution.current_step === "image_describer"
+    ? "raw_normalizer"
+    : details.execution.current_step;
+  const currentStepIndex = steps.indexOf(currentStep);
   return (
     <ScrollArea className="min-h-0" role="tabpanel">
       <div className="grid gap-4 py-4">
@@ -1083,12 +1088,28 @@ function InboxAiProcessPanel({ item }: { item: InboxItem }) {
 
         <div className="grid gap-2">
           <h3 className="m-0 text-sm font-semibold">Шаги workflow</h3>
-          {(details.definition?.steps ?? []).map((step) => (
-            <div className="flex items-center gap-2 text-sm text-muted-foreground" key={step}>
-              <CheckCircle2 className="size-3.5" aria-hidden="true" />
-              {step}
-            </div>
-          ))}
+          {steps.map((step, index) => {
+            const stepState = details.execution.status === "completed" || index < currentStepIndex
+              ? "completed"
+              : index === currentStepIndex && failed
+                ? "failed"
+                : index === currentStepIndex
+                  ? "running"
+                  : "pending";
+            return (
+              <div
+                className={cx("flex items-center gap-2 text-sm", stepState === "failed" ? "text-destructive" : "text-muted-foreground")}
+                data-workflow-step-state={stepState}
+                key={step}
+              >
+                {stepState === "completed" ? <CheckCircle2 className="size-3.5 text-primary" aria-hidden="true" /> : null}
+                {stepState === "running" ? <LoaderCircle className="size-3.5 animate-spin text-primary" aria-hidden="true" /> : null}
+                {stepState === "failed" ? <XCircle className="size-3.5" aria-hidden="true" /> : null}
+                {stepState === "pending" ? <Circle className="size-3.5" aria-hidden="true" /> : null}
+                {step}
+              </div>
+            );
+          })}
         </div>
 
         <div className="grid gap-2">

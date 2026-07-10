@@ -1,7 +1,8 @@
 # entity-role-architecture Specification
 
 ## Purpose
-TBD - created by archiving change agent-role-normalization-workflows. Update Purpose after archive.
+Define the canonical entity-role model, raw role records, active-role cardinality, and role-linked domain events.
+
 ## Requirements
 ### Requirement: Entities are represented through roles
 Brai SHALL represent domain entities through `items`, `item_role_types`, `item_roles`, and role tables.

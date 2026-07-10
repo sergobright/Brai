@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { TextDecoder } from 'node:util';
+import { scopedUserId } from './user-scope.js';
 
 export const INBOX_BODY_LIMIT_BYTES = 16 * 1024 * 1024;
 
@@ -113,7 +114,9 @@ async function receiveInboxInner({
   const attachments = decodeAttachments(body);
   const nowIso = nowDate.toISOString();
   const idempotencyKey = optionalText(body?.idempotency_key);
-  const ingestIdempotencyHash = idempotencyKey ? fullHash(idempotencyKey) : null;
+  const ingestIdempotencyHash = idempotencyKey
+    ? fullHash(`${scopedUserId() ?? 'unclaimed'}\0${idempotencyKey}`)
+    : null;
   const stableId = ingestIdempotencyHash?.slice(0, 32) ?? null;
   const inboxId = stableId ? `inbox:api:${stableId}` : `inbox:api:${crypto.randomUUID()}`;
   const eventId = stableId ? `inbox:api:${stableId}:create` : `inbox:api:${crypto.randomUUID()}:create`;

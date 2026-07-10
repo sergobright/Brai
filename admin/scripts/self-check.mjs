@@ -289,6 +289,9 @@ try {
   assert.equal(classifyTableGroup("app_settings"), "user", "app settings are user data");
   assert.equal(classifyTableGroup("focus_session_versions"), "user", "focus session versions are user data");
   assert.equal(classifyTableGroup("items"), "system", "items registry is system data");
+  assert.equal(classifyTableGroup("item_roles"), "system", "item roles are system data");
+  assert.equal(classifyTableGroup("item_role_types"), "system", "item role types are system data");
+  assert.equal(classifyTableGroup("events"), "system", "global events are system data");
   assert.equal(classifyTableGroup("logs"), "system", "runtime logs are system data");
 } finally {
   await db.end().catch(() => {});

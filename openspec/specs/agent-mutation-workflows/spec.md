@@ -1,7 +1,8 @@
 # agent-mutation-workflows Specification
 
 ## Purpose
-TBD - created by archiving change agent-role-normalization-workflows. Update Purpose after archive.
+Define how AI executions produce validated structured results while deterministic, idempotent workflow activities own domain mutations and retry rules.
+
 ## Requirements
 ### Requirement: Agents do not mutate domain tables directly
 Brai AI agents SHALL return structured JSON instead of directly mutating domain tables.
@@ -19,6 +20,14 @@ Brai SHALL normalize new raw records through a workflow before they become entit
 - **WHEN** ingest creates a raw role record
 - **THEN** the normalizer transforms raw content into validated JSON
 - **AND** apply creates the item, role, events, and logs
+
+### Requirement: Workflow apply owns the normalization transition
+Brai SHALL allow a raw role record to become normalized and entity-linked only through the accepted workflow mutation activity.
+
+#### Scenario: A client submits a direct normalization event
+- **WHEN** an API or sync client submits a normalization mutation for a raw role record
+- **THEN** Brai rejects or ignores that mutation
+- **AND** no item, role, or normalized state is created outside the workflow apply activity
 
 ### Requirement: AI logs record real AI executions
 Brai SHALL write one `ai_logs` row for every actual AI execution.

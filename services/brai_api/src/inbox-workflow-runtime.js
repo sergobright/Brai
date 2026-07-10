@@ -66,31 +66,44 @@ export async function createInboxWorkflowRuntime({
   workerRun.catch((error) => logger.error?.('Inbox Temporal worker stopped', error));
   const client = new Client({ connection: clientConnection, namespace });
 
+  async function start({ ownerUserId, inboxId }) {
+    const workflowId = inboxWorkflowId(inboxId);
+    let handle;
+    try {
+      handle = await client.workflow.start('InboxNormalizationWorkflow', {
+        args: [{ ownerUserId, inboxId }],
+        taskQueue,
+        workflowId,
+        workflowIdConflictPolicy: 'USE_EXISTING',
+        workflowIdReusePolicy: 'REJECT_DUPLICATE'
+      });
+    } catch (error) {
+      if (error?.name !== 'WorkflowExecutionAlreadyStartedError') throw error;
+      handle = client.workflow.getHandle(workflowId);
+    }
+    const runId = handle.firstExecutionRunId || (await handle.describe()).runId;
+    await withUserScope(ownerUserId, () => store.markInboxWorkflowStarted({
+      inboxId,
+      workflowId,
+      runId,
+      nowIso: now().toISOString()
+    }));
+    return { workflowId, runId, completion: handle.result() };
+  }
+
   return {
     taskQueue,
-    async start({ ownerUserId, inboxId }) {
-      const workflowId = inboxWorkflowId(inboxId);
-      let handle;
-      try {
-        handle = await client.workflow.start('InboxNormalizationWorkflow', {
-          args: [{ ownerUserId, inboxId }],
-          taskQueue,
-          workflowId,
-          workflowIdConflictPolicy: 'USE_EXISTING',
-          workflowIdReusePolicy: 'REJECT_DUPLICATE'
-        });
-      } catch (error) {
-        if (error?.name !== 'WorkflowExecutionAlreadyStartedError') throw error;
-        handle = client.workflow.getHandle(workflowId);
+    start,
+    async recoverQueued({ limit = 500 } = {}) {
+      const queued = store.listQueuedInboxWorkflowStarts({ limit });
+      for (const entry of queued) {
+        const started = await start({ ownerUserId: entry.owner_user_id, inboxId: entry.inbox_id });
+        void started.completion.catch((error) => logger.error?.('Recovered Inbox workflow failed', {
+          error: error instanceof Error ? error.message : String(error),
+          inboxId: entry.inbox_id
+        }));
       }
-      const runId = handle.firstExecutionRunId || (await handle.describe()).runId;
-      await withUserScope(ownerUserId, () => store.markInboxWorkflowStarted({
-        inboxId,
-        workflowId,
-        runId,
-        nowIso: now().toISOString()
-      }));
-      return { workflowId, runId, completion: handle.result() };
+      return queued.length;
     },
     async close() {
       worker.shutdown();

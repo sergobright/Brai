@@ -43,7 +43,7 @@ Response:
 | `response_required` | `inbox.response_required` | Boolean. |
 | `record_type_id` | `inbox.record_type_id` | Внешний API принимает только `1` или `2`; default `1`. |
 | `attachments[]` | `inbox.attachment_links_json` | Whitelisted MIME attachments, включая изображения. |
-| `idempotency_key` | `inbox.ingest_idempotency_hash` | Тот же key + тот же payload возвращает существующую запись; другой payload получает `409`. Исходный key не хранится. |
+| `idempotency_key` | `inbox.ingest_idempotency_hash` | Для одного владельца тот же key + тот же payload возвращает существующую запись; другой payload получает `409`. Исходный key не хранится. |
 
 Legacy image shortcut всё ещё поддерживается для Android compatibility:
 
@@ -75,9 +75,10 @@ Brai CMD отправляет:
 1. `ingest` сохраняет raw row, initial event, compact log и `workflow_executions` row; `items`/`item_roles` ещё не создаются.
 2. `raw_normalizer` при необходимости вызывает `inbox.image_describer`, затем вызывает `inbox.normalizer`. Агенты возвращают данные activity-коду и не мутируют domain tables.
 3. JSON normalizer валидируется. Schema errors получают до трёх реальных AI executions с контекстом предыдущей ошибки; каждый call пишет отдельный `ai_logs`.
-4. `apply_normalized_raw` в одной idempotent transaction создаёт `items`, `item_roles`, обновляет Inbox, заполняет initial event `item_roles_id`, пишет final domain event/log и завершает workflow read model.
+4. `apply_normalized_raw` в одной idempotent transaction создаёт `items`, `item_roles`, обновляет Inbox, связывает с `item_roles_id` все принятые raw events (включая initial event), пишет replay-safe final domain event/log и завершает workflow read model.
 
 DB/business errors останавливают workflow без повторного LLM call. Product UI читает compact status из `workflow_executions`; детали доступны через `GET /v1/inbox/<inbox-id>/workflow`.
+Если API перезапустился между raw ingest и Temporal start, startup reconciliation повторно запускает оставшиеся `queued` executions по тому же stable workflow id.
 
 `explanation_text` не перезаписывается: это source transcript/raw request.
 

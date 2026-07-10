@@ -112,9 +112,12 @@ CREATE INDEX IF NOT EXISTS idx_inbox_raw_queue
 CREATE INDEX IF NOT EXISTS idx_inbox_item_roles ON inbox (item_roles_id);
 CREATE INDEX IF NOT EXISTS idx_activities_item_roles ON activities (item_roles_id);
 CREATE INDEX IF NOT EXISTS idx_focus_sessions_item_roles ON focus_sessions (item_roles_id);
-CREATE INDEX IF NOT EXISTS idx_inbox_initial_event ON inbox (initial_event_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_inbox_initial_event ON inbox (initial_event_id)
+  WHERE initial_event_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_events_item_roles_occurred
   ON events (item_roles_id, occurred_at_utc, server_sequence);
+CREATE INDEX IF NOT EXISTS idx_events_domain_subject_occurred
+  ON events (event_domain, subject_id, status, occurred_at_utc, domain_sequence);
 CREATE INDEX IF NOT EXISTS idx_workflow_executions_status_updated
   ON workflow_executions (status, updated_at_utc);
 CREATE INDEX IF NOT EXISTS idx_workflow_executions_raw_record
@@ -241,12 +244,16 @@ SET version = '2',
 WHERE id IN ('inbox.image_describer', 'inbox.normalizer');
 
 INSERT INTO table_descriptions (table_name, title, short_description, long_description, updated_at_utc) VALUES
+  ('items', 'Items', 'Identity-уровень сущностей Brai.', 'Хранит стабильную identity сущности; role-specific данные и lifecycle находятся в item_roles и соответствующей role table.', now()::text),
+  ('item_roles', 'Item roles', 'Связи сущностей с типами ролей и lifecycle-статусом.', 'Связывает items с item_role_types; partial unique index допускает не более одной active роли одного типа для сущности, сохраняя ended/deleted историю.', now()::text),
+  ('activities', 'Activities', 'Role table пользовательских действий.', 'Role-specific данные Activity; нормализованная запись связывается с entity только через activities.item_roles_id.', now()::text),
+  ('focus_sessions', 'Focus sessions', 'Role table сессий фокусировки.', 'Role-specific данные Focus session; нормализованная запись связывается с entity только через focus_sessions.item_roles_id.', now()::text),
   ('role_statuses', 'Role statuses', 'Справочник lifecycle-статусов ролей сущностей.', 'Определяет допустимые active/ended/deleted состояния item_roles и терминальность статуса.', now()::text),
   ('role_contracts', 'Role contracts', 'Контракты role tables для workflow и агентов.', 'Связывает role type, payload table, item_roles_id, lifecycle, workflow/schema versions, owner и event rules.', now()::text),
   ('workflow_definitions', 'Workflow definitions', 'Версионированный source of truth product workflows.', 'Хранит шаги, task queue, Mermaid diagram и versioned JSON schemas; Admin рендерит diagram через Kroki.', now()::text),
   ('workflow_executions', 'Workflow executions', 'Компактный read model выполнения product workflows.', 'Хранит workflow/run ids, текущий шаг, status, attempt count и bounded last error для UI/Admin без polling Temporal history.', now()::text),
   ('inbox', 'Inbox', 'Role table входящих записей с raw и normalized состояниями.', 'Raw строка не имеет item_roles_id; workflow inbox.raw-normalization создает entity/role, связывает initial_event_id и сохраняет compact execution state.', now()::text),
-  ('events', 'Global events', 'Единый canonical event log для бизнес-событий Brai.', 'Role-linked события используют item_roles_id. Первый raw Inbox event создается без ссылки и получает item_roles_id один раз после успешной нормализации.', now()::text),
+  ('events', 'Global events', 'Единый canonical event log для бизнес-событий Brai.', 'Role-linked события используют item_roles_id. Принятые raw Inbox events создаются без ссылки и получают item_roles_id после успешной нормализации без изменения исходного payload, timestamp или type.', now()::text),
   ('ai_logs', 'AI logs', 'Отдельный журнал фактических AI-срабатываний.', 'Каждый реальный AI call создает строку с workflow_id, run_id и attempt_number; technical logs не дублируют AI outputs.', now()::text)
 ON CONFLICT (table_name) DO UPDATE SET
   title = excluded.title,

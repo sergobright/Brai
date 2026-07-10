@@ -358,6 +358,10 @@ export const inboxEventMethods = {
       status = 'ignored';
       ignoreReason = 'inbox_id_required';
       occurredAt = Number.isFinite(occurredMs) ? new Date(occurredMs).toISOString() : receivedAt;
+    } else if (rawType === 'create' && inboxOwnerDiffers(this, inboxId)) {
+      status = 'ignored';
+      ignoreReason = 'inbox_id_conflict';
+      occurredAt = Number.isFinite(occurredMs) ? new Date(occurredMs).toISOString() : receivedAt;
     } else if (!Number.isFinite(occurredMs)) {
       status = 'ignored';
       ignoreReason = 'invalid_timestamp';
@@ -507,7 +511,7 @@ export const inboxEventMethods = {
     const events = this.db
       .prepare(
         `
-          SELECT id, event_id, subject_id AS inbox_id, event_type AS type,
+          SELECT id, event_id, device_id, subject_id AS inbox_id, event_type AS type,
             occurred_at_utc, received_at_utc, domain_sequence AS server_sequence, payload_json, user_id
           FROM events
           WHERE event_domain = 'inbox'
@@ -550,8 +554,12 @@ export const inboxEventMethods = {
           normalization_text: item?.normalization_text ?? '',
           is_normalized: item?.is_normalized ?? 0,
           initial_event_id: item?.initial_event_id ?? event.id,
-          ingest_idempotency_hash: sanitizeText(payload.ingest_idempotency_hash) ?? item?.ingest_idempotency_hash ?? null,
-          ingest_payload_hash: sanitizeText(payload.ingest_payload_hash) ?? item?.ingest_payload_hash ?? null,
+          ingest_idempotency_hash: event.device_id === 'inbox-api'
+            ? sanitizeText(payload.ingest_idempotency_hash) ?? item?.ingest_idempotency_hash ?? null
+            : item?.ingest_idempotency_hash ?? null,
+          ingest_payload_hash: event.device_id === 'inbox-api'
+            ? sanitizeText(payload.ingest_payload_hash) ?? item?.ingest_payload_hash ?? null
+            : item?.ingest_payload_hash ?? null,
           created_at_utc: item?.created_at_utc ?? event.occurred_at_utc,
           updated_at_utc: event.occurred_at_utc,
           deleted_at_utc: null,
@@ -567,7 +575,7 @@ export const inboxEventMethods = {
         item.description_text = normalizeMarkdownSource(payload.description_md ?? '');
         item.updated_at_utc = event.occurred_at_utc;
         item.last_event_id = event.event_id;
-      } else if (event.type === 'normalize' && item) {
+      } else if ((event.type === 'normalize' || event.type === 'normalized') && item) {
         const title = sanitizeText(payload.title);
         if (title) item.title = title;
         if (typeof payload.description_md === 'string') {
@@ -694,4 +702,9 @@ function normalizeInboxRecordTypeId(value, fallback = 4) {
 function sanitizeClassKey(value) {
   const text = typeof value === 'string' ? value.trim().toLowerCase() : '';
   return /^[a-z][a-z0-9_-]{1,62}$/.test(text) ? text : '';
+}
+
+function inboxOwnerDiffers(store, inboxId) {
+  const existing = store.db.prepare('SELECT user_id FROM inbox WHERE id = ?').get(inboxId);
+  return Boolean(existing) && existing.user_id !== scopedUserId();
 }
