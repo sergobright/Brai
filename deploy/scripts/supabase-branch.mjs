@@ -6,7 +6,7 @@ import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
-import { orderTablesByDependencies, tablesToReset } from "./copy-table-order.mjs";
+import { expandPreservedTables, orderTablesByDependencies, tablesToReset } from "./copy-table-order.mjs";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(scriptDir, "../..");
@@ -14,6 +14,7 @@ const requireFromApi = createRequire(path.join(root, "services/brai_api/package.
 const { Pool } = requireFromApi("pg");
 const [command, ...argv] = process.argv.slice(2);
 const args = parseArgs(argv);
+const POST_PRODUCTION_SEED_MIGRATION_MARKER = "brai:reapply-after-production-seed";
 const LEGACY_DATABASE_ENV_KEYS = new Set([
   "BRAI_DATA_STORE",
   "BRAI_DB",
@@ -249,19 +250,43 @@ async function seedTestDataFromProduction(targetDatabaseUrl) {
   } finally {
     await pool.end();
   }
+  await reapplyPostProductionSeedMigrations(targetDatabaseUrl);
   return true;
+}
+
+async function reapplyPostProductionSeedMigrations(databaseUrl) {
+  const migrationsDir = path.join(root, "supabase/migrations");
+  const migrations = fs.readdirSync(migrationsDir)
+    .filter((name) => name.endsWith(".sql"))
+    .sort()
+    .map((name) => ({ name, sql: fs.readFileSync(path.join(migrationsDir, name), "utf8") }))
+    .filter(({ sql }) => sql.includes(POST_PRODUCTION_SEED_MIGRATION_MARKER));
+  if (migrations.length === 0) return;
+
+  const pool = new Pool({ connectionString: databaseUrl, ssl: postgresSsl(databaseUrl) });
+  try {
+    await pool.query("BEGIN");
+    for (const { sql } of migrations) await pool.query(sql);
+    await pool.query("COMMIT");
+  } catch (error) {
+    await pool.query("ROLLBACK");
+    throw error;
+  } finally {
+    await pool.end();
+  }
 }
 
 async function copySchemaData(pool, { sourceSchema, targetSchema }) {
   const targetTables = await schemaTables(pool, targetSchema);
-  const truncatableTables = tablesToReset(targetTables, TEST_DATA_RESET_PRESERVED_TABLES);
+  const dependencies = await foreignKeyDependencies(pool, targetSchema);
+  const preservedTables = expandPreservedTables(TEST_DATA_RESET_PRESERVED_TABLES, dependencies);
+  const truncatableTables = tablesToReset(targetTables, preservedTables);
   if (truncatableTables.length === 0) return;
 
   const sourceTables = new Set(await schemaTables(pool, sourceSchema));
-  const copyTables = await orderedTables(
-    pool,
-    targetSchema,
-    truncatableTables.filter((table) => sourceTables.has(table) && !TEST_DATA_COPY_EXCLUDED_TABLES.has(table))
+  const copyTables = orderTablesByDependencies(
+    truncatableTables.filter((table) => sourceTables.has(table) && !TEST_DATA_COPY_EXCLUDED_TABLES.has(table)),
+    { dependencies, fallbackOrder: migrationTableOrder() }
   );
 
   await pool.query("BEGIN");
@@ -309,14 +334,6 @@ async function commonColumns(pool, sourceSchema, targetSchema, table) {
     ORDER BY target.ordinal_position
   `, [sourceSchema, targetSchema, table]);
   return result.rows.map((row) => row.column_name);
-}
-
-async function orderedTables(pool, schema, tables) {
-  const dependencies = await foreignKeyDependencies(pool, schema);
-  return orderTablesByDependencies(tables, {
-    dependencies,
-    fallbackOrder: migrationTableOrder()
-  });
 }
 
 async function foreignKeyDependencies(pool, schema) {

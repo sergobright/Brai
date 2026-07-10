@@ -1,3 +1,5 @@
+-- brai:reapply-after-production-seed
+
 CREATE TABLE IF NOT EXISTS role_statuses (
   id text PRIMARY KEY,
   title text NOT NULL,

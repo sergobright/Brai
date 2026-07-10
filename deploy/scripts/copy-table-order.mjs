@@ -2,6 +2,23 @@ export function tablesToReset(tables, preservedTables) {
   return tables.filter((table) => !preservedTables.has(table));
 }
 
+export function expandPreservedTables(preservedTables, dependencies) {
+  const expanded = new Set(preservedTables);
+  let changed = true;
+
+  while (changed) {
+    changed = false;
+    for (const { table, referencedTable } of dependencies) {
+      if (expanded.has(table) && !expanded.has(referencedTable)) {
+        expanded.add(referencedTable);
+        changed = true;
+      }
+    }
+  }
+
+  return expanded;
+}
+
 export function orderTablesByDependencies(tables, { dependencies = [], fallbackOrder = [] } = {}) {
   const uniqueTables = [...new Set(tables)];
   const tableSet = new Set(uniqueTables);

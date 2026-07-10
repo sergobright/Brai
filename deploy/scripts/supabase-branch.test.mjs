@@ -7,6 +7,21 @@ import path from "node:path";
 
 const repoRoot = path.resolve(import.meta.dirname, "../..");
 
+test("production seed reapplies only explicitly marked idempotent migrations", () => {
+  const script = fs.readFileSync(path.join(repoRoot, "deploy/scripts/supabase-branch.mjs"), "utf8");
+  const migration = fs.readFileSync(
+    path.join(repoRoot, "supabase/migrations/0010_agent_role_normalization_workflows.sql"),
+    "utf8"
+  );
+  const seedStart = script.indexOf("async function seedTestDataFromProduction");
+  const copyStart = script.indexOf("async function copySchemaData");
+  const seedFunction = script.slice(seedStart, copyStart);
+
+  assert.match(migration, /^-- brai:reapply-after-production-seed$/m);
+  assert.match(script, /sql\.includes\(POST_PRODUCTION_SEED_MIGRATION_MARKER\)/);
+  assert.ok(seedFunction.indexOf("copySchemaData") < seedFunction.indexOf("reapplyPostProductionSeedMigrations"));
+});
+
 test("preview env setup rewrites existing shell-unsafe values safely", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "brai-supabase-env-"));
   const envFile = path.join(dir, "brai-api.env");

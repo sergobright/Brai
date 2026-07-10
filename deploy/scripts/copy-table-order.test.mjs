@@ -1,19 +1,19 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { orderTablesByDependencies, tablesToReset } from "./copy-table-order.mjs";
+import { expandPreservedTables, orderTablesByDependencies, tablesToReset } from "./copy-table-order.mjs";
 
 test("schema copy preserves migration-owned catalogs while resetting runtime data", () => {
-  const preservedTables = new Set([
-    "agents",
-    "role_contracts",
-    "role_statuses",
-    "table_descriptions",
-    "workflow_definitions"
-  ]);
+  const preservedTables = expandPreservedTables(
+    new Set(["agents", "role_contracts", "role_statuses", "table_descriptions", "workflow_definitions"]),
+    [
+      { table: "role_contracts", referencedTable: "item_role_types" },
+      { table: "role_contracts", referencedTable: "workflow_definitions" }
+    ]
+  );
 
   assert.deepEqual(
     tablesToReset(
-      ["agents", "item_roles", "role_statuses", "workflow_definitions", "workflow_executions"],
+      ["agents", "item_role_types", "item_roles", "role_statuses", "workflow_definitions", "workflow_executions"],
       preservedTables
     ),
     ["item_roles", "workflow_executions"]
