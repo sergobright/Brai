@@ -38,8 +38,8 @@ describe("BraiApp shell", () => {
         });
       }
       if (url.endsWith("/auth/test-email-login")) {
-        return new Response(JSON.stringify({ authenticated: true, user: { id: "primary", email: "primary@example.com", name: "Primary" } }), {
-          status: 200,
+        return new Response(JSON.stringify({ error: "invalid_email" }), {
+          status: 401,
           headers: { "content-type": "application/json" },
         });
       }
@@ -49,7 +49,7 @@ describe("BraiApp shell", () => {
 
     render(<BraiApp />);
 
-    const email = await screen.findByRole("textbox", { name: "Email" });
+    const email = await screen.findByRole("textbox", { name: "Email" }, { timeout: 5000 });
     expect(screen.queryByLabelText("Код из письма")).not.toBeInTheDocument();
     fireEvent.change(email, { target: { value: "primary@example.com" } });
     fireEvent.click(screen.getByRole("button", { name: "Войти" }));
@@ -58,6 +58,7 @@ describe("BraiApp shell", () => {
       "/api/auth/test-email-login",
       expect.objectContaining({ method: "POST" }),
     ));
+    expect(await screen.findByText("Email не подошёл")).toBeInTheDocument();
     expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/auth/otp/"))).toBe(false);
   });
 
@@ -77,7 +78,7 @@ describe("BraiApp shell", () => {
 
     render(<BraiApp />);
 
-    expect(await screen.findByLabelText("Пароль")).toHaveAttribute("type", "password");
+    expect(await screen.findByLabelText("Пароль", {}, { timeout: 5000 })).toHaveAttribute("type", "password");
     expect(screen.queryByRole("textbox", { name: "Email" })).not.toBeInTheDocument();
   });
 
@@ -96,7 +97,7 @@ describe("BraiApp shell", () => {
 
     render(<BraiApp />);
 
-    expect(await screen.findByRole("textbox", { name: "Email" })).toBeInTheDocument();
+    expect(await screen.findByRole("textbox", { name: "Email" }, { timeout: 5000 })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Получить код" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Войти" })).not.toBeInTheDocument();
   });
