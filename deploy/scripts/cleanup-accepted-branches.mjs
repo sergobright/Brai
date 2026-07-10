@@ -39,7 +39,7 @@ export function cleanupCandidates({ pulls, openPulls = [], activeBranches = [], 
     const merged = Boolean(pull?.merged_at ?? pull?.mergedAt) || pull?.merged === true || pull?.state === "MERGED";
     if (base !== targetBranch || !merged || !head?.startsWith("codex/") || seen.has(head)) continue;
     if (requested.size > 0 && !requested.has(head)) continue;
-    if (open.has(head) || active.has(head)) continue;
+    if ((requested.size === 0 && open.has(head)) || active.has(head)) continue;
     seen.add(head);
     candidates.push(head);
   }

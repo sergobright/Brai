@@ -34,10 +34,17 @@ The live Brai API service SHALL run with the supported Brai Node.js runtime inst
 - **AND** it does not rely on `/usr/bin/node` when that binary is an unsupported Node version
 
 #### Scenario: Brai API tests are run
-- **WHEN** maintainers run `npm --prefix services/brai_api test`
+- **WHEN** maintainers run `scripts/brai-api-test.sh`
 - **THEN** the tests execute under the supported Brai Node runtime
 - **AND** `BRAI_TEST_DATABASE_URL` points at a writable Postgres database for isolated test schemas
+- **AND** isolated schemas include branch and run scopes
+- **AND** the wrapper removes its run-scoped schemas before reporting completion
+- **AND** a cleanup failure makes the test command fail
 - **AND** the test suite passes without a native `SIGSEGV`
+
+#### Scenario: An API fixture shutdown fails
+- **WHEN** server shutdown throws or rejects
+- **THEN** database schema and temporary-file cleanup are still attempted
 
 ### Requirement: One VPS hosts production and preview services behind Caddy
 Brai SHALL host production and preview Brai API and Admin services on localhost-only

@@ -1794,6 +1794,7 @@ function deliveryClassForFile(file) {
       "deploy/scripts/ci-ssh-release-slot.sh",
       "deploy/scripts/ci-ssh-sync-main-checkout.sh",
       "deploy/scripts/cleanup-accepted-branches.mjs",
+      "deploy/scripts/cleanup-test-schemas.mjs",
       "deploy/scripts/complete-operation-activities.sh",
       "deploy/scripts/create-operation-activity.sh",
       "deploy/scripts/list-operation-activities.sh",

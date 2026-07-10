@@ -4,6 +4,12 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 NODE_BIN="${NODE_BIN:-node}"
 ENVS_ROOT="${BRAI_ENVS_ROOT:-/srv/projects/brai-envs}"
+EXPLICIT_BRANCH=false
+for arg in "$@"; do
+  if [[ "$arg" == "--branch" ]]; then
+    EXPLICIT_BRANCH=true
+  fi
+done
 
 active_preview_branches_json() {
   : "${BRAI_DEPLOY_HOST:?BRAI_DEPLOY_HOST is required}"
@@ -44,20 +50,28 @@ if ! ACTIVE_BRANCHES_JSON="$(active_preview_branches_json)"; then
   "$NODE_BIN" "$SCRIPT_DIR/record-runtime-log.mjs" \
     --source deploy \
     --operation accepted_branch.cleanup \
-    --status skipped \
+    --status failed \
     --severity WARN \
     --reason active_preview_inspection_failed \
-    --message "Skipped accepted branch cleanup because active previews could not be inspected" \
+    --message "Accepted branch cleanup failed because active previews could not be inspected" \
     --json "{}" >/dev/null 2>&1 || true
-  echo "Warning: could not inspect active preview branches; skipping accepted branch cleanup." >&2
-  exit 0
+  echo "Could not inspect active preview branches; accepted branch cleanup cannot continue safely." >&2
+  exit 1
 fi
 
-mapfile -t CLEANUP_BRANCHES < <(
-  BRAI_ACTIVE_PREVIEW_BRANCHES_JSON="$ACTIVE_BRANCHES_JSON" "$NODE_BIN" "$SCRIPT_DIR/cleanup-accepted-branches.mjs" "$@"
-)
+CLEANUP_BRANCH_LIST="$(
+  BRAI_ACTIVE_PREVIEW_BRANCHES_JSON="$ACTIVE_BRANCHES_JSON" "$NODE_BIN" "$SCRIPT_DIR/cleanup-accepted-branches.mjs" --dry-run "$@"
+)"
+CLEANUP_BRANCHES=()
+while IFS= read -r branch; do
+  [[ -n "$branch" ]] && CLEANUP_BRANCHES+=("$branch")
+done <<<"$CLEANUP_BRANCH_LIST"
 
 if [[ "${#CLEANUP_BRANCHES[@]}" -eq 0 ]]; then
+  if [[ "$EXPLICIT_BRANCH" == "true" ]]; then
+    echo "Explicit accepted branch cleanup found no merged candidate; retry after GitHub merge state is consistent." >&2
+    exit 1
+  fi
   "$NODE_BIN" "$SCRIPT_DIR/record-runtime-log.mjs" \
     --source deploy \
     --operation accepted_branch.cleanup \
@@ -71,6 +85,16 @@ fi
 
 cleanup_json="{}"
 cleanup_json="$("$NODE_BIN" -e 'const branches = process.argv.slice(1); console.log(JSON.stringify({ branch_count: branches.length, branches }));' "${CLEANUP_BRANCHES[@]}")" || cleanup_json="{}"
+for branch in "${CLEANUP_BRANCHES[@]}"; do
+  BRAI_BRANCH="$branch" BRAI_ACCEPTED_PREVIEW=true "$SCRIPT_DIR/ci-ssh-release-slot.sh" >/dev/null
+done
+
+DELETE_ARGS=()
+for branch in "${CLEANUP_BRANCHES[@]}"; do
+  DELETE_ARGS+=(--branch "$branch")
+done
+BRAI_ACTIVE_PREVIEW_BRANCHES_JSON="$ACTIVE_BRANCHES_JSON" "$NODE_BIN" "$SCRIPT_DIR/cleanup-accepted-branches.mjs" "${DELETE_ARGS[@]}" >/dev/null
+
 if ! "$SCRIPT_DIR/ci-ssh-prune-accepted-branches.sh" "${CLEANUP_BRANCHES[@]}"; then
   "$NODE_BIN" "$SCRIPT_DIR/record-runtime-log.mjs" \
     --source deploy \
@@ -80,7 +104,8 @@ if ! "$SCRIPT_DIR/ci-ssh-prune-accepted-branches.sh" "${CLEANUP_BRANCHES[@]}"; t
     --reason local_cleanup_failed \
     --message "Accepted branch cleanup failed after remote cleanup" \
     --json "$cleanup_json" >/dev/null 2>&1 || true
-  echo "Warning: local accepted worktree cleanup failed; remote branch cleanup already completed where possible." >&2
+  echo "Local accepted worktree cleanup failed after database and remote branch cleanup." >&2
+  exit 1
 else
   "$NODE_BIN" "$SCRIPT_DIR/record-runtime-log.mjs" \
     --source deploy \

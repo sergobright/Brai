@@ -9,6 +9,7 @@
     "openspec": "scripts/use-node22.sh node scripts/run-openspec.mjs",
     "openspec:guard": "scripts/use-node22.sh node scripts/check-open-openspec-changes.mjs",
     "openspec:validate": "scripts/use-node22.sh node scripts/check-open-openspec-changes.mjs && scripts/use-node22.sh node scripts/run-openspec.mjs validate --all --strict",
+    "skills:sync:hermes": "scripts/use-node22.sh node scripts/sync-hermes-skills.mjs",
     "public:guard": "scripts/use-node22.sh node scripts/check-public-branch.mjs",
     "socraticode:ensure": "scripts/use-node22.sh node scripts/brai-socraticode-preflight.mjs --ensure",
     "socraticode:preflight": "scripts/use-node22.sh node scripts/brai-socraticode-preflight.mjs",

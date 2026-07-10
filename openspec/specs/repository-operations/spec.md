@@ -99,6 +99,18 @@ Native-boundary preview branches SHALL publish a slot-specific preview APK befor
 - **AND** the agent monitors the GitHub PR, merge queue, `deploy-prod`, metadata promotion, and preview-slot release until completion or an explicit blocker is known
 - **AND** the work is merged into `main` before production deploy
 
+#### Scenario: Preview branch is accepted or deleted
+- **WHEN** a `codex/*` preview branch is accepted, abandoned, or deleted
+- **THEN** its preview schema is removed
+- **AND** its branch-scoped API test schemas are removed
+- **AND** legacy unscoped test schemas older than the safety window are removed
+- **AND** the preview slot is released only after those deletions succeed
+- **AND** deletion failure keeps the workflow non-terminal and blocked for repair
+
+#### Scenario: Previously accepted preview is recovered
+- **WHEN** production delivery finds an accepted preview that still owns a slot or queue entry
+- **THEN** cleanup failure fails production delivery instead of being ignored
+
 #### Scenario: Preview work is not accepted yet
 - **WHEN** the project owner uses a negated acceptance phrase such as "пока не принято" or "не принято"
 - **THEN** the agent does not run the preview acceptance script
