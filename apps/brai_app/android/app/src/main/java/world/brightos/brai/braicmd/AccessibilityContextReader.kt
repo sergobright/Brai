@@ -48,9 +48,6 @@ internal class AccessibilityContextReader(private val service: BraiAccessibility
         }.maxByOrNull { it.confidence }
     }
 
-    fun activeApplicationWindowId(): Int? =
-        visibleApplicationRoots().firstOrNull { it.windowId != null }?.windowId
-
     private fun visibleApplicationRoots(): List<ApplicationRoot> {
         val windowRoots = service.windows
             .filter { it.type == AccessibilityWindowInfo.TYPE_APPLICATION }
@@ -62,14 +59,14 @@ internal class AccessibilityContextReader(private val service: BraiAccessibility
                 val root = window.root ?: return@mapNotNull null
                 val appPackage = root.packageName?.toString().orEmpty()
                 if (appPackage.isBlank() || appPackage == service.packageName) return@mapNotNull null
-                ApplicationRoot(root, appPackage, window.id)
+                ApplicationRoot(root, appPackage)
             }
         if (windowRoots.isNotEmpty()) return windowRoots
 
         val root = service.rootInActiveWindow ?: return emptyList()
         val appPackage = root.packageName?.toString().orEmpty()
         if (appPackage.isBlank() || appPackage == service.packageName) return emptyList()
-        return listOf(ApplicationRoot(root, appPackage, null))
+        return listOf(ApplicationRoot(root, appPackage))
     }
 
     private fun collectPageText(
@@ -199,8 +196,7 @@ internal class AccessibilityContextReader(private val service: BraiAccessibility
 
 private data class ApplicationRoot(
     val root: AccessibilityNodeInfo,
-    val appPackage: String,
-    val windowId: Int?
+    val appPackage: String
 )
 
 private data class HeaderTextCandidate(

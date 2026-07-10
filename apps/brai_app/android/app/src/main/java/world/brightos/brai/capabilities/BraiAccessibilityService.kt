@@ -6,12 +6,15 @@ import android.accessibilityservice.AccessibilityService.TakeScreenshotCallback
 import android.app.KeyguardManager
 import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Color
 import android.graphics.Rect
 import android.os.Build
 import android.os.PowerManager
 import android.view.Display
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
+import android.view.accessibility.AccessibilityWindowInfo
 import android.widget.Toast
 import world.brightos.brai.braicmd.AccessibilityContextReader
 import world.brightos.brai.braicmd.AccessibilityTextInserter
@@ -87,13 +90,6 @@ class BraiAccessibilityService : AccessibilityService() {
             }
         }
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            val targetWindowId = contextReader.activeApplicationWindowId()
-            if (targetWindowId != null) {
-                takeScreenshotOfWindow(targetWindowId, mainExecutor, callback)
-                return
-            }
-        }
         takeScreenshot(Display.DEFAULT_DISPLAY, mainExecutor, callback)
     }
 
@@ -168,7 +164,7 @@ class BraiAccessibilityService : AccessibilityService() {
         }
         val editable = findEditableNode() ?: refreshedFocusedNode()
         focusedNode = editable
-        if (editable != null) {
+        if (shouldShowDictationButton(editable != null, isInputMethodVisible())) {
             overlay.showIfAllowed()
         } else {
             overlay.hideInputButton()
@@ -176,6 +172,9 @@ class BraiAccessibilityService : AccessibilityService() {
         overlay.showScreenshotIfAllowed()
         if (editable != null) retryAutoInsertTranscript()
     }
+
+    private fun isInputMethodVisible(): Boolean =
+        windows.any { window -> window.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD }
 
     private fun findEditableNode(): AccessibilityNodeInfo? {
         val root = rootInActiveWindow ?: return null
@@ -267,7 +266,7 @@ class BraiAccessibilityService : AccessibilityService() {
         screenshot.hardwareBuffer.close()
         if (source == null) return null
 
-        val bitmap = runCatching { source.copy(Bitmap.Config.ARGB_8888, false) }.getOrNull()
+        val bitmap = runCatching { opaqueScreenshotBitmap(source) }.getOrNull()
         source.recycle()
         if (bitmap == null) return null
 
@@ -298,3 +297,15 @@ class BraiAccessibilityService : AccessibilityService() {
         private const val MAX_SCREENSHOT_DIMENSION = 1440
     }
 }
+
+internal fun shouldShowDictationButton(hasEditableField: Boolean, inputMethodVisible: Boolean): Boolean =
+    hasEditableField && inputMethodVisible
+
+internal fun opaqueScreenshotBitmap(source: Bitmap): Bitmap =
+    Bitmap.createBitmap(source.width, source.height, Bitmap.Config.ARGB_8888).also { output ->
+        Canvas(output).apply {
+            drawColor(Color.BLACK)
+            drawBitmap(source, 0f, 0f, null)
+        }
+        output.setHasAlpha(false)
+    }

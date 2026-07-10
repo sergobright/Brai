@@ -6,6 +6,7 @@ import android.view.WindowManager
 import world.brightos.brai.capabilities.BraiAccessibilityService
 import kotlin.math.PI
 import kotlin.math.atan2
+import kotlin.math.ceil
 import kotlin.math.cos
 import kotlin.math.hypot
 import kotlin.math.max
@@ -77,12 +78,11 @@ internal class OverlayGeometry(
             maxPosition = visibleBounds().bottom - cancelSizePx
         )
 
-    fun radialActionPositions(hub: OverlayAnchor, main: OverlayAnchor, actionSize: Int, count: Int): List<OverlayPoint> {
+    fun radialActionPositions(hub: OverlayAnchor, actionSize: Int, count: Int): List<OverlayPoint> {
         val baseRadius = hub.size / 2 + actionSize / 2 + service.dp(8)
         return RadialActionLayout.positions(
             bounds = visibleBounds().inset(service.dp(8)),
             hub = hub,
-            main = main,
             actionSize = actionSize,
             count = count,
             baseRadius = baseRadius,
@@ -131,7 +131,6 @@ internal object RadialActionLayout {
     fun positions(
         bounds: OverlayBounds,
         hub: OverlayAnchor,
-        main: OverlayAnchor,
         actionSize: Int,
         count: Int,
         baseRadius: Int,
@@ -145,30 +144,62 @@ internal object RadialActionLayout {
             (bounds.top + bounds.bottom) / 2.0 - hubCenterY,
             (bounds.left + bounds.right) / 2.0 - hubCenterX
         ))
-        val mainAngle = Math.toDegrees(atan2(
-            main.y + main.size / 2.0 - hubCenterY,
-            main.x + main.size / 2.0 - hubCenterX
-        ))
-        val radiusStep = max(1, collisionGap / 2)
-        var radius = baseRadius
-        while (radius <= maxRadius) {
-            val angleSets = listOf(
-                circleAngles(count, -90.0),
-                circleAngles(count, mainAngle + (180.0 / count)),
-                arcAngles(count, inwardAngle, 180.0),
-                arcAngles(count, inwardAngle, 144.0),
-                arcAngles(count, mainAngle + 180.0, 144.0),
-                arcAngles(count, inwardAngle - 36.0, 144.0),
-                arcAngles(count, inwardAngle + 36.0, 144.0)
-            )
-            for (angles in angleSets) {
-                val candidate = positionsFor(hub, actionSize, radius, angles)
-                if (positionsFit(candidate, bounds, hub, main, actionSize, collisionGap)) return candidate
+        val spans = listOf(360.0, 180.0, 144.0, 120.0, 96.0, 90.0)
+        val orientations = buildList {
+            add(inwardAngle)
+            for (offset in 5..180 step 5) {
+                add(inwardAngle + offset)
+                add(inwardAngle - offset)
             }
-            radius += radiusStep
         }
+        val minimumRadiusBySpan = spans.associateWith { span ->
+            minimumRadius(hub, actionSize, count, span, baseRadius, collisionGap)
+        }
+        var radius = baseRadius
+        val radiusLimit = maxRadius + actionSize + collisionGap
+        while (radius <= radiusLimit) {
+            for (span in spans) {
+                if (radius < minimumRadiusBySpan.getValue(span)) continue
+                if (span == 360.0 && !fullCircleFits(bounds, hub, actionSize, radius)) continue
+                for (orientation in orientations) {
+                    val angles = if (span == 360.0) {
+                        circleAngles(count, orientation)
+                    } else {
+                        arcAngles(count, orientation, span)
+                    }
+                    val candidate = positionsFor(hub, actionSize, radius, angles)
+                    if (positionsFit(candidate, bounds, hub, actionSize, collisionGap)) return candidate
+                }
+            }
+            radius += 2
+        }
+        return emptyList()
+    }
 
-        return nearestRadialSlots(bounds, hub, main, actionSize, count, baseRadius, maxRadius, collisionGap)
+    private fun minimumRadius(
+        hub: OverlayAnchor,
+        actionSize: Int,
+        count: Int,
+        span: Double,
+        baseRadius: Int,
+        gap: Int
+    ): Int {
+        if (count <= 1) return baseRadius
+        val angleStep = if (span == 360.0) 360.0 / count else span / (count - 1)
+        val halfStep = angleStep * PI / 360.0
+        val actionRadius = ceil((actionSize + gap) / (2.0 * sin(halfStep))).toInt() + 1
+        val hubRadius = ceil(hub.size / 2.0 + actionSize / 2.0 + gap).toInt() + 1
+        return max(baseRadius, max(actionRadius, hubRadius))
+    }
+
+    private fun fullCircleFits(bounds: OverlayBounds, hub: OverlayAnchor, actionSize: Int, radius: Int): Boolean {
+        val centerX = hub.x + hub.size / 2.0
+        val centerY = hub.y + hub.size / 2.0
+        val extent = radius + actionSize / 2.0
+        return centerX - extent >= bounds.left &&
+            centerX + extent <= bounds.right &&
+            centerY - extent >= bounds.top &&
+            centerY + extent <= bounds.bottom
     }
 
     private fun circleAngles(count: Int, start: Double): List<Double> =
@@ -196,72 +227,30 @@ internal object RadialActionLayout {
         positions: List<OverlayPoint>,
         bounds: OverlayBounds,
         hub: OverlayAnchor,
-        main: OverlayAnchor,
         actionSize: Int,
         gap: Int
     ): Boolean {
-        val hubRect = OverlayRect(hub.x, hub.y, hub.x + hub.size, hub.y + hub.size)
-        val mainRect = OverlayRect(main.x, main.y, main.x + main.size, main.y + main.size)
         val rects = positions.map { OverlayRect(it.x, it.y, it.x + actionSize, it.y + actionSize) }
-        if (rects.any { !it.inside(bounds) || it.intersects(hubRect, gap) || it.intersects(mainRect, gap) }) return false
-        for (index in rects.indices) {
-            for (other in index + 1 until rects.size) {
-                if (rects[index].intersects(rects[other], gap)) return false
+        if (rects.any { !it.inside(bounds) }) return false
+        val centers = positions.map { point ->
+            Pair(point.x + actionSize / 2.0, point.y + actionSize / 2.0)
+        }
+        val hubCenter = Pair(hub.x + hub.size / 2.0, hub.y + hub.size / 2.0)
+        val hubDistance = hub.size / 2.0 + actionSize / 2.0 + gap
+        val actionDistance = actionSize + gap.toDouble()
+        centers.forEach { center ->
+            if (distance(center, hubCenter) < hubDistance) return false
+        }
+        for (index in centers.indices) {
+            for (other in index + 1 until centers.size) {
+                if (distance(centers[index], centers[other]) < actionDistance) return false
             }
         }
         return true
     }
 
-    private fun nearestRadialSlots(
-        bounds: OverlayBounds,
-        hub: OverlayAnchor,
-        main: OverlayAnchor,
-        actionSize: Int,
-        count: Int,
-        baseRadius: Int,
-        maxRadius: Int,
-        gap: Int
-    ): List<OverlayPoint> {
-        val hubCenterX = hub.x + hub.size / 2.0
-        val hubCenterY = hub.y + hub.size / 2.0
-        val radialCandidates = buildList {
-            var radius = baseRadius
-            val outerRadius = maxRadius + actionSize + gap
-            while (radius <= outerRadius) {
-                repeat(24) { index ->
-                    addAll(positionsFor(hub, actionSize, radius, listOf(index * 15.0)))
-                }
-                radius += max(1, gap)
-            }
-        }.distinct().sortedBy { point ->
-            hypot(point.x + actionSize / 2.0 - hubCenterX, point.y + actionSize / 2.0 - hubCenterY)
-        }
-        val selected = mutableListOf<OverlayPoint>()
-        for (point in radialCandidates) {
-            if (positionsFit(selected + point, bounds, hub, main, actionSize, gap)) selected += point
-            if (selected.size == count) return selected
-        }
-
-        val gridStep = max(1, actionSize + gap)
-        val gridCandidates = buildList {
-            var y = bounds.top
-            while (y + actionSize <= bounds.bottom) {
-                var x = bounds.left
-                while (x + actionSize <= bounds.right) {
-                    add(OverlayPoint(x, y))
-                    x += gridStep
-                }
-                y += gridStep
-            }
-        }.sortedBy { point ->
-            hypot(point.x + actionSize / 2.0 - hubCenterX, point.y + actionSize / 2.0 - hubCenterY)
-        }
-        for (point in gridCandidates) {
-            if (positionsFit(selected + point, bounds, hub, main, actionSize, gap)) selected += point
-            if (selected.size == count) break
-        }
-        return selected
-    }
+    private fun distance(first: Pair<Double, Double>, second: Pair<Double, Double>): Double =
+        hypot(first.first - second.first, first.second - second.second)
 
     private data class OverlayRect(
         val left: Int,
@@ -272,10 +261,5 @@ internal object RadialActionLayout {
         fun inside(bounds: OverlayBounds): Boolean =
             left >= bounds.left && top >= bounds.top && right <= bounds.right && bottom <= bounds.bottom
 
-        fun intersects(other: OverlayRect, gap: Int): Boolean =
-            left - gap < other.right &&
-                right + gap > other.left &&
-                top - gap < other.bottom &&
-                bottom + gap > other.top
     }
 }
