@@ -1037,27 +1037,28 @@ function InboxDetailEditor({
 }
 
 function InboxAiProcessPanel({ item }: { item: InboxItem }) {
-  const [details, setDetails] = useState<InboxWorkflowDetails | null>(null);
-  const [error, setError] = useState("");
+  const [result, setResult] = useState<{ inboxId: string; details: InboxWorkflowDetails | null; error: string } | null>(null);
+  const hasWorkflow = item.workflow_execution_id != null || Boolean(item.temporal_workflow_id);
 
   useEffect(() => {
+    if (!hasWorkflow) return;
     let active = true;
     void new BraiApi(defaultApiBase()).inboxWorkflow(item.id)
       .then((value) => {
-        if (active) {
-          setDetails(value);
-          setError("");
-        }
+        if (active) setResult({ inboxId: item.id, details: value, error: "" });
       })
       .catch((reason) => {
-        if (active) setError(reason instanceof Error ? reason.message : "Не удалось загрузить workflow");
+        if (active) setResult({ inboxId: item.id, details: null, error: reason instanceof Error ? reason.message : "Не удалось загрузить workflow" });
       });
     return () => {
       active = false;
     };
-  }, [item.id, item.temporal_run_id, item.workflow_attempt_count, item.workflow_status]);
+  }, [hasWorkflow, item.id, item.temporal_run_id, item.workflow_attempt_count, item.workflow_status]);
 
-  if (error) return <p className="m-0 py-4 text-sm text-destructive" role="alert">{error}</p>;
+  if (!hasWorkflow) return <p className="m-0 py-4 text-sm text-muted-foreground">Для этой записи AI workflow ещё не запускался.</p>;
+  const currentResult = result?.inboxId === item.id ? result : null;
+  if (currentResult?.error) return <p className="m-0 py-4 text-sm text-destructive" role="alert">{currentResult.error}</p>;
+  const details = currentResult?.details;
   if (!details) {
     return (
       <div className="flex items-center gap-2 py-4 text-sm text-muted-foreground">

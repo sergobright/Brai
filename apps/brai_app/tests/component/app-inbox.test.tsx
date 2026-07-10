@@ -78,6 +78,9 @@ describe("BraiApp inbox", () => {
     expect(inboxRow).toHaveClass("[&:has(+_.action-row.selected)]:border-b-transparent");
     const detailPanel = screen.getByLabelText("Редактирование входящего");
     expect(detailPanel).toHaveClass("px-0");
+    fireEvent.click(screen.getByRole("tab", { name: "AI" }));
+    expect(await screen.findByText("Для этой записи AI workflow ещё не запускался.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "Инфо" }));
     const detailTitle = screen.getByRole("textbox", { name: "Название входящего" });
     const detailTabs = detailPanel.querySelector(".actions-detail-tabs") as HTMLElement;
     expect(detailTabs.compareDocumentPosition(detailTitle) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
