@@ -114,12 +114,12 @@ export function setupBraiAppTest() {
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
     delete window.Capacitor;
     delete window.BraiAndroidBack;
     delete window.__BRAI_RUNTIME_CONFIG__;
     delete document.documentElement.dataset.sidebarState;
-    vi.restoreAllMocks();
-    vi.unstubAllGlobals();
   });
 }
 
