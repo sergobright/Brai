@@ -24,7 +24,7 @@ const sessionSecret = process.env.BRAI_SESSION_SECRET;
 const betterAuthSecret = process.env.BETTER_AUTH_SECRET ?? sessionSecret;
 const betterAuthUrl = process.env.BETTER_AUTH_URL ?? null;
 const resendApiKey = process.env.RESEND_API_KEY ?? null;
-const authFromEmail = process.env.BRAI_AUTH_FROM ?? 'Brai <auth@mail.brightos.world>';
+const authFromEmail = process.env.BRAI_AUTH_FROM ?? 'Brai <auth@mail.brai.one>';
 const inboxApiKey = process.env.BRAI_INBOX_API_KEY;
 const inboxStorageRoot =
   process.env.BRAI_INBOX_STORAGE_ROOT ?? path.join(dataRoot, 'inbox-attachments');

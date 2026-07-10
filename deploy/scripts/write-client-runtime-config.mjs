@@ -26,8 +26,8 @@ export function runtimeConfigFromEnv(env = process.env) {
     branch: value(env.NEXT_PUBLIC_BRAI_BRANCH, env.BRAI_BRANCH, ""),
     commit: value(env.NEXT_PUBLIC_BRAI_COMMIT, env.BRAI_COMMIT, ""),
     webApiBase: value(env.NEXT_PUBLIC_BRAI_API, "/api"),
-    androidApiBase: value(env.NEXT_PUBLIC_BRAI_ANDROID_API, "https://api.brightos.world"),
-    otaChannel: value(env.NEXT_PUBLIC_BRAI_OTA_CHANNEL, "app.brightos.world/mobile-update"),
+    androidApiBase: value(env.NEXT_PUBLIC_BRAI_ANDROID_API, "https://api.brai.one"),
+    otaChannel: value(env.NEXT_PUBLIC_BRAI_OTA_CHANNEL, "app.brai.one/mobile-update"),
   };
 }
 

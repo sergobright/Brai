@@ -27,7 +27,7 @@ Build and publish a release APK only when native Android code, Capacitor config,
 - Preview A-E: `Brai A`...`Brai E`, `brai-a-vN.apk`...`brai-e-vN.apk`
 - Active native preview work temporarily replaces its slot card with `Preview A`...`Preview E` and the active slot-specific `brai-<slot>-vN-previewM.apk` artifact.
 
-The Dev APK belongs to the persistent protected Dev environment on `dev.brightos.world`. Dev deploys use the long-lived Supabase `brai-dev` branch and must keep APK, OTA/web, API, and version ledger in sync.
+The Dev APK belongs to the persistent protected Dev environment on `dev.brai.one`. Dev deploys use the long-lived Supabase `brai-dev` branch and must keep APK, OTA/web, API, and version ledger in sync.
 
 ## OTA Manifest
 

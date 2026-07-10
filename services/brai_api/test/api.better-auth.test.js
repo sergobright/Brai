@@ -159,7 +159,7 @@ test('email OTP signs in, claims legacy data, and isolates the next user', async
 
     await jsonRequest(fixture.url, '/v1/activities/events/sync', {
       method: 'POST',
-      headers: { cookie: second.cookie, origin: 'https://app.brightos.world' },
+      headers: { cookie: second.cookie, origin: 'https://app.brai.one' },
       body: JSON.stringify({
         device: { device_id: 'second-web', platform: 'web' },
         events: [

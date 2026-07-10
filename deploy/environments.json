@@ -4,7 +4,7 @@
   "environments": {
     "prod": {
       "branch": "main",
-      "domain": "app.brightos.world",
+      "domain": "app.brai.one",
       "displayName": "Production",
       "displayLabel": "Prod",
       "androidApp": "Brai",
@@ -19,7 +19,7 @@
     },
     "dev": {
       "branch": "dev",
-      "domain": "dev.brightos.world",
+      "domain": "dev.brai.one",
       "displayName": "Dev",
       "displayLabel": "Dev",
       "androidApp": "Brai Dev",
@@ -34,7 +34,7 @@
     },
     "preview-a": {
       "branch": "codex/*",
-      "domain": "a.test.brightos.world",
+      "domain": "a.test.brai.one",
       "displayName": "Preview A",
       "displayLabel": "A",
       "androidApp": "Brai A",
@@ -49,7 +49,7 @@
     },
     "preview-b": {
       "branch": "codex/*",
-      "domain": "b.test.brightos.world",
+      "domain": "b.test.brai.one",
       "displayName": "Preview B",
       "displayLabel": "B",
       "androidApp": "Brai B",
@@ -64,7 +64,7 @@
     },
     "preview-c": {
       "branch": "codex/*",
-      "domain": "c.test.brightos.world",
+      "domain": "c.test.brai.one",
       "displayName": "Preview C",
       "displayLabel": "C",
       "androidApp": "Brai C",
@@ -79,7 +79,7 @@
     },
     "preview-d": {
       "branch": "codex/*",
-      "domain": "d.test.brightos.world",
+      "domain": "d.test.brai.one",
       "displayName": "Preview D",
       "displayLabel": "D",
       "androidApp": "Brai D",
@@ -94,7 +94,7 @@
     },
     "preview-e": {
       "branch": "codex/*",
-      "domain": "e.test.brightos.world",
+      "domain": "e.test.brai.one",
       "displayName": "Preview E",
       "displayLabel": "E",
       "androidApp": "Brai E",

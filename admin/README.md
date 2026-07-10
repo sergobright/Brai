@@ -4,9 +4,9 @@ Read-only technical admin panel for Brai development data.
 
 The live admin route is `/admin` inside each Brai environment:
 
-- production: `https://app.brightos.world/admin`;
-- dev: `https://dev.brightos.world/admin`;
-- previews: `https://<slot>.test.brightos.world/admin`.
+- production: `https://app.brai.one/admin`;
+- dev: `https://dev.brai.one/admin`;
+- previews: `https://<slot>.test.brai.one/admin`.
 
 Production admin uses the Brai account primary-user gate. Dev and preview
 admin routes also sit behind unified Caddy Basic Auth.

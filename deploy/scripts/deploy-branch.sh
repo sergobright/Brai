@@ -154,7 +154,7 @@ fi
 
 ANDROID_API="https://$DOMAIN/api"
 if [[ "$ENVIRONMENT" == "prod" ]]; then
-  ANDROID_API="https://api.brightos.world"
+  ANDROID_API="https://api.brai.one"
 fi
 
 export BRAI_ROOT="$ROOT"

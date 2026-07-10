@@ -81,8 +81,8 @@ describe("mobile OTA publish scripts", () => {
         NEXT_PUBLIC_BRAI_BRANCH: "codex/x</script>\u2028",
         NEXT_PUBLIC_BRAI_COMMIT: "abc123",
         NEXT_PUBLIC_BRAI_API: "/api",
-        NEXT_PUBLIC_BRAI_ANDROID_API: "https://a.test.brightos.world/api",
-        NEXT_PUBLIC_BRAI_OTA_CHANNEL: "a.test.brightos.world/mobile-update",
+        NEXT_PUBLIC_BRAI_ANDROID_API: "https://a.test.brai.one/api",
+        NEXT_PUBLIC_BRAI_OTA_CHANNEL: "a.test.brai.one/mobile-update",
       },
     });
 
@@ -98,8 +98,8 @@ describe("mobile OTA publish scripts", () => {
       branch: "codex/x</script>\u2028",
       commit: "abc123",
       webApiBase: "/api",
-      androidApiBase: "https://a.test.brightos.world/api",
-      otaChannel: "a.test.brightos.world/mobile-update",
+      androidApiBase: "https://a.test.brai.one/api",
+      otaChannel: "a.test.brai.one/mobile-update",
     });
   });
 
@@ -121,7 +121,7 @@ describe("mobile OTA publish scripts", () => {
         BRAI_APP_VERSION: "9.9.9",
         BRAI_WEB_TARGET: path.join(envRoot, "web"),
         BRAI_MOBILE_TARGET: path.join(envRoot, "mobile-update"),
-        BRAI_UPDATE_BASE_URL: "https://a.test.brightos.world/mobile-update",
+        BRAI_UPDATE_BASE_URL: "https://a.test.brai.one/mobile-update",
         BRAI_MOBILE_BUNDLE_VERSION: "9.9.9-preview.42",
         BRAI_ENVIRONMENT: "preview-a",
         BRAI_TARGET_APK_VERSION: "2999",
@@ -133,7 +133,7 @@ describe("mobile OTA publish scripts", () => {
     await expect(readFile(path.join(envRoot, "web/index.html"), "utf8")).resolves.toContain("env");
     expect(manifest.otaVersion).toBe("9.9.9");
     expect(manifest.targetApkVersion).toBe(2999);
-    expect(manifest.archiveUrl).toBe("https://a.test.brightos.world/mobile-update/bundles/9.9.9-preview.42/bundle.zip");
+    expect(manifest.archiveUrl).toBe("https://a.test.brai.one/mobile-update/bundles/9.9.9-preview.42/bundle.zip");
   });
 
   it("publishes a baseline web layer for a selected non-production environment", async () => {
@@ -163,10 +163,10 @@ describe("mobile OTA publish scripts", () => {
     await expect(readFile(path.join(target, "web/index.html"), "utf8")).resolves.toContain("baseline");
     expect(runtimeConfig).toContain('"environment": "preview-b"');
     expect(runtimeConfig).toContain('"previewSlot": "B"');
-    expect(runtimeConfig).toContain('"androidApiBase": "https://b.test.brightos.world/api"');
+    expect(runtimeConfig).toContain('"androidApiBase": "https://b.test.brai.one/api"');
     expect(manifest.otaVersion).toBe("9.9.9");
     expect(manifest.targetApkVersion).toBe(2999);
-    expect(manifest.archiveUrl).toBe("https://b.test.brightos.world/mobile-update/bundles/9.9.9/bundle.zip");
+    expect(manifest.archiveUrl).toBe("https://b.test.brai.one/mobile-update/bundles/9.9.9/bundle.zip");
   });
 
   it("does not force a new Preview APK for web-only OTA bundles", async () => {
@@ -193,7 +193,7 @@ describe("mobile OTA publish scripts", () => {
         BRAI_APP_VERSION: "9.9.9",
         BRAI_WEB_TARGET: path.join(envRoot, "web"),
         BRAI_MOBILE_TARGET: path.join(envRoot, "mobile-update"),
-        BRAI_UPDATE_BASE_URL: "https://a.test.brightos.world/mobile-update",
+        BRAI_UPDATE_BASE_URL: "https://a.test.brai.one/mobile-update",
         BRAI_MOBILE_BUNDLE_VERSION: "9.9.9-preview.42",
         BRAI_RELEASE_TARGET: releaseDir,
         BRAI_ENVIRONMENT: "preview-a",
@@ -229,7 +229,7 @@ describe("mobile OTA publish scripts", () => {
         BRAI_APP_VERSION: "9.9.9",
         BRAI_WEB_TARGET: path.join(envRoot, "web"),
         BRAI_MOBILE_TARGET: path.join(envRoot, "mobile-update"),
-        BRAI_UPDATE_BASE_URL: "https://a.test.brightos.world/mobile-update",
+        BRAI_UPDATE_BASE_URL: "https://a.test.brai.one/mobile-update",
         BRAI_MOBILE_BUNDLE_VERSION: "9.9.9-preview.42",
         BRAI_RELEASE_TARGET: releaseDir,
         BRAI_ENVIRONMENT: "preview-a",
@@ -277,6 +277,10 @@ describe("mobile OTA publish scripts", () => {
     );
 
     expect(productionTemplate).toContain("{{ brai_envs.prod.domain }}");
+    expect(template).toContain("{{ brai_api_domain }}");
+    expect(template).toContain("{{ brai_temporal_ui_domain }}");
+    expect(template).toContain("brai_api_legacy_domains");
+    expect(template).toContain("redir https://{{ brai_api_domain }}{uri} permanent");
     expect(productionApiBlock).not.toContain("brai_basic_auth_directive");
     expect(productionApiBlock).not.toContain("header_up Authorization");
     expect(productionAdminBlock).toContain("brai_envs.prod.admin_port");
@@ -295,6 +299,7 @@ describe("mobile OTA publish scripts", () => {
     expect(mobileBlock).toContain('header /manifest.json Cache-Control "no-store"');
     expect(webShellBlock).toContain("brai_basic_auth_directive");
     expect(playbook.match(/{{ brai_supabase_studio_domain }}/g)?.length ?? 0).toBeGreaterThanOrEqual(6);
+    expect(playbook).toContain("{{ brai_api_legacy_domains[0] }}");
   });
 
   it("uses the public API endpoint for production Android bundles", async () => {
@@ -302,9 +307,9 @@ describe("mobile OTA publish scripts", () => {
     const buildApk = await readFile(path.join(workspaceRoot, "deploy/scripts/build-android-env-apk.sh"), "utf8");
     const gradle = await readFile(path.join(workspaceRoot, "apps/brai_app/android/app/build.gradle"), "utf8");
 
-    expect(deployBranch).toContain('ANDROID_API="https://api.brightos.world"');
+    expect(deployBranch).toContain('ANDROID_API="https://api.brai.one"');
     expect(deployBranch).toContain('export NEXT_PUBLIC_BRAI_ANDROID_API="$ANDROID_API"');
-    expect(buildApk).toContain('ANDROID_API="https://api.brightos.world"');
+    expect(buildApk).toContain('ANDROID_API="https://api.brai.one"');
     expect(buildApk).toContain('export NEXT_PUBLIC_BRAI_ANDROID_API="$ANDROID_API"');
     expect(buildApk).toContain('export JAVA_HOME="/srv/opt/jdk-21"');
     expect(buildApk).toContain('SIGNING_ENV="${BRAI_ANDROID_SIGNING_ENV:-/srv/projects/brai-envs/android-signing/signing.env}"');
@@ -315,7 +320,7 @@ describe("mobile OTA publish scripts", () => {
     expect(gradle).toContain("tasks.register('validateBraiAndroidApiBundle')");
     expect(gradle).toContain("brai-runtime-config.js");
     expect(gradle).toContain("Non-production runtime config contains production API");
-    expect(gradle).toContain("https://a.test.brightos.world/api");
+    expect(gradle).toContain("https://a.test.brai.one/api");
     expect(gradle).not.toContain("BRAI_PROD_FALLBACK_BUNDLE_VERSION");
     expect(gradle).not.toContain("BRAI_NON_PROD_FALLBACK_BUNDLE_VERSION");
     expect(gradle).not.toContain("?: '0.0.10'");
@@ -480,7 +485,7 @@ describe("mobile OTA publish scripts", () => {
     expect(manifest).toMatchObject({
       schemaVersion: 2,
       otaVersion: bundleVersion,
-      archiveUrl: `https://app.brightos.world/mobile-update/bundles/${bundleVersion}/bundle.zip`,
+      archiveUrl: `https://app.brai.one/mobile-update/bundles/${bundleVersion}/bundle.zip`,
       entrypoint: "index.html",
       targetApkVersion: 2999,
       targetApkReleaseKey: "production",
@@ -762,7 +767,7 @@ describe("mobile OTA publish scripts", () => {
       path.join(envsRoot, "preview-b/mobile-update/manifest.json"),
       JSON.stringify({
         otaVersion: "0.0.67",
-        archiveUrl: "https://b.test.brightos.world/mobile-update/bundles/0.0.67/bundle.zip",
+        archiveUrl: "https://b.test.brai.one/mobile-update/bundles/0.0.67/bundle.zip",
       }),
     );
     await execFileAsync("bash", [path.join(workspaceRoot, "deploy/scripts/sync-occupied-preview-ota-manifests.sh"), "--local"], {
@@ -783,7 +788,7 @@ describe("mobile OTA publish scripts", () => {
     await expect(readFile(path.join(envsRoot, "preview-b/web/index.html"), "utf8")).resolves.toContain("preview-b-content");
     expect(syncScript).toContain("BRAI_BUILD_CLIENT=false");
     expect(manifest.otaVersion).toBe("0.0.68");
-    expect(manifest.archiveUrl).toBe("https://b.test.brightos.world/mobile-update/bundles/0.0.68/bundle.zip");
+    expect(manifest.archiveUrl).toBe("https://b.test.brai.one/mobile-update/bundles/0.0.68/bundle.zip");
   });
 
   it("allocates, reuses, and releases preview slots with the lock wrapper", async () => {

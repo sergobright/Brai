@@ -17,7 +17,7 @@ The project is built around a simple rule: the device should remain useful first
 ## Repository Layout
 
 - `apps/brai_app/` - Next.js 16, React 19, Tailwind CSS, source-owned UI, and Capacitor Android.
-- `apps/brai_site/` - static public site source for `brightos.world`.
+- `apps/brai_site/` - static public site source for `brai.one`.
 - `services/brai_api/` - Node.js Brai API with Supabase Postgres storage and offline-first sync endpoints.
 - `deploy/` - deployment scripts, Ansible playbooks, Caddy/systemd templates, and environment mapping.
 - `docs/` - development guidelines, checklists, and operations notes.
@@ -80,8 +80,8 @@ Release APK signing is configured through environment variables outside the repo
 
 ## Deployment Flow
 
-- `brightos.world` serves the public site without Caddy basic auth.
-- `main` is production and deploys the protected app to `app.brightos.world`.
+- `brai.one` serves the public site without Caddy basic auth.
+- `main` is production and deploys the protected app to `app.brai.one`.
 - `codex/*` branches deploy to preview slots `A` through `E`.
 - `npm run app:dev` is only the local Next.js development server.
 

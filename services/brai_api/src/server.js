@@ -1104,16 +1104,16 @@ function requestPathname(req) {
 }
 
 function isAllowedCorsOrigin(origin, pathname = '/') {
-  if (origin === 'https://brightos.world') return pathname === '/auth/session';
+  if (origin === 'https://brai.one') return pathname === '/auth/session';
   if (isTrustedAppOrigin(origin)) return true;
-  if (origin === 'https://previews.brightos.world') return true;
+  if (origin === 'https://previews.brai.one') return true;
   return false;
 }
 
 function isTrustedAppOrigin(origin) {
-  if (origin === 'https://app.brightos.world') return true;
-  if (origin === 'https://dev.brightos.world') return true;
-  if (/^https:\/\/[a-e]\.test\.brightos\.world$/.test(origin)) return true;
+  if (origin === 'https://app.brai.one') return true;
+  if (origin === 'https://dev.brai.one') return true;
+  if (/^https:\/\/[a-e]\.test\.brai\.one$/.test(origin)) return true;
   if (origin === 'capacitor://localhost') return true;
   if (origin === 'https://localhost' || origin === 'http://localhost') return true;
   return /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin);
@@ -1242,7 +1242,7 @@ function parseCookies(header) {
 
 function shouldUseSecureCookie(req) {
   const host = req.headers.host ?? '';
-  return host.includes('brightos.world') || req.headers['x-forwarded-proto'] === 'https';
+  return host.includes('brai.one') || req.headers['x-forwarded-proto'] === 'https';
 }
 
 export function createUserVaultPreparer({

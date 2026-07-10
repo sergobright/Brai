@@ -207,7 +207,7 @@ TEMPORAL_ADDRESS=127.0.0.1:7233 npm --prefix services/brai_temporal run signal -
 The inventory output groups rows by workflow family and by operational category:
 `active`, `blocked`, `stale`, and `legacy`.
 
-Then open `https://temporal.brightos.world` with the unified Caddy basic auth and look for workflow ID `brai:preview:codex/temporal-smoke`.
+Then open `https://temporal.brai.one` with the unified Caddy basic auth and look for workflow ID `brai:preview:codex/temporal-smoke`.
 
 ## Failure And Manual Recovery
 

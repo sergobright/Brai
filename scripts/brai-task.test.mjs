@@ -1244,7 +1244,7 @@ test("preview receipts must match exact branch and head", () => {
     branch: "codex/foo",
     commit: "1111111111111111111111111111111111111111",
     slot: "A",
-    url: "https://a.test.brightos.world",
+    url: "https://a.test.brai.one",
     runId: 123,
     releaseNotes,
     verifiedAt: "2026-06-26T00:00:00.000Z",
@@ -1337,13 +1337,13 @@ test("task state blocks local implementation work without exact preview receipt"
     const head = git(["rev-parse", "HEAD"], repo).stdout.trim();
     fs.writeFileSync(
       path.join(repo, ".brai-task", "preview-handoff.json"),
-      `${JSON.stringify({ branch: "codex/foo", commit: base, slot: "A", url: "https://a.test.brightos.world", runId: 123, releaseNotes: { short_changes: "Исправлен тест.", detailed_changes: "Детали теста.", reason: "Нужно проверить receipt." }, verifiedAt: "2026-06-26T00:00:00.000Z" })}\n`,
+      `${JSON.stringify({ branch: "codex/foo", commit: base, slot: "A", url: "https://a.test.brai.one", runId: 123, releaseNotes: { short_changes: "Исправлен тест.", detailed_changes: "Детали теста.", reason: "Нужно проверить receipt." }, verifiedAt: "2026-06-26T00:00:00.000Z" })}\n`,
     );
     assert.equal(deriveTaskState().ok, false);
 
     fs.writeFileSync(
       path.join(repo, ".brai-task", "preview-handoff.json"),
-      `${JSON.stringify({ branch: "codex/foo", commit: head, slot: "A", url: "https://a.test.brightos.world", runId: 123, releaseNotes: { short_changes: "Исправлен тест.", detailed_changes: "Детали теста.", reason: "Нужно проверить receipt." }, verifiedAt: "2026-06-26T00:00:00.000Z" })}\n`,
+      `${JSON.stringify({ branch: "codex/foo", commit: head, slot: "A", url: "https://a.test.brai.one", runId: 123, releaseNotes: { short_changes: "Исправлен тест.", detailed_changes: "Детали теста.", reason: "Нужно проверить receipt." }, verifiedAt: "2026-06-26T00:00:00.000Z" })}\n`,
     );
     assert.equal(deriveTaskState().ok, true);
 

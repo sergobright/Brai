@@ -18,11 +18,11 @@ test('public landing exposes Sign In app button without secrets', async () => {
     const html = files[htmlFile];
     assert.match(html, /data-auth-link/);
     assert.match(html, />Sign In</);
-    assert.match(html, /href="https:\/\/app\.brightos\.world\/"/);
+    assert.match(html, /href="https:\/\/app\.brai\.one\/"/);
     assert.match(html, /src="\/auth-link\.js"/);
   }
 
-  assert.match(files['landing/public/auth-link.js'], /https:\/\/app\.brightos\.world\/api\/auth\/session/);
+  assert.match(files['landing/public/auth-link.js'], /https:\/\/app\.brai\.one\/api\/auth\/session/);
   assert.match(files['landing/public/auth-link.js'], /credentials: "include"/);
   assert.match(files['landing/public/auth-link.js'], /textContent = "APP"/);
 
