@@ -19,6 +19,7 @@ class BraiCmdQueueTest {
     @Before
     @After
     fun cleanQueue() {
+        BraiCmdQueue.clearTransportFailures(context)
         listOf(
             "pending-recordings",
             "pending-screenshot-inbox",
@@ -58,8 +59,97 @@ class BraiCmdQueueTest {
         assertEquals(1, snapshot.transport[ContextButtonAction.ChatContextInbox])
         assertEquals(1, snapshot.transport[ContextButtonAction.SaveContextInbox])
         assertEquals(7, snapshot.transport.total)
+        assertEquals(0, snapshot.failedTransport.total)
         assertEquals(1, snapshot.readyToInsert.mainDictation)
         assertEquals(1, snapshot.readyToInsert.chatReply)
+    }
+
+    @Test
+    fun transportIsFailedOnlyAfterAnAttemptActuallyFails() {
+        recordings.mkdirs()
+        val main = audio("main")
+        val idea = audio("idea").also { InboxPayloadStore.saveAction(it, AudioQueueAction.IdeaVoiceInbox) }
+        val screenshot = File(context.cacheDir, "snapshot-${System.nanoTime()}.png").apply {
+            writeBytes(byteArrayOf(1))
+        }
+        val queuedScreenshot = requireNotNull(ScreenshotInboxStore.enqueue(context, screenshot))
+
+        assertEquals(3, BraiCmdQueue.snapshot(context).transport.total)
+        assertEquals(0, BraiCmdQueue.snapshot(context).failedTransport.total)
+
+        BraiCmdQueue.markTransportFailed(
+            context,
+            listOf(
+                BraiCmdQueue.audioTransportId(main),
+                BraiCmdQueue.screenshotTransportId(queuedScreenshot)
+            )
+        )
+
+        val failed = BraiCmdQueue.snapshot(context)
+        assertEquals(1, failed.failedTransport.main)
+        assertEquals(0, failed.failedTransport[ContextButtonAction.IdeaVoiceInbox])
+        assertEquals(1, failed.failedTransport[ContextButtonAction.ScreenshotInbox])
+        assertEquals(2, failed.failedTransport.total)
+
+        audio("chat").also { InboxPayloadStore.saveAction(it, AudioQueueAction.ChatContextInbox) }
+        val afterEnqueue = BraiCmdQueue.snapshot(context)
+        assertEquals(4, afterEnqueue.transport.total)
+        assertEquals(2, afterEnqueue.failedTransport.total)
+        assertEquals(0, afterEnqueue.failedTransport[ContextButtonAction.ChatContextInbox])
+
+        assertTrue(AudioQueueStore.complete(main))
+        assertTrue(AudioQueueStore.complete(idea))
+    }
+
+    @Test
+    fun authBlockReportsTheExactItemsThatCouldNotBeSent() {
+        ConfigStore(context).authToken = ""
+        recordings.mkdirs()
+        val main = audio("blocked-main")
+        val screenshot = File(context.cacheDir, "blocked-${System.nanoTime()}.png").apply {
+            writeBytes(byteArrayOf(1))
+        }
+        val queuedScreenshot = requireNotNull(ScreenshotInboxStore.enqueue(context, screenshot))
+
+        val result = QueueTransportWorker(context).run(null)
+
+        assertEquals(QueueTransportStatus.Blocked, result.status)
+        assertEquals(
+            setOf(
+                BraiCmdQueue.audioTransportId(main),
+                BraiCmdQueue.screenshotTransportId(queuedScreenshot)
+            ),
+            result.failedTransportIds
+        )
+    }
+
+    @Test
+    fun fullDrainClearsFailedMarkerForFutureItems() {
+        recordings.mkdirs()
+        val first = audio("same-name")
+        BraiCmdQueue.markTransportFailed(context, listOf(BraiCmdQueue.audioTransportId(first)))
+        assertEquals(1, BraiCmdQueue.snapshot(context).failedTransport.main)
+
+        assertTrue(AudioQueueStore.complete(first))
+        assertEquals(0, BraiCmdQueue.snapshot(context).transport.total)
+
+        audio("same-name")
+        val fresh = BraiCmdQueue.snapshot(context)
+        assertEquals(1, fresh.transport.main)
+        assertEquals(0, fresh.failedTransport.main)
+    }
+
+    @Test
+    fun quarantinedItemIsRemovedFromFailedTransport() {
+        recordings.mkdirs()
+        val rejected = audio("rejected")
+        BraiCmdQueue.markTransportFailed(context, listOf(BraiCmdQueue.audioTransportId(rejected)))
+        assertEquals(1, BraiCmdQueue.snapshot(context).failedTransport.main)
+
+        assertTrue(AudioQueueStore.quarantine(context, rejected))
+        val snapshot = BraiCmdQueue.snapshot(context)
+        assertEquals(0, snapshot.transport.total)
+        assertEquals(0, snapshot.failedTransport.total)
     }
 
     @Test

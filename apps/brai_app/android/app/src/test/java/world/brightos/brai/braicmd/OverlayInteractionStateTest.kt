@@ -16,10 +16,10 @@ class OverlayInteractionStateTest {
     }
 
     @Test
-    fun secondaryButtonsDisappearBeforeTheyReachTheHub() {
+    fun secondaryButtonsFadeContinuouslyUntilTheyReachTheHub() {
         assertEquals(1f, secondaryCloseAlpha(0f), 0.001f)
-        assertTrue(secondaryCloseAlpha(0.25f) in 0f..0.55f)
-        assertEquals(0f, secondaryCloseAlpha(0.52f), 0.001f)
+        assertEquals(0.75f, secondaryCloseAlpha(0.25f), 0.001f)
+        assertEquals(0.48f, secondaryCloseAlpha(0.52f), 0.001f)
         assertEquals(0f, secondaryCloseAlpha(1f), 0.001f)
     }
 }

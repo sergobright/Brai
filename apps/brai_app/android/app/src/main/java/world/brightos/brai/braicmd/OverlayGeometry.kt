@@ -84,14 +84,20 @@ internal class OverlayGeometry(
             maxPosition = visibleBounds().bottom - cancelSizePx
         )
 
-    fun radialMenuLayout(hub: OverlayAnchor, actionSize: Int, count: Int): RadialMenuLayout? =
+    fun radialMenuLayout(
+        hub: OverlayAnchor,
+        actionSize: Int,
+        count: Int,
+        avoid: OverlayAnchor? = null
+    ): RadialMenuLayout? =
         RadialActionLayout.layout(
             bounds = visibleBounds().inset(service.dp(8)),
             hub = hub,
             actionSize = actionSize,
             count = count,
             maxActionCount = 5,
-            collisionGap = service.dp(6)
+            collisionGap = service.dp(6),
+            avoid = avoid
         )
 
     private fun cancelAxisPosition(preferred: Int, fallback: Int, minPosition: Int, maxPosition: Int): Int {
@@ -137,52 +143,37 @@ internal object RadialActionLayout {
         actionSize: Int,
         count: Int,
         maxActionCount: Int,
-        collisionGap: Int
+        collisionGap: Int,
+        avoid: OverlayAnchor? = null
     ): RadialMenuLayout? {
         if (count <= 0) return null
-        val radius = fixedRadius(hub.size, actionSize, maxActionCount, collisionGap)
-        val extent = radius + actionSize / 2
-        val originalCenter = center(hub)
-        val horizontalCenter = originalCenter.first.coerceIn(
-            bounds.left + extent.toDouble(),
-            max(bounds.left + extent, bounds.right - extent).toDouble()
-        )
-        val verticalCenter = originalCenter.second.coerceIn(
-            bounds.top + extent.toDouble(),
-            max(bounds.top + extent, bounds.bottom - extent).toDouble()
-        )
-        val candidateCenters = listOf(
-            originalCenter,
-            Pair(originalCenter.first, verticalCenter),
-            Pair(horizontalCenter, originalCenter.second),
-            Pair(horizontalCenter, verticalCenter)
-        ).distinct().sortedBy { point -> distance(point, originalCenter) }
-
-        for (candidateCenter in candidateCenters) {
-            val candidateHub = OverlayAnchor(
-                x = (candidateCenter.first - hub.size / 2.0).roundToInt(),
-                y = (candidateCenter.second - hub.size / 2.0).roundToInt(),
-                size = hub.size
+        val baseRadius = fixedRadius(hub.size, actionSize, maxActionCount, collisionGap)
+        val maxRadius = hypot((bounds.right - bounds.left).toDouble(), (bounds.bottom - bounds.top).toDouble()).toInt()
+        val hubCenter = center(hub)
+        val inward = Math.toDegrees(
+            atan2(
+                (bounds.top + bounds.bottom) / 2.0 - hubCenter.second,
+                (bounds.left + bounds.right) / 2.0 - hubCenter.first
             )
-            val inward = Math.toDegrees(
-                atan2(
-                    (bounds.top + bounds.bottom) / 2.0 - candidateCenter.second,
-                    (bounds.left + bounds.right) / 2.0 - candidateCenter.first
-                )
-            )
+        )
+        var radius = baseRadius
+        while (radius <= maxRadius) {
             val angleSets = buildList {
                 add(circleAngles(count, inward))
-                for (offset in 0..180 step 5) {
-                    add(arcAngles(count, inward + offset, 180.0))
-                    if (offset > 0) add(arcAngles(count, inward - offset, 180.0))
+                listOf(180.0, 160.0, 140.0, 120.0, 100.0, 90.0).forEach { span ->
+                    for (offset in 0..180 step 5) {
+                        add(arcAngles(count, inward + offset, span))
+                        if (offset > 0) add(arcAngles(count, inward - offset, span))
+                    }
                 }
             }
             for (angles in angleSets) {
-                val points = positionsFor(candidateHub, actionSize, radius, angles)
-                if (positionsFit(points, bounds, candidateHub, actionSize, collisionGap)) {
-                    return RadialMenuLayout(candidateHub, points, radius)
+                val points = positionsFor(hub, actionSize, radius, angles)
+                if (positionsFit(points, bounds, hub, actionSize, collisionGap, avoid)) {
+                    return RadialMenuLayout(hub, points, radius)
                 }
             }
+            radius += 2
         }
         return null
     }
@@ -222,10 +213,20 @@ internal object RadialActionLayout {
         bounds: OverlayBounds,
         hub: OverlayAnchor,
         actionSize: Int,
-        gap: Int
+        gap: Int,
+        avoid: OverlayAnchor?
     ): Boolean {
         val rects = positions.map { OverlayRect(it.x, it.y, it.x + actionSize, it.y + actionSize) }
         if (rects.any { !it.inside(bounds) }) return false
+        if (avoid != null) {
+            val avoided = OverlayRect(
+                avoid.x - gap,
+                avoid.y - gap,
+                avoid.x + avoid.size + gap,
+                avoid.y + avoid.size + gap
+            )
+            if (rects.any { it.overlaps(avoided) }) return false
+        }
         val centers = positions.map { point -> Pair(point.x + actionSize / 2.0, point.y + actionSize / 2.0) }
         val hubCenter = center(hub)
         val hubDistance = hub.size / 2.0 + actionSize / 2.0 + gap
@@ -248,5 +249,8 @@ internal object RadialActionLayout {
     private data class OverlayRect(val left: Int, val top: Int, val right: Int, val bottom: Int) {
         fun inside(bounds: OverlayBounds): Boolean =
             left >= bounds.left && top >= bounds.top && right <= bounds.right && bottom <= bounds.bottom
+
+        fun overlaps(other: OverlayRect): Boolean =
+            left < other.right && right > other.left && top < other.bottom && bottom > other.top
     }
 }

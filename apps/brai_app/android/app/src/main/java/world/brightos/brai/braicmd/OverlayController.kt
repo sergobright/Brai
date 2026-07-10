@@ -11,9 +11,9 @@ import android.os.Looper
 import android.provider.Settings
 import android.view.Gravity
 import android.view.MotionEvent
+import android.view.animation.PathInterpolator
 import android.view.View
 import android.view.ViewConfiguration
-import android.view.animation.AccelerateDecelerateInterpolator
 import android.view.WindowManager
 import android.widget.FrameLayout
 import android.widget.Toast
@@ -98,7 +98,6 @@ class OverlayController(private val service: BraiAccessibilityService) {
     private var contextMenuGeneration = 0
     private var contextMenuAnimator: ValueAnimator? = null
     private var contextActionLayer: ContextActionLayerView? = null
-    private var contextHubView: ScreenshotButtonView? = null
     private var contextActionLayerParams: WindowManager.LayoutParams? = null
     private var contextMenuLayout: RadialMenuLayout? = null
     private var contextOriginalHub: OverlayAnchor? = null
@@ -485,13 +484,13 @@ class OverlayController(private val service: BraiAccessibilityService) {
         }
         val actionSize = contextActionButtonSizePx()
         val originalHub = screenshotButtonAnchor()
-        val layout = geometry().radialMenuLayout(originalHub, actionSize, actions.size)
+        val layout = geometry().radialMenuLayout(originalHub, actionSize, actions.size, mainButtonAnchor())
         if (layout == null || layout.actions.size != actions.size) {
             Toast.makeText(service, "Недостаточно места для кнопок Brai Cmd", Toast.LENGTH_SHORT).show()
             return
         }
         val originalPoint = contextMenuHubPoint(originalHub, actionSize)
-        val layerBounds = contextLayerBounds(originalHub, layout.hub, layout.actions, actionSize)
+        val layerBounds = contextLayerBounds(originalHub, layout.actions, actionSize)
         val layer = ContextActionLayerView(service).apply {
             onOutsideTouch = ::closeIdleContextMenu
             onHubTouch = ::handleScreenshotTouch
@@ -516,8 +515,6 @@ class OverlayController(private val service: BraiAccessibilityService) {
                 }
                 it.isEnabled = false
                 it.alpha = 0f
-                it.scaleX = CONTEXT_ACTION_START_SCALE
-                it.scaleY = CONTEXT_ACTION_START_SCALE
                 it.translationX = (originalPoint.x - point.x).toFloat()
                 it.translationY = (originalPoint.y - point.y).toFloat()
             }
@@ -532,21 +529,6 @@ class OverlayController(private val service: BraiAccessibilityService) {
                 contextActionPoints[action] = point
             }
         }
-        val hubView = ScreenshotButtonView(service).also {
-            it.contentDescription = "Свернуть контекстные действия Brai Cmd"
-            it.setGlyph(ContextButtonGlyph.Logo)
-            it.setRecorderState(RecorderState.Idle)
-            it.setMenuExpansionProgress(0f)
-            it.alpha = screenshotIconAlpha()
-        }
-        layer.addView(
-            hubView,
-            FrameLayout.LayoutParams(originalHub.size, originalHub.size).apply {
-                leftMargin = originalHub.x - layerBounds.left
-                topMargin = originalHub.y - layerBounds.top
-            }
-        )
-
         val layerParams = WindowManager.LayoutParams(
             layerBounds.width,
             layerBounds.height,
@@ -570,7 +552,6 @@ class OverlayController(private val service: BraiAccessibilityService) {
             return
         }
         contextActionLayer = layer
-        contextHubView = hubView
         contextActionLayerParams = layerParams
         contextMenuLayout = layout
         contextOriginalHub = originalHub
@@ -578,15 +559,7 @@ class OverlayController(private val service: BraiAccessibilityService) {
         contextMenuState = ContextMenuState.Opening(generation)
         button?.visibility = View.INVISIBLE
         updateQueueIndicators()
-        layer.postOnAnimation {
-            layer.postOnAnimation handoff@{
-                if (generation != contextMenuGeneration || contextMenuState != ContextMenuState.Opening(generation)) {
-                    return@handoff
-                }
-                screenshotButton?.visibility = View.INVISIBLE
-                animateContextMenu(opening = true, generation = generation)
-            }
-        }
+        animateContextMenu(opening = true, generation = generation)
     }
 
     private fun closeContextMenu(animated: Boolean) {
@@ -621,7 +594,7 @@ class OverlayController(private val service: BraiAccessibilityService) {
         val layer = contextActionLayer ?: return finishClosingContextMenu(generation)
         val layout = contextMenuLayout ?: return finishClosingContextMenu(generation)
         val originalHub = contextOriginalHub ?: return finishClosingContextMenu(generation)
-        val hubView = contextHubView ?: return finishClosingContextMenu(generation)
+        val hubView = screenshotButton ?: return finishClosingContextMenu(generation)
         val layerParams = contextActionLayerParams ?: return finishClosingContextMenu(generation)
         val actionSize = contextActionButtonSizePx()
         val closingPoint = contextMenuHubPoint(originalHub, actionSize)
@@ -632,12 +605,12 @@ class OverlayController(private val service: BraiAccessibilityService) {
         val endHubTranslationX = (endHub.x - originalHub.x).toFloat()
         val endHubTranslationY = (endHub.y - originalHub.y).toFloat()
         val starts = contextActionButtons.mapValues { (_, view) ->
-            floatArrayOf(view.translationX, view.translationY, view.alpha, view.scaleX)
+            floatArrayOf(view.translationX, view.translationY, view.alpha)
         }
         contextMenuAnimator?.cancel()
         val animator = ValueAnimator.ofFloat(0f, 1f).apply {
             duration = if (opening) CONTEXT_MENU_OPEN_MS else CONTEXT_MENU_CLOSE_MS
-            interpolator = AccelerateDecelerateInterpolator()
+            interpolator = CONTEXT_MOTION_INTERPOLATOR
             addUpdateListener { animation ->
                 val progress = animation.animatedValue as Float
                 contextMenuProgress = startProgress + ((if (opening) 1f else 0f) - startProgress) * progress
@@ -657,15 +630,7 @@ class OverlayController(private val service: BraiAccessibilityService) {
                     val endTranslationY = if (opening) 0f else (closingPoint.y - point.y).toFloat()
                     view.translationX = start[0] + (endTranslationX - start[0]) * progress
                     view.translationY = start[1] + (endTranslationY - start[1]) * progress
-                    view.alpha = if (opening) {
-                        start[2] + (1f - start[2]) * (progress / CONTEXT_ACTION_FADE_IN_PORTION).coerceAtMost(1f)
-                    } else {
-                        start[2] * secondaryCloseAlpha(progress)
-                    }
-                    val targetScale = if (opening) 1f else CONTEXT_ACTION_START_SCALE
-                    val scale = start[3] + (targetScale - start[3]) * progress
-                    view.scaleX = scale
-                    view.scaleY = scale
+                    view.alpha = if (opening) start[2] + (1f - start[2]) * progress else start[2] * secondaryCloseAlpha(progress)
                 }
             }
             addListener(object : AnimatorListenerAdapter() {
@@ -679,8 +644,6 @@ class OverlayController(private val service: BraiAccessibilityService) {
                             view.translationX = 0f
                             view.translationY = 0f
                             view.alpha = 1f
-                            view.scaleX = 1f
-                            view.scaleY = 1f
                             view.isEnabled = true
                             layer.setTouchable(view, true)
                         }
@@ -696,25 +659,14 @@ class OverlayController(private val service: BraiAccessibilityService) {
 
     private fun contextLayerBounds(
         originalHub: OverlayAnchor,
-        targetHub: OverlayAnchor,
         actions: List<OverlayPoint>,
         actionSize: Int
-    ): ContextLayerBounds {
-        return ContextLayerBounds(
-            left = minOf(actions.minOf { it.x }, originalHub.x, targetHub.x),
-            top = minOf(actions.minOf { it.y }, originalHub.y, targetHub.y),
-            right = maxOf(
-                actions.maxOf { it.x + actionSize },
-                originalHub.x + originalHub.size,
-                targetHub.x + targetHub.size
-            ),
-            bottom = maxOf(
-                actions.maxOf { it.y + actionSize },
-                originalHub.y + originalHub.size,
-                targetHub.y + targetHub.size
-            )
-        )
-    }
+    ): ContextLayerBounds = ContextLayerBounds(
+        left = minOf(actions.minOf { it.x }, originalHub.x),
+        top = minOf(actions.minOf { it.y }, originalHub.y),
+        right = maxOf(actions.maxOf { it.x + actionSize }, originalHub.x + originalHub.size),
+        bottom = maxOf(actions.maxOf { it.y + actionSize }, originalHub.y + originalHub.size)
+    )
 
     private fun contextMenuHubPoint(hub: OverlayAnchor, actionSize: Int): OverlayPoint =
         OverlayPoint(
@@ -730,7 +682,11 @@ class OverlayController(private val service: BraiAccessibilityService) {
             screenshotParams?.let { params ->
                 params.x = original.x
                 params.y = original.y
-                screenshotButton?.let { runCatching { windowManager.updateViewLayout(it, params) } }
+                screenshotButton?.let { view ->
+                    view.translationX = 0f
+                    view.translationY = 0f
+                    runCatching { windowManager.updateViewLayout(view, params) }
+                }
             }
         }
         contextMenuProgress = 0f
@@ -741,7 +697,6 @@ class OverlayController(private val service: BraiAccessibilityService) {
         contextActionLayer?.let { runCatching { windowManager.removeView(it) } }
         contextActionLayer?.removeAllViews()
         contextActionLayer = null
-        contextHubView = null
         contextActionLayerParams = null
         contextActionButtons.clear()
         contextActionPoints.clear()
@@ -782,12 +737,12 @@ class OverlayController(private val service: BraiAccessibilityService) {
             layer.setTouchable(selectedView, true)
         }
         val starts = collapsing.mapValues { (_, view) ->
-            floatArrayOf(view.translationX, view.translationY, view.alpha, view.scaleX)
+            floatArrayOf(view.translationX, view.translationY, view.alpha)
         }
         contextMenuAnimator?.cancel()
         contextMenuAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
             duration = CONTEXT_ACTION_COLLAPSE_MS
-            interpolator = AccelerateDecelerateInterpolator()
+            interpolator = CONTEXT_MOTION_INTERPOLATOR
             addUpdateListener { animation ->
                 val progress = animation.animatedValue as Float
                 collapsing.forEach { (action, view) ->
@@ -798,9 +753,6 @@ class OverlayController(private val service: BraiAccessibilityService) {
                     view.translationX = start[0] + (endX - start[0]) * progress
                     view.translationY = start[1] + (endY - start[1]) * progress
                     view.alpha = start[2] * secondaryCloseAlpha(progress)
-                    val scale = start[3] + (CONTEXT_ACTION_START_SCALE - start[3]) * progress
-                    view.scaleX = scale
-                    view.scaleY = scale
                 }
             }
             addListener(object : AnimatorListenerAdapter() {
@@ -846,7 +798,6 @@ class OverlayController(private val service: BraiAccessibilityService) {
     private fun applyIconSettings() {
         button?.alpha = mainIconAlpha()
         screenshotButton?.alpha = contextHubAlpha()
-        contextHubView?.alpha = contextHubAlpha()
 
         params?.let { lp ->
             val sizePx = mainButtonSizePx()
@@ -881,10 +832,6 @@ class OverlayController(private val service: BraiAccessibilityService) {
         screenshotButton?.setGlyph(ContextButtonGlyph.Logo)
         screenshotButton?.setMenuExpansionProgress(contextMenuProgress)
         screenshotButton?.alpha = contextHubAlpha()
-        contextHubView?.setRecorderState(RecorderState.Idle)
-        contextHubView?.setGlyph(ContextButtonGlyph.Logo)
-        contextHubView?.setMenuExpansionProgress(contextMenuProgress)
-        contextHubView?.alpha = contextHubAlpha()
         contextActionButtons.forEach { (menuAction, view) ->
             view.setRecorderState(recording.contextButtonState(menuAction.action, state))
             view.isEnabled = !(state is RecorderState.Uploading && recording.activeContextAction == menuAction.action)
@@ -894,8 +841,8 @@ class OverlayController(private val service: BraiAccessibilityService) {
     private fun updateQueueIndicators(snapshot: BraiCmdQueueSnapshot = BraiCmdQueue.snapshot(service)) {
         val mainReady = snapshot.readyToInsert.mainDictation
         button?.setQueueState(
-            count = snapshot.transport.main + mainReady,
-            ready = mainReady > 0
+            failedCount = snapshot.failedTransport.main + snapshot.failedTransport.unknown,
+            readyCount = mainReady
         )
         contextActionButtons.forEach { (menuAction, view) ->
             val chatReady = if (menuAction.action == ContextButtonAction.ChatContextInbox) {
@@ -904,8 +851,8 @@ class OverlayController(private val service: BraiAccessibilityService) {
                 0
             }
             view.setQueueState(
-                count = snapshot.transport[menuAction.action] + chatReady,
-                ready = chatReady > 0
+                failedCount = snapshot.failedTransport[menuAction.action],
+                readyCount = chatReady
             )
         }
     }
@@ -923,9 +870,9 @@ class OverlayController(private val service: BraiAccessibilityService) {
         if (!hiddenForScreenshot) return
         hiddenForScreenshot = false
         button?.visibility = if (isShown && mainButtonShouldBeVisible()) View.VISIBLE else View.INVISIBLE
-        screenshotButton?.visibility = if (screenshotShown && contextMenuState == ContextMenuState.Closed) View.VISIBLE else View.INVISIBLE
+        screenshotButton?.visibility = if (screenshotShown) View.VISIBLE else View.INVISIBLE
         cancelButton?.visibility = if (cancelShown) View.VISIBLE else View.INVISIBLE
-        contextActionLayer?.visibility = if (contextMenuState == ContextMenuState.Closed) View.INVISIBLE else View.VISIBLE
+        contextActionLayer?.visibility = if (screenshotShown) View.VISIBLE else View.INVISIBLE
     }
 
     private fun showCancelButton() {
@@ -1100,12 +1047,11 @@ class OverlayController(private val service: BraiAccessibilityService) {
         const val BASE_SCREENSHOT_BUTTON_DP = 46
         const val CONTEXT_MENU_HUB_ALPHA = 0.30f
         const val CONTEXT_ACTION_BUTTON_SCALE = 0.80f
-        const val CONTEXT_ACTION_START_SCALE = 0.82f
-        const val CONTEXT_ACTION_FADE_IN_PORTION = 0.68f
-        const val CONTEXT_MENU_OPEN_MS = 180L
-        const val CONTEXT_MENU_CLOSE_MS = 150L
-        const val CONTEXT_ACTION_COLLAPSE_MS = 140L
-        const val CONTEXT_ACTION_SUCCESS_MS = 600L
+        val CONTEXT_MOTION_INTERPOLATOR = PathInterpolator(0.2f, 0f, 0f, 1f)
+        const val CONTEXT_MENU_OPEN_MS = 240L
+        const val CONTEXT_MENU_CLOSE_MS = 220L
+        const val CONTEXT_ACTION_COLLAPSE_MS = 220L
+        const val CONTEXT_ACTION_SUCCESS_MS = 1000L
         const val CONTEXT_ACTION_TERMINAL_MS = 800L
         val contextActionSettingKeys = setOf(
             AppConstants.KEY_CONTEXT_ACTION_IDEA_ENABLED,
@@ -1127,4 +1073,4 @@ class OverlayController(private val service: BraiAccessibilityService) {
 }
 
 internal fun secondaryCloseAlpha(progress: Float): Float =
-    (1f - progress.coerceIn(0f, 1f) / 0.52f).coerceAtLeast(0f)
+    1f - progress.coerceIn(0f, 1f)

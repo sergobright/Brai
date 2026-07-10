@@ -13,6 +13,7 @@ internal enum class QueueTransportStatus {
 internal data class QueueTransportResult(
     val status: QueueTransportStatus,
     val failure: Throwable? = null,
+    val failedTransportIds: Set<String> = emptySet(),
     val autoInsertTranscriptFile: String? = null,
     val fallbackUsed: Boolean = false,
     val provider: String = "",
@@ -32,14 +33,17 @@ internal class QueueTransportWorker(context: Context) {
     private var permanentFailureMessage: String? = null
 
     fun run(autoInsertAudioFileName: String?): QueueTransportResult {
-        if (ConfigStore(appContext).authToken.isBlank()) {
-            return result(QueueTransportStatus.Blocked, QueueAuthBlockedException())
-        }
-
         val items = (
             AudioQueueStore.list(appContext).map { PendingItem.Audio(it) } +
                 ScreenshotInboxStore.list(appContext).map { PendingItem.Screenshot(it) }
             ).sortedBy { it.file.lastModified() }
+        if (ConfigStore(appContext).authToken.isBlank()) {
+            return result(
+                QueueTransportStatus.Blocked,
+                QueueAuthBlockedException(),
+                items.mapTo(mutableSetOf()) { it.transportId }
+            )
+        }
 
         for (item in items) {
             if (!item.file.exists()) continue
@@ -51,9 +55,9 @@ internal class QueueTransportWorker(context: Context) {
             } catch (error: Throwable) {
                 when (classifyQueueFailure(error)) {
                     QueueFailureDisposition.Transient ->
-                        return result(QueueTransportStatus.TransientFailure, error)
+                        return result(QueueTransportStatus.TransientFailure, error, setOf(item.transportId))
                     QueueFailureDisposition.Blocked ->
-                        return result(QueueTransportStatus.Blocked, error)
+                        return result(QueueTransportStatus.Blocked, error, setOf(item.transportId))
                     QueueFailureDisposition.Permanent -> {
                         val quarantined = when (item) {
                             is PendingItem.Audio -> AudioQueueStore.quarantine(appContext, item.file)
@@ -62,7 +66,8 @@ internal class QueueTransportWorker(context: Context) {
                         if (!quarantined) {
                             return result(
                                 QueueTransportStatus.TransientFailure,
-                                IOException("Не удалось переместить поврежденный элемент очереди")
+                                IOException("Не удалось переместить поврежденный элемент очереди"),
+                                setOf(item.transportId)
                             )
                         }
                         permanentFailureMessage = permanentFailureMessage(error)
@@ -149,10 +154,15 @@ internal class QueueTransportWorker(context: Context) {
         }
     }
 
-    private fun result(status: QueueTransportStatus, failure: Throwable? = null) =
+    private fun result(
+        status: QueueTransportStatus,
+        failure: Throwable? = null,
+        failedTransportIds: Set<String> = emptySet()
+    ) =
         QueueTransportResult(
             status = status,
             failure = failure,
+            failedTransportIds = failedTransportIds,
             autoInsertTranscriptFile = autoInsertTranscriptFile,
             fallbackUsed = fallbackUsed,
             provider = provider,
@@ -174,8 +184,15 @@ internal class QueueTransportWorker(context: Context) {
         }
 
     private sealed class PendingItem(open val file: File) {
-        data class Audio(override val file: File) : PendingItem(file)
-        data class Screenshot(override val file: File) : PendingItem(file)
+        abstract val transportId: String
+
+        data class Audio(override val file: File) : PendingItem(file) {
+            override val transportId: String = BraiCmdQueue.audioTransportId(file)
+        }
+
+        data class Screenshot(override val file: File) : PendingItem(file) {
+            override val transportId: String = BraiCmdQueue.screenshotTransportId(file)
+        }
     }
 
     private companion object {

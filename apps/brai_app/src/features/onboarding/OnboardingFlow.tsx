@@ -1,7 +1,6 @@
 "use client";
 
 import { Children, createContext, type FormEvent, type ReactNode, useContext, useEffect, useRef, useState } from "react";
-import { useReducedMotion } from "motion/react";
 import {
   ArrowRight,
   Bell,
@@ -43,14 +42,12 @@ import { AnimatedShinyText } from "@/shared/ui/animated-shiny-text";
 import { Button } from "@/shared/ui/button";
 import { Card } from "@/shared/ui/card";
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/shared/ui/field";
-import { GlareHover } from "@/shared/ui/glare-hover";
 import { Input } from "@/shared/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/shared/ui/select";
 import { Textarea } from "@/shared/ui/textarea";
 import { Carousel, CarouselContent, CarouselItem, type CarouselApi } from "@/shared/ui/carousel";
 import { cx } from "../app/appUtils";
 import {
-  initialOnboardingState,
   loadOnboardingState,
   saveOnboardingState,
   type OnboardingState,
@@ -65,9 +62,11 @@ type OnboardingFlowProps = {
   authMode: "otp" | "password";
   onLogin: (password: string) => Promise<boolean>;
   onRequestOtp: (email: string) => Promise<void>;
+  onStartupScreenChange: (active: boolean) => void;
   onVerifyOtp: (email: string, otp: string) => Promise<void>;
   onDone: () => void;
   onOpenNativeCmdSettings: () => Promise<boolean>;
+  startupIntroComplete: boolean;
 };
 
 type CheckStatus = "idle" | "checking" | "ready" | "error";
@@ -89,10 +88,7 @@ const OnboardingChromeContext = createContext<{
   transitionActive: false,
 });
 
-const startButtonDelayMs = process.env.NODE_ENV === "test" ? 1 : 3000;
 const screenTransitionDelayMs = process.env.NODE_ENV === "test" ? 0 : 280;
-const startLogoGlareDelayMs = 1000;
-const startLogoGlareDurationMs = 1000;
 const providerOptions = ["Groq", "OpenAI", "Deepgram", "AssemblyAI"] as const;
 const manualConfirmDelayMs = 3000;
 const verificationMinVisibleMs = process.env.NODE_ENV === "test" ? 1 : 1000;
@@ -133,10 +129,11 @@ export function OnboardingFlow({
   onLogin,
   onOpenNativeCmdSettings,
   onRequestOtp,
+  onStartupScreenChange,
   onVerifyOtp,
+  startupIntroComplete,
 }: OnboardingFlowProps) {
-  const reduceMotion = Boolean(useReducedMotion()) || process.env.NODE_ENV === "test";
-  const [state, setState] = useState<OnboardingState>(initialOnboardingState);
+  const [state, setState] = useState<OnboardingState>(() => loadInitialOnboardingState(authRequired));
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [provider, setProvider] = useState("Groq");
@@ -153,7 +150,6 @@ export function OnboardingFlow({
   const [queueSaved, setQueueSaved] = useState(false);
   const [queueInserted, setQueueInserted] = useState(false);
   const [screenTransitioning, setScreenTransitioning] = useState(false);
-  const [startupSplashVisible, setStartupSplashVisible] = useState(startButtonDelayMs > 0);
   const [permissionFallbackStep, setPermissionFallbackStep] = useState<OnboardingStep | null>(null);
   const stepRef = useRef<OnboardingStep>(state.step);
   const stateRef = useRef<OnboardingState>(state);
@@ -170,12 +166,8 @@ export function OnboardingFlow({
       stepRef.current = next.step;
       setState(next);
     }, 0);
-    const splashTimer = window.setTimeout(() => setStartupSplashVisible(false), startButtonDelayMs);
     void refreshCapabilities();
-    return () => {
-      window.clearTimeout(loadTimer);
-      window.clearTimeout(splashTimer);
-    };
+    return () => window.clearTimeout(loadTimer);
   }, [authRequired]);
 
   useEffect(() => {
@@ -193,6 +185,10 @@ export function OnboardingFlow({
     stateRef.current = state;
     stepRef.current = state.step;
   }, [state]);
+
+  useEffect(() => {
+    onStartupScreenChange(state.step === "start");
+  }, [onStartupScreenChange, state.step]);
 
   useEffect(() => installAndroidBackHandler(() => {
     const current = stateRef.current;
@@ -793,58 +789,20 @@ export function OnboardingFlow({
     return null;
   }
 
-  if (startupSplashVisible || state.step === "start") {
+  if (state.step === "start") {
     return (
       <OnboardingChromeContext.Provider value={chrome}>
-        <main className={cx("fixed inset-0 overflow-hidden bg-black text-foreground transition-opacity duration-300 ease-out", screenTransitioning ? "opacity-0" : "opacity-100")} data-onboarding-flow data-theme="dark" style={{ colorScheme: "dark" }}>
+        <main className={cx("fixed inset-0 z-[10000] overflow-hidden bg-transparent text-foreground transition-opacity duration-300 ease-out", screenTransitioning ? "opacity-0" : "opacity-100")} data-onboarding-flow data-theme="dark" style={{ colorScheme: "dark" }}>
           <style>{startButtonCss}</style>
-          <div className="pointer-events-none absolute inset-0 grid place-items-center">
-            <div
-              data-startup-logo
-              style={{
-                width: "min(20rem, calc(100vw - 3rem))",
-                aspectRatio: "779 / 368",
-              }}
-            >
-              <GlareHover
-                width="100%"
-                height="100%"
-                background="transparent"
-                borderColor="transparent"
-                borderRadius="0"
-                className="border-0"
-                glareAngle={18}
-                glareOpacity={1}
-                glareSize={64}
-                glareMaskImage="/brand/brai-logo-transparent.svg"
-                transitionDuration={startLogoGlareDurationMs}
-                autoPlayDelayMs={reduceMotion ? undefined : startLogoGlareDelayMs}
-                interactive={false}
-                playOnce
-              >
-                {/* eslint-disable-next-line @next/next/no-img-element -- stable startup geometry matters here more than Next image optimization. */}
-                <img
-                  className="block h-full w-full select-none object-contain"
-                  src="/brand/brai-logo-transparent.svg"
-                  alt="Brai"
-                  width="779"
-                  height="368"
-                  decoding="sync"
-                  fetchPriority="high"
-                  draggable={false}
-                />
-              </GlareHover>
-            </div>
-          </div>
           <div
             className={cx(
               "absolute inset-x-6 z-10 mx-auto max-w-md",
-              !startupSplashVisible && state.step === "start" ? "pointer-events-auto" : "pointer-events-none",
+              startupIntroComplete ? "pointer-events-auto" : "pointer-events-none",
             )}
             style={{
               bottom: "calc(env(safe-area-inset-bottom) + 1.5rem)",
-              opacity: !startupSplashVisible && state.step === "start" ? 1 : 0,
-              animation: !startupSplashVisible && state.step === "start" ? `brai-onboarding-start-button 300ms ease-out both` : undefined,
+              opacity: startupIntroComplete ? 1 : 0,
+              animation: startupIntroComplete ? "brai-onboarding-start-button 300ms ease-out both" : undefined,
             }}
           >
             <ShinyButton onClick={() => go("welcome-1")}>Приступить</ShinyButton>
@@ -1068,8 +1026,7 @@ function WelcomeCarousel({ currentStep, onStart, onStepChange }: { currentStep: 
   useEffect(() => {
     if (!api) return;
     const index = welcomeStepIndex(currentStep);
-    if (api.selectedScrollSnap() === index) return;
-    api.scrollTo(index, true);
+    if (api.selectedScrollSnap() !== index) api.scrollTo(index, true);
   }, [api, currentStep]);
 
   useEffect(() => {
@@ -1079,19 +1036,16 @@ function WelcomeCarousel({ currentStep, onStart, onStepChange }: { currentStep: 
       setCurrent(index);
       onStepChange(welcomeSlides[index]?.step ?? "welcome-1");
     };
-    onSelect();
     api.on("select", onSelect);
-    api.on("reInit", onSelect);
     return () => {
       api.off("select", onSelect);
-      api.off("reInit", onSelect);
     };
   }, [api, onStepChange]);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
       <div className="grid min-h-0 flex-1 grid-rows-[minmax(0,1fr)_auto] gap-5 overflow-hidden pt-[clamp(3rem,10dvh,7rem)] [@media(max-height:700px)]:gap-2 [@media(max-height:700px)]:pt-2 [@media(max-height:650px)]:pt-1">
-        <Carousel setApi={setApi} opts={{ align: "start" }} className="h-full w-full min-w-0 overflow-hidden" aria-label="Приветствие Brai" data-nav-swipe-exclusion>
+        <Carousel setApi={setApi} opts={{ align: "start", startIndex: welcomeStepIndex(currentStep) }} className="h-full w-full min-w-0 overflow-hidden" aria-label="Приветствие Brai" data-nav-swipe-exclusion>
           <CarouselContent viewportClassName="h-full" className="h-full w-full touch-pan-y">
             {welcomeSlides.map(({ icon: Icon, step, text, title }, index) => (
               <CarouselItem key={step} className="h-full basis-full">

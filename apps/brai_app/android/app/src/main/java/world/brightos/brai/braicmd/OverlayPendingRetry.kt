@@ -32,6 +32,14 @@ internal class QueueRetryStore(context: Context) {
         get() = prefs.getBoolean(KEY_BLOCKED, false)
 
     fun recordTransient(nowMillis: Long): QueueRetrySchedule {
+        return recordFailure(nowMillis, blocked = false)
+    }
+
+    fun recordBlocked(nowMillis: Long): QueueRetrySchedule {
+        return recordFailure(nowMillis, blocked = true)
+    }
+
+    private fun recordFailure(nowMillis: Long, blocked: Boolean): QueueRetrySchedule {
         val failureCount = prefs.getInt(KEY_FAILURE_COUNT, 0) + 1
         val schedule = QueueRetrySchedule(
             failureCount = failureCount,
@@ -40,16 +48,9 @@ internal class QueueRetryStore(context: Context) {
         prefs.edit()
             .putInt(KEY_FAILURE_COUNT, schedule.failureCount)
             .putLong(KEY_NEXT_RETRY_AT, schedule.nextRetryAtMillis)
-            .putBoolean(KEY_BLOCKED, false)
+            .putBoolean(KEY_BLOCKED, blocked)
             .commit()
         return schedule
-    }
-
-    fun markBlocked() {
-        prefs.edit()
-            .putBoolean(KEY_BLOCKED, true)
-            .remove(KEY_NEXT_RETRY_AT)
-            .commit()
     }
 
     fun allowImmediate() {
@@ -60,7 +61,6 @@ internal class QueueRetryStore(context: Context) {
     }
 
     fun remainingDelayMillis(nowMillis: Long): Long? {
-        if (isBlocked) return null
         return (prefs.getLong(KEY_NEXT_RETRY_AT, 0L) - nowMillis).coerceAtLeast(0L)
     }
 
@@ -87,7 +87,9 @@ internal class OverlayPendingRetry(
     private var retryRunnable: Runnable? = null
     private var scheduledAtMillis = 0L
     private val settingsListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
-        if (key == AppConstants.KEY_AUTH_TOKEN && config.authToken.isNotBlank() && retryStore.isBlocked) {
+        if (key == AppConstants.KEY_AUTH_TOKEN && config.authToken.isNotBlank() &&
+            RecordingService.hasPendingRecordings(service)
+        ) {
             retryNow()
         }
     }
@@ -95,9 +97,9 @@ internal class OverlayPendingRetry(
         handler.post {
             onQueueChanged(result.snapshot)
             when (result.status) {
-                QueueWorkerStatus.TransientFailure -> schedule()
-                QueueWorkerStatus.Drained,
-                QueueWorkerStatus.Blocked -> cancel()
+                QueueWorkerStatus.TransientFailure,
+                QueueWorkerStatus.Blocked -> schedule()
+                QueueWorkerStatus.Drained -> cancel()
             }
         }
     }
@@ -154,7 +156,6 @@ internal class OverlayPendingRetry(
         val connectivity = service.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
         val callback = object : ConnectivityManager.NetworkCallback() {
             override fun onAvailable(network: Network) {
-                if (retryStore.isBlocked) return
                 cancel()
                 RecordingService.retryPending(service, QueueRetryTrigger.Network)
             }

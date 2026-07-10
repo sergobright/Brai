@@ -61,6 +61,7 @@ internal data class QueueReadyToInsertCounts(
 
 internal data class BraiCmdQueueSnapshot(
     val transport: QueueTransportCounts,
+    val failedTransport: QueueTransportCounts,
     val readyToInsert: QueueReadyToInsertCounts
 )
 
@@ -80,26 +81,90 @@ internal object BraiCmdQueue {
     fun snapshot(context: Context): BraiCmdQueueSnapshot {
         var main = 0
         var unknown = 0
+        var failedMain = 0
+        var failedUnknown = 0
         val contextCounts = ContextButtonAction.entries.associateWith { 0 }.toMutableMap()
-        for (file in AudioQueueStore.list(context)) {
+        val failedContextCounts = ContextButtonAction.entries.associateWith { 0 }.toMutableMap()
+        val failedItems = FailedTransportStore.read(context)
+        val audioFiles = AudioQueueStore.list(context)
+        for (file in audioFiles) {
             val action = AudioQueueStore.action(file)
+            val failed = FailedTransportStore.audioId(file) in failedItems
             when (action) {
-                AudioQueueAction.MainDictation -> main += 1
-                AudioQueueAction.Unknown -> unknown += 1
-                else -> action.contextAction?.let { contextCounts[it] = contextCounts.getValue(it) + 1 }
+                AudioQueueAction.MainDictation -> {
+                    main += 1
+                    if (failed) failedMain += 1
+                }
+                AudioQueueAction.Unknown -> {
+                    unknown += 1
+                    if (failed) failedUnknown += 1
+                }
+                else -> action.contextAction?.let {
+                    contextCounts[it] = contextCounts.getValue(it) + 1
+                    if (failed) failedContextCounts[it] = failedContextCounts.getValue(it) + 1
+                }
             }
         }
-        contextCounts[ContextButtonAction.ScreenshotInbox] = ScreenshotInboxStore.list(context).size
+        val screenshots = ScreenshotInboxStore.list(context)
+        contextCounts[ContextButtonAction.ScreenshotInbox] = screenshots.size
+        failedContextCounts[ContextButtonAction.ScreenshotInbox] = screenshots.count {
+            FailedTransportStore.screenshotId(it) in failedItems
+        }
 
         val transcripts = PendingTranscriptStore.list(context)
+        val transport = QueueTransportCounts(main, contextCounts.toMap(), unknown)
+        if (transport.total == 0) clearTransportFailures(context)
         return BraiCmdQueueSnapshot(
-            transport = QueueTransportCounts(main, contextCounts.toMap(), unknown),
+            transport = transport,
+            failedTransport = QueueTransportCounts(failedMain, failedContextCounts.toMap(), failedUnknown),
             readyToInsert = QueueReadyToInsertCounts(
                 mainDictation = transcripts.count { it.kind == PendingTranscriptKind.MainDictation },
                 chatReply = transcripts.count { it.kind == PendingTranscriptKind.ChatReply }
             )
         )
     }
+
+    fun markTransportFailed(context: Context, itemIds: Collection<String>) =
+        FailedTransportStore.add(context, itemIds)
+
+    fun clearTransportFailures(context: Context) = FailedTransportStore.clear(context)
+
+    fun audioTransportId(file: File): String = FailedTransportStore.audioId(file)
+
+    fun screenshotTransportId(file: File): String = FailedTransportStore.screenshotId(file)
+}
+
+private object FailedTransportStore {
+    private const val PREFS = "brai_cmd_failed_transport"
+    private const val KEY_ITEMS = "items"
+
+    fun read(context: Context): Set<String> =
+        context.applicationContext
+            .getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getStringSet(KEY_ITEMS, emptySet())
+            .orEmpty()
+            .toSet()
+
+    fun add(context: Context, items: Collection<String>) {
+        if (items.isEmpty()) return
+        context.applicationContext
+            .getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit()
+            .putStringSet(KEY_ITEMS, read(context) + items)
+            .commit()
+    }
+
+    fun clear(context: Context) {
+        context.applicationContext
+            .getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit()
+            .clear()
+            .commit()
+    }
+
+    fun audioId(file: File): String = "audio:${file.name}"
+
+    fun screenshotId(file: File): String = "screenshot:${file.name}"
 }
 
 internal object AudioQueueStore {

@@ -1,7 +1,8 @@
 package world.brightos.brai.braicmd
 
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNull
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -26,7 +27,7 @@ class OverlayPendingRetryTest {
     }
 
     @Test
-    fun retryAttemptAndBlockedStatePersist() {
+    fun transientAndBlockedFailuresUseTheSamePersistentSchedule() {
         val context = RuntimeEnvironment.getApplication()
         val first = QueueRetryStore(context).recordTransient(1_000L)
         val second = QueueRetryStore(context).recordTransient(2_000L)
@@ -36,10 +37,14 @@ class OverlayPendingRetryTest {
         assertEquals(2, second.failureCount)
         assertEquals(62_000L, second.nextRetryAtMillis)
 
-        QueueRetryStore(context).markBlocked()
-        assertNull(QueueRetryStore(context).remainingDelayMillis(3_000L))
+        val blocked = QueueRetryStore(context).recordBlocked(3_000L)
+        assertEquals(3, blocked.failureCount)
+        assertEquals(303_000L, blocked.nextRetryAtMillis)
+        assertTrue(QueueRetryStore(context).isBlocked)
+        assertEquals(300_000L, QueueRetryStore(context).remainingDelayMillis(3_000L))
 
         QueueRetryStore(context).allowImmediate()
+        assertFalse(QueueRetryStore(context).isBlocked)
         assertEquals(0L, QueueRetryStore(context).remainingDelayMillis(3_000L))
     }
 }

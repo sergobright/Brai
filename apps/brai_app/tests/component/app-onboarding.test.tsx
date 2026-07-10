@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { androidCapabilitiesPlugin, cmdPlugin, setupBraiAppTest, stubAndroidCapacitor } from "./app-test-support";
 import RootLayout from "@/app/layout";
 import { BraiApp } from "@/features/app/BraiApp";
@@ -14,8 +14,10 @@ function runAppInitScript() {
 
 describe("BraiApp onboarding", () => {
   setupBraiAppTest();
+  afterEach(() => vi.useRealTimers());
 
   it("shows the commissioning start screen before the normal shell on a fresh install", async () => {
+    vi.useFakeTimers();
     stubAndroidCapacitor();
     window.localStorage.removeItem(ONBOARDING_STORAGE_KEY);
     window.localStorage.setItem("brai_theme_mode", "light");
@@ -27,9 +29,23 @@ describe("BraiApp onboarding", () => {
 
     render(<BraiApp />);
 
-    expect(await screen.findByRole("button", { name: "Приступить" })).toBeInTheDocument();
+    const logo = screen.getByRole("img", { name: "Brai" });
     expect(document.querySelector("[data-startup-splash]")).toBeInTheDocument();
-    expect(document.querySelector("[data-startup-logo]")).not.toHaveStyle({ opacity: "0" });
+    expect(document.querySelectorAll("[data-startup-logo]")).toHaveLength(1);
+    expect(document.querySelector("[data-startup-logo]")).toHaveStyle({ animation: "brai-startup-logo-fade 1000ms linear both" });
+    const startButtonContainer = screen.getByRole("button", { name: "Приступить" }).parentElement;
+    expect(startButtonContainer).toHaveStyle({ opacity: "0" });
+
+    act(() => vi.advanceTimersByTime(2999));
+    expect(startButtonContainer).toHaveStyle({ opacity: "0" });
+
+    act(() => vi.advanceTimersByTime(1));
+    expect(screen.getByRole("button", { name: "Приступить" })).toBeInTheDocument();
+    expect(startButtonContainer).toHaveStyle({
+      animation: "brai-onboarding-start-button 300ms ease-out both",
+    });
+    expect(document.querySelector("[data-startup-logo]")).toBe(logo.closest("[data-startup-logo]"));
+    vi.useRealTimers();
     expect(screen.queryByText("ВВОД В ЭКСПЛУАТАЦИЮ")).not.toBeInTheDocument();
     expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
     expect(screen.queryByRole("textbox", { name: "Добавить" })).not.toBeInTheDocument();
@@ -53,12 +69,16 @@ describe("BraiApp onboarding", () => {
   });
 
   it("renders the first welcome cards without carousel arrow buttons", async () => {
+    vi.useFakeTimers();
     stubAndroidCapacitor();
     window.localStorage.removeItem(ONBOARDING_STORAGE_KEY);
 
     const { container } = render(<BraiApp />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Приступить" }));
+    act(() => vi.advanceTimersByTime(3000));
+    const startButton = screen.getByRole("button", { name: "Приступить" });
+    vi.useRealTimers();
+    fireEvent.click(startButton);
     expect(screen.getByText("Brai рядом с вашим экраном")).toBeInTheDocument();
     expect(screen.getByText("Голос превращается в действие")).toBeInTheDocument();
     expect(screen.getByText("Идеи не теряются")).toBeInTheDocument();
@@ -93,7 +113,7 @@ describe("BraiApp onboarding", () => {
     expect(screen.getByRole("button", { name: /Есть профиль/ })).toBeInTheDocument();
   });
 
-  it("shows the logo splash before restoring an unfinished onboarding step", async () => {
+  it("keeps the logo splash above a synchronously restored onboarding step", () => {
     stubAndroidCapacitor();
     window.localStorage.setItem(ONBOARDING_STORAGE_KEY, JSON.stringify({
       complete: false,
@@ -108,8 +128,8 @@ describe("BraiApp onboarding", () => {
     render(<BraiApp />);
 
     expect(document.querySelector("[data-startup-splash] img[alt='Brai']")).toBeInTheDocument();
-    expect(screen.queryByText("Как распознавать голос?")).not.toBeInTheDocument();
-    expect(await screen.findByText("Как распознавать голос?")).toBeInTheDocument();
+    expect(document.querySelectorAll("[data-startup-logo]")).toHaveLength(1);
+    expect(screen.getByText("Как распознавать голос?")).toBeInTheDocument();
   });
 
   it("keeps unauthenticated users inside the limited access screen", async () => {

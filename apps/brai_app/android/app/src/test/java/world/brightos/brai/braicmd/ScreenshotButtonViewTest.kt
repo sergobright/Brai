@@ -25,15 +25,24 @@ class ScreenshotButtonViewTest {
     }
 
     @Test
+    fun successfulActionReplacesItsGlyphWithTheCleanCheckState() {
+        assertFalse(shouldDrawContextActionGlyph(ContextButtonGlyph.Image, RecorderState.InboxDelivered))
+    }
+
+    @Test
     fun queueBadgeUsesRedForTransportAndGreenForReadyText() {
         assertEquals(
             QueueBadgeState(2, QueueBadgeTone.Pending),
-            resolveQueueBadgeState(count = 2, ready = false)
+            resolveQueueBadgeState(failedCount = 2, readyCount = 0)
         )
         assertEquals(
             QueueBadgeState(3, QueueBadgeTone.Ready),
-            resolveQueueBadgeState(count = 3, ready = true)
+            resolveQueueBadgeState(failedCount = 0, readyCount = 3)
         )
-        assertNull(resolveQueueBadgeState(count = 0, ready = false))
+        assertEquals(
+            QueueBadgeState(3, QueueBadgeTone.Ready),
+            resolveQueueBadgeState(failedCount = 2, readyCount = 3)
+        )
+        assertNull(resolveQueueBadgeState(failedCount = 0, readyCount = 0))
     }
 }

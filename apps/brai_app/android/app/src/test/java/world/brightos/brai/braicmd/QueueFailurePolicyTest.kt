@@ -18,7 +18,8 @@ class QueueFailurePolicyTest {
             ServerResponseException(425, "http_error", "early"),
             ServerResponseException(429, "http_error", "rate"),
             ServerResponseException(503, "http_error", "down"),
-            ServerResponseException(400, "upstream_error", "model")
+            ServerResponseException(400, "upstream_error", "model"),
+            ServerResponseException(409, "conflict", "retry")
         )
 
         failures.forEach { assertEquals(QueueFailureDisposition.Transient, classifyQueueFailure(it)) }

@@ -70,8 +70,8 @@ class ScreenshotButtonView(context: Context) : View(context) {
         invalidate()
     }
 
-    fun setQueueState(count: Int, ready: Boolean = false) {
-        queueBadge = resolveQueueBadgeState(count, ready)
+    fun setQueueState(failedCount: Int, readyCount: Int = 0) {
+        queueBadge = resolveQueueBadgeState(failedCount, readyCount)
         invalidate()
     }
 
@@ -85,17 +85,21 @@ class ScreenshotButtonView(context: Context) : View(context) {
             drawHubTransition(canvas, cx, cy, radius)
             return
         }
+        if (state is RecorderState.InboxDelivered) {
+            drawButtonShell(canvas, cx, cy, radius)
+            drawCheck(canvas, cx, cy)
+            return
+        }
         if (glyph == ContextButtonGlyph.Logo) drawIcon(canvas) else drawButtonShell(canvas, cx, cy, radius)
         if (glyph == ContextButtonGlyph.Close) {
             drawGlyph(canvas, cx, cy)
             return
         }
 
-        if (shouldDrawContextActionGlyph(glyph)) drawGlyph(canvas, cx, cy)
+        if (shouldDrawContextActionGlyph(glyph, state)) drawGlyph(canvas, cx, cy)
         when (val current = state) {
             is RecorderState.Recording -> drawAmplitude(canvas, cx, cy, radius, current.amplitude)
             is RecorderState.Uploading -> drawSpinner(canvas, cx, cy, radius)
-            is RecorderState.InboxDelivered -> drawCheck(canvas, cx, cy)
             is RecorderState.Error -> drawError(canvas, cx, cy)
             else -> Unit
         }
@@ -251,5 +255,8 @@ class ScreenshotButtonView(context: Context) : View(context) {
     }
 }
 
-internal fun shouldDrawContextActionGlyph(glyph: ContextButtonGlyph): Boolean =
+internal fun shouldDrawContextActionGlyph(
+    glyph: ContextButtonGlyph,
+    state: RecorderState = RecorderState.Idle
+): Boolean = state !is RecorderState.InboxDelivered &&
     glyph != ContextButtonGlyph.Logo && glyph != ContextButtonGlyph.Close

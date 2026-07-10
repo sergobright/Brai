@@ -39,8 +39,8 @@ class AirButtonView(context: Context) : View(context) {
         invalidate()
     }
 
-    fun setQueueState(count: Int, ready: Boolean) {
-        queueBadge = resolveQueueBadgeState(count, ready)
+    fun setQueueState(failedCount: Int, readyCount: Int) {
+        queueBadge = resolveQueueBadgeState(failedCount, readyCount)
         invalidate()
     }
 
@@ -140,7 +140,8 @@ internal data class QueueBadgeState(
     val tone: QueueBadgeTone
 )
 
-internal fun resolveQueueBadgeState(count: Int, ready: Boolean): QueueBadgeState? =
-    count.coerceAtLeast(0).takeIf { it > 0 }?.let {
-        QueueBadgeState(it, if (ready) QueueBadgeTone.Ready else QueueBadgeTone.Pending)
-    }
+internal fun resolveQueueBadgeState(failedCount: Int, readyCount: Int): QueueBadgeState? = when {
+    readyCount > 0 -> QueueBadgeState(readyCount, QueueBadgeTone.Ready)
+    failedCount > 0 -> QueueBadgeState(failedCount, QueueBadgeTone.Pending)
+    else -> null
+}

@@ -8,7 +8,7 @@ import { getBraiLocalStorageItem, removeBraiLocalStorageItem, setBraiLocalStorag
 import { ScrollArea } from "@/shared/ui/scroll-area";
 import { SidebarInset, SidebarProvider } from "@/shared/ui/sidebar";
 import { OnboardingFlow, shouldShowOnboarding } from "@/features/onboarding/OnboardingFlow";
-import { AppStartupSplash, SPLASH_MAX_VISIBLE_MS } from "./AppStartupSplash";
+import { AppStartupSplash } from "./AppStartupSplash";
 import type { SectionId } from "./appModel";
 import { isPrimarySection, sectionIcon, sectionTitle } from "./appModel";
 import { cx } from "./appUtils";
@@ -37,7 +37,8 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
   const app = useBraiAppState(initialSection);
   const nativeAndroid = useMountedNativeAndroid();
   const [mobileDockMenu, setMobileDockMenu] = useState<"left" | "right" | null>(null);
-  const [startupExpired, setStartupExpired] = useState(false);
+  const [startupIntroComplete, setStartupIntroComplete] = useState(false);
+  const [onboardingStartupActive, setOnboardingStartupActive] = useState(true);
   const [onboardingVisible, setOnboardingVisible] = useState(() => process.env.NODE_ENV === "test" ? shouldShowOnboarding(false) : true);
   const onboardingActive = nativeAndroid && onboardingVisible;
   const dockOverflowOpen = mobileDockMenu != null;
@@ -48,6 +49,7 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
   const selectSectionRef = useRef(app.selectSection);
   const adjacentSection = app.swipeNavigation.visual?.to;
   const startupReady = app.localSnapshotReady || app.displaySyncStatus === "auth_required" || app.displaySyncStatus === "offline" || app.displaySyncStatus === "sync_failed";
+  const handleStartupIntroComplete = useCallback(() => setStartupIntroComplete(true), []);
   const mobileMenuSwipe = useLeftEdgeMenuSwipe(
     () => setMobileDockMenu("left"),
     !app.mobileMenuOpen && !mobileDockMenu && !app.mobileContextPanel && !app.actionOverlayOpen,
@@ -71,11 +73,6 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
     sectionRef.current = app.section;
     selectSectionRef.current = app.selectSection;
   }, [app.section, app.selectSection]);
-
-  useEffect(() => {
-    const timeout = window.setTimeout(() => setStartupExpired(true), SPLASH_MAX_VISIBLE_MS);
-    return () => window.clearTimeout(timeout);
-  }, []);
 
   useEffect(() => {
     if (!nativeAndroid) return;
@@ -242,7 +239,9 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
           onLogin={app.onLogin}
           onOpenNativeCmdSettings={openNativeBraiCmdSettings}
           onRequestOtp={app.onRequestOtp}
+          onStartupScreenChange={setOnboardingStartupActive}
           onVerifyOtp={app.onVerifyOtp}
+          startupIntroComplete={startupIntroComplete}
         />
       ) : (
         <SidebarProvider
@@ -351,7 +350,11 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
       ) : null}
         </SidebarProvider>
       )}
-      {startupExpired ? null : <AppStartupSplash ready={startupReady} />}
+      <AppStartupSplash
+        ready={startupReady}
+        persist={onboardingActive && onboardingStartupActive}
+        onIntroComplete={handleStartupIntroComplete}
+      />
     </>
   );
 }

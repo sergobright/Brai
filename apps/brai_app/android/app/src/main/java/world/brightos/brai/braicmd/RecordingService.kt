@@ -189,14 +189,17 @@ class RecordingService : Service() {
                 val transport = QueueTransportWorker(this).run(autoInsertAudioFileName)
                 val retryStore = QueueRetryStore(this)
                 val nextRetryAt = when (transport.status) {
-                    QueueTransportStatus.TransientFailure ->
+                    QueueTransportStatus.TransientFailure -> {
+                        BraiCmdQueue.markTransportFailed(this, transport.failedTransportIds)
                         retryStore.recordTransient(System.currentTimeMillis()).nextRetryAtMillis
+                    }
                     QueueTransportStatus.Blocked -> {
-                        retryStore.markBlocked()
-                        null
+                        BraiCmdQueue.markTransportFailed(this, transport.failedTransportIds)
+                        retryStore.recordBlocked(System.currentTimeMillis()).nextRetryAtMillis
                     }
                     QueueTransportStatus.Drained -> {
                         retryStore.reset()
+                        BraiCmdQueue.clearTransportFailures(this)
                         null
                     }
                 }
@@ -479,7 +482,6 @@ class RecordingService : Service() {
                 uploadInProgress.get() ||
                 state is RecorderState.Recording ||
                 (state is RecorderState.Uploading && trigger != QueueRetryTrigger.Enqueue) ||
-                (retryStore.isBlocked && trigger !in setOf(QueueRetryTrigger.Manual, QueueRetryTrigger.Enqueue)) ||
                 !hasPendingRecordings(context)
             ) {
                 return false

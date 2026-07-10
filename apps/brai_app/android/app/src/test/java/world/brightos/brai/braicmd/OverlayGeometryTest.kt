@@ -11,7 +11,7 @@ class OverlayGeometryTest {
     private val bounds = OverlayBounds(left = 24, top = 90, right = 1056, bottom = 2180)
 
     @Test
-    fun keepsOneRadiusAtCenterEdgeAndCorner() {
+    fun keepsHubFixedAndUsesOneRadiusPerLayoutAtCenterEdgeAndCorner() {
         val hubs = listOf(
             OverlayAnchor(x = 471, y = 980, size = 138),
             OverlayAnchor(x = 894, y = 1670, size = 138),
@@ -22,11 +22,9 @@ class OverlayGeometryTest {
             RadialActionLayout.layout(bounds, hub, 110, 5, 5, 18)!!
         }
 
-        assertEquals(1, layouts.map { it.radius }.distinct().size)
         layouts.forEach { assertLayoutIsVisibleAndSeparated(it, 110, 18) }
-        assertEquals(hubs[1].x, layouts[1].hub.x)
-        assertTrue(layouts[2].hub.x < hubs[2].x || layouts[2].hub.y > hubs[2].y)
-        assertTrue(layouts[2].hub.x == hubs[2].x || layouts[2].hub.y == hubs[2].y)
+        layouts.forEachIndexed { index, layout -> assertEquals(hubs[index], layout.hub) }
+        assertTrue(layouts[2].radius >= layouts[0].radius)
     }
 
     @Test
@@ -50,6 +48,24 @@ class OverlayGeometryTest {
 
             assertNotNull("missing layout at scale $scale", layout)
             assertLayoutIsVisibleAndSeparated(layout!!, actionSize, gap)
+        }
+    }
+
+    @Test
+    fun keepsActionsAwayFromTheMainDictationButton() {
+        val hub = OverlayAnchor(x = 894, y = 1580, size = 138)
+        val main = OverlayAnchor(x = 880, y = 1760, size = 150)
+        val layout = RadialActionLayout.layout(bounds, hub, 110, 5, 5, 18, main)
+
+        assertNotNull(layout)
+        assertLayoutIsVisibleAndSeparated(layout!!, 110, 18)
+        layout.actions.forEach { point ->
+            assertTrue(
+                point.x + 110 <= main.x - 18 ||
+                    point.x >= main.x + main.size + 18 ||
+                    point.y + 110 <= main.y - 18 ||
+                    point.y >= main.y + main.size + 18
+            )
         }
     }
 
