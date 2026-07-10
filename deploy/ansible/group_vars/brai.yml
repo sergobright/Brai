@@ -4,12 +4,18 @@ brai_node_root: /srv/opt/node-v22.16.0
 brai_node_bin: /srv/opt/node-v22.16.0/bin/node
 brai_caddyfile: /etc/caddy/Caddyfile
 brai_public_site_domain: brightos.world
+brai_public_site_aliases:
+  - brai.one
 brai_github_repository: sergobright/Brai
 brai_public_site_root: "{{ brai_repo }}/deploy/site"
 brai_syncthing_domain: sync.brightos.world
+brai_syncthing_aliases:
+  - sync.brai.one
 brai_syncthing_gui_port: 8384
 brai_syncthing_sync_port: 22000
 brai_supabase_studio_domain: supabase.brightos.world
+brai_supabase_studio_aliases:
+  - supabase.brai.one
 brai_supabase_studio_port: 54323
 brai_syncthing_user: mark
 brai_syncthing_vault_path: /srv/projects/brai/vault
@@ -32,6 +38,8 @@ brai_basic_auth_directive: "import brai_unified_basic_auth"
 brai_envs:
   prod:
     domain: app.brightos.world
+    aliases:
+      - app.brai.one
     path: prod
     api_port: 3020
     admin_port: 3040
@@ -39,6 +47,8 @@ brai_envs:
     admin_service: brai-admin.service
   dev:
     domain: dev.brightos.world
+    aliases:
+      - dev.brai.one
     path: dev
     api_port: 3030
     admin_port: 3041
@@ -46,6 +56,8 @@ brai_envs:
     admin_service: brai-admin-dev.service
   preview-a:
     domain: a.test.brightos.world
+    aliases:
+      - a.test.brai.one
     path: preview-a
     api_port: 3031
     admin_port: 3042
@@ -53,6 +65,8 @@ brai_envs:
     admin_service: brai-admin-preview-a.service
   preview-b:
     domain: b.test.brightos.world
+    aliases:
+      - b.test.brai.one
     path: preview-b
     api_port: 3032
     admin_port: 3043
@@ -60,6 +74,8 @@ brai_envs:
     admin_service: brai-admin-preview-b.service
   preview-c:
     domain: c.test.brightos.world
+    aliases:
+      - c.test.brai.one
     path: preview-c
     api_port: 3033
     admin_port: 3044
@@ -67,6 +83,8 @@ brai_envs:
     admin_service: brai-admin-preview-c.service
   preview-d:
     domain: d.test.brightos.world
+    aliases:
+      - d.test.brai.one
     path: preview-d
     api_port: 3034
     admin_port: 3045
@@ -74,6 +92,8 @@ brai_envs:
     admin_service: brai-admin-preview-d.service
   preview-e:
     domain: e.test.brightos.world
+    aliases:
+      - e.test.brai.one
     path: preview-e
     api_port: 3035
     admin_port: 3046
