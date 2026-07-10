@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -73,9 +74,15 @@ export async function createFixture(times, options = {}) {
     wsUrl: `ws://127.0.0.1:${address.port}`,
     store: runtime.store,
     close: async () => {
-      await runtime.close();
-      await database.drop();
-      fs.rmSync(tmp, { recursive: true, force: true });
+      try {
+        await runtime.close();
+      } finally {
+        try {
+          await database.drop();
+        } finally {
+          fs.rmSync(tmp, { recursive: true, force: true });
+        }
+      }
     }
   };
 }
@@ -196,7 +203,17 @@ export function eventDomainCount(fixture, eventDomain) {
 export async function createTestDatabase() {
   const baseUrl = process.env.BRAI_TEST_DATABASE_URL?.trim();
   if (!baseUrl) throw new Error('BRAI_TEST_DATABASE_URL is required for API tests');
-  const schema = `brai_test_${process.pid}_${Date.now()}_${Math.random().toString(16).slice(2)}`.replace(/[^a-zA-Z0-9_]/g, '_');
+  const branch = process.env.BRAI_TEST_BRANCH?.trim();
+  const runId = process.env.BRAI_TEST_RUN_ID?.trim();
+  if (Boolean(branch) !== Boolean(runId)) throw new Error('BRAI_TEST_BRANCH and BRAI_TEST_RUN_ID must be set together');
+  const scope = branch ? `${scopeHash(branch)}_${scopeHash(runId)}` : '';
+  const schema = [
+    'brai_test',
+    scope,
+    process.pid.toString(36),
+    Date.now().toString(36),
+    Math.random().toString(36).slice(2, 8)
+  ].filter(Boolean).join('_');
   const pool = new Pool({ connectionString: baseUrl, ssl: postgresSsl(baseUrl) });
   const client = await pool.connect();
   try {
@@ -233,6 +250,10 @@ function databaseUrlForSchema(baseUrl, schema) {
 
 function quoteIdent(value) {
   return `"${String(value).replaceAll('"', '""')}"`;
+}
+
+function scopeHash(value) {
+  return crypto.createHash('sha1').update(value).digest('hex').slice(0, 12);
 }
 
 function postgresSsl(databaseUrl) {

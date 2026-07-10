@@ -89,8 +89,8 @@ filter_cleanup_branches_to_active_previews() {
   [[ "${#CLEANUP_BRANCHES[@]}" -gt 0 ]] || return 0
   local active_list
   if ! active_list="$(active_preview_branches)"; then
-    echo "Warning: could not inspect active preview slots; falling back to recent merged cleanup." >&2
-    return 0
+    echo "Could not inspect active preview slots; accepted preview cleanup cannot continue safely." >&2
+    return 1
   fi
 
   declare -A active=()
@@ -239,7 +239,8 @@ cleanup_previously_accepted_preview() {
 
 for branch in "${CLEANUP_BRANCHES[@]}"; do
   if ! cleanup_previously_accepted_preview "$branch"; then
-    echo "Best-effort cleanup failed for previously accepted preview $branch; continuing." >&2
+    echo "Required cleanup failed for previously accepted preview $branch." >&2
+    exit 1
   fi
 done
 

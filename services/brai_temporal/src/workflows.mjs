@@ -125,8 +125,9 @@ async function runNoPreviewMerged(state, request) {
   applyPreviewEvent(state, eventLike(request, "delivery_handoff_passed"));
   try {
     await activities.cleanupAcceptedBranches({ branch: state.branch });
-  } catch {
-    // Cleanup is hygiene. The merge lifecycle must still reach terminal.
+  } catch (error) {
+    applyPreviewEvent(state, eventLike(request, "delivery_handoff_failed", { reason: reasonFromError(error) }));
+    return;
   }
   applyPreviewEvent(state, eventLike(request, "pr_merged"));
 }

@@ -22,10 +22,10 @@
 - [ ] Classify delivery with the guard: preview-class runtime/product or `infra-docs`.
 - [ ] For preview-class work, wait for CI/deploy to assign or reuse a preview slot.
 - [ ] For preview-class work, record release notes with `node scripts/brai-task.mjs release-notes --short "..." --details "..." --reason "..."`, then run `scripts/brai-preview-handoff.sh`, let it wait through transient `queued` / `in_progress` states, and use its verified preview letter, URL, branch, and commit only after success.
-- [ ] For `infra-docs` work, run `node scripts/brai-task.mjs handoff` and use its verified no-preview PR state only after the PR is `MERGED`; `OPEN`, `BEHIND`, `BLOCKED`, `DIRTY`, failed checks, and auto-merge-only states are blockers.
+- [ ] For `infra-docs` or `technical-no-preview` work, run `node scripts/brai-task.mjs handoff` and use its verified no-preview PR state only after the PR is `MERGED`; `OPEN`, `BEHIND`, `BLOCKED`, `DIRTY`, failed checks, cleanup failures, and auto-merge-only states are blockers.
 - [ ] If all preview slots are occupied, report queued status and queue position/source when available.
 - [ ] If the project owner accepts the preview (`Принято`, `принимаю`, `accepted`, or equivalent, but not negated phrases like `пока не принято`), run `deploy/scripts/accept-preview.sh <codex-branch>` instead of replying with an acknowledgement; the script must verify the exact branch head before PR or merge actions.
 - [ ] For accepted preview work, verify the successful `deploy-prod` post-step promoted metadata and released the preview slot; treat a missing release as a blocker.
-- [ ] After accepted delivery completes, expect best-effort cleanup to delete the accepted `codex/*` remote branch and clean local task worktree; do not resume work on that branch.
+- [ ] Before accepted delivery completes, verify preview/test schemas were deleted, the preview slot was released when applicable, and accepted branch/worktree cleanup succeeded; any cleanup failure is a delivery blocker.
 - [ ] Do not close permission operation tasks until the access contract is green; otherwise keep one open epic `operation:agent-task:codex-access-contract-guard`.
 - [ ] End with clean tracked `git status --short` and report preview letter + URL, or report queued/blocker status explicitly.
