@@ -6,8 +6,6 @@ import android.content.Context
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Paint
-import android.graphics.PorterDuff
-import android.graphics.PorterDuffColorFilter
 import android.graphics.Rect
 import android.graphics.RectF
 import android.os.SystemClock
@@ -34,8 +32,7 @@ class AirButtonView(context: Context) : View(context) {
     }
 
     private var state: RecorderState = RecorderState.Idle
-    private var queueCount = 0
-    private var readyToInsert = false
+    private var queueBadge: QueueBadgeState? = null
 
     fun setRecorderState(next: RecorderState) {
         state = next
@@ -43,8 +40,7 @@ class AirButtonView(context: Context) : View(context) {
     }
 
     fun setQueueState(count: Int, ready: Boolean) {
-        queueCount = count.coerceAtLeast(0)
-        readyToInsert = ready
+        queueBadge = resolveQueueBadgeState(count, ready)
         invalidate()
     }
 
@@ -62,7 +58,7 @@ class AirButtonView(context: Context) : View(context) {
             is RecorderState.Error -> drawError(canvas, cx, cy)
             else -> Unit
         }
-        if (queueCount > 0) drawQueueBadge(canvas)
+        queueBadge?.let { drawQueueBadge(canvas, it) }
 
         if (state is RecorderState.Recording || state is RecorderState.Uploading) {
             postInvalidateOnAnimation()
@@ -71,9 +67,7 @@ class AirButtonView(context: Context) : View(context) {
 
     private fun drawIcon(canvas: Canvas) {
         iconBounds.set(0, 0, width, height)
-        bitmapPaint.colorFilter = if (readyToInsert) PorterDuffColorFilter(COLOR_ICON_GREEN, PorterDuff.Mode.SRC_IN) else null
         canvas.drawBitmap(iconBitmap, null, iconBounds, bitmapPaint)
-        bitmapPaint.colorFilter = null
     }
 
     private fun drawAmplitude(canvas: Canvas, cx: Float, cy: Float, radius: Float, amplitude: Int) {
@@ -103,14 +97,14 @@ class AirButtonView(context: Context) : View(context) {
         canvas.drawArc(RectF(cx - radius * 0.55f, cy - radius * 0.55f, cx + radius * 0.55f, cy + radius * 0.55f), phase, 250f, false, strokePaint)
     }
 
-    private fun drawQueueBadge(canvas: Canvas) {
-        val label = if (queueCount > 99) "99+" else queueCount.toString()
+    private fun drawQueueBadge(canvas: Canvas, badge: QueueBadgeState) {
+        val label = if (badge.count > 99) "99+" else badge.count.toString()
         val badgeRadius = width * 0.15f
         val badgeX = width * 0.77f
         val badgeY = height * 0.23f
         val badgePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             style = Paint.Style.FILL
-            color = currentIconColor()
+            color = if (badge.tone == QueueBadgeTone.Ready) COLOR_BADGE_GREEN else COLOR_ICON_RED
         }
         canvas.drawCircle(badgeX, badgeY, badgeRadius, badgePaint)
         textPaint.color = COLOR_BADGE_TEXT
@@ -124,17 +118,29 @@ class AirButtonView(context: Context) : View(context) {
         canvas.drawText("!", cx - width * 0.2f, cy + height * 0.3f, textPaint)
     }
 
-    private fun currentIconColor(): Int =
-        if (readyToInsert) COLOR_ICON_GREEN else COLOR_ICON_RED
+    private fun currentIconColor(): Int = COLOR_ICON_RED
 
-    private fun currentIconSoftColor(): Int =
-        if (readyToInsert) COLOR_ICON_GREEN_SOFT else COLOR_ICON_RED_SOFT
+    private fun currentIconSoftColor(): Int = COLOR_ICON_RED_SOFT
 
     companion object {
         private const val COLOR_ICON_RED = 0xFFFF2020.toInt()
-        private const val COLOR_ICON_GREEN = 0xFF2ED36F.toInt()
         private const val COLOR_ICON_RED_SOFT = 0xB8FF2020.toInt()
-        private const val COLOR_ICON_GREEN_SOFT = 0xB82ED36F.toInt()
+        private const val COLOR_BADGE_GREEN = 0xFF2ED36F.toInt()
         private const val COLOR_BADGE_TEXT = 0xFF050505.toInt()
     }
 }
+
+internal enum class QueueBadgeTone {
+    Pending,
+    Ready
+}
+
+internal data class QueueBadgeState(
+    val count: Int,
+    val tone: QueueBadgeTone
+)
+
+internal fun resolveQueueBadgeState(count: Int, ready: Boolean): QueueBadgeState? =
+    count.coerceAtLeast(0).takeIf { it > 0 }?.let {
+        QueueBadgeState(it, if (ready) QueueBadgeTone.Ready else QueueBadgeTone.Pending)
+    }

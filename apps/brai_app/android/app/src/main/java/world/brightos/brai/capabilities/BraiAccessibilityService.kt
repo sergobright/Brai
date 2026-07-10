@@ -274,7 +274,7 @@ class BraiAccessibilityService : AccessibilityService() {
         screenshot.hardwareBuffer.close()
         if (source == null) return null
 
-        val bitmap = runCatching { opaqueScreenshotBitmap(source) }.getOrNull()
+        val bitmap = runCatching { screenshotBitmapForStorage(source) }.getOrNull()
         source.recycle()
         if (bitmap == null) return null
 
@@ -309,11 +309,25 @@ class BraiAccessibilityService : AccessibilityService() {
 internal fun shouldShowDictationButton(hasEditableField: Boolean, inputMethodVisible: Boolean): Boolean =
     hasEditableField && inputMethodVisible
 
-internal fun opaqueScreenshotBitmap(source: Bitmap): Bitmap =
-    Bitmap.createBitmap(source.width, source.height, Bitmap.Config.ARGB_8888).also { output ->
+internal fun opaqueScreenshotBitmap(source: Bitmap): Bitmap {
+    require(source.config != Bitmap.Config.HARDWARE) {
+        "Hardware bitmap must be copied before software composition"
+    }
+    return Bitmap.createBitmap(source.width, source.height, Bitmap.Config.ARGB_8888).also { output ->
         Canvas(output).apply {
             drawColor(Color.BLACK)
             drawBitmap(source, 0f, 0f, null)
         }
         output.setHasAlpha(false)
     }
+}
+
+internal fun screenshotBitmapForStorage(source: Bitmap): Bitmap {
+    val softwareCopy = source.copy(Bitmap.Config.ARGB_8888, false)
+        ?: error("Unable to copy screenshot into software memory")
+    return try {
+        opaqueScreenshotBitmap(softwareCopy)
+    } finally {
+        softwareCopy.recycle()
+    }
+}

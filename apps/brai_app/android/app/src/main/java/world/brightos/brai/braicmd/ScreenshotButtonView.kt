@@ -52,8 +52,7 @@ class ScreenshotButtonView(context: Context) : View(context) {
     private var glyph: ContextButtonGlyph = ContextButtonGlyph.Logo
     private var glyphDrawable: Drawable? = null
     private var menuExpansionProgress = 0f
-    private var queueCount = 0
-    private var readyToInsert = false
+    private var queueBadge: QueueBadgeState? = null
 
     fun setRecorderState(next: RecorderState) {
         state = next
@@ -72,8 +71,7 @@ class ScreenshotButtonView(context: Context) : View(context) {
     }
 
     fun setQueueState(count: Int, ready: Boolean = false) {
-        queueCount = count.coerceAtLeast(0)
-        readyToInsert = ready
+        queueBadge = resolveQueueBadgeState(count, ready)
         invalidate()
     }
 
@@ -101,7 +99,7 @@ class ScreenshotButtonView(context: Context) : View(context) {
             is RecorderState.Error -> drawError(canvas, cx, cy)
             else -> Unit
         }
-        if (queueCount > 0) drawQueueBadge(canvas)
+        queueBadge?.let { drawQueueBadge(canvas, it) }
 
         if (state is RecorderState.Recording || state is RecorderState.Uploading) {
             postInvalidateOnAnimation()
@@ -222,12 +220,12 @@ class ScreenshotButtonView(context: Context) : View(context) {
         canvas.drawArc(RectF(cx - radius * 0.55f, cy - radius * 0.55f, cx + radius * 0.55f, cy + radius * 0.55f), phase, 250f, false, strokePaint)
     }
 
-    private fun drawQueueBadge(canvas: Canvas) {
-        val label = if (queueCount > 99) "99+" else queueCount.toString()
+    private fun drawQueueBadge(canvas: Canvas, badge: QueueBadgeState) {
+        val label = if (badge.count > 99) "99+" else badge.count.toString()
         val badgeRadius = width * 0.17f
         val badgeX = width * 0.76f
         val badgeY = height * 0.24f
-        fillPaint.color = currentIconColor()
+        fillPaint.color = if (badge.tone == QueueBadgeTone.Ready) COLOR_BADGE_GREEN else COLOR_ICON_RED
         canvas.drawCircle(badgeX, badgeY, badgeRadius, fillPaint)
         fillPaint.color = COLOR_BUTTON_BACKGROUND
         textPaint.color = COLOR_BUTTON_BACKGROUND
@@ -241,18 +239,15 @@ class ScreenshotButtonView(context: Context) : View(context) {
         canvas.drawText("!", cx - width * 0.22f, cy + height * 0.3f, textPaint)
     }
 
-    private fun currentIconColor(): Int =
-        if (readyToInsert) COLOR_ICON_GREEN else COLOR_ICON_RED
+    private fun currentIconColor(): Int = COLOR_ICON_RED
 
-    private fun currentIconSoftColor(): Int =
-        if (readyToInsert) COLOR_ICON_GREEN_SOFT else COLOR_ICON_RED_SOFT
+    private fun currentIconSoftColor(): Int = COLOR_ICON_RED_SOFT
 
     companion object {
         private const val COLOR_BUTTON_BACKGROUND = 0xFF050505.toInt()
         private const val COLOR_ICON_RED = 0xFFFF2020.toInt()
-        private const val COLOR_ICON_GREEN = 0xFF2ED36F.toInt()
         private const val COLOR_ICON_RED_SOFT = 0xB8FF2020.toInt()
-        private const val COLOR_ICON_GREEN_SOFT = 0xB82ED36F.toInt()
+        private const val COLOR_BADGE_GREEN = 0xFF2ED36F.toInt()
     }
 }
 

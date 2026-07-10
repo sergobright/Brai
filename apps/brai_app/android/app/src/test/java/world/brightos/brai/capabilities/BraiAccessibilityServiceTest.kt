@@ -8,8 +8,10 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 
 @RunWith(RobolectricTestRunner::class)
+@Config(sdk = [35])
 class BraiAccessibilityServiceTest {
     @Test
     fun dictationButtonRequiresBothEditableFieldAndVisibleKeyboard() {
@@ -27,6 +29,21 @@ class BraiAccessibilityServiceTest {
 
         val result = opaqueScreenshotBitmap(source)
 
+        assertEquals(Color.RED, result.getPixel(1, 0))
+        assertFalse(result.hasAlpha())
+    }
+
+    @Test
+    fun hardwareScreenshotIsCopiedBeforeSoftwareComposition() {
+        val software = Bitmap.createBitmap(2, 1, Bitmap.Config.ARGB_8888).apply {
+            setPixel(0, 0, Color.TRANSPARENT)
+            setPixel(1, 0, Color.RED)
+        }
+        val hardware = software.copy(Bitmap.Config.HARDWARE, false)
+
+        val result = screenshotBitmapForStorage(hardware)
+
+        assertEquals(Bitmap.Config.HARDWARE, hardware.config)
         assertEquals(Color.RED, result.getPixel(1, 0))
         assertFalse(result.hasAlpha())
     }
