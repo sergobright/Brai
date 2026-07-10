@@ -43,7 +43,15 @@ class OverlayController(private val service: BraiAccessibilityService) {
     private val settingsListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
         if (key in overlaySettingKeys) {
             if (key in contextActionSettingKeys) closeContextMenu(animated = false)
+            if ((key == AppConstants.KEY_AUTH_TOKEN && config.authToken.isBlank()) ||
+                (key == AppConstants.KEY_OVERLAY_ENABLED && !config.overlayEnabled)
+            ) {
+                hideInputButtonView()
+                hideScreenshotButton()
+                return@OnSharedPreferenceChangeListener
+            }
             applyIconSettings()
+            if ((key == AppConstants.KEY_AUTH_TOKEN || key == AppConstants.KEY_OVERLAY_ENABLED) && inputButtonRequested) showIfAllowed()
             updateScreenshotButtonVisibility()
         }
     }
@@ -71,6 +79,7 @@ class OverlayController(private val service: BraiAccessibilityService) {
     private var screenshotShown = false
     private var cancelShown = false
     private var contextMenuOpen = false
+    private var contextMenuClosing = false
     private var inputButtonRequested = false
     private var downRawX = 0f
     private var downRawY = 0f
@@ -164,8 +173,9 @@ class OverlayController(private val service: BraiAccessibilityService) {
 
     fun showIfAllowed() {
         inputButtonRequested = true
-        if (!Settings.canDrawOverlays(service)) {
-            hide()
+        if (!config.overlayEnabled || config.authToken.isBlank() || !Settings.canDrawOverlays(service)) {
+            hideInputButtonView()
+            hideScreenshotButton()
             return
         }
         if (isShown) {
@@ -396,6 +406,7 @@ class OverlayController(private val service: BraiAccessibilityService) {
             return
         }
         contextMenuOpen = true
+        contextMenuClosing = false
         screenshotButton?.setGlyph(ContextButtonGlyph.Close)
         screenshotButton?.alpha = contextHubAlpha()
 
@@ -438,8 +449,7 @@ class OverlayController(private val service: BraiAccessibilityService) {
     private fun closeContextMenu(animated: Boolean) {
         if (!contextMenuOpen && contextActionParams.isEmpty()) return
         contextMenuOpen = false
-        screenshotButton?.setGlyph(ContextButtonGlyph.Logo)
-        screenshotButton?.alpha = contextHubAlpha()
+        contextMenuClosing = animated && contextActionParams.isNotEmpty()
 
         val actionSize = contextActionButtonSizePx()
         val end = contextMenuHubPoint(screenshotButtonAnchor(), actionSize)
@@ -454,6 +464,7 @@ class OverlayController(private val service: BraiAccessibilityService) {
                 runCatching { windowManager.removeView(view) }
             }
         }
+        if (!contextMenuClosing) finishClosingContextMenu()
     }
 
     private fun updateContextMenuPosition() {
@@ -502,7 +513,10 @@ class OverlayController(private val service: BraiAccessibilityService) {
             addListener(object : AnimatorListenerAdapter() {
                 override fun onAnimationEnd(animation: Animator) {
                     contextActionAnimators.remove(action)
-                    if (!opening) runCatching { windowManager.removeView(view) }
+                    if (!opening) {
+                        runCatching { windowManager.removeView(view) }
+                        if (!contextMenuOpen && contextActionAnimators.isEmpty()) finishClosingContextMenu()
+                    }
                 }
             })
         }
@@ -515,6 +529,12 @@ class OverlayController(private val service: BraiAccessibilityService) {
             x = hub.x + (hub.size - actionSize) / 2,
             y = hub.y + (hub.size - actionSize) / 2
         )
+
+    private fun finishClosingContextMenu() {
+        contextMenuClosing = false
+        screenshotButton?.setGlyph(ContextButtonGlyph.Logo)
+        screenshotButton?.alpha = contextHubAlpha()
+    }
 
     private fun handleContextAction(action: ContextMenuAction) {
         closeContextMenu(animated = true)
@@ -556,7 +576,7 @@ class OverlayController(private val service: BraiAccessibilityService) {
     private fun updateButtonStates(state: RecorderState) {
         button?.setRecorderState(recording.mainButtonState(state))
         screenshotButton?.setRecorderState(RecorderState.Idle)
-        screenshotButton?.setGlyph(if (contextMenuOpen) ContextButtonGlyph.Close else ContextButtonGlyph.Logo)
+        screenshotButton?.setGlyph(if (contextMenuOpen || contextMenuClosing) ContextButtonGlyph.Close else ContextButtonGlyph.Logo)
         screenshotButton?.alpha = contextHubAlpha()
         contextActionButtons.forEach { (menuAction, view) ->
             view.setRecorderState(recording.contextButtonState(menuAction.action, state))
@@ -696,7 +716,7 @@ class OverlayController(private val service: BraiAccessibilityService) {
         config.screenshotIconOpacityPercent / 100f
 
     private fun contextHubAlpha(): Float =
-        if (contextMenuOpen) CONTEXT_MENU_HUB_ALPHA else screenshotIconAlpha()
+        if (contextMenuOpen || contextMenuClosing) CONTEXT_MENU_HUB_ALPHA else screenshotIconAlpha()
 
     private fun mainButtonSizePx(): Int =
         (service.dp(BASE_MAIN_BUTTON_DP) * config.mainIconSizePercent / 100f).roundToInt()
@@ -708,7 +728,7 @@ class OverlayController(private val service: BraiAccessibilityService) {
         (screenshotButtonSizePx() * CONTEXT_ACTION_BUTTON_SCALE).roundToInt().coerceAtLeast(service.dp(28))
 
     private fun contextButtonAllowed(): Boolean =
-        !config.onboardingVoiceOnly && enabledContextMenuActions().isNotEmpty()
+        config.overlayEnabled && config.authToken.isNotBlank() && !config.onboardingVoiceOnly && enabledContextMenuActions().isNotEmpty()
 
     private fun enabledContextMenuActions(): List<ContextMenuAction> =
         contextMenuActions.filter { action ->
@@ -741,6 +761,8 @@ class OverlayController(private val service: BraiAccessibilityService) {
             AppConstants.KEY_MAIN_ICON_SIZE_PERCENT,
             AppConstants.KEY_SCREENSHOT_ICON_OPACITY_PERCENT,
             AppConstants.KEY_SCREENSHOT_ICON_SIZE_PERCENT,
+            AppConstants.KEY_AUTH_TOKEN,
+            AppConstants.KEY_OVERLAY_ENABLED,
             AppConstants.KEY_ONBOARDING_VOICE_ONLY
         ) + contextActionSettingKeys
     }

@@ -37,7 +37,7 @@ import {
   requestAndroidMicrophone,
   requestAndroidNotifications,
 } from "@/shared/platform/androidCapabilities";
-import { ensureBraiCmdAccess, listenBraiCmdOnboardingEvents, retryBraiCmdQueue, setBraiCmdAccessKey, setBraiCmdQueuePausedMode, setBraiCmdVoiceOnlyMode, vibrateBraiCmdPress } from "@/shared/platform/braiCmd";
+import { ensureBraiCmdAccess, listenBraiCmdOnboardingEvents, retryBraiCmdQueue, setBraiCmdAccessKey, setBraiCmdOverlayEnabled, setBraiCmdQueuePausedMode, setBraiCmdVoiceOnlyMode, vibrateBraiCmdPress } from "@/shared/platform/braiCmd";
 import { installAndroidBackHandler, isNativeShell, platformName } from "@/shared/platform/platform";
 import { AnimatedShinyText } from "@/shared/ui/animated-shiny-text";
 import { Button } from "@/shared/ui/button";
@@ -63,7 +63,7 @@ type OnboardingFlowProps = {
   authRequired: boolean;
   busy: boolean;
   authMode: "otp" | "password";
-  onLogin: (password: string) => Promise<void>;
+  onLogin: (password: string) => Promise<boolean>;
   onRequestOtp: (email: string) => Promise<void>;
   onVerifyOtp: (email: string, otp: string) => Promise<void>;
   onDone: () => void;
@@ -223,8 +223,13 @@ export function OnboardingFlow({
 
   useEffect(() => {
     if (!isAndroid) return;
-    void setBraiCmdVoiceOnlyMode(!(state.complete || state.step === "voice-ready"));
-  }, [isAndroid, state.complete, state.step]);
+    void setBraiCmdVoiceOnlyMode(true);
+  }, [isAndroid]);
+
+  useEffect(() => {
+    if (!isAndroid) return;
+    void setBraiCmdOverlayEnabled(state.step.startsWith("training-") || state.step === "voice-ready");
+  }, [isAndroid, state.step]);
 
   useEffect(() => {
     if (!isAndroid) return;
@@ -341,9 +346,9 @@ export function OnboardingFlow({
     if (!current.step.startsWith("welcome-") || !step.startsWith("welcome-")) setState(next);
   }
 
-  function completeSetup() {
-    void setBraiCmdQueuePausedMode(false);
-    void setBraiCmdVoiceOnlyMode(false);
+  async function completeSetup() {
+    await setBraiCmdOverlayEnabled(false);
+    await setBraiCmdQueuePausedMode(false);
     const current = stateRef.current;
     transitionTo({ ...current, complete: true, step: "login-check", history: [...current.history, current.step] });
   }
@@ -422,7 +427,8 @@ export function OnboardingFlow({
   async function submitCloudLogin(password: string) {
     setError("");
     try {
-      await onLogin(password);
+      const authenticated = await onLogin(password);
+      if (!authenticated) throw new Error("Login failed");
       go("setup-start");
     } catch {
       setError("Пароль не подошел. Проверьте его и попробуйте снова.");
@@ -556,6 +562,7 @@ export function OnboardingFlow({
         setError("Не удалось подготовить доступ Brai CMD. Проверьте подключение и нажмите «Обучение» еще раз.");
         return;
       }
+      await setBraiCmdOverlayEnabled(true);
       await setBraiCmdVoiceOnlyMode(true);
     }
     go("training-dictate");
@@ -1151,7 +1158,7 @@ function OnboardingAuthForm({
   busy: boolean;
   intro?: ReactNode;
   mode: "otp" | "password";
-  onLogin: (password: string) => Promise<void>;
+  onLogin: (password: string) => Promise<unknown>;
   onRequestOtp: (email: string) => Promise<void>;
   onVerifyOtp: (email: string, otp: string) => Promise<void>;
 }) {

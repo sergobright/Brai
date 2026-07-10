@@ -16,6 +16,7 @@ object AppConstants {
     const val KEY_POST_PROCESSING_PROMPT = "post_processing_prompt"
     const val KEY_ONBOARDING_VOICE_ONLY = "onboarding_voice_only"
     const val KEY_ONBOARDING_QUEUE_PAUSED = "onboarding_queue_paused"
+    const val KEY_OVERLAY_ENABLED = "overlay_enabled"
     const val KEY_BUTTON_X = "button_x"
     const val KEY_BUTTON_Y = "button_y"
     const val KEY_MAIN_ICON_OPACITY_PERCENT = "main_icon_opacity_percent"

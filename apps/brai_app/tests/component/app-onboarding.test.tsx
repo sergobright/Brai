@@ -187,7 +187,7 @@ describe("BraiApp onboarding", () => {
     await waitFor(() => expect(cmdPlugin.setVoiceOnlyMode).toHaveBeenCalledWith({ enabled: true }));
   });
 
-  it("allows the context floating button on the final voice screen", async () => {
+  it("keeps the context floating button hidden until the cabinet opens", async () => {
     stubAndroidCapacitor();
     window.localStorage.setItem(ONBOARDING_STORAGE_KEY, JSON.stringify({
       complete: false,
@@ -202,7 +202,125 @@ describe("BraiApp onboarding", () => {
     render(<BraiApp />);
 
     expect(await screen.findByText("Голосовое управление настроено")).toBeInTheDocument();
-    await waitFor(() => expect(cmdPlugin.setVoiceOnlyMode).toHaveBeenCalledWith({ enabled: false }));
+    await waitFor(() => expect(cmdPlugin.setVoiceOnlyMode).toHaveBeenCalledWith({ enabled: true }));
+    expect(cmdPlugin.setVoiceOnlyMode).not.toHaveBeenCalledWith({ enabled: false });
+  });
+
+  it("keeps the context floating button hidden after skipping voice training", async () => {
+    stubAndroidCapacitor();
+    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      if (url.endsWith("/auth/session")) {
+        return new Response(JSON.stringify({ authenticated: false }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return Promise.reject(new Error("offline"));
+    });
+    window.localStorage.setItem(ONBOARDING_STORAGE_KEY, JSON.stringify({
+      complete: false,
+      history: ["notifications"],
+      name: "Test",
+      path: "new",
+      profileVersion: "cloud",
+      step: "training-start",
+      voiceMode: "cloud",
+    }));
+
+    render(<BraiApp />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Пропустить" }));
+    expect(await screen.findByText("Нужен вход")).toBeInTheDocument();
+    await waitFor(() => expect(cmdPlugin.setOverlayEnabled).toHaveBeenCalledWith({ enabled: false }));
+    expect(cmdPlugin.setVoiceOnlyMode).not.toHaveBeenCalledWith({ enabled: false });
+  });
+
+  it("temporarily enables only the training overlay after native access is ready", async () => {
+    stubAndroidCapacitor();
+    window.localStorage.setItem(ONBOARDING_STORAGE_KEY, JSON.stringify({
+      complete: false,
+      history: ["notifications"],
+      name: "Test",
+      path: "new",
+      profileVersion: "cloud",
+      step: "training-start",
+      voiceMode: "cloud",
+    }));
+
+    render(<BraiApp />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Обучение" }));
+
+    await waitFor(() => expect(cmdPlugin.ensureAccess).toHaveBeenCalledWith({ displayName: "Test" }));
+    await waitFor(() => expect(cmdPlugin.setOverlayEnabled).toHaveBeenCalledWith({ enabled: true }));
+    expect(await screen.findByRole("textbox", { name: "Результат голосового ввода" })).toBeInTheDocument();
+    expect(cmdPlugin.setVoiceOnlyMode).not.toHaveBeenCalledWith({ enabled: false });
+  });
+
+  it("does not leave cloud login after a failed password request", async () => {
+    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      if (url.endsWith("/auth/session")) {
+        return new Response(JSON.stringify({ authenticated: false }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return Promise.reject(new Error("offline"));
+    });
+    window.localStorage.setItem(ONBOARDING_STORAGE_KEY, JSON.stringify({
+      complete: false,
+      history: ["profile-version"],
+      name: "Test",
+      path: "existing",
+      profileVersion: "cloud",
+      step: "cloud-password",
+      voiceMode: null,
+    }));
+
+    render(<BraiApp />);
+
+    fireEvent.change(await screen.findByLabelText("Пароль"), { target: { value: "wrong" } });
+    fireEvent.click(screen.getByRole("button", { name: "Открыть" }));
+
+    expect(await screen.findByText("Пароль не подошел. Проверьте его и попробуйте снова.")).toBeInTheDocument();
+    expect(screen.getByText("Вход в облачный профиль")).toBeInTheDocument();
+    expect(screen.queryByText("Начинаем настройку")).not.toBeInTheDocument();
+  });
+
+  it("keeps a completed onboarding locked when cabinet login fails", async () => {
+    stubAndroidCapacitor();
+    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      if (url.endsWith("/auth/session")) {
+        return new Response(JSON.stringify({ authenticated: false }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return Promise.reject(new Error("offline"));
+    });
+    window.localStorage.setItem(ONBOARDING_STORAGE_KEY, JSON.stringify({
+      complete: true,
+      history: ["login-check"],
+      name: "Test",
+      path: "new",
+      profileVersion: "cloud",
+      step: "locked",
+      voiceMode: "cloud",
+    }));
+
+    render(<BraiApp />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Войти" }));
+    fireEvent.change(await screen.findByLabelText("Пароль"), { target: { value: "wrong" } });
+    fireEvent.click(screen.getByRole("button", { name: "Открыть" }));
+
+    await waitFor(() => expect(cmdPlugin.setOverlayEnabled).toHaveBeenCalledWith({ enabled: false }));
+    expect(screen.getByLabelText("Пароль")).toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: "Добавить" })).not.toBeInTheDocument();
+    expect(cmdPlugin.setOverlayEnabled).not.toHaveBeenCalledWith({ enabled: true });
   });
 
   it("does not run a fake check on the cloud privacy screen", async () => {

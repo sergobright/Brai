@@ -44,4 +44,13 @@ class ConfigStoreTest {
         assertFalse(reloaded.contextActionChatEnabled)
         assertFalse(reloaded.contextActionSaveEnabled)
     }
+
+    @Test
+    fun overlayIsLockedByDefaultAndPersistsExplicitEnablement() {
+        assertFalse(store.overlayEnabled)
+
+        store.overlayEnabled = true
+
+        assertTrue(ConfigStore(RuntimeEnvironment.getApplication()).overlayEnabled)
+    }
 }

@@ -307,7 +307,7 @@ export function AuthPanel({
 }: {
   busy: boolean;
   mode: "otp" | "password";
-  onLogin: (password: string) => Promise<void>;
+  onLogin: (password: string) => Promise<boolean>;
   onRequestOtp: (email: string) => Promise<void>;
   onVerifyOtp: (email: string, otp: string) => Promise<void>;
 }) {

@@ -6,6 +6,7 @@ import android.content.Context
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Paint
+import android.graphics.Path
 import android.graphics.Rect
 import android.graphics.RectF
 import android.os.SystemClock
@@ -26,8 +27,9 @@ enum class ContextButtonGlyph {
 }
 
 class ScreenshotButtonView(context: Context) : View(context) {
-    private val iconBitmap = BitmapFactory.decodeResource(resources, R.drawable.bright_command_small_circle)
+    private val iconBitmap by lazy { BitmapFactory.decodeResource(resources, R.drawable.bright_command_small_circle) }
     private val iconBounds = Rect()
+    private val glyphPath = Path()
     private val bitmapPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
     private val fillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.FILL
@@ -36,6 +38,7 @@ class ScreenshotButtonView(context: Context) : View(context) {
     private val strokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
         strokeCap = Paint.Cap.ROUND
+        strokeJoin = Paint.Join.ROUND
         color = COLOR_ICON_RED
     }
     private val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -101,64 +104,165 @@ class ScreenshotButtonView(context: Context) : View(context) {
 
     private fun drawGlyph(canvas: Canvas, cx: Float, cy: Float) {
         if (glyph == ContextButtonGlyph.Logo) return
+        val size = minOf(width, height).toFloat()
         strokePaint.color = currentIconColor()
-        strokePaint.strokeWidth = width * 0.065f
+        strokePaint.strokeWidth = size * 0.045f
         textPaint.color = currentIconColor()
         textPaint.textSize = width * 0.34f
         when (glyph) {
-            ContextButtonGlyph.Close -> drawCross(canvas)
-            ContextButtonGlyph.Idea -> drawIdea(canvas, cx, cy)
-            ContextButtonGlyph.Image -> drawImage(canvas)
+            ContextButtonGlyph.Close -> drawCross(canvas, cx, cy, size)
+            ContextButtonGlyph.Idea -> drawIdea(canvas, cx, cy, size)
+            ContextButtonGlyph.Image -> drawImage(
+                canvas,
+                RectF(cx - size * 0.26f, cy - size * 0.21f, cx + size * 0.26f, cy + size * 0.20f)
+            )
             ContextButtonGlyph.ImageMic -> {
-                drawImage(canvas)
-                drawMic(canvas, cx + width * 0.18f, cy + height * 0.13f, width * 0.34f)
+                drawImage(
+                    canvas,
+                    RectF(cx - size * 0.30f, cy - size * 0.20f, cx + size * 0.13f, cy + size * 0.15f)
+                )
+                drawMic(canvas, cx + size * 0.21f, cy + size * 0.07f, size * 0.38f)
             }
-            ContextButtonGlyph.Chat -> drawChat(canvas)
-            ContextButtonGlyph.Save -> drawSave(canvas)
+            ContextButtonGlyph.Chat -> drawChat(canvas, cx, cy, size)
+            ContextButtonGlyph.Save -> drawSave(canvas, cx, cy, size)
             ContextButtonGlyph.Logo -> Unit
         }
     }
 
-    private fun drawCross(canvas: Canvas) {
-        val inset = width * 0.34f
-        canvas.drawLine(inset, inset, width - inset, height - inset, strokePaint)
-        canvas.drawLine(width - inset, inset, inset, height - inset, strokePaint)
+    private fun drawCross(canvas: Canvas, cx: Float, cy: Float, size: Float) {
+        val half = size * 0.16f
+        glyphPath.reset()
+        glyphPath.moveTo(cx - half, cy - half)
+        glyphPath.lineTo(cx + half, cy + half)
+        glyphPath.moveTo(cx + half, cy - half)
+        glyphPath.lineTo(cx - half, cy + half)
+        canvas.drawPath(glyphPath, strokePaint)
     }
 
-    private fun drawIdea(canvas: Canvas, cx: Float, cy: Float) {
-        canvas.drawCircle(cx, cy - height * 0.08f, width * 0.15f, strokePaint)
-        canvas.drawLine(cx - width * 0.08f, cy + height * 0.11f, cx + width * 0.08f, cy + height * 0.11f, strokePaint)
-        canvas.drawLine(cx - width * 0.05f, cy + height * 0.19f, cx + width * 0.05f, cy + height * 0.19f, strokePaint)
+    private fun drawIdea(canvas: Canvas, cx: Float, cy: Float, size: Float) {
+        glyphPath.reset()
+        glyphPath.moveTo(cx - size * 0.07f, cy + size * 0.10f)
+        glyphPath.cubicTo(
+            cx - size * 0.08f, cy + size * 0.04f,
+            cx - size * 0.17f, cy,
+            cx - size * 0.17f, cy - size * 0.11f
+        )
+        glyphPath.cubicTo(
+            cx - size * 0.17f, cy - size * 0.22f,
+            cx - size * 0.10f, cy - size * 0.29f,
+            cx, cy - size * 0.29f
+        )
+        glyphPath.cubicTo(
+            cx + size * 0.10f, cy - size * 0.29f,
+            cx + size * 0.17f, cy - size * 0.22f,
+            cx + size * 0.17f, cy - size * 0.11f
+        )
+        glyphPath.cubicTo(
+            cx + size * 0.17f, cy,
+            cx + size * 0.08f, cy + size * 0.04f,
+            cx + size * 0.07f, cy + size * 0.10f
+        )
+        glyphPath.lineTo(cx - size * 0.07f, cy + size * 0.10f)
+        glyphPath.moveTo(cx - size * 0.07f, cy + size * 0.18f)
+        glyphPath.lineTo(cx + size * 0.07f, cy + size * 0.18f)
+        canvas.drawPath(glyphPath, strokePaint)
     }
 
-    private fun drawImage(canvas: Canvas) {
-        val rect = RectF(width * 0.27f, height * 0.29f, width * 0.73f, height * 0.66f)
-        canvas.drawRoundRect(rect, width * 0.04f, width * 0.04f, strokePaint)
-        canvas.drawCircle(width * 0.62f, height * 0.39f, width * 0.035f, strokePaint)
-        canvas.drawLine(rect.left + width * 0.05f, rect.bottom - width * 0.06f, width * 0.44f, height * 0.51f, strokePaint)
-        canvas.drawLine(width * 0.44f, height * 0.51f, rect.right - width * 0.04f, rect.bottom - width * 0.06f, strokePaint)
+    private fun drawImage(canvas: Canvas, bounds: RectF) {
+        val imageWidth = bounds.width()
+        val imageHeight = bounds.height()
+        glyphPath.reset()
+        glyphPath.addRoundRect(bounds, imageWidth * 0.09f, imageWidth * 0.09f, Path.Direction.CW)
+        glyphPath.addCircle(
+            bounds.left + imageWidth * 0.72f,
+            bounds.top + imageHeight * 0.27f,
+            imageWidth * 0.055f,
+            Path.Direction.CW
+        )
+        glyphPath.moveTo(bounds.left + imageWidth * 0.08f, bounds.bottom - imageHeight * 0.12f)
+        glyphPath.lineTo(bounds.left + imageWidth * 0.35f, bounds.top + imageHeight * 0.50f)
+        glyphPath.lineTo(bounds.left + imageWidth * 0.52f, bounds.top + imageHeight * 0.68f)
+        glyphPath.lineTo(bounds.left + imageWidth * 0.68f, bounds.top + imageHeight * 0.54f)
+        glyphPath.lineTo(bounds.right - imageWidth * 0.07f, bounds.bottom - imageHeight * 0.12f)
+        canvas.drawPath(glyphPath, strokePaint)
     }
 
     private fun drawMic(canvas: Canvas, cx: Float, cy: Float, size: Float) {
-        val rect = RectF(cx - size * 0.16f, cy - size * 0.28f, cx + size * 0.16f, cy + size * 0.12f)
-        canvas.drawRoundRect(rect, size * 0.14f, size * 0.14f, strokePaint)
-        canvas.drawLine(cx, cy + size * 0.17f, cx, cy + size * 0.34f, strokePaint)
-        canvas.drawLine(cx - size * 0.16f, cy + size * 0.34f, cx + size * 0.16f, cy + size * 0.34f, strokePaint)
+        val mic = RectF(cx - size * 0.14f, cy - size * 0.30f, cx + size * 0.14f, cy + size * 0.08f)
+        glyphPath.reset()
+        glyphPath.addRoundRect(mic, mic.width() / 2f, mic.width() / 2f, Path.Direction.CW)
+        glyphPath.moveTo(cx - size * 0.25f, cy - size * 0.01f)
+        glyphPath.cubicTo(
+            cx - size * 0.25f, cy + size * 0.17f,
+            cx - size * 0.12f, cy + size * 0.25f,
+            cx, cy + size * 0.25f
+        )
+        glyphPath.cubicTo(
+            cx + size * 0.12f, cy + size * 0.25f,
+            cx + size * 0.25f, cy + size * 0.17f,
+            cx + size * 0.25f, cy - size * 0.01f
+        )
+        glyphPath.moveTo(cx, cy + size * 0.25f)
+        glyphPath.lineTo(cx, cy + size * 0.37f)
+        glyphPath.moveTo(cx - size * 0.16f, cy + size * 0.37f)
+        glyphPath.lineTo(cx + size * 0.16f, cy + size * 0.37f)
+        canvas.drawPath(glyphPath, strokePaint)
     }
 
-    private fun drawChat(canvas: Canvas) {
-        val rect = RectF(width * 0.25f, height * 0.30f, width * 0.75f, height * 0.62f)
-        canvas.drawRoundRect(rect, width * 0.10f, width * 0.10f, strokePaint)
-        canvas.drawLine(width * 0.40f, rect.bottom, width * 0.32f, height * 0.73f, strokePaint)
+    private fun drawChat(canvas: Canvas, cx: Float, cy: Float, size: Float) {
+        glyphPath.reset()
+        glyphPath.moveTo(cx - size * 0.17f, cy - size * 0.20f)
+        glyphPath.cubicTo(
+            cx - size * 0.25f, cy - size * 0.20f,
+            cx - size * 0.29f, cy - size * 0.15f,
+            cx - size * 0.29f, cy - size * 0.08f
+        )
+        glyphPath.lineTo(cx - size * 0.29f, cy + size * 0.10f)
+        glyphPath.cubicTo(
+            cx - size * 0.29f, cy + size * 0.17f,
+            cx - size * 0.24f, cy + size * 0.21f,
+            cx - size * 0.17f, cy + size * 0.21f
+        )
+        glyphPath.lineTo(cx - size * 0.10f, cy + size * 0.21f)
+        glyphPath.lineTo(cx - size * 0.21f, cy + size * 0.31f)
+        glyphPath.lineTo(cx + size * 0.01f, cy + size * 0.21f)
+        glyphPath.lineTo(cx + size * 0.17f, cy + size * 0.21f)
+        glyphPath.cubicTo(
+            cx + size * 0.25f, cy + size * 0.21f,
+            cx + size * 0.29f, cy + size * 0.16f,
+            cx + size * 0.29f, cy + size * 0.09f
+        )
+        glyphPath.lineTo(cx + size * 0.29f, cy - size * 0.08f)
+        glyphPath.cubicTo(
+            cx + size * 0.29f, cy - size * 0.16f,
+            cx + size * 0.24f, cy - size * 0.20f,
+            cx + size * 0.17f, cy - size * 0.20f
+        )
+        glyphPath.close()
+        glyphPath.moveTo(cx - size * 0.16f, cy - size * 0.05f)
+        glyphPath.lineTo(cx + size * 0.16f, cy - size * 0.05f)
+        glyphPath.moveTo(cx - size * 0.16f, cy + size * 0.07f)
+        glyphPath.lineTo(cx + size * 0.08f, cy + size * 0.07f)
+        canvas.drawPath(glyphPath, strokePaint)
     }
 
-    private fun drawSave(canvas: Canvas) {
-        val rect = RectF(width * 0.28f, height * 0.27f, width * 0.72f, height * 0.72f)
-        canvas.drawRoundRect(rect, width * 0.04f, width * 0.04f, strokePaint)
-        canvas.drawLine(width * 0.38f, rect.top, width * 0.38f, height * 0.43f, strokePaint)
-        canvas.drawLine(width * 0.60f, rect.top, width * 0.60f, height * 0.43f, strokePaint)
-        canvas.drawLine(width * 0.38f, height * 0.43f, width * 0.60f, height * 0.43f, strokePaint)
-        canvas.drawLine(width * 0.38f, height * 0.60f, width * 0.62f, height * 0.60f, strokePaint)
+    private fun drawSave(canvas: Canvas, cx: Float, cy: Float, size: Float) {
+        glyphPath.reset()
+        glyphPath.moveTo(cx - size * 0.24f, cy - size * 0.25f)
+        glyphPath.lineTo(cx + size * 0.12f, cy - size * 0.25f)
+        glyphPath.lineTo(cx + size * 0.24f, cy - size * 0.13f)
+        glyphPath.lineTo(cx + size * 0.24f, cy + size * 0.25f)
+        glyphPath.lineTo(cx - size * 0.24f, cy + size * 0.25f)
+        glyphPath.close()
+        glyphPath.moveTo(cx - size * 0.11f, cy - size * 0.25f)
+        glyphPath.lineTo(cx - size * 0.11f, cy - size * 0.06f)
+        glyphPath.lineTo(cx + size * 0.10f, cy - size * 0.06f)
+        glyphPath.lineTo(cx + size * 0.10f, cy - size * 0.25f)
+        glyphPath.moveTo(cx - size * 0.12f, cy + size * 0.25f)
+        glyphPath.lineTo(cx - size * 0.12f, cy + size * 0.07f)
+        glyphPath.lineTo(cx + size * 0.12f, cy + size * 0.07f)
+        glyphPath.lineTo(cx + size * 0.12f, cy + size * 0.25f)
+        canvas.drawPath(glyphPath, strokePaint)
     }
 
     private fun drawAmplitude(canvas: Canvas, cx: Float, cy: Float, radius: Float, amplitude: Int) {

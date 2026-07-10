@@ -13,6 +13,7 @@ import com.getcapacitor.ServerPath;
 
 import world.brightos.brai.capabilities.BraiAndroidCapabilitiesPlugin;
 import world.brightos.brai.braicmd.BraiCmdPlugin;
+import world.brightos.brai.braicmd.ConfigStore;
 import world.brightos.brai.ota.BraiOtaManager;
 import world.brightos.brai.ota.BraiOtaPlugin;
 import world.brightos.brai.ota.BraiOtaRegistry;
@@ -33,6 +34,7 @@ public class MainActivity extends BridgeActivity {
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
+        new ConfigStore(this).setOverlayEnabled(false);
         getWindow().setBackgroundDrawable(new ColorDrawable(STARTUP_BACKGROUND));
         getWindow().setStatusBarColor(STARTUP_BACKGROUND);
         getWindow().setNavigationBarColor(STARTUP_BACKGROUND);

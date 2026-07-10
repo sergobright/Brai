@@ -646,9 +646,12 @@ export function useBraiAppState(initialSection: SectionId) {
         resetUserSnapshots();
         setSyncStatus("connecting");
         await refreshAll();
+        return true;
       }
-    } catch (error) {
-      handleError(error);
+      return false;
+    } catch {
+      setSyncStatus("auth_required");
+      return false;
     } finally {
       setBusy(false);
     }

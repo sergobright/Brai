@@ -7,6 +7,7 @@ const plugin = vi.hoisted(() => ({
   openSettings: vi.fn(),
   retryQueue: vi.fn(),
   setAccessKey: vi.fn(),
+  setOverlayEnabled: vi.fn(),
   setQueuePausedMode: vi.fn(),
   setVoiceOnlyMode: vi.fn(),
   vibratePress: vi.fn(),
@@ -25,6 +26,7 @@ describe("Brai CMD bridge", () => {
     plugin.openSettings.mockReset();
     plugin.retryQueue.mockReset();
     plugin.setAccessKey.mockReset();
+    plugin.setOverlayEnabled.mockReset();
     plugin.setQueuePausedMode.mockReset();
     plugin.setVoiceOnlyMode.mockReset();
     plugin.vibratePress.mockReset();
@@ -33,12 +35,13 @@ describe("Brai CMD bridge", () => {
 
   it("does nothing outside Android native shell", async () => {
     vi.stubGlobal("Capacitor", undefined);
-    const { ensureBraiCmdAccess, getBraiCmdState, listenBraiCmdOnboardingEvents, retryBraiCmdQueue, setBraiCmdAccessKey, setBraiCmdQueuePausedMode, setBraiCmdVoiceOnlyMode, vibrateBraiCmdPress } = await import("@/shared/platform/braiCmd");
+    const { ensureBraiCmdAccess, getBraiCmdState, listenBraiCmdOnboardingEvents, retryBraiCmdQueue, setBraiCmdAccessKey, setBraiCmdOverlayEnabled, setBraiCmdQueuePausedMode, setBraiCmdVoiceOnlyMode, vibrateBraiCmdPress } = await import("@/shared/platform/braiCmd");
 
     await expect(getBraiCmdState()).resolves.toBeNull();
     await expect(ensureBraiCmdAccess("Test")).resolves.toBeNull();
     await expect(listenBraiCmdOnboardingEvents(vi.fn())).resolves.toBeNull();
     await expect(setBraiCmdAccessKey("token", "Test")).resolves.toBeNull();
+    await expect(setBraiCmdOverlayEnabled(true)).resolves.toBeNull();
     await expect(setBraiCmdVoiceOnlyMode(true)).resolves.toBeNull();
     await expect(setBraiCmdQueuePausedMode(true)).resolves.toBeNull();
     await expect(retryBraiCmdQueue()).resolves.toBeNull();
@@ -94,16 +97,19 @@ describe("Brai CMD bridge", () => {
     });
     plugin.ensureAccess.mockResolvedValue({ accessGranted: true });
     plugin.setAccessKey.mockResolvedValue({ accessGranted: true });
+    plugin.setOverlayEnabled.mockResolvedValue({ overlayEnabled: true });
     plugin.setQueuePausedMode.mockResolvedValue({ queuePausedMode: true });
     plugin.retryQueue.mockResolvedValue({ queuePausedMode: false });
-    const { ensureBraiCmdAccess, retryBraiCmdQueue, setBraiCmdAccessKey, setBraiCmdQueuePausedMode } = await import("@/shared/platform/braiCmd");
+    const { ensureBraiCmdAccess, retryBraiCmdQueue, setBraiCmdAccessKey, setBraiCmdOverlayEnabled, setBraiCmdQueuePausedMode } = await import("@/shared/platform/braiCmd");
 
     await expect(ensureBraiCmdAccess("Fixture User")).resolves.toMatchObject({ accessGranted: true });
     await expect(setBraiCmdAccessKey("fixture-access-key", "Fixture User")).resolves.toMatchObject({ accessGranted: true });
+    await expect(setBraiCmdOverlayEnabled(true)).resolves.toMatchObject({ overlayEnabled: true });
     await expect(setBraiCmdQueuePausedMode(true)).resolves.toMatchObject({ queuePausedMode: true });
     await expect(retryBraiCmdQueue()).resolves.toMatchObject({ queuePausedMode: false });
     expect(plugin.ensureAccess).toHaveBeenCalledWith({ displayName: "Fixture User" });
     expect(plugin.setAccessKey).toHaveBeenCalledWith({ token: "fixture-access-key", displayName: "Fixture User" });
+    expect(plugin.setOverlayEnabled).toHaveBeenCalledWith({ enabled: true });
     expect(plugin.setQueuePausedMode).toHaveBeenCalledWith({ enabled: true });
     expect(plugin.retryQueue).toHaveBeenCalledWith();
   });

@@ -15,6 +15,7 @@ const cmdPlugin = vi.hoisted(() => ({
   openSettings: vi.fn(),
   retryQueue: vi.fn(),
   setAccessKey: vi.fn(),
+  setOverlayEnabled: vi.fn(),
   setQueuePausedMode: vi.fn(),
   setVoiceOnlyMode: vi.fn(),
 }));
@@ -68,6 +69,7 @@ export function setupBraiAppTest() {
     cmdPlugin.getState.mockReset();
     cmdPlugin.retryQueue.mockReset();
     cmdPlugin.setAccessKey.mockReset();
+    cmdPlugin.setOverlayEnabled.mockReset();
     cmdPlugin.setQueuePausedMode.mockReset();
     cmdPlugin.setVoiceOnlyMode.mockReset();
     androidCapabilitiesPlugin.getState.mockReset();
@@ -82,6 +84,7 @@ export function setupBraiAppTest() {
     cmdPlugin.getState.mockResolvedValue({ accessGranted: true });
     cmdPlugin.retryQueue.mockResolvedValue({ queuePausedMode: false });
     cmdPlugin.setAccessKey.mockResolvedValue({ accessGranted: true });
+    cmdPlugin.setOverlayEnabled.mockResolvedValue({ overlayEnabled: true });
     cmdPlugin.setQueuePausedMode.mockResolvedValue({ queuePausedMode: true });
     cmdPlugin.setVoiceOnlyMode.mockResolvedValue({ voiceOnlyMode: true });
     androidCapabilitiesPlugin.getState.mockResolvedValue({});

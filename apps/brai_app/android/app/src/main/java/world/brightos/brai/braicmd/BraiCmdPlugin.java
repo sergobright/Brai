@@ -82,6 +82,13 @@ public final class BraiCmdPlugin extends Plugin {
     }
 
     @PluginMethod
+    public void setOverlayEnabled(PluginCall call) {
+        ConfigStore config = new ConfigStore(getContext());
+        config.setOverlayEnabled(call.getBoolean("enabled", false));
+        call.resolve(stateJson());
+    }
+
+    @PluginMethod
     public void ensureAccess(PluginCall call) {
         ConfigStore config = new ConfigStore(getContext());
         String displayName = cleanDisplayName(call.getString("displayName", ""));
@@ -175,6 +182,7 @@ public final class BraiCmdPlugin extends Plugin {
         state.put("accessGranted", !config.getAuthToken().isBlank());
         state.put("voiceOnlyMode", config.getOnboardingVoiceOnly());
         state.put("queuePausedMode", config.getOnboardingQueuePaused());
+        state.put("overlayEnabled", config.getOverlayEnabled());
         state.put("settingsDeclared", hasActivity(BraiCmdSettingsActivity.class));
         state.put("accessibilityServiceDeclared", hasService(BraiAccessibilityService.class));
         state.put("recordingServiceDeclared", hasService(RecordingService.class));

@@ -7,6 +7,7 @@ type BraiCmdPlugin = {
   openSettings(): Promise<unknown>;
   ensureAccess(options: { displayName: string }): Promise<BraiCmdState>;
   setAccessKey(options: { token: string; displayName: string }): Promise<BraiCmdState>;
+  setOverlayEnabled(options: { enabled: boolean }): Promise<BraiCmdState>;
   setVoiceOnlyMode(options: { enabled: boolean }): Promise<BraiCmdState>;
   setQueuePausedMode(options: { enabled: boolean }): Promise<BraiCmdState>;
   retryQueue(): Promise<BraiCmdState>;
@@ -20,6 +21,7 @@ export type BraiCmdState = {
   accessGranted?: boolean;
   voiceOnlyMode?: boolean;
   queuePausedMode?: boolean;
+  overlayEnabled?: boolean;
 };
 
 export type BraiCmdOnboardingEvent = {
@@ -69,6 +71,15 @@ export async function setBraiCmdVoiceOnlyMode(enabled: boolean): Promise<BraiCmd
   if (!isNativeAndroid()) return null;
   try {
     return await BraiCmd.setVoiceOnlyMode({ enabled });
+  } catch {
+    return null;
+  }
+}
+
+export async function setBraiCmdOverlayEnabled(enabled: boolean): Promise<BraiCmdState | null> {
+  if (!isNativeAndroid()) return null;
+  try {
+    return await BraiCmd.setOverlayEnabled({ enabled });
   } catch {
     return null;
   }

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { BookOpen, Crown, Info, Settings } from "lucide-react";
-import { openBraiCmdSettings, setBraiCmdQueuePausedMode, setBraiCmdVoiceOnlyMode } from "@/shared/platform/braiCmd";
+import { ensureBraiCmdAccess, openBraiCmdSettings, setBraiCmdOverlayEnabled, setBraiCmdQueuePausedMode, setBraiCmdVoiceOnlyMode } from "@/shared/platform/braiCmd";
 import { installAndroidBackHandler } from "@/shared/platform/platform";
 import { getBraiLocalStorageItem, removeBraiLocalStorageItem, setBraiLocalStorageItem } from "@/shared/storage/localStorageKeys";
 import { ScrollArea } from "@/shared/ui/scroll-area";
@@ -87,10 +87,32 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
   }, [app.theme, onboardingVisible]);
 
   useEffect(() => {
-    if (onboardingVisible || app.displaySyncStatus === "auth_required") return;
-    void setBraiCmdVoiceOnlyMode(false);
-    void setBraiCmdQueuePausedMode(false);
-  }, [app.displaySyncStatus, onboardingVisible]);
+    let cancelled = false;
+    if (app.displaySyncStatus === "auth_required") {
+      void setBraiCmdOverlayEnabled(false);
+      void setBraiCmdVoiceOnlyMode(true);
+      return;
+    }
+    if (
+      onboardingVisible ||
+      !app.localSnapshotReady ||
+      app.displaySyncStatus === "connecting"
+    ) return;
+    void ensureBraiCmdAccess("Brai").then(async (access) => {
+      if (cancelled) return;
+      if (!access?.accessGranted) return;
+      await setBraiCmdOverlayEnabled(true);
+      if (cancelled) {
+        await setBraiCmdOverlayEnabled(false);
+        return;
+      }
+      await setBraiCmdVoiceOnlyMode(false);
+      await setBraiCmdQueuePausedMode(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [app.displaySyncStatus, app.localSnapshotReady, onboardingVisible]);
 
   useEffect(() => installAndroidBackHandler(() => {
     if (window.history.state?.braiMobileMenu || window.history.state?.braiMobileDockMenu || window.history.state?.braiMobileSheet || window.history.state?.braiActivityEditor || window.history.state?.braiMobileActionCreate || window.history.state?.braiInboxEditor || window.history.state?.braiMobileInboxCreate || window.history.state?.braiFactoryLog) return false;
