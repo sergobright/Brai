@@ -4,5 +4,5 @@
 - [x] 1.4 Make accepted-preview recovery cleanup fail closed.
 - [x] 1.5 Run API, task, Temporal, OpenSpec, and public checks.
 - [x] 1.6 Verify real Postgres branch/run cleanup and prepare `technical-no-preview` delivery.
-- [ ] 1.7 Verify accepted-branch cleanup in production after merge.
-- [ ] 1.8 Archive this OpenSpec change after acceptance.
+- [x] 1.7 Verify accepted-branch cleanup in production after merge.
+- [x] 1.8 Archive this OpenSpec change after acceptance.
