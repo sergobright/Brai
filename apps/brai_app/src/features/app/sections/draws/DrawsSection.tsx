@@ -1,14 +1,15 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent, type MouseEvent } from "react";
 import dynamic from "next/dynamic";
-import { Edit3, Maximize2, Minimize2, PanelLeftClose, PanelLeftOpen, Plus } from "lucide-react";
+import { Maximize2, Minimize2, PanelLeftClose, PanelLeftOpen, Plus } from "lucide-react";
 import type { AppState, BinaryFiles } from "@excalidraw/excalidraw/types";
 import type { ExcalidrawElement } from "@excalidraw/excalidraw/element/types";
 import type { ThemeMode } from "../../appModel";
 import { BraiApi, type BraiApiError, type DrawSceneSummary } from "@/shared/api/braiApi";
 import { defaultApiBase } from "@/shared/config/runtime";
 import { Button } from "@/shared/ui/button";
+import { Card, CardPanel } from "@/shared/ui/card";
 import { ScrollArea } from "@/shared/ui/scroll-area";
 import { cx, plainEditableText, setPlainEditableText } from "../../appUtils";
 import { isMobileNavigationViewport } from "../../navigation/useSectionSwipeNavigation";
@@ -168,62 +169,67 @@ export function DrawsSection({ theme }: { theme: ThemeMode }) {
       )}
     >
       {showList ? (
-      <aside className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)] rounded-md border border-border bg-card">
-        <div className="flex items-center justify-between gap-2 border-b border-border p-2">
-          <div className="min-w-0">
-            <h2 className="truncate text-sm font-semibold leading-5">Draws</h2>
-            <p className="truncate text-xs text-muted-foreground">{saveStatusLabel(status)}</p>
+        <Card className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden">
+          <div className="flex items-center justify-between gap-3 border-b border-border p-4">
+            <div className="min-w-0">
+              <h2 className="m-0 truncate text-lg font-semibold leading-none">Draws</h2>
+              <p className="m-0 mt-1 truncate text-sm text-muted-foreground">{saveStatusLabel(status)}</p>
+            </div>
+            <div className="flex shrink-0 items-center gap-1">
+              <Button type="button" size="icon-sm" variant="ghost" aria-label="Создать сцену" title="Создать сцену" onClick={createDraw}>
+                <Plus className="size-4" aria-hidden="true" />
+              </Button>
+            </div>
           </div>
-          <div className="flex shrink-0 items-center gap-1">
-            <Button type="button" size="icon-sm" variant="ghost" aria-label="Создать сцену" title="Создать сцену" onClick={createDraw}>
-              <Plus className="size-4" aria-hidden="true" />
-            </Button>
-          </div>
-        </div>
-        <ScrollArea className="min-h-0">
-          <div className="grid gap-1 p-2">
-            {draws.length ? draws.map((draw) => (
-              <div
-                key={draw.name}
-                className={cx(
-                  "grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center rounded-md hover:bg-accent hover:text-accent-foreground",
-                  draw.name === activeName && "bg-accent text-accent-foreground",
-                )}
-                onContextMenu={(event) => {
-                  event.preventDefault();
-                  setEditingTitle({ name: draw.name, source: "list" });
-                }}
-                onClick={() => setActiveName(draw.name)}
-              >
-                <div className="grid min-w-0 px-2 py-2 text-left text-sm">
-                  <DrawTitleEditor
-                    editing={editingTitle?.name === draw.name && editingTitle.source === "list"}
-                    label={`Название рисунка: ${draw.title}`}
-                    title={draw.title}
-                    onCommit={(title) => renameDraw(draw.name, title)}
-                    onEditDone={() => setEditingTitle(null)}
-                  />
-                  <span className="truncate text-xs text-muted-foreground">{formatUpdatedAt(draw.updated_at_utc)}</span>
+          <ScrollArea className="min-h-0 [&>[data-slot=scroll-area-scrollbar]]:!right-1" contentInset="none">
+            <div className="grid gap-2 p-4">
+              {draws.length ? draws.map((draw) => (
+                <div
+                  key={draw.name}
+                  role="button"
+                  tabIndex={0}
+                  className={cx(
+                    "group grid min-h-[72px] min-w-0 cursor-pointer content-center rounded-lg border border-transparent px-3 py-2.5 text-left transition-colors hover:bg-accent/60 hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50",
+                    draw.name === activeName && "border-primary/20 bg-primary/10 text-accent-foreground",
+                  )}
+                  onContextMenu={(event) => {
+                    event.preventDefault();
+                    setEditingTitle({ name: draw.name, source: "list" });
+                  }}
+                  onClick={() => setActiveName(draw.name)}
+                  onKeyDown={(event) => {
+                    if (event.key !== "Enter" && event.key !== " ") return;
+                    event.preventDefault();
+                    setActiveName(draw.name);
+                  }}
+                >
+                  <div className="min-w-0">
+                    <DrawTitleEditor
+                      editing={editingTitle?.name === draw.name && editingTitle.source === "list"}
+                      label={`Название рисунка: ${draw.title}`}
+                      title={draw.title}
+                      onCommit={(title) => renameDraw(draw.name, title)}
+                      onEditDone={() => setEditingTitle(null)}
+                      onEditStart={() => setEditingTitle({ name: draw.name, source: "list" })}
+                    />
+                    <span className="block truncate text-xs text-muted-foreground">{formatUpdatedAt(draw.updated_at_utc)}</span>
+                  </div>
                 </div>
-                <Button type="button" size="icon-xs" variant="ghost" aria-label={`Переименовать ${draw.title}`} title="Переименовать" onClick={() => setEditingTitle({ name: draw.name, source: "list" })}>
-                  <Edit3 className="size-3" aria-hidden="true" />
-                </Button>
-              </div>
-            )) : (
-              <button
-                type="button"
-                className="rounded-md px-2 py-2 text-left text-sm text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-                onClick={() => setActiveName(DEFAULT_DRAW_NAME)}
-              >
-                Новый рисунок
-              </button>
-            )}
-          </div>
-        </ScrollArea>
-      </aside>
+              )) : (
+                <button
+                  type="button"
+                  className="min-h-[72px] rounded-lg px-3 py-2.5 text-left text-sm text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+                  onClick={() => setActiveName(DEFAULT_DRAW_NAME)}
+                >
+                  Новый рисунок
+                </button>
+              )}
+            </div>
+          </ScrollArea>
+        </Card>
       ) : null}
-      <div className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden rounded-md border border-border bg-background" data-nav-swipe-exclusion>
-        <div className="flex min-h-10 items-center justify-between gap-2 border-b border-border bg-card/80 px-2 py-1">
+      <Card className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden" data-nav-swipe-exclusion>
+        <div className="flex min-h-14 items-center justify-between gap-3 border-b border-border px-3 py-2">
           <Button type="button" size="icon-sm" variant="ghost" aria-label={listOpen ? "Скрыть список рисунков" : "Показать список рисунков"} title={listOpen ? "Скрыть список рисунков" : "Показать список рисунков"} disabled={fullScreen} onClick={() => setListOpen((open) => !open)}>
             {listOpen ? <PanelLeftClose className="size-4" aria-hidden="true" /> : <PanelLeftOpen className="size-4" aria-hidden="true" />}
           </Button>
@@ -234,32 +240,32 @@ export function DrawsSection({ theme }: { theme: ThemeMode }) {
               title={activeName.replace(/\.excalidraw$/, "")}
               onCommit={(title) => renameDraw(activeName, title)}
               onEditDone={() => setEditingTitle(null)}
+              onEditStart={() => setEditingTitle({ name: activeName, source: "main" })}
             />
             <p className="truncate text-xs text-muted-foreground">{saveStatusLabel(status)}</p>
           </div>
           <div className="flex shrink-0 items-center gap-1">
-            <Button type="button" size="icon-sm" variant="ghost" aria-label="Переименовать рисунок" title="Переименовать рисунок" onClick={() => setEditingTitle({ name: activeName, source: "main" })}>
-              <Edit3 className="size-4" aria-hidden="true" />
-            </Button>
             <Button type="button" size="icon-sm" variant="ghost" aria-label={fullScreen ? "Выйти из полноэкранного режима" : "На весь экран"} title={fullScreen ? "Выйти из полноэкранного режима" : "На весь экран"} onClick={() => setFullScreen((open) => !open)}>
               {fullScreen ? <Minimize2 className="size-4" aria-hidden="true" /> : <Maximize2 className="size-4" aria-hidden="true" />}
             </Button>
           </div>
         </div>
-        <div className="min-h-0 overflow-hidden">
-        {scene ? (
-          <DrawsCanvas
-            key={activeName}
-            initialData={scene}
-            name={activeName}
-            onChange={onChange}
-            theme={theme}
-          />
-        ) : (
-          <div className="grid h-full place-items-center text-sm text-muted-foreground">Загрузка</div>
-        )}
-        </div>
-      </div>
+        <CardPanel className="min-h-0 p-3">
+          <div className="h-full min-h-0 overflow-hidden rounded-xl border border-border bg-background">
+            {scene ? (
+              <DrawsCanvas
+                key={activeName}
+                initialData={scene}
+                name={activeName}
+                onChange={onChange}
+                theme={theme}
+              />
+            ) : (
+              <div className="grid h-full place-items-center text-sm text-muted-foreground">Загрузка</div>
+            )}
+          </div>
+        </CardPanel>
+      </Card>
     </div>
   );
 }
@@ -284,14 +290,17 @@ function DrawTitleEditor({
   title,
   onCommit,
   onEditDone,
+  onEditStart,
 }: {
   editing: boolean;
   label: string;
   title: string;
   onCommit: (title: string) => Promise<void>;
   onEditDone: () => void;
+  onEditStart: () => void;
 }) {
   const titleRef = useRef<HTMLSpanElement | null>(null);
+  const mobile = useHydratedMobileNavigationViewport();
 
   useLayoutEffect(() => {
     if (!titleRef.current || document.activeElement === titleRef.current) return;
@@ -325,6 +334,7 @@ function DrawTitleEditor({
   }
 
   function onKeyDown(event: KeyboardEvent<HTMLSpanElement>) {
+    event.stopPropagation();
     if (event.key === "Enter") {
       event.preventDefault();
       titleRef.current?.blur();
@@ -337,20 +347,38 @@ function DrawTitleEditor({
     }
   }
 
+  function onClick(event: MouseEvent<HTMLSpanElement>) {
+    event.stopPropagation();
+    if (mobile && !editing) event.preventDefault();
+    onEditStart();
+  }
+
   return (
     <span
       ref={titleRef}
-      className="block min-w-0 truncate font-medium focus:text-primary focus:outline-0"
-      contentEditable={!isMobileNavigationViewport() || editing}
+      className="inline-block max-w-full truncate align-top font-medium focus:text-primary focus:outline-0"
+      contentEditable={!mobile || editing}
       suppressContentEditableWarning
       tabIndex={0}
       role="textbox"
       aria-label={label}
+      onClick={onClick}
       onBlur={() => void saveTitle()}
       onInput={onInput}
       onKeyDown={onKeyDown}
     />
   );
+}
+
+function useHydratedMobileNavigationViewport(): boolean {
+  return useSyncExternalStore(subscribeMobileNavigationViewport, isMobileNavigationViewport, () => false);
+}
+
+function subscribeMobileNavigationViewport(onStoreChange: () => void): () => void {
+  if (typeof window === "undefined" || typeof window.matchMedia !== "function") return () => undefined;
+  const query = window.matchMedia("(max-width: 860px)");
+  query.addEventListener("change", onStoreChange);
+  return () => query.removeEventListener("change", onStoreChange);
 }
 
 function toDrawFileName(title: string): string {
