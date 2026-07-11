@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { openProfileMenuItem, setupBraiAppTest, stubAndroidCapacitor } from "./app-test-support";
+import { openProfileMenuItem, setupBraiAppTest, stubAndroidCapacitor, useUnauthenticatedSession } from "./app-test-support";
 import { BraiApp } from "@/features/app/BraiApp";
 import { FocusSection } from "@/features/app/sections/focus/FocusSection";
 import { pendingEvents, saveGoalCache, saveHistoryCache } from "@/shared/storage/syncStore";
@@ -29,7 +29,9 @@ describe("BraiApp shell", () => {
 
   it("uses explicit email-only login on Preview web", async () => {
     window.__BRAI_RUNTIME_CONFIG__ = { environment: "preview-a", previewSlot: "A" };
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    useUnauthenticatedSession();
+    const fetchMock = vi.mocked(fetch);
+    fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
       const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
       if (url.endsWith("/auth/session")) return unauthenticatedSessionResponse();
       if (url.endsWith("/auth/test-email-login")) {
@@ -40,8 +42,6 @@ describe("BraiApp shell", () => {
       }
       return Promise.reject(new Error("offline"));
     });
-    vi.stubGlobal("fetch", fetchMock);
-
     render(<BraiApp />);
 
     const email = await screen.findByRole("textbox", { name: "Email" }, { timeout: 15_000 });
@@ -60,7 +60,7 @@ describe("BraiApp shell", () => {
   it("keeps Android login password-only", async () => {
     stubAndroidCapacitor();
     window.__BRAI_RUNTIME_CONFIG__ = { environment: "preview-a", previewSlot: "A" };
-    stubUnauthenticatedSessionFetch();
+    useUnauthenticatedSession();
 
     render(<BraiApp />);
 
@@ -70,7 +70,7 @@ describe("BraiApp shell", () => {
 
   it("keeps production Web on the OTP flow", async () => {
     window.__BRAI_RUNTIME_CONFIG__ = { environment: "prod" };
-    stubUnauthenticatedSessionFetch();
+    useUnauthenticatedSession();
 
     render(<BraiApp />);
 
@@ -1017,13 +1017,6 @@ function authSessionResponse(): Response {
 
 function unauthenticatedSessionResponse(): Response {
   return jsonResponse({ authenticated: false, user: null });
-}
-
-function stubUnauthenticatedSessionFetch() {
-  vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
-    if (requestUrl(input).endsWith("/auth/session")) return unauthenticatedSessionResponse();
-    return Promise.reject(new Error("offline"));
-  }));
 }
 
 function emptyInboxResponse(): Response {

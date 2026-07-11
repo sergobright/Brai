@@ -22,6 +22,8 @@ const actionsWidgetPlugin = vi.hoisted(() => ({
 
 export { actionsWidgetPlugin, cmdPlugin, otaPlugin };
 
+let authSession = authenticatedSession();
+
 vi.mock("@capacitor/core", () => ({
   registerPlugin: vi.fn((name: string) => {
     if (name === "BraiCmd") return cmdPlugin;
@@ -40,6 +42,7 @@ function matchesMediaQuery(query: string): boolean {
 
 export function setupBraiAppTest() {
   beforeEach(async () => {
+    authSession = authenticatedSession();
     const db = clientDb();
     await Promise.all(db.tables.map((table) => table.clear()));
     otaPlugin.getState.mockReset();
@@ -79,7 +82,7 @@ export function setupBraiAppTest() {
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
       if (url.endsWith("/auth/session")) {
-        return new Response(JSON.stringify({ authenticated: true, user: { id: "test-user", email: "test@example.com", name: "Test" } }), {
+        return new Response(JSON.stringify(authSession), {
           status: 200,
           headers: { "content-type": "application/json" },
         });
@@ -122,6 +125,14 @@ export function setupBraiAppTest() {
     delete window.__BRAI_RUNTIME_CONFIG__;
     delete document.documentElement.dataset.sidebarState;
   });
+}
+
+export function useUnauthenticatedSession() {
+  authSession = { authenticated: false, user: null };
+}
+
+function authenticatedSession() {
+  return { authenticated: true, user: { id: "test-user", email: "test@example.com", name: "Test" } };
 }
 
 export function stubAndroidCapacitor() {
