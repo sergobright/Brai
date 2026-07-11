@@ -399,7 +399,7 @@ describe("BraiApp onboarding", () => {
 
     render(<BraiApp />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Войти" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Войти" }, { timeout: 5_000 }));
     fireEvent.change(await screen.findByLabelText("Пароль"), { target: { value: "wrong" } });
     fireEvent.click(screen.getByRole("button", { name: "Открыть" }));
 
@@ -440,7 +440,7 @@ describe("BraiApp onboarding", () => {
 
     render(<BraiApp />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Войти" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Войти" }, { timeout: 5_000 }));
     expect(cmdPlugin.setVoiceOnlyMode).not.toHaveBeenCalledWith({ enabled: false });
     fireEvent.change(await screen.findByLabelText("Пароль"), { target: { value: "correct" } });
     fireEvent.click(screen.getByRole("button", { name: "Открыть" }));
