@@ -25,6 +25,7 @@ export type OnboardingStep =
   | "demo-chat-reply"
   | "demo-agent-command"
   | "special-settings"
+  | "security"
   | "voice-intro"
   | "voice-choice"
   | "provider-key"
@@ -142,17 +143,18 @@ const orderedSteps: OnboardingStep[] = [
   "demo-chat-reply",
   "demo-agent-command",
   "special-settings",
+  "security",
   "voice-intro",
   "voice-choice",
   "provider-key",
   "local-server",
   "cloud-privacy",
+  "microphone",
   "overlay",
   "accessibility-why",
   "accessibility-blocked",
   "accessibility-restricted",
   "accessibility-enable",
-  "microphone",
   "notifications",
   "training-start",
   "training-dictate",

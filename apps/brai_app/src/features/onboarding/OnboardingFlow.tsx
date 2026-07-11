@@ -429,7 +429,7 @@ export function OnboardingFlow({
   function chooseVoiceMode(voiceMode: VoiceMode) {
     if (voiceMode === "provider") go("provider-key", { voiceMode });
     if (voiceMode === "local") go("local-server", { voiceMode });
-    if (voiceMode === "cloud") go("cloud-privacy", { voiceMode });
+    if (voiceMode === "cloud") go("microphone", { voiceMode });
   }
 
   async function submitCloudLogin(email: string) {
@@ -447,7 +447,7 @@ export function OnboardingFlow({
 
   async function testProviderKey() {
     if (readyStep === "provider-key") {
-      go("overlay");
+      go("microphone");
       return;
     }
     if (!provider.trim() || providerKey.trim().length < 8) {
@@ -459,7 +459,7 @@ export function OnboardingFlow({
 
   async function testLocalServer() {
     if (readyStep === "local-server") {
-      go("overlay");
+      go("microphone");
       return;
     }
     await runVerification("local-server", async () => {
@@ -508,7 +508,7 @@ export function OnboardingFlow({
 
   async function checkAccessibility() {
     if (readyStep === "accessibility-enable") {
-      go("microphone");
+      go("notifications");
       return;
     }
     await runVerification("accessibility-enable", async () => {
@@ -519,7 +519,7 @@ export function OnboardingFlow({
 
   async function requestMic() {
     if (readyStep === "microphone") {
-      go("notifications");
+      go("overlay");
       return;
     }
     const checkOnly = permissionFallbackStep === "microphone";
@@ -684,16 +684,59 @@ export function OnboardingFlow({
       );
     }
 
-    if (state.step === "special-settings") return <InfoScreen icon={ShieldCheck} title="Нужны системные настройки" text="Показанные функции требуют доступа поверх экрана, специальных возможностей, микрофона и уведомлений."><PrimaryButton onClick={() => go("voice-intro")}>Продолжить</PrimaryButton></InfoScreen>;
-    if (state.step === "voice-intro") return <InfoScreen icon={Mic} title="Сначала голосовой модуль" text="Без распознавания голоса Brai CMD не сможет принимать команды и вставлять продиктованный текст."><PrimaryButton onClick={() => go("voice-choice")}>Настроить Brai CMD</PrimaryButton></InfoScreen>;
+    if (state.step === "special-settings") {
+      return (
+        <InfoScreen
+          icon={ShieldCheck}
+          title="Требуется особая настройка"
+          text={"Продемонстрированные функции не могут работать без специальной настройки\n\nПоэтому далее мы проведём вас по шагам, чтобы всё заработало\n\nНичего сложного. Просто следуйте инструкциям шаг за шагом."}
+        >
+          <PrimaryButton onClick={() => go("security")}>Продолжить</PrimaryButton>
+        </InfoScreen>
+      );
+    }
+
+    if (state.step === "security") {
+      return (
+        <StepScreen actions={<PrimaryButton onClick={() => go("voice-intro")}>Продолжить</PrimaryButton>}>
+          <div className="grid gap-5">
+            <InfoBlock
+              icon={ShieldCheck}
+              title="Не беспокойтесь о безопасности"
+              text={"Приложение не шпионит за вами и ничего не делает без вашего ведома.\n\nУ приложения открыт исходный код, который может проверить любой человек или агент.\n\nПоэтому, несмотря на уведомления о нарушении безопасности, вы можете ему доверять."}
+            />
+            <Card className="rounded-2xl border-primary/15 bg-card/70 p-4 shadow-none">
+              <p className="m-0 text-base leading-6 text-muted-foreground">
+                Вот ссылка на исходный код.{" "}
+                <a className="font-medium text-primary underline-offset-4 hover:underline" href="https://github.com/sergobright/Brai" rel="noreferrer" target="_blank">
+                  sergobright/Brai
+                </a>
+              </p>
+            </Card>
+          </div>
+        </StepScreen>
+      );
+    }
+
+    if (state.step === "voice-intro") {
+      return (
+        <InfoScreen
+          icon={Mic}
+          title="Давайте настроим Brai CMD"
+          text={"Brai обладает мощными ИИ-функциями и может работать даже без этих настроек.\n\nНо Андроид приложение спроектировано так, чтобы телефон был вашим командным центром.\n\nПоэтому давайте настроим всё по шагам."}
+        >
+          <PrimaryButton onClick={() => go("voice-choice")}>Настроить Brai CMD</PrimaryButton>
+        </InfoScreen>
+      );
+    }
 
     if (state.step === "voice-choice") {
       const choices = [
         { icon: KeyRound, title: "API ключ", text: "Расшифровка напрямую через поставщика LLM. Нужен API ключ", onClick: () => chooseVoiceMode("provider") },
-        { icon: Server, title: "Локальная модель", text: "Расшифровка на вашем сервере. Нужен эндпойнт и ключ", onClick: () => chooseVoiceMode("local") },
+        { icon: Server, title: "Локальная модель", text: "Расшифровка на вашем сервере. Нужен эндпойнт и ключ", disabled: true, badge: "В разработке" },
         { icon: Cloud, title: "Облако Brai", text: "Расшифровка через серверы Брай. Ничего не требует, но есть лимиты на бесплатное использование", badge: "Самое простое", onClick: () => chooseVoiceMode("cloud") },
       ];
-      return <ChoiceScreen compact title="Как распознавать голос" choices={choices} />;
+      return <ChoiceScreen compact title="Как распознавать голос" text="Без распознавания голоса Brai CMD не сможет принимать команды и вставлять продиктованный текст" choices={choices} />;
     }
 
     if (state.step === "provider-key") {
@@ -733,36 +776,42 @@ export function OnboardingFlow({
       );
     }
 
-    if (state.step === "cloud-privacy") return <InfoScreen icon={Cloud} title="Мы ничего не храним" text={"Ваши аудио с голосом и расшифровки обрабатываются на серверах Брай.\n\nНо после успешной доставки расшифровки вам мы всё сразу удаляем. Это наши принципы.\n\nДля полной приватности используйте локальные модели"}><PrimaryButton onClick={() => go("overlay")}>Согласен</PrimaryButton></InfoScreen>;
+    if (state.step === "cloud-privacy") return <InfoScreen icon={Cloud} title="Мы ничего не храним" text={"Ваши аудио с голосом и расшифровки обрабатываются на серверах Брай.\n\nНо после успешной доставки расшифровки вам мы всё сразу удаляем. Это наши принципы.\n\nДля полной приватности используйте локальные модели"}><PrimaryButton onClick={() => go("microphone")}>Согласен</PrimaryButton></InfoScreen>;
 
     if (state.step === "overlay") {
       return (
-        <PermissionScreen icon={MonitorUp} title="Поверх других приложений" text="Это разрешение нужно, чтобы плавающая кнопка Brai была доступна поверх текущего приложения.">
+        <SettingsImageScreen icon={MonitorUp} imageAlt="Включение плавающих кнопок Brai" imageHeight={1280} imageSrc="/onboarding/settings-2-floating-buttons.jpg" imageWidth={1280} title="Плавающие кнопки">
           <SecondaryButton icon={ExternalLink} onClick={openOverlay}>Открыть настройки</SecondaryButton>
           <CheckActionButton status={checkStatus("overlay")} onClick={checkOverlay} />
-        </PermissionScreen>
+        </SettingsImageScreen>
       );
     }
 
-    if (state.step === "accessibility-why") return <InfoScreen icon={ShieldCheck} title="Специальные возможности" text="Они нужны, чтобы вставлять текст в поля, работать с буфером и выполнять действия на экране."><PrimaryButton onClick={() => go("accessibility-blocked")}>Продолжить</PrimaryButton></InfoScreen>;
-    if (state.step === "accessibility-blocked") return <InfoScreen icon={Lock} title="Шаг 1: получить отказ" text="Откройте специальные возможности и попробуйте включить Brai. Android должен показать, что настройка заблокирована."><SecondaryButton icon={ExternalLink} onClick={openAccessibility}>Открыть</SecondaryButton><PrimaryButton disabled={isAndroid && manualConfirmReadyStep !== "accessibility-blocked"} icon={CheckCircle2} onClick={() => go("accessibility-restricted")}>Да, доступ заблокирован</PrimaryButton></InfoScreen>;
-    if (state.step === "accessibility-restricted") return <InfoScreen icon={ShieldCheck} title="Шаг 2: снять ограничение" text="Откройте карточку приложения, нажмите меню с тремя точками и выберите «Разрешить ограниченные настройки»."><SecondaryButton icon={ExternalLink} onClick={openAppSettings}>Открыть карточку приложения</SecondaryButton><PrimaryButton disabled={isAndroid && manualConfirmReadyStep !== "accessibility-restricted"} icon={CheckCircle2} onClick={() => go("accessibility-enable")}>Ограничение снято</PrimaryButton></InfoScreen>;
-    if (state.step === "accessibility-enable") return <InfoScreen icon={ShieldCheck} title="Шаг 3: включить доступ" text="Теперь снова откройте специальные возможности и включите Brai. После возврата мы проверим состояние."><SecondaryButton icon={ExternalLink} onClick={openAccessibility}>Открыть</SecondaryButton><CheckActionButton status={checkStatus("accessibility-enable")} onClick={checkAccessibility} /></InfoScreen>;
+    if (state.step === "accessibility-why") {
+      return (
+        <StepScreen actions={<PrimaryButton onClick={() => go("accessibility-blocked")}>Три шага</PrimaryButton>}>
+          <InfoBlock icon={ShieldCheck} title="Особый доступ" />
+        </StepScreen>
+      );
+    }
+    if (state.step === "accessibility-blocked") return <SettingsImageScreen icon={Lock} imageAlt="Шаг 1: получите отказ в специальных возможностях" imageHeight={1280} imageSrc="/onboarding/settings-3-accessibility.jpg" imageWidth={1280} title="Шаг 1: Получить отказ"><SecondaryButton icon={ExternalLink} onClick={openAccessibility}>Открыть специальные возможности</SecondaryButton><PrimaryButton disabled={isAndroid && manualConfirmReadyStep !== "accessibility-blocked"} icon={CheckCircle2} onClick={() => go("accessibility-restricted")}>Продолжить</PrimaryButton></SettingsImageScreen>;
+    if (state.step === "accessibility-restricted") return <SettingsImageScreen icon={ShieldCheck} imageAlt="Шаг 2: снимите ограничение в карточке приложения" imageHeight={1181} imageSrc="/onboarding/settings-4-restricted.jpg" imageWidth={1280} title="Шаг 2: Снять ограничение"><SecondaryButton icon={ExternalLink} onClick={openAppSettings}>Открыть карточку приложения</SecondaryButton><PrimaryButton disabled={isAndroid && manualConfirmReadyStep !== "accessibility-restricted"} icon={CheckCircle2} onClick={() => go("accessibility-enable")}>Продолжить</PrimaryButton></SettingsImageScreen>;
+    if (state.step === "accessibility-enable") return <SettingsImageScreen icon={ShieldCheck} imageAlt="Шаг 3: включите особый доступ Brai" imageHeight={1280} imageSrc="/onboarding/settings-3-accessibility.jpg" imageWidth={1280} title="Шаг 3: Включить доступ"><SecondaryButton icon={ExternalLink} onClick={openAccessibility}>Открыть специальные возможности</SecondaryButton><CheckActionButton status={checkStatus("accessibility-enable")} onClick={checkAccessibility} /></SettingsImageScreen>;
 
     if (state.step === "microphone") return (
-      <PermissionScreen icon={Mic} title="Микрофон" text="Микрофон нужен для голосового ввода и команд.">
+      <SettingsImageScreen icon={Mic} imageAlt="Разрешение микрофона Brai" imageHeight={960} imageSrc="/onboarding/settings-1-microphone.jpg" imageWidth={1280} title="Микрофон">
         {permissionFallbackStep === "microphone" ? <SecondaryButton icon={ExternalLink} onClick={() => openPermissionAppSettings("microphone")}>Открыть настройки приложения</SecondaryButton> : null}
         <CheckActionButton idleLabel={permissionFallbackStep === "microphone" ? "Проверить" : "Разрешить микрофон"} status={checkStatus("microphone")} onClick={requestMic} />
-      </PermissionScreen>
+      </SettingsImageScreen>
     );
     if (state.step === "notifications") return (
-      <PermissionScreen icon={Bell} title="Уведомления" text="Уведомления нужны для фоновой записи, очереди и статуса отправки.">
+      <SettingsImageScreen icon={Bell} imageAlt="Разрешение уведомлений Brai" imageHeight={1280} imageSrc="/onboarding/settings-5-notifications.jpg" imageWidth={1280} title="Уведомления">
         {permissionFallbackStep === "notifications" ? <SecondaryButton icon={ExternalLink} onClick={() => openPermissionAppSettings("notifications")}>Открыть настройки приложения</SecondaryButton> : null}
         <CheckActionButton idleLabel={permissionFallbackStep === "notifications" ? "Проверить" : "Разрешить уведомления"} status={checkStatus("notifications")} onClick={requestNotifications} />
-      </PermissionScreen>
+      </SettingsImageScreen>
     );
 
-    if (state.step === "training-start") return <InfoScreen icon={CheckCircle2} title="Готово к обучению" text="Базовая настройка завершена. Осталось проверить голосовой сценарий в четыре шага."><SecondaryButton onClick={completeSetup}>Пропустить</SecondaryButton><PrimaryButton onClick={startTraining}>Обучение</PrimaryButton></InfoScreen>;
+    if (state.step === "training-start") return <InfoScreen icon={CheckCircle2} title="Готово к обучению" text={"Базовая настройка завершена. Осталось проверить голосовой сценарий в четыре шага.\n\nЕсли вы ещё не пользовались Brai CMD, то не пропускайте этот шаг."}><SecondaryButton onClick={completeSetup}>Пропустить</SecondaryButton><PrimaryButton onClick={startTraining}>Обучение</PrimaryButton></InfoScreen>;
     if (state.step === "training-dictate") return <TrainingDictate confirmed={trainingDictated} value={trainingText} onChange={(value) => {
       setTrainingText(value);
       if (!value.trim()) setTrainingDictated(false);
@@ -840,19 +889,21 @@ function ShinyButton({ children, onClick }: { children: ReactNode; onClick: () =
 }
 
 function CheckActionButton({ disabled, idleLabel = "Проверить", onClick, status }: { disabled?: boolean; idleLabel?: string; onClick: () => void | Promise<void>; status: CheckStatus }) {
+  const { transitionActive } = useContext(OnboardingChromeContext);
   const checking = status === "checking";
   const failed = status === "error";
   const ready = status === "ready";
+  const continuing = transitionActive && !checking && !failed;
   return (
     <PrimaryButton
       disabled={disabled || checking || failed}
-      icon={checking ? LoaderCircle : failed ? CircleX : ready ? CheckCircle2 : ShieldCheck}
-      iconClassName={checking ? "animate-spin" : ready ? "text-emerald-400" : undefined}
+      icon={checking ? LoaderCircle : failed ? CircleX : ready || continuing ? CheckCircle2 : ShieldCheck}
+      iconClassName={checking ? "animate-spin" : ready || continuing ? "text-emerald-400" : undefined}
       tone={failed ? "danger" : "default"}
       trailingArrow={false}
       onClick={onClick}
     >
-      {checking ? "Проверка" : failed ? "Ошибка" : ready ? "Продолжить" : idleLabel}
+      {checking ? "Проверка" : failed ? "Ошибка" : ready || continuing ? "Продолжить" : idleLabel}
     </PrimaryButton>
   );
 }
@@ -982,7 +1033,7 @@ function StepActions({ children, preserveBottomGap = false }: { children: ReactN
   );
 }
 
-function InfoBlock({ compactOnShort = false, icon: Icon, title, text }: { compactOnShort?: boolean; icon: LucideIcon; title: string; text: string }) {
+function InfoBlock({ compactOnShort = false, icon: Icon, title, text }: { compactOnShort?: boolean; icon: LucideIcon; title: string; text?: string }) {
   return (
     <div className={cx("grid min-w-0 gap-4", compactOnShort ? "[@media(max-height:700px)]:gap-2 [@media(max-height:650px)]:gap-1.5 [@media(max-height:800px)_and_(min-aspect-ratio:2/3)]:gap-1" : "")}>
       <span className={cx("grid size-11 place-items-center rounded-full border border-primary/25 bg-primary/10 text-primary", compactOnShort ? "[@media(max-height:700px)]:size-9 [@media(max-height:650px)]:size-8 [@media(max-height:800px)_and_(min-aspect-ratio:2/3)]:hidden" : "")}>
@@ -990,7 +1041,7 @@ function InfoBlock({ compactOnShort = false, icon: Icon, title, text }: { compac
       </span>
       <div className={cx("grid min-w-0 gap-2", compactOnShort ? "[@media(max-height:800px)_and_(min-aspect-ratio:2/3)]:gap-1" : "")}>
         <h2 className={cx("m-0 break-words text-3xl font-semibold leading-tight", compactOnShort ? "[@media(max-height:700px)]:text-2xl [@media(max-height:650px)]:text-xl [@media(max-height:800px)_and_(min-aspect-ratio:2/3)]:text-xl" : "")}>{title}</h2>
-        <p className={cx("m-0 whitespace-pre-line break-words text-base leading-6 text-muted-foreground", compactOnShort ? "[@media(max-height:700px)]:text-sm [@media(max-height:700px)]:leading-5 [@media(max-height:650px)]:text-sm [@media(max-height:650px)]:leading-5 [@media(max-height:800px)_and_(min-aspect-ratio:2/3)]:text-sm [@media(max-height:800px)_and_(min-aspect-ratio:2/3)]:leading-5" : "")}>{text}</p>
+        {text ? <p className={cx("m-0 whitespace-pre-line break-words text-base leading-6 text-muted-foreground", compactOnShort ? "[@media(max-height:700px)]:text-sm [@media(max-height:700px)]:leading-5 [@media(max-height:650px)]:text-sm [@media(max-height:650px)]:leading-5 [@media(max-height:800px)_and_(min-aspect-ratio:2/3)]:text-sm [@media(max-height:800px)_and_(min-aspect-ratio:2/3)]:leading-5" : "")}>{text}</p> : null}
       </div>
     </div>
   );
@@ -1103,11 +1154,16 @@ function WelcomeCarousel({ currentStep, onStart, onStepChange }: { currentStep: 
   );
 }
 
-function PermissionScreen({ children, icon, text, title }: { children: ReactNode; icon: LucideIcon; text: string; title: string }) {
+function SettingsImageScreen({ children, icon, imageAlt, imageHeight, imageSrc, imageWidth, title }: { children: ReactNode; icon: LucideIcon; imageAlt: string; imageHeight: number; imageSrc: string; imageWidth: number; title: string }) {
   return (
-    <InfoScreen icon={icon} title={title} text={text}>
-      {children}
-    </InfoScreen>
+    <StepScreen actions={children}>
+      <div className="grid gap-4 [@media(max-height:700px)]:gap-3">
+        <InfoBlock icon={icon} title={title} />
+        <Card className="overflow-hidden rounded-2xl border-primary/15 bg-card/70 p-0 shadow-none">
+          <Image alt={imageAlt} className="h-auto max-h-[34dvh] w-full object-contain [@media(max-height:700px)]:max-h-[28dvh] [@media(max-height:620px)]:max-h-[22dvh]" height={imageHeight} src={imageSrc} unoptimized width={imageWidth} />
+        </Card>
+      </div>
+    </StepScreen>
   );
 }
 
@@ -1330,11 +1386,11 @@ function StatusCard({ text, tone }: { text: string; tone: ChromeStatusTone }) {
   return (
     <Card
       className={cx(
-        "h-14 justify-center rounded-2xl px-4 py-2 text-sm leading-5 shadow-none",
+        "max-h-[32dvh] min-h-14 justify-center overflow-auto rounded-2xl px-4 py-2 text-sm leading-5 shadow-none",
         tone === "bad" ? "border-destructive/35 bg-destructive/10 text-destructive" : tone === "ok" ? "border-primary/30 bg-primary/10 text-foreground" : "border-primary/15 bg-card/60 text-muted-foreground",
       )}
     >
-      <p className="m-0 line-clamp-2">{text}</p>
+      <p className="m-0 whitespace-pre-line break-words">{text}</p>
     </Card>
   );
 }
@@ -1359,6 +1415,7 @@ function previousOnboardingStep(state: OnboardingState): { step: OnboardingStep;
 function screenIconForStep(step: OnboardingStep): LucideIcon {
   if (step === "locked" || step === "login" || step === "login-check") return Lock;
   if (step.startsWith("training")) return step === "training-offline" ? WifiOff : step === "training-storage" ? FileAudio : Mic;
+  if (step === "security") return ShieldCheck;
   if (step === "voice-choice" || step === "provider-key") return KeyRound;
   if (step === "local-server") return Server;
   if (step === "cloud-privacy") return Cloud;
@@ -1373,12 +1430,13 @@ function screenIconForStep(step: OnboardingStep): LucideIcon {
 function statusPromptForStep(step: OnboardingStep): string {
   if (step === "provider-key") return "Выберите поставщика, введите ключ и нажмите Проверить.";
   if (step === "local-server") return "Введите URL локального сервера и нажмите Проверить.";
-  if (step === "overlay") return "Включите разрешение поверх экрана и нажмите Проверить.";
-  if (step === "accessibility-blocked") return "Откройте специальные возможности, получите отказ и подтвердите шаг.";
-  if (step === "accessibility-restricted") return "Разрешите ограниченные настройки в карточке приложения.";
-  if (step === "accessibility-enable") return "Включите специальные возможности Brai и нажмите Проверить.";
-  if (step === "microphone") return "Разрешите микрофон и нажмите Продолжить после успешной проверки.";
-  if (step === "notifications") return "Разрешите уведомления и нажмите Продолжить после успешной проверки.";
+  if (step === "microphone") return "Нужен для голосового ввода команд и диктовки для транскрибации";
+  if (step === "overlay") return "Они должны появляться поверх других приложений, чтобы выполнять своё предназначение. Кнопки не собирают никакие данные.";
+  if (step === "accessibility-why") return "Делает возможным всё остальное, но требует особых разрешений.\n\nПозволяет:\n\nВставить текст в поле ввода\n\nРаботать с буфером обмена\n\nДелать снимки экрана\n\nВидеть то, что видите вы, чтобы помогать\n\nВсё под вашим контролем";
+  if (step === "accessibility-blocked") return "Android просто так не разрешает получить этот доступ. Откройте «Специальные возможности» по кнопке ниже и попробуйте включить Brai. Android должен показать, что настройка заблокирована. Это важно. Потом вернитесь назад и нажмите на продолжение.";
+  if (step === "accessibility-restricted") return "Откройте карточку приложения, нажмите меню с тремя точками и выберите «разрешить ограниченные настройки». Это меню появляется только, если вы на предыдущем шаге получили отказ.";
+  if (step === "accessibility-enable") return "Теперь снова откройте специальные возможности и ещё раз попробуйте включить Brai. Откроется меню, где нужно будет только включить доступ, а затем Разрешить. После вернитесь сюда и нажмите на кнопку Проверки";
+  if (step === "notifications") return "Уведомления нужны для фоновой записи, работы очереди, когда нет сети, для получения обратной связи от Брай. Разработчики не шлют вам никаких уведомлений. Это только для вас.";
   return "";
 }
 

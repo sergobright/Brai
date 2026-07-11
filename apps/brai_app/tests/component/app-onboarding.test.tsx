@@ -228,6 +228,35 @@ describe("BraiApp onboarding", () => {
     expect(screen.getByRole("button", { name: "Ознакомиться" })).toBeInTheDocument();
   });
 
+  it("introduces special settings and security before Brai CMD setup", async () => {
+    stubAndroidCapacitor();
+    window.localStorage.setItem(ONBOARDING_STORAGE_KEY, JSON.stringify({
+      complete: false,
+      history: ["demo-agent-command"],
+      name: "Test",
+      path: "new",
+      profileVersion: "cloud",
+      step: "special-settings",
+      voiceMode: null,
+    }));
+
+    render(<BraiApp />);
+
+    expect(await screen.findByText("Требуется особая настройка")).toBeInTheDocument();
+    expect(screen.getByText(/Продемонстрированные функции не могут работать без специальной настройки/)).toBeInTheDocument();
+    expect(screen.getByText(/Поэтому далее мы проведём вас по шагам, чтобы всё заработало/)).toBeInTheDocument();
+    expect(screen.getByText(/Ничего сложного\. Просто следуйте инструкциям шаг за шагом\./)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Продолжить" }));
+
+    expect(await screen.findByText("Не беспокойтесь о безопасности")).toBeInTheDocument();
+    expect(screen.getByText(/Приложение не шпионит за вами и ничего не делает без вашего ведома\./)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "sergobright/Brai" })).toHaveAttribute("href", "https://github.com/sergobright/Brai");
+    fireEvent.click(screen.getByRole("button", { name: "Продолжить" }));
+
+    expect(await screen.findByText("Давайте настроим Brai CMD")).toBeInTheDocument();
+    expect(screen.getByText(/Brai обладает мощными ИИ-функциями и может работать даже без этих настроек\./)).toBeInTheDocument();
+  });
+
   it("keeps the logo splash above a synchronously restored onboarding step", () => {
     stubAndroidCapacitor();
     window.localStorage.setItem(ONBOARDING_STORAGE_KEY, JSON.stringify({
@@ -267,7 +296,7 @@ describe("BraiApp onboarding", () => {
     expect(screen.queryByRole("textbox", { name: "Добавить" })).not.toBeInTheDocument();
   });
 
-  it("offers cloud and local voice recognition for a new setup", async () => {
+  it("offers voice recognition choices and keeps the local model unavailable", async () => {
     stubAndroidCapacitor();
     window.localStorage.setItem(ONBOARDING_STORAGE_KEY, JSON.stringify({
       complete: false,
@@ -282,12 +311,15 @@ describe("BraiApp onboarding", () => {
     render(<BraiApp />);
 
     expect(await screen.findByText("Как распознавать голос")).toBeInTheDocument();
+    expect(screen.getByText("Без распознавания голоса Brai CMD не сможет принимать команды и вставлять продиктованный текст")).toBeInTheDocument();
     const choices = screen.getAllByRole("button").filter((button) => /API ключ|Локальная модель|Облако Brai/.test(button.textContent ?? ""));
     expect(choices.map((button) => button.textContent)).toEqual([
       expect.stringContaining("API ключ"),
       expect.stringContaining("Локальная модель"),
       expect.stringContaining("Облако Brai"),
     ]);
+    expect(screen.getByRole("button", { name: /Локальная модель/ })).toBeDisabled();
+    expect(screen.getByText("В разработке")).toBeInTheDocument();
     expect(screen.getByText("Самое простое")).toBeInTheDocument();
   });
 
@@ -324,6 +356,7 @@ describe("BraiApp onboarding", () => {
 
     render(<BraiApp />);
 
+    expect(await screen.findByRole("img", { name: "Разрешение микрофона Brai" })).toHaveAttribute("src", "/onboarding/settings-1-microphone.jpg");
     fireEvent.click(await screen.findByRole("button", { name: "Разрешить микрофон" }));
     expect(await screen.findByRole("button", { name: "Открыть настройки приложения" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Ошибка" })).toBeDisabled();
@@ -344,9 +377,67 @@ describe("BraiApp onboarding", () => {
 
     render(<BraiApp />);
 
+    expect(await screen.findByRole("img", { name: "Разрешение уведомлений Brai" })).toHaveAttribute("src", "/onboarding/settings-5-notifications.jpg");
+    expect(screen.getByText("Уведомления нужны для фоновой записи, работы очереди, когда нет сети, для получения обратной связи от Брай. Разработчики не шлют вам никаких уведомлений. Это только для вас.")).toBeInTheDocument();
     fireEvent.click(await screen.findByRole("button", { name: "Разрешить уведомления" }));
     expect(await screen.findByRole("button", { name: "Открыть настройки приложения" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Ошибка" })).toBeDisabled();
+  });
+
+  it("walks through special access explanation and images", async () => {
+    stubAndroidCapacitor();
+    window.localStorage.setItem(ONBOARDING_STORAGE_KEY, JSON.stringify({
+      complete: false,
+      history: ["overlay"],
+      name: "Test",
+      path: "new",
+      profileVersion: "cloud",
+      step: "accessibility-why",
+      voiceMode: "cloud",
+    }));
+
+    render(<BraiApp />);
+
+    expect(await screen.findByText("Особый доступ")).toBeInTheDocument();
+    expect(screen.getByText(/Видеть то, что видите вы, чтобы помогать/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Три шага" }));
+
+    expect(await screen.findByRole("img", { name: "Шаг 1: получите отказ в специальных возможностях" })).toHaveAttribute("src", "/onboarding/settings-3-accessibility.jpg");
+    fireEvent.click(screen.getByRole("button", { name: "Открыть специальные возможности" }));
+  });
+
+  it("shows the remaining special access instruction images", async () => {
+    stubAndroidCapacitor();
+    window.localStorage.setItem(ONBOARDING_STORAGE_KEY, JSON.stringify({
+      complete: false,
+      history: ["accessibility-blocked"],
+      name: "Test",
+      path: "new",
+      profileVersion: "cloud",
+      step: "accessibility-restricted",
+      voiceMode: "cloud",
+    }));
+
+    const { unmount } = render(<BraiApp />);
+
+    expect(await screen.findByRole("img", { name: "Шаг 2: снимите ограничение в карточке приложения" })).toHaveAttribute("src", "/onboarding/settings-4-restricted.jpg");
+    expect(screen.getByText(/Это меню появляется только, если вы на предыдущем шаге получили отказ/)).toBeInTheDocument();
+    unmount();
+
+    window.localStorage.setItem(ONBOARDING_STORAGE_KEY, JSON.stringify({
+      complete: false,
+      history: ["accessibility-restricted"],
+      name: "Test",
+      path: "new",
+      profileVersion: "cloud",
+      step: "accessibility-enable",
+      voiceMode: "cloud",
+    }));
+
+    render(<BraiApp />);
+
+    expect(await screen.findByRole("img", { name: "Шаг 3: включите особый доступ Brai" })).toHaveAttribute("src", "/onboarding/settings-3-accessibility.jpg");
+    expect(screen.getByText(/После вернитесь сюда и нажмите на кнопку Проверки/)).toBeInTheDocument();
   });
 
   it("keeps the context floating button disabled until the final voice screen", async () => {
@@ -629,7 +720,27 @@ describe("BraiApp onboarding", () => {
     expect(screen.getByText(/Для полной приватности используйте локальные модели/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Проверить" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Согласен" }));
-    expect(await screen.findByText("Поверх других приложений")).toBeInTheDocument();
+    expect(await screen.findByText("Микрофон")).toBeInTheDocument();
+  });
+
+  it("starts concrete settings with microphone after choosing the Brai cloud", async () => {
+    stubAndroidCapacitor();
+    window.localStorage.setItem(ONBOARDING_STORAGE_KEY, JSON.stringify({
+      complete: false,
+      history: ["voice-intro"],
+      name: "Test",
+      path: "new",
+      profileVersion: "cloud",
+      step: "voice-choice",
+      voiceMode: null,
+    }));
+
+    render(<BraiApp />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /Облако Brai/ }));
+    expect(await screen.findByText("Микрофон")).toBeInTheDocument();
+    expect(screen.getByText("Нужен для голосового ввода команд и диктовки для транскрибации")).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Разрешение микрофона Brai" })).toHaveAttribute("src", "/onboarding/settings-1-microphone.jpg");
   });
 
   it("checks overlay permission before continuing", async () => {
@@ -640,7 +751,7 @@ describe("BraiApp onboarding", () => {
       .mockImplementationOnce(() => new Promise((resolve) => window.setTimeout(() => resolve({ overlayGranted: true }), 20)));
     window.localStorage.setItem(ONBOARDING_STORAGE_KEY, JSON.stringify({
       complete: false,
-      history: ["cloud-privacy"],
+      history: ["microphone"],
       name: "Test",
       path: "new",
       profileVersion: "cloud",
@@ -650,6 +761,9 @@ describe("BraiApp onboarding", () => {
 
     render(<BraiApp />);
 
+    expect(await screen.findByText("Плавающие кнопки")).toBeInTheDocument();
+    expect(screen.getByText("Они должны появляться поверх других приложений, чтобы выполнять своё предназначение. Кнопки не собирают никакие данные.")).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Включение плавающих кнопок Brai" })).toHaveAttribute("src", "/onboarding/settings-2-floating-buttons.jpg");
     const checkButton = await screen.findByRole("button", { name: "Проверить" });
     expect(checkButton).toBeEnabled();
     expect(screen.queryByText("Готово")).not.toBeInTheDocument();
@@ -681,9 +795,11 @@ describe("BraiApp onboarding", () => {
         vi.runOnlyPendingTimers();
       });
 
-      const confirmButton = screen.getByRole("button", { name: "Да, доступ заблокирован" });
+      expect(screen.getByText("Шаг 1: Получить отказ")).toBeInTheDocument();
+      expect(screen.getByRole("img", { name: "Шаг 1: получите отказ в специальных возможностях" })).toHaveAttribute("src", "/onboarding/settings-3-accessibility.jpg");
+      const confirmButton = screen.getByRole("button", { name: "Продолжить" });
       expect(confirmButton).toBeDisabled();
-      fireEvent.click(screen.getByRole("button", { name: "Открыть" }));
+      fireEvent.click(screen.getByRole("button", { name: "Открыть специальные возможности" }));
       expect(confirmButton).toBeDisabled();
       act(() => vi.advanceTimersByTime(2999));
       expect(confirmButton).toBeDisabled();

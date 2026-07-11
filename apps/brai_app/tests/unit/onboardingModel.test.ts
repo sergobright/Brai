@@ -71,6 +71,8 @@ describe("onboarding model", () => {
 
   it("returns monotonic progress for later steps", () => {
     expect(stepProgress("notifications")).toBeGreaterThan(stepProgress("start"));
+    expect(stepProgress("overlay")).toBeGreaterThan(stepProgress("microphone"));
+    expect(stepProgress("notifications")).toBeGreaterThan(stepProgress("accessibility-enable"));
     expect(stepProgress("voice-ready")).toBeGreaterThan(stepProgress("notifications"));
   });
 });
