@@ -16,6 +16,11 @@ test('uses Europe/Moscow UTC+3 local dates', () => {
   assert.equal(localDateFromUtcMs(Date.parse('2026-06-11T21:00:00.000Z')), '2026-06-12');
 });
 
+test('uses supplied display timezone for local dates', () => {
+  assert.equal(localDateFromUtcMs(Date.parse('2026-06-11T21:00:00.000Z'), 'UTC'), '2026-06-11');
+  assert.equal(localDateFromUtcMs(Date.parse('2026-06-11T21:00:00.000Z'), 'Asia/Dubai'), '2026-06-12');
+});
+
 test('splits sessions crossing Moscow midnight', () => {
   const chunks = splitSessionByMoscowDay(
     '2026-06-12T20:30:00.000Z',
@@ -24,6 +29,17 @@ test('splits sessions crossing Moscow midnight', () => {
   assert.deepEqual(chunks, [
     { date: '2026-06-12', seconds: 1800 },
     { date: '2026-06-13', seconds: 1800 }
+  ]);
+});
+
+test('splits sessions with supplied display timezone', () => {
+  const chunks = splitSessionByMoscowDay(
+    '2026-06-12T20:30:00.000Z',
+    '2026-06-12T21:30:00.000Z',
+    'UTC'
+  );
+  assert.deepEqual(chunks, [
+    { date: '2026-06-12', seconds: 3600 }
   ]);
 });
 

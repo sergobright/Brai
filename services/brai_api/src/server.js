@@ -59,6 +59,7 @@ export function createBraiServer({
   codexModel = null,
   codexFallbackModel = null,
   codexTimeoutMs = null,
+  inboxExternalAi = {},
   inboxImageDescriber = null,
   inboxNormalizer = null,
   inboxWorkflowStarter = null,
@@ -117,6 +118,7 @@ export function createBraiServer({
               codexModel,
               codexFallbackModel,
               codexTimeoutMs,
+              externalAi: inboxExternalAi,
               imageDescriber: inboxImageDescriber,
               normalizer: inboxNormalizer,
               nowDate: now()
@@ -687,6 +689,23 @@ export function createBraiServer({
       }
 
       await withUserScope(authContext.userId, async () => {
+      if (req.method === 'GET' && url.pathname === '/v1/settings') {
+        sendJson(req, res, 200, settingsState(store, inboxExternalAi));
+        return;
+      }
+
+      if (['POST', 'PUT', 'PATCH'].includes(req.method) && url.pathname === '/v1/settings') {
+        const requestNow = now();
+        const body = await readJson(req, { limit: 64 * 1024 });
+        if (!body || typeof body !== 'object' || Array.isArray(body)) {
+          sendJson(req, res, 400, { error: 'invalid_settings_payload' });
+          return;
+        }
+        store.setAppSettings(body, requestNow.toISOString());
+        sendJson(req, res, 200, settingsState(store, inboxExternalAi));
+        return;
+      }
+
       if (req.method === 'GET' && url.pathname === '/v1/timer/state') {
         sendJson(req, res, 200, timerState(store, now()));
         return;
@@ -824,10 +843,11 @@ export function createBraiServer({
       if (req.method === 'POST' && url.pathname === '/v1/timer/stop') {
         const requestNow = now();
         const result = store.stopTimer(requestNow.toISOString());
+        const settings = store.appSettings();
         const body = {
           ...timerState(store, requestNow),
           stopped: result.stopped,
-          completed_session: formatSession(result.session)
+          completed_session: formatSession(result.session, settings.display_timezone)
         };
         if (result.stopped) {
           broadcast(sockets, { type: 'timer_stopped', state: body }, scopedUserId());
@@ -958,8 +978,9 @@ export function createBraiServer({
 }
 
 export function timerState(store, nowDate) {
-  const active = formatSession(store.getActiveSession());
-  const activeInterval = formatFocusInterval(store.getActiveInterval());
+  const settings = store.appSettings();
+  const active = formatSession(store.getActiveSession(), settings.display_timezone);
+  const activeInterval = formatFocusInterval(store.getActiveInterval(), settings.display_timezone);
   const nowIso = nowDate.toISOString();
   const elapsedSeconds = active
     ? Math.max(0, Math.floor((Date.parse(nowIso) - Date.parse(active.started_at_utc)) / 1000))
@@ -970,7 +991,7 @@ export function timerState(store, nowDate) {
   return {
     server_time_utc: nowIso,
     server_revision: store.getServerRevision(),
-    timezone: 'Europe/Moscow',
+    timezone: settings.display_timezone,
     active_session: active,
     elapsed_seconds: elapsedSeconds,
     active_interval: activeInterval,
@@ -978,6 +999,17 @@ export function timerState(store, nowDate) {
     active_activity_id: activeInterval?.activity_id ?? null,
     active_session_start_origin: active?.start_origin ?? null,
     active_session_started_by_activity_id: active?.started_by_activity_id ?? null
+  };
+}
+
+export function settingsState(store, inboxExternalAi = {}) {
+  const settings = store.appSettings();
+  return {
+    ...settings,
+    external_ai: {
+      groq_configured: Boolean(inboxExternalAi.groqApiKey),
+      openai_configured: Boolean(inboxExternalAi.openaiApiKey)
+    }
   };
 }
 

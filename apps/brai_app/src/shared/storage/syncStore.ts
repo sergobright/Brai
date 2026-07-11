@@ -1,4 +1,5 @@
 import { clientDb, ensureClientMeta, getMeta, randomId, setMeta } from "./db";
+import { addDays, getDisplayTimeZone, localDateFromUtcMs, localDateStartUtcMs, localHourFromUtcMs } from "@/shared/time/format";
 import type {
   GoalData,
   HistoryData,
@@ -7,8 +8,6 @@ import type {
   TimerEventType,
   TimerState,
 } from "@/shared/types/timer";
-
-const MOSCOW_OFFSET_MS = 3 * 60 * 60 * 1000;
 
 /**
  * Adds a timer mutation to the durable local outbox.
@@ -209,7 +208,7 @@ export async function loadCanonicalState(): Promise<TimerState | null> {
   return {
     server_time_utc: row.serverTimeUtc,
     server_revision: row.serverRevision,
-    timezone: "Europe/Moscow",
+    timezone: getDisplayTimeZone(),
     active_session: row.activeSessionJson,
     elapsed_seconds: row.elapsedSeconds,
     active_interval: row.activeIntervalJson ?? row.activeSessionJson?.active_interval ?? null,
@@ -276,7 +275,7 @@ function sessionDayChunks(session: TimerSession): TimerSession[] {
   let cursor = startMs;
   while (cursor < endMs) {
     const date = localDateFromUtcMs(cursor);
-    const chunkEndMs = Math.min(endMs, moscowDateStartUtcMs(addDays(date, 1)));
+    const chunkEndMs = Math.min(endMs, localDateStartUtcMs(addDays(date, 1)));
     const durationSeconds = Math.floor((chunkEndMs - cursor) / 1000);
     if (durationSeconds > 0) {
       const startedAtUtc = new Date(cursor).toISOString();
@@ -299,22 +298,4 @@ function sessionDayChunks(session: TimerSession): TimerSession[] {
     cursor = chunkEndMs;
   }
   return chunks;
-}
-
-function localDateFromUtcMs(utcMs: number): string {
-  return new Date(utcMs + MOSCOW_OFFSET_MS).toISOString().slice(0, 10);
-}
-
-function localHourFromUtcMs(utcMs: number): number {
-  return Number(new Date(utcMs + MOSCOW_OFFSET_MS).toISOString().slice(11, 13));
-}
-
-function addDays(dateString: string, days: number): string {
-  const [year, month, day] = dateString.split("-").map(Number);
-  return new Date(Date.UTC(year, month - 1, day + days)).toISOString().slice(0, 10);
-}
-
-function moscowDateStartUtcMs(dateString: string): number {
-  const [year, month, day] = dateString.split("-").map(Number);
-  return Date.UTC(year, month - 1, day, 0, 0, 0) - MOSCOW_OFFSET_MS;
 }

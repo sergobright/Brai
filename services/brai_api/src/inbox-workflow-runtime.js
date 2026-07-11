@@ -20,6 +20,7 @@ export async function createInboxWorkflowRuntime({
   codexModel,
   codexFallbackModel,
   codexTimeoutMs,
+  externalAi = {},
   address = process.env.TEMPORAL_ADDRESS ?? '127.0.0.1:7233',
   namespace = process.env.TEMPORAL_NAMESPACE ?? 'default',
   taskQueue = process.env.BRAI_TEMPORAL_INBOX_TASK_QUEUE ?? `brai-inbox-normalization-${process.env.PORT ?? '3020'}`,
@@ -42,6 +43,7 @@ export async function createInboxWorkflowRuntime({
         codexBin,
         codexModel,
         codexTimeoutMs,
+        externalAi,
         nowDate: now()
       })),
     normalizeInboxRaw: (input) => withUserScope(input.ownerUserId, () =>
@@ -51,6 +53,7 @@ export async function createInboxWorkflowRuntime({
         codexBin,
         codexModel: input.attempt > 1 && codexFallbackModel ? codexFallbackModel : codexModel,
         codexTimeoutMs,
+        externalAi,
         nowDate: now()
       })),
     applyNormalizedInbox: (input) => withUserScope(input.ownerUserId, () =>

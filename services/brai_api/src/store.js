@@ -1,5 +1,6 @@
 import { PostgresSyncDatabase, isPostgresUrl } from './postgres-sync-db.js';
 import { activityEventMethods } from './store-activity-events.js';
+import { appSettingsMethods } from './store-app-settings.js';
 import { authUserMethods } from './store-auth-users.js';
 import { braiCmdStoreMethods } from './store-brai-cmd.js';
 import { aiLogMethods } from './store-ai-logs.js';
@@ -22,6 +23,7 @@ export class BraiStore {
 
 Object.assign(
   BraiStore.prototype,
+  appSettingsMethods,
   authUserMethods,
   braiCmdStoreMethods,
   aiLogMethods,

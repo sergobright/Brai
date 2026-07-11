@@ -6,7 +6,7 @@ import {
   addDays,
   challengeDates,
   challengeEndExclusiveUtcMs,
-  moscowDateStartUtcMs,
+  localDateStartUtcMs,
   remainingChallengeDays,
   splitSessionByMoscowDay
 } from './time.js';
@@ -22,8 +22,9 @@ export const readModelMethods = {
 ,
 
   listSessions({ from, to } = {}) {
-    const fromUtc = from ? new Date(moscowDateStartUtcMs(from)).toISOString() : null;
-    const toUtc = to ? new Date(moscowDateStartUtcMs(addDays(to, 1))).toISOString() : null;
+    const timeZone = this.appSettings().display_timezone;
+    const fromUtc = from ? new Date(localDateStartUtcMs(from, timeZone)).toISOString() : null;
+    const toUtc = to ? new Date(localDateStartUtcMs(addDays(to, 1), timeZone)).toISOString() : null;
     const scope = scopeSql('s');
 
     let sql = `
@@ -53,14 +54,15 @@ export const readModelMethods = {
     }
     sql += ' GROUP BY s.id ORDER BY started_at_utc DESC';
 
-    const sessions = this.db.prepare(sql).all(...params).map((row) => formatSession(this.sessionWithIntervals(row)));
-    return { sessions, groups: groupSessionsByDateHour(sessions, { from, to }) };
+    const sessions = this.db.prepare(sql).all(...params).map((row) => formatSession(this.sessionWithIntervals(row), timeZone));
+    return { sessions, groups: groupSessionsByDateHour(sessions, { from, to, timeZone }) };
   }
 ,
 
   challengeSummary(currentUtcMs = Date.now()) {
-    const startUtc = new Date(moscowDateStartUtcMs(CHALLENGE_START_DATE)).toISOString();
-    const endUtc = new Date(challengeEndExclusiveUtcMs()).toISOString();
+    const timeZone = this.appSettings().display_timezone;
+    const startUtc = new Date(localDateStartUtcMs(CHALLENGE_START_DATE, timeZone)).toISOString();
+    const endUtc = new Date(challengeEndExclusiveUtcMs(timeZone)).toISOString();
     const scope = scopeSql('s');
     const rows = this.db
       .prepare(`
@@ -80,7 +82,8 @@ export const readModelMethods = {
     for (const session of rows) {
       for (const chunk of splitSessionByMoscowDay(
         session.started_at_utc,
-        session.ended_at_utc
+        session.ended_at_utc,
+        timeZone
       )) {
         if (totals.has(chunk.date)) {
           totals.set(chunk.date, totals.get(chunk.date) + chunk.seconds);
@@ -101,14 +104,14 @@ export const readModelMethods = {
 
     const completedSeconds = days.reduce((sum, day) => sum + day.completed_seconds, 0);
     const remainingSeconds = Math.max(0, CHALLENGE_TARGET_SECONDS - completedSeconds);
-    const remainingDays = remainingChallengeDays(currentUtcMs);
+    const remainingDays = remainingChallengeDays(currentUtcMs, timeZone);
     const requiredAverageSeconds =
       completedSeconds >= CHALLENGE_TARGET_SECONDS || remainingDays === 0
         ? 0
         : remainingSeconds / remainingDays;
 
     return {
-      timezone: 'Europe/Moscow',
+      timezone: timeZone,
       start_date: CHALLENGE_START_DATE,
       end_date: addDays(CHALLENGE_START_DATE, CHALLENGE_DAYS - 1),
       days_count: CHALLENGE_DAYS,

@@ -1,4 +1,5 @@
 import type { HistoryData } from "@/shared/types/timer";
+import { localDateFromUtcMs } from "@/shared/time/format";
 
 export function cx(...classes: Array<string | false | null | undefined>): string {
   return classes.filter(Boolean).join(" ");
@@ -39,5 +40,5 @@ export function normalizeHistory(history: HistoryData): HistoryData {
 }
 
 export function moscowTodayKey(): string {
-  return new Date(Date.now() + 3 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  return localDateFromUtcMs(Date.now());
 }

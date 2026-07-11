@@ -6,6 +6,7 @@ import path from 'node:path';
 import {
   DEFAULT_INBOX_CODEX_BIN,
   DEFAULT_INBOX_CODEX_MODEL,
+  describeInboxImagesForWorkflow,
   normalizeInboxRawForWorkflow
 } from '../src/inbox.js';
 
@@ -185,6 +186,100 @@ test('Inbox Codex defaults point at the installed local CLI and mini model', () 
   assert.equal(DEFAULT_INBOX_CODEX_MODEL, 'gpt-5.4-mini');
 });
 
+test('Inbox external text normalizer uses Groq GPT OSS 120B with JSON schema', async () => {
+  let captured = null;
+  const result = await normalizeInboxRawForWorkflow({
+    store: normalizerStore({
+      settings: {
+        model_provider_mode: 'external',
+        inbox_text_model: 'openai/gpt-oss-120b',
+        inbox_image_model: 'gpt-4.1-mini'
+      }
+    }),
+    inboxId: 'inbox-1',
+    workflowId: 'workflow-1',
+    runId: 'run-1',
+    attempt: 1,
+    externalAi: {
+      groqApiKey: 'test-groq-key',
+      fetch: async (url, options) => {
+        captured = {
+          url,
+          headers: options.headers,
+          body: JSON.parse(options.body)
+        };
+        return new Response(JSON.stringify({
+          choices: [{ message: { content: JSON.stringify(VALID_OUTPUT) } }]
+        }), { status: 200 });
+      }
+    },
+    codexTimeoutMs: 1_000
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.normalized.classKey, 'wish');
+  assert.equal(captured.url, 'https://api.groq.com/openai/v1/chat/completions');
+  assert.equal(captured.headers.authorization, 'Bearer test-groq-key');
+  assert.equal(captured.body.model, 'openai/gpt-oss-120b');
+  assert.equal(captured.body.response_format.type, 'json_schema');
+  assert.deepEqual(captured.body.response_format.json_schema.schema, OUTPUT_SCHEMA);
+});
+
+test('Inbox external image describer uses OpenAI 4.1 mini with image input', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'brai-openai-image-test-'));
+  const imagePath = path.join(root, 'image.png');
+  fs.writeFileSync(imagePath, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+  let captured = null;
+  const store = {
+    getInboxItem: () => ({
+      id: 'inbox-1',
+      attachment_links: ['/v1/inbox/attachments/image.png']
+    }),
+    markInboxWorkflowStep: () => true,
+    getAgent: () => ({ version: '2', llm_model: '', llm_prompt_template: null, llm_timeout_ms: 1_000 }),
+    appSettings: () => ({
+      model_provider_mode: 'external',
+      inbox_text_model: 'openai/gpt-oss-120b',
+      inbox_image_model: 'gpt-4.1-mini'
+    }),
+    recordAiLog: () => undefined
+  };
+  try {
+    const result = await describeInboxImagesForWorkflow({
+      store,
+      inboxId: 'inbox-1',
+      workflowId: 'workflow-1',
+      runId: 'run-1',
+      storageRoot: root,
+      externalAi: {
+        openaiApiKey: 'test-openai-key',
+        fetch: async (url, options) => {
+          captured = {
+            url,
+            headers: options.headers,
+            body: JSON.parse(options.body)
+          };
+          return new Response(JSON.stringify({
+            output_text: 'На изображении виден тестовый экран.'
+          }), { status: 200 });
+        }
+      },
+      codexTimeoutMs: 1_000
+    });
+
+    assert.equal(result.ok, true);
+    assert.equal(result.imageDescription, 'На изображении виден тестовый экран.');
+    assert.equal(captured.url, 'https://api.openai.com/v1/responses');
+    assert.equal(captured.headers.authorization, 'Bearer test-openai-key');
+    assert.equal(captured.body.model, 'gpt-4.1-mini');
+    assert.equal(captured.body.input[0].content[0].type, 'input_text');
+    assert.equal(captured.body.input[0].content[1].type, 'input_image');
+    assert.match(captured.body.input[0].content[1].image_url, /^data:image\/png;base64,/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('a pinned v1 execution keeps local Codex isolation without silently adopting the v2 strict schema', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'brai-codex-cli-v1-'));
   const capturePath = path.join(root, 'capture.json');
@@ -222,7 +317,7 @@ test('a pinned v1 execution keeps local Codex isolation without silently adoptin
   }
 });
 
-function normalizerStore({ workflowVersion = 3, outputSchema = OUTPUT_SCHEMA } = {}) {
+function normalizerStore({ workflowVersion = 3, outputSchema = OUTPUT_SCHEMA, settings = null } = {}) {
   const logs = [];
   return {
     logs,
@@ -238,6 +333,11 @@ function normalizerStore({ workflowVersion = 3, outputSchema = OUTPUT_SCHEMA } =
     listInboxClasses: () => [{ key: 'wish', title: 'Желание' }],
     getInboxWorkflowExecution: () => ({ workflow_definition_version: workflowVersion }),
     getInboxWorkflowOutputSchema: () => outputSchema,
+    appSettings: () => settings ?? {
+      model_provider_mode: 'internal',
+      inbox_text_model: 'openai/gpt-oss-120b',
+      inbox_image_model: 'gpt-4.1-mini'
+    },
     getAgent: () => ({ version: '4', llm_model: '', llm_prompt_template: null, llm_timeout_ms: 1_000 }),
     recordAiLog: (entry) => logs.push(entry)
   };
