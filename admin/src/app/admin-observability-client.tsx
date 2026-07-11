@@ -2,11 +2,13 @@
 
 import { useRouter } from "next/navigation";
 import Image from "next/image";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Maximize2, Minus, Plus, RotateCcw, Scan } from "lucide-react";
 import { Button } from "@/shared/ui/button";
 import { ScrollArea } from "@/shared/ui/scroll-area";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/shared/ui/table";
+
+const DEFAULT_DIAGRAM_SIZE = { width: 1200, height: 680 };
 
 export function AutoRefresh({
   enabled,
@@ -43,11 +45,35 @@ export function DiagramViewport({
   title: string;
 }) {
   const [zoom, setZoom] = useState(1);
+  const [fitZoom, setFitZoom] = useState(1);
+  const [imageSize, setImageSize] = useState(DEFAULT_DIAGRAM_SIZE);
   const frameRef = useRef<HTMLDivElement>(null);
-  const fit = () => setZoom(1);
+  const fitToFrame = useCallback((size = imageSize) => {
+    const frame = frameRef.current;
+    if (!frame || !size.width || !size.height) return;
+    const availableWidth = Math.max(1, frame.clientWidth - 24);
+    const availableHeight = Math.max(1, frame.clientHeight - 24);
+    const nextFit = Math.min(1, availableWidth / size.width, availableHeight / size.height);
+    const safeFit = Number.isFinite(nextFit) ? Math.max(0.05, nextFit) : 1;
+    setFitZoom(safeFit);
+    setZoom(safeFit);
+  }, [imageSize]);
+  const fit = () => setZoom(fitZoom);
   const fullscreen = () => {
     void frameRef.current?.requestFullscreen?.();
   };
+  const scaledWidth = imageSize.width * zoom;
+  const scaledHeight = imageSize.height * zoom;
+
+  useEffect(() => {
+    if (!dataUrl) return undefined;
+    fitToFrame();
+    const frame = frameRef.current;
+    if (!frame) return undefined;
+    const observer = new ResizeObserver(() => fitToFrame());
+    observer.observe(frame);
+    return () => observer.disconnect();
+  }, [dataUrl, fitToFrame]);
 
   return (
     <section className="grid gap-3" aria-label={title}>
@@ -57,17 +83,17 @@ export function DiagramViewport({
           <p className="m-0 text-sm leading-6 text-muted-foreground">{summary}</p>
         </div>
         <div className="flex flex-wrap gap-2" aria-label="Управление диаграммой">
-          <Button onClick={() => setZoom((value) => Math.max(0.5, value - 0.1))} size="icon-sm" title="Уменьшить" type="button" variant="outline">
+          <Button onClick={() => setZoom((value) => Math.max(0.05, value - 0.1))} size="icon-sm" title="Уменьшить" type="button" variant="outline">
             <Minus className="size-4" />
             <span className="sr-only">Уменьшить</span>
           </Button>
-          <Button onClick={() => setZoom((value) => Math.min(2, value + 0.1))} size="icon-sm" title="Увеличить" type="button" variant="outline">
+          <Button onClick={() => setZoom((value) => Math.min(3, value + 0.1))} size="icon-sm" title="Увеличить" type="button" variant="outline">
             <Plus className="size-4" />
             <span className="sr-only">Увеличить</span>
           </Button>
-          <Button onClick={fit} size="icon-sm" title="Fit" type="button" variant="outline">
+          <Button onClick={fit} size="icon-sm" title="Вписать" type="button" variant="outline">
             <Scan className="size-4" />
-            <span className="sr-only">Fit</span>
+            <span className="sr-only">Вписать</span>
           </Button>
           <Button onClick={() => setZoom(1)} size="icon-sm" title="Сбросить" type="button" variant="outline">
             <RotateCcw className="size-4" />
@@ -82,15 +108,30 @@ export function DiagramViewport({
       <div ref={frameRef} className="min-h-[65vh] min-w-0 rounded-lg border bg-background p-3">
         <ScrollArea className="h-[65vh] min-h-[680px] min-w-0" contentInset="none" scrollbars="both">
           {dataUrl ? (
-            <Image
-              alt={alt}
-              className="block max-w-none origin-top-left"
-              height={680}
-              unoptimized
-              src={dataUrl}
-              style={{ minWidth: 1200, transform: `scale(${zoom})`, transformOrigin: "top left" }}
-              width={1200}
-            />
+            <div style={{ height: scaledHeight, width: scaledWidth }}>
+              <Image
+                alt={alt}
+                className="block max-w-none origin-top-left"
+                height={imageSize.height}
+                onLoad={(event) => {
+                  const next = {
+                    height: event.currentTarget.naturalHeight || DEFAULT_DIAGRAM_SIZE.height,
+                    width: event.currentTarget.naturalWidth || DEFAULT_DIAGRAM_SIZE.width,
+                  };
+                  setImageSize(next);
+                  requestAnimationFrame(() => fitToFrame(next));
+                }}
+                unoptimized
+                src={dataUrl}
+                style={{
+                  height: imageSize.height,
+                  transform: `scale(${zoom})`,
+                  transformOrigin: "top left",
+                  width: imageSize.width,
+                }}
+                width={imageSize.width}
+              />
+            </div>
           ) : (
             <div className="grid min-w-[1200px] gap-3">
               <p className="m-0 text-sm text-muted-foreground">Kroki недоступен. Ниже показаны таблица шагов и Mermaid source.</p>
