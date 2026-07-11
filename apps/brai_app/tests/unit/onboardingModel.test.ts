@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { initialOnboardingState, loadOnboardingState, ONBOARDING_STORAGE_KEY, saveOnboardingState, stepProgress } from "@/features/onboarding/onboardingModel";
+import { initialOnboardingState, isValidOnboardingName, loadOnboardingState, ONBOARDING_STORAGE_KEY, saveOnboardingState, stepProgress } from "@/features/onboarding/onboardingModel";
 
 describe("onboarding model", () => {
   beforeEach(() => {
@@ -45,6 +45,28 @@ describe("onboarding model", () => {
       history: ["profile-version", "cloud-login"],
       step: "cloud-login",
     });
+  });
+
+  it("migrates the removed features screen to floating buttons", () => {
+    window.localStorage.setItem(ONBOARDING_STORAGE_KEY, JSON.stringify({
+      ...initialOnboardingState,
+      history: ["setup-start", "features"],
+      step: "features",
+    }));
+
+    expect(loadOnboardingState()).toMatchObject({
+      history: ["setup-start", "floating-buttons"],
+      step: "floating-buttons",
+    });
+  });
+
+  it("accepts letters from any alphabet, numbers and spaces in names", () => {
+    expect(isValidOnboardingName("Я1")).toBe(true);
+    expect(isValidOnboardingName("李 明")).toBe(true);
+    expect(isValidOnboardingName("Él")).toBe(true);
+    expect(isValidOnboardingName("A")).toBe(false);
+    expect(isValidOnboardingName("A!")).toBe(false);
+    expect(isValidOnboardingName("  ")).toBe(false);
   });
 
   it("returns monotonic progress for later steps", () => {

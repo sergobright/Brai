@@ -10,6 +10,8 @@ export type OnboardingStep =
   | "welcome-2"
   | "welcome-3"
   | "welcome-4"
+  | "welcome-5"
+  | "welcome-6"
   | "path"
   | "name"
   | "profile-version"
@@ -95,6 +97,11 @@ export function saveOnboardingState(state: OnboardingState): void {
   setBraiLocalStorageItem(ONBOARDING_STORAGE_KEY, JSON.stringify(state));
 }
 
+/** Checks the locally entered display name before onboarding can continue. */
+export function isValidOnboardingName(name: string): boolean {
+  return /^[\p{L}\p{M}\p{N} ]+$/u.test(name) && (name.match(/[\p{L}\p{N}]/gu)?.length ?? 0) >= 2;
+}
+
 export function stepProgress(step: OnboardingStep): number {
   const index = orderedSteps.indexOf(step);
   if (index < 0) return 0;
@@ -107,6 +114,7 @@ function isOnboardingStep(value: unknown): value is OnboardingStep {
 
 function normalizeOnboardingStep(value: unknown): OnboardingStep | null {
   if (value === "cloud-password") return "cloud-login";
+  if (value === "features") return "floating-buttons";
   return isOnboardingStep(value) ? value : null;
 }
 
@@ -120,13 +128,14 @@ const orderedSteps: OnboardingStep[] = [
   "welcome-2",
   "welcome-3",
   "welcome-4",
+  "welcome-5",
+  "welcome-6",
   "path",
   "name",
   "profile-version",
   "cloud-login",
   "self-hosted-key",
   "setup-start",
-  "features",
   "floating-buttons",
   "demo-dictation",
   "demo-save-screen",

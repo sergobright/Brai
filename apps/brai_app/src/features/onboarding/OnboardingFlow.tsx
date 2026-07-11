@@ -1,6 +1,7 @@
 "use client";
 
 import { Children, createContext, type FormEvent, type ReactNode, useContext, useEffect, useRef, useState } from "react";
+import Image from "next/image";
 import {
   ArrowRight,
   Bell,
@@ -49,6 +50,7 @@ import { Textarea } from "@/shared/ui/textarea";
 import { Carousel, CarouselContent, CarouselItem, type CarouselApi } from "@/shared/ui/carousel";
 import { cx } from "../app/appUtils";
 import {
+  isValidOnboardingName,
   loadOnboardingState,
   saveOnboardingState,
   type OnboardingState,
@@ -95,11 +97,13 @@ const manualConfirmDelayMs = 3000;
 const verificationMinVisibleMs = process.env.NODE_ENV === "test" ? 1 : 1000;
 const failedCheckVisibleMs = process.env.NODE_ENV === "test" ? 100 : 2000;
 const welcomeSlides = [
-  { step: "welcome-1", title: "Brai рядом с вашим экраном", text: "Голос, текст и контекст доступны без переключения между приложениями.", icon: TextCursorInput },
-  { step: "welcome-2", title: "Голос превращается в действие", text: "Надиктуйте мысль, ответ или команду — Brai подготовит текст там, где вы работаете.", icon: Mic },
-  { step: "welcome-3", title: "Идеи не теряются", text: "Сохраняйте важное прямо с экрана и отправляйте агенту задачи вместе с контекстом.", icon: Send },
-  { step: "welcome-4", title: "Пора настроить основу", text: "Дальше выберем профиль, голосовой модуль и системные разрешения.", icon: Sparkles },
-] as const satisfies ReadonlyArray<{ step: OnboardingStep; title: string; text: string; icon: LucideIcon }>;
+  { step: "welcome-1", title: "А что, если исполнитель желаний существует?", text: "Люди веками мечтали найти джинна, философский камень или силу, способную воплощать желания. Представь, что теперь такая сила доступна тебе.", image: "/onboarding/welcome-1.webp" },
+  { step: "welcome-2", title: "Тебе достаточно сказать, чего ты хочешь", text: "Не нужно знать правильные команды, изучать сложные инструменты или разбираться, с чего начать. Брай поможет найти путь.", image: "/onboarding/welcome-2.webp" },
+  { step: "welcome-3", title: "У него только одна цель", text: "Понять, чего ты действительно хочешь, и помочь тебе этого достичь. Твои желания становятся его задачей.", image: "/onboarding/welcome-3.webp" },
+  { step: "welcome-4", title: "Он не просто советует", text: "Брай превращает желания в конкретные шаги, помогает принимать решения и может брать на себя часть задач.", image: "/onboarding/welcome-4.webp" },
+  { step: "welcome-5", title: "Вся твоя жизнь — в одном разуме", text: "Брай помнит твои цели, идеи, проекты, решения и заботы. Он видит не отдельный вопрос, а всю картину — и понимает тебя всё лучше.", image: "/onboarding/welcome-5.webp" },
+  { step: "welcome-6", title: "Твой исполнитель желаний уже здесь", text: "Не волшебством, а интеллектом, действиями и радикальной ясностью Брай помогает превращать желаемое в реальность.\n\nОн уже в твоих руках.", image: "/onboarding/welcome-6.webp" },
+] as const satisfies ReadonlyArray<{ step: OnboardingStep; title: string; text: string; image: string }>;
 const startButtonCss = `
 @keyframes brai-onboarding-start-button {
   0% { opacity: 0; }
@@ -601,10 +605,9 @@ export function OnboardingFlow({
       return (
         <ChoiceScreen
           title="Как запускаем Brai?"
-          text="Можно начать с чистого профиля или подключить приложение к уже существующему."
           choices={[
-            { icon: UserRound, title: "Начать с начала", text: "Создать локальную настройку и пройти все шаги.", onClick: () => choosePath("new") },
-            { icon: KeyRound, title: "Есть профиль", text: "Подключить облачную или self-hosted версию.", onClick: () => choosePath("existing") },
+            { title: "С чистого листа", text: "Начнём с нуля, познакомимся и всё настроим", onClick: () => choosePath("new") },
+            { title: "Есть профиль", text: "Вы уже создавали профиль или вам его кто-то создал и передал ключ активации", onClick: () => choosePath("existing") },
           ]}
         />
       );
@@ -614,14 +617,17 @@ export function OnboardingFlow({
       return (
         <form className="flex min-h-0 flex-1 flex-col overflow-hidden" onSubmit={(event) => {
           event.preventDefault();
-          if (!state.name.trim()) return setError("Введите имя.");
+          if (!isValidOnboardingName(state.name)) return setError("Используйте минимум два символа: буквы, цифры или пробел.");
           go("setup-start");
         }}>
-          <div className="grid min-h-0 flex-1 content-center gap-5 overflow-hidden py-4">
-            <InfoBlock icon={UserRound} title="Как к вам обращаться?" text="Имя нужно для приветствия и будущих голосовых подсказок." />
-            <Input value={state.name} placeholder="Ваше имя" aria-label="Имя" onChange={(event) => update({ name: event.target.value })} />
+          <div className="grid min-h-0 flex-1 content-center gap-5 overflow-hidden py-2">
+            <InfoBlock icon={UserRound} title="Как к вам обращаться" text="Имя будет использоваться для персонализации в обращениях Brai и будет в аккаунте при регистрации" />
+            <Input autoFocus value={state.name} placeholder="Только буквы и пробел" aria-label="Имя" className="placeholder:text-muted-foreground/35" onChange={(event) => {
+              setError("");
+              update({ name: event.target.value });
+            }} />
           </div>
-          <StepActions><PrimaryButton disabled={!state.name.trim()}>Продолжить</PrimaryButton></StepActions>
+          <StepActions><PrimaryButton disabled={!isValidOnboardingName(state.name)}>Продолжить</PrimaryButton></StepActions>
         </form>
       );
     }
@@ -629,11 +635,9 @@ export function OnboardingFlow({
     if (state.step === "profile-version") {
       return (
         <ChoiceScreen
-          title="Какой профиль подключаем?"
-          text="Выберите источник существующего профиля."
           choices={[
-            { icon: Cloud, title: "Облачная версия", text: "Авторизация через Better Auth на серверах Brai.", onClick: () => chooseProfileVersion("cloud") },
-            { icon: Server, title: "Self-hosted версия", text: "Подключение по ключу доступа вашего сервера.", onClick: () => chooseProfileVersion("self-hosted") },
+            { title: "Облачная версия", text: "Авторизация по e-mail на серверах Brai", onClick: () => chooseProfileVersion("cloud") },
+            { title: "Self-hosted версия", text: "Подключение по URL и ключу доступа к частному приватному серверу", disabled: true, badge: "В разработке" },
           ]}
         />
       );
@@ -659,9 +663,9 @@ export function OnboardingFlow({
       );
     }
 
-    if (state.step === "setup-start") return <InfoScreen icon={ShieldCheck} title="Начинаем настройку" text="Сейчас подготовим Brai CMD, голосовой модуль и системные разрешения."><PrimaryButton onClick={() => go("features")}>Настроить</PrimaryButton></InfoScreen>;
-    if (state.step === "features") return <InfoScreen icon={Sparkles} title="Базовые возможности" text="Коротко покажем, что будет доступно после настройки."><PrimaryButton onClick={() => go("floating-buttons")}>Продолжить</PrimaryButton></InfoScreen>;
-    if (state.step === "floating-buttons") return <InfoScreen icon={Command} title="Плавающие кнопки" text="Brai CMD управляется кнопками поверх других приложений: они слушают голос, берут контекст экрана и помогают вставлять результат."><PrimaryButton onClick={() => go("demo-dictation")}>Продолжить</PrimaryButton></InfoScreen>;
+    if (state.step === "setup-start") return <InfoScreen icon={Command} title="Brai CMD" text="Превращает смартфон в командный центр, упрощая и ускоряя взаимодействие с Брай."><PrimaryButton onClick={() => go("floating-buttons")}>Далее</PrimaryButton></InfoScreen>;
+    if (state.step === "features") return <InfoScreen icon={Command} title="Плавающие кнопки" text="Brai CMD управляется кнопками поверх других приложений. Они слушают голос, берут контекст экрана, вставляют данные, добавляя магии в повседневные действия."><PrimaryButton onClick={() => go("demo-dictation")}>Ознакомиться</PrimaryButton></InfoScreen>;
+    if (state.step === "floating-buttons") return <InfoScreen icon={Command} title="Плавающие кнопки" text="Brai CMD управляется кнопками поверх других приложений. Они слушают голос, берут контекст экрана, вставляют данные, добавляя магии в повседневные действия."><PrimaryButton onClick={() => go("demo-dictation")}>Ознакомиться</PrimaryButton></InfoScreen>;
 
     if (state.step.startsWith("demo-")) {
       const demos = [
@@ -998,17 +1002,27 @@ function InfoScreen({ children, eyebrow, icon, text, title }: { children: ReactN
   );
 }
 
-function ChoiceScreen({ choices, text, title }: { choices: Array<{ icon: LucideIcon; title: string; text: string; onClick: () => void }>; text: string; title: string }) {
+type OnboardingChoice = {
+  badge?: string;
+  disabled?: boolean;
+  icon?: LucideIcon;
+  onClick?: () => void;
+  text: string;
+  title: string;
+};
+
+function ChoiceScreen({ choices, text, title }: { choices: OnboardingChoice[]; text?: string; title?: string }) {
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
       <div className="grid min-h-0 flex-1 content-center gap-4 overflow-hidden py-4">
-        <InfoBlock icon={Radio} title={title} text={text} />
+        {title ? text ? <InfoBlock icon={Radio} title={title} text={text} /> : <h2 className="m-0 break-words text-2xl font-semibold leading-tight">{title}</h2> : null}
         <div className="grid gap-3 sm:grid-cols-2">
           {choices.map((choice) => (
-            <button key={choice.title} type="button" className="grid min-h-28 content-start gap-2 rounded-lg border border-primary/20 bg-primary/5 p-3 text-left transition-all duration-200 hover:bg-primary/10 active:scale-[0.98] active:border-primary/40 active:bg-primary/15 focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40" onClick={choice.onClick}>
-              <choice.icon className="size-5 text-primary" aria-hidden="true" />
+            <button key={choice.title} type="button" disabled={choice.disabled} className="grid min-h-28 content-start gap-2 rounded-lg border border-primary/20 bg-primary/5 p-3 text-left transition-all duration-200 hover:bg-primary/10 active:scale-[0.98] active:border-primary/40 active:bg-primary/15 focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40 disabled:pointer-events-none disabled:border-primary/10 disabled:bg-primary/[0.02] disabled:text-muted-foreground disabled:opacity-55" onClick={choice.onClick}>
+              {choice.icon ? <choice.icon className="size-5 text-primary" aria-hidden="true" /> : null}
               <span className="text-base font-semibold">{choice.title}</span>
               <span className="text-sm leading-5 text-muted-foreground">{choice.text}</span>
+              {choice.badge ? <span className="mt-auto w-fit rounded-full border border-primary/20 px-2 py-0.5 text-xs font-medium text-muted-foreground">{choice.badge}</span> : null}
             </button>
           ))}
         </div>
@@ -1047,11 +1061,18 @@ function WelcomeCarousel({ currentStep, onStart, onStepChange }: { currentStep: 
       <div className="grid min-h-0 flex-1 grid-rows-[minmax(0,1fr)_auto] gap-5 overflow-hidden pt-[clamp(3rem,10dvh,7rem)] [@media(max-height:700px)]:gap-2 [@media(max-height:700px)]:pt-2 [@media(max-height:650px)]:pt-1">
         <Carousel setApi={setApi} opts={{ align: "start", startIndex: welcomeStepIndex(currentStep) }} className="h-full w-full min-w-0 overflow-hidden" aria-label="Приветствие Brai" data-nav-swipe-exclusion>
           <CarouselContent viewportClassName="h-full" className="h-full w-full touch-pan-y">
-            {welcomeSlides.map(({ icon: Icon, step, text, title }, index) => (
+            {welcomeSlides.map(({ image, step, text, title }, index) => (
               <CarouselItem key={step} className="h-full basis-full">
-                <Card className="grid h-full w-full min-w-0 content-center gap-6 overflow-hidden rounded-2xl border-primary/15 bg-card/80 p-6 shadow-none [@media(max-height:700px)]:gap-3 [@media(max-height:700px)]:p-4 [@media(max-height:650px)]:gap-2 [@media(max-height:650px)]:p-3 [@media(max-height:800px)_and_(min-aspect-ratio:2/3)]:gap-1.5">
-                  <p className="m-0 text-sm font-medium text-muted-foreground [@media(max-height:700px)]:text-xs [@media(max-height:650px)]:text-[0.72rem] [@media(max-height:800px)_and_(min-aspect-ratio:2/3)]:text-[0.68rem]">Карточка {index + 1} из 4</p>
-                  <InfoBlock compactOnShort icon={Icon} title={title} text={text} />
+                <Card className="relative h-full w-full min-w-0 overflow-hidden rounded-2xl border-primary/15 bg-black p-0 shadow-none">
+                  <Image src={image} alt="" width={640} height={1280} className="absolute inset-x-0 top-0 h-auto w-full max-w-none" aria-hidden="true" />
+                  <div className="absolute inset-0 bg-gradient-to-b from-transparent via-black/45 to-black" aria-hidden="true" />
+                  <div className="absolute inset-x-0 bottom-0 flex h-2/3 min-h-0 flex-col px-6 pt-6 [@media(max-height:700px)]:px-4 [@media(max-height:700px)]:pt-4 [@media(max-height:650px)]:px-3 [@media(max-height:650px)]:pt-3">
+                    <p className="m-0 text-xs font-medium text-white/60">Карточка {index + 1} из 6</p>
+                    <div className="mt-3 grid min-h-0 gap-3 [@media(max-height:700px)]:mt-2 [@media(max-height:700px)]:gap-2">
+                      <h2 className="m-0 break-words text-2xl font-semibold leading-tight text-white [@media(max-height:700px)]:text-xl [@media(max-height:650px)]:text-lg">{title}</h2>
+                      <p className="m-0 whitespace-pre-line break-words text-sm leading-5 text-white/85 [@media(max-height:700px)]:text-xs [@media(max-height:700px)]:leading-4">{text}</p>
+                    </div>
+                  </div>
                 </Card>
               </CarouselItem>
             ))}

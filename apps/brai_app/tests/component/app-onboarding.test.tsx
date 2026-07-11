@@ -120,21 +120,24 @@ describe("BraiApp onboarding", () => {
     const startButton = screen.getByRole("button", { name: "Приступить" });
     vi.useRealTimers();
     fireEvent.click(startButton);
-    expect(screen.getByText("Brai рядом с вашим экраном")).toBeInTheDocument();
-    expect(screen.getByText("Голос превращается в действие")).toBeInTheDocument();
-    expect(screen.getByText("Идеи не теряются")).toBeInTheDocument();
-    expect(screen.getByText("Пора настроить основу")).toBeInTheDocument();
+    expect(screen.getByText("А что, если исполнитель желаний существует?")).toBeInTheDocument();
+    expect(screen.getByText("Тебе достаточно сказать, чего ты хочешь")).toBeInTheDocument();
+    expect(screen.getByText("У него только одна цель")).toBeInTheDocument();
+    expect(screen.getByText("Он не просто советует")).toBeInTheDocument();
+    expect(screen.getByText("Вся твоя жизнь — в одном разуме")).toBeInTheDocument();
+    expect(screen.getByText("Твой исполнитель желаний уже здесь")).toBeInTheDocument();
+    expect(container.querySelectorAll('[data-slot="card"] img')).toHaveLength(6);
     expect(container.querySelector('[data-slot="carousel-content"]')).toHaveClass("h-full");
     expect(container.querySelector('[data-slot="carousel-content"] > div')).toHaveClass("-ml-4", "h-full", "w-full", "touch-pan-y");
-    expect(screen.getByText("Карточка 1 из 4").closest('[data-slot="carousel-item"]')).toHaveClass("h-full", "pl-4");
-    expect(screen.getByText("Карточка 1 из 4").closest('[data-slot="card"]')).toHaveClass("h-full", "w-full", "overflow-hidden");
+    expect(screen.getByText("Карточка 1 из 6").closest('[data-slot="carousel-item"]')).toHaveClass("h-full", "pl-4");
+    expect(screen.getByText("Карточка 1 из 6").closest('[data-slot="card"]')).toHaveClass("h-full", "w-full", "overflow-hidden");
     expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Previous slide" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Next slide" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Начать" })).not.toBeInTheDocument();
   });
 
-  it("shows the start button on the fourth welcome card", async () => {
+  it("shows the start button on the sixth welcome card", async () => {
     stubAndroidCapacitor();
     window.localStorage.setItem(ONBOARDING_STORAGE_KEY, JSON.stringify({
       complete: false,
@@ -142,7 +145,7 @@ describe("BraiApp onboarding", () => {
       name: "",
       path: null,
       profileVersion: null,
-      step: "welcome-4",
+      step: "welcome-6",
       voiceMode: null,
     }));
 
@@ -150,8 +153,72 @@ describe("BraiApp onboarding", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Начать" }));
     expect(screen.getByText("Как запускаем Brai?")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Начать с начала/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /С чистого листа/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Есть профиль/ })).toBeInTheDocument();
+  });
+
+  it("keeps self-hosted profiles unavailable and marks them as in development", async () => {
+    stubAndroidCapacitor();
+    window.localStorage.setItem(ONBOARDING_STORAGE_KEY, JSON.stringify({
+      complete: false,
+      history: ["path"],
+      name: "",
+      path: "existing",
+      profileVersion: null,
+      step: "profile-version",
+      voiceMode: null,
+    }));
+
+    render(<BraiApp />);
+
+    expect(await screen.findByRole("button", { name: /Облачная версия/ })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /Self-hosted версия/ })).toBeDisabled();
+    expect(screen.getByText("В разработке")).toBeInTheDocument();
+  });
+
+  it("autofocuses the name and enables continuation only for a valid value", async () => {
+    stubAndroidCapacitor();
+    window.localStorage.setItem(ONBOARDING_STORAGE_KEY, JSON.stringify({
+      complete: false,
+      history: ["path"],
+      name: "",
+      path: "new",
+      profileVersion: "self-hosted",
+      step: "name",
+      voiceMode: null,
+    }));
+
+    render(<BraiApp />);
+
+    const input = await screen.findByRole("textbox", { name: "Имя" });
+    const continueButton = screen.getByRole("button", { name: "Продолжить" });
+    expect(input).toHaveFocus();
+    expect(input).toHaveAttribute("placeholder", "Только буквы и пробел");
+    expect(continueButton).toBeDisabled();
+    fireEvent.change(input, { target: { value: "А!" } });
+    expect(continueButton).toBeDisabled();
+    fireEvent.change(input, { target: { value: "А1" } });
+    expect(continueButton).toBeEnabled();
+  });
+
+  it("moves from the Brai CMD introduction to floating buttons", async () => {
+    stubAndroidCapacitor();
+    window.localStorage.setItem(ONBOARDING_STORAGE_KEY, JSON.stringify({
+      complete: false,
+      history: ["name"],
+      name: "Брай",
+      path: "new",
+      profileVersion: "self-hosted",
+      step: "setup-start",
+      voiceMode: null,
+    }));
+
+    render(<BraiApp />);
+
+    expect(await screen.findByText("Brai CMD")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Далее" }));
+    expect(await screen.findByText("Плавающие кнопки")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Ознакомиться" })).toBeInTheDocument();
   });
 
   it("keeps the logo splash above a synchronously restored onboarding step", () => {
