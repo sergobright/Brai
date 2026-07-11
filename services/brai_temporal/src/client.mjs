@@ -9,6 +9,7 @@ import {
   previewWorkflowId,
   promotionWorkflowId
 } from "./state.mjs";
+import { signalWithClosedWorkflowRetry } from "./workflow-signal.mjs";
 
 const argv = process.argv.slice(2);
 const command = argv.shift();
@@ -112,12 +113,15 @@ async function dispatchReleasePreview(client, options) {
 
 async function startAndSignalPreview(client, branch, sha, event) {
   if (!PREVIEW_EVENTS.has(event.type)) throw new Error(`Unsupported preview event: ${event.type}`);
-  const { handle, started } = await startOrGet(client, "BranchPreviewWorkflow", {
-    args: [{ branch, sha, at: event.at, source: event.source }],
-    taskQueue: process.env.BRAI_TEMPORAL_PREVIEW_TASK_QUEUE ?? PREVIEW_TASK_QUEUE,
-    workflowId: previewWorkflowId(branch)
-  });
-  await handle.signal(EVENT_SIGNAL, event);
+  const { handle, started } = await signalWithClosedWorkflowRetry(
+    () => startOrGet(client, "BranchPreviewWorkflow", {
+      args: [{ branch, sha, at: event.at, source: event.source }],
+      taskQueue: process.env.BRAI_TEMPORAL_PREVIEW_TASK_QUEUE ?? PREVIEW_TASK_QUEUE,
+      workflowId: previewWorkflowId(branch)
+    }),
+    EVENT_SIGNAL,
+    event
+  );
   console.log(`${started ? "started" : "signaled"} ${handle.workflowId} ${event.type}`);
   return handle;
 }
@@ -139,15 +143,16 @@ async function signalPreview(client, options) {
   const sha = options.sha ?? "";
   const event = buildEvent(options.event ?? "branch_pushed", options, sha);
   if (!PREVIEW_EVENTS.has(event.type)) throw new Error(`Unsupported preview event: ${event.type}`);
-  const { handle, started } = await startOrGet(client, "BranchPreviewWorkflow", {
-    args: [{ branch, sha, at: event.at, source: event.source }],
-    taskQueue: process.env.BRAI_TEMPORAL_PREVIEW_TASK_QUEUE ?? PREVIEW_TASK_QUEUE,
-    workflowId: previewWorkflowId(branch)
-  });
-
-  if (!started || event.type !== "branch_pushed") {
-    await handle.signal(EVENT_SIGNAL, event);
-  }
+  const { handle, started } = await signalWithClosedWorkflowRetry(
+    () => startOrGet(client, "BranchPreviewWorkflow", {
+      args: [{ branch, sha, at: event.at, source: event.source }],
+      taskQueue: process.env.BRAI_TEMPORAL_PREVIEW_TASK_QUEUE ?? PREVIEW_TASK_QUEUE,
+      workflowId: previewWorkflowId(branch)
+    }),
+    EVENT_SIGNAL,
+    event,
+    { skipWhenStarted: event.type === "branch_pushed" }
+  );
   console.log(`${started ? "started" : "signaled"} ${handle.workflowId} ${event.type}`);
 }
 
