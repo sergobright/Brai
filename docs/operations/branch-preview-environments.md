@@ -18,6 +18,7 @@ Follow-up branches keep the exact task base recorded by the starter in `.brai-ta
 After the project owner accepts a preview, a dirty acceptance PR is resolved in the same branch with `node scripts/brai-task.mjs acceptance-reconcile <codex-branch>`. That command is the only approved exception to the frozen-base rule: it verifies the accepted PR, merges current `origin/main` into the same `codex/*` branch, and leaves any real conflicts for the agent to resolve before pushing the same branch again. Do not create a replacement branch or PR for accepted conflict resolution.
 
 A pushed preview-class `codex/*` branch allocates or reuses a preview slot through `deploy/scripts/preview-slots.sh`, deploys that slot, and reports the slot URL. If all slots `A` through `E` are occupied, the branch enters the preview queue until a slot is released. No push means no slot/deploy/queue.
+`pull_request` opened, synchronize, and reopened events do not run the full delivery workflow; the `codex/*` push run is the authoritative check/deploy source. `pull_request.closed` remains enabled only to record no-preview merges and release abandoned preview slots.
 `deploy/scripts/preview-slots.sh status` is read-only: it takes a shared lock and must not rewrite the slot registry or status page.
 
 Each preview slot uses its own Supabase preview branch. After slot allocation, CI creates or reuses

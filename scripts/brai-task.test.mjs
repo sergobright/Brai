@@ -1577,6 +1577,14 @@ test("infra docs workflow marks handoff passed only from the PR merge job", () =
   assert.match(recordMergeJob, /BRAI_PR_MERGED_AT/);
 });
 
+test("delivery workflow avoids duplicate full checks on PR updates", () => {
+  const workflow = fs.readFileSync(new URL("../.github/workflows/brai-delivery.yml", import.meta.url), "utf8");
+  const pullRequestTrigger = workflow.slice(workflow.indexOf("  pull_request:"), workflow.indexOf("  delete:"));
+
+  assert.match(pullRequestTrigger, /types:\n\s+- closed/);
+  assert.doesNotMatch(pullRequestTrigger, /\bopened\b|\bsynchronize\b|\breopened\b/);
+});
+
 test("delivery workflow dispatches prod deploy through Temporal and bootstraps worker changes", () => {
   const workflow = fs.readFileSync(new URL("../.github/workflows/brai-delivery.yml", import.meta.url), "utf8");
   const deployProdJob = workflow.slice(workflow.indexOf("deploy-prod:"), workflow.indexOf("deploy-dev:"));
