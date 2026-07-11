@@ -308,6 +308,8 @@ test("local main sync preserves runtime dirs and hard resets to origin main", ()
   assert.match(script, /sync-occupied-preview-ota-manifests\.sh/);
   assert.match(script, /preserve_agent_dependency_paths/);
   assert.match(script, /admin\/node_modules/);
+  assert.match(ciScript, /BRAI_INSTALL_TEMPORAL_DEPENDENCIES:-false/);
+  assert.match(ciScript, /INSTALL_DEPENDENCIES.*== "true"/);
   assert.match(script, /apps\/brai_app\/node_modules/);
   assert.ok(script.match(/-type l -prune -o/g)?.length >= 4);
   assert.match(script, /chmod u=rwx,g=rx,o=x deploy\/scripts/);
@@ -1552,6 +1554,8 @@ test("delivery workflow dispatches prod deploy through Temporal and bootstraps w
 
   assert.match(deployProdJob, /permissions:\n\s+contents: write/);
   assert.match(deployProdJob, /id: temporal_worker_restart/);
+  assert.match(deployProdJob, /services\/brai_temporal\/package\.json services\/brai_temporal\/package-lock\.json/);
+  assert.match(deployProdJob, /BRAI_INSTALL_TEMPORAL_DEPENDENCIES:.*install_dependencies/);
   assert.match(deployProdJob, /Bootstrap Temporal worker for orchestration changes/);
   assert.match(deployProdJob, /ci-ssh-sync-main-checkout\.sh/);
   assert.match(deployProdJob, /dispatch-promotion --target prod/);
