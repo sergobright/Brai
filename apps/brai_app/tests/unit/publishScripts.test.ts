@@ -280,7 +280,7 @@ describe("mobile OTA publish scripts", () => {
     expect(template).toContain("{{ brai_api_domain }}");
     expect(template).toContain("{{ brai_temporal_ui_domain }}");
     expect(template).toContain("brai_api_legacy_domains");
-    expect(template).toContain("redir https://{{ brai_api_domain }}{uri} permanent");
+    expect(template).toContain("redir https://{{ brai_api_domain }}{uri} 308");
     expect(productionApiBlock).not.toContain("brai_basic_auth_directive");
     expect(productionApiBlock).not.toContain("header_up Authorization");
     expect(productionAdminBlock).toContain("brai_envs.prod.admin_port");
