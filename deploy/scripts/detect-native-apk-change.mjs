@@ -3,10 +3,8 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 
-const nativePrefixes = [
-  "apps/brai_app/android/",
-  "apps/brai_app/capacitor.config",
-];
+const androidPrefix = "apps/brai_app/android/";
+const nonReleaseAndroidSourcePattern = /\/src\/(?:androidTest|test|testFixtures)(?:\/|$)/;
 const environmentFile = "deploy/environments.json";
 const nativeEnvironmentPattern = /^\s*[+-]\s*"(displayLabel|domain|androidApp|androidFlavor|applicationId|releaseKey)"\s*:/m;
 const nativePackageFiles = new Set([
@@ -35,9 +33,14 @@ if (path.resolve(process.argv[1] ?? "") === fileURLToPath(import.meta.url)) {
 }
 
 export function requiresNativeApkChange(files, packageDiff = "", environmentDiff = "") {
-  return files.some((file) => nativePrefixes.some((prefix) => file.startsWith(prefix)))
+  return files.some(isNativeApkInput)
     || nativePackagePattern.test(packageDiff)
     || (files.includes(environmentFile) && requiresNativeEnvironmentChange(environmentDiff));
+}
+
+function isNativeApkInput(file) {
+  return file.startsWith("apps/brai_app/capacitor.config")
+    || (file.startsWith(androidPrefix) && !nonReleaseAndroidSourcePattern.test(file));
 }
 
 function requiresNativeEnvironmentChange(diff) {

@@ -751,6 +751,16 @@ test("main checkout sync removes dangling dependency symlinks before relinking",
 
 test("native APK detector ignores OTA web-layer changes", () => {
   assert.equal(requiresNativeApkChange(["apps/brai_app/android/app/build.gradle"]), true);
+  assert.equal(requiresNativeApkChange(["apps/brai_app/android/app/src/main/AndroidManifest.xml"]), true);
+  assert.equal(requiresNativeApkChange(["apps/brai_app/android/app/src/previewA/res/values/strings.xml"]), true);
+  assert.equal(
+    requiresNativeApkChange([
+      "apps/brai_app/android/app/src/androidTest/java/world/brightos/brai/braicmd/OverlayScreenshotInstrumentedTest.kt",
+    ]),
+    false,
+  );
+  assert.equal(requiresNativeApkChange(["apps/brai_app/android/app/src/test/java/ExampleTest.kt"]), false);
+  assert.equal(requiresNativeApkChange(["apps/brai_app/android/app/src/testFixtures/java/Fixture.kt"]), false);
   assert.equal(requiresNativeApkChange(["deploy/scripts/ci-ssh-deploy.sh"]), false);
   assert.equal(requiresNativeApkChange(["deploy/scripts/ci-ssh-release-slot.sh"]), false);
   assert.equal(requiresNativeApkChange(["deploy/scripts/detect-native-apk-change.mjs"]), false);
