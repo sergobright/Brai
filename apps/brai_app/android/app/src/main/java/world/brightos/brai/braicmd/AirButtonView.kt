@@ -32,9 +32,15 @@ class AirButtonView(context: Context) : View(context) {
     }
 
     private var state: RecorderState = RecorderState.Idle
+    private var queueBadge: QueueBadgeState? = null
 
     fun setRecorderState(next: RecorderState) {
         state = next
+        invalidate()
+    }
+
+    fun setQueueState(failedCount: Int, readyCount: Int) {
+        queueBadge = resolveQueueBadgeState(failedCount, readyCount)
         invalidate()
     }
 
@@ -49,11 +55,10 @@ class AirButtonView(context: Context) : View(context) {
         when (val current = state) {
             is RecorderState.Recording -> drawAmplitude(canvas, cx, cy, radius, current.amplitude)
             is RecorderState.Uploading -> drawSpinner(canvas, cx, cy, radius)
-            is RecorderState.Pending -> drawPendingCount(canvas, cx, cy, current.recordings + current.transcripts)
-            is RecorderState.TranscriptReady -> drawPendingCount(canvas, cx, cy, current.transcripts)
             is RecorderState.Error -> drawError(canvas, cx, cy)
             else -> Unit
         }
+        queueBadge?.let { drawQueueBadge(canvas, it) }
 
         if (state is RecorderState.Recording || state is RecorderState.Uploading) {
             postInvalidateOnAnimation()
@@ -92,44 +97,51 @@ class AirButtonView(context: Context) : View(context) {
         canvas.drawArc(RectF(cx - radius * 0.55f, cy - radius * 0.55f, cx + radius * 0.55f, cy + radius * 0.55f), phase, 250f, false, strokePaint)
     }
 
-    private fun drawPendingCount(canvas: Canvas, cx: Float, cy: Float, count: Int) {
-        val label = count.coerceAtLeast(1).coerceAtMost(99).toString()
-        textPaint.color = currentIconColor()
-        textPaint.textSize = if (label.length == 1) width * 0.42f else width * 0.34f
-        canvas.drawText(label, cx, cy - ((textPaint.descent() + textPaint.ascent()) / 2f) - height * 0.05f, textPaint)
-
-        strokePaint.color = currentIconColor()
-        strokePaint.strokeWidth = width * 0.045f
-        val trayTop = cy + height * 0.22f
-        val tray = RectF(cx - width * 0.18f, trayTop, cx + width * 0.18f, trayTop + height * 0.11f)
-        canvas.drawLine(tray.left, tray.top, tray.left + width * 0.06f, tray.bottom, strokePaint)
-        canvas.drawLine(tray.right, tray.top, tray.right - width * 0.06f, tray.bottom, strokePaint)
-        canvas.drawLine(tray.left + width * 0.06f, tray.bottom, tray.right - width * 0.06f, tray.bottom, strokePaint)
+    private fun drawQueueBadge(canvas: Canvas, badge: QueueBadgeState) {
+        val label = if (badge.count > 99) "99+" else badge.count.toString()
+        val badgeRadius = width * 0.15f
+        val badgeX = width * 0.77f
+        val badgeY = height * 0.23f
+        val badgePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.FILL
+            color = if (badge.tone == QueueBadgeTone.Ready) COLOR_BADGE_GREEN else COLOR_ICON_RED
+        }
+        canvas.drawCircle(badgeX, badgeY, badgeRadius, badgePaint)
+        textPaint.color = COLOR_BADGE_TEXT
+        textPaint.textSize = if (label.length == 1) width * 0.2f else width * 0.14f
+        canvas.drawText(label, badgeX, badgeY - (textPaint.descent() + textPaint.ascent()) / 2f, textPaint)
     }
 
     private fun drawError(canvas: Canvas, cx: Float, cy: Float) {
         textPaint.color = currentIconColor()
-        canvas.drawText("!", cx, cy - ((textPaint.descent() + textPaint.ascent()) / 2f), textPaint)
+        textPaint.textSize = width * 0.26f
+        canvas.drawText("!", cx - width * 0.2f, cy + height * 0.3f, textPaint)
     }
 
-    private fun currentIconColor(): Int =
-        when (state) {
-            is RecorderState.Pending,
-            is RecorderState.TranscriptReady,
-            is RecorderState.Error -> COLOR_ICON_LIGHT
-            else -> COLOR_ICON_RED
-        }
+    private fun currentIconColor(): Int = COLOR_ICON_RED
 
-    private fun currentIconSoftColor(): Int =
-        when (state) {
-            is RecorderState.Error -> COLOR_ICON_LIGHT_SOFT
-            else -> COLOR_ICON_RED_SOFT
-        }
+    private fun currentIconSoftColor(): Int = COLOR_ICON_RED_SOFT
 
     companion object {
         private const val COLOR_ICON_RED = 0xFFFF2020.toInt()
-        private const val COLOR_ICON_LIGHT = 0xFFEFF4F7.toInt()
         private const val COLOR_ICON_RED_SOFT = 0xB8FF2020.toInt()
-        private const val COLOR_ICON_LIGHT_SOFT = 0xB8EFF4F7.toInt()
+        private const val COLOR_BADGE_GREEN = 0xFF2ED36F.toInt()
+        private const val COLOR_BADGE_TEXT = 0xFF050505.toInt()
     }
+}
+
+internal enum class QueueBadgeTone {
+    Pending,
+    Ready
+}
+
+internal data class QueueBadgeState(
+    val count: Int,
+    val tone: QueueBadgeTone
+)
+
+internal fun resolveQueueBadgeState(failedCount: Int, readyCount: Int): QueueBadgeState? = when {
+    readyCount > 0 -> QueueBadgeState(readyCount, QueueBadgeTone.Ready)
+    failedCount > 0 -> QueueBadgeState(failedCount, QueueBadgeTone.Pending)
+    else -> null
 }

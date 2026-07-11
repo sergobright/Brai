@@ -7,6 +7,10 @@ import android.os.Vibrator
 import android.os.VibratorManager
 
 object Haptics {
+    fun buttonPress(context: Context) {
+        vibrateOneShot(context, 16)
+    }
+
     fun recordingStart(context: Context) {
         vibrateOneShot(context, 28)
     }

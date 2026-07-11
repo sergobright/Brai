@@ -302,27 +302,19 @@ export function AuthPanel({
   busy,
   mode,
   onEmailLogin,
-  onLogin,
   onRequestOtp,
   onVerifyOtp,
 }: {
   busy: boolean;
-  mode: "email" | "otp" | "password";
+  mode: "email" | "otp";
   onEmailLogin: (email: string) => Promise<void>;
-  onLogin: (password: string) => Promise<void>;
   onRequestOtp: (email: string) => Promise<void>;
   onVerifyOtp: (email: string, otp: string) => Promise<void>;
 }) {
-  const [password, setPassword] = useState("");
   const [email, setEmail] = useState("");
   const [otp, setOtp] = useState("");
   const [otpSent, setOtpSent] = useState(false);
   const [error, setError] = useState("");
-
-  async function submitPassword(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    await onLogin(password);
-  }
 
   async function submitOtp(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -347,27 +339,6 @@ export function AuthPanel({
     } catch {
       setError("Email не подошёл");
     }
-  }
-
-  if (mode === "password") {
-    return (
-      <Card className="mt-[52px] grid w-[min(520px,100%)] justify-items-start gap-3 p-6" render={<form onSubmit={submitPassword} />}>
-        <Lock aria-hidden="true" className="size-5 text-muted-foreground" />
-        <h2 className="m-0 text-base leading-[1.2]">Вход</h2>
-        <Input
-          className="my-0.5 mb-1"
-          value={password}
-          type="password"
-          autoComplete="current-password"
-          aria-label="Пароль"
-          onChange={(event) => setPassword(event.target.value)}
-        />
-        <Button disabled={busy || !password}>
-          <Lock aria-hidden="true" />
-          Открыть
-        </Button>
-      </Card>
-    );
   }
 
   if (mode === "email") {

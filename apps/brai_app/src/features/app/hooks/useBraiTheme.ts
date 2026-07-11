@@ -16,7 +16,7 @@ export function useBraiTheme() {
   });
 
   useEffect(() => {
-    document.documentElement.dataset.theme = theme;
+    document.documentElement.dataset.theme = isOnboardingComplete() ? theme : "dark";
     setBraiLocalStorageItem("brai_theme_mode", theme);
   }, [theme]);
 
@@ -28,4 +28,13 @@ export function useBraiTheme() {
   }, []);
 
   return { setTheme, theme };
+}
+
+function isOnboardingComplete(): boolean {
+  try {
+    const state = getBraiLocalStorageItem("brai_onboarding_state_v1");
+    return state ? Boolean(JSON.parse(state).complete) : false;
+  } catch {
+    return false;
+  }
 }

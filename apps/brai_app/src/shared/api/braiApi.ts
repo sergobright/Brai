@@ -146,13 +146,6 @@ export class BraiApi {
     });
   }
 
-  async login(password: string): Promise<AuthSession> {
-    return this.request("/auth/login", {
-      method: "POST",
-      json: { password },
-    });
-  }
-
   async logout(): Promise<void> {
     await this.request("/auth/logout", { method: "POST" });
   }

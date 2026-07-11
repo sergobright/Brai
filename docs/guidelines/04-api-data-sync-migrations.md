@@ -69,10 +69,10 @@
 
 ## API и auth
 
-- Internal API v1 требует Bearer auth или valid password-auth session cookie; external Inbox API требует Inbox API key.
+- Internal API v1 требует Bearer auth или valid Brai API session cookie; external Inbox API требует Inbox API key.
 - Browser web `/api/*` идёт через same-origin Caddy proxy and is authorized by Brai API session cookies or explicit Bearer auth; Caddy must not inject a private Bearer token for public browser routes.
-- Direct Capacitor Android uses password-auth session cookies against `https://api.brai.one`.
-- Browser Web в Preview/Dev требует ввод точного email primary account и только после этого создаёт test session без password/OTP; production browser сохраняет email OTP.
+- Direct Capacitor Android uses the configured environment API endpoint and the same app auth mode as web: Production email OTP, Dev/Preview email-only test login.
+- Browser Web и Android в Preview/Dev требуют явный email и только после этого создают Better Auth session без password/OTP; production browser/Android сохраняют email OTP.
 - Не embed private Bearer token или Inbox API key в web bundle, OTA bundle или docs.
 - External Inbox API contract is documented in `docs/api/inbox-api.md`.
 - Any Inbox API route, payload, response, auth, MIME, limit, storage, DB mapping, processing, or error-code change must update `docs/api/inbox-api.md` in the same commit.
