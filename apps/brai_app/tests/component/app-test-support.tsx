@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, vi } from "vitest";
 import { clientDb } from "@/shared/storage/db";
 
@@ -114,6 +114,7 @@ export function setupBraiAppTest() {
   });
 
   afterEach(() => {
+    cleanup();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
     delete window.Capacitor;
