@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { cmdPlugin, openProfileMenuItem, setupBraiAppTest, stubAndroidCapacitor } from "./app-test-support";
+import { cmdPlugin, openProfileMenuItem, setupBraiAppTest, stubAndroidCapacitor, testVersionState } from "./app-test-support";
 import { BraiApp } from "@/features/app/BraiApp";
 import { resolveAuthMode } from "@/features/app/appModel";
 import { AuthPanel } from "@/features/app/chrome/AppChrome";
@@ -8,6 +8,10 @@ import { FocusSection } from "@/features/app/sections/focus/FocusSection";
 import { pendingEvents, saveGoalCache, saveHistoryCache } from "@/shared/storage/syncStore";
 import { emptyGoal, emptyHistory } from "@/shared/types/timer";
 import { shouldSnapSlidingNumber } from "@/shared/ui/sliding-number";
+
+vi.mock("@/features/app/sections/draws/DrawsCanvas", () => ({
+  DrawsCanvas: () => <div data-testid="draws-canvas" />,
+}));
 
 describe("BraiApp shell", () => {
   setupBraiAppTest();
@@ -139,6 +143,46 @@ describe("BraiApp shell", () => {
     await waitFor(() => expect(document.querySelector(".mobile-dock-overflow-sheet")).toHaveAttribute("aria-label", "Левое меню"));
     expect(within(document.querySelector(".mobile-dock-overflow-sheet") as HTMLElement).getByRole("button", { name: "Настройки" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Добавить действие" })).not.toBeInTheDocument();
+  });
+
+  it("hides app chrome while Draws is fullscreen", async () => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, writable: true, value: 1200 });
+    stubDrawsFetch();
+
+    render(<BraiApp initialSection="draws" />);
+
+    const fullScreenButton = await screen.findByRole("button", { name: "На весь экран" });
+    expect(document.querySelector(".desktop-rail")).toBeInTheDocument();
+    expect(document.querySelector(".main-dock")).toBeInTheDocument();
+
+    fireEvent.click(fullScreenButton);
+
+    await waitFor(() => expect(document.querySelector(".desktop-rail")).not.toBeInTheDocument());
+    expect(document.querySelector(".main-dock")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Открыть левое меню" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Выйти из полноэкранного режима" })).toBeInTheDocument();
+  });
+
+  it("starts Draws rename only from the main title text", async () => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, writable: true, value: 1200 });
+    stubDrawsFetch();
+
+    render(<BraiApp initialSection="draws" />);
+
+    const titleButton = await screen.findByRole("button", { name: "Название рисунка: Рисунок" });
+    const fileCard = screen.getAllByRole("button", { name: /Рисунок/ }).find((button) => button.textContent?.includes("11.07"));
+
+    expect(fileCard).toBeInstanceOf(HTMLElement);
+    fireEvent.click(fileCard as HTMLElement);
+    expect(screen.queryByRole("textbox", { name: "Название рисунка: Рисунок" })).not.toBeInTheDocument();
+
+    fireEvent.click(titleButton.parentElement as HTMLElement);
+    expect(screen.queryByRole("textbox", { name: "Название рисунка: Рисунок" })).not.toBeInTheDocument();
+
+    fireEvent.click(titleButton);
+    const editor = screen.getByRole("textbox", { name: "Название рисунка: Рисунок" });
+    expect(editor).toBeVisible();
+    expect(editor).toHaveTextContent("Рисунок");
   });
 
   it("keeps contextual actions before the rightmost sync status", async () => {
@@ -1019,6 +1063,25 @@ function authSessionResponse(): Response {
 
 function emptyInboxResponse(): Response {
   return jsonResponse({ server_time_utc: "2026-06-22T06:00:00.000Z", server_revision: 1, inbox: [] });
+}
+
+function stubDrawsFetch() {
+  vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+    const url = requestUrl(input);
+    if (url.endsWith("/auth/session")) return authSessionResponse();
+    if (url.endsWith("/v1/version")) return jsonResponse(testVersionState("0.0.10"));
+    if (url.endsWith("/v1/draws")) {
+      return jsonResponse({
+        draws: [{
+          name: "Рисунок.excalidraw",
+          title: "Рисунок",
+          updated_at_utc: "2026-07-11T12:00:00.000Z",
+          size_bytes: 0,
+        }],
+      });
+    }
+    return Promise.reject(new Error("offline"));
+  }));
 }
 
 function stubWebSockets(): Array<{ sendMessage: (payload: unknown) => void }> {

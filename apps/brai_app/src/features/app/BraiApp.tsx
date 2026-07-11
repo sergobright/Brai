@@ -30,6 +30,7 @@ import { SettingsSection } from "./sections/settings/SettingsSection";
 import type { MobileCreateDraft } from "./sections/MobileCreateComposer";
 
 const SECTION_PAGE_INSET_CLASS = "grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] pb-11 pl-7 pr-0 pt-3.5 max-[860px]:px-3.5 max-[860px]:pb-7 max-[860px]:pt-[var(--mobile-top-padding)]";
+const FULLSCREEN_SECTION_PAGE_CLASS = "grid h-full min-h-0 grid-rows-[minmax(0,1fr)] p-0";
 const EMPTY_MOBILE_CREATE_DRAFT: MobileCreateDraft = { title: "", descriptionMd: "" };
 const ACTIONS_MOBILE_CREATE_DRAFT_STORAGE_KEY = "brai_actions_mobile_create_draft";
 const INBOX_MOBILE_CREATE_DRAFT_STORAGE_KEY = "brai_inbox_mobile_create_draft";
@@ -46,6 +47,12 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
   const [actionsMobileCreateDraft, setActionsMobileCreateDraft] = useStoredMobileCreateDraft(ACTIONS_MOBILE_CREATE_DRAFT_STORAGE_KEY);
   const [inboxMobileCreateDraft, setInboxMobileCreateDraft] = useStoredMobileCreateDraft(INBOX_MOBILE_CREATE_DRAFT_STORAGE_KEY);
   const mobileViewport = useMountedMobileNavigationViewport();
+  const [drawsFullScreen, setDrawsFullScreen] = useState(false);
+  const drawsFullscreenActive = app.section === "draws" && drawsFullScreen;
+  const handleDrawsFullscreenChange = useCallback((nextFullScreen: boolean) => {
+    setDrawsFullScreen(nextFullScreen);
+    if (nextFullScreen) setMobileDockMenu(null);
+  }, []);
   const sectionRef = useRef(app.section);
   const selectSectionRef = useRef(app.selectSection);
   const adjacentSection = app.swipeNavigation.visual?.to;
@@ -118,31 +125,35 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
   }), []);
 
   function renderSectionScreen(screenSection: SectionId, isActivePage: boolean) {
+    const hideScreenHeader = screenSection === "draws" && drawsFullscreenActive;
+
     return (
       <>
-        <ScreenHeader
-          title={sectionTitle(screenSection)}
-          icon={sectionIcon(screenSection)}
-          syncStatus={app.displaySyncStatus}
-          pendingCount={app.totalPendingCount}
-          leading={isPrimarySection(screenSection) ? <MobileMenuButton onClick={openMobileMenu} /> : null}
-          trailing={
-            screenSection === "actions" && mobileViewport ? (
-              <IconButton icon={Info} label="Информация о действиях" active={app.actionsInfoActive} onClick={app.toggleActionsInfoPanel} />
-            ) : screenSection === "inbox" && mobileViewport ? (
-              <IconButton icon={Info} label="Информация о входящих" active={app.inboxInfoActive} onClick={app.toggleInboxInfoPanel} />
-            ) : screenSection === "focus" ? (
-              <>
-                <IconButton icon={Crown} label="Цели фокусировки" active={app.focusGoalActive} onClick={() => app.toggleFocusContextPanel("goal")} />
-                <IconButton icon={BookOpen} label="История фокуса" active={app.focusHistoryActive} className="min-[861px]:mr-5 max-[860px]:mr-1.5" onClick={() => app.toggleFocusContextPanel("history")} />
-              </>
-            ) : screenSection === "archive" ? (
-              <IconButton icon={Settings} label="Назад к настройкам" onClick={app.openSettingsPage} />
-            ) : screenSection === "settings" ? (
-              <ThemeButton theme={app.theme} onTheme={app.setTheme} />
-            ) : null
-          }
-        />
+        {!hideScreenHeader ? (
+          <ScreenHeader
+            title={sectionTitle(screenSection)}
+            icon={sectionIcon(screenSection)}
+            syncStatus={app.displaySyncStatus}
+            pendingCount={app.totalPendingCount}
+            leading={isPrimarySection(screenSection) ? <MobileMenuButton onClick={openMobileMenu} /> : null}
+            trailing={
+              screenSection === "actions" && mobileViewport ? (
+                <IconButton icon={Info} label="Информация о действиях" active={app.actionsInfoActive} onClick={app.toggleActionsInfoPanel} />
+              ) : screenSection === "inbox" && mobileViewport ? (
+                <IconButton icon={Info} label="Информация о входящих" active={app.inboxInfoActive} onClick={app.toggleInboxInfoPanel} />
+              ) : screenSection === "focus" ? (
+                <>
+                  <IconButton icon={Crown} label="Цели фокусировки" active={app.focusGoalActive} onClick={() => app.toggleFocusContextPanel("goal")} />
+                  <IconButton icon={BookOpen} label="История фокуса" active={app.focusHistoryActive} className="min-[861px]:mr-5 max-[860px]:mr-1.5" onClick={() => app.toggleFocusContextPanel("history")} />
+                </>
+              ) : screenSection === "archive" ? (
+                <IconButton icon={Settings} label="Назад к настройкам" onClick={app.openSettingsPage} />
+              ) : screenSection === "settings" ? (
+                <ThemeButton theme={app.theme} onTheme={app.setTheme} />
+              ) : null
+            }
+          />
+        ) : null}
         {app.displaySyncStatus === "auth_required" ? (
           <AuthPanel
             busy={app.busy}
@@ -210,7 +221,7 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
         ) : screenSection === "evil-eye" ? (
           <EvilEyeSection />
         ) : screenSection === "draws" ? (
-          <DrawsSection theme={app.theme} />
+          <DrawsSection theme={app.theme} onFullscreenChange={isActivePage ? handleDrawsFullscreenChange : undefined} />
         ) : screenSection === "engine" ? (
           <EngineSection
             appVersionState={app.versionState}
@@ -254,30 +265,33 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
         "app-shell h-dvh min-h-0 overflow-hidden [--sticky-top-offset:0px] max-[860px]:grid max-[860px]:grid-rows-[minmax(0,1fr)_auto] max-[860px]:[--mobile-top-padding:env(safe-area-inset-top)]",
         app.actionOverlayOpen && "has-mobile-action-overlay max-[860px]:pb-0",
         app.mobileMenuOpen && "has-mobile-menu",
+        drawsFullscreenActive && "max-[860px]:grid-rows-[minmax(0,1fr)]",
       )}
       data-app-shell
     >
-      <DesktopRail
-        section={app.section}
-        appVersionState={app.versionState}
-        otaRefreshing={app.otaRefreshing}
-        otaState={app.otaState}
-        pendingCount={app.totalPendingCount}
-        versionError={app.versionError}
-        versionRefreshing={app.versionRefreshing}
-        syncStatus={app.displaySyncStatus}
-        onSettings={app.openSettingsPage}
-        onBraiCmd={openBraiCmd}
-        onEngine={() => app.selectSection("engine")}
-        onArchive={() => app.selectSection("archive")}
-        onLogout={app.onLogout}
-      />
+      {!drawsFullscreenActive ? (
+        <DesktopRail
+          section={app.section}
+          appVersionState={app.versionState}
+          otaRefreshing={app.otaRefreshing}
+          otaState={app.otaState}
+          pendingCount={app.totalPendingCount}
+          versionError={app.versionError}
+          versionRefreshing={app.versionRefreshing}
+          syncStatus={app.displaySyncStatus}
+          onSettings={app.openSettingsPage}
+          onBraiCmd={openBraiCmd}
+          onEngine={() => app.selectSection("engine")}
+          onArchive={() => app.selectSection("archive")}
+          onLogout={app.onLogout}
+        />
+      ) : null}
       <SidebarInset className={cx("main-view m-0 h-full min-h-0 w-full min-w-0 overflow-hidden max-[860px]:overscroll-contain max-[860px]:[touch-action:pan-y]", app.swipeNavigation.visual && "is-section-swiping")} {...mobileMenuSwipe.handlers}>
         {app.section === "focus" ? <FocusBackground active={app.active} mode={app.focusBackground} /> : null}
         <ScrollArea scrollbar={false} className="main-scroll relative z-[1] h-full [&>[data-slot=scroll-area-viewport]>div]:h-full max-[860px]:[&>[data-slot=scroll-area-viewport]]:overscroll-contain max-[860px]:[&>[data-slot=scroll-area-viewport]]:[touch-action:pan-y]">
           <div className="section-swipe-stage relative m-0 h-full min-h-0 w-full overflow-x-hidden overflow-y-visible">
             <section
-              className={cx("section-page section-page-current relative z-[1] min-w-0 [backface-visibility:hidden]", SECTION_PAGE_INSET_CLASS, app.swipeNavigation.visual && "will-change-transform")}
+              className={cx("section-page section-page-current relative z-[1] min-w-0 [backface-visibility:hidden]", drawsFullscreenActive ? FULLSCREEN_SECTION_PAGE_CLASS : SECTION_PAGE_INSET_CLASS, app.swipeNavigation.visual && "will-change-transform")}
               data-section-page={app.section}
               style={sectionSwipePageStyle(app.swipeNavigation.visual, "current")}
             >
@@ -296,31 +310,37 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
           </div>
         </ScrollArea>
       </SidebarInset>
-      <MainDock
-        section={app.section}
-        hidden={app.actionOverlayOpen || app.mobileContextPanel != null}
-        mobileViewport={mobileViewport}
-        onSection={app.selectSection}
-        swipeHandlers={app.swipeNavigation.handlers}
-        timer={app.timer}
-      />
-      <MobileDockOverflowButton
-        side="left"
-        hidden={app.mobileMenuOpen || mobileDockMenu === "left" || app.actionOverlayOpen}
-        onClick={() => setMobileDockMenu("left")}
-      />
-      <MobileDockOverflowButton
-        side="right"
-        open={mobileDockMenu === "right"}
-        hidden={app.mobileMenuOpen || mobileDockMenu === "left" || app.actionOverlayOpen}
-        onClick={() => setMobileDockMenu((current) => current === "right" ? null : "right")}
-      />
-      {app.mobileMenuOpen ? (
+      {!drawsFullscreenActive ? (
+        <MainDock
+          section={app.section}
+          hidden={app.actionOverlayOpen || app.mobileContextPanel != null}
+          mobileViewport={mobileViewport}
+          onSection={app.selectSection}
+          swipeHandlers={app.swipeNavigation.handlers}
+          timer={app.timer}
+        />
+      ) : null}
+      {!drawsFullscreenActive ? (
+        <>
+          <MobileDockOverflowButton
+            side="left"
+            hidden={app.mobileMenuOpen || mobileDockMenu === "left" || app.actionOverlayOpen}
+            onClick={() => setMobileDockMenu("left")}
+          />
+          <MobileDockOverflowButton
+            side="right"
+            open={mobileDockMenu === "right"}
+            hidden={app.mobileMenuOpen || mobileDockMenu === "left" || app.actionOverlayOpen}
+            onClick={() => setMobileDockMenu((current) => current === "right" ? null : "right")}
+          />
+        </>
+      ) : null}
+      {app.mobileMenuOpen && !drawsFullscreenActive ? (
         <MobileProfileDrawer
           onClose={() => app.setMobileMenuOpen(false)}
         />
       ) : null}
-      {mobileDockMenu ? (
+      {mobileDockMenu && !drawsFullscreenActive ? (
         <MobileDockOverflowSheet
           side={mobileDockMenu}
           section={app.section}
