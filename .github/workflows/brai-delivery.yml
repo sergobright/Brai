@@ -267,6 +267,11 @@ jobs:
           cache-dependency-path: services/brai_temporal/package-lock.json
       - id: temporal_worker_restart
         run: |
+          if git diff --quiet "$BRAI_BASE_COMMIT" "$BRAI_COMMIT" -- services/brai_temporal/package.json services/brai_temporal/package-lock.json; then
+            echo "install_dependencies=false" >>"$GITHUB_OUTPUT"
+          else
+            echo "install_dependencies=true" >>"$GITHUB_OUTPUT"
+          fi
           if git diff --quiet "$BRAI_BASE_COMMIT" "$BRAI_COMMIT" -- services/brai_temporal deploy/systemd/brai-temporal-worker.service; then
             echo "restart=false" >>"$GITHUB_OUTPUT"
           else
@@ -287,6 +292,7 @@ jobs:
           BRAI_DEPLOY_SSH_KEY: ${{ secrets.BRAI_DEPLOY_SSH_KEY }}
           BRAI_COMMIT: ${{ github.sha }}
           BRAI_RESTART_TEMPORAL_WORKER: 'true'
+          BRAI_INSTALL_TEMPORAL_DEPENDENCIES: ${{ steps.temporal_worker_restart.outputs.install_dependencies }}
           BRAI_TEMPORAL_WORKER_RESTART_DELAY: '1'
       - name: Temporal prod deploy
         run: deploy/scripts/ci-temporal-signal.sh dispatch-promotion --target prod --sha "$BRAI_COMMIT" --base-sha "$BRAI_BASE_COMMIT" --restart-temporal-worker "$BRAI_RESTART_TEMPORAL_WORKER" --source deploy-prod
