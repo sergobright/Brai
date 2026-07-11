@@ -20,7 +20,7 @@ Brai SHALL publish the built Next.js web output to the existing `deploy/web` web
 Brai SHALL preserve the existing Caddy route boundaries for web, API proxy, direct API access, and protected releases.
 
 #### Scenario: Web app is deployed
-- **WHEN** `app.brightos.world` serves the migrated web app
+- **WHEN** `app.brai.one` serves the migrated web app
 - **THEN** `/api/*` remains routed to the Brai API before the web catch-all
 - **AND** `/releases*` remains routed to the release/auth flow before the web catch-all
 - **AND** application service ports remain localhost-only
@@ -168,16 +168,16 @@ Brai delivery scripts SHALL select the supported Brai Node runtime before runnin
 Brai SHALL not serve retired `/timer*` or `/history*` web app URLs after Timer is renamed to Focus and History is merged into Focus.
 
 #### Scenario: Focus static route is served
-- **WHEN** `app.brightos.world/focus` is requested
+- **WHEN** `app.brai.one/focus` is requested
 - **THEN** Caddy serves the static exported Focus route
 
 #### Scenario: Timer URL is retired
-- **WHEN** `app.brightos.world/timer` or a nested `/timer*` path is requested
+- **WHEN** `app.brai.one/timer` or a nested `/timer*` path is requested
 - **THEN** Caddy returns 404
 - **AND** it does not serve the app fallback
 
 #### Scenario: History URL is retired
-- **WHEN** `app.brightos.world/history` or a nested `/history*` path is requested
+- **WHEN** `app.brai.one/history` or a nested `/history*` path is requested
 - **THEN** Caddy returns 404
 - **AND** it does not serve the app fallback
 
@@ -186,7 +186,7 @@ Brai SHALL use one production environment and five preview environments.
 
 #### Scenario: A branch is deployed
 - **WHEN** `main` is deployed
-- **THEN** it targets production at `app.brightos.world`
+- **THEN** it targets production at `app.brai.one`
 - **WHEN** a `codex/*` branch is deployed
 - **THEN** it allocates or reuses one preview slot from `A` through `E`
 
@@ -226,7 +226,7 @@ Brai SHALL serve the technical admin panel at `/admin` inside each Brai runtime
 environment domain instead of a standalone admin subdomain.
 
 #### Scenario: Production admin is requested
-- **WHEN** `https://app.brightos.world/admin` is requested
+- **WHEN** `https://app.brai.one/admin` is requested
 - **THEN** Caddy routes the request to the production admin service before the web catch-all
 - **AND** Caddy does not apply Basic Auth to the production admin route
 - **AND** the admin app grants access only to the Brai primary user account

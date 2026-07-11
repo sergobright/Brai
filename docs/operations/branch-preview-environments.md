@@ -210,7 +210,7 @@ and deploy/preview artifact roots stay `2775` so future files inherit `brai-depl
 
 ### Supabase Runtime Maintenance
 
-Supabase lifecycle configuration lives outside Git on the VPS. The brightos.world server runs
+Supabase lifecycle configuration lives outside Git on the VPS. The brai.one server runs
 self-hosted Supabase, so preview and Dev isolation use separate Postgres schemas with connection
 URLs carrying an explicit `search_path`:
 
