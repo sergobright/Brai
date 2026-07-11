@@ -37,17 +37,11 @@ test('email OTP message renders the reusable responsive card', () => {
   assert.match(message.html, /Код действует 5 минут\./);
   assert.match(message.html, /max-width:600px/);
   assert.match(message.html, /@media only screen and \(max-width: 620px\)/);
-  assert.match(message.html, /<img src="cid:brai-logo"/);
+  assert.match(message.html, /<img src="https:\/\/app\.brai\.one\/brand\/brai-logo-email-white-bg\.png"/);
   assert.match(message.html, /alt="Brai"/);
+  assert.doesNotMatch(message.html, /cid:/);
   assert.doesNotMatch(message.html, /data:image/);
-  assert.equal(message.attachments[0].contentId, 'brai-logo');
-  assert.equal(message.attachments[0].contentType, 'image/png');
-  assert.equal(message.attachments[0].filename, 'brai-logo.png');
-  assert.equal(
-    message.attachments[0].content,
-    fs.readFileSync(new URL('../../../assets/brand/brai-logo-email-white-bg.png', import.meta.url)).toString('base64')
-  );
-  assert.ok(Buffer.from(message.attachments[0].content, 'base64').byteLength < 20_000);
+  assert.deepEqual(message.attachments, []);
   assert.match(message.html, /&lt;123456&gt;/);
   assert.doesNotMatch(message.html, /<123456>/);
   assert.match(message.text, /<123456>/);

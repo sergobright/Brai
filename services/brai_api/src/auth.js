@@ -1,4 +1,3 @@
-import { readFileSync } from 'node:fs';
 import { betterAuth } from 'better-auth';
 import { emailOTP } from 'better-auth/plugins';
 import { Resend } from 'resend';
@@ -7,8 +6,7 @@ import { isPostgresUrl, postgresPoolMax } from './postgres-sync-db.js';
 
 const DEFAULT_FROM = 'Brai <auth@mail.brai.one>';
 const OTP_EXPIRES_IN_SECONDS = 5 * 60;
-const LOGO_CONTENT_ID = 'brai-logo';
-const LOGO_ATTACHMENT_CONTENT = readFileSync(new URL('../../../assets/brand/brai-logo-email-white-bg.png', import.meta.url)).toString('base64');
+const LOGO_URL = 'https://app.brai.one/brand/brai-logo-email-white-bg.png';
 const DEFAULT_ALLOWED_HOSTS = [
   'brai.one',
   'app.brai.one',
@@ -104,14 +102,7 @@ export function renderOtpEmail({ otp }) {
       '',
       'Brai · brai.one'
     ].join('\n'),
-    attachments: [
-      {
-        content: LOGO_ATTACHMENT_CONTENT,
-        filename: 'brai-logo.png',
-        contentId: LOGO_CONTENT_ID,
-        contentType: 'image/png'
-      }
-    ],
+    attachments: [],
     html: `<!doctype html>
 <html lang="ru">
   <head>
@@ -135,7 +126,7 @@ export function renderOtpEmail({ otp }) {
           <table role="presentation" class="email-card" width="100%" cellpadding="0" cellspacing="0" style="width:100%;max-width:600px;border-collapse:separate;background:#ffffff;border:1px solid #e4e4e7;border-radius:8px;box-shadow:0 18px 44px rgba(24,24,27,0.08);overflow:hidden;">
             <tr>
               <td class="card-pad" style="padding:40px 44px 34px;text-align:center;">
-                <img src="cid:${LOGO_CONTENT_ID}" width="150" height="80" alt="Brai" style="display:block;width:150px;height:auto;margin:0 auto 28px;border:0;">
+                <img src="${LOGO_URL}" width="150" height="80" alt="Brai" style="display:block;width:150px;height:auto;margin:0 auto 28px;border:0;">
                 <h1 style="margin:0;color:#18181b;font-size:24px;line-height:1.25;font-weight:700;">Ваш одноразовый код</h1>
                 <p style="margin:14px 0 0;color:#52525b;font-size:16px;line-height:1.55;">Введите этот код в Brai, чтобы завершить вход.</p>
                 <div class="otp-code" style="margin:30px 0 24px;color:#18181b;font-family:'SFMono-Regular',Consolas,'Liberation Mono',Menlo,monospace;font-size:48px;line-height:1.1;font-weight:800;letter-spacing:6px;white-space:nowrap;">${safeOtp}</div>
