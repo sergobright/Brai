@@ -14,6 +14,8 @@ test("sandbox helper marks Next and API commands as requiring escalation", () =>
   assert.equal(sandboxCheckMode(["npm", "--prefix", "services/brai_api", "test"]).mode, "require_escalated");
   assert.equal(sandboxCheckMode(["npm", "--prefix", "services/brai_api", "run", "test"]).mode, "require_escalated");
   assert.equal(sandboxCheckMode(["scripts/brai-api-test.sh"]).mode, "require_escalated");
+  assert.equal(sandboxCheckMode(["ansible-playbook", "--syntax-check", "deploy/ansible/brai.yml"]).mode, "require_escalated");
+  assert.equal(sandboxCheckMode(["ansible", "localhost", "-m", "template"]).mode, "require_escalated");
   assert.equal(sandboxCheckMode(["npm", "run", "socraticode:preflight"]).mode, "require_escalated");
   assert.equal(sandboxCheckMode(["npm", "run", "socraticode:ensure"]).mode, "require_escalated");
 });
@@ -34,6 +36,7 @@ test("sandbox helper marks live operation completion as requiring escalation", (
   assert.equal(sandboxCheckMode(["deploy/scripts/complete-operation-activities.sh", "--local", "operation:agent-task:x"]).mode, "require_escalated");
   assert.equal(sandboxCheckMode(["deploy/scripts/create-operation-activity.sh", "--id", "operation:agent-task:x"]).mode, "require_escalated");
   assert.equal(sandboxCheckMode(["deploy/scripts/list-operation-activities.sh", "--limit", "5"]).mode, "require_escalated");
+  assert.equal(sandboxCheckMode(["deploy/scripts/postgres-diagnostics.mjs"]).mode, "require_escalated");
 });
 
 test("sandbox helper marks host access checks as requiring escalation", () => {

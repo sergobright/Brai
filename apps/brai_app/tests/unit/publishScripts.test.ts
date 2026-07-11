@@ -327,6 +327,21 @@ describe("mobile OTA publish scripts", () => {
     expect(gradle).not.toContain("?: '0.0.10'");
   });
 
+  it("uses the brai.one endpoint for Preview E Android bundles", async () => {
+    const environments = JSON.parse(
+      await readFile(path.join(workspaceRoot, "deploy/environments.json"), "utf8"),
+    );
+    const gradle = await readFile(path.join(workspaceRoot, "apps/brai_app/android/app/build.gradle"), "utf8");
+    const ansible = await readFile(path.join(workspaceRoot, "deploy/ansible/group_vars/brai.yml"), "utf8");
+
+    expect(environments.environments["preview-e"].domain).toBe("e.test.brai.one");
+    expect(gradle).toContain("previewe: 'https://e.test.brai.one/api'");
+    expect(gradle).toContain('"https://e.test.brai.one/mobile-update/manifest.json"');
+    expect(ansible).toContain("domain: e.test.brai.one");
+    expect(gradle).not.toContain("https://e.test.brightos.world/api");
+    expect(ansible).toContain("- e.test.brightos.world");
+  });
+
   it("marks preview ready only after the service restart succeeds", async () => {
     const deployBranch = await readFile(path.join(workspaceRoot, "deploy/scripts/deploy-branch.sh"), "utf8");
     const restartIndex = deployBranch.indexOf('"${BRAI_SUDO:-sudo}" systemctl restart "$SERVICE_NAME"');
@@ -822,9 +837,7 @@ describe("mobile OTA publish scripts", () => {
     registry = JSON.parse(await readFile(path.join(envsRoot, "preview-slots.json"), "utf8"));
     expect(registry.A.status).toBe("free");
     expect(registry.A.branch).toBeNull();
-    const statusHtml = await readFile(path.join(envsRoot, "preview-status/index.html"), "utf8");
-    expect(statusHtml).toContain("Brai Preview Slots");
-    expect(statusHtml).toContain("APK versionCode");
+    await expect(readFile(path.join(envsRoot, "preview-status/index.html"), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   it("commits preview APK counters per branch and stable version only after a ready preview", async () => {

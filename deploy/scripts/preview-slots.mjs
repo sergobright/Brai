@@ -5,7 +5,6 @@ import process from "node:process";
 const root = process.env.BRAI_ROOT ?? path.resolve(import.meta.dirname, "../..");
 const envsRoot = process.env.BRAI_ENVS_ROOT ?? "/srv/projects/brai-envs";
 const registryPath = process.env.BRAI_PREVIEW_REGISTRY ?? path.join(envsRoot, "preview-slots.json");
-const statusDir = process.env.BRAI_PREVIEW_STATUS_DIR ?? path.join(envsRoot, "preview-status");
 const environments = JSON.parse(fs.readFileSync(path.join(root, "deploy/environments.json"), "utf8")).environments;
 const slots = ["A", "B", "C", "D", "E"];
 const [command, ...args] = process.argv.slice(2);
@@ -59,7 +58,6 @@ try {
 
   if (command !== "status") {
     writeRegistry(registry);
-    renderStatusPage(registry);
   }
   console.log(JSON.stringify(result, null, 2));
 } catch (error) {
@@ -351,85 +349,6 @@ function defaultSlot(slot) {
   };
 }
 
-function renderStatusPage(registry) {
-  fs.mkdirSync(statusDir, { recursive: true });
-  chmodIfPossible(statusDir, 0o2775);
-  const cards = slots
-    .map((slot) => {
-      const entry = registry[slot];
-      const commit = entry.commit ? entry.commit.slice(0, 12) : "none";
-      const env = environments[`preview-${slot.toLowerCase()}`];
-      const apkUrl = entry.apk_file ? `https://${env.domain}/releases/${entry.apk_file}` : null;
-      const apkStatus = entry.apk_version_code ? "apk current" : "apk missing";
-      return `<section class="slot slot-${escapeHtml(entry.status)}">
-        <h2>${slot}</h2>
-        <dl>
-          <div><dt>Status</dt><dd>${escapeHtml(entry.status)}</dd></div>
-          <div><dt>Branch</dt><dd>${escapeHtml(entry.branch ?? "free")}</dd></div>
-          <div><dt>Commit</dt><dd>${escapeHtml(commit)}</dd></div>
-          <div><dt>URL</dt><dd><a href="${escapeHtml(entry.url)}">${escapeHtml(entry.url)}</a></dd></div>
-          <div><dt>Android</dt><dd>${escapeHtml(entry.android_app)}</dd></div>
-          <div><dt>APK</dt><dd>${apkUrl ? `<a href="${escapeHtml(apkUrl)}">${escapeHtml(entry.apk_file)}</a>` : escapeHtml(apkStatus)}</dd></div>
-          <div><dt>APK versionCode</dt><dd>${escapeHtml(entry.apk_version_code ?? "none")}</dd></div>
-          <div><dt>APK kind</dt><dd>${escapeHtml(entry.apk_build_kind ?? "stable")}</dd></div>
-          <div><dt>Supabase</dt><dd>${escapeHtml(entry.supabase_branch_name ? `${entry.supabase_branch_name} (${entry.supabase_branch_status ?? "unknown"})` : "none")}</dd></div>
-        </dl>
-      </section>`;
-    })
-    .join("\n");
-  const queue = registry.queue.length
-    ? `<ol>${registry.queue
-        .map(
-          (entry) =>
-            `<li><strong>${escapeHtml(entry.branch)}</strong> <span>${escapeHtml(entry.commit?.slice(0, 12) ?? "none")}</span></li>`,
-        )
-        .join("")}</ol>`
-    : "<p>No queued preview branches.</p>";
-  const statusPage = path.join(statusDir, "index.html");
-  fs.writeFileSync(
-    statusPage,
-    `<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Brai Preview Slots</title>
-  <style>
-    :root { color-scheme: dark; font-family: system-ui, sans-serif; background: #0c1110; color: #edf7f4; }
-    body { margin: 0; padding: 32px; }
-    main { max-width: 980px; margin: 0 auto; }
-    h1 { margin: 0 0 22px; font-size: 32px; }
-    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
-    .slot { border: 1px solid #2a3935; border-radius: 8px; padding: 16px; background: #121a18; }
-    .slot-free { opacity: .72; }
-    .queue { margin-top: 24px; border-top: 1px solid #2a3935; padding-top: 16px; }
-    h2 { margin: 0 0 12px; font-size: 24px; }
-    dl { display: grid; gap: 8px; margin: 0; }
-    div { min-width: 0; }
-    dt { color: #9fb0ab; font-size: 12px; text-transform: uppercase; }
-    dd { margin: 2px 0 0; overflow-wrap: anywhere; }
-    ol { margin: 0; padding-left: 22px; }
-    li { margin: 8px 0; overflow-wrap: anywhere; }
-    li span { color: #9fb0ab; }
-    a { color: #4cc3ad; }
-  </style>
-</head>
-<body>
-  <main>
-    <h1>Brai Preview Slots</h1>
-    <div class="grid">${cards}</div>
-    <section class="queue">
-      <h2>Queue</h2>
-      ${queue}
-    </section>
-  </main>
-</body>
-</html>
-`,
-  );
-  chmodIfPossible(statusPage, 0o664);
-}
-
 function chmodIfPossible(target, mode) {
   try {
     fs.chmodSync(target, mode);
@@ -484,12 +403,4 @@ function normalizeQueue(queue) {
       queued_at: entry.queued_at ?? null,
       updated_at: entry.updated_at ?? entry.queued_at ?? null,
     }));
-}
-
-function escapeHtml(value) {
-  return String(value)
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;");
 }

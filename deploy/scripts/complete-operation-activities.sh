@@ -54,7 +54,7 @@ validate_ids() {
   local id
   declare -A seen=()
   for id in "$@"; do
-    if [[ ! "$id" =~ ^operation[:._-][A-Za-z0-9._:-]+$ ]]; then
+    if [[ ! "$id" =~ ^(operation[:._-]|activity:operation:)[A-Za-z0-9._:-]+$ ]]; then
       echo "Invalid operation activity id: $id" >&2
       exit 1
     fi

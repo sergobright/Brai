@@ -6,6 +6,8 @@ import android.accessibilityservice.AccessibilityService.TakeScreenshotCallback
 import android.app.KeyguardManager
 import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Color
 import android.graphics.Rect
 import android.os.Build
 import android.os.PowerManager
@@ -17,9 +19,11 @@ import android.widget.Toast
 import world.brightos.brai.braicmd.AccessibilityContextReader
 import world.brightos.brai.braicmd.AccessibilityTextInserter
 import world.brightos.brai.braicmd.BraiCmdBus
+import world.brightos.brai.braicmd.BraiCmdPlugin
 import world.brightos.brai.braicmd.OverlayController
 import world.brightos.brai.braicmd.PendingReason
 import world.brightos.brai.braicmd.PendingTranscript
+import world.brightos.brai.braicmd.PendingTranscriptKind
 import world.brightos.brai.braicmd.PendingTranscriptStore
 import world.brightos.brai.braicmd.RecorderState
 import world.brightos.brai.braicmd.RecordingService
@@ -44,6 +48,10 @@ class BraiAccessibilityService : AccessibilityService() {
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         when (event?.eventType) {
+            AccessibilityEvent.TYPE_VIEW_CLICKED -> {
+                overlay.onExternalInteraction(event.packageName?.toString())
+                updateFocusedNode()
+            }
             AccessibilityEvent.TYPE_VIEW_FOCUSED,
             AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED,
             AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED,
@@ -71,6 +79,9 @@ class BraiAccessibilityService : AccessibilityService() {
     fun captureVisibleConversationContext(): VisibleConversationContext? =
         if (isDeviceInteractive()) contextReader.capture() else null
 
+    fun canCaptureWindowWithoutHidingOverlays(): Boolean =
+        shouldUseWindowScreenshot(Build.VERSION.SDK_INT, activeWindowId())
+
     fun captureActiveWindowScreenshot(onComplete: (File?) -> Unit) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R || !isDeviceInteractive()) {
             onComplete(null)
@@ -87,18 +98,19 @@ class BraiAccessibilityService : AccessibilityService() {
             }
         }
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            val targetWindowId = contextReader.activeApplicationWindowId()
-            if (targetWindowId != null) {
-                takeScreenshotOfWindow(targetWindowId, mainExecutor, callback)
-                return
-            }
+        val windowId = activeWindowId()
+        if (shouldUseWindowScreenshot(Build.VERSION.SDK_INT, windowId)) {
+            takeScreenshotOfWindow(windowId!!, mainExecutor, callback)
+        } else {
+            takeScreenshot(Display.DEFAULT_DISPLAY, mainExecutor, callback)
         }
-        takeScreenshot(Display.DEFAULT_DISPLAY, mainExecutor, callback)
     }
 
-    fun insertNextPendingTranscriptIntoFocusedField(showToast: Boolean): Boolean {
-        val pending = PendingTranscriptStore.list(this)
+    fun insertNextPendingTranscriptIntoFocusedField(
+        showToast: Boolean,
+        kind: PendingTranscriptKind = PendingTranscriptKind.MainDictation
+    ): Boolean {
+        val pending = PendingTranscriptStore.list(this, kind)
         if (pending.isEmpty()) return false
         return insertPendingTranscriptIntoFocusedField(pending.first(), pending.size, showToast)
     }
@@ -140,6 +152,7 @@ class BraiAccessibilityService : AccessibilityService() {
 
         if (autoInsertTranscriptFile == transcript.file.name) autoInsertTranscriptFile = null
         PendingTranscriptStore.delete(transcript)
+        BraiCmdPlugin.notifyOnboardingEvent("voiceTextInserted", text)
         val pendingTranscripts = PendingTranscriptStore.list(this).size
         if (!RecordingService.hasPendingRecordings(this) && pendingTranscripts == 0) {
             BraiCmdBus.post(RecorderState.Idle)
@@ -167,7 +180,7 @@ class BraiAccessibilityService : AccessibilityService() {
         }
         val editable = findEditableNode() ?: refreshedFocusedNode()
         focusedNode = editable
-        if (editable != null && isKeyboardVisible()) {
+        if (shouldShowDictationButton(editable != null, isInputMethodVisible())) {
             overlay.showIfAllowed()
         } else {
             overlay.hideInputButton()
@@ -175,6 +188,9 @@ class BraiAccessibilityService : AccessibilityService() {
         overlay.showScreenshotIfAllowed()
         if (editable != null) retryAutoInsertTranscript()
     }
+
+    private fun isInputMethodVisible(): Boolean =
+        windows.any { window -> window.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD }
 
     private fun findEditableNode(): AccessibilityNodeInfo? {
         val root = rootInActiveWindow ?: return null
@@ -240,6 +256,9 @@ class BraiAccessibilityService : AccessibilityService() {
         return node
     }
 
+    private fun activeWindowId(): Int? =
+        rootInActiveWindow?.windowId?.takeIf { it >= 0 }
+
     private fun retryAutoInsertTranscript() {
         val fileName = autoInsertTranscriptFile ?: return
         autoInsertTranscriptFile = null
@@ -250,9 +269,6 @@ class BraiAccessibilityService : AccessibilityService() {
             retryingAutoInsert = false
         }
     }
-
-    private fun isKeyboardVisible(): Boolean =
-        windows.any { window -> window.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD }
 
     private fun isDeviceInteractive(): Boolean {
         val power = getSystemService(Context.POWER_SERVICE) as PowerManager
@@ -269,7 +285,7 @@ class BraiAccessibilityService : AccessibilityService() {
         screenshot.hardwareBuffer.close()
         if (source == null) return null
 
-        val bitmap = runCatching { source.copy(Bitmap.Config.ARGB_8888, false) }.getOrNull()
+        val bitmap = runCatching { screenshotBitmapForStorage(source) }.getOrNull()
         source.recycle()
         if (bitmap == null) return null
 
@@ -298,5 +314,34 @@ class BraiAccessibilityService : AccessibilityService() {
     companion object {
         private const val SCREENSHOT_DIR = "pending-screenshots"
         private const val MAX_SCREENSHOT_DIMENSION = 1440
+    }
+}
+
+internal fun shouldShowDictationButton(hasEditableField: Boolean, inputMethodVisible: Boolean): Boolean =
+    hasEditableField && inputMethodVisible
+
+internal fun shouldUseWindowScreenshot(sdkInt: Int, windowId: Int?): Boolean =
+    sdkInt >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE && windowId != null && windowId >= 0
+
+internal fun opaqueScreenshotBitmap(source: Bitmap): Bitmap {
+    require(source.config != Bitmap.Config.HARDWARE) {
+        "Hardware bitmap must be copied before software composition"
+    }
+    return Bitmap.createBitmap(source.width, source.height, Bitmap.Config.ARGB_8888).also { output ->
+        Canvas(output).apply {
+            drawColor(Color.BLACK)
+            drawBitmap(source, 0f, 0f, null)
+        }
+        output.setHasAlpha(false)
+    }
+}
+
+internal fun screenshotBitmapForStorage(source: Bitmap): Bitmap {
+    val softwareCopy = source.copy(Bitmap.Config.ARGB_8888, false)
+        ?: error("Unable to copy screenshot into software memory")
+    return try {
+        opaqueScreenshotBitmap(softwareCopy)
+    } finally {
+        softwareCopy.recycle()
     }
 }

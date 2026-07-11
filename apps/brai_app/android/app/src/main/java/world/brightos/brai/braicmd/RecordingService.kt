@@ -16,9 +16,8 @@ import java.io.File
 import java.io.IOException
 import java.net.SocketTimeoutException
 import java.net.UnknownHostException
+import java.util.concurrent.CopyOnWriteArraySet
 import java.util.concurrent.atomic.AtomicBoolean
-
-private class InboxDeliveryException(message: String) : IOException(message)
 
 class RecordingService : Service() {
     private val handler = Handler(Looper.getMainLooper())
@@ -27,6 +26,8 @@ class RecordingService : Service() {
     private var conversationContext: VisibleConversationContext? = null
     private var screenshotFile: File? = null
     private var inboxDelivery = false
+    private var inboxTextPrefix = ""
+    private var audioQueueAction = AudioQueueAction.MainDictation
     private var amplitudeTicker: Runnable? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -39,7 +40,9 @@ class RecordingService : Service() {
             else -> startRecording(
                 VisibleConversationContext.fromIntent(intent),
                 screenshotFileFromIntent(intent),
-                intent?.getBooleanExtra(EXTRA_INBOX_DELIVERY, false) == true
+                intent?.getBooleanExtra(EXTRA_INBOX_DELIVERY, false) == true,
+                intent?.getStringExtra(EXTRA_INBOX_TEXT_PREFIX).orEmpty(),
+                audioQueueActionFromIntent(intent)
             )
         }
         return START_NOT_STICKY
@@ -52,16 +55,25 @@ class RecordingService : Service() {
             val pendingFile = finalizeRecording(unfinishedFile)
             ConversationContextStore.save(pendingFile, conversationContext)
             screenshotFile?.let { ScreenshotContextStore.save(pendingFile, it) }
-            if (inboxDelivery) InboxPayloadStore.mark(pendingFile)
+            if (inboxDelivery) InboxPayloadStore.mark(pendingFile, inboxTextPrefix)
+            InboxPayloadStore.saveAction(pendingFile, audioQueueAction)
         }
         outputFile = null
         conversationContext = null
         screenshotFile = null
         inboxDelivery = false
+        inboxTextPrefix = ""
+        audioQueueAction = AudioQueueAction.MainDictation
         super.onDestroy()
     }
 
-    private fun startRecording(context: VisibleConversationContext?, screenshot: File?, deliverToInbox: Boolean) {
+    private fun startRecording(
+        context: VisibleConversationContext?,
+        screenshot: File?,
+        deliverToInbox: Boolean,
+        textPrefix: String,
+        action: AudioQueueAction
+    ) {
         if (recorder != null) {
             screenshot?.delete()
             return
@@ -69,6 +81,8 @@ class RecordingService : Service() {
         conversationContext = context
         screenshotFile = screenshot?.takeIf { it.isFile && it.length() > 0L }
         inboxDelivery = deliverToInbox
+        inboxTextPrefix = textPrefix.trim()
+        audioQueueAction = action
         startRecordingForeground()
 
         val file = File(recordingsDir().apply { mkdirs() }, "brai-cmd-${System.currentTimeMillis()}.recording.m4a")
@@ -85,7 +99,8 @@ class RecordingService : Service() {
             recorder = mediaRecorder
             outputFile = file
             ScreenshotContextStore.save(file, screenshotFile)
-            if (inboxDelivery) InboxPayloadStore.mark(file)
+            if (inboxDelivery) InboxPayloadStore.mark(file, inboxTextPrefix)
+            InboxPayloadStore.saveAction(file, audioQueueAction)
             screenshotFile = null
             BraiCmdBus.post(RecorderState.Recording(0))
             startAmplitudeTicker()
@@ -123,6 +138,17 @@ class RecordingService : Service() {
         }
         ConversationContextStore.save(pendingFile, conversationContext)
         ScreenshotContextStore.move(recordingFile, pendingFile)
+        InboxPayloadStore.saveAction(pendingFile, audioQueueAction)
+        if (ConfigStore(this).onboardingQueuePaused) {
+            BraiCmdPlugin.notifyOnboardingEvent("queueSaved", null)
+            postPendingState(
+                message = "Запись сохранена в очереди. Отправка временно остановлена для проверки.",
+                reason = PendingReason.Network
+            )
+            stopRecordingForeground()
+            stopSelf()
+            return
+        }
         uploadFreshRecording(pendingFile)
     }
 
@@ -132,6 +158,8 @@ class RecordingService : Service() {
         outputFile = null
         conversationContext = null
         inboxDelivery = false
+        inboxTextPrefix = ""
+        audioQueueAction = AudioQueueAction.MainDictation
         screenshotFile?.delete()
         screenshotFile = null
         recordingFile?.let { ConversationContextStore.delete(it) }
@@ -143,189 +171,124 @@ class RecordingService : Service() {
         stopSelf()
     }
 
-    private fun uploadPendingRecordings() {
-        uploadRecordings(pendingAudioFiles(this), autoInsertAudioFileName = null)
-    }
+    private fun uploadPendingRecordings() = uploadQueue(autoInsertAudioFileName = null)
 
     private fun uploadFreshRecording(file: File) {
-        uploadRecordings(listOf(file), autoInsertAudioFileName = file.name)
+        QueueRetryStore(this).allowImmediate()
+        uploadQueue(autoInsertAudioFileName = file.name)
     }
 
-    private fun uploadRecordings(files: List<File>, autoInsertAudioFileName: String?) {
+    private fun uploadQueue(autoInsertAudioFileName: String?) {
+        workerStartRequested.set(false)
         if (!uploadInProgress.compareAndSet(false, true)) return
-        val firstBatch = files.filter { it.exists() && it.length() >= 512L }
-        if (firstBatch.isEmpty()) {
-            uploadInProgress.set(false)
-            val transcripts = PendingTranscriptStore.list(this).size
-            if (transcripts > 0) {
-                BraiCmdBus.post(RecorderState.TranscriptReady(transcripts))
-            }
-            stopRecordingForeground()
-            stopSelf()
-            return
-        }
-
         startUploadForeground()
         BraiCmdBus.post(RecorderState.Uploading)
         Thread {
+            var workerResult: QueueWorkerResult? = null
             try {
-                val client = NetworkClient(this)
-                var autoInsertTranscriptFile: String? = null
-                var fallbackUsed = false
-                var fallbackProvider = ""
-                var fallbackModel = ""
-                var permanentFailureMessage: String? = null
-                var inboxDelivered = false
-                for (file in firstBatch) {
-                    if (!file.exists()) continue
-                    val inboxPayload = InboxPayloadStore.isInboxPayload(file)
-                    if (isTooLargeForUpload(file)) {
-                        permanentFailureMessage = tooLargeMessage(file)
-                        markAudioUnretryable(file)
-                        continue
+                val transport = QueueTransportWorker(this).run(autoInsertAudioFileName)
+                val retryStore = QueueRetryStore(this)
+                val nextRetryAt = when (transport.status) {
+                    QueueTransportStatus.TransientFailure -> {
+                        BraiCmdQueue.markTransportFailed(this, transport.failedTransportIds)
+                        retryStore.recordTransient(System.currentTimeMillis()).nextRetryAtMillis
                     }
-                    if (inboxPayload) {
-                        var text = InboxPayloadStore.readTranscript(file)
-                        if (text == null) {
-                            val response = try {
-                                client.uploadAudio(file, null, null)
-                            } catch (error: ServerResponseException) {
-                                if (isPermanentServerReject(error)) {
-                                    markAudioUnretryable(file)
-                                    permanentFailureMessage = permanentRejectMessage(error)
-                                    continue
-                                }
-                                throw error
-                            }
-                            text = response.text.trim()
-                            if (text.isNotBlank()) {
-                                InboxPayloadStore.saveTranscript(file, text)
-                            }
-                        }
-                        val finalText = text.orEmpty()
-                        if (finalText.isBlank()) {
-                            postPendingState(
-                                message = "Данные сохранены. Модель вернула пустой текст; повторю автоматически.",
-                                reason = PendingReason.Transcription
-                            )
-                            return@Thread
-                        }
-                        deliverToInbox(client, file, finalText)
-                        markAudioComplete(file)
-                        inboxDelivered = true
-                    } else {
-                        val storedContext = ConversationContextStore.read(file)
-                        val response = try {
-                            client.uploadAudio(file, storedContext, ScreenshotContextStore.read(file))
-                        } catch (error: ServerResponseException) {
-                            if (isPermanentServerReject(error)) {
-                                markAudioUnretryable(file)
-                                permanentFailureMessage = permanentRejectMessage(error)
-                                continue
-                            }
-                            throw error
-                        }
-                        val text = response.text.trim()
-                        if (text.isBlank()) {
-                            postPendingState(
-                                message = "Запись сохранена. Модель вернула пустой текст; повторю автоматически.",
-                                reason = PendingReason.Transcription
-                            )
-                            return@Thread
-                        }
-                        val transcriptFile = PendingTranscriptStore.add(this, text)
-                        if (file.name == autoInsertAudioFileName) {
-                            autoInsertTranscriptFile = transcriptFile.name
-                        }
-                        if (response.fallbackUsed) {
-                            fallbackUsed = true
-                            fallbackProvider = response.provider
-                            fallbackModel = response.model
-                        }
-                        markAudioComplete(file)
+                    QueueTransportStatus.Blocked -> {
+                        BraiCmdQueue.markTransportFailed(this, transport.failedTransportIds)
+                        retryStore.recordBlocked(System.currentTimeMillis()).nextRetryAtMillis
+                    }
+                    QueueTransportStatus.Drained -> {
+                        retryStore.reset()
+                        BraiCmdQueue.clearTransportFailures(this)
+                        null
                     }
                 }
-                val pendingRecordings = pendingAudioFiles(this).size
-                val pendingTranscripts = PendingTranscriptStore.list(this).size
-                if (pendingTranscripts > 0) {
-                    BraiCmdBus.post(
-                        RecorderState.TranscriptReady(
-                            transcripts = pendingTranscripts,
-                            autoInsertTranscriptFile = autoInsertTranscriptFile,
-                            fallbackUsed = fallbackUsed,
-                            provider = fallbackProvider,
-                            model = fallbackModel
-                        )
-                    )
-                } else if (pendingRecordings > 0) {
-                    BraiCmdBus.post(
-                        RecorderState.Pending(
-                            message = "Есть сохраненные записи в очереди",
-                            recordings = pendingRecordings,
-                            transcripts = 0,
-                            reason = PendingReason.Unknown
-                        )
-                    )
-                } else if (permanentFailureMessage != null) {
-                    BraiCmdBus.post(RecorderState.Error(permanentFailureMessage))
-                } else if (inboxDelivered) {
-                    BraiCmdBus.post(RecorderState.InboxDelivered)
-                } else {
-                    BraiCmdBus.post(RecorderState.Idle)
-                }
+                val snapshot = queueSnapshot(this)
+                workerResult = QueueWorkerResult(
+                    status = when (transport.status) {
+                        QueueTransportStatus.Drained -> QueueWorkerStatus.Drained
+                        QueueTransportStatus.TransientFailure -> QueueWorkerStatus.TransientFailure
+                        QueueTransportStatus.Blocked -> QueueWorkerStatus.Blocked
+                    },
+                    snapshot = snapshot,
+                    nextRetryAtMillis = nextRetryAt
+                )
+                postQueueState(transport, snapshot)
             } catch (error: Throwable) {
+                val schedule = QueueRetryStore(this).recordTransient(System.currentTimeMillis())
+                val snapshot = queueSnapshot(this)
+                workerResult = QueueWorkerResult(
+                    status = QueueWorkerStatus.TransientFailure,
+                    snapshot = snapshot,
+                    nextRetryAtMillis = schedule.nextRetryAtMillis
+                )
                 val (message, reason) = pendingStatusFor(error)
-                postPendingState(message, reason)
+                postPendingState(snapshot, message, reason)
             } finally {
                 uploadInProgress.set(false)
+                val result = workerResult ?: QueueWorkerResult(QueueWorkerStatus.TransientFailure, queueSnapshot(this))
+                queueWorkerListeners.forEach { listener -> runCatching { listener(result) } }
                 stopRecordingForeground()
                 stopSelf()
+                if (result.status == QueueWorkerStatus.Drained &&
+                    result.snapshot.transport.total > 0 &&
+                    !ConfigStore(this).onboardingQueuePaused
+                ) {
+                    retryPending(this, QueueRetryTrigger.Enqueue)
+                }
             }
         }.start()
     }
 
-    private fun deliverToInbox(client: NetworkClient, file: File, text: String) {
-        val context = ConversationContextStore.read(file)
-        val screenshot = ScreenshotContextStore.read(file)
-        try {
-            client.uploadInboxCommand(
-                transcript = text,
-                conversationContext = context,
-                screenshotFile = screenshot,
-                idempotencyKey = file.name
+    private fun postQueueState(transport: QueueTransportResult, snapshot: BraiCmdQueueSnapshot) {
+        if (transport.status != QueueTransportStatus.Drained) {
+            val failure = transport.failure ?: IOException("Не удалось отправить очередь")
+            val (message, reason) = pendingStatusFor(failure)
+            postPendingState(snapshot, message, reason)
+            return
+        }
+        when {
+            transport.autoInsertTranscriptFile != null -> BraiCmdBus.post(
+                RecorderState.TranscriptReady(
+                    transcripts = snapshot.readyToInsert.total,
+                    autoInsertTranscriptFile = transport.autoInsertTranscriptFile,
+                    fallbackUsed = transport.fallbackUsed,
+                    provider = transport.provider,
+                    model = transport.model
+                )
             )
-        } catch (error: Throwable) {
-            throw InboxDeliveryException(error.message ?: "Входящие не отвечают")
+            transport.permanentFailureMessage != null -> BraiCmdBus.post(RecorderState.Error(transport.permanentFailureMessage))
+            transport.inboxDelivered -> BraiCmdBus.post(RecorderState.InboxDelivered)
+            snapshot.readyToInsert.total > 0 -> BraiCmdBus.post(
+                RecorderState.TranscriptReady(
+                    transcripts = snapshot.readyToInsert.total,
+                    fallbackUsed = transport.fallbackUsed,
+                    provider = transport.provider,
+                    model = transport.model
+                )
+            )
+            snapshot.transport.total > 0 -> postPendingState(
+                snapshot,
+                "Есть сохраненные данные в очереди",
+                PendingReason.Unknown
+            )
+            else -> BraiCmdBus.post(RecorderState.Idle)
         }
     }
 
-    private fun postPendingState(message: String, reason: PendingReason) {
+    private fun postPendingState(snapshot: BraiCmdQueueSnapshot, message: String, reason: PendingReason) {
         BraiCmdBus.post(
             RecorderState.Pending(
                 message = message,
-                recordings = pendingAudioFiles(this).size,
-                transcripts = PendingTranscriptStore.list(this).size,
+                recordings = snapshot.transport.total,
+                transcripts = snapshot.readyToInsert.total,
                 reason = reason
             )
         )
     }
 
-    private fun markAudioComplete(file: File) {
-        ConversationContextStore.delete(file)
-        ScreenshotContextStore.delete(file)
-        InboxPayloadStore.delete(file)
-        if (file.delete()) return
-        file.renameTo(File(file.parentFile ?: recordingsDir(), "${file.name}.done"))
-    }
-
-    private fun markAudioUnretryable(file: File) {
-        ConversationContextStore.delete(file)
-        ScreenshotContextStore.delete(file)
-        InboxPayloadStore.delete(file)
-        val failedFile = File(file.parentFile ?: recordingsDir(), "${file.name}.failed")
-        if (file.renameTo(failedFile)) return
-        file.delete()
-    }
+    private fun postPendingState(message: String, reason: PendingReason) =
+        postPendingState(queueSnapshot(this), message, reason)
 
     private fun finalizeRecording(file: File): File {
         if (!file.name.contains(".recording.")) return file
@@ -351,48 +314,26 @@ class RecordingService : Service() {
 
     private fun pendingStatusFor(error: Throwable): Pair<String, PendingReason> =
         when (error) {
-            is InboxDeliveryException ->
-                Pair("Команда сохранена. Входящие сейчас не отвечают; повторю автоматически.", PendingReason.Server)
+            is QueueAuthBlockedException ->
+                Pair("Данные сохранены. Обновите доступ и повторите отправку.", PendingReason.Server)
+            is QueueEmptyModelException ->
+                Pair("Данные сохранены. Модель вернула пустой текст; повторю автоматически.", PendingReason.Transcription)
             is UnknownHostException ->
-                Pair("Запись сохранена. Нет интернета; когда связь вернется, Brai Cmd расшифрует ее сам.", PendingReason.Network)
+                Pair("Данные сохранены. Нет интернета; отправлю, когда связь вернется.", PendingReason.Network)
             is SocketTimeoutException ->
-                Pair("Запись сохранена. Сервер долго не отвечает; повторю отправку автоматически.", PendingReason.Server)
+                Pair("Данные сохранены. Сервер долго не отвечает; повторю автоматически.", PendingReason.Server)
             is ServerResponseException ->
-                if (error.code == "upstream_error") {
-                    Pair("Запись сохранена. Модель расшифровки сейчас не отвечает; повторю автоматически.", PendingReason.Transcription)
+                if (error.statusCode == 401 || error.statusCode == 403) {
+                    Pair("Данные сохранены. Обновите доступ и повторите отправку.", PendingReason.Server)
+                } else if (error.code == "upstream_error") {
+                    Pair("Данные сохранены. Модель сейчас не отвечает; повторю автоматически.", PendingReason.Transcription)
                 } else {
-                    Pair("Запись сохранена. Сервер не принял запрос; повторю автоматически.", PendingReason.Server)
+                    Pair("Данные сохранены. Сервер не принял запрос; повторю автоматически.", PendingReason.Server)
                 }
             is IOException ->
-                Pair("Запись сохранена. Сейчас нет связи с сервером; повторю отправку автоматически.", PendingReason.Network)
+                Pair("Данные сохранены. Сейчас нет связи с сервером; повторю автоматически.", PendingReason.Network)
             else ->
-                Pair("Запись сохранена. Не удалось отправить сейчас; повторю автоматически.", PendingReason.Unknown)
-        }
-
-    private fun isTooLargeForUpload(file: File): Boolean =
-        file.length() > NetworkClient.MAX_AUDIO_BYTES
-
-    private fun tooLargeMessage(file: File): String {
-        val megabytes = ((file.length() + BYTES_PER_MEGABYTE - 1) / BYTES_PER_MEGABYTE).coerceAtLeast(1)
-        return "Запись ${megabytes} МБ слишком большая для отправки и убрана из очереди."
-    }
-
-    private fun isPermanentServerReject(error: ServerResponseException): Boolean =
-        error.statusCode == 413 ||
-            error.code == "request_too_large" ||
-            error.code == "audio_too_large" ||
-            error.code == "unsupported_audio" ||
-            error.code == "unsupported_media_type" ||
-            error.code == "missing_audio"
-
-    private fun permanentRejectMessage(error: ServerResponseException): String =
-        when (error.code) {
-            "request_too_large", "audio_too_large" ->
-                "Запись слишком большая для отправки и убрана из очереди."
-            "unsupported_audio", "unsupported_media_type", "missing_audio" ->
-                "Запись повреждена или не поддерживается и убрана из очереди."
-            else ->
-                "Сервер не принял запись, она убрана из очереди."
+                Pair("Данные сохранены. Не удалось отправить сейчас; повторю автоматически.", PendingReason.Unknown)
         }
 
     private fun startRecordingForeground() {
@@ -465,7 +406,6 @@ class RecordingService : Service() {
 
     companion object {
         private const val RECORDINGS_DIR = "pending-recordings"
-        private const val BYTES_PER_MEGABYTE = 1024L * 1024L
         private const val NOTIFICATION_CHANNEL_ID = "brai_cmd_recording"
         private const val NOTIFICATION_ID = 4007
         private const val ACTION_START = "world.brightos.brai.braicmd.START_RECORDING"
@@ -474,13 +414,19 @@ class RecordingService : Service() {
         private const val ACTION_RETRY = "world.brightos.brai.braicmd.RETRY_RECORDINGS"
         private const val EXTRA_SCREENSHOT_PATH = "world.brightos.brai.braicmd.extra.SCREENSHOT_PATH"
         private const val EXTRA_INBOX_DELIVERY = "world.brightos.brai.braicmd.extra.INBOX_DELIVERY"
+        private const val EXTRA_INBOX_TEXT_PREFIX = "world.brightos.brai.braicmd.extra.INBOX_TEXT_PREFIX"
+        private const val EXTRA_AUDIO_QUEUE_ACTION = "world.brightos.brai.braicmd.extra.AUDIO_QUEUE_ACTION"
         private val uploadInProgress = AtomicBoolean(false)
+        private val workerStartRequested = AtomicBoolean(false)
+        private val queueWorkerListeners = CopyOnWriteArraySet<(QueueWorkerResult) -> Unit>()
 
-        fun start(
+        internal fun start(
             context: Context,
             conversationContext: VisibleConversationContext? = null,
             screenshotFile: File? = null,
-            deliverToInbox: Boolean = false
+            deliverToInbox: Boolean = false,
+            inboxTextPrefix: String = "",
+            contextAction: ContextButtonAction? = null
         ) {
             val intent = Intent(context, RecordingService::class.java).setAction(ACTION_START)
             VisibleConversationContext.putInto(intent, conversationContext)
@@ -488,6 +434,17 @@ class RecordingService : Service() {
                 intent.putExtra(EXTRA_SCREENSHOT_PATH, screenshotFile.absolutePath)
             }
             intent.putExtra(EXTRA_INBOX_DELIVERY, deliverToInbox)
+            if (inboxTextPrefix.isNotBlank()) intent.putExtra(EXTRA_INBOX_TEXT_PREFIX, inboxTextPrefix.trim())
+            val action = when {
+                contextAction != null -> AudioQueueAction.fromContextAction(contextAction)
+                !deliverToInbox -> AudioQueueAction.MainDictation
+                inboxTextPrefix.trim().equals(AudioQueueStore.IDEA_PREFIX, ignoreCase = true) -> AudioQueueAction.IdeaVoiceInbox
+                screenshotFile != null -> AudioQueueAction.ScreenshotVoiceInbox
+                inboxTextPrefix.trim().equals(AudioQueueStore.CHAT_PREFIX, ignoreCase = true) -> AudioQueueAction.ChatContextInbox
+                conversationContext != null -> AudioQueueAction.SaveContextInbox
+                else -> AudioQueueAction.Unknown
+            }
+            intent.putExtra(EXTRA_AUDIO_QUEUE_ACTION, action.persistedValue)
             try {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) context.startForegroundService(intent) else context.startService(intent)
             } catch (error: Throwable) {
@@ -512,36 +469,86 @@ class RecordingService : Service() {
             }
         }
 
-        fun retryPending(context: Context) {
+        fun retryPending(context: Context): Boolean =
+            retryPending(context, QueueRetryTrigger.Manual)
+
+        internal fun retryPending(
+            context: Context,
+            trigger: QueueRetryTrigger
+        ): Boolean {
             val state = BraiCmdBus.latest
-            if (uploadInProgress.get() ||
+            val retryStore = QueueRetryStore(context)
+            if (ConfigStore(context).onboardingQueuePaused ||
+                uploadInProgress.get() ||
                 state is RecorderState.Recording ||
-                state is RecorderState.Uploading ||
+                (state is RecorderState.Uploading && trigger != QueueRetryTrigger.Enqueue) ||
                 !hasPendingRecordings(context)
             ) {
-                return
+                return false
+            }
+            if (!workerStartRequested.compareAndSet(false, true)) return false
+            if (trigger in setOf(QueueRetryTrigger.Manual, QueueRetryTrigger.Network, QueueRetryTrigger.Enqueue)) {
+                retryStore.allowImmediate()
             }
             val intent = Intent(context, RecordingService::class.java).setAction(ACTION_RETRY)
-            try {
+            return try {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) context.startForegroundService(intent) else context.startService(intent)
+                true
             } catch (error: Throwable) {
+                workerStartRequested.set(false)
                 BraiCmdBus.post(RecorderState.Error(error.message ?: "Не удалось повторить отправку сохраненной записи"))
+                false
             }
         }
 
-        fun hasPendingRecordings(context: Context): Boolean = pendingAudioFiles(context).isNotEmpty()
+        internal fun enqueueScreenshot(context: Context, screenshotFile: File): Boolean {
+            if (ScreenshotInboxStore.enqueue(context, screenshotFile) == null) return false
+            val snapshot = queueSnapshot(context)
+            if (ConfigStore(context).onboardingQueuePaused) {
+                BraiCmdPlugin.notifyOnboardingEvent("queueSaved", null)
+                BraiCmdBus.post(
+                    RecorderState.Pending(
+                        message = "Скриншот сохранен в очереди. Отправка временно остановлена для проверки.",
+                        recordings = snapshot.transport.total,
+                        transcripts = snapshot.readyToInsert.total,
+                        reason = PendingReason.Network
+                    )
+                )
+                return true
+            }
+            retryPending(context, QueueRetryTrigger.Enqueue)
+            return true
+        }
 
-        fun pendingRecordingsCount(context: Context): Int = pendingAudioFiles(context).size
+        internal fun queueSnapshot(context: Context): BraiCmdQueueSnapshot = BraiCmdQueue.snapshot(context)
 
-        private fun pendingAudioFiles(context: Context): List<File> =
-            File(context.filesDir, RECORDINGS_DIR)
-                .listFiles { file ->
-                    file.isFile &&
-                        file.name.endsWith(".m4a", ignoreCase = true) &&
-                        !file.name.contains(".recording.")
-                }
-                ?.sortedBy { it.lastModified() }
-                .orEmpty()
+        internal fun addQueueWorkerListener(listener: (QueueWorkerResult) -> Unit) {
+            queueWorkerListeners.add(listener)
+        }
+
+        internal fun removeQueueWorkerListener(listener: (QueueWorkerResult) -> Unit) {
+            queueWorkerListeners.remove(listener)
+        }
+
+        fun hasPendingRecordings(context: Context): Boolean =
+            AudioQueueStore.list(context).isNotEmpty() || ScreenshotInboxStore.list(context).isNotEmpty()
+
+        fun pendingRecordingsCount(context: Context): Int =
+            AudioQueueStore.list(context).size + ScreenshotInboxStore.list(context).size
+
+        private fun audioQueueActionFromIntent(intent: Intent?): AudioQueueAction {
+            val saved = intent?.getStringExtra(EXTRA_AUDIO_QUEUE_ACTION)
+            if (!saved.isNullOrBlank()) return AudioQueueAction.fromPersisted(saved)
+            if (intent?.getBooleanExtra(EXTRA_INBOX_DELIVERY, false) != true) return AudioQueueAction.MainDictation
+            val prefix = intent.getStringExtra(EXTRA_INBOX_TEXT_PREFIX).orEmpty().trim()
+            return when {
+                prefix.equals(AudioQueueStore.IDEA_PREFIX, ignoreCase = true) -> AudioQueueAction.IdeaVoiceInbox
+                intent.getStringExtra(EXTRA_SCREENSHOT_PATH).orEmpty().isNotBlank() -> AudioQueueAction.ScreenshotVoiceInbox
+                prefix.equals(AudioQueueStore.CHAT_PREFIX, ignoreCase = true) -> AudioQueueAction.ChatContextInbox
+                VisibleConversationContext.fromIntent(intent) != null -> AudioQueueAction.SaveContextInbox
+                else -> AudioQueueAction.Unknown
+            }
+        }
 
         private fun screenshotFileFromIntent(intent: Intent?): File? {
             val path = intent?.getStringExtra(EXTRA_SCREENSHOT_PATH).orEmpty()

@@ -22,6 +22,7 @@
 - `deploy/ansible/` и `deploy/environments.json` - one-VPS production/preview environment setup and routing source.
 - `docs/operations/branch-preview-environments.md` - branch preview workflow, CI secrets, deploy-user boundary and branch protection steps.
 - `openspec/` - accepted/planned requirements.
+- `docs/adr/` - architecture decision records and rationale, rendered by Log4brains.
 - `memory-bank/` - фактический контекст и решения.
 - `.socraticode.json` - committed SocratiCode `projectId` so the main checkout and task worktrees share one semantic index.
 - `.socraticodecontextartifacts.json` - SocratiCode context artifact registry for agent rules, docs, OpenSpec, and Memory Bank.
@@ -34,6 +35,7 @@
 | --- | --- |
 | `brai-logo-transparent.png` / `brai-logo-transparent.svg` | Основной вариант для UI, сайта и макетов, где фон задаёт контейнер. Подходит для тёмных, цветных и фото-фонов; не ставить на светлый фон без проверки контраста, потому что `Br` белые. |
 | `brai-logo-white-bg.png` / `brai-logo-white-bg.svg` | Для белых и светлых поверхностей, документов, писем, презентаций и экспортов: `Br` чёрные, красный остаётся без изменения. |
+| `brai-logo-email-white-bg.png` | Маленький `300x142` PNG для email; в письмах использовать публичный `https://brai.one/brai-logo-email-white-bg.png` из `landing/public`, а не MIME attachment. |
 | `brai-logo-black-bg.png` / `brai-logo-black-bg.svg` | Для тёмных блоков, заставок и экспортов, где нужна встроенная чёрная подложка и предсказуемый контраст: `Br` белые, красный остаётся без изменения. |
 
 `brai-logo-source.png`, `brai-logo-black.png`, app icons, favicons и launcher assets являются отдельными иконками/прежними исходниками; wordmark-размещения по умолчанию берут один из трёх вариантов выше.
@@ -49,6 +51,10 @@
 - `npm run android:build:release` - release APK build.
 - `npm run openspec:guard` - проверка, что завершённые OpenSpec changes не оставлены активными.
 - `npm run openspec:validate` - completed-change guard плюс strict OpenSpec validation.
+- `npm run adr:list` - список Architecture Decision Records через Log4brains.
+- `npm run adr:preview` - локальный Log4brains preview для ADR.
+- `npm run adr:build` - сборка статического ADR-сайта.
+- `npm run publish:adr` - сборка и публикация ADR-сайта в защищённый `adr.brai.one`.
 - `scripts/brai-guard-sync-check.sh --check` - проверка, что installed Brai guard copy в `/srv/opt` совпадает с repo `scripts/brai-task.mjs`.
 - `npm run socraticode:ensure` - создать/догнать shared SocratiCode index для текущего worktree path и поднять watcher.
 - `npm run socraticode:preflight` - проверка, что SocratiCode подключён, shared index complete, context artifacts объявлены, и watcher активен для текущего project path.
@@ -62,6 +68,8 @@
 - `deploy/scripts/accept-preview.sh <codex-branch>` - deterministic acceptance entrypoint when the project owner accepts a preview; creates/reuses PR into `main` and enables merge/auto-merge.
 - `deploy/scripts/complete-operation-activities.sh <operation-activity-id>...` - host/deploy-context helper that runs from deploy-owned prod source and marks Codex operation activities as `Done` in the runtime database.
 - `deploy/scripts/list-operation-activities.sh [--status New|Done|all] [--limit <N>] [--json]` - read-only host/deploy-context helper that lists Codex operation activities from the runtime database.
+- `deploy/scripts/postgres-diagnostics.mjs` - read-only Postgres connection and pool diagnostics using `BRAI_DATABASE_URL` from the protected host environment.
+- `scripts/brai-npm-update.sh <prefix> <package...>` - updates package manifests and lockfiles without replacing linked task-worktree `node_modules`.
 - `npm --prefix services/brai_api test` - тесты Brai API.
 - `npm --prefix services/brai_api start` - запуск Brai API.
 - `npm --prefix services/brai_temporal test` - state tests для Temporal CI/CD workflow package.

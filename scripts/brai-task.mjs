@@ -92,6 +92,7 @@ export {
   validateSocraticodeRequirement,
   validateTaskMarker,
   validateTaskThread,
+  validateDelegatedPaths,
   validateDeliveryReceipt,
   validateReleaseNotes,
   validatePushUpdate,
@@ -112,11 +113,23 @@ function runCli([command, ...args]) {
       case "acceptance-reconcile":
         acceptanceReconcile(args[0]);
         break;
+      case "acceptance-repair":
+        acceptanceRepair(args[0]);
+        break;
       case "pre-tool-use":
         preToolUse();
         break;
       case "socraticode-exact-only":
         markSocraticodeExactOnly(args);
+        break;
+      case "socraticode-used":
+        markSocraticodeUsedExplicit(args);
+        break;
+      case "delegate":
+        updateDelegation(args, false);
+        break;
+      case "revoke":
+        updateDelegation(args, true);
         break;
       case "pre-commit":
         preCommit();
@@ -155,7 +168,7 @@ function runCli([command, ...args]) {
         accessContract(args);
         break;
       default:
-        throw new Error("usage: brai-task.mjs start <slug>|follow-up [branch]|acceptance-reconcile [branch]|pre-tool-use|pre-commit|pre-push <remote>|stop|classify [--base <ref>] [--head <ref>] [--github-output]|handoff [branch]|preview [branch]|release-notes --short <text> --details <text> --reason <text>|require-delivery [branch] [sha]|require-preview [branch] [sha]|doctor [--strict]|preflight [--strict]|access-contract --local|--server|socraticode-exact-only --reason <text>");
+        throw new Error("usage: brai-task.mjs start <slug>|follow-up [branch]|acceptance-reconcile [branch]|acceptance-repair [branch]|pre-tool-use|pre-commit|pre-push <remote>|stop|classify [--base <ref>] [--head <ref>] [--github-output]|handoff [branch]|preview [branch]|release-notes --short <text> --details <text> --reason <text>|require-delivery [branch] [sha]|require-preview [branch] [sha]|doctor [--strict]|preflight [--strict]|access-contract --local|--server|socraticode-exact-only --reason <text>|socraticode-used --tool <name>|delegate --thread <id> --path <path>|revoke --thread <id>");
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -297,6 +310,46 @@ function acceptanceReconcile(branchArg) {
   console.log("Push the same branch, rerun preview handoff, then rerun accept-preview.");
 }
 
+function acceptanceRepair(branchArg) {
+  const branch = branchArg ?? currentBranch();
+  if (!CODEX_BRANCH_RE.test(branch)) throw new Error(`Acceptance repair requires codex/* branch, got: ${branch}`);
+  if (branch !== currentBranch()) throw new Error(`Current branch is ${currentBranch()}, not ${branch}`);
+  const validation = validateTaskBranch({ requireExpectedUpstream: false });
+  if (!validation.ok) throw new Error(validation.message);
+  const markerValidation = validateTaskMarker(readTaskMarker(), branch);
+  if (!markerValidation.ok) throw new Error(`${markerValidation.message}\n\n${taskStartGuidance()}`);
+  const threadValidation = validateTaskThread(readTaskMarker(), currentThreadId());
+  if (!threadValidation.ok) throw new Error(`${threadValidation.message}\n\n${taskStartGuidance()}`);
+  if (git("status", "--porcelain").trim()) throw new Error("Working tree must be clean before acceptance repair.");
+
+  fetchTaskBranch(branch);
+  const head = git("rev-parse", "HEAD");
+  const remoteHead = git("rev-parse", `origin/${branch}`);
+  if (head !== remoteHead) throw new Error(`HEAD ${head} is not origin/${branch} (${remoteHead}). Push before acceptance repair.`);
+  const receipt = readAcceptanceReceipt();
+  if (receipt?.receiptType !== ACCEPTANCE_RECEIPT_VERSION || receipt.branch !== branch || receipt.commit !== head) {
+    throw new Error("Acceptance repair requires an exact local acceptance receipt for the current branch head.");
+  }
+  if (receipt.status !== "acceptance_started") {
+    throw new Error(`Acceptance receipt status is ${receipt.status || "(missing)"}, not acceptance_started.`);
+  }
+  const pr = findAcceptancePr(branch, head);
+  if (!pr) throw new Error(`No open acceptance PR into ${acceptedBaseBranch()} found for ${branch}@${head}.`);
+  if (pr.mergeStateStatus !== "BLOCKED") {
+    throw new Error(`Acceptance PR #${pr.number} mergeStateStatus is ${pr.mergeStateStatus || "(missing)"}, not BLOCKED.`);
+  }
+  runRequired(["gh", "pr", "merge", String(pr.number), "--disable-auto"], `Failed to disable auto-merge for PR #${pr.number}.`);
+  writeAcceptanceReceipt({
+    ...receipt,
+    prNumber: pr.number,
+    prUrl: pr.url,
+    status: "repair_started",
+    repairStartedAt: new Date().toISOString(),
+  });
+  console.log(`Acceptance repair enabled for ${branch}; auto-merge is disabled on PR #${pr.number}.`);
+  console.log("Commit only the required CI/runtime fix, push the same branch, rerun preview handoff, then rerun accept-preview.");
+}
+
 function preToolUse() {
   const analysis = analyzeHookInput(readStdin());
   if (!analysis.ok) return blockHook(analysis.reason);
@@ -346,6 +399,34 @@ function markSocraticodeExactOnly(args = []) {
   console.log("Marked SocratiCode exact-only fallback.");
 }
 
+function markSocraticodeUsedExplicit(args = []) {
+  const toolIndex = args.indexOf("--tool");
+  const tool = toolIndex >= 0 ? String(args[toolIndex + 1] ?? "").trim() : "";
+  if (!/^codebase_[A-Za-z0-9_]+$/.test(tool)) throw new Error("socraticode-used requires --tool codebase_<name>.");
+  const validation = validateTaskBranch({ requireExpectedUpstream: false });
+  if (!validation.ok) throw new Error(validation.message);
+  const root = git("rev-parse", "--show-toplevel");
+  const marker = readTaskMarker();
+  writeTaskMarker(root, withThreadId({ ...marker, branch: currentBranch(), socraticodeUsedAt: new Date().toISOString(), socraticodeTool: tool }));
+  console.log(`Marked SocratiCode use: ${tool}`);
+}
+
+function updateDelegation(args, revoke) {
+  const threadIndex = args.indexOf("--thread");
+  const threadId = threadIndex >= 0 ? String(args[threadIndex + 1] ?? "").trim() : "";
+  if (!/^[A-Za-z0-9._:-]+$/.test(threadId)) throw new Error("Delegation requires --thread <id>.");
+  const marker = readTaskMarker();
+  if (!marker || marker.threadId !== currentThreadId()) throw new Error("Only the owning Codex thread can change delegations.");
+  const delegations = Array.isArray(marker.delegations) ? marker.delegations.filter((entry) => entry?.threadId !== threadId) : [];
+  if (!revoke) {
+    const paths = args.flatMap((arg, index) => arg === "--path" ? [String(args[index + 1] ?? "").replace(/^\.\//, "").replace(/\/$/, "")] : []).filter(Boolean);
+    if (!paths.length || paths.some((entry) => entry.startsWith("../") || path.isAbsolute(entry))) throw new Error("Delegation requires one or more repository-relative --path values.");
+    delegations.push({ threadId, paths: [...new Set(paths)].sort(), delegatedAt: new Date().toISOString() });
+  }
+  writeTaskMarker(git("rev-parse", "--show-toplevel"), { ...marker, delegations });
+  console.log(`${revoke ? "Revoked" : "Recorded"} delegation for ${threadId}.`);
+}
+
 function preCommit() {
   const validation = validateTaskBranch({ requireExpectedUpstream: true });
   if (!validation.ok) throw new Error(validation.message);
@@ -356,6 +437,9 @@ function preCommit() {
     .split("\n")
     .map((line) => line.trim())
     .filter(Boolean);
+
+  const delegated = validateDelegatedPaths(readTaskMarker(), currentThreadId(), staged);
+  if (!delegated.ok) throw new Error(delegated.message);
 
   const blocked = staged.filter(isSensitivePath);
   if (blocked.length) {
@@ -1269,10 +1353,18 @@ function validateTaskThread(marker, threadId) {
   if (!marker?.threadId) {
     return { ok: false, message: "Brai task marker has no Codex thread id, so this thread cannot change project files on this branch." };
   }
-  if (marker.threadId !== threadId) {
+  if (marker.threadId !== threadId && !marker?.delegations?.some((entry) => entry?.threadId === threadId)) {
     return { ok: false, message: `Brai task branch belongs to Codex thread ${marker.threadId}, not current thread ${threadId}.` };
   }
   return { ok: true };
+}
+
+function validateDelegatedPaths(marker, threadId, files) {
+  if (!threadId || marker?.threadId === threadId) return { ok: true };
+  const delegation = marker?.delegations?.find((entry) => entry?.threadId === threadId);
+  if (!delegation) return { ok: false, message: `No active delegation for Codex thread ${threadId}.` };
+  const outside = files.filter((file) => !delegation.paths.some((allowed) => file === allowed || file.startsWith(`${allowed}/`)));
+  return outside.length ? { ok: false, message: `Delegated thread may not commit outside its scope:\n${outside.map((file) => `- ${file}`).join("\n")}` } : { ok: true };
 }
 
 function validatePushUpdate(line, currentBranchName = "", { isAcceptedRemote = () => false } = {}) {
@@ -1573,7 +1665,7 @@ function isRepoTaskStarterCommand(commandText) {
 function isOfficialAcceptanceReconcileCommand(commandText) {
   const branchPattern = "(?:\\s+codex/[a-z0-9][a-z0-9._-]*)?";
   const segmentPattern = new RegExp(
-    `^(?:node\\s+scripts/brai-task\\.mjs|scripts/use-node22\\.sh\\s+node\\s+scripts/brai-task\\.mjs)\\s+acceptance-reconcile${branchPattern}$`,
+    `^(?:node\\s+scripts/brai-task\\.mjs|scripts/use-node22\\.sh\\s+node\\s+scripts/brai-task\\.mjs)\\s+acceptance-(?:reconcile|repair)${branchPattern}$`,
   );
   return splitShellSegments(commandText).some((segment) => segmentPattern.test(segment));
 }
@@ -1663,7 +1755,7 @@ function sandboxCheckMode(commandText) {
     /\bnode scripts\/brai-task\.mjs access-contract --server\b/.test(text) ||
     /\bscripts\/brai-preview-handoff\.sh\b/.test(text) ||
     /\bdeploy\/scripts\/accept-preview\.sh\b/.test(text) ||
-    /\bnode scripts\/brai-task\.mjs (acceptance-reconcile|handoff|preview)\b/.test(text) ||
+    /\bnode scripts\/brai-task\.mjs (acceptance-reconcile|acceptance-repair|handoff|preview)\b/.test(text) ||
     /\bdeploy\/scripts\/(complete-operation-activities|create-operation-activity|list-operation-activities)\.sh\b/.test(text)
   ) {
     return { mode: "require_escalated", reason: "Brai host/Git/runtime boundaries for this command are not authoritative inside the Codex sandbox." };
@@ -1714,7 +1806,11 @@ function classifyDelivery(files, { base = acceptedBaseRef(), head = "HEAD", bran
   const paths = { blocked: [], docs: [], infra: [], technical: [], runtime: [], unknown: [] };
   for (const file of files) {
     const category = deliveryClassForFile(file);
-    paths[category === "runtime" && isTechnicalRuntimeChange(file, { base, head, diffs }) ? "technical" : category].push(file);
+    const context = { base, head, diffs };
+    let target = category;
+    if (category === "runtime" && isTechnicalRuntimeChange(file, context)) target = "technical";
+    else if (category === "unknown" && isInfraDocsConfigChange(file, context)) target = "infra";
+    paths[target].push(file);
   }
 
   const deliveryClass = paths.blocked.length
@@ -1769,10 +1865,15 @@ function deliveryClassForFile(file) {
   if (/^deploy\/scripts\/[^/]+\.test\.mjs$/.test(file)) return "technical";
   if (
     file === ".gitignore" ||
+    file === ".log4brains.yml" ||
+    file === ".socraticodecontextartifacts.json" ||
     file === ".github/workflows/brai-delivery.yml" ||
     file === ".codex/hooks.json" ||
     file === "deploy/environments.json" ||
     file === "apps/brai_app/tests/unit/publishScripts.test.ts" ||
+    file === "scripts/run-log4brains.sh" ||
+    file === "tools/log4brains/package.json" ||
+    file === "tools/log4brains/package-lock.json" ||
     file.startsWith("admin/deploy/") ||
     file.startsWith("deploy/ansible/") ||
     file.startsWith("deploy/systemd/") ||
@@ -1797,6 +1898,7 @@ function deliveryClassForFile(file) {
       "deploy/scripts/cleanup-accepted-branches.mjs",
       "deploy/scripts/cleanup-test-schemas.mjs",
       "deploy/scripts/complete-operation-activities.sh",
+      "deploy/scripts/codex-cli-smoke.sh",
       "deploy/scripts/create-operation-activity.sh",
       "deploy/scripts/list-operation-activities.sh",
       "deploy/scripts/deploy-branch.sh",
@@ -1807,6 +1909,7 @@ function deliveryClassForFile(file) {
       "deploy/scripts/permissions.sh",
       "deploy/scripts/postgres-smoke.mjs",
       "deploy/scripts/prune-caddy-site-blocks.mjs",
+      "deploy/scripts/publish-adr-site.sh",
       "deploy/scripts/publish-capacitor-apk.sh",
       "deploy/scripts/publish-client-web-layer.sh",
       "deploy/scripts/publish-mobile-bundle.sh",
@@ -1869,6 +1972,11 @@ function isTechnicalRuntimeChange(file, context) {
   return false;
 }
 
+function isInfraDocsConfigChange(file, context) {
+  if (file === "package.json") return isRootAdrPackageJsonDiff(diffForFile(file, context));
+  return false;
+}
+
 function diffForFile(file, { base = acceptedBaseRef(), head = "HEAD", diffs = null } = {}) {
   if (diffs && Object.hasOwn(diffs, file)) return String(diffs[file] ?? "");
   return gitMaybe("diff", "--unified=5", `${base}...${head}`, "--", file) ?? "";
@@ -1899,6 +2007,19 @@ function isClientPackageTestScriptDiff(diff) {
     .map((line) => line.match(/^[+-]\s*"([^"]+)":/)?.[1])
     .filter(Boolean);
   return keys.length > 0 && keys.every((key) => key === "test" || key === "test:watch");
+}
+
+function isRootAdrPackageJsonDiff(diff) {
+  const lines = changedDiffLines(diff).map((line) => line.trim()).filter(Boolean);
+  const allowed = [
+    /^[+]\s*"adr:list":\s*"scripts\/run-log4brains\.sh adr list",?$/,
+    /^[+]\s*"adr:preview":\s*"scripts\/run-log4brains\.sh preview",?$/,
+    /^[+]\s*"adr:build":\s*"scripts\/run-log4brains\.sh build",?$/,
+    /^[+]\s*"publish:adr":\s*"deploy\/scripts\/publish-adr-site\.sh",?$/,
+    /^[+-]\s*"publish:apk":\s*"deploy\/scripts\/publish-capacitor-apk\.sh",?$/,
+    /^[+-]\s*"@fission-ai\/openspec":\s*"1\.4\.1",?$/,
+  ];
+  return lines.length > 0 && lines.every((line) => allowed.some((pattern) => pattern.test(line)));
 }
 
 function writeGithubOutput(classification) {
@@ -2235,6 +2356,7 @@ function waitForReadyPreviewSlot(branch, sha) {
 
 function waitForCondition(fn, waitMs, pollMs) {
   const deadline = Date.now() + waitMs;
+  const startedAt = Date.now();
   let lastError;
   do {
     try {
@@ -2242,6 +2364,7 @@ function waitForCondition(fn, waitMs, pollMs) {
     } catch (error) {
       lastError = error;
       if (Date.now() >= deadline) break;
+      console.log(`Waiting for delivery (${Math.round((Date.now() - startedAt) / 1000)}s): ${String(error?.message ?? error).split("\n")[0]}`);
       spawnSync("sleep", [String(Math.max(1, Math.ceil(pollMs / 1000)))], { stdio: "ignore" });
     }
   } while (Date.now() < deadline);

@@ -78,7 +78,7 @@ class NetworkClient(context: Context) {
             setRequestProperty("Content-Type", "multipart/form-data; boundary=$boundary")
         }
         val shouldPostProcess = config.postProcessingEnabled
-        val shouldSendHeaderContext = config.headerContextEnabled && conversationContext?.isReliable() == true
+        val shouldSendHeaderContext = conversationContext?.isReliable() == true
         val shouldSendScreenshot = screenshotFile?.isFile == true && screenshotFile.length() > 0L
         BufferedOutputStream(connection.outputStream).use { out ->
             writeField(out, boundary, "locale", config.locale)
@@ -88,15 +88,15 @@ class NetworkClient(context: Context) {
             writeField(out, boundary, "audioDurationMs", audioDurationMs(file).toString())
             if (shouldSendHeaderContext) {
                 writeField(out, boundary, "headerContextEnabled", "true")
-                writeField(out, boundary, "screenTitle", conversationContext?.recipientName.orEmpty())
-                writeField(out, boundary, "screenAppPackage", conversationContext?.appPackage.orEmpty())
-                writeField(out, boundary, "screenAppLabel", conversationContext?.appLabel.orEmpty())
-                writeField(out, boundary, "pageContextJson", conversationContext?.toJson()?.toString().orEmpty())
-                writeField(out, boundary, "normalizedContextJson", conversationContext?.toNormalizedJson()?.toString().orEmpty())
+                writeField(out, boundary, "screenTitle", conversationContext.recipientName)
+                writeField(out, boundary, "screenAppPackage", conversationContext.appPackage)
+                writeField(out, boundary, "screenAppLabel", conversationContext.appLabel)
+                writeField(out, boundary, "pageContextJson", conversationContext.toJson().toString())
+                writeField(out, boundary, "normalizedContextJson", conversationContext.toNormalizedJson().toString())
             }
             if (shouldSendScreenshot) {
                 writeField(out, boundary, "screenshotContextEnabled", "true")
-                writeFile(out, boundary, "screenshot", screenshotFile!!.name, "image/jpeg", screenshotFile)
+                writeFile(out, boundary, "screenshot", screenshotFile.name, "image/jpeg", screenshotFile)
             }
             if (shouldPostProcess) {
                 writeField(out, boundary, "postProcessingEnabled", "true")

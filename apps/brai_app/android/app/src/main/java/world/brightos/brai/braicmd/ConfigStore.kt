@@ -2,6 +2,7 @@ package world.brightos.brai.braicmd
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.net.Uri
 import java.util.UUID
 
 enum class ContextDeliveryMode {
@@ -20,7 +21,7 @@ class ConfigStore(context: Context) {
     var serverUrl: String
         get() {
             val value = prefs.getString(AppConstants.KEY_SERVER_URL, AppConstants.DEFAULT_SERVER_URL).orEmpty()
-            return if (value in LEGACY_SERVER_URLS) AppConstants.DEFAULT_SERVER_URL else value
+            return if (isLegacyBraiServerUrl(value)) AppConstants.DEFAULT_SERVER_URL else value
         }
         set(value) = prefs.edit().putString(AppConstants.KEY_SERVER_URL, value.trim()).apply()
 
@@ -76,6 +77,18 @@ class ConfigStore(context: Context) {
         }
         set(value) = prefs.edit().putString(AppConstants.KEY_POST_PROCESSING_PROMPT, value.trim()).apply()
 
+    var onboardingVoiceOnly: Boolean
+        get() = prefs.getBoolean(AppConstants.KEY_ONBOARDING_VOICE_ONLY, false)
+        set(value) = prefs.edit().putBoolean(AppConstants.KEY_ONBOARDING_VOICE_ONLY, value).apply()
+
+    var onboardingQueuePaused: Boolean
+        get() = prefs.getBoolean(AppConstants.KEY_ONBOARDING_QUEUE_PAUSED, false)
+        set(value) = prefs.edit().putBoolean(AppConstants.KEY_ONBOARDING_QUEUE_PAUSED, value).apply()
+
+    var overlayEnabled: Boolean
+        get() = prefs.getBoolean(AppConstants.KEY_OVERLAY_ENABLED, false)
+        set(value) = prefs.edit().putBoolean(AppConstants.KEY_OVERLAY_ENABLED, value).apply()
+
     var mainIconOpacityPercent: Int
         get() = prefs.getInt(AppConstants.KEY_MAIN_ICON_OPACITY_PERCENT, AppConstants.DEFAULT_ICON_OPACITY_PERCENT)
             .coerceIn(AppConstants.MIN_ICON_OPACITY_PERCENT, AppConstants.MAX_ICON_OPACITY_PERCENT)
@@ -104,6 +117,26 @@ class ConfigStore(context: Context) {
             .putInt(AppConstants.KEY_SCREENSHOT_ICON_SIZE_PERCENT, value.coerceIn(AppConstants.MIN_ICON_SIZE_PERCENT, AppConstants.MAX_ICON_SIZE_PERCENT))
             .apply()
 
+    var contextActionIdeaEnabled: Boolean
+        get() = contextActionEnabled(AppConstants.KEY_CONTEXT_ACTION_IDEA_ENABLED)
+        set(value) = setContextActionEnabled(AppConstants.KEY_CONTEXT_ACTION_IDEA_ENABLED, value)
+
+    var contextActionScreenshotEnabled: Boolean
+        get() = contextActionEnabled(AppConstants.KEY_CONTEXT_ACTION_SCREENSHOT_ENABLED)
+        set(value) = setContextActionEnabled(AppConstants.KEY_CONTEXT_ACTION_SCREENSHOT_ENABLED, value)
+
+    var contextActionScreenshotVoiceEnabled: Boolean
+        get() = contextActionEnabled(AppConstants.KEY_CONTEXT_ACTION_SCREENSHOT_VOICE_ENABLED)
+        set(value) = setContextActionEnabled(AppConstants.KEY_CONTEXT_ACTION_SCREENSHOT_VOICE_ENABLED, value)
+
+    var contextActionChatEnabled: Boolean
+        get() = contextActionEnabled(AppConstants.KEY_CONTEXT_ACTION_CHAT_ENABLED)
+        set(value) = setContextActionEnabled(AppConstants.KEY_CONTEXT_ACTION_CHAT_ENABLED, value)
+
+    var contextActionSaveEnabled: Boolean
+        get() = contextActionEnabled(AppConstants.KEY_CONTEXT_ACTION_SAVE_ENABLED)
+        set(value) = setContextActionEnabled(AppConstants.KEY_CONTEXT_ACTION_SAVE_ENABLED, value)
+
     fun registerChangeListener(listener: SharedPreferences.OnSharedPreferenceChangeListener) =
         prefs.registerOnSharedPreferenceChangeListener(listener)
 
@@ -119,6 +152,13 @@ class ConfigStore(context: Context) {
             .putInt(AppConstants.KEY_BUTTON_X, x)
             .putInt(AppConstants.KEY_BUTTON_Y, y)
             .apply()
+    }
+
+    private fun contextActionEnabled(key: String): Boolean =
+        prefs.getBoolean(key, AppConstants.DEFAULT_CONTEXT_ACTION_ENABLED)
+
+    private fun setContextActionEnabled(key: String, value: Boolean) {
+        prefs.edit().putBoolean(key, value).apply()
     }
 
     private fun migrateLegacyPreferences() {
@@ -146,5 +186,15 @@ class ConfigStore(context: Context) {
             "https://your-server.example.com",
             "http://192.168.1.9:8787"
         )
+
+        private fun isLegacyBraiServerUrl(value: String): Boolean {
+            if (value in LEGACY_SERVER_URLS) return true
+            val uri = runCatching { Uri.parse(value) }.getOrNull() ?: return false
+            val host = uri.host?.lowercase().orEmpty()
+            return host == "api.brightos.world" ||
+                host == "app.brightos.world" ||
+                host == "dev.brightos.world" ||
+                host.matches(Regex("^[a-e]\\.test\\.brightos\\.world$"))
+        }
     }
 }

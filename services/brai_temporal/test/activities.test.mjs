@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { cloneSourceForRemote } from "../src/activities.mjs";
+import { cloneSourceForRemote, commandFailureMessage } from "../src/activities.mjs";
 
 test("source checkout clones GitHub remote when auth env is available", () => {
   assert.equal(
@@ -14,4 +14,10 @@ test("source checkout clones GitHub remote when auth env is available", () => {
 
 test("source checkout keeps local clone fallback without auth env", () => {
   assert.notEqual(cloneSourceForRemote({ url: "git@github.com:sergobright/Brai.git", env: {} }), "git@github.com:sergobright/Brai.git");
+});
+
+test("activity failures retain both stderr and stdout tails", () => {
+  const message = commandFailureMessage("deploy", 1, "build details", "ssh wrapper warning");
+  assert.match(message, /stderr:\nssh wrapper warning/);
+  assert.match(message, /stdout:\nbuild details/);
 });

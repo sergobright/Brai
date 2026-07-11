@@ -3,6 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const plugin = vi.hoisted(() => ({
   getState: vi.fn(),
   requestMicrophone: vi.fn(),
+  requestNotifications: vi.fn(),
+  openAppSettings: vi.fn(),
   openOverlaySettings: vi.fn(),
   openAccessibilitySettings: vi.fn(),
 }));
@@ -16,6 +18,8 @@ describe("Android capabilities bridge", () => {
     vi.resetModules();
     plugin.getState.mockReset();
     plugin.requestMicrophone.mockReset();
+    plugin.requestNotifications.mockReset();
+    plugin.openAppSettings.mockReset();
     plugin.openOverlaySettings.mockReset();
     plugin.openAccessibilitySettings.mockReset();
     vi.unstubAllGlobals();
@@ -41,6 +45,7 @@ describe("Android capabilities bridge", () => {
     plugin.getState.mockResolvedValue({
       overlayDeclared: true,
       microphoneGranted: true,
+      notificationsGranted: true,
       mediaProjectionServiceTypeDeclared: true,
     });
     const { getAndroidCapabilities } = await import("@/shared/platform/androidCapabilities");
@@ -48,8 +53,41 @@ describe("Android capabilities bridge", () => {
     await expect(getAndroidCapabilities()).resolves.toMatchObject({
       overlayDeclared: true,
       microphoneGranted: true,
+      notificationsGranted: true,
       mediaProjectionServiceTypeDeclared: true,
     });
+  });
+
+  it("requests Android notification permission through the native bridge", async () => {
+    vi.stubGlobal("Capacitor", {
+      isNativePlatform: () => true,
+      getPlatform: () => "android",
+    });
+    plugin.requestNotifications.mockResolvedValue({
+      notificationsDeclared: true,
+      notificationsGranted: true,
+    });
+    const { requestAndroidNotifications } = await import("@/shared/platform/androidCapabilities");
+
+    await expect(requestAndroidNotifications()).resolves.toMatchObject({
+      notificationsDeclared: true,
+      notificationsGranted: true,
+    });
+    expect(plugin.requestNotifications).toHaveBeenCalledTimes(1);
+  });
+
+  it("opens Android app settings through the native bridge", async () => {
+    vi.stubGlobal("Capacitor", {
+      isNativePlatform: () => true,
+      getPlatform: () => "android",
+    });
+    plugin.openAppSettings.mockResolvedValue({ accessibilityServiceEnabled: false });
+    const { openAndroidAppSettings } = await import("@/shared/platform/androidCapabilities");
+
+    await expect(openAndroidAppSettings()).resolves.toMatchObject({
+      accessibilityServiceEnabled: false,
+    });
+    expect(plugin.openAppSettings).toHaveBeenCalledTimes(1);
   });
 
   it("keeps callers alive when old APKs do not have the plugin", async () => {

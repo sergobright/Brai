@@ -59,6 +59,7 @@ export function createBraiServer({
   codexModel = null,
   codexFallbackModel = null,
   codexTimeoutMs = null,
+  inboxExternalAi = {},
   inboxImageDescriber = null,
   inboxNormalizer = null,
   inboxWorkflowStarter = null,
@@ -94,7 +95,7 @@ export function createBraiServer({
     fromEmail: authFromEmail ?? undefined,
     sendOtp
   });
-  const { auth } = authRuntime;
+  const { auth, testEmailLogin: betterAuthTestEmailLogin } = authRuntime;
   const sockets = new Set();
   const receiveInboxRequest = (body, requestNow, logContext = {}) => receiveInbox({
     store,
@@ -117,6 +118,7 @@ export function createBraiServer({
               codexModel,
               codexFallbackModel,
               codexTimeoutMs,
+              externalAi: inboxExternalAi,
               imageDescriber: inboxImageDescriber,
               normalizer: inboxNormalizer,
               nowDate: now()
@@ -271,33 +273,78 @@ export function createBraiServer({
         }
         const body = await readJson(req);
         const email = cleanEmail(body.email);
-        const primary = store.primaryUser();
-        if (!email || !primary?.id || cleanEmail(primary.email) !== email) {
+        if (!email) {
           recordRuntimeLog(store, logger, {
             traceId,
             source: 'auth',
             operation: 'auth.test_email_login',
             status: 'failed',
             severityText: 'WARN',
-            reason: email ? 'invalid_email' : 'email_required',
+            reason: 'email_required',
             message: 'Test email login rejected',
             jsonData: { route: url.pathname, email_present: Boolean(email) }
           });
-          sendJson(req, res, email ? 401 : 400, { error: email ? 'invalid_email' : 'email_required' });
+          sendJson(req, res, 400, { error: 'email_required' });
           return;
         }
 
-        const cookie = createSessionCookie(sessionSecret, now(), shouldUseSecureCookie(req));
+        let response;
+        try {
+          response = await betterAuthTestEmailLogin({
+            email,
+            name: cleanName(body.name) ?? email,
+            headers: requestHeaders(req)
+          });
+        } catch (error) {
+          recordRuntimeLog(store, logger, {
+            traceId,
+            source: 'auth',
+            operation: 'auth.test_email_login',
+            status: 'failed',
+            severityText: 'ERROR',
+            reason: 'provider_exception',
+            message: 'Test email login provider failed',
+            jsonData: { route: url.pathname, error_name: error instanceof Error ? error.name : 'Error' }
+          });
+          throw error;
+        }
+        const text = await response.text();
+        const payload = parseJson(text);
+        let vaultPrepared = null;
+        if (response.ok && payload?.user?.id) {
+          const finalized = await prepareSignedInAuthUser({
+            store,
+            logger,
+            traceId,
+            route: url.pathname,
+            operation: 'auth.test_email_login',
+            payload,
+            ensureUserVault,
+            now
+          });
+          if (!finalized.ok) {
+            sendJson(req, res, finalized.status, finalized.body);
+            return;
+          }
+          vaultPrepared = finalized.vaultPrepared;
+        }
         recordRuntimeLog(store, logger, {
           traceId,
           source: 'auth',
           operation: 'auth.test_email_login',
-          status: 'done',
-          userId: primary.id,
+          status: response.ok ? 'done' : 'failed',
+          severityText: response.ok ? 'INFO' : 'WARN',
+          userId: response.ok ? payload?.user?.id : null,
+          reason: response.ok ? null : 'provider_rejected',
           message: 'Test email login completed',
-          jsonData: { route: url.pathname, secure_cookie: shouldUseSecureCookie(req) }
+          jsonData: {
+            route: url.pathname,
+            status_code: response.status,
+            user_created_or_authenticated: Boolean(payload?.user?.id),
+            vault_prepared: vaultPrepared
+          }
         });
-        sendJson(req, res, 200, { authenticated: true, user: publicAuthUser(primary) }, { 'set-cookie': cookie });
+        relayAuthText(req, res, response, text, payload);
         return;
       }
 
@@ -392,30 +439,23 @@ export function createBraiServer({
         }
         const text = await response.text();
         const payload = parseJson(text);
+        let vaultPrepared = null;
         if (response.ok && payload?.user?.id) {
-          try {
-            await ensureUserVault({ userId: payload.user.id, email: payload.user.email });
-          } catch (error) {
-            logger.error?.('Failed to prepare user vault', {
-              error: error instanceof Error ? error.message : String(error),
-              userId: payload.user.id,
-              email: payload.user.email ?? null
-            });
-            recordRuntimeLog(store, logger, {
-              traceId,
-              source: 'auth',
-              operation: 'auth.otp_verify',
-              status: 'failed',
-              severityText: 'ERROR',
-              userId: payload.user.id,
-              reason: 'vault_prepare_failed',
-              message: 'OTP verify vault preparation failed',
-              jsonData: { route: url.pathname, status_code: 503 }
-            });
-            sendJson(req, res, 503, { error: 'vault_prepare_failed' });
+          const finalized = await prepareSignedInAuthUser({
+            store,
+            logger,
+            traceId,
+            route: url.pathname,
+            operation: 'auth.otp_verify',
+            payload,
+            ensureUserVault,
+            now
+          });
+          if (!finalized.ok) {
+            sendJson(req, res, finalized.status, finalized.body);
             return;
           }
-          store.claimFirstUser(payload.user.id, now().toISOString());
+          vaultPrepared = finalized.vaultPrepared;
         }
         recordRuntimeLog(store, logger, {
           traceId,
@@ -429,7 +469,8 @@ export function createBraiServer({
           jsonData: {
             route: url.pathname,
             status_code: response.status,
-            user_created_or_authenticated: Boolean(payload?.user?.id)
+            user_created_or_authenticated: Boolean(payload?.user?.id),
+            vault_prepared: vaultPrepared
           }
         });
         relayAuthText(req, res, response, text, payload);
@@ -687,6 +728,23 @@ export function createBraiServer({
       }
 
       await withUserScope(authContext.userId, async () => {
+      if (req.method === 'GET' && url.pathname === '/v1/settings') {
+        sendJson(req, res, 200, settingsState(store, inboxExternalAi));
+        return;
+      }
+
+      if (['POST', 'PUT', 'PATCH'].includes(req.method) && url.pathname === '/v1/settings') {
+        const requestNow = now();
+        const body = await readJson(req, { limit: 64 * 1024 });
+        if (!body || typeof body !== 'object' || Array.isArray(body)) {
+          sendJson(req, res, 400, { error: 'invalid_settings_payload' });
+          return;
+        }
+        store.setAppSettings(body, requestNow.toISOString());
+        sendJson(req, res, 200, settingsState(store, inboxExternalAi));
+        return;
+      }
+
       if (req.method === 'GET' && url.pathname === '/v1/timer/state') {
         sendJson(req, res, 200, timerState(store, now()));
         return;
@@ -824,10 +882,11 @@ export function createBraiServer({
       if (req.method === 'POST' && url.pathname === '/v1/timer/stop') {
         const requestNow = now();
         const result = store.stopTimer(requestNow.toISOString());
+        const settings = store.appSettings();
         const body = {
           ...timerState(store, requestNow),
           stopped: result.stopped,
-          completed_session: formatSession(result.session)
+          completed_session: formatSession(result.session, settings.display_timezone)
         };
         if (result.stopped) {
           broadcast(sockets, { type: 'timer_stopped', state: body }, scopedUserId());
@@ -958,8 +1017,9 @@ export function createBraiServer({
 }
 
 export function timerState(store, nowDate) {
-  const active = formatSession(store.getActiveSession());
-  const activeInterval = formatFocusInterval(store.getActiveInterval());
+  const settings = store.appSettings();
+  const active = formatSession(store.getActiveSession(), settings.display_timezone);
+  const activeInterval = formatFocusInterval(store.getActiveInterval(), settings.display_timezone);
   const nowIso = nowDate.toISOString();
   const elapsedSeconds = active
     ? Math.max(0, Math.floor((Date.parse(nowIso) - Date.parse(active.started_at_utc)) / 1000))
@@ -970,7 +1030,7 @@ export function timerState(store, nowDate) {
   return {
     server_time_utc: nowIso,
     server_revision: store.getServerRevision(),
-    timezone: 'Europe/Moscow',
+    timezone: settings.display_timezone,
     active_session: active,
     elapsed_seconds: elapsedSeconds,
     active_interval: activeInterval,
@@ -978,6 +1038,17 @@ export function timerState(store, nowDate) {
     active_activity_id: activeInterval?.activity_id ?? null,
     active_session_start_origin: active?.start_origin ?? null,
     active_session_started_by_activity_id: active?.started_by_activity_id ?? null
+  };
+}
+
+export function settingsState(store, inboxExternalAi = {}) {
+  const settings = store.appSettings();
+  return {
+    ...settings,
+    external_ai: {
+      groq_configured: Boolean(inboxExternalAi.groqApiKey),
+      openai_configured: Boolean(inboxExternalAi.openaiApiKey)
+    }
   };
 }
 
@@ -1112,6 +1183,32 @@ async function betterAuthSession(req, auth) {
   }
 }
 
+async function prepareSignedInAuthUser({ store, logger, traceId, route, operation, payload, ensureUserVault, now }) {
+  let vaultPrepared = true;
+  try {
+    await ensureUserVault({ userId: payload.user.id, email: payload.user.email });
+  } catch (error) {
+    vaultPrepared = false;
+    logger.error?.('Failed to prepare user vault', {
+      error: error instanceof Error ? error.message : String(error),
+      userId: payload.user.id
+    });
+    recordRuntimeLog(store, logger, {
+      traceId,
+      source: 'auth',
+      operation,
+      status: 'failed',
+      severityText: 'ERROR',
+      userId: payload.user.id,
+      reason: 'vault_prepare_failed',
+      message: 'Auth sign-in vault preparation failed',
+      jsonData: { route, error_name: error instanceof Error ? error.name : 'Error' }
+    });
+  }
+  store.claimFirstUser(payload.user.id, now().toISOString());
+  return { ok: true, vaultPrepared };
+}
+
 function hasLegacyToken(req, token, parsedUrl = null) {
   if (!token) return false;
   const header = req.headers.authorization ?? '';
@@ -1213,7 +1310,6 @@ function requestPathname(req) {
 function isAllowedCorsOrigin(origin, pathname = '/') {
   if (origin === 'https://brai.one') return pathname === '/auth/session';
   if (isTrustedAppOrigin(origin)) return true;
-  if (origin === 'https://previews.brai.one') return true;
   return false;
 }
 
@@ -1227,10 +1323,11 @@ function isTrustedAppOrigin(origin) {
 }
 
 function isTestEmailLoginOrigin(origin) {
-  if (origin === 'https://dev.brightos.world') return true;
-  if (/^https:\/\/[a-e]\.test\.brightos\.world$/.test(origin ?? '')) return true;
+  if (origin === 'capacitor://localhost') return true;
+  if (origin === 'https://dev.brai.one' || origin === 'https://dev.brightos.world') return true;
   if (/^https:\/\/[a-e]\.test\.brai\.one$/.test(origin ?? '')) return true;
-  return /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin ?? '');
+  if (/^https:\/\/[a-e]\.test\.brightos\.world$/.test(origin ?? '')) return true;
+  return /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin ?? '');
 }
 
 function requiresTrustedOrigin(req, authContext) {

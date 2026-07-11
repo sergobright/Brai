@@ -288,7 +288,7 @@ test('inbox sync create schedules AI processing', async () => {
     ]);
     assert.equal(workflow.body.attempts.length, 1);
     assert.equal(workflow.body.attempts[0].agent_id, 'inbox.normalizer');
-    assert.equal(workflow.body.attempts[0].agent_version, '4');
+    assert.equal(workflow.body.attempts[0].agent_version, '5');
     assert.deepEqual(workflow.body.step_states.find((step) => step.id === 'image_describer'), {
       id: 'image_describer',
       state: 'skipped',

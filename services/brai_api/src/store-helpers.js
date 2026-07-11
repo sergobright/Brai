@@ -1,8 +1,9 @@
 import {
   addDays,
+  DEFAULT_TIME_ZONE,
   localDateFromUtcMs,
   localHourFromUtcMs,
-  moscowDateStartUtcMs
+  localDateStartUtcMs
 } from './time.js';
 
 export const FUTURE_EVENT_TOLERANCE_MS = 5 * 60 * 1000;
@@ -27,12 +28,12 @@ export const INBOX_EVENT_TYPES = new Set([
 ]);
 export const ACTIVITY_STATUSES = new Set(['New', 'Done']);
 
-export function formatSession(session) {
+export function formatSession(session, timeZone = DEFAULT_TIME_ZONE) {
   if (!session) return null;
   const startedMs = Date.parse(session.started_at_utc);
   const endedMs = session.ended_at_utc ? Date.parse(session.ended_at_utc) : null;
   const intervals = Array.isArray(session.intervals)
-    ? session.intervals.map(formatFocusInterval)
+    ? session.intervals.map((interval) => formatFocusInterval(interval, timeZone))
     : [];
   const activityIntervals = intervals.filter((interval) => interval.activity_id);
   const primaryActivity = primaryActivityInterval(activityIntervals);
@@ -45,18 +46,18 @@ export function formatSession(session) {
     activity_interval_count: activityIntervals.length,
     primary_activity_id: primaryActivity?.activity_id ?? null,
     primary_activity_title: primaryActivity?.activity_title ?? null,
-    active_interval: session.active_interval ? formatFocusInterval(session.active_interval) : null,
+    active_interval: session.active_interval ? formatFocusInterval(session.active_interval, timeZone) : null,
     active_activity_id: session.active_interval?.activity_id ?? null,
     start_origin: session.start_origin ?? 'focus',
     started_by_activity_id: session.started_by_activity_id ?? null,
-    started_date_msk: localDateFromUtcMs(startedMs),
-    started_hour_msk: localHourFromUtcMs(startedMs),
-    ended_date_msk: endedMs ? localDateFromUtcMs(endedMs) : null,
-    ended_hour_msk: endedMs ? localHourFromUtcMs(endedMs) : null
+    started_date_msk: localDateFromUtcMs(startedMs, timeZone),
+    started_hour_msk: localHourFromUtcMs(startedMs, timeZone),
+    ended_date_msk: endedMs ? localDateFromUtcMs(endedMs, timeZone) : null,
+    ended_hour_msk: endedMs ? localHourFromUtcMs(endedMs, timeZone) : null
   };
 }
 
-export function formatFocusInterval(interval) {
+export function formatFocusInterval(interval, timeZone = DEFAULT_TIME_ZONE) {
   if (!interval) return null;
   const startedMs = Date.parse(interval.started_at_utc);
   const endedMs = interval.ended_at_utc ? Date.parse(interval.ended_at_utc) : null;
@@ -68,10 +69,10 @@ export function formatFocusInterval(interval) {
     started_at_utc: interval.started_at_utc,
     ended_at_utc: interval.ended_at_utc,
     duration_seconds: interval.duration_seconds,
-    started_date_msk: localDateFromUtcMs(startedMs),
-    started_hour_msk: localHourFromUtcMs(startedMs),
-    ended_date_msk: endedMs ? localDateFromUtcMs(endedMs) : null,
-    ended_hour_msk: endedMs ? localHourFromUtcMs(endedMs) : null
+    started_date_msk: localDateFromUtcMs(startedMs, timeZone),
+    started_hour_msk: localHourFromUtcMs(startedMs, timeZone),
+    ended_date_msk: endedMs ? localDateFromUtcMs(endedMs, timeZone) : null,
+    ended_hour_msk: endedMs ? localHourFromUtcMs(endedMs, timeZone) : null
   };
 }
 
@@ -134,10 +135,10 @@ export function formatInboxItem(item) {
   };
 }
 
-export function groupSessionsByDateHour(sessions, { from, to } = {}) {
+export function groupSessionsByDateHour(sessions, { from, to, timeZone = DEFAULT_TIME_ZONE } = {}) {
   const dates = {};
   for (const session of sessions) {
-    for (const chunk of sessionDayChunks(session)) {
+    for (const chunk of sessionDayChunks(session, timeZone)) {
       const date = chunk.started_date_msk;
       if ((from && date < from) || (to && date > to)) continue;
       const hour = String(chunk.started_hour_msk).padStart(2, '0');
@@ -151,7 +152,7 @@ export function groupSessionsByDateHour(sessions, { from, to } = {}) {
   return dates;
 }
 
-function sessionDayChunks(session) {
+function sessionDayChunks(session, timeZone = DEFAULT_TIME_ZONE) {
   const startMs = Date.parse(session.started_at_utc);
   const endMs = Date.parse(session.ended_at_utc);
   if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) {
@@ -161,8 +162,8 @@ function sessionDayChunks(session) {
   const chunks = [];
   let cursor = startMs;
   while (cursor < endMs) {
-    const date = localDateFromUtcMs(cursor);
-    const chunkEndMs = Math.min(endMs, moscowDateStartUtcMs(addDays(date, 1)));
+    const date = localDateFromUtcMs(cursor, timeZone);
+    const chunkEndMs = Math.min(endMs, localDateStartUtcMs(addDays(date, 1), timeZone));
     const durationSeconds = Math.floor((chunkEndMs - cursor) / 1000);
     if (durationSeconds > 0) {
       const startedAtUtc = new Date(cursor).toISOString();
@@ -177,9 +178,9 @@ function sessionDayChunks(session) {
         ended_at_utc: endedAtUtc,
         duration_seconds: durationSeconds,
         started_date_msk: date,
-        started_hour_msk: localHourFromUtcMs(cursor),
-        ended_date_msk: localDateFromUtcMs(chunkEndMs),
-        ended_hour_msk: localHourFromUtcMs(chunkEndMs)
+        started_hour_msk: localHourFromUtcMs(cursor, timeZone),
+        ended_date_msk: localDateFromUtcMs(chunkEndMs, timeZone),
+        ended_hour_msk: localHourFromUtcMs(chunkEndMs, timeZone)
       });
     }
     cursor = chunkEndMs;

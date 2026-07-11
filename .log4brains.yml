@@ -1,0 +1,7 @@
+project:
+  name: Brai
+  tz: Etc/UTC
+  adrFolder: ./docs/adr
+  repository:
+    url: https://github.com/sergobright/Brai
+    provider: github
