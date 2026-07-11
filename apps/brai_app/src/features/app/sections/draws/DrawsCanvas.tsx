@@ -9,10 +9,12 @@ export function DrawsCanvas({
   initialData,
   name,
   onChange,
+  theme,
 }: {
   initialData: Record<string, unknown>;
   name: string;
   onChange: (elements: readonly ExcalidrawElement[], appState: AppState, files: BinaryFiles) => void;
+  theme: "light" | "dark";
 }) {
   return (
     <Excalidraw
@@ -20,6 +22,14 @@ export function DrawsCanvas({
       langCode="ru-RU"
       name={name}
       onChange={onChange}
+      theme={theme}
+      UIOptions={{
+        canvasActions: {
+          loadScene: false,
+          saveToActiveFile: false,
+          toggleTheme: null,
+        },
+      }}
     />
   );
 }

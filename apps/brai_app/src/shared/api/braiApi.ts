@@ -203,6 +203,13 @@ export class BraiApi {
     });
   }
 
+  async renameDraw(name: string, nextName: string): Promise<DrawScene> {
+    return this.request(`/v1/draws/${encodeURIComponent(name)}/rename`, {
+      method: "POST",
+      json: { name: nextName },
+    });
+  }
+
   async syncEvents(params: {
     deviceId: string;
     platform: string;

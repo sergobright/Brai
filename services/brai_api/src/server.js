@@ -736,6 +736,18 @@ export function createBraiServer({
         return;
       }
 
+      const drawRenameMatch = url.pathname.match(/^\/v1\/draws\/([^/]+)\/rename$/);
+      if (drawRenameMatch) {
+        if (req.method !== 'POST') {
+          sendJson(req, res, 405, { error: 'method_not_allowed' });
+          return;
+        }
+        const body = await readJson(req, { limit: 4096 });
+        const scene = renameDrawScene(resolvedVaultRoot, drawSceneFileName(drawRenameMatch[1]), drawSceneFileName(body.name));
+        sendJson(req, res, 200, scene);
+        return;
+      }
+
       const drawMatch = url.pathname.match(/^\/v1\/draws\/([^/]+)$/);
       if (drawMatch) {
         const fileName = drawSceneFileName(drawMatch[1]);
@@ -1298,6 +1310,25 @@ function writeDrawScene(vaultRoot, fileName, scene) {
   const nextScene = normalizeDrawScene(scene);
   fs.writeFileSync(filePath, JSON.stringify(nextScene));
   return { ...drawSceneSummary(drawsDir, fileName), scene: nextScene };
+}
+
+function renameDrawScene(vaultRoot, fromName, toName) {
+  const drawsDir = ensureScopedDrawsDir(vaultRoot);
+  const fromPath = safeDrawScenePath(drawsDir, fromName);
+  const toPath = safeDrawScenePath(drawsDir, toName);
+  if (!fs.existsSync(fromPath)) {
+    const error = new Error('not_found');
+    error.status = 404;
+    throw error;
+  }
+  if (fromPath !== toPath && fs.existsSync(toPath)) {
+    const error = new Error('draw_exists');
+    error.status = 409;
+    throw error;
+  }
+  if (fromPath !== toPath) fs.renameSync(fromPath, toPath);
+  const scene = JSON.parse(fs.readFileSync(toPath, 'utf8'));
+  return { ...drawSceneSummary(drawsDir, toName), scene };
 }
 
 function ensureScopedDrawsDir(vaultRoot) {

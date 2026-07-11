@@ -210,7 +210,7 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
         ) : screenSection === "evil-eye" ? (
           <EvilEyeSection />
         ) : screenSection === "draws" ? (
-          <DrawsSection />
+          <DrawsSection theme={app.theme} />
         ) : screenSection === "engine" ? (
           <EngineSection
             appVersionState={app.versionState}

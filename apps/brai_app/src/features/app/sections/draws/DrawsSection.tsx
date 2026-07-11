@@ -2,9 +2,10 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
-import { Plus } from "lucide-react";
+import { Edit3, Maximize2, Minimize2, PanelLeftClose, PanelLeftOpen, Plus } from "lucide-react";
 import type { AppState, BinaryFiles } from "@excalidraw/excalidraw/types";
 import type { ExcalidrawElement } from "@excalidraw/excalidraw/element/types";
+import type { ThemeMode } from "../../appModel";
 import { BraiApi, type BraiApiError, type DrawSceneSummary } from "@/shared/api/braiApi";
 import { defaultApiBase } from "@/shared/config/runtime";
 import { Button } from "@/shared/ui/button";
@@ -28,14 +29,17 @@ const emptyScene = (): Record<string, unknown> => ({
   files: {},
 });
 
-export function DrawsSection() {
+export function DrawsSection({ theme }: { theme: ThemeMode }) {
   const api = useMemo(() => new BraiApi(defaultApiBase()), []);
   const [draws, setDraws] = useState<DrawSceneSummary[]>([]);
   const [activeName, setActiveName] = useState(DEFAULT_DRAW_NAME);
   const [scene, setScene] = useState<Record<string, unknown> | null>(null);
   const [status, setStatus] = useState<SaveStatus>("loading");
+  const [listOpen, setListOpen] = useState(true);
+  const [fullScreen, setFullScreen] = useState(false);
   const saveTimerRef = useRef<number | null>(null);
   const loadedRef = useRef(false);
+  const pendingSceneRef = useRef<Record<string, unknown> | null>(null);
 
   const saveScene = useCallback(async (name: string, nextScene: Record<string, unknown>) => {
     setStatus("saving");
@@ -106,6 +110,34 @@ export function DrawsSection() {
     }));
   }, [draws]);
 
+  const renameDraw = useCallback(async (name: string) => {
+    const current = draws.find((draw) => draw.name === name);
+    const title = window.prompt("Новое название", current?.title ?? name.replace(/\.excalidraw$/, ""));
+    if (!title) return;
+    const nextName = toDrawFileName(title);
+    if (nextName === name) return;
+    if (saveTimerRef.current != null) {
+      window.clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
+    setStatus("saving");
+    try {
+      if (name === activeName && pendingSceneRef.current) {
+        await api.saveDraw(name, pendingSceneRef.current);
+        pendingSceneRef.current = null;
+      }
+      const renamed = await api.renameDraw(name, nextName);
+      setDraws((currentDraws) => upsertDraw(currentDraws.filter((draw) => draw.name !== name), renamed));
+      if (name === activeName) {
+        setActiveName(renamed.name);
+        setScene(renamed.scene);
+      }
+      setStatus("saved");
+    } catch {
+      setStatus("error");
+    }
+  }, [activeName, api, draws]);
+
   const onChange = useCallback((elements: readonly ExcalidrawElement[], appState: AppState, files: BinaryFiles) => {
     if (!loadedRef.current) return;
     const nextScene = {
@@ -116,40 +148,64 @@ export function DrawsSection() {
       appState,
       files,
     } as Record<string, unknown>;
+    pendingSceneRef.current = nextScene;
     if (saveTimerRef.current != null) window.clearTimeout(saveTimerRef.current);
     saveTimerRef.current = window.setTimeout(() => {
-      void saveScene(activeName, nextScene);
+      void saveScene(activeName, nextScene).then(() => {
+        if (pendingSceneRef.current === nextScene) pendingSceneRef.current = null;
+      });
     }, 700);
     setStatus("saving");
   }, [activeName, saveScene]);
 
+  const showList = listOpen && !fullScreen;
+
   return (
-    <div className="grid h-full min-h-0 grid-cols-[13rem_minmax(0,1fr)] gap-3 max-[860px]:grid-cols-1 max-[860px]:grid-rows-[auto_minmax(0,1fr)]">
+    <div
+      className={cx(
+        "grid h-full min-h-0 gap-3",
+        showList ? "grid-cols-[13rem_minmax(0,1fr)] max-[860px]:grid-cols-1 max-[860px]:grid-rows-[auto_minmax(0,1fr)]" : "grid-cols-1",
+        fullScreen && "fixed inset-0 z-[120] bg-background p-2",
+      )}
+    >
+      {showList ? (
       <aside className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)] rounded-md border border-border bg-card">
         <div className="flex items-center justify-between gap-2 border-b border-border p-2">
           <div className="min-w-0">
             <h2 className="truncate text-sm font-semibold leading-5">Draws</h2>
             <p className="truncate text-xs text-muted-foreground">{saveStatusLabel(status)}</p>
           </div>
-          <Button type="button" size="icon" variant="ghost" aria-label="Создать сцену" onClick={createDraw}>
-            <Plus className="size-4" aria-hidden="true" />
-          </Button>
+          <div className="flex shrink-0 items-center gap-1">
+            <Button type="button" size="icon-sm" variant="ghost" aria-label="Скрыть список рисунков" title="Скрыть список рисунков" onClick={() => setListOpen(false)}>
+              <PanelLeftClose className="size-4" aria-hidden="true" />
+            </Button>
+            <Button type="button" size="icon-sm" variant="ghost" aria-label="Создать сцену" title="Создать сцену" onClick={createDraw}>
+              <Plus className="size-4" aria-hidden="true" />
+            </Button>
+          </div>
         </div>
         <ScrollArea className="min-h-0">
           <div className="grid gap-1 p-2">
             {draws.length ? draws.map((draw) => (
-              <button
+              <div
                 key={draw.name}
-                type="button"
                 className={cx(
-                  "grid min-w-0 rounded-md px-2 py-2 text-left text-sm hover:bg-accent hover:text-accent-foreground",
+                  "grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center rounded-md hover:bg-accent hover:text-accent-foreground",
                   draw.name === activeName && "bg-accent text-accent-foreground",
                 )}
-                onClick={() => setActiveName(draw.name)}
+                onContextMenu={(event) => {
+                  event.preventDefault();
+                  void renameDraw(draw.name);
+                }}
               >
-                <span className="truncate font-medium">{draw.title}</span>
-                <span className="truncate text-xs text-muted-foreground">{formatUpdatedAt(draw.updated_at_utc)}</span>
-              </button>
+                <button type="button" className="grid min-w-0 px-2 py-2 text-left text-sm" onClick={() => setActiveName(draw.name)}>
+                  <span className="truncate font-medium">{draw.title}</span>
+                  <span className="truncate text-xs text-muted-foreground">{formatUpdatedAt(draw.updated_at_utc)}</span>
+                </button>
+                <Button type="button" size="icon-xs" variant="ghost" aria-label={`Переименовать ${draw.title}`} title="Переименовать" onClick={() => void renameDraw(draw.name)}>
+                  <Edit3 className="size-3" aria-hidden="true" />
+                </Button>
+              </div>
             )) : (
               <button
                 type="button"
@@ -162,17 +218,38 @@ export function DrawsSection() {
           </div>
         </ScrollArea>
       </aside>
-      <div className="min-h-0 overflow-hidden rounded-md border border-border bg-background" data-nav-swipe-exclusion>
+      ) : null}
+      <div className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden rounded-md border border-border bg-background" data-nav-swipe-exclusion>
+        <div className="flex min-h-10 items-center justify-between gap-2 border-b border-border bg-card/80 px-2 py-1">
+          <div className="min-w-0">
+            <p className="truncate text-sm font-medium">{activeName.replace(/\.excalidraw$/, "")}</p>
+            <p className="truncate text-xs text-muted-foreground">{saveStatusLabel(status)}</p>
+          </div>
+          <div className="flex shrink-0 items-center gap-1">
+            <Button type="button" size="icon-sm" variant="ghost" aria-label={listOpen ? "Скрыть список рисунков" : "Показать список рисунков"} title={listOpen ? "Скрыть список рисунков" : "Показать список рисунков"} disabled={fullScreen} onClick={() => setListOpen((open) => !open)}>
+              {listOpen ? <PanelLeftClose className="size-4" aria-hidden="true" /> : <PanelLeftOpen className="size-4" aria-hidden="true" />}
+            </Button>
+            <Button type="button" size="icon-sm" variant="ghost" aria-label="Переименовать рисунок" title="Переименовать рисунок" onClick={() => void renameDraw(activeName)}>
+              <Edit3 className="size-4" aria-hidden="true" />
+            </Button>
+            <Button type="button" size="icon-sm" variant="ghost" aria-label={fullScreen ? "Выйти из полноэкранного режима" : "На весь экран"} title={fullScreen ? "Выйти из полноэкранного режима" : "На весь экран"} onClick={() => setFullScreen((open) => !open)}>
+              {fullScreen ? <Minimize2 className="size-4" aria-hidden="true" /> : <Maximize2 className="size-4" aria-hidden="true" />}
+            </Button>
+          </div>
+        </div>
+        <div className="min-h-0 overflow-hidden">
         {scene ? (
           <DrawsCanvas
             key={activeName}
             initialData={scene}
             name={activeName}
             onChange={onChange}
+            theme={theme}
           />
         ) : (
           <div className="grid h-full place-items-center text-sm text-muted-foreground">Загрузка</div>
         )}
+        </div>
       </div>
     </div>
   );
