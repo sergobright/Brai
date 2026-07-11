@@ -195,6 +195,9 @@ function publishReleaseMetadata(value, includeIndex) {
   const suffix = `${process.pid}.${crypto.randomBytes(6).toString("hex")}.tmp`;
   const stagedIndex = path.join(releaseDir, `.releases.json.${suffix}`);
   const stagedHtml = path.join(releaseDir, `.index.html.${suffix}`);
+  const backupIndex = path.join(releaseDir, `.releases.json.${suffix}.bak`);
+  const backupHtml = path.join(releaseDir, `.index.html.${suffix}.bak`);
+  const htmlPath = path.join(releaseDir, "index.html");
   try {
     if (includeIndex) {
       fs.writeFileSync(stagedIndex, `${JSON.stringify(value, null, 2)}\n`);
@@ -203,11 +206,24 @@ function publishReleaseMetadata(value, includeIndex) {
     fs.writeFileSync(stagedHtml, renderReleasePage(value));
     chmodPublicFile(stagedHtml);
     if (process.env.BRAI_RELEASE_METADATA_FAIL_AFTER_STAGE === "1") throw new Error("injected release metadata failure");
-    if (includeIndex) fs.renameSync(stagedIndex, indexPath);
-    fs.renameSync(stagedHtml, path.join(releaseDir, "index.html"));
+    if (includeIndex && fs.existsSync(indexPath)) fs.renameSync(indexPath, backupIndex);
+    if (fs.existsSync(htmlPath)) fs.renameSync(htmlPath, backupHtml);
+    try {
+      if (includeIndex) fs.renameSync(stagedIndex, indexPath);
+      if (process.env.BRAI_RELEASE_METADATA_FAIL_AFTER_INDEX === "1") throw new Error("injected release metadata swap failure");
+      fs.renameSync(stagedHtml, htmlPath);
+    } catch (error) {
+      if (includeIndex) fs.rmSync(indexPath, { force: true });
+      fs.rmSync(htmlPath, { force: true });
+      if (includeIndex && fs.existsSync(backupIndex)) fs.renameSync(backupIndex, indexPath);
+      if (fs.existsSync(backupHtml)) fs.renameSync(backupHtml, htmlPath);
+      throw error;
+    }
   } finally {
     fs.rmSync(stagedIndex, { force: true });
     fs.rmSync(stagedHtml, { force: true });
+    fs.rmSync(backupIndex, { force: true });
+    fs.rmSync(backupHtml, { force: true });
   }
 }
 

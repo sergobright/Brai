@@ -1038,6 +1038,20 @@ describe("mobile OTA publish scripts", () => {
 
     expect(await readFile(path.join(releaseDir, "releases.json"), "utf8")).toBe(oldJson);
     expect(await readFile(path.join(releaseDir, "index.html"), "utf8")).toBe("old html\n");
+
+    await expect(execFileAsync("node", [
+      path.join(workspaceRoot, "deploy/scripts/update-release-index.mjs"),
+      "--release", "production",
+      "--file", "brai-v2.apk",
+      "--apk-version", "2",
+      "--version-code", "2",
+      "--published-at", "2026-07-11T22:00:00Z",
+    ], {
+      env: { ...process.env, BRAI_ROOT: root, BRAI_RELEASE_METADATA_FAIL_AFTER_INDEX: "1" },
+    })).rejects.toThrow(/injected release metadata swap failure/);
+
+    expect(await readFile(path.join(releaseDir, "releases.json"), "utf8")).toBe(oldJson);
+    expect(await readFile(path.join(releaseDir, "index.html"), "utf8")).toBe("old html\n");
   });
 });
 

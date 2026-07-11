@@ -302,6 +302,9 @@ test("local main sync preserves runtime dirs and hard resets to origin main", ()
   assert.match(script, /git_cmd checkout -f -B "\$BRANCH" "origin\/\$BRANCH"/);
   assert.match(script, /git_cmd reset --hard "origin\/\$BRANCH"/);
   assert.match(script, /install -D -m 0755 scripts\/brai-task\.mjs "\$INSTALLED_GUARD_TASK"/);
+  assert.match(script, /PRESERVED_OPENSPEC_CHANGES/);
+  assert.match(script, /cp -a openspec\/changes\/\. "\$PRESERVED_OPENSPEC_CHANGES\/"/);
+  assert.match(script, /restore_openspec_changes/);
   assert.match(script, /-e data\//);
   assert.match(script, /-e deploy\/web\//);
   assert.match(script, /-e deploy\/releases\//);
