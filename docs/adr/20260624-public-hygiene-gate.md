@@ -1,42 +1,42 @@
-# Public hygiene gate
+# Публичная проверка безопасности
 
 - Status: accepted
-- Deciders: Project owner, Codex
+- Deciders: Владелец проекта, Codex
 - Date: 2026-06-24
-- Tags: security, public-safety, ci
+- Tags: безопасность, публичная-безопасность, ci
 
-## Context
+## Контекст
 
-Public branches must not expose runtime data, generated release artifacts, signing material, local paths, private context, or high-confidence secret patterns.
+Публичные ветки не должны раскрывать runtime-данные, сгенерированные релизные артефакты, материалы подписи, локальные пути, приватный контекст или паттерны, с высокой вероятностью похожие на секреты.
 
-## Decision
+## Решение
 
-Every public branch class must run the public guard before merge or deployment.
+Каждый класс публичной ветки должен запускать public guard перед merge или деплоем.
 
-## Alternatives Considered
+## Рассмотренные альтернативы
 
-- Rely on manual review: rejected because secret and artifact leaks are easy to miss.
-- Keep guard optional: rejected because public safety must be enforced consistently.
+- Полагаться на ручное ревью: отклонено, потому что утечки секретов и артефактов легко пропустить.
+- Оставить guard опциональным: отклонено, потому что публичная безопасность должна обеспечиваться последовательно.
 
-## Consequences
+## Последствия
 
-- Positive: risky files and patterns are blocked before publication.
-- Negative: false positives must be fixed or explicitly handled.
-- Risk: new artifact classes require guard updates when discovered.
+- Плюс: рискованные файлы и паттерны блокируются до публикации.
+- Минус: ложные срабатывания нужно исправлять или явно обрабатывать.
+- Риск: новые классы артефактов требуют обновления guard после обнаружения.
 
-## Confirmation
+## Проверка
 
-Run `npm run public:guard` before handoff, merge, or publication.
+Запускайте `npm run public:guard` перед handoff, merge или публикацией.
 
-## Links
+## Ссылки
 
 - `memory-bank/decisionLog.md`
 - `docs/guidelines/01-sources-of-truth.md`
 
-## Supersedes
+## Заменяет
 
-None.
+Нет.
 
-## Superseded By
+## Заменено
 
-None.
+Нет.

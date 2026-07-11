@@ -1,43 +1,43 @@
-# Temporal CI/CD control ledger
+# Temporal как контрольный журнал CI/CD
 
 - Status: accepted
-- Deciders: Project owner, Codex
+- Deciders: Владелец проекта, Codex
 - Date: 2026-07-06
 - Tags: ci-cd, temporal, deployment
 
-## Context
+## Контекст
 
-Brai deployment uses GitHub Actions and deploy scripts, but critical preview and promotion transitions need a durable control ledger that records blockers and manual recovery state.
+Деплой Brai использует GitHub Actions и скрипты деплоя, но критическим переходам preview и promotion нужен устойчивый контрольный журнал, который фиксирует блокеры и состояние ручного восстановления.
 
-## Decision
+## Решение
 
-Brai uses self-hosted Temporal as the required CI/CD control ledger for branch previews and promotions. GitHub Actions still runs the checks and deployment scripts; Temporal gates and records critical transitions.
+Brai использует self-hosted Temporal как обязательный контрольный журнал CI/CD для preview-веток и promotions. GitHub Actions по-прежнему запускает проверки и скрипты деплоя; Temporal ограничивает и записывает критические transitions.
 
-## Alternatives Considered
+## Рассмотренные альтернативы
 
-- Keep state only in GitHub Actions logs: rejected because logs are not an explicit workflow state machine.
-- Replace deploy scripts with Temporal activities immediately: rejected because existing scripts remain the underlying deployment authority.
+- Хранить state только в GitHub Actions logs: отклонено, потому что logs не являются явной workflow state machine.
+- Немедленно заменить скрипты деплоя на Temporal activities: отклонено, потому что существующие scripts остаются underlying deployment authority.
 
-## Consequences
+## Последствия
 
-- Positive: failed checks, deploys, releases, and no-preview handoffs have durable workflow state.
-- Negative: CI/CD process changes must update Temporal state, signals, tests, and docs together.
-- Risk: Temporal outages block strict delivery until repaired.
+- Плюс: failed checks, deploys, releases и no-preview handoffs имеют durable workflow state.
+- Минус: изменения CI/CD process должны вместе обновлять Temporal state, signals, tests и docs.
+- Риск: outages Temporal блокируют strict delivery до восстановления.
 
-## Confirmation
+## Проверка
 
-Run Temporal state tests and query workflow state when delivery changes or failures occur.
+Запускайте Temporal state tests и запрашивайте workflow state при изменениях delivery или сбоях.
 
-## Links
+## Ссылки
 
 - `docs/operations/temporal-ci-cd.md`
 - `services/brai_temporal/`
 - `docs/operations/branch-preview-environments.md`
 
-## Supersedes
+## Заменяет
 
-None.
+Нет.
 
-## Superseded By
+## Заменено
 
-None.
+Нет.

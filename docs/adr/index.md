@@ -1,7 +1,7 @@
-# Brai Architecture Decision Records
+# Архитектурные решения Brai
 
-Brai ADRs record durable architecture decisions and their rationale. They explain why a decision was made; accepted behavior, workflow rules, and product requirements remain in OpenSpec.
+ADR Brai фиксируют устойчивые архитектурные решения и их обоснование. Они объясняют, почему решение было принято; принятое поведение, правила рабочих процессов и продуктовые требования остаются в OpenSpec.
 
-Create an ADR when a decision is expensive to reverse or changes architecture, data, security, deployment, dependencies, public contracts, or multiple modules.
+Создавайте ADR, когда решение дорого откатывать или оно меняет архитектуру, данные, безопасность, деплой, зависимости, публичные контракты либо несколько модулей.
 
-Use `npm run adr:list` to inspect records, `npm run adr:preview` for local browsing, and `npm run adr:build` before publishing the static ADR site.
+Используйте `npm run adr:list` для просмотра записей, `npm run adr:preview` для локального просмотра сайта и `npm run adr:build` перед публикацией статического ADR-сайта.

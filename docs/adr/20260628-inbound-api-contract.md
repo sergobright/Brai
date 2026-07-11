@@ -1,43 +1,43 @@
-# External inbound API contract
+# Внешний контракт входящего API
 
 - Status: accepted
-- Deciders: Project owner, Codex
+- Deciders: Владелец проекта, Codex
 - Date: 2026-06-28
-- Tags: api, integration, inbound
+- Tags: api, интеграция, входящие-запросы
 
-## Context
+## Контекст
 
-Connector-style writes into Brai need a stable external API shape with explicit authentication, request limits, storage mapping, and error behavior.
+Записи в Brai в стиле коннекторов требуют стабильной формы внешнего API с явной аутентификацией, лимитами запросов, маппингом хранения и поведением ошибок.
 
-## Decision
+## Решение
 
-Brai exposes a stable inbound API contract under the documented route shape, protected by the inbound API key, with behavior recorded in OpenSpec and `docs/api/inbound-api.md`.
+Brai предоставляет стабильный контракт входящего API по документированной форме маршрута, защищенный ключом входящего API; поведение зафиксировано в OpenSpec и `docs/api/inbound-api.md`.
 
-## Alternatives Considered
+## Рассмотренные альтернативы
 
-- Let external callers use internal API routes directly: rejected because internal sync/auth contracts can evolve differently.
-- Document the route only in code: rejected because integration behavior must be durable and reviewable.
+- Разрешить внешним клиентам напрямую использовать внутренние API-маршруты: отклонено, потому что внутренние контракты синхронизации и аутентификации могут развиваться иначе.
+- Документировать маршрут только в коде: отклонено, потому что поведение интеграции должно быть устойчивым и доступным для ревью.
 
-## Consequences
+## Последствия
 
-- Positive: external connector writes have a stable contract.
-- Negative: route, payload, response, auth, MIME, limits, storage mapping, title generation, and error changes must update docs in the same commit.
-- Risk: Caddy/API path changes can break connectors if not handled through the documented contract.
+- Плюс: записи от внешних коннекторов имеют стабильный контракт.
+- Минус: изменения маршрута, payload, response, auth, MIME, лимитов, storage mapping, генерации title и ошибок должны обновлять документацию в том же commit.
+- Риск: изменения путей Caddy/API могут сломать коннекторы, если не проходят через документированный контракт.
 
-## Confirmation
+## Проверка
 
-Run API tests and update `docs/api/inbound-api.md` whenever inbound behavior changes.
+Запускайте API-тесты и обновляйте `docs/api/inbound-api.md` при любом изменении входящего поведения.
 
-## Links
+## Ссылки
 
 - `openspec/specs/inbound-api/spec.md`
 - `docs/api/inbound-api.md`
 - `docs/guidelines/04-api-data-sync-migrations.md`
 
-## Supersedes
+## Заменяет
 
-None.
+Нет.
 
-## Superseded By
+## Заменено
 
-None.
+Нет.

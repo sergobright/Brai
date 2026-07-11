@@ -1,42 +1,42 @@
-# [short problem and chosen solution]
+# [краткая проблема и выбранное решение]
 
 - Status: draft
-- Deciders: Project owner
+- Deciders: Владелец проекта
 - Date: YYYY-MM-DD
-- Tags: architecture
+- Tags: архитектура
 
-## Context
+## Контекст
 
-What problem exists, why it matters, and which constraints apply.
+Какая проблема существует, почему она важна и какие ограничения действуют.
 
-## Decision
+## Решение
 
-What we choose.
+Что мы выбираем.
 
-## Alternatives Considered
+## Рассмотренные альтернативы
 
-- Option A: why not.
-- Option B: why not.
+- Вариант A: почему не подходит.
+- Вариант B: почему не подходит.
 
-## Consequences
+## Последствия
 
-- Positive: what becomes simpler or safer.
-- Negative: what cost or constraint we accept.
-- Risk: what may require revisiting.
+- Плюс: что становится проще или безопаснее.
+- Минус: какую цену или ограничение мы принимаем.
+- Риск: что может потребовать пересмотра.
 
-## Confirmation
+## Проверка
 
-How future work can verify that the project still follows this decision.
+Как будущие изменения могут проверить, что проект по-прежнему следует этому решению.
 
-## Links
+## Ссылки
 
-- Related OpenSpec change or spec.
-- Related docs, PRs, issues, or external references.
+- Связанное изменение OpenSpec или спецификация.
+- Связанные документы, PR, issue или внешние ссылки.
 
-## Supersedes
+## Заменяет
 
-None.
+Нет.
 
-## Superseded By
+## Заменено
 
-None.
+Нет.

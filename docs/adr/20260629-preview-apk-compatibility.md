@@ -1,43 +1,43 @@
-# Preview APK compatibility
+# Совместимость preview APK
 
 - Status: accepted
-- Deciders: Project owner, Codex
+- Deciders: Владелец проекта, Codex
 - Date: 2026-06-29
 - Tags: android, preview, apk, ota
 
-## Context
+## Контекст
 
-Preview branches can change the Android native boundary. A stale preview APK must not silently run an incompatible OTA bundle.
+Preview-ветки могут менять нативную границу Android. Устаревший preview APK не должен незаметно запускать несовместимый OTA-bundle.
 
-## Decision
+## Решение
 
-Native-boundary preview branches publish slot-specific APKs and matching OTA metadata. Preview Android `versionCode` uses `N * 10000 + M`, where `N` is the stable APK version and `M` is the branch-local preview iteration.
+Preview-ветки, меняющие нативную границу, публикуют APK для конкретного слота и соответствующие OTA-метаданные. Preview Android `versionCode` использует `N * 10000 + M`, где `N` - стабильная версия APK, а `M` - локальная для ветки preview-итерация.
 
-## Alternatives Considered
+## Рассмотренные альтернативы
 
-- Reuse production APKs for native preview branches: rejected because native/web compatibility can drift.
-- Publish preview OTA without APK compatibility metadata: rejected because incompatible clients would fail late.
+- Переиспользовать production APK для native preview-веток: отклонено, потому что совместимость native/web может разойтись.
+- Публиковать preview OTA без метаданных совместимости APK: отклонено, потому что несовместимые клиенты падали бы поздно.
 
-## Consequences
+## Последствия
 
-- Positive: stale preview APKs are blocked instead of silently running incompatible bundles.
-- Negative: native preview deploys are heavier than web-only preview deploys.
-- Risk: APK ledger or slot metadata mistakes can block preview handoff.
+- Плюс: устаревшие preview APK блокируются вместо тихого запуска несовместимых bundles.
+- Минус: native preview deploy тяжелее, чем web-only preview deploy.
+- Риск: ошибки в APK ledger или метаданных слота могут заблокировать preview handoff.
 
-## Confirmation
+## Проверка
 
-Verify native-boundary preview APK metadata, OTA manifest compatibility, and release index entries during preview deploy.
+Проверяйте метаданные native-boundary preview APK, совместимость OTA manifest и записи release index во время preview deploy.
 
-## Links
+## Ссылки
 
 - `openspec/specs/app-delivery/spec.md`
 - `docs/operations/branch-preview-environments.md`
 - `docs/guidelines/05-android-web-ota-releases.md`
 
-## Supersedes
+## Заменяет
 
-None.
+Нет.
 
-## Superseded By
+## Заменено
 
-None.
+Нет.

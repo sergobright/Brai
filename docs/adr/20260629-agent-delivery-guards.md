@@ -1,43 +1,43 @@
-# Agent delivery guards
+# Защитные правила доставки для агентов
 
 - Status: accepted
-- Deciders: Project owner, Codex
+- Deciders: Владелец проекта, Codex
 - Date: 2026-06-29
-- Tags: agents, delivery, guardrails
+- Tags: агенты, delivery, guardrails
 
-## Context
+## Контекст
 
-Agent work can accidentally edit tracked files on the wrong branch, bypass preview workflow, or leave completed OpenSpec changes active.
+Работа агента может случайно изменить отслеживаемые файлы на неправильной ветке, обойти preview workflow или оставить завершенные изменения OpenSpec активными.
 
-## Decision
+## Решение
 
-Brai enforces agent delivery through `scripts/brai-task.mjs`, Codex hooks, Git hooks, delivery classification, OpenSpec validation, public guard, and preview/no-preview handoff requirements.
+Brai обеспечивает доставку агентских изменений через `scripts/brai-task.mjs`, Codex hooks, Git hooks, классификацию delivery, OpenSpec validation, public guard и требования preview/no-preview handoff.
 
-## Alternatives Considered
+## Рассмотренные альтернативы
 
-- Trust agents to remember procedure: rejected because context can compress and multiple tools can mutate files.
-- Use Git branches manually as fallback: rejected because the official task state must remain authoritative.
+- Доверить агентам помнить процедуру: отклонено, потому что контекст может сжиматься, а несколько инструментов могут менять файлы.
+- Использовать Git branches вручную как fallback: отклонено, потому что официальное task state должно оставаться авторитетным.
 
-## Consequences
+## Последствия
 
-- Positive: implementation work has a deterministic branch and handoff flow.
-- Negative: legitimate operations may require escalation when sandboxed tools cannot write refs or runtime ledgers.
-- Risk: hook drift can weaken enforcement unless synced and checked.
+- Плюс: работа по реализации имеет детерминированную ветку и handoff flow.
+- Минус: легитимные операции могут требовать escalation, когда инструменты в sandbox не могут писать refs или runtime ledgers.
+- Риск: расхождение hooks может ослабить enforcement, если hooks не синхронизировать и не проверять.
 
-## Confirmation
+## Проверка
 
-Run `scripts/brai-guard-sync-check.sh --check` and task tests when delivery guard behavior changes.
+Запускайте `scripts/brai-guard-sync-check.sh --check` и task tests при изменении поведения delivery guard.
 
-## Links
+## Ссылки
 
 - `AGENTS.md`
 - `scripts/brai-task.mjs`
 - `docs/operations/branch-preview-environments.md`
 
-## Supersedes
+## Заменяет
 
-None.
+Нет.
 
-## Superseded By
+## Заменено
 
-None.
+Нет.
