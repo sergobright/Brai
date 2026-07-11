@@ -288,6 +288,7 @@ describe("BraiApp onboarding", () => {
       expect.stringContaining("Локальная модель"),
       expect.stringContaining("Облако Brai"),
     ]);
+    expect(screen.getByText("Самое простое")).toBeInTheDocument();
   });
 
   it("uses a select for provider choice and mutes provider testing until the key is entered", async () => {
