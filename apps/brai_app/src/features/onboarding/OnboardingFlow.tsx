@@ -606,8 +606,8 @@ export function OnboardingFlow({
         <ChoiceScreen
           title="Как запускаем Brai?"
           choices={[
-            { title: "С чистого листа", text: "Начнём с нуля, познакомимся и всё настроим", onClick: () => choosePath("new") },
-            { title: "Есть профиль", text: "Вы уже создавали профиль или вам его кто-то создал и передал ключ активации", onClick: () => choosePath("existing") },
+            { icon: UserRound, title: "С чистого листа", text: "Начнём с нуля, познакомимся и всё настроим", onClick: () => choosePath("new") },
+            { icon: KeyRound, title: "Есть профиль", text: "Вы уже создавали профиль или вам его кто-то создал и передал ключ активации", onClick: () => choosePath("existing") },
           ]}
         />
       );
@@ -627,7 +627,7 @@ export function OnboardingFlow({
               update({ name: event.target.value });
             }} />
           </div>
-          <StepActions><PrimaryButton disabled={!isValidOnboardingName(state.name)}>Продолжить</PrimaryButton></StepActions>
+          <StepActions preserveBottomGap><PrimaryButton disabled={!isValidOnboardingName(state.name)}>Продолжить</PrimaryButton></StepActions>
         </form>
       );
     }
@@ -636,8 +636,8 @@ export function OnboardingFlow({
       return (
         <ChoiceScreen
           choices={[
-            { title: "Облачная версия", text: "Авторизация по e-mail на серверах Brai", onClick: () => chooseProfileVersion("cloud") },
-            { title: "Self-hosted версия", text: "Подключение по URL и ключу доступа к частному приватному серверу", disabled: true, badge: "В разработке" },
+            { icon: Cloud, title: "Облачная версия", text: "Авторизация по e-mail на серверах Brai", onClick: () => chooseProfileVersion("cloud") },
+            { icon: Server, title: "Self-hosted версия", text: "Подключение по URL и ключу доступа к частному приватному серверу", disabled: true, badge: "В разработке" },
           ]}
         />
       );
@@ -953,7 +953,7 @@ function StepScreen({ actions, children }: { actions?: ReactNode; children: Reac
   );
 }
 
-function StepActions({ children }: { children: ReactNode }) {
+function StepActions({ children, preserveBottomGap = false }: { children: ReactNode; preserveBottomGap?: boolean }) {
   const { canBack, onBack, statusText, statusTone } = useContext(OnboardingChromeContext);
   const actions = Children.toArray(children).filter(Boolean);
   const mainAction = actions.at(-1);
@@ -962,7 +962,12 @@ function StepActions({ children }: { children: ReactNode }) {
   if (!statusText && !mainAction && !canBack) return null;
 
   return (
-    <div className="grid shrink-0 gap-3 pb-[calc(env(safe-area-inset-bottom)+1.5rem)] pt-5 [@media(max-height:700px)]:gap-2 [@media(max-height:700px)]:pb-[calc(env(safe-area-inset-bottom)+0.5rem)] [@media(max-height:700px)]:pt-2 [@media(max-height:800px)_and_(min-aspect-ratio:2/3)]:pb-[calc(env(safe-area-inset-bottom)+0.25rem)] [@media(max-height:800px)_and_(min-aspect-ratio:2/3)]:pt-1">
+    <div className={cx(
+      "grid shrink-0 gap-3 pb-[calc(env(safe-area-inset-bottom)+1.5rem)] pt-5",
+      preserveBottomGap
+        ? "[@media(max-height:700px)]:pb-[calc(env(safe-area-inset-bottom)+1rem)] [@media(max-height:700px)]:pt-3 [@media(max-height:800px)_and_(min-aspect-ratio:2/3)]:pb-[calc(env(safe-area-inset-bottom)+1rem)] [@media(max-height:800px)_and_(min-aspect-ratio:2/3)]:pt-3"
+        : "[@media(max-height:700px)]:gap-2 [@media(max-height:700px)]:pb-[calc(env(safe-area-inset-bottom)+0.5rem)] [@media(max-height:700px)]:pt-2 [@media(max-height:800px)_and_(min-aspect-ratio:2/3)]:pb-[calc(env(safe-area-inset-bottom)+0.25rem)] [@media(max-height:800px)_and_(min-aspect-ratio:2/3)]:pt-1",
+    )}>
       {statusText ? <StatusCard text={statusText} tone={statusTone} /> : null}
       {extraActions.length ? <div className="grid gap-2">{extraActions}</div> : null}
       <div className={cx("grid gap-3", canBack && mainAction ? "grid-cols-[3rem_minmax(0,1fr)]" : canBack ? "grid-cols-[3rem]" : "grid-cols-1")}>
@@ -984,8 +989,8 @@ function InfoBlock({ compactOnShort = false, icon: Icon, title, text }: { compac
         <Icon className={cx("size-5", compactOnShort ? "[@media(max-height:700px)]:size-4 [@media(max-height:650px)]:size-3.5" : "")} aria-hidden="true" />
       </span>
       <div className={cx("grid min-w-0 gap-2", compactOnShort ? "[@media(max-height:800px)_and_(min-aspect-ratio:2/3)]:gap-1" : "")}>
-        <h2 className={cx("m-0 break-words text-2xl font-semibold leading-tight", compactOnShort ? "[@media(max-height:700px)]:text-xl [@media(max-height:650px)]:text-lg [@media(max-height:800px)_and_(min-aspect-ratio:2/3)]:text-base" : "")}>{title}</h2>
-        <p className={cx("m-0 break-words text-sm leading-5 text-muted-foreground", compactOnShort ? "[@media(max-height:700px)]:text-xs [@media(max-height:700px)]:leading-4 [@media(max-height:650px)]:text-[0.72rem] [@media(max-height:650px)]:leading-[0.95rem] [@media(max-height:800px)_and_(min-aspect-ratio:2/3)]:text-[0.68rem] [@media(max-height:800px)_and_(min-aspect-ratio:2/3)]:leading-[0.82rem]" : "")}>{text}</p>
+        <h2 className={cx("m-0 break-words text-3xl font-semibold leading-tight", compactOnShort ? "[@media(max-height:700px)]:text-2xl [@media(max-height:650px)]:text-xl [@media(max-height:800px)_and_(min-aspect-ratio:2/3)]:text-xl" : "")}>{title}</h2>
+        <p className={cx("m-0 break-words text-base leading-6 text-muted-foreground", compactOnShort ? "[@media(max-height:700px)]:text-sm [@media(max-height:700px)]:leading-5 [@media(max-height:650px)]:text-sm [@media(max-height:650px)]:leading-5 [@media(max-height:800px)_and_(min-aspect-ratio:2/3)]:text-sm [@media(max-height:800px)_and_(min-aspect-ratio:2/3)]:leading-5" : "")}>{text}</p>
       </div>
     </div>
   );
@@ -1015,14 +1020,16 @@ function ChoiceScreen({ choices, text, title }: { choices: OnboardingChoice[]; t
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
       <div className="grid min-h-0 flex-1 content-center gap-4 overflow-hidden py-4">
-        {title ? text ? <InfoBlock icon={Radio} title={title} text={text} /> : <h2 className="m-0 break-words text-2xl font-semibold leading-tight">{title}</h2> : null}
+        {title ? text ? <InfoBlock icon={Radio} title={title} text={text} /> : <h2 className="m-0 break-words text-3xl font-semibold leading-tight">{title}</h2> : null}
         <div className="grid gap-3 sm:grid-cols-2">
           {choices.map((choice) => (
-            <button key={choice.title} type="button" disabled={choice.disabled} className="grid min-h-28 content-start gap-2 rounded-lg border border-primary/20 bg-primary/5 p-3 text-left transition-all duration-200 hover:bg-primary/10 active:scale-[0.98] active:border-primary/40 active:bg-primary/15 focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40 disabled:pointer-events-none disabled:border-primary/10 disabled:bg-primary/[0.02] disabled:text-muted-foreground disabled:opacity-55" onClick={choice.onClick}>
-              {choice.icon ? <choice.icon className="size-5 text-primary" aria-hidden="true" /> : null}
-              <span className="text-base font-semibold">{choice.title}</span>
-              <span className="text-sm leading-5 text-muted-foreground">{choice.text}</span>
-              {choice.badge ? <span className="mt-auto w-fit rounded-full border border-primary/20 px-2 py-0.5 text-xs font-medium text-muted-foreground">{choice.badge}</span> : null}
+            <button key={choice.title} type="button" disabled={choice.disabled} className="group grid min-h-36 content-start gap-3 rounded-2xl border border-primary/20 bg-card/80 p-5 text-left shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/40 hover:bg-primary/10 hover:shadow-md active:translate-y-0 active:scale-[0.98] active:bg-primary/15 focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40 disabled:pointer-events-none disabled:border-primary/10 disabled:bg-card/35 disabled:text-muted-foreground disabled:opacity-55 disabled:shadow-none" onClick={choice.onClick}>
+              <div className="flex items-start justify-between gap-3">
+                {choice.icon ? <span className="grid size-10 place-items-center rounded-xl border border-primary/20 bg-primary/10 text-primary"><choice.icon className="size-5" aria-hidden="true" /></span> : null}
+                {choice.badge ? <span className="rounded-full border border-primary/20 bg-primary/5 px-2.5 py-1 text-xs font-medium text-muted-foreground">{choice.badge}</span> : <ArrowRight className="mt-2 size-4 text-muted-foreground transition-transform group-hover:translate-x-1" aria-hidden="true" />}
+              </div>
+              <span className="text-lg font-semibold leading-tight">{choice.title}</span>
+              <span className="text-base leading-6 text-muted-foreground">{choice.text}</span>
             </button>
           ))}
         </div>
@@ -1035,7 +1042,14 @@ function ChoiceScreen({ choices, text, title }: { choices: OnboardingChoice[]; t
 function WelcomeCarousel({ currentStep, onStart, onStepChange }: { currentStep: OnboardingStep; onStart: () => void; onStepChange: (step: OnboardingStep) => void }) {
   const [api, setApi] = useState<CarouselApi>();
   const [current, setCurrent] = useState(() => welcomeStepIndex(currentStep));
-  const canStart = current === welcomeSlides.length - 1;
+  const [showStartButton, setShowStartButton] = useState(false);
+  const isLastSlide = current === welcomeSlides.length - 1;
+
+  useEffect(() => {
+    if (!isLastSlide) return;
+    const timer = window.setTimeout(() => setShowStartButton(true), 2000);
+    return () => window.clearTimeout(timer);
+  }, [isLastSlide]);
 
   useEffect(() => {
     if (!api) return;
@@ -1047,6 +1061,7 @@ function WelcomeCarousel({ currentStep, onStart, onStepChange }: { currentStep: 
     if (!api) return;
     const onSelect = () => {
       const index = api.selectedScrollSnap();
+      setShowStartButton(false);
       setCurrent(index);
       onStepChange(welcomeSlides[index]?.step ?? "welcome-1");
     };
@@ -1060,17 +1075,16 @@ function WelcomeCarousel({ currentStep, onStart, onStepChange }: { currentStep: 
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
       <div className="grid min-h-0 flex-1 grid-rows-[minmax(0,1fr)_auto] gap-5 overflow-hidden pt-[clamp(3rem,10dvh,7rem)] [@media(max-height:700px)]:gap-2 [@media(max-height:700px)]:pt-2 [@media(max-height:650px)]:pt-1">
         <Carousel setApi={setApi} opts={{ align: "start", startIndex: welcomeStepIndex(currentStep) }} className="h-full w-full min-w-0 overflow-hidden" aria-label="Приветствие Brai" data-nav-swipe-exclusion>
-          <CarouselContent viewportClassName="h-full" className="h-full w-full touch-pan-y">
-            {welcomeSlides.map(({ image, step, text, title }, index) => (
-              <CarouselItem key={step} className="h-full basis-full">
+          <CarouselContent viewportClassName="h-full" className="!ml-0 h-full w-full touch-pan-y gap-4">
+            {welcomeSlides.map(({ image, step, text, title }) => (
+              <CarouselItem key={step} className="h-full basis-full !pl-0">
                 <Card className="relative h-full w-full min-w-0 overflow-hidden rounded-2xl border-primary/15 bg-black p-0 shadow-none">
                   <Image src={image} alt="" width={640} height={1280} className="absolute inset-x-0 top-0 h-auto w-full max-w-none" aria-hidden="true" />
                   <div className="absolute inset-0 bg-gradient-to-b from-transparent via-black/45 to-black" aria-hidden="true" />
                   <div className="absolute inset-x-0 bottom-0 flex h-2/3 min-h-0 flex-col px-6 pt-6 [@media(max-height:700px)]:px-4 [@media(max-height:700px)]:pt-4 [@media(max-height:650px)]:px-3 [@media(max-height:650px)]:pt-3">
-                    <p className="m-0 text-xs font-medium text-white/60">Карточка {index + 1} из 6</p>
-                    <div className="mt-3 grid min-h-0 gap-3 [@media(max-height:700px)]:mt-2 [@media(max-height:700px)]:gap-2">
-                      <h2 className="m-0 break-words text-2xl font-semibold leading-tight text-white [@media(max-height:700px)]:text-xl [@media(max-height:650px)]:text-lg">{title}</h2>
-                      <p className="m-0 whitespace-pre-line break-words text-sm leading-5 text-white/85 [@media(max-height:700px)]:text-xs [@media(max-height:700px)]:leading-4">{text}</p>
+                    <div className="grid min-h-0 gap-4 [@media(max-height:700px)]:gap-3">
+                      <h2 className="m-0 break-words text-3xl font-semibold leading-tight text-white [@media(max-height:700px)]:text-2xl [@media(max-height:650px)]:text-xl">{title}</h2>
+                      <p className="m-0 whitespace-pre-line break-words text-base leading-6 text-white/90 [@media(max-height:700px)]:text-sm [@media(max-height:700px)]:leading-5">{text}</p>
                     </div>
                   </div>
                 </Card>
@@ -1085,7 +1099,7 @@ function WelcomeCarousel({ currentStep, onStart, onStepChange }: { currentStep: 
         </div>
       </div>
       <StepActions>
-        <PrimaryButton className={canStart ? "" : "invisible"} disabled={!canStart} aria-hidden={!canStart} tabIndex={canStart ? 0 : -1} onClick={onStart}>Начать</PrimaryButton>
+        <PrimaryButton className={showStartButton ? "opacity-100 duration-500" : "pointer-events-none opacity-0 duration-500"} disabled={!showStartButton} aria-hidden={!showStartButton} tabIndex={showStartButton ? 0 : -1} onClick={onStart}>Начать</PrimaryButton>
       </StepActions>
     </div>
   );

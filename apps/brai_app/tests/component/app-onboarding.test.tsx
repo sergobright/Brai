@@ -128,9 +128,10 @@ describe("BraiApp onboarding", () => {
     expect(screen.getByText("Твой исполнитель желаний уже здесь")).toBeInTheDocument();
     expect(container.querySelectorAll('[data-slot="card"] img')).toHaveLength(6);
     expect(container.querySelector('[data-slot="carousel-content"]')).toHaveClass("h-full");
-    expect(container.querySelector('[data-slot="carousel-content"] > div')).toHaveClass("-ml-4", "h-full", "w-full", "touch-pan-y");
-    expect(screen.getByText("Карточка 1 из 6").closest('[data-slot="carousel-item"]')).toHaveClass("h-full", "pl-4");
-    expect(screen.getByText("Карточка 1 из 6").closest('[data-slot="card"]')).toHaveClass("h-full", "w-full", "overflow-hidden");
+    expect(container.querySelector('[data-slot="carousel-content"] > div')).toHaveClass("!ml-0", "h-full", "w-full", "touch-pan-y", "gap-4");
+    expect(screen.getByText("А что, если исполнитель желаний существует?").closest('[data-slot="carousel-item"]')).toHaveClass("h-full", "!pl-0");
+    expect(screen.getByText("А что, если исполнитель желаний существует?").closest('[data-slot="card"]')).toHaveClass("h-full", "w-full", "overflow-hidden");
+    expect(screen.queryByText(/Карточка \d из 6/)).not.toBeInTheDocument();
     expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Previous slide" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Next slide" })).not.toBeInTheDocument();
@@ -138,6 +139,7 @@ describe("BraiApp onboarding", () => {
   });
 
   it("shows the start button on the sixth welcome card", async () => {
+    vi.useFakeTimers();
     stubAndroidCapacitor();
     window.localStorage.setItem(ONBOARDING_STORAGE_KEY, JSON.stringify({
       complete: false,
@@ -151,6 +153,11 @@ describe("BraiApp onboarding", () => {
 
     render(<BraiApp />);
 
+    expect(screen.queryByRole("button", { name: "Начать" })).not.toBeInTheDocument();
+    act(() => vi.advanceTimersByTime(1999));
+    expect(screen.queryByRole("button", { name: "Начать" })).not.toBeInTheDocument();
+    act(() => vi.advanceTimersByTime(1));
+    vi.useRealTimers();
     fireEvent.click(await screen.findByRole("button", { name: "Начать" }));
     expect(screen.getByText("Как запускаем Brai?")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /С чистого листа/ })).toBeInTheDocument();
