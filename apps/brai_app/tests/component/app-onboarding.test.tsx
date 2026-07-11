@@ -244,7 +244,7 @@ describe("BraiApp onboarding", () => {
 
     expect(document.querySelector("[data-startup-splash] img[alt='Brai']")).toBeInTheDocument();
     expect(document.querySelectorAll("[data-startup-logo]")).toHaveLength(1);
-    expect(screen.getByText("Как распознавать голос?")).toBeInTheDocument();
+    expect(screen.getByText("Как распознавать голос")).toBeInTheDocument();
   });
 
   it("keeps unauthenticated users inside the limited access screen", async () => {
@@ -281,9 +281,13 @@ describe("BraiApp onboarding", () => {
 
     render(<BraiApp />);
 
-    expect(await screen.findByText("Как распознавать голос?")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Облачный модуль/ })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Локальная модель/ })).toBeInTheDocument();
+    expect(await screen.findByText("Как распознавать голос")).toBeInTheDocument();
+    const choices = screen.getAllByRole("button").filter((button) => /API ключ|Локальная модель|Облако Brai/.test(button.textContent ?? ""));
+    expect(choices.map((button) => button.textContent)).toEqual([
+      expect.stringContaining("API ключ"),
+      expect.stringContaining("Локальная модель"),
+      expect.stringContaining("Облако Brai"),
+    ]);
   });
 
   it("uses a select for provider choice and mutes provider testing until the key is entered", async () => {
@@ -619,9 +623,11 @@ describe("BraiApp onboarding", () => {
 
     render(<BraiApp />);
 
-    expect(await screen.findByText("Приватность облака")).toBeInTheDocument();
+    expect(await screen.findByText("Мы ничего не храним")).toBeInTheDocument();
+    expect(screen.getByText(/после успешной доставки расшифровки/)).toBeInTheDocument();
+    expect(screen.getByText(/Для полной приватности используйте локальные модели/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Проверить" })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Продолжить" }));
+    fireEvent.click(screen.getByRole("button", { name: "Согласен" }));
     expect(await screen.findByText("Поверх других приложений")).toBeInTheDocument();
   });
 

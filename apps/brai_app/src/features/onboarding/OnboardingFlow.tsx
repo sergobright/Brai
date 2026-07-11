@@ -689,11 +689,11 @@ export function OnboardingFlow({
 
     if (state.step === "voice-choice") {
       const choices = [
-        { icon: KeyRound, title: "Ключ поставщика", text: "Выбрать поставщика и сохранить API-ключ.", onClick: () => chooseVoiceMode("provider") },
-        { icon: Cloud, title: "Облачный модуль", text: "Использовать облачное распознавание Brai.", onClick: () => chooseVoiceMode("cloud") },
-        { icon: Server, title: "Локальная модель", text: "Подключить URL модели на вашем сервере.", onClick: () => chooseVoiceMode("local") },
+        { icon: KeyRound, title: "API ключ", text: "Расшифровка напрямую через поставщика LLM. Нужен API ключ", onClick: () => chooseVoiceMode("provider") },
+        { icon: Server, title: "Локальная модель", text: "Расшифровка на вашем сервере. Нужен эндпойнт и ключ", onClick: () => chooseVoiceMode("local") },
+        { icon: Cloud, title: "Облако Brai", text: "Расшифровка через серверы Брай. Ничего не требует, но есть лимиты на бесплатное использование", onClick: () => chooseVoiceMode("cloud") },
       ];
-      return <ChoiceScreen title="Как распознавать голос?" text="Выберите способ, который будет использовать Brai CMD." choices={choices} />;
+      return <ChoiceScreen compact title="Как распознавать голос" choices={choices} />;
     }
 
     if (state.step === "provider-key") {
@@ -733,7 +733,7 @@ export function OnboardingFlow({
       );
     }
 
-    if (state.step === "cloud-privacy") return <InfoScreen icon={Cloud} title="Приватность облака" text="Аудио проходит через серверы Brai для расшифровки. Мы не храним содержимое запросов."><PrimaryButton onClick={() => go("overlay")}>Продолжить</PrimaryButton></InfoScreen>;
+    if (state.step === "cloud-privacy") return <InfoScreen icon={Cloud} title="Мы ничего не храним" text={"Ваши аудио с голосом и расшифровки обрабатываются на серверах Брай.\n\nНо после успешной доставки расшифровки вам мы всё сразу удаляем. Это наши принципы.\n\nДля полной приватности используйте локальные модели"}><PrimaryButton onClick={() => go("overlay")}>Согласен</PrimaryButton></InfoScreen>;
 
     if (state.step === "overlay") {
       return (
@@ -990,7 +990,7 @@ function InfoBlock({ compactOnShort = false, icon: Icon, title, text }: { compac
       </span>
       <div className={cx("grid min-w-0 gap-2", compactOnShort ? "[@media(max-height:800px)_and_(min-aspect-ratio:2/3)]:gap-1" : "")}>
         <h2 className={cx("m-0 break-words text-3xl font-semibold leading-tight", compactOnShort ? "[@media(max-height:700px)]:text-2xl [@media(max-height:650px)]:text-xl [@media(max-height:800px)_and_(min-aspect-ratio:2/3)]:text-xl" : "")}>{title}</h2>
-        <p className={cx("m-0 break-words text-base leading-6 text-muted-foreground", compactOnShort ? "[@media(max-height:700px)]:text-sm [@media(max-height:700px)]:leading-5 [@media(max-height:650px)]:text-sm [@media(max-height:650px)]:leading-5 [@media(max-height:800px)_and_(min-aspect-ratio:2/3)]:text-sm [@media(max-height:800px)_and_(min-aspect-ratio:2/3)]:leading-5" : "")}>{text}</p>
+        <p className={cx("m-0 whitespace-pre-line break-words text-base leading-6 text-muted-foreground", compactOnShort ? "[@media(max-height:700px)]:text-sm [@media(max-height:700px)]:leading-5 [@media(max-height:650px)]:text-sm [@media(max-height:650px)]:leading-5 [@media(max-height:800px)_and_(min-aspect-ratio:2/3)]:text-sm [@media(max-height:800px)_and_(min-aspect-ratio:2/3)]:leading-5" : "")}>{text}</p>
       </div>
     </div>
   );
@@ -1016,20 +1016,18 @@ type OnboardingChoice = {
   title: string;
 };
 
-function ChoiceScreen({ choices, text, title }: { choices: OnboardingChoice[]; text?: string; title?: string }) {
+function ChoiceScreen({ choices, compact = false, text, title }: { choices: OnboardingChoice[]; compact?: boolean; text?: string; title?: string }) {
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-      <div className="grid min-h-0 flex-1 content-center gap-4 overflow-hidden py-4">
-        {title ? text ? <InfoBlock icon={Radio} title={title} text={text} /> : <h2 className="m-0 break-words text-3xl font-semibold leading-tight">{title}</h2> : null}
-        <div className="grid gap-3 sm:grid-cols-2">
+      <div className={cx("grid min-h-0 flex-1 content-center overflow-hidden", compact ? "gap-3 py-2 [@media(max-height:700px)]:gap-2 [@media(max-height:700px)]:py-1" : "gap-4 py-4")}>
+        {title ? text ? <InfoBlock icon={Radio} title={title} text={text} /> : <h2 className={cx("m-0 break-words font-semibold leading-tight", compact ? "text-2xl [@media(max-height:700px)]:text-xl" : "text-3xl")}>{title}</h2> : null}
+        <div className={cx("grid", compact ? "gap-2 sm:grid-cols-3" : "gap-3 sm:grid-cols-2")}>
           {choices.map((choice) => (
-            <button key={choice.title} type="button" disabled={choice.disabled} className="group grid min-h-36 content-start gap-3 rounded-2xl border border-primary/20 bg-card/80 p-5 text-left shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/40 hover:bg-primary/10 hover:shadow-md active:translate-y-0 active:scale-[0.98] active:bg-primary/15 focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40 disabled:pointer-events-none disabled:border-primary/10 disabled:bg-card/35 disabled:text-muted-foreground disabled:opacity-55 disabled:shadow-none" onClick={choice.onClick}>
-              <div className="flex items-start justify-between gap-3">
-                {choice.icon ? <span className="grid size-10 place-items-center rounded-xl border border-primary/20 bg-primary/10 text-primary"><choice.icon className="size-5" aria-hidden="true" /></span> : null}
-                {choice.badge ? <span className="rounded-full border border-primary/20 bg-primary/5 px-2.5 py-1 text-xs font-medium text-muted-foreground">{choice.badge}</span> : <ArrowRight className="mt-2 size-4 text-muted-foreground transition-transform group-hover:translate-x-1" aria-hidden="true" />}
-              </div>
-              <span className="text-lg font-semibold leading-tight">{choice.title}</span>
-              <span className="text-base leading-6 text-muted-foreground">{choice.text}</span>
+            <button key={choice.title} type="button" disabled={choice.disabled} className={cx("group grid items-start rounded-2xl border border-primary/20 bg-card/80 text-left shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/40 hover:bg-primary/10 hover:shadow-md active:translate-y-0 active:scale-[0.98] active:bg-primary/15 focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40 disabled:pointer-events-none disabled:border-primary/10 disabled:bg-card/35 disabled:text-muted-foreground disabled:opacity-55 disabled:shadow-none", compact ? "grid-cols-[2.25rem_minmax(0,1fr)_1rem] gap-x-3 gap-y-1.5 p-3 [@media(max-height:700px)]:grid-cols-[2rem_minmax(0,1fr)_1rem] [@media(max-height:700px)]:gap-x-2 [@media(max-height:700px)]:p-2.5 sm:min-h-36 sm:p-4" : "min-h-36 grid-cols-[2.5rem_minmax(0,1fr)_auto] gap-x-3 gap-y-2 p-5")} onClick={choice.onClick}>
+              {choice.icon ? <span className={cx("row-span-2 grid place-items-center border border-primary/20 bg-primary/10 text-primary", compact ? "size-9 rounded-lg [@media(max-height:700px)]:size-8" : "size-10 rounded-xl")}><choice.icon className={compact ? "size-4" : "size-5"} aria-hidden="true" /></span> : null}
+              <span className={cx("col-start-2 font-semibold leading-tight", compact ? "text-base [@media(max-height:700px)]:text-sm sm:text-base" : "text-lg")}>{choice.title}</span>
+              {choice.badge ? <span className="col-start-3 rounded-full border border-primary/20 bg-primary/5 px-2.5 py-1 text-xs font-medium text-muted-foreground">{choice.badge}</span> : <ArrowRight className="col-start-3 mt-0.5 size-4 text-muted-foreground transition-transform group-hover:translate-x-1" aria-hidden="true" />}
+              <span className={cx("col-start-2 col-end-4 text-muted-foreground", compact ? "text-sm leading-5 [@media(max-height:700px)]:text-xs [@media(max-height:700px)]:leading-4 sm:text-sm sm:leading-5" : "text-base leading-6")}>{choice.text}</span>
             </button>
           ))}
         </div>
