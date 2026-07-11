@@ -9,7 +9,9 @@ import {
   readColumns,
   readDatabaseView,
   readPrimaryUserId,
+  readRoleContractsAdmin,
   readTableDescriptions,
+  readWorkflowAdminSummary,
   resolveDatabaseUrl,
 } from "../src/lib/database.js";
 import { readBraiCmdAdminSummary } from "../src/lib/braiCmdSummary.js";
@@ -95,6 +97,58 @@ try {
       long_description text NOT NULL,
       updated_at_utc text NOT NULL
     );
+    CREATE TABLE item_role_types (
+      id integer PRIMARY KEY,
+      title_system text NOT NULL,
+      title text NOT NULL
+    );
+    CREATE TABLE workflow_definitions (
+      id text NOT NULL,
+      version integer NOT NULL,
+      title text NOT NULL,
+      description text NOT NULL,
+      status text NOT NULL,
+      task_queue text NOT NULL,
+      steps_json text NOT NULL,
+      diagram_mermaid text NOT NULL,
+      input_schema_version text NOT NULL,
+      input_schema_json text NOT NULL,
+      output_schema_version text NOT NULL,
+      output_schema_json text NOT NULL,
+      updated_at_utc text NOT NULL,
+      PRIMARY KEY (id, version)
+    );
+    CREATE TABLE role_contracts (
+      id text PRIMARY KEY,
+      item_role_types_id integer NOT NULL REFERENCES item_role_types(id),
+      payload_table text NOT NULL,
+      link_column text NOT NULL,
+      lifecycle_json text NOT NULL,
+      workflow_definition_id text,
+      workflow_definition_version integer,
+      input_schema_version text,
+      output_schema_version text,
+      owner text NOT NULL,
+      event_rules_json text NOT NULL,
+      created_at_utc text NOT NULL,
+      updated_at_utc text NOT NULL
+    );
+    CREATE TABLE workflow_executions (
+      id integer PRIMARY KEY,
+      workflow_id text NOT NULL,
+      run_id text,
+      workflow_definition_id text NOT NULL,
+      workflow_definition_version integer NOT NULL,
+      role_contract_id text NOT NULL,
+      raw_record_id text NOT NULL,
+      status text NOT NULL,
+      current_step text NOT NULL,
+      attempt_count integer NOT NULL,
+      last_error text,
+      started_at_utc text,
+      completed_at_utc text,
+      updated_at_utc text NOT NULL
+    );
   `);
 
   for (let index = 1; index <= 55; index += 1) {
@@ -139,6 +193,36 @@ try {
     `,
     ["target_table", "Цель", "Коротко.", "Длинное описание."],
   );
+  await db.query("INSERT INTO item_role_types (id, title_system, title) VALUES (2, 'inbox', 'Inbox')");
+  await db.query(`
+    INSERT INTO workflow_definitions (
+      id, version, title, description, status, task_queue, steps_json, diagram_mermaid,
+      input_schema_version, input_schema_json, output_schema_version, output_schema_json, updated_at_utc
+    ) VALUES (
+      'inbox.raw-normalization', 1, 'Inbox normalization', '', 'active', 'brai-inbox-normalization',
+      '["ingest","raw_normalizer","apply_normalized_raw"]', 'flowchart LR; ingest --> apply',
+      'input.v1', '{}', 'output.v1', '{}', '2026-01-03T00:00:00.000Z'
+    )
+  `);
+  await db.query(`
+    INSERT INTO role_contracts (
+      id, item_role_types_id, payload_table, link_column, lifecycle_json,
+      workflow_definition_id, workflow_definition_version, input_schema_version,
+      output_schema_version, owner, event_rules_json, created_at_utc, updated_at_utc
+    ) VALUES (
+      'inbox', 2, 'inbox', 'item_roles_id', '{}', 'inbox.raw-normalization', 1,
+      'input.v1', 'output.v1', 'brai-inbox', '{}', '2026-01-03T00:00:00.000Z', '2026-01-03T00:00:00.000Z'
+    )
+  `);
+  await db.query(`
+    INSERT INTO workflow_executions (
+      id, workflow_id, run_id, workflow_definition_id, workflow_definition_version,
+      role_contract_id, raw_record_id, status, current_step, attempt_count, updated_at_utc
+    ) VALUES (
+      1, 'brai:inbox:test', 'run-test', 'inbox.raw-normalization', 1,
+      'inbox', 'inbox-test', 'running', 'raw_normalizer', 1, '2026-01-03T00:00:00.000Z'
+    )
+  `);
 
   const readOnly = openReadOnlyDatabase(databaseUrl);
   try {
@@ -193,11 +277,21 @@ try {
   assert.equal(braiCmdSummary.recentUsage[0].errorCode, "timeout", "recent brai cmd usage sorts newest first");
   assert.equal(braiCmdSummary.recentUsage[0].fallbackUsed, true, "recent brai cmd fallback flag is preserved");
 
+  const workflowSummary = await readWorkflowAdminSummary(databaseUrl);
+  assert.equal(workflowSummary.definitions[0].id, "inbox.raw-normalization", "workflow definition read model is readable");
+  assert.equal(workflowSummary.executions[0].current_step, "raw_normalizer", "workflow execution read model is readable");
+  const roleContracts = await readRoleContractsAdmin(databaseUrl);
+  assert.equal(roleContracts[0].role_key, "inbox", "role contract joins its role type");
+  assert.equal(roleContracts[0].workflow_title, "Inbox normalization", "role contract joins its workflow definition");
+
   process.env[DATABASE_URL_ENV] = databaseUrl;
   assert.equal(resolveDatabaseUrl(), databaseUrl, "production database URL resolves");
   assert.equal(classifyTableGroup("app_settings"), "user", "app settings are user data");
   assert.equal(classifyTableGroup("focus_session_versions"), "user", "focus session versions are user data");
   assert.equal(classifyTableGroup("items"), "system", "items registry is system data");
+  assert.equal(classifyTableGroup("item_roles"), "system", "item roles are system data");
+  assert.equal(classifyTableGroup("item_role_types"), "system", "item role types are system data");
+  assert.equal(classifyTableGroup("events"), "system", "global events are system data");
   assert.equal(classifyTableGroup("logs"), "system", "runtime logs are system data");
 } finally {
   await db.end().catch(() => {});

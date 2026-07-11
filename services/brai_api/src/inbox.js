@@ -4,8 +4,12 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { TextDecoder } from 'node:util';
+import { INBOX_WORKFLOW_DEFINITION_VERSION } from './store-workflows.js';
+import { scopedUserId } from './user-scope.js';
 
 export const INBOX_BODY_LIMIT_BYTES = 16 * 1024 * 1024;
+export const DEFAULT_INBOX_CODEX_BIN = '/srv/opt/codex-cli/bin/codex';
+export const DEFAULT_INBOX_CODEX_MODEL = 'gpt-5.4-mini';
 
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 const PDF_SIGNATURE = Buffer.from('%PDF-');
@@ -43,6 +47,9 @@ const DEFAULT_IMAGE_PROMPT_TEMPLATE = [
 const DEFAULT_NORMALIZER_PROMPT_TEMPLATE = [
   'Разбери Inbox-запись на русском языке.',
   'Нужно сопоставить голосовой транскрипт, текстовый контекст и описание картинки.',
+  'Сохраняй исходное намерение пользователя и все названные им сущности, имена и названия.',
+  'Исправляй очевидные опечатки, но не меняй смысл.',
+  'Если хотя бы один вход непустой, не называй запись пустой и не утверждай, что контекст отсутствует.',
   'Верни только JSON без Markdown с полями:',
   '{"title":"короткий заголовок до 80 символов","description":"понятное описание чего хотел пользователь","class_key":"ключ класса","class_title":"русское название класса если ключ новый","class_description":"краткое описание класса если ключ новый","normalization":"технический разбор"}',
   '',
@@ -58,6 +65,11 @@ const DEFAULT_NORMALIZER_PROMPT_TEMPLATE = [
   'Описание картинки:',
   '{{image_description}}'
 ].join('\n');
+const DEFAULT_NORMALIZER_CODEX_INSTRUCTIONS = [
+  'You are a deterministic JSON normalizer.',
+  "Follow the user's task exactly and return one JSON object matching the provided output schema.",
+  'Do not use tools, browse, inspect files, or add commentary.'
+].join(' ');
 
 export function inboxRequestTarget(req, body = {}) {
   const target = inboxTarget(body?.target ?? body?.destination)
@@ -113,21 +125,39 @@ async function receiveInboxInner({
   const attachments = decodeAttachments(body);
   const nowIso = nowDate.toISOString();
   const idempotencyKey = optionalText(body?.idempotency_key);
-  const stableId = idempotencyKey ? shortHash(idempotencyKey) : null;
+  const ingestIdempotencyHash = idempotencyKey
+    ? fullHash(`${scopedUserId() ?? 'unclaimed'}\0${idempotencyKey}`)
+    : null;
+  const stableId = ingestIdempotencyHash?.slice(0, 32) ?? null;
   const inboxId = stableId ? `inbox:api:${stableId}` : `inbox:api:${crypto.randomUUID()}`;
   const eventId = stableId ? `inbox:api:${stableId}:create` : `inbox:api:${crypto.randomUUID()}:create`;
   const source = optionalText(body?.source) ?? 'inbox';
   const sourceKey = optionalText(body?.source_key) ?? '';
+  const responseRequired = optionalBoolean(body?.response_required, 'invalid_response_required');
+  const recordTypeId = inboxRecordTypeId(body?.record_type_id ?? body?.record_type);
+  const ingestPayloadHash = fullHash(JSON.stringify({
+    text,
+    descriptionText,
+    source,
+    sourceKey,
+    responseRequired,
+    recordTypeId,
+    attachments: attachments.map((attachment) => ({ mime: attachment.mime, sha256: fullHash(attachment.bytes) }))
+  }));
   const existingInboxId = stableId ? store.inboxIdForEvent(eventId) : null;
   if (existingInboxId) {
+    const existing = store.getInboxIngestFingerprint(existingInboxId);
+    if (existing?.ingest_payload_hash && existing.ingest_payload_hash !== ingestPayloadHash) {
+      throwStatus('idempotency_conflict', 409);
+    }
     recordInboxIngestLog(store, {
       nowIso,
       body,
       attachments,
       source,
       sourceKey,
-      recordTypeId: safeInboxRecordTypeId(body?.record_type_id ?? body?.record_type),
-      responseRequired: safeOptionalBoolean(body?.response_required),
+      recordTypeId,
+      responseRequired,
       idempotencyKey,
       logContext,
       inboxId: existingInboxId,
@@ -138,8 +168,6 @@ async function receiveInboxInner({
     return { inbox_id: existingInboxId, created: false, attachment_links: [] };
   }
 
-  const responseRequired = optionalBoolean(body?.response_required, 'invalid_response_required');
-  const recordTypeId = inboxRecordTypeId(body?.record_type_id ?? body?.record_type);
   const relatedInboxId = referencesPreviousMessage(`${text}\n${descriptionText}`)
     ? store.latestInboxIdForInbox({ source, sourceKey })
     : null;
@@ -179,7 +207,7 @@ async function receiveInboxInner({
       }
       attachmentLinks.push(`/v1/inbox/attachments/${fileName}`);
     });
-    store.createInboxApiItem({
+    const created = store.createInboxApiItem({
       eventId,
       inboxId,
       title: initialTitle(text),
@@ -191,8 +219,33 @@ async function receiveInboxInner({
       responseRequired,
       relatedInboxId,
       recordTypeId,
+      ingestIdempotencyHash,
+      ingestPayloadHash,
       nowIso
     });
+    if (!created.accepted_event) {
+      const existing = store.getInboxIngestFingerprint(inboxId);
+      if (existing?.ingest_payload_hash && existing.ingest_payload_hash !== ingestPayloadHash) {
+        throwStatus('idempotency_conflict', 409);
+      }
+      for (const filePath of writtenPaths) fs.rmSync(filePath, { force: true });
+      recordInboxIngestLog(store, {
+        nowIso,
+        body,
+        attachments,
+        source,
+        sourceKey,
+        recordTypeId,
+        responseRequired,
+        idempotencyKey,
+        logContext,
+        inboxId,
+        eventId,
+        created: false,
+        reason: 'duplicate'
+      });
+      return { inbox_id: inboxId, created: false, attachment_links: [] };
+    }
   } catch (error) {
     for (const filePath of writtenPaths) fs.rmSync(filePath, { force: true });
     throw error;
@@ -239,7 +292,6 @@ function recordInboxIngestLog(store, {
     source: 'inbox',
     operation: 'inbox.ingest',
     status: created ? 'done' : 'skipped',
-    itemsId: inboxId,
     eventDomain: 'inbox',
     eventId,
     reason,
@@ -306,127 +358,276 @@ export async function processInboxItem({
 }) {
   if (!tryInboxLock(store, inboxId)) return { skipped: true, reason: 'locked' };
   try {
-    const item = store.getInboxItem(inboxId);
-    if (!item || item.deleted_at_utc || item.is_normalized) {
-      return { skipped: true, reason: item ? 'already_normalized' : 'missing' };
-    }
+    const execution = store.ensureInboxWorkflowExecution({ inboxId, nowIso: nowDate.toISOString() });
+    const workflowId = execution.workflow_id;
+    const runId = execution.run_id ?? `inline:${crypto.randomUUID()}`;
+    const prepared = prepareInboxNormalization({ store, inboxId, workflowId, runId, storageRoot, nowDate });
+    if (prepared.skipped) return prepared;
 
-    const imageAgent = store.getAgent(INBOX_IMAGE_AGENT_ID);
-    const imagePaths = imagePathsForItem(item, storageRoot);
     let imageDescription = '';
-    if (imagePaths.length > 0) {
-      const imageResult = await describeImages({
-        agent: imageAgent,
+    if (prepared.imageRequired) {
+      const imageResult = await describeInboxImagesForWorkflow({
+        store,
+        inboxId,
+        workflowId,
+        runId,
+        storageRoot,
         codexBin,
         codexModel,
-        codexFallbackModel,
         codexTimeoutMs,
         imageDescriber,
-        imagePaths
+        nowDate
       });
-      imageDescription = imageResult.text;
-      recordInboxImageAiLog(store, {
-        agent: imageAgent,
-        dt: nowDate.toISOString(),
-        status: imageResult.status,
-        inboxId,
-        imagePaths,
-        imageDescription,
-        error: imageResult.error,
-        model: imageResult.model,
-        durationMs: imageResult.durationMs
-      });
-      if (imageResult.status !== 'done') return { ok: false, reason: 'image_description_failed' };
-      store.createInboxNormalizationEvent({
-        inboxId,
-        payload: {
-          normalization_text: normalizeBlocks({
-            imageDescription,
-            analysis: item.normalization_text
-          })
-        },
-        nowIso: nowDate.toISOString()
-      });
+      if (!imageResult.ok) {
+        store.failInboxWorkflow({ inboxId, workflowId, runId, reason: imageResult.error, step: 'image_describer', nowIso: nowDate.toISOString() });
+        return { ok: false, reason: 'image_description_failed' };
+      }
+      imageDescription = imageResult.imageDescription;
     }
 
-    const freshItem = store.getInboxItem(inboxId) ?? item;
-    const classes = store.listInboxClasses();
-    const normalizerAgent = store.getAgent(INBOX_NORMALIZER_AGENT_ID);
-    const normalizeResult = await normalizeInbox({
-      agent: normalizerAgent,
-      codexBin,
-      codexModel,
-      codexFallbackModel,
-      codexTimeoutMs,
-      normalizer,
-      item: freshItem,
-      classes,
-      imageDescription
-    });
-    if (normalizeResult.status !== 'done') {
-      recordInboxNormalizerAiLog(store, {
-        agent: normalizerAgent,
-        dt: nowDate.toISOString(),
-        status: normalizeResult.status,
+    let validationError = '';
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      const result = await normalizeInboxRawForWorkflow({
+        store,
         inboxId,
-        item: freshItem,
-        classes,
+        workflowId,
+        runId,
+        attempt,
+        validationError,
         imageDescription,
-        output: normalizeResult.output,
-        error: normalizeResult.error,
-        model: normalizeResult.model,
-        durationMs: normalizeResult.durationMs
+        codexBin,
+        codexModel: attempt > 1 && codexFallbackModel ? codexFallbackModel : codexModel,
+        codexTimeoutMs,
+        normalizer,
+        nowDate
       });
-      return { ok: false, reason: 'normalizer_failed' };
+      if (result.ok) {
+        try {
+          const applied = applyNormalizedInboxForWorkflow({
+            store,
+            inboxId,
+            workflowId,
+            runId,
+            normalized: result.normalized,
+            imageDescription,
+            nowDate
+          });
+          return {
+            ...applied,
+            image_described: prepared.imageRequired,
+            class_key: result.normalized.classKey
+          };
+        } catch (error) {
+          store.failInboxWorkflow({
+            inboxId,
+            workflowId,
+            runId,
+            reason: errorText(error),
+            step: 'apply_normalized_raw',
+            attemptCount: attempt,
+            nowIso: nowDate.toISOString()
+          });
+          return { ok: false, reason: 'apply_failed' };
+        }
+      }
+      if (!result.validationFailed) {
+        store.failInboxWorkflow({
+          inboxId,
+          workflowId,
+          runId,
+          reason: result.error,
+          attemptCount: attempt,
+          nowIso: nowDate.toISOString()
+        });
+        return { ok: false, reason: 'normalizer_failed' };
+      }
+      validationError = result.error;
     }
-    const knownClass = classes.find((entry) => entry.key === normalizeResult.classKey);
-    if (!knownClass) {
-      store.upsertInboxClass({
-        key: normalizeResult.classKey,
-        title: normalizeResult.classTitle || normalizeResult.classKey,
-        description: normalizeResult.classDescription || 'Класс предложен AI-разбором Inbox.',
-        status: 'candidate',
-        createdByAgentId: INBOX_NORMALIZER_AGENT_ID,
-        nowIso: nowDate.toISOString()
-      });
-    }
-    const normalizationText = normalizeBlocks({
-      imageDescription,
-      analysis: normalizeResult.normalization
-    });
-    store.createInboxNormalizationEvent({
+
+    store.failInboxWorkflow({
       inboxId,
-      payload: {
-        title: normalizeResult.title,
-        description_md: normalizeResult.description,
-        preliminary_section: normalizeResult.classKey,
-        normalization_text: normalizationText,
-        is_normalized: true
-      },
+      workflowId,
+      runId,
+      reason: validationError || 'normalizer_validation_failed',
+      needsReview: true,
+      attemptCount: 3,
       nowIso: nowDate.toISOString()
     });
-    recordInboxNormalizerAiLog(store, {
-      agent: normalizerAgent,
-      dt: nowDate.toISOString(),
-      status: normalizeResult.status,
-      inboxId,
-      item: freshItem,
-      classes,
-      imageDescription,
-      output: {
-        title: normalizeResult.title,
-        description: normalizeResult.description,
-        classKey: normalizeResult.classKey,
-        normalization: normalizationText
-      },
-      error: normalizeResult.error,
-      model: normalizeResult.model,
-      durationMs: normalizeResult.durationMs
-    });
-    return { ok: true, image_described: imagePaths.length > 0, class_key: normalizeResult.classKey };
+    return { ok: false, reason: 'normalizer_validation_failed' };
   } finally {
     unlockInbox(store, inboxId);
   }
+}
+
+export function prepareInboxNormalization({ store, inboxId, workflowId, runId, storageRoot, nowDate = new Date() }) {
+  const item = store.getInboxItem(inboxId);
+  if (!item || item.deleted_at_utc || item.item_roles_id) {
+    return { skipped: true, reason: item?.item_roles_id ? 'already_normalized' : item ? 'deleted' : 'missing' };
+  }
+  const active = store.markInboxWorkflowStep({
+    inboxId,
+    workflowId,
+    runId,
+    step: 'prepare_raw',
+    nowIso: nowDate.toISOString()
+  });
+  if (!active) return { skipped: true, reason: 'workflow_not_active' };
+  const imageRequired = imagePathsForItem(item, storageRoot).length > 0;
+  if (!rawInboxText(item) && !cleanText(item.description_md) && !imageRequired) {
+    store.failInboxWorkflow({
+      inboxId,
+      workflowId,
+      runId,
+      reason: 'raw_input_empty',
+      step: 'prepare_raw',
+      needsReview: true,
+      nowIso: nowDate.toISOString()
+    });
+    return { skipped: true, reason: 'raw_input_empty' };
+  }
+  return { ok: true, imageRequired };
+}
+
+export async function describeInboxImagesForWorkflow({
+  store,
+  inboxId,
+  workflowId,
+  runId,
+  storageRoot,
+  codexBin,
+  codexModel,
+  codexTimeoutMs,
+  imageDescriber,
+  nowDate = new Date()
+}) {
+  const item = store.getInboxItem(inboxId);
+  const imagePaths = item ? imagePathsForItem(item, storageRoot) : [];
+  if (!item || imagePaths.length === 0) return { ok: true, imageDescription: '' };
+  const active = store.markInboxWorkflowStep({
+    inboxId,
+    workflowId,
+    runId,
+    step: 'image_describer',
+    attemptCount: 1,
+    nowIso: nowDate.toISOString()
+  });
+  if (!active) return { ok: false, error: 'workflow_not_active' };
+  const agent = store.getAgent(INBOX_IMAGE_AGENT_ID);
+  const result = await describeImages({ agent, codexBin, codexModel, codexTimeoutMs, imageDescriber, imagePaths });
+  recordInboxImageAiLog(store, {
+    agent,
+    dt: nowDate.toISOString(),
+    status: result.status,
+    inboxId,
+    imagePaths,
+    imageDescription: result.text,
+    error: result.error,
+    model: result.model,
+    durationMs: result.durationMs,
+    workflowId,
+    runId,
+    attemptNumber: 1
+  });
+  return result.status === 'done'
+    ? { ok: true, imageDescription: result.text }
+    : { ok: false, error: result.error || 'image_description_failed' };
+}
+
+export async function normalizeInboxRawForWorkflow({
+  store,
+  inboxId,
+  workflowId,
+  runId,
+  attempt,
+  validationError = '',
+  imageDescription = '',
+  codexBin,
+  codexModel,
+  codexTimeoutMs,
+  normalizer,
+  nowDate = new Date()
+}) {
+  const item = store.getInboxItem(inboxId);
+  if (!item || item.deleted_at_utc || item.item_roles_id) {
+    return { ok: false, validationFailed: false, error: item?.item_roles_id ? 'already_normalized' : 'raw_record_missing' };
+  }
+  const active = store.markInboxWorkflowStep({
+    inboxId,
+    workflowId,
+    runId,
+    step: 'raw_normalizer',
+    attemptCount: attempt,
+    nowIso: nowDate.toISOString()
+  });
+  if (!active) return { ok: false, validationFailed: false, error: 'workflow_not_active' };
+  const classes = store.listInboxClasses();
+  const execution = store.getInboxWorkflowExecution(inboxId);
+  const workflowVersion = execution?.workflow_definition_version;
+  const outputSchema = store.getInboxWorkflowOutputSchema(workflowVersion);
+  if (!outputSchema) {
+    return { ok: false, validationFailed: false, error: 'workflow_output_schema_missing' };
+  }
+  const agent = store.getAgent(INBOX_NORMALIZER_AGENT_ID);
+  const result = await normalizeInbox({
+    agent,
+    codexBin,
+    codexModel,
+    codexTimeoutMs,
+    normalizer,
+    item,
+    classes,
+    imageDescription,
+    validationError,
+    outputSchema,
+    strictOutputSchema: workflowVersion >= 2 && workflowVersion <= INBOX_WORKFLOW_DEFINITION_VERSION
+  });
+  recordInboxNormalizerAiLog(store, {
+    agent,
+    dt: nowDate.toISOString(),
+    status: result.status === 'done' ? 'done' : 'failed',
+    inboxId,
+    item,
+    classes,
+    imageDescription,
+    output: result.status === 'done' ? result : result.output,
+    error: result.error,
+    model: result.model,
+    durationMs: result.durationMs,
+    workflowId,
+    runId,
+    attemptNumber: attempt
+  });
+  return result.status === 'done'
+    ? { ok: true, normalized: result }
+    : { ok: false, validationFailed: result.validationFailed === true, error: result.error };
+}
+
+export function applyNormalizedInboxForWorkflow({
+  store,
+  inboxId,
+  workflowId,
+  runId,
+  normalized,
+  imageDescription = '',
+  deferTerminal = false,
+  nowDate = new Date()
+}) {
+  store.markInboxWorkflowStep({
+    inboxId,
+    workflowId,
+    runId,
+    step: 'apply_normalized_raw',
+    nowIso: nowDate.toISOString()
+  });
+  return store.applyNormalizedInbox({
+    inboxId,
+    workflowId,
+    runId,
+    normalized,
+    normalizationText: normalizeBlocks({ imageDescription, analysis: normalized.normalization }),
+    deferTerminal,
+    nowIso: nowDate.toISOString()
+  });
 }
 
 export function serveInboxAttachment(req, res, url, storageRoot, sendJson, store = null) {
@@ -585,27 +786,11 @@ function optionalBoolean(value, message) {
   throwStatus(message, 400);
 }
 
-function safeOptionalBoolean(value) {
-  try {
-    return optionalBoolean(value, 'invalid_response_required');
-  } catch {
-    return null;
-  }
-}
-
 function inboxRecordTypeId(value) {
   if (value == null) return 1;
   const number = Number(value);
   if (number === 1 || number === 2) return number;
   throwStatus('invalid_record_type', 400);
-}
-
-function safeInboxRecordTypeId(value) {
-  try {
-    return inboxRecordTypeId(value);
-  } catch {
-    return null;
-  }
 }
 
 function referencesPreviousMessage(value) {
@@ -619,20 +804,19 @@ function throwStatus(message, status) {
   throw error;
 }
 
-async function describeImages({ agent, codexBin, codexModel, codexFallbackModel, codexTimeoutMs, imageDescriber, imagePaths }) {
+async function describeImages({ agent, codexBin, codexModel, codexTimeoutMs, imageDescriber, imagePaths }) {
   const startedAt = Date.now();
   const model = codexModel ?? optionalText(agent?.llm_model) ?? '';
   try {
     const result = imageDescriber
       ? { text: await imageDescriber({ imagePaths }), model }
-      : await codexTextWithModelRetry({
+      : { text: await codexText({
         codexBin,
         codexModel: model || null,
-        codexFallbackModel,
         promptTemplate: optionalBodyText(agent?.llm_prompt_template) ?? DEFAULT_IMAGE_PROMPT_TEMPLATE,
         timeoutMs: Number.isFinite(codexTimeoutMs) ? codexTimeoutMs : agent?.llm_timeout_ms,
         images: imagePaths
-      });
+      }), model };
     const clean = cleanText(result.text);
     const durationMs = Date.now() - startedAt;
     if (!clean) return { text: '', status: 'failed', error: 'empty_image_description', model: result.model, durationMs };
@@ -643,46 +827,103 @@ async function describeImages({ agent, codexBin, codexModel, codexFallbackModel,
   }
 }
 
-async function normalizeInbox({ agent, codexBin, codexModel, codexFallbackModel, codexTimeoutMs, normalizer, item, classes, imageDescription }) {
+async function normalizeInbox({
+  agent,
+  codexBin,
+  codexModel,
+  codexTimeoutMs,
+  normalizer,
+  item,
+  classes,
+  imageDescription,
+  validationError,
+  outputSchema,
+  strictOutputSchema
+}) {
   const startedAt = Date.now();
-  const model = codexModel ?? optionalText(agent?.llm_model) ?? '';
+  const model = codexModel ?? optionalText(agent?.llm_model) ?? DEFAULT_INBOX_CODEX_MODEL;
+  let result;
   try {
-    const result = normalizer
-      ? { text: await normalizer({ item, classes, imageDescription }), model }
-      : await codexTextWithModelRetry({
+    result = normalizer
+      ? { text: await normalizer({ item, classes, imageDescription, validationError }), model }
+      : { text: await codexText({
         codexBin,
         codexModel: model || null,
-        codexFallbackModel,
         promptTemplate: renderNormalizerPrompt(
           optionalBodyText(agent?.llm_prompt_template) ?? DEFAULT_NORMALIZER_PROMPT_TEMPLATE,
           item,
           classes,
-          imageDescription
+          imageDescription,
+          validationError
         ),
-        timeoutMs: Number.isFinite(codexTimeoutMs) ? codexTimeoutMs : agent?.llm_timeout_ms
-      });
+        timeoutMs: Number.isFinite(codexTimeoutMs) ? codexTimeoutMs : agent?.llm_timeout_ms,
+        outputSchema: strictOutputSchema ? outputSchema : null,
+        normalizerMode: true
+      }), model };
+  } catch (error) {
+    return failedNormalization(errorText(error), model, Date.now() - startedAt, false);
+  }
+  try {
     const parsed = typeof result.text === 'string' ? parseNormalizerJson(result.text) : result.text;
+    validateJsonSchema(parsed, outputSchema);
     const normalized = cleanNormalization(parsed);
     return { ...normalized, status: 'done', error: '', model: result.model, durationMs: Date.now() - startedAt };
   } catch (error) {
-    return {
-      status: 'failed',
-      error: errorText(error),
-      model,
-      durationMs: Date.now() - startedAt,
-      output: {
-        title: '',
-        description: '',
-        classKey: '',
-        normalization: ''
-      }
-    };
+    return failedNormalization(errorText(error), result.model, Date.now() - startedAt, true);
   }
+}
+
+function validateJsonSchema(value, schema) {
+  const errors = [];
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    errors.push({ path: '$', code: 'type', expected: 'object' });
+  } else {
+    const properties = schema?.properties && typeof schema.properties === 'object' ? schema.properties : {};
+    for (const key of Array.isArray(schema?.required) ? schema.required : []) {
+      if (!(key in value)) errors.push({ path: `$.${key}`, code: 'required' });
+    }
+    if (schema?.additionalProperties === false) {
+      for (const key of Object.keys(value)) {
+        if (!(key in properties)) errors.push({ path: `$.${key}`, code: 'additional_property' });
+      }
+    }
+    for (const [key, rule] of Object.entries(properties)) {
+      if (!(key in value)) continue;
+      const candidate = value[key];
+      if (rule?.type === 'string' && typeof candidate !== 'string') {
+        errors.push({ path: `$.${key}`, code: 'type', expected: 'string' });
+        continue;
+      }
+      if (typeof candidate === 'string') {
+        if (Number.isInteger(rule?.minLength) && candidate.length < rule.minLength) {
+          errors.push({ path: `$.${key}`, code: 'minLength', expected: rule.minLength });
+        }
+        if (Number.isInteger(rule?.maxLength) && candidate.length > rule.maxLength) {
+          errors.push({ path: `$.${key}`, code: 'maxLength', expected: rule.maxLength });
+        }
+        if (typeof rule?.pattern === 'string' && !new RegExp(rule.pattern).test(candidate)) {
+          errors.push({ path: `$.${key}`, code: 'pattern', expected: rule.pattern });
+        }
+      }
+    }
+  }
+  if (errors.length > 0) throw new Error(`schema_validation_failed:${JSON.stringify(errors.slice(0, 10))}`);
+}
+
+function failedNormalization(error, model, durationMs, validationFailed) {
+  return {
+    status: 'failed',
+    validationFailed,
+    error,
+    model,
+    durationMs,
+    output: { title: '', description: '', classKey: '', normalization: '' }
+  };
 }
 
 function cleanNormalization(value) {
   const normalized = {
-    title: cleanTitle(value?.title),
+    title: cleanNormalizedTitle(value?.title),
     description: cleanText(value?.description),
     classKey: cleanClassKey(value?.class_key ?? value?.classKey),
     classTitle: cleanText(value?.class_title ?? value?.classTitle),
@@ -695,12 +936,26 @@ function cleanNormalization(value) {
   return normalized;
 }
 
-function renderNormalizerPrompt(template, item, classes, imageDescription) {
-  return template
+function cleanNormalizedTitle(value) {
+  const title = cleanTitle(value);
+  const guillemets = title.match(/[«»]/g)?.length ?? 0;
+  return guillemets % 2 === 0 ? title : title.replace(/[«»]/g, '');
+}
+
+function renderNormalizerPrompt(template, item, classes, imageDescription, validationError = '') {
+  const prompt = template
     .replaceAll('{{classes}}', JSON.stringify(classes, null, 2))
-    .replaceAll('{{text}}', item.explanation_text || '')
+    .replaceAll('{{text}}', rawInboxText(item))
     .replaceAll('{{description}}', item.description_md || '')
-    .replaceAll('{{image_description}}', imageDescription || '');
+    .replaceAll('{{image_description}}', imageDescription || '')
+    .replaceAll('{{validation_error}}', validationError || '');
+  return validationError
+    ? `${prompt}\n\nОшибка валидации предыдущего ответа:\n${validationError}\nИсправь JSON и верни только валидный объект.`
+    : prompt;
+}
+
+function rawInboxText(item) {
+  return cleanText(item?.explanation_text) || cleanText(item?.title);
 }
 
 function parseNormalizerJson(value) {
@@ -708,7 +963,10 @@ function parseNormalizerJson(value) {
   return JSON.parse(text);
 }
 
-function recordInboxImageAiLog(store, { agent, dt, status, inboxId, imagePaths, imageDescription, error, model, durationMs }) {
+function recordInboxImageAiLog(store, {
+  agent, dt, status, inboxId, imagePaths, imageDescription, error, model, durationMs,
+  workflowId, runId, attemptNumber
+}) {
   store.recordAiLog({
     agentId: INBOX_IMAGE_AGENT_ID,
     agentVersion: agent?.version ?? '',
@@ -717,6 +975,9 @@ function recordInboxImageAiLog(store, { agent, dt, status, inboxId, imagePaths, 
     aiTitle: status === 'done' ? 'Описал картинку Inbox' : 'Не описал картинку Inbox',
     flowId: inboxId,
     flowCommand: 'describe_image',
+    workflowId,
+    runId,
+    attemptNumber,
     jsonData: {
       schema: 'brai.ai_log.v1',
       inputs: [
@@ -733,7 +994,10 @@ function recordInboxImageAiLog(store, { agent, dt, status, inboxId, imagePaths, 
   });
 }
 
-function recordInboxNormalizerAiLog(store, { agent, dt, status, inboxId, item, classes, imageDescription, output, error, model, durationMs }) {
+function recordInboxNormalizerAiLog(store, {
+  agent, dt, status, inboxId, item, classes, imageDescription, output, error, model, durationMs,
+  workflowId, runId, attemptNumber
+}) {
   store.recordAiLog({
     agentId: INBOX_NORMALIZER_AGENT_ID,
     agentVersion: agent?.version ?? '',
@@ -742,11 +1006,14 @@ function recordInboxNormalizerAiLog(store, { agent, dt, status, inboxId, item, c
     aiTitle: status === 'done' ? 'Разобрал Inbox-запись' : 'Не разобрал Inbox-запись',
     flowId: inboxId,
     flowCommand: 'normalize',
+    workflowId,
+    runId,
+    attemptNumber,
     jsonData: {
       schema: 'brai.ai_log.v1',
       inputs: [
         { ref: 'inbox.id', value: inboxId },
-        { ref: 'inbox.explanation_text', value: item.explanation_text || '' },
+        { ref: 'inbox.explanation_text', value: rawInboxText(item) },
         { ref: 'inbox.description_text', value: item.description_md || '' },
         { ref: 'inbox.normalization_text.image_description', value: imageDescription || '' },
         { ref: 'inbox_classes.keys', value: classes.map((entry) => entry.key) }
@@ -797,41 +1064,68 @@ function normalizeBlocks({ imageDescription, analysis }) {
   ].filter(Boolean).join('\n\n').trim();
 }
 
-async function codexTextWithModelRetry({ codexFallbackModel = null, ...input }) {
-  const models = [input.codexModel ?? null];
-  if (codexFallbackModel && codexFallbackModel !== input.codexModel) models.push(codexFallbackModel);
-  let lastError = null;
-  for (const model of models) {
-    try {
-      return { text: await codexText({ ...input, codexModel: model }), model: model ?? '' };
-    } catch (error) {
-      lastError = error;
-    }
-  }
-  throw lastError ?? new Error('codex_inbox_failed');
-}
-
-function codexText({ codexBin = 'codex', codexModel = null, promptTemplate, timeoutMs = 3000, images = [] } = {}) {
+function codexText({
+  codexBin = DEFAULT_INBOX_CODEX_BIN,
+  codexModel = DEFAULT_INBOX_CODEX_MODEL,
+  promptTemplate,
+  timeoutMs = 3000,
+  images = [],
+  outputSchema = null,
+  normalizerMode = false
+} = {}) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'brai-inbox-ai-'));
   const outputPath = path.join(tmp, 'output.txt');
+  const schemaPath = outputSchema ? path.join(tmp, 'output-schema.json') : null;
+  const isolatedNormalizer = normalizerMode || Boolean(outputSchema);
+  const instructionsPath = isolatedNormalizer ? path.join(tmp, 'model-instructions.txt') : null;
   const timeout = Number.isFinite(timeoutMs) ? timeoutMs : 3000;
+  const executable = !codexBin || codexBin === 'codex' ? DEFAULT_INBOX_CODEX_BIN : codexBin;
+
+  if (isolatedNormalizer) {
+    try {
+      if (schemaPath) fs.writeFileSync(schemaPath, JSON.stringify(outputSchema), { mode: 0o600 });
+      fs.writeFileSync(instructionsPath, DEFAULT_NORMALIZER_CODEX_INSTRUCTIONS, { mode: 0o600 });
+    } catch (error) {
+      fs.rmSync(tmp, { recursive: true, force: true });
+      throw error;
+    }
+  }
 
   return new Promise((resolve, reject) => {
     let settled = false;
     let stderr = '';
-    const args = [
-      '--sandbox',
-      'read-only',
-      '--ask-for-approval',
-      'never'
-    ];
+    const args = [];
+    if (isolatedNormalizer) {
+      args.push(
+        '-c', 'model_reasoning_effort="low"',
+        '-c', 'model_verbosity="low"',
+        '-c', `model_instructions_file=${JSON.stringify(instructionsPath)}`,
+        '-c', 'features.apps=false',
+        '-c', 'features.image_generation=false',
+        '-c', 'features.shell_tool=false',
+        '-c', 'features.unified_exec=false',
+        '-c', 'features.multi_agent=false',
+        '-c', 'web_search="disabled"',
+        '-c', 'tools_view_image=false'
+      );
+    }
+    args.push('--sandbox', 'read-only', '--ask-for-approval', 'never');
     if (codexModel) args.push('--model', codexModel);
     args.push(
       'exec',
-      '--ephemeral',
-      '--skip-git-repo-check'
+      '--ephemeral'
     );
-    if (images.length > 0) {
+    if (isolatedNormalizer) {
+      args.push(
+        '--ignore-user-config',
+        '--skip-git-repo-check',
+        '--cd', tmp
+      );
+      if (schemaPath) args.push('--output-schema', schemaPath);
+    } else {
+      args.push('--skip-git-repo-check');
+    }
+    if (!schemaPath && images.length > 0) {
       args.push('--cd', os.tmpdir());
       for (const imagePath of images) args.push('--image', imagePath);
     }
@@ -840,12 +1134,24 @@ function codexText({ codexBin = 'codex', codexModel = null, promptTemplate, time
       outputPath,
       '-'
     );
-    const child = spawn(codexBin, args, { stdio: ['pipe', 'ignore', 'pipe'] });
+    let child;
+    try {
+      child = spawn(executable, args, {
+        cwd: isolatedNormalizer ? tmp : undefined,
+        detached: true,
+        stdio: ['pipe', 'ignore', 'pipe']
+      });
+    } catch (error) {
+      fs.rmSync(tmp, { recursive: true, force: true });
+      reject(error);
+      return;
+    }
     const timer = setTimeout(() => {
-      child.kill('SIGKILL');
+      killProcessGroup(child);
       finish(reject, new Error('codex_inbox_timeout'));
     }, timeout);
 
+    child.stdin?.on('error', () => {});
     child.stderr?.on('data', (chunk) => {
       stderr = `${stderr}${chunk}`.slice(-4000);
     });
@@ -855,7 +1161,11 @@ function codexText({ codexBin = 'codex', codexModel = null, promptTemplate, time
         finish(reject, new Error(cleanCodexError(stderr) || 'codex_inbox_failed'));
         return;
       }
-      finish(resolve, fs.existsSync(outputPath) ? fs.readFileSync(outputPath, 'utf8') : '');
+      try {
+        finish(resolve, fs.existsSync(outputPath) ? fs.readFileSync(outputPath, 'utf8') : '');
+      } catch (error) {
+        finish(reject, error);
+      }
     });
     child.stdin.end(promptTemplate);
 
@@ -867,6 +1177,18 @@ function codexText({ codexBin = 'codex', codexModel = null, promptTemplate, time
       callback(value);
     }
   });
+}
+
+function killProcessGroup(child) {
+  try {
+    if (Number.isInteger(child.pid) && child.pid > 0) {
+      process.kill(-child.pid, 'SIGKILL');
+      return;
+    }
+  } catch {}
+  try {
+    child.kill('SIGKILL');
+  } catch {}
 }
 
 function usageBlock(model) {
@@ -900,8 +1222,8 @@ function compactTimestamp(date) {
   return date.toISOString().replace(/[:.]/g, '-');
 }
 
-function shortHash(value) {
-  return crypto.createHash('sha256').update(value).digest('hex').slice(0, 32);
+function fullHash(value) {
+  return crypto.createHash('sha256').update(value).digest('hex');
 }
 
 function contentTypeForName(name) {

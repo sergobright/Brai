@@ -101,6 +101,11 @@ export function readDatabaseView(options?: {
   sortDirection?: DbSortDirection;
 }): Promise<DbView>;
 export function readPrimaryUserId(databaseUrl?: string): Promise<string | null>;
+export function readWorkflowAdminSummary(databaseUrl?: string): Promise<{
+  definitions: Array<Record<string, unknown> & { diagramDataUrl: string | null }>;
+  executions: Array<Record<string, unknown>>;
+}>;
+export function readRoleContractsAdmin(databaseUrl?: string): Promise<Array<Record<string, unknown>>>;
 export function listTables(db: DbQuery): Promise<DbTable[]>;
 export function readColumns(db: DbQuery, tableName: string): Promise<DbColumn[]>;
 export function readIndexes(db: DbQuery, tableName: string): Promise<DbIndex[]>;

@@ -2,6 +2,14 @@
 
 Brai uses self-host Temporal as the required CI/CD orchestrator for branch previews and promotions. GitHub Actions still runs branch-protection checks and reports external facts, but deploy, release, promotion, and cleanup side effects run as Temporal activities around the existing shell scripts. Temporal is not exposed publicly and no deploy ports are opened.
 
+## Product Workflow Isolation
+
+Inbox normalization is a product workflow and does not run on the CI/CD worker queues. Each Brai API environment starts an embedded Temporal worker from the same deployed source and polls `brai-inbox-normalization-<api-port>`, so production, Dev, and every preview use their own Postgres schema, attachment root, code version, and task queue.
+
+The API starts `InboxNormalizationWorkflow` with stable id `brai:inbox:<inbox-id>`. Workflow code is deterministic; Postgres, file, and LLM work runs only in Activities. `workflow_executions` is the compact product/Admin read model, while Temporal history remains the durable orchestration record. The global `brai-temporal-worker.service` continues to poll only `brai-preview` and `brai-promotion`.
+
+On startup, each API environment reconciles raw Inbox executions still marked `queued`. Starting with the same workflow id is idempotent, so a process crash between Postgres ingest and Temporal start cannot strand the raw record.
+
 ## Process Change Rule
 
 Any change to Brai CI/CD must update the Temporal contract in the same branch when the change adds, removes, reorders, or changes an operation that must always happen, can block delivery, or needs manual recovery. Do not add a hidden deploy side effect only inside a shell script or GitHub Actions step.

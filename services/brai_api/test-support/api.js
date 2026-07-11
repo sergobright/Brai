@@ -57,12 +57,13 @@ export async function createFixture(times, options = {}) {
     codexTimeoutMs: options.codexTimeoutMs,
     inboxImageDescriber: options.inboxImageDescriber,
     inboxNormalizer: options.inboxNormalizer,
+    inboxWorkflowStarter: options.inboxWorkflowStarter,
     inboxAutoProcess: options.inboxAutoProcess ?? false,
     braiCmd: options.braiCmd,
     branch: options.branch,
     commit: options.commit,
     databaseBranch: options.databaseBranch,
-    testAutoLogin: options.testAutoLogin,
+    testEmailLogin: options.testEmailLogin,
     now: () => new Date(times[Math.min(index++, times.length - 1)]),
     logger: options.logger ?? { error: () => {} }
   });
@@ -200,7 +201,13 @@ export function eventDomainCount(fixture, eventDomain) {
     .get(eventDomain).count);
 }
 
-export async function createTestDatabase() {
+export async function createTestDatabase(migrations = [
+  '0001_brai_baseline.sql',
+  '0010_agent_role_normalization_workflows.sql',
+  '0011_inbox_workflow_reliability.sql',
+  '0012_inbox_raw_input_preservation.sql',
+  '0013_drop_legacy_event_tables.sql'
+]) {
   const baseUrl = process.env.BRAI_TEST_DATABASE_URL?.trim();
   if (!baseUrl) throw new Error('BRAI_TEST_DATABASE_URL is required for API tests');
   const branch = process.env.BRAI_TEST_BRANCH?.trim();
@@ -219,7 +226,9 @@ export async function createTestDatabase() {
   try {
     await client.query(`CREATE SCHEMA ${quoteIdent(schema)}`);
     await client.query(`SET search_path TO ${quoteIdent(schema)}`);
-    await client.query(fs.readFileSync(path.resolve(import.meta.dirname, '../../../supabase/migrations/0001_brai_baseline.sql'), 'utf8'));
+    for (const migration of migrations) {
+      await client.query(fs.readFileSync(path.resolve(import.meta.dirname, '../../../supabase/migrations', migration), 'utf8'));
+    }
   } catch (error) {
     await dropTestSchema(baseUrl, schema).catch(() => {});
     throw error;

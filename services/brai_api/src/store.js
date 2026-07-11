@@ -8,6 +8,7 @@ import { deploymentMethods } from './store-deployments.js';
 import { eventsLogsMethods } from './store-events-logs.js';
 import { readModelMethods } from './store-read-models.js';
 import { timerEventMethods } from './store-timer-events.js';
+import { workflowStoreMethods } from './store-workflows.js';
 export { formatActivity, formatFocusInterval, formatSession, groupSessionsByDateHour } from './store-helpers.js';
 
 export class BraiStore {
@@ -29,5 +30,6 @@ Object.assign(
   timerEventMethods,
   activityEventMethods,
   inboxEventMethods,
+  workflowStoreMethods,
   readModelMethods
 );

@@ -23,7 +23,6 @@ export const INBOX_EVENT_TYPES = new Set([
   'create',
   'update_title',
   'update_description',
-  'normalize',
   'delete'
 ]);
 export const ACTIVITY_STATUSES = new Set(['New', 'Done']);
@@ -120,6 +119,15 @@ export function formatInboxItem(item) {
     explanation_text: item.explanation_text ?? '',
     normalization_text: item.normalization_text ?? '',
     is_normalized: item.is_normalized === 1,
+    item_roles_id: Number.isInteger(item.item_roles_id) ? item.item_roles_id : null,
+    initial_event_id: item.initial_event_id ?? null,
+    workflow_execution_id: Number.isInteger(item.workflow_execution_id) ? item.workflow_execution_id : null,
+    workflow_status: item.workflow_status ?? null,
+    workflow_step: item.workflow_step ?? null,
+    workflow_attempt_count: Number.isInteger(item.workflow_attempt_count) ? item.workflow_attempt_count : 0,
+    workflow_last_error: item.workflow_last_error ?? null,
+    temporal_workflow_id: item.temporal_workflow_id ?? null,
+    temporal_run_id: item.temporal_run_id ?? null,
     created_at_utc: item.created_at_utc,
     updated_at_utc: item.updated_at_utc,
     deleted_at_utc: item.deleted_at_utc ?? null

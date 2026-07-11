@@ -22,7 +22,7 @@ A pushed preview-class `codex/*` branch allocates or reuses a preview slot throu
 
 Each preview slot uses its own Supabase preview branch. After slot allocation, CI creates or reuses
 `brai-preview-<safe-codex-branch>-<hash>`, applies `supabase/migrations/*.sql`, refreshes the
-preview schema data from the production DB, enables test-only `BRAI_TEST_AUTO_LOGIN=true`, writes
+preview schema data from the production DB, enables test-only `BRAI_TEST_EMAIL_LOGIN=true`, writes
 the branch runtime DSN to
 `/srv/projects/brai-envs/<preview>/brai-api.env`, and records only `supabase_branch_name`,
 `supabase_branch_id`, and `supabase_branch_status` in `preview-slots.json`. Connection strings and
@@ -225,8 +225,10 @@ Preview and Dev runtime credentials live in `/srv/projects/brai-envs/<environmen
 and are deploy-writable so CI can update schema-scoped DSNs after Supabase schema creation.
 Dev and Preview rebuilds copy current production data into their schema after migrations, excluding
 production Better Auth session, account, and verification rows. Those test env files set
-`BRAI_TEST_AUTO_LOGIN=true`, so the first `GET /auth/session` mints a normal Brai session for the
-copied `app_settings.primary_user_id`. Production env files must not set this flag.
+`BRAI_TEST_EMAIL_LOGIN=true`. Preview/Dev web still starts on the login screen and creates a normal
+Brai session only after the user enters the copied primary account email; it never asks for a
+password or OTP. Android keeps password-only login, and opening either surface never creates a
+session by itself. Production env files must not set this flag and web production keeps OTP login.
 
 Use [Supabase Postgres Cutover](supabase-postgres-cutover.md) only as the archived record of the
 completed cutover. Active production, Dev, and preview writes use Supabase Postgres only.

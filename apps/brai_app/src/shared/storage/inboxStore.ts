@@ -36,7 +36,7 @@ export async function enqueueInboxEvent(params: {
       type: params.type,
       occurredAtUtc: now,
       inboxId,
-      payload: normalizedPayload(params.payload),
+      payload: normalizedPayload(params.payload, params.type, meta.deviceId),
       baseServerRevision: params.baseServerRevision,
       payloadVersion: 1,
       status: "pending",
@@ -155,8 +155,8 @@ export function projectInboxState(
         id: event.inboxId,
         title,
         description_md: normalizeDescription(event.payload.description_md),
-        source: "",
-        source_key: "",
+        source: event.payload.source ?? "",
+        source_key: event.payload.source_key ?? "",
         response_required: false,
         related_inbox_id: null,
         record_type_id: 4,
@@ -165,9 +165,18 @@ export function projectInboxState(
         preliminary_section: "",
         urgency: "",
         attachment_links: [],
-        explanation_text: "",
+        explanation_text: event.payload.explanation_text ?? "",
         normalization_text: "",
         is_normalized: false,
+        item_roles_id: null,
+        initial_event_id: null,
+        workflow_execution_id: null,
+        workflow_status: "queued",
+        workflow_step: "ingest",
+        workflow_attempt_count: 0,
+        workflow_last_error: null,
+        temporal_workflow_id: null,
+        temporal_run_id: null,
         ai_processing_status: null,
         ai_processing_error: null,
         created_at_utc: occurredAtUtc,
@@ -214,10 +223,18 @@ export function sortInbox(items: InboxItem[]): InboxItem[] {
   });
 }
 
-function normalizedPayload(payload: InboxEventPayload): InboxEventPayload {
-  return {
-    title: payload.title == null ? undefined : cleanTitle(payload.title),
+function normalizedPayload(payload: InboxEventPayload, type: InboxEventType, deviceId: string): InboxEventPayload {
+  const title = payload.title == null ? undefined : cleanTitle(payload.title);
+  const normalized = {
+    title,
     description_md: payload.description_md == null ? undefined : normalizeDescription(payload.description_md),
+  };
+  if (type !== "create") return normalized;
+  return {
+    ...normalized,
+    source: payload.source?.trim() || "brai-app",
+    source_key: payload.source_key?.trim() || deviceId,
+    explanation_text: normalizeDescription(payload.explanation_text ?? title ?? ""),
   };
 }
 
@@ -233,7 +250,20 @@ function normalizeInboxItem(item: InboxItem): InboxItem {
     item_date: item.item_date ?? null,
     deleted_at_utc: item.deleted_at_utc ?? null,
     is_normalized: Boolean(item.is_normalized),
-    ai_processing_status: item.ai_processing_status === "failed" ? "failed" : null,
+    item_roles_id: Number.isInteger(item.item_roles_id) ? item.item_roles_id : null,
+    initial_event_id: item.initial_event_id ?? null,
+    workflow_execution_id: Number.isInteger(item.workflow_execution_id) ? item.workflow_execution_id : null,
+    workflow_status: ["queued", "running", "completed", "failed", "needs_review"].includes(item.workflow_status ?? "")
+      ? item.workflow_status
+      : null,
+    workflow_step: item.workflow_step ?? null,
+    workflow_attempt_count: Number.isInteger(item.workflow_attempt_count) ? item.workflow_attempt_count : 0,
+    workflow_last_error: item.workflow_last_error ?? null,
+    temporal_workflow_id: item.temporal_workflow_id ?? null,
+    temporal_run_id: item.temporal_run_id ?? null,
+    ai_processing_status: ["running", "failed", "needs_review"].includes(item.ai_processing_status ?? "")
+      ? item.ai_processing_status
+      : null,
     ai_processing_error: typeof item.ai_processing_error === "string" ? item.ai_processing_error : null,
   };
 }

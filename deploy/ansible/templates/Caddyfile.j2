@@ -1,10 +1,10 @@
 http://{{ brai_public_site_domain }} {
-  redir https://{{ brai_public_site_domain }}{uri} permanent
+  redir https://{{ brai_public_site_domain }}{uri} 308
 }
 
 {% for domain in brai_public_site_legacy_domains %}
 http://{{ domain }}, {{ domain }} {
-  redir https://{{ brai_public_site_domain }}{uri} permanent
+  redir https://{{ brai_public_site_domain }}{uri} 308
 }
 {% endfor %}
 
@@ -22,12 +22,12 @@ http://{{ domain }}, {{ domain }} {
 }
 
 http://{{ brai_syncthing_domain }} {
-  redir https://{{ brai_syncthing_domain }}{uri} permanent
+  redir https://{{ brai_syncthing_domain }}{uri} 308
 }
 
 {% for domain in brai_syncthing_legacy_domains %}
 http://{{ domain }}, {{ domain }} {
-  redir https://{{ brai_syncthing_domain }}{uri} permanent
+  redir https://{{ brai_syncthing_domain }}{uri} 308
 }
 {% endfor %}
 
@@ -46,12 +46,12 @@ http://{{ domain }}, {{ domain }} {
 }
 
 http://{{ brai_supabase_studio_domain }} {
-  redir https://{{ brai_supabase_studio_domain }}{uri} permanent
+  redir https://{{ brai_supabase_studio_domain }}{uri} 308
 }
 
 {% for domain in brai_supabase_studio_legacy_domains %}
 http://{{ domain }}, {{ domain }} {
-  redir https://{{ brai_supabase_studio_domain }}{uri} permanent
+  redir https://{{ brai_supabase_studio_domain }}{uri} 308
 }
 {% endfor %}
 
@@ -68,12 +68,12 @@ http://{{ domain }}, {{ domain }} {
 }
 
 http://{{ brai_api_domain }} {
-  redir https://{{ brai_api_domain }}{uri} permanent
+  redir https://{{ brai_api_domain }}{uri} 308
 }
 
 {% for domain in brai_api_legacy_domains %}
 http://{{ domain }}, {{ domain }} {
-  redir https://{{ brai_api_domain }}{uri} permanent
+  redir https://{{ brai_api_domain }}{uri} 308
 }
 {% endfor %}
 
@@ -89,12 +89,12 @@ http://{{ domain }}, {{ domain }} {
 }
 
 http://{{ brai_temporal_ui_domain }} {
-  redir https://{{ brai_temporal_ui_domain }}{uri} permanent
+  redir https://{{ brai_temporal_ui_domain }}{uri} 308
 }
 
 {% for domain in brai_temporal_ui_legacy_domains %}
 http://{{ domain }}, {{ domain }} {
-  redir https://{{ brai_temporal_ui_domain }}{uri} permanent
+  redir https://{{ brai_temporal_ui_domain }}{uri} 308
 }
 {% endfor %}
 
@@ -111,12 +111,12 @@ http://{{ domain }}, {{ domain }} {
 }
 
 http://{{ brai_envs.prod.domain }} {
-  redir https://{{ brai_envs.prod.domain }}{uri} permanent
+  redir https://{{ brai_envs.prod.domain }}{uri} 308
 }
 
 {% for domain in brai_envs.prod.legacy_domains | default([]) %}
 http://{{ domain }}, {{ domain }} {
-  redir https://{{ brai_envs.prod.domain }}{uri} permanent
+  redir https://{{ brai_envs.prod.domain }}{uri} 308
 }
 {% endfor %}
 
@@ -174,12 +174,12 @@ http://{{ domain }}, {{ domain }} {
 
 {% for name, env in brai_envs.items() if name != 'prod' %}
 http://{{ env.domain }} {
-  redir https://{{ env.domain }}{uri} permanent
+  redir https://{{ env.domain }}{uri} 308
 }
 
 {% for domain in env.legacy_domains | default([]) %}
 http://{{ domain }}, {{ domain }} {
-  redir https://{{ env.domain }}{uri} permanent
+  redir https://{{ env.domain }}{uri} 308
 }
 {% endfor %}
 
@@ -221,12 +221,12 @@ http://{{ domain }}, {{ domain }} {
 {% endfor %}
 
 http://{{ brai_preview_status_domain }} {
-  redir https://{{ brai_preview_status_domain }}{uri} permanent
+  redir https://{{ brai_preview_status_domain }}{uri} 308
 }
 
 {% for domain in brai_preview_status_legacy_domains %}
 http://{{ domain }}, {{ domain }} {
-  redir https://{{ brai_preview_status_domain }}{uri} permanent
+  redir https://{{ brai_preview_status_domain }}{uri} 308
 }
 {% endfor %}
 

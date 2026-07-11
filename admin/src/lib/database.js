@@ -8,8 +8,8 @@ export const DEFAULT_SORT_DIRECTION = "desc";
 const CREATED_COLUMN_NAMES = ["created_at_utc", "created_at", "createdAt", "created_on", "creation_date"];
 const USER_TABLE_NAMES = new Set(["activities", "app_settings", "inbox"]);
 const USER_TABLE_PREFIXES = ["activity_", "focus_", "timer_"];
-const SYSTEM_TABLE_NAMES = new Set(["items", "logs"]);
-const SYSTEM_TABLE_PREFIXES = ["schema_", "table_", "build_", "deployment_", "version_", "agent_", "ai_", "brai_cmd_"];
+const SYSTEM_TABLE_NAMES = new Set(["events", "item_roles", "item_role_types", "items", "logs"]);
+const SYSTEM_TABLE_PREFIXES = ["schema_", "table_", "build_", "deployment_", "version_", "agent_", "ai_", "role_", "workflow_", "brai_cmd_"];
 const POSTGRES_PROTOCOLS = new Set(["postgres:", "postgresql:"]);
 
 export function resolveDatabaseUrl() {
@@ -132,6 +132,77 @@ export async function readPrimaryUserId(databaseUrl = resolveDatabaseUrl()) {
     return typeof value === "string" && value ? value : null;
   } finally {
     await db.close();
+  }
+}
+
+export async function readWorkflowAdminSummary(databaseUrl = resolveDatabaseUrl()) {
+  const db = openReadOnlyDatabase(databaseUrl);
+  try {
+    const [definitions, executions] = await Promise.all([
+      db.query(`
+        SELECT id, version, title, description, status, task_queue, steps_json,
+          diagram_mermaid, input_schema_version, input_schema_json,
+          output_schema_version, output_schema_json, updated_at_utc
+        FROM workflow_definitions
+        ORDER BY id, version DESC
+      `),
+      db.query(`
+        SELECT workflow_id, run_id, workflow_definition_id, workflow_definition_version,
+          role_contract_id, raw_record_id, status, current_step, attempt_count,
+          last_error, started_at_utc, completed_at_utc, updated_at_utc
+        FROM workflow_executions
+        ORDER BY updated_at_utc DESC, id DESC
+        LIMIT 100
+      `),
+    ]);
+    return {
+      definitions: await Promise.all(definitions.rows.map(async (definition) => ({
+        ...definition,
+        diagramDataUrl: await renderMermaid(definition.diagram_mermaid),
+      }))),
+      executions: executions.rows,
+    };
+  } finally {
+    await db.close();
+  }
+}
+
+export async function readRoleContractsAdmin(databaseUrl = resolveDatabaseUrl()) {
+  const db = openReadOnlyDatabase(databaseUrl);
+  try {
+    const result = await db.query(`
+      SELECT c.*, t.title_system AS role_key, t.title AS role_title,
+        w.title AS workflow_title, w.status AS workflow_status
+      FROM role_contracts c
+      JOIN item_role_types t ON t.id = c.item_role_types_id
+      LEFT JOIN workflow_definitions w
+        ON w.id = c.workflow_definition_id
+       AND w.version = c.workflow_definition_version
+      ORDER BY t.id
+    `);
+    return result.rows;
+  } finally {
+    await db.close();
+  }
+}
+
+async function renderMermaid(source) {
+  if (typeof source !== "string" || !source.trim()) return null;
+  try {
+    const baseUrl = new URL(process.env.BRAI_KROKI_URL ?? "http://127.0.0.1:8000");
+    if (baseUrl.protocol !== "http:" && baseUrl.protocol !== "https:") return null;
+    const response = await fetch(new URL("/mermaid/svg", baseUrl), {
+      method: "POST",
+      headers: { "content-type": "text/plain" },
+      body: source,
+      cache: "no-store",
+      signal: AbortSignal.timeout(3000),
+    });
+    if (!response.ok) return null;
+    const svg = Buffer.from(await response.arrayBuffer()).toString("base64");
+    return `data:image/svg+xml;base64,${svg}`;
+  } catch {
+    return null;
   }
 }
 

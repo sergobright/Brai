@@ -6,3 +6,5 @@
 - [x] 1.6 Run API, OpenSpec, public guard, and delivery checks before handoff.
 - [ ] 1.7 Verify live Postgres schema and preview runtime after deployment.
 - [ ] 1.8 Archive this OpenSpec change after review/merge.
+- [ ] 1.9 Verify parity and remove the retired timer, activity, and inbox event tables.
+- [x] 1.10 Remove legacy table ownership and metadata references.
