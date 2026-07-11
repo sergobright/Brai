@@ -165,3 +165,46 @@ test('workflow v3 migration restores raw UI input and flags empty-input normaliz
     await database.drop();
   }
 });
+
+test('workflow observability migration adds process json and telemetry tables idempotently', async () => {
+  const database = await createTestDatabase([
+    '0001_brai_baseline.sql',
+    '0010_agent_role_normalization_workflows.sql',
+    '0011_inbox_workflow_reliability.sql',
+    '0012_inbox_raw_input_preservation.sql',
+    '0013_drop_legacy_event_tables.sql'
+  ]);
+  const pool = new Pool({ connectionString: database.url });
+  try {
+    const migration = fs.readFileSync(
+      path.resolve(import.meta.dirname, '../../../supabase/migrations/0015_admin_role_workflow_observability.sql'),
+      'utf8'
+    );
+    await pool.query(migration);
+    await pool.query(migration);
+
+    const definitions = (await pool.query(`
+      SELECT version, process_json->'steps' AS steps
+      FROM workflow_definitions
+      WHERE id = 'inbox.raw-normalization'
+      ORDER BY version
+    `)).rows;
+    assert.deepEqual(definitions.map((row) => row.version), [1, 2, 3]);
+    assert(definitions.every((row) => Array.isArray(row.steps) && row.steps.length > 0));
+    assert.deepEqual((await pool.query(`
+      SELECT column_name
+      FROM information_schema.columns
+      WHERE table_name = 'workflow_executions'
+        AND column_name = 'trace_status'
+    `)).rows, [{ column_name: 'trace_status' }]);
+    assert.equal((await pool.query(`
+      SELECT COUNT(*)::int AS count
+      FROM information_schema.tables
+      WHERE table_name IN ('workflow_execution_steps', 'workflow_worker_heartbeats')
+    `)).rows[0].count, 2);
+    assert.equal((await pool.query("SELECT COUNT(*)::int AS count FROM schema_migrations WHERE version = 56")).rows[0].count, 1);
+  } finally {
+    await pool.end();
+    await database.drop();
+  }
+});

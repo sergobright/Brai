@@ -1,5 +1,6 @@
 import { Client, Connection, WorkflowNotFoundError } from '@temporalio/client';
 import { IllegalStateError, NativeConnection, Worker } from '@temporalio/worker';
+import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import {
   applyNormalizedInboxForWorkflow,
@@ -30,6 +31,19 @@ export async function createInboxWorkflowRuntime({
   const store = new BraiStore(databaseUrl);
   store.logger = logger;
   store.syncInboxWorkflowTaskQueue(taskQueue);
+  const workerStartedAt = now().toISOString();
+  const workerIdentity = `${os.hostname()}:${process.pid}`;
+  const heartbeat = () => store.recordWorkflowWorkerHeartbeat({
+    taskQueue,
+    workerIdentity,
+    buildRef: process.env.BRAI_BUILD_REF ?? process.env.BRAI_COMMIT ?? '',
+    startedAtIso: workerStartedAt,
+    nowIso: now().toISOString(),
+    metadataJson: { namespace, pid: process.pid }
+  });
+  heartbeat();
+  const heartbeatInterval = setInterval(heartbeat, 10_000);
+  heartbeatInterval.unref?.();
   const nativeConnection = await NativeConnection.connect({ address });
   const clientConnection = await Connection.connect({ address });
   const activities = {
@@ -136,6 +150,7 @@ export async function createInboxWorkflowRuntime({
       if (closePromise) return closePromise;
       closePromise = (async () => {
         await reconciler.close();
+        clearInterval(heartbeatInterval);
         try {
           worker.shutdown();
         } catch (error) {

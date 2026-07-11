@@ -132,6 +132,12 @@
     opacity: 0.54;
   }
 
+  button:not(:disabled):active,
+  a[href]:not([aria-disabled="true"]):active,
+  [role="button"]:not([aria-disabled="true"]):active {
+    transform: translateY(1px);
+  }
+
   input,
   textarea {
     color: var(--foreground);
