@@ -8,7 +8,7 @@
   },
   "scripts": {
     "dev": "next dev -H 127.0.0.1 -p ${PORT:-3040}",
-    "build": "next build",
+    "build": "next build --webpack",
     "start": "next start -H 127.0.0.1 -p ${PORT:-3040}",
     "lint": "eslint .",
     "sync-table-descriptions": "node scripts/sync-table-descriptions.mjs",

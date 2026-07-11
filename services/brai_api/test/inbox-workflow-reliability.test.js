@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeInboxRawForWorkflow } from '../src/inbox.js';
+import { applyNormalizedInboxForWorkflow, normalizeInboxRawForWorkflow, prepareInboxNormalization } from '../src/inbox.js';
 import { createQueuedInboxWorkflowReconciler } from '../src/inbox-workflow-runtime.js';
 import { createFixture, inboxEvent, request, waitFor } from '../test-support/api.js';
 
@@ -197,6 +197,76 @@ test('successful normalization is not rolled back when its technical log fails',
       nowIso: '2026-07-10T12:00:03.000Z'
     }), { changed: true, status: 'completed' });
     assert.equal(fixture.store.getInboxWorkflowExecution('apply-inbox').status, 'completed');
+  } finally {
+    await fixture.close();
+  }
+});
+
+test('inbox workflow records bounded step telemetry and retry attempts', async () => {
+  const fixture = await createFixture(['2026-07-10T12:00:00.000Z', '2026-07-10T12:00:01.000Z', '2026-07-10T12:00:02.000Z', '2026-07-10T12:00:03.000Z'], {
+    inboxAutoProcess: false
+  });
+  try {
+    fixture.store.syncInboxEvents({
+      device: { device_id: 'telemetry-device', platform: 'web' },
+      events: [inboxEvent('telemetry-create', 1, 'create', 'telemetry-inbox', '2026-07-10T11:59:00.000Z', { title: 'Raw telemetry' })],
+      nowIso: '2026-07-10T12:00:00.000Z'
+    });
+    prepareInboxNormalization({
+      store: fixture.store,
+      inboxId: 'telemetry-inbox',
+      workflowId: 'brai:inbox:telemetry-inbox',
+      runId: 'inline:test',
+      storageRoot: '',
+      nowDate: new Date('2026-07-10T12:00:00.500Z')
+    });
+    await normalizeInboxRawForWorkflow({
+      store: fixture.store,
+      inboxId: 'telemetry-inbox',
+      workflowId: 'brai:inbox:telemetry-inbox',
+      runId: 'inline:test',
+      attempt: 1,
+      nowDate: new Date('2026-07-10T12:00:01.000Z'),
+      normalizer: async () => ({ title: '' })
+    });
+    const result = await normalizeInboxRawForWorkflow({
+      store: fixture.store,
+      inboxId: 'telemetry-inbox',
+      workflowId: 'brai:inbox:telemetry-inbox',
+      runId: 'inline:test',
+      attempt: 2,
+      validationError: 'schema_validation_failed',
+      nowDate: new Date('2026-07-10T12:00:02.000Z'),
+      normalizer: async () => JSON.stringify({
+        title: 'Normalized',
+        description: 'Normalized description',
+        class_key: 'note',
+        class_title: '',
+        class_description: '',
+        normalization: 'bounded technical normalization'
+      })
+    });
+    assert.equal(result.ok, true);
+    applyNormalizedInboxForWorkflow({
+      store: fixture.store,
+      inboxId: 'telemetry-inbox',
+      workflowId: 'brai:inbox:telemetry-inbox',
+      runId: 'inline:test',
+      normalized: result.normalized,
+      nowDate: new Date('2026-07-10T12:00:03.000Z')
+    });
+
+    const execution = fixture.store.getInboxWorkflowExecution('telemetry-inbox');
+    const steps = fixture.store.db.prepare(`
+      SELECT step_key, attempt, status, error_summary
+      FROM workflow_execution_steps
+      WHERE workflow_execution_id = ?
+      ORDER BY step_key, attempt
+    `).all(execution.id);
+    assert(steps.some((step) => step.step_key === 'image_describer' && step.status === 'skipped'));
+    assert(steps.some((step) => step.step_key === 'raw_normalizer' && step.attempt === 1 && step.status === 'failed'));
+    assert(steps.some((step) => step.step_key === 'raw_normalizer' && step.attempt === 2 && step.status === 'completed'));
+    assert(steps.every((step) => !String(step.error_summary ?? '').includes('Raw telemetry')));
   } finally {
     await fixture.close();
   }

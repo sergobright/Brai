@@ -13,6 +13,11 @@ const TERMINAL_TEMPORAL_STATUSES = new Set([
   'TIMED_OUT',
   'NOT_FOUND'
 ]);
+const TERMINAL_WORKFLOW_STATUSES = new Set(['completed', 'failed', 'needs_review']);
+const STEP_AGENT_IDS = {
+  image_describer: 'inbox.image_describer',
+  raw_normalizer: 'inbox.normalizer'
+};
 
 export function inboxWorkflowId(inboxId) {
   return `brai:inbox:${inboxId}`;
@@ -52,8 +57,8 @@ export const workflowStoreMethods = {
       INSERT INTO workflow_executions (
         workflow_definition_id, workflow_definition_version, workflow_id, run_id,
         role_contract_id, raw_record_id, status, current_step, attempt_count,
-        last_error, started_at_utc, completed_at_utc, created_at_utc, updated_at_utc, user_id
-      ) VALUES (?, ?, ?, NULL, 'inbox', ?, 'queued', 'ingest', 0, NULL, NULL, NULL, ?, ?, ?)
+        last_error, started_at_utc, completed_at_utc, created_at_utc, updated_at_utc, user_id, trace_status
+      ) VALUES (?, ?, ?, NULL, 'inbox', ?, 'queued', 'ingest', 0, NULL, NULL, NULL, ?, ?, ?, 'recording')
       ON CONFLICT(workflow_id) DO UPDATE SET updated_at_utc = workflow_executions.updated_at_utc
       WHERE workflow_executions.user_id IS NOT DISTINCT FROM excluded.user_id
       RETURNING *
@@ -67,6 +72,22 @@ export const workflowStoreMethods = {
       scopedUserId()
     );
     if (!row) throw businessError('workflow_id_conflict');
+    this.recordInboxWorkflowStepStarted({
+      inboxId: id,
+      workflowId,
+      runId: null,
+      stepKey: 'ingest',
+      nowIso: now,
+      metadataJson: { inbox_id: id, workflow_id: workflowId }
+    });
+    this.recordInboxWorkflowStepFinished({
+      inboxId: id,
+      workflowId,
+      runId: null,
+      stepKey: 'ingest',
+      status: 'completed',
+      nowIso: now
+    });
     const scope = scopeSql();
     this.db.prepare(`
       UPDATE inbox
@@ -134,12 +155,32 @@ export const workflowStoreMethods = {
       WHERE role_contract_id = 'inbox' AND raw_record_id = ?
         AND status IN ('queued', 'running') ${scope.clause}
     `).run(workflowId, runId, now, now, id, ...scope.params);
+    if (result.changes > 0) {
+      this.recordInboxWorkflowStepStarted({
+        inboxId: id,
+        workflowId,
+        runId,
+        stepKey: 'dispatch',
+        nowIso: now,
+        metadataJson: { inbox_id: id, workflow_id: workflowId, run_id: runId }
+      });
+      this.recordInboxWorkflowStepFinished({
+        inboxId: id,
+        workflowId,
+        runId,
+        stepKey: 'dispatch',
+        status: 'completed',
+        nowIso: now
+      });
+    }
     return result.changes > 0;
   },
 
   markInboxWorkflowStep({ inboxId, workflowId, runId, step, attemptCount = 0, nowIso }) {
     const id = sanitizeText(inboxId);
     const now = nowIso ?? new Date().toISOString();
+    const stepKey = sanitizeText(step);
+    if (!stepKey) return false;
     const scope = scopeSql();
     const result = this.db.prepare(`
       UPDATE workflow_executions
@@ -148,7 +189,20 @@ export const workflowStoreMethods = {
         last_error = NULL, updated_at_utc = ?
       WHERE role_contract_id = 'inbox' AND raw_record_id = ?
         AND status IN ('queued', 'running') ${scope.clause}
-    `).run(workflowId, runId, step, attemptCount, now, now, id, ...scope.params);
+    `).run(workflowId, runId, stepKey, attemptCount, now, now, id, ...scope.params);
+    if (result.changes > 0) {
+      this.recordInboxWorkflowStepStarted({
+        inboxId: id,
+        workflowId,
+        runId,
+        stepKey,
+        attempt: attemptForStep(attemptCount),
+        activityType: stepKey,
+        agentId: STEP_AGENT_IDS[stepKey] ?? null,
+        nowIso: now,
+        metadataJson: { inbox_id: id, workflow_id: workflowId, run_id: runId }
+      });
+    }
     return result.changes > 0;
   },
 
@@ -167,6 +221,18 @@ export const workflowStoreMethods = {
         AND status IN ('queued', 'running') ${scope.clause}
     `).run(workflowId, runId, status, currentStep, attemptCount, error, now, now, id, ...scope.params);
     if (result.changes === 0) return;
+    this.recordInboxWorkflowStepFinished({
+      inboxId: id,
+      workflowId,
+      runId,
+      stepKey: currentStep,
+      attempt: attemptForStep(attemptCount),
+      status: status === 'failed' && /timeout/i.test(error) ? 'timed_out' : 'failed',
+      errorCode: errorCode(error),
+      errorSummary: error,
+      nowIso: now
+    });
+    this.reconcileInboxWorkflowTraceStatus({ inboxId: id, workflowId, runId, nowIso: now });
     recordInboxTechnicalLog(this, {
       dt: now,
       source: 'workflow',
@@ -203,7 +269,7 @@ export const workflowStoreMethods = {
         LIMIT 1
         FOR UPDATE OF w
       `).get(id, operationId, temporalRunId, ...scope.params);
-      if (!row) return { changed: false, status: null, reason: null, step: null };
+      if (!row) return { changed: false, status: null, reason: null, step: null, executionId: null };
 
       const domainCompleted = status === 'COMPLETED'
         && Boolean(row.item_roles_id)
@@ -222,11 +288,31 @@ export const workflowStoreMethods = {
           AND workflow_id = ?
           AND run_id IS NOT DISTINCT FROM ?
       `).run(localStatus, reason, now, now, row.id, operationId, temporalRunId);
-      if (updated.changes !== 1) return { changed: false, status: null, reason: null, step: null };
-      return { changed: true, status: localStatus, reason, step: row.current_step };
+      if (updated.changes !== 1) return { changed: false, status: null, reason: null, step: null, executionId: null };
+      return { changed: true, status: localStatus, reason, step: row.current_step, executionId: row.id };
     })();
 
     if (result.changed) {
+      this.recordInboxWorkflowStepStarted({
+        inboxId: id,
+        workflowId: operationId,
+        runId: temporalRunId,
+        stepKey: 'terminal_reconcile',
+        nowIso: now,
+        metadataJson: { temporal_status: status }
+      });
+      this.recordInboxWorkflowStepFinished({
+        inboxId: id,
+        workflowId: operationId,
+        runId: temporalRunId,
+        stepKey: 'terminal_reconcile',
+        status: result.status === 'completed' ? 'completed' : 'failed',
+        errorCode: result.reason,
+        errorSummary: result.reason,
+        nowIso: now,
+        metadataJson: { temporal_status: status }
+      });
+      this.reconcileInboxWorkflowTraceStatus({ executionId: result.executionId, nowIso: now });
       recordInboxTechnicalLog(this, {
         dt: now,
         source: 'workflow',
@@ -390,7 +476,7 @@ export const workflowStoreMethods = {
           AND run_id IS NOT DISTINCT FROM ?
       `).run(localStatus, completedAt, now, execution.id, operationId, temporalRunId);
       if (updatedExecution.changes !== 1) throw businessError('workflow_execution_changed');
-      return { ok: true, idempotent: false, items_id: id, item_roles_id: role.id };
+      return { ok: true, idempotent: false, items_id: id, item_roles_id: role.id, workflow_execution_id: execution.id };
     });
     const result = run();
     if (!result.idempotent) {
@@ -405,6 +491,7 @@ export const workflowStoreMethods = {
         message: 'Inbox normalization applied',
         jsonData: { workflow_id: operationId, run_id: runId, inbox_id: id, item_roles_id: result.item_roles_id }
       });
+      if (!deferTerminal) this.reconcileInboxWorkflowTraceStatus({ executionId: result.workflow_execution_id, nowIso: now });
     }
     return result;
   },
@@ -413,7 +500,7 @@ export const workflowStoreMethods = {
     const execution = this.getInboxWorkflowExecution(inboxId);
     if (!execution) return null;
     const definition = this.db.prepare(`
-      SELECT id, version, title, task_queue, steps_json, input_schema_version, output_schema_version
+      SELECT id, version, title, task_queue, steps_json, process_json, input_schema_version, output_schema_version
       FROM workflow_definitions
       WHERE id = ? AND version = ?
     `).get(execution.workflow_definition_id, execution.workflow_definition_version);
@@ -426,19 +513,236 @@ export const workflowStoreMethods = {
       ORDER BY dt ASC, id ASC
       LIMIT 50
     `).all(execution.workflow_id, execution.run_id).map((row) => ({ ...row, json_data: parseJsonObject(row.json_data) }));
+    const telemetrySteps = this.listInboxWorkflowExecutionSteps({ executionId: execution.id });
     const resolvedDefinition = definition ? { ...definition, steps: parseJsonArray(definition.steps_json) } : null;
     return {
       execution,
       definition: resolvedDefinition,
       step_states: resolvedDefinition
-        ? inboxStepStates({ execution, steps: resolvedDefinition.steps, attempts, item: this.getInboxItem(inboxId) })
+        ? inboxStepStates({ execution, steps: resolvedDefinition.steps, attempts, item: this.getInboxItem(inboxId), telemetrySteps })
         : [],
+      steps: telemetrySteps,
       attempts
     };
+  },
+
+  recordInboxWorkflowStepStarted(input) {
+    return safeWorkflowTelemetry(this, () => {
+      const stepKey = sanitizeText(input.stepKey);
+      const workflowId = sanitizeText(input.workflowId);
+      const inboxId = sanitizeText(input.inboxId);
+      if (!stepKey || !workflowId || !inboxId) return false;
+      const runId = sanitizeText(input.runId);
+      const now = input.nowIso ?? new Date().toISOString();
+      const attempt = attemptForStep(input.attempt);
+      const metadata = boundedWorkflowMetadata(input.metadataJson);
+      const result = this.db.prepare(`
+        WITH execution AS (
+          SELECT id
+          FROM workflow_executions
+          WHERE role_contract_id = 'inbox'
+            AND raw_record_id = ?
+            AND workflow_id = ?
+            AND run_id IS NOT DISTINCT FROM ?
+          ORDER BY id DESC
+          LIMIT 1
+        )
+        INSERT INTO workflow_execution_steps (
+          workflow_execution_id, step_key, attempt, status, started_at_utc,
+          activity_type, agent_id, metadata_json, created_at_utc, updated_at_utc
+        )
+        SELECT id, ?, ?, 'running', ?, ?, ?, ?::jsonb, ?, ?
+        FROM execution
+        ON CONFLICT (workflow_execution_id, step_key, attempt) DO UPDATE SET
+          status = CASE
+            WHEN workflow_execution_steps.status IN ('completed', 'failed', 'cancelled', 'skipped', 'timed_out')
+              THEN workflow_execution_steps.status
+            ELSE 'running'
+          END,
+          started_at_utc = COALESCE(workflow_execution_steps.started_at_utc, excluded.started_at_utc),
+          activity_type = excluded.activity_type,
+          agent_id = COALESCE(excluded.agent_id, workflow_execution_steps.agent_id),
+          metadata_json = COALESCE(workflow_execution_steps.metadata_json, '{}'::jsonb) || excluded.metadata_json,
+          updated_at_utc = excluded.updated_at_utc
+      `).run(
+        inboxId,
+        workflowId,
+        runId,
+        stepKey,
+        attempt,
+        now,
+        sanitizeText(input.activityType) ?? stepKey,
+        sanitizeText(input.agentId),
+        metadata,
+        now,
+        now
+      );
+      return result.changes > 0;
+    }, input);
+  },
+
+  recordInboxWorkflowStepFinished(input) {
+    return safeWorkflowTelemetry(this, () => {
+      const stepKey = sanitizeText(input.stepKey);
+      const workflowId = sanitizeText(input.workflowId);
+      const inboxId = sanitizeText(input.inboxId);
+      if (!stepKey || !workflowId || !inboxId) return false;
+      const runId = sanitizeText(input.runId);
+      const now = input.nowIso ?? new Date().toISOString();
+      const attempt = attemptForStep(input.attempt);
+      const status = workflowStepStatus(input.status);
+      const metadata = boundedWorkflowMetadata(input.metadataJson);
+      const result = this.db.prepare(`
+        UPDATE workflow_execution_steps AS step
+        SET status = ?,
+          completed_at_utc = ?,
+          duration_ms = CASE
+            WHEN step.started_at_utc IS NULL THEN NULL
+            ELSE GREATEST(0, floor(extract(epoch FROM (?::timestamptz - step.started_at_utc::timestamptz)) * 1000)::int)
+          END,
+          ai_log_id = COALESCE(?, step.ai_log_id),
+          error_code = COALESCE(?, step.error_code),
+          error_summary = COALESCE(?, step.error_summary),
+          metadata_json = COALESCE(step.metadata_json, '{}'::jsonb) || ?::jsonb,
+          updated_at_utc = ?
+        FROM workflow_executions AS execution
+        WHERE execution.id = step.workflow_execution_id
+          AND execution.role_contract_id = 'inbox'
+          AND execution.raw_record_id = ?
+          AND execution.workflow_id = ?
+          AND execution.run_id IS NOT DISTINCT FROM ?
+          AND step.step_key = ?
+          AND step.attempt = ?
+      `).run(
+        status,
+        now,
+        now,
+        Number.isInteger(input.aiLogId) ? input.aiLogId : null,
+        sanitizeText(input.errorCode),
+        boundedError(input.errorSummary),
+        metadata,
+        now,
+        inboxId,
+        workflowId,
+        runId,
+        stepKey,
+        attempt
+      );
+      return result.changes > 0;
+    }, input);
+  },
+
+  recordInboxWorkflowStepSkipped({ inboxId, workflowId, runId, stepKey, reason, nowIso, metadataJson }) {
+    const now = nowIso ?? new Date().toISOString();
+    this.recordInboxWorkflowStepStarted({
+      inboxId,
+      workflowId,
+      runId,
+      stepKey,
+      nowIso: now,
+      metadataJson: { ...(metadataJson ?? {}), skip_reason: sanitizeText(reason) ?? 'not_required' }
+    });
+    return this.recordInboxWorkflowStepFinished({
+      inboxId,
+      workflowId,
+      runId,
+      stepKey,
+      status: 'skipped',
+      errorCode: sanitizeText(reason) ?? 'not_required',
+      errorSummary: sanitizeText(reason) ?? 'not_required',
+      nowIso: now
+    });
+  },
+
+  listInboxWorkflowExecutionSteps({ executionId }) {
+    if (!Number.isInteger(executionId)) return [];
+    return safeWorkflowTelemetry(this, () => this.db.prepare(`
+      SELECT id, workflow_execution_id, step_key, attempt, status, started_at_utc,
+        completed_at_utc, duration_ms, activity_type, agent_id, ai_log_id,
+        error_code, error_summary, metadata_json
+      FROM workflow_execution_steps
+      WHERE workflow_execution_id = ?
+      ORDER BY COALESCE(started_at_utc, completed_at_utc, updated_at_utc), attempt, id
+    `).all(executionId).map((row) => ({ ...row, metadata_json: parseJsonObject(row.metadata_json) })), { executionId }) ?? [];
+  },
+
+  reconcileInboxWorkflowTraceStatus({ executionId, inboxId, workflowId, runId, nowIso } = {}) {
+    return safeWorkflowTelemetry(this, () => {
+      const now = nowIso ?? new Date().toISOString();
+      const row = Number.isInteger(executionId)
+        ? this.db.prepare('SELECT * FROM workflow_executions WHERE id = ?').get(executionId)
+        : this.db.prepare(`
+          SELECT *
+          FROM workflow_executions
+          WHERE role_contract_id = 'inbox'
+            AND raw_record_id = ?
+            AND workflow_id = ?
+            AND run_id IS NOT DISTINCT FROM ?
+          ORDER BY id DESC
+          LIMIT 1
+        `).get(sanitizeText(inboxId), sanitizeText(workflowId), sanitizeText(runId));
+      if (!row || !TERMINAL_WORKFLOW_STATUSES.has(row.status)) return false;
+      if (row.trace_status === 'unavailable') return false;
+      const definition = this.db.prepare(`
+        SELECT process_json
+        FROM workflow_definitions
+        WHERE id = ? AND version = ?
+      `).get(row.workflow_definition_id, row.workflow_definition_version);
+      const expected = expectedTraceSteps(definition?.process_json, row.status);
+      const actual = this.db.prepare(`
+        SELECT step_key, status
+        FROM workflow_execution_steps
+        WHERE workflow_execution_id = ?
+      `).all(row.id);
+      const actualKeys = new Set(actual.map((step) => step.step_key));
+      const hasFailedStep = actual.some((step) => ['failed', 'timed_out'].includes(step.status));
+      const complete = expected.every((step) => actualKeys.has(step)) && (row.status === 'completed' || hasFailedStep || row.status === 'needs_review');
+      this.db.prepare(`
+        UPDATE workflow_executions
+        SET trace_status = ?, updated_at_utc = ?
+        WHERE id = ? AND trace_status <> 'unavailable'
+      `).run(complete ? 'complete' : 'partial', now, row.id);
+      return true;
+    }, { executionId, inboxId, workflowId, runId });
+  },
+
+  recordWorkflowWorkerHeartbeat({ taskQueue, workerIdentity, buildRef = '', startedAtIso, nowIso, metadataJson } = {}) {
+    return safeWorkflowTelemetry(this, () => {
+      const queue = sanitizeText(taskQueue);
+      const identity = sanitizeText(workerIdentity);
+      if (!queue || !identity) return false;
+      const now = nowIso ?? new Date().toISOString();
+      const started = startedAtIso ?? now;
+      const metadata = boundedWorkflowMetadata(metadataJson);
+      const result = this.db.prepare(`
+        INSERT INTO workflow_worker_heartbeats (
+          task_queue, worker_identity, build_ref, started_at_utc, last_seen_at_utc, metadata_json
+        ) VALUES (?, ?, ?, ?, ?, ?::jsonb)
+        ON CONFLICT (task_queue, worker_identity) DO UPDATE SET
+          build_ref = excluded.build_ref,
+          last_seen_at_utc = excluded.last_seen_at_utc,
+          metadata_json = excluded.metadata_json
+      `).run(queue, identity, sanitizeText(buildRef) ?? '', started, now, metadata);
+      return result.changes > 0;
+    }, { taskQueue, workerIdentity });
   }
 };
 
-function inboxStepStates({ execution, steps, attempts, item }) {
+function inboxStepStates({ execution, steps, attempts, item, telemetrySteps = [] }) {
+  if (telemetrySteps.length > 0) {
+    const byStep = new Map();
+    for (const step of telemetrySteps) byStep.set(step.step_key, step);
+    return steps.map((step) => {
+      const telemetry = byStep.get(step);
+      if (!telemetry) return { id: step, state: 'pending', reason: null };
+      const state = telemetry.status === 'completed' ? 'completed'
+        : telemetry.status === 'failed' || telemetry.status === 'timed_out' ? 'failed'
+          : telemetry.status === 'skipped' ? 'skipped'
+            : telemetry.status === 'running' ? 'running'
+              : telemetry.status;
+      return { id: step, state, reason: telemetry.error_code ?? telemetry.metadata_json?.skip_reason ?? null };
+    });
+  }
   const currentIndex = steps.indexOf(execution.current_step);
   const terminal = ['completed', 'failed', 'needs_review'].includes(execution.status);
   const failedIndex = ['failed', 'needs_review'].includes(execution.status) ? currentIndex : -1;
@@ -507,6 +811,67 @@ function businessError(code) {
   const error = new Error(code);
   error.businessError = true;
   return error;
+}
+
+function attemptForStep(value) {
+  const number = Number(value);
+  return Number.isInteger(number) && number > 0 ? number : 1;
+}
+
+function workflowStepStatus(value) {
+  return ['queued', 'running', 'completed', 'failed', 'cancelled', 'skipped', 'timed_out'].includes(value)
+    ? value
+    : 'completed';
+}
+
+function boundedWorkflowMetadata(value) {
+  const object = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  return JSON.stringify(object, (_key, candidate) => {
+    if (typeof candidate === 'string') return sanitizeText(candidate)?.slice(0, 240) ?? '';
+    if (typeof candidate === 'number' || typeof candidate === 'boolean' || candidate === null) return candidate;
+    if (Array.isArray(candidate)) return candidate.slice(0, 20);
+    return candidate;
+  }).slice(0, 4000);
+}
+
+function boundedError(value) {
+  return sanitizeText(value)?.slice(0, 1000) ?? null;
+}
+
+function errorCode(value) {
+  return sanitizeText(value)?.split(':')[0]?.slice(0, 120) ?? 'workflow_failed';
+}
+
+function expectedTraceSteps(processJson, status) {
+  const process = parseJsonObject(processJson);
+  const steps = Array.isArray(process.steps) ? process.steps.map((step) => sanitizeText(step.id)).filter(Boolean) : [];
+  if (status === 'completed') return steps;
+  return steps.filter((step) => step !== 'terminal_reconcile');
+}
+
+function safeWorkflowTelemetry(store, fn, context) {
+  try {
+    return fn();
+  } catch (error) {
+    try {
+      store.recordLog?.({
+        dt: new Date().toISOString(),
+        source: 'workflow',
+        operation: 'workflow.telemetry',
+        status: 'failed',
+        severityText: 'WARN',
+        reason: error instanceof Error ? error.message.slice(0, 1000) : String(error).slice(0, 1000),
+        message: 'Workflow telemetry write failed',
+        jsonData: {
+          step_key: sanitizeText(context?.stepKey) ?? null,
+          workflow_id: sanitizeText(context?.workflowId) ?? null,
+          run_id_present: Boolean(context?.runId),
+          inbox_id_present: Boolean(context?.inboxId)
+        }
+      });
+    } catch {}
+    return false;
+  }
 }
 
 function normalizedEventPayload({ workflowId, normalized, normalizationText }) {

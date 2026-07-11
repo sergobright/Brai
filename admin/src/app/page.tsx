@@ -1,8 +1,9 @@
 import Link from "next/link";
-import Image from "next/image";
 import { headers } from "next/headers";
 import type { ReactNode } from "react";
-import { ArrowDownUp, CalendarClock, ChevronDown, ChevronFirst, ChevronLast, ChevronLeft, ChevronRight, Command, Database, FileKey2, Table2, Workflow } from "lucide-react";
+import { ArrowDownUp, CalendarClock, ChevronDown, ChevronFirst, ChevronLast, ChevronLeft, ChevronRight, Command, Database, FileKey2, Table2, Webhook, Workflow } from "lucide-react";
+import { RoleContractsRail, RoleContractsWorkspace, WorkflowsRail, WorkflowsWorkspace, type RoleFilters, type WorkflowFilters } from "@/app/admin-observability";
+import { AdminInteractionFeedback } from "@/app/admin-observability-client";
 import { AnimatedThemeToggler } from "@/shared/ui/animated-theme-toggler";
 import { BraiCmdAdminSection } from "@/app/BraiCmdAdminSection";
 import { Badge } from "@/shared/ui/badge";
@@ -37,26 +38,68 @@ export default async function Home({ searchParams }: { searchParams: SearchParam
   const activeSection = parseSection(first(params.section));
   const activeTab = parseTab(first(params.tab));
   const sortDirection = parseSortDirection(first(params.sort));
-  const view = await readDatabaseView({
-    tableName: fixedSectionTable(activeSection) ?? requestedTable,
-    page: requestedPage,
-    pageSize: PAGE_SIZE,
-    sortDirection,
-  });
+  const needsDatabaseView = activeSection === "database" || activeSection === "handlers" || activeSection === "schedules";
+  const view = needsDatabaseView
+    ? await readDatabaseView({
+      tableName: fixedSectionTable(activeSection) ?? requestedTable,
+      page: requestedPage,
+      pageSize: PAGE_SIZE,
+      sortDirection,
+    })
+    : emptyDatabaseView();
   const braiCmdSummary = activeSection === "brai-cmd" ? await readBraiCmdAdminSummary() : null;
-  const workflowSummary = activeSection === "workflows" ? await readWorkflowAdminSummary() : null;
-  const roleContracts = activeSection === "role-contracts" ? await readRoleContractsAdmin() : null;
+  const workflowFilters: WorkflowFilters = {
+    cursor: first(params.cursor),
+    dateFrom: first(params.dateFrom),
+    dateTo: first(params.dateTo),
+    hasError: first(params.hasError),
+    health: first(params.health),
+    mode: first(params.mode),
+    owner: first(params.owner),
+    q: first(params.q),
+    role: first(params.role),
+    run: first(params.run),
+    status: first(params.status),
+    stuck: first(params.stuck),
+    tab: first(params.tab),
+    version: first(params.version),
+    workflow: first(params.workflow),
+  };
+  const roleFilters: RoleFilters = {
+    health: first(params.health),
+    owner: first(params.owner),
+    q: first(params.q),
+    role: first(params.role),
+    tab: first(params.tab),
+    workflowFilter: first(params.workflowFilter),
+  };
+  const workflowSummary = activeSection === "workflows" ? await readWorkflowAdminSummary({
+    cursor: workflowFilters.cursor,
+    dateFrom: workflowFilters.dateFrom,
+    dateTo: workflowFilters.dateTo,
+    hasError: workflowFilters.hasError,
+    health: workflowFilters.health,
+    owner: workflowFilters.owner,
+    role: workflowFilters.role,
+    runId: workflowFilters.run,
+    status: workflowFilters.status,
+    stuck: workflowFilters.stuck,
+    version: Number(workflowFilters.version),
+    workflowId: workflowFilters.workflow,
+  }) : null;
+  const roleContracts = activeSection === "role-contracts" ? await readRoleContractsAdmin({ roleId: roleFilters.role }) : null;
   const selectedName = view.selectedTable?.name ?? "";
 
   return (
     <main className="admin-shell grid h-dvh min-h-0 bg-background text-foreground max-md:grid-rows-[auto_minmax(0,2fr)_minmax(0,3fr)] md:grid-cols-[4.5rem_20rem_minmax(0,1fr)]">
+      <AdminInteractionFeedback />
       <PrimaryRail activeSection={activeSection} />
       {activeSection === "handlers" ? (
         <HandlersRail count={view.rowCount} />
       ) : activeSection === "workflows" && workflowSummary ? (
-        <MetadataRail count={workflowSummary.definitions.length} title="Workflows" />
+        <WorkflowsRail filters={workflowFilters} summary={workflowSummary} />
       ) : activeSection === "role-contracts" && roleContracts ? (
-        <MetadataRail count={roleContracts.length} title="Role contracts" />
+        <RoleContractsRail filters={roleFilters} summary={roleContracts} />
       ) : activeSection === "schedules" ? (
         <SchedulesRail count={view.selectedTable?.name === "handler_schedules" ? view.rowCount : 0} />
       ) : activeSection === "brai-cmd" && braiCmdSummary ? (
@@ -70,9 +113,9 @@ export default async function Home({ searchParams }: { searchParams: SearchParam
             {activeSection === "handlers" ? (
               <HandlersSection rows={view.selectedTable?.name === "handlers" ? view.rows : []} />
             ) : activeSection === "workflows" && workflowSummary ? (
-              <WorkflowsSection summary={workflowSummary} />
+              <WorkflowsWorkspace filters={workflowFilters} summary={workflowSummary} />
             ) : activeSection === "role-contracts" && roleContracts ? (
-              <RoleContractsSection rows={roleContracts} />
+              <RoleContractsWorkspace filters={roleFilters} summary={roleContracts} />
             ) : activeSection === "schedules" ? (
               <SchedulesSection sortDirection={sortDirection} view={view} />
             ) : activeSection === "brai-cmd" && braiCmdSummary ? (
@@ -122,6 +165,24 @@ async function readAdminAccess(requestHeaders: RequestHeaders): Promise<AdminAcc
     console.error("Brai Admin auth check failed", error);
     return { status: "unavailable" };
   }
+}
+
+function emptyDatabaseView(): DbView {
+  return {
+    stats: { databaseName: "", schemaName: "", databaseSizeBytes: 0, tableCount: 0, totalRows: 0 },
+    tables: [],
+    selectedTable: null,
+    tableDescription: null,
+    columns: [],
+    indexes: [],
+    foreignKeys: [],
+    referencedBy: [],
+    rows: [],
+    page: 1,
+    pageSize: PAGE_SIZE,
+    pageCount: 1,
+    rowCount: 0,
+  };
 }
 
 async function readAuthenticatedUserId(requestHeaders: RequestHeaders) {
@@ -175,6 +236,7 @@ function AdminAccessPanel({ loginHref, status }: { loginHref: string; status: Ex
 
   return (
     <main className="grid min-h-dvh place-items-center bg-background p-4 text-foreground">
+      <AdminInteractionFeedback />
       <Card className="grid w-full max-w-md gap-4 p-6">
         <div className="grid gap-2">
           <h1 className="m-0 text-xl font-semibold">{copy.title}</h1>
@@ -253,7 +315,7 @@ function PrimaryRail({ activeSection }: { activeSection: SectionName }) {
           size="icon-lg"
           variant={activeSection === "handlers" ? "default" : "outline"}
         >
-          <Workflow className="size-5" />
+          <Webhook className="size-5" />
           <span className="sr-only">Обработчики</span>
         </ButtonLink>
         <ButtonLink
@@ -300,120 +362,6 @@ function PrimaryRail({ activeSection }: { activeSection: SectionName }) {
         variant="circle"
       />
     </aside>
-  );
-}
-
-function MetadataRail({ count, title }: { count: number; title: string }) {
-  return (
-    <aside className="grid min-h-0 border-b bg-card md:border-b-0 md:border-r">
-      <div className="grid content-start gap-3 p-3">
-        <header className="grid gap-1">
-          <div className="text-sm font-semibold">{title}</div>
-          <div className="text-xs text-muted-foreground">{count} записей</div>
-        </header>
-        <Card className="p-3">
-          <p className="m-0 text-sm text-muted-foreground">Read-only operational metadata.</p>
-        </Card>
-      </div>
-    </aside>
-  );
-}
-
-function WorkflowsSection({ summary }: { summary: Awaited<ReturnType<typeof readWorkflowAdminSummary>> }) {
-  return (
-    <>
-      <Card>
-        <CardHeader className="gap-2 p-4 md:p-5">
-          <div className="flex items-center gap-2 text-sm text-muted-foreground"><Workflow className="size-4" />Process source of truth</div>
-          <h1 className="m-0 text-2xl font-semibold leading-none">Workflows</h1>
-          <p className="m-0 text-sm leading-6 text-muted-foreground">Версии, JSON schemas, Mermaid/Kroki diagrams и последние executions.</p>
-        </CardHeader>
-      </Card>
-      <div className="grid gap-3.5">
-        {summary.definitions.map((definition) => (
-          <Card className="grid gap-4 p-4" key={`${text(definition, "id")}:${text(definition, "version")}`}>
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div className="grid gap-1">
-                <h2 className="m-0 text-lg font-semibold">{text(definition, "title")}</h2>
-                <code className="text-xs text-muted-foreground">{text(definition, "id")} v{text(definition, "version")}</code>
-              </div>
-              <div className="flex gap-2"><Badge>{text(definition, "status")}</Badge><Badge variant="outline">{text(definition, "task_queue")}</Badge></div>
-            </div>
-            <p className="m-0 text-sm text-muted-foreground">{text(definition, "description")}</p>
-            {typeof definition.diagramDataUrl === "string" ? (
-              <div className="overflow-hidden rounded-lg border border-border bg-background p-3">
-                <Image className="h-auto w-full" src={definition.diagramDataUrl} alt={`Workflow ${text(definition, "title")}`} width={900} height={360} unoptimized />
-              </div>
-            ) : (
-              <pre className="m-0 overflow-x-auto rounded-lg border border-border bg-muted/35 p-3 text-xs">{text(definition, "diagram_mermaid")}</pre>
-            )}
-            <div className="grid gap-2 text-xs text-muted-foreground sm:grid-cols-2">
-              <div>Input: <code>{text(definition, "input_schema_version")}</code></div>
-              <div>Output: <code>{text(definition, "output_schema_version")}</code></div>
-            </div>
-            <div className="grid gap-2 lg:grid-cols-2">
-              <SchemaDetails label="Input schema" value={text(definition, "input_schema_json")} />
-              <SchemaDetails label="Output schema" value={text(definition, "output_schema_json")} />
-            </div>
-          </Card>
-        ))}
-      </div>
-      <Panel description={`${summary.executions.length} последних запусков`} title="Workflow executions">
-        <Card className="divide-y divide-border overflow-hidden">
-          {summary.executions.length ? summary.executions.map((execution) => (
-            <div className="grid gap-2 p-3 text-sm md:grid-cols-[minmax(0,1fr)_auto]" key={text(execution, "workflow_id")}>
-              <div className="grid min-w-0 gap-1">
-                <code className="truncate text-xs">{text(execution, "workflow_id")}</code>
-                <span className="text-muted-foreground">{text(execution, "current_step")} · attempts {text(execution, "attempt_count")}</span>
-                <span className="break-all text-xs text-muted-foreground">run {text(execution, "run_id") || "—"} · raw {text(execution, "raw_record_id")}</span>
-                {text(execution, "last_error") ? <span className="text-destructive">{text(execution, "last_error")}</span> : null}
-              </div>
-              <Badge variant="outline">{text(execution, "status")}</Badge>
-            </div>
-          )) : <p className="m-0 p-4 text-sm text-muted-foreground">Запусков пока нет.</p>}
-        </Card>
-      </Panel>
-    </>
-  );
-}
-
-function SchemaDetails({ label, value }: { label: string; value: string }) {
-  return (
-    <details className="rounded-lg border border-border bg-muted/20 p-3">
-      <summary className="cursor-pointer text-sm font-medium">{label}</summary>
-      <pre className="mb-0 mt-3 overflow-x-auto whitespace-pre-wrap break-words text-xs text-muted-foreground">{value}</pre>
-    </details>
-  );
-}
-
-function RoleContractsSection({ rows }: { rows: Array<Record<string, unknown>> }) {
-  return (
-    <>
-      <Card>
-        <CardHeader className="gap-2 p-4 md:p-5">
-          <div className="flex items-center gap-2 text-sm text-muted-foreground"><FileKey2 className="size-4" />Agent context</div>
-          <h1 className="m-0 text-2xl font-semibold leading-none">Role contracts</h1>
-          <p className="m-0 text-sm leading-6 text-muted-foreground">Role table, lifecycle, workflow ownership, schemas и event rules.</p>
-        </CardHeader>
-      </Card>
-      <div className="grid gap-3.5 lg:grid-cols-2">
-        {rows.map((row) => (
-          <Card className="grid gap-3 p-4" key={text(row, "id")}>
-            <div className="flex items-start justify-between gap-3">
-              <div><h2 className="m-0 text-base font-semibold">{text(row, "role_title")}</h2><code className="text-xs text-muted-foreground">{text(row, "role_key")}</code></div>
-              <Badge variant="outline">{text(row, "owner")}</Badge>
-            </div>
-            <dl className="m-0 grid gap-2 text-sm">
-              <div><dt className="text-xs text-muted-foreground">Payload</dt><dd className="m-0"><code>{text(row, "payload_table")}.{text(row, "link_column")}</code></dd></div>
-              <div><dt className="text-xs text-muted-foreground">Workflow</dt><dd className="m-0">{text(row, "workflow_title") || "—"}</dd></div>
-              <div><dt className="text-xs text-muted-foreground">Schemas</dt><dd className="m-0 break-words">{text(row, "input_schema_version") || "—"} → {text(row, "output_schema_version") || "—"}</dd></div>
-              <div><dt className="text-xs text-muted-foreground">Lifecycle</dt><dd className="m-0 break-words font-mono text-xs">{text(row, "lifecycle_json")}</dd></div>
-              <div><dt className="text-xs text-muted-foreground">Events</dt><dd className="m-0 break-words font-mono text-xs">{text(row, "event_rules_json")}</dd></div>
-            </dl>
-          </Card>
-        ))}
-      </div>
-    </>
   );
 }
 
@@ -523,7 +471,7 @@ function HandlersSection({ rows }: { rows: Array<Record<string, unknown>> }) {
       <Card>
         <CardHeader className="gap-2 p-4 md:p-5">
           <div className="flex min-w-0 items-center gap-2 text-sm text-muted-foreground">
-            <Workflow className="size-4 shrink-0" />
+            <Webhook className="size-4 shrink-0" />
             <span>Раздел</span>
           </div>
           <h1 className="m-0 text-2xl font-semibold leading-none">Обработчики</h1>

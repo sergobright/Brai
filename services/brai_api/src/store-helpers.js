@@ -221,6 +221,7 @@ export function normalizeOrderedIds(value) {
 
 export function parseJsonObject(value) {
   if (!value) return {};
+  if (typeof value === 'object' && !Array.isArray(value)) return value;
   try {
     const parsed = JSON.parse(value);
     return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
@@ -231,6 +232,7 @@ export function parseJsonObject(value) {
 
 export function parseJsonArray(value) {
   if (!value) return [];
+  if (Array.isArray(value)) return value;
   try {
     const parsed = JSON.parse(value);
     return Array.isArray(parsed) ? parsed : [];

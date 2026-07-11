@@ -494,6 +494,25 @@ export function prepareInboxNormalization({ store, inboxId, workflowId, runId, s
     });
     return { skipped: true, reason: 'raw_input_empty' };
   }
+  store.recordInboxWorkflowStepFinished?.({
+    inboxId,
+    workflowId,
+    runId,
+    stepKey: 'prepare_raw',
+    status: 'completed',
+    nowIso: nowDate.toISOString(),
+    metadataJson: { image_required: imageRequired }
+  });
+  if (!imageRequired) {
+    store.recordInboxWorkflowStepSkipped?.({
+      inboxId,
+      workflowId,
+      runId,
+      stepKey: 'image_describer',
+      reason: 'not_required',
+      nowIso: nowDate.toISOString()
+    });
+  }
   return { ok: true, imageRequired };
 }
 
@@ -533,7 +552,7 @@ export async function describeInboxImagesForWorkflow({
     imageDescriber,
     imagePaths
   });
-  recordInboxImageAiLog(store, {
+  const aiLogId = recordInboxImageAiLog(store, {
     agent,
     dt: nowDate.toISOString(),
     status: result.status,
@@ -546,6 +565,18 @@ export async function describeInboxImagesForWorkflow({
     workflowId,
     runId,
     attemptNumber: 1
+  });
+  store.recordInboxWorkflowStepFinished?.({
+    inboxId,
+    workflowId,
+    runId,
+    stepKey: 'image_describer',
+    status: result.status === 'done' ? 'completed' : 'failed',
+    aiLogId,
+    errorCode: result.error || null,
+    errorSummary: result.error || null,
+    nowIso: nowDate.toISOString(),
+    metadataJson: { model: result.model, duration_ms: result.durationMs }
   });
   return result.status === 'done'
     ? { ok: true, imageDescription: result.text }
@@ -603,7 +634,7 @@ export async function normalizeInboxRawForWorkflow({
     outputSchema,
     strictOutputSchema: workflowVersion >= 2 && workflowVersion <= INBOX_WORKFLOW_DEFINITION_VERSION
   });
-  recordInboxNormalizerAiLog(store, {
+  const aiLogId = recordInboxNormalizerAiLog(store, {
     agent,
     dt: nowDate.toISOString(),
     status: result.status === 'done' ? 'done' : 'failed',
@@ -618,6 +649,23 @@ export async function normalizeInboxRawForWorkflow({
     workflowId,
     runId,
     attemptNumber: attempt
+  });
+  store.recordInboxWorkflowStepFinished?.({
+    inboxId,
+    workflowId,
+    runId,
+    stepKey: 'raw_normalizer',
+    attempt,
+    status: result.status === 'done' ? 'completed' : 'failed',
+    aiLogId,
+    errorCode: result.error || null,
+    errorSummary: result.error || null,
+    nowIso: nowDate.toISOString(),
+    metadataJson: {
+      model: result.model,
+      duration_ms: result.durationMs,
+      validation_failed: result.validationFailed === true
+    }
   });
   return result.status === 'done'
     ? { ok: true, normalized: result }
@@ -641,7 +689,7 @@ export function applyNormalizedInboxForWorkflow({
     step: 'apply_normalized_raw',
     nowIso: nowDate.toISOString()
   });
-  return store.applyNormalizedInbox({
+  const result = store.applyNormalizedInbox({
     inboxId,
     workflowId,
     runId,
@@ -650,6 +698,41 @@ export function applyNormalizedInboxForWorkflow({
     deferTerminal,
     nowIso: nowDate.toISOString()
   });
+  store.recordInboxWorkflowStepFinished?.({
+    inboxId,
+    workflowId,
+    runId,
+    stepKey: 'apply_normalized_raw',
+    status: 'completed',
+    nowIso: nowDate.toISOString(),
+    metadataJson: {
+      items_id: result.items_id,
+      item_roles_id: result.item_roles_id,
+      idempotent: result.idempotent === true
+    }
+  });
+  if (!deferTerminal) {
+    store.recordInboxWorkflowStepStarted?.({
+      inboxId,
+      workflowId,
+      runId,
+      stepKey: 'terminal_reconcile',
+      nowIso: nowDate.toISOString(),
+      metadataJson: { inline: true }
+    });
+    store.recordInboxWorkflowStepFinished?.({
+      inboxId,
+      workflowId,
+      runId,
+      stepKey: 'terminal_reconcile',
+      status: 'skipped',
+      errorCode: 'inline_execution',
+      errorSummary: 'inline_execution',
+      nowIso: nowDate.toISOString(),
+      metadataJson: { inline: true }
+    });
+  }
+  return result;
 }
 
 export function serveInboxAttachment(req, res, url, storageRoot, sendJson, store = null) {
@@ -1021,7 +1104,7 @@ function recordInboxImageAiLog(store, {
   agent, dt, status, inboxId, imagePaths, imageDescription, error, model, durationMs,
   workflowId, runId, attemptNumber
 }) {
-  store.recordAiLog({
+  return store.recordAiLog({
     agentId: INBOX_IMAGE_AGENT_ID,
     agentVersion: agent?.version ?? '',
     dt,
@@ -1052,7 +1135,7 @@ function recordInboxNormalizerAiLog(store, {
   agent, dt, status, inboxId, item, classes, imageDescription, output, error, model, durationMs,
   workflowId, runId, attemptNumber
 }) {
-  store.recordAiLog({
+  return store.recordAiLog({
     agentId: INBOX_NORMALIZER_AGENT_ID,
     agentVersion: agent?.version ?? '',
     dt,
