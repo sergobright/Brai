@@ -11,7 +11,7 @@ test("preview env setup rewrites existing shell-unsafe values safely", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "brai-supabase-env-"));
   const envFile = path.join(dir, "brai-api.env");
   fs.writeFileSync(envFile, [
-    "BRAI_AUTH_FROM=Brai <auth@mail.brightos.world>",
+    "BRAI_AUTH_FROM=Brai <auth@mail.brai.one>",
     "BRAI_DATA_STORE=sqlite",
     "BRAI_LEGACY_SQLITE_PATH=/srv/projects/brai/data/brai.sqlite",
     "BROKEN NON ASSIGNMENT",
@@ -53,7 +53,7 @@ test("preview env setup rewrites existing shell-unsafe values safely", () => {
   const source = spawnSync("bash", ["-n", envFile], { encoding: "utf8" });
   assert.equal(source.status, 0, source.stderr || source.stdout);
   const contents = fs.readFileSync(envFile, "utf8");
-  assert.match(contents, /^BRAI_AUTH_FROM='Brai <auth@mail\.brightos\.world>'$/m);
+  assert.match(contents, /^BRAI_AUTH_FROM='Brai <auth@mail\.brai\.one>'$/m);
   assert.doesNotMatch(contents, /BRAI_DATA_STORE|BRAI_LEGACY_SQLITE_PATH|BROKEN NON ASSIGNMENT/);
   assert.match(contents, /^BRAI_DATABASE_URL='postgres:\/\/brai:brai@127\.0\.0\.1:5432\/brai\?options=-c\+search_path%3Dbrai_preview_supabase_only_runtime_e3117d5f%2Cpublic'$/m);
   assert.match(contents, /^BRAI_SUPABASE_BRANCH='brai_preview_supabase_only_runtime_e3117d5f'$/m);
@@ -157,4 +157,16 @@ test("branch database URL override requires explicit preview marker", () => {
     }
   });
   assert.equal(allowed.status, 0, allowed.stderr || allowed.stdout);
+});
+
+test("production seed advances copied generated-id sequences before commit", () => {
+  const script = fs.readFileSync(path.join(repoRoot, "deploy/scripts/supabase-branch.mjs"), "utf8");
+  const copyStart = script.indexOf("async function copySchemaData");
+  const copyEnd = script.indexOf("async function schemaTables", copyStart);
+  const copyBlock = script.slice(copyStart, copyEnd);
+
+  assert.match(copyBlock, /await resetCopiedSequences\(pool, targetSchema, copyTables\);\s+await pool\.query\("COMMIT"\)/);
+  assert.match(copyBlock, /pg_get_serial_sequence/);
+  assert.match(copyBlock, /SELECT setval\(/);
+  assert.match(copyBlock, /COALESCE\(MAX\(\$\{quoteIdentifier\(column\)\}\), 0\) \+ 1/);
 });

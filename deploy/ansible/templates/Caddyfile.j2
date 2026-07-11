@@ -1,8 +1,14 @@
-http://{{ brai_public_site_domain }}{% for domain in brai_public_site_aliases %}, http://{{ domain }}{% endfor %} {
-  redir https://{host}{uri} permanent
+http://{{ brai_public_site_domain }} {
+  redir https://{{ brai_public_site_domain }}{uri} permanent
 }
 
-{{ brai_public_site_domain }}{% for domain in brai_public_site_aliases %}, {{ domain }}{% endfor %} {
+{% for domain in brai_public_site_legacy_domains %}
+http://{{ domain }}, {{ domain }} {
+  redir https://{{ brai_public_site_domain }}{uri} permanent
+}
+{% endfor %}
+
+{{ brai_public_site_domain }} {
   encode zstd gzip
   tls {
     issuer acme {
@@ -15,11 +21,17 @@ http://{{ brai_public_site_domain }}{% for domain in brai_public_site_aliases %}
   file_server
 }
 
-http://{{ brai_syncthing_domain }}{% for domain in brai_syncthing_aliases %}, http://{{ domain }}{% endfor %} {
-  redir https://{host}{uri} permanent
+http://{{ brai_syncthing_domain }} {
+  redir https://{{ brai_syncthing_domain }}{uri} permanent
 }
 
-{{ brai_syncthing_domain }}{% for domain in brai_syncthing_aliases %}, {{ domain }}{% endfor %} {
+{% for domain in brai_syncthing_legacy_domains %}
+http://{{ domain }}, {{ domain }} {
+  redir https://{{ brai_syncthing_domain }}{uri} permanent
+}
+{% endfor %}
+
+{{ brai_syncthing_domain }} {
   import brai_unified_basic_auth
   encode zstd gzip
   tls {
@@ -33,11 +45,17 @@ http://{{ brai_syncthing_domain }}{% for domain in brai_syncthing_aliases %}, ht
   }
 }
 
-http://{{ brai_supabase_studio_domain }}{% for domain in brai_supabase_studio_aliases %}, http://{{ domain }}{% endfor %} {
-  redir https://{host}{uri} permanent
+http://{{ brai_supabase_studio_domain }} {
+  redir https://{{ brai_supabase_studio_domain }}{uri} permanent
 }
 
-{{ brai_supabase_studio_domain }}{% for domain in brai_supabase_studio_aliases %}, {{ domain }}{% endfor %} {
+{% for domain in brai_supabase_studio_legacy_domains %}
+http://{{ domain }}, {{ domain }} {
+  redir https://{{ brai_supabase_studio_domain }}{uri} permanent
+}
+{% endfor %}
+
+{{ brai_supabase_studio_domain }} {
   import brai_unified_basic_auth
   encode zstd gzip
   tls {
@@ -49,11 +67,60 @@ http://{{ brai_supabase_studio_domain }}{% for domain in brai_supabase_studio_al
   reverse_proxy 127.0.0.1:{{ brai_supabase_studio_port }}
 }
 
-http://{{ brai_envs.prod.domain }}{% for domain in brai_envs.prod.aliases | default([]) %}, http://{{ domain }}{% endfor %} {
-  redir https://{host}{uri} permanent
+http://{{ brai_api_domain }} {
+  redir https://{{ brai_api_domain }}{uri} permanent
 }
 
-{{ brai_envs.prod.domain }}{% for domain in brai_envs.prod.aliases | default([]) %}, {{ domain }}{% endfor %} {
+{% for domain in brai_api_legacy_domains %}
+http://{{ domain }}, {{ domain }} {
+  redir https://{{ brai_api_domain }}{uri} permanent
+}
+{% endfor %}
+
+{{ brai_api_domain }} {
+  encode zstd gzip
+  tls {
+    issuer acme {
+      disable_http_challenge
+    }
+  }
+
+  reverse_proxy 127.0.0.1:{{ brai_envs.prod.api_port }}
+}
+
+http://{{ brai_temporal_ui_domain }} {
+  redir https://{{ brai_temporal_ui_domain }}{uri} permanent
+}
+
+{% for domain in brai_temporal_ui_legacy_domains %}
+http://{{ domain }}, {{ domain }} {
+  redir https://{{ brai_temporal_ui_domain }}{uri} permanent
+}
+{% endfor %}
+
+{{ brai_temporal_ui_domain }} {
+  {{ brai_basic_auth_directive }}
+  encode zstd gzip
+  tls {
+    issuer acme {
+      disable_http_challenge
+    }
+  }
+
+  reverse_proxy 127.0.0.1:{{ brai_temporal_ui_port }}
+}
+
+http://{{ brai_envs.prod.domain }} {
+  redir https://{{ brai_envs.prod.domain }}{uri} permanent
+}
+
+{% for domain in brai_envs.prod.legacy_domains | default([]) %}
+http://{{ domain }}, {{ domain }} {
+  redir https://{{ brai_envs.prod.domain }}{uri} permanent
+}
+{% endfor %}
+
+{{ brai_envs.prod.domain }} {
   encode zstd gzip
   tls {
     issuer acme {
@@ -106,11 +173,17 @@ http://{{ brai_envs.prod.domain }}{% for domain in brai_envs.prod.aliases | defa
 }
 
 {% for name, env in brai_envs.items() if name != 'prod' %}
-http://{{ env.domain }}{% for domain in env.aliases | default([]) %}, http://{{ domain }}{% endfor %} {
-  redir https://{host}{uri} permanent
+http://{{ env.domain }} {
+  redir https://{{ env.domain }}{uri} permanent
 }
 
-{{ env.domain }}{% for domain in env.aliases | default([]) %}, {{ domain }}{% endfor %} {
+{% for domain in env.legacy_domains | default([]) %}
+http://{{ domain }}, {{ domain }} {
+  redir https://{{ env.domain }}{uri} permanent
+}
+{% endfor %}
+
+{{ env.domain }} {
   encode zstd gzip
   tls {
     issuer acme {
@@ -150,6 +223,12 @@ http://{{ env.domain }}{% for domain in env.aliases | default([]) %}, http://{{ 
 http://{{ brai_preview_status_domain }} {
   redir https://{{ brai_preview_status_domain }}{uri} permanent
 }
+
+{% for domain in brai_preview_status_legacy_domains %}
+http://{{ domain }}, {{ domain }} {
+  redir https://{{ brai_preview_status_domain }}{uri} permanent
+}
+{% endfor %}
 
 {{ brai_preview_status_domain }} {
   {{ brai_basic_auth_directive }}

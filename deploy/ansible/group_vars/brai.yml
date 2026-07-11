@@ -3,19 +3,19 @@ brai_env_root: /srv/projects/brai-envs
 brai_node_root: /srv/opt/node-v22.16.0
 brai_node_bin: /srv/opt/node-v22.16.0/bin/node
 brai_caddyfile: /etc/caddy/Caddyfile
-brai_public_site_domain: brightos.world
-brai_public_site_aliases:
-  - brai.one
+brai_public_site_domain: brai.one
+brai_public_site_legacy_domains:
+  - brightos.world
 brai_github_repository: sergobright/Brai
 brai_public_site_root: "{{ brai_repo }}/deploy/site"
-brai_syncthing_domain: sync.brightos.world
-brai_syncthing_aliases:
-  - sync.brai.one
+brai_syncthing_domain: sync.brai.one
+brai_syncthing_legacy_domains:
+  - sync.brightos.world
 brai_syncthing_gui_port: 8384
 brai_syncthing_sync_port: 22000
-brai_supabase_studio_domain: supabase.brightos.world
-brai_supabase_studio_aliases:
-  - supabase.brai.one
+brai_supabase_studio_domain: supabase.brai.one
+brai_supabase_studio_legacy_domains:
+  - supabase.brightos.world
 brai_supabase_studio_port: 54323
 brai_syncthing_user: mark
 brai_syncthing_vault_path: /srv/projects/brai/vault
@@ -28,75 +28,84 @@ brai_service_user: brai
 brai_service_group: brai
 brai_protected_env_dir: /etc/brai
 brai_api_env_source: /etc/brai/brai-api.env
+brai_api_domain: api.brai.one
+brai_api_legacy_domains:
+  - api.brightos.world
 brai_supabase_deploy_env_source: /etc/brai/supabase-deploy.env
 brai_temporal_worker_env_source: /etc/brai/brai-temporal-worker.env
+brai_temporal_ui_domain: temporal.brai.one
+brai_temporal_ui_legacy_domains:
+  - temporal.brightos.world
 brai_temporal_deploy_host: 127.0.0.1
+brai_temporal_ui_port: 8233
 brai_temporal_deploy_ssh_port: 22
 brai_temporal_deploy_ssh_key_path: /etc/brai/brai-temporal-deploy-ssh-key
 brai_temporal_github_token_path: /etc/brai/brai-temporal-github-token
 brai_basic_auth_directive: "import brai_unified_basic_auth"
 brai_envs:
   prod:
-    domain: app.brightos.world
-    aliases:
-      - app.brai.one
+    domain: app.brai.one
+    legacy_domains:
+      - app.brightos.world
     path: prod
     api_port: 3020
     admin_port: 3040
     service: brai-api.service
     admin_service: brai-admin.service
   dev:
-    domain: dev.brightos.world
-    aliases:
-      - dev.brai.one
+    domain: dev.brai.one
+    legacy_domains:
+      - dev.brightos.world
     path: dev
     api_port: 3030
     admin_port: 3041
     service: brai-api-dev.service
     admin_service: brai-admin-dev.service
   preview-a:
-    domain: a.test.brightos.world
-    aliases:
-      - a.test.brai.one
+    domain: a.test.brai.one
+    legacy_domains:
+      - a.test.brightos.world
     path: preview-a
     api_port: 3031
     admin_port: 3042
     service: brai-api-preview-a.service
     admin_service: brai-admin-preview-a.service
   preview-b:
-    domain: b.test.brightos.world
-    aliases:
-      - b.test.brai.one
+    domain: b.test.brai.one
+    legacy_domains:
+      - b.test.brightos.world
     path: preview-b
     api_port: 3032
     admin_port: 3043
     service: brai-api-preview-b.service
     admin_service: brai-admin-preview-b.service
   preview-c:
-    domain: c.test.brightos.world
-    aliases:
-      - c.test.brai.one
+    domain: c.test.brai.one
+    legacy_domains:
+      - c.test.brightos.world
     path: preview-c
     api_port: 3033
     admin_port: 3044
     service: brai-api-preview-c.service
     admin_service: brai-admin-preview-c.service
   preview-d:
-    domain: d.test.brightos.world
-    aliases:
-      - d.test.brai.one
+    domain: d.test.brai.one
+    legacy_domains:
+      - d.test.brightos.world
     path: preview-d
     api_port: 3034
     admin_port: 3045
     service: brai-api-preview-d.service
     admin_service: brai-admin-preview-d.service
   preview-e:
-    domain: e.test.brightos.world
-    aliases:
-      - e.test.brai.one
+    domain: e.test.brai.one
+    legacy_domains:
+      - e.test.brightos.world
     path: preview-e
     api_port: 3035
     admin_port: 3046
     service: brai-api-preview-e.service
     admin_service: brai-admin-preview-e.service
-brai_preview_status_domain: previews.brightos.world
+brai_preview_status_domain: previews.brai.one
+brai_preview_status_legacy_domains:
+  - previews.brightos.world

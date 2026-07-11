@@ -20,7 +20,7 @@ describe("client runtime config", () => {
       environment: "preview-b",
       previewSlot: "B",
       webApiBase: "/preview-api",
-      androidApiBase: "https://b.test.brightos.world/api",
+      androidApiBase: "https://b.test.brai.one/api",
     };
 
     expect(appVersion()).toBe("9.9.9");
@@ -34,13 +34,13 @@ describe("client runtime config", () => {
   it("uses runtime Android API base inside the native shell", () => {
     window.__BRAI_RUNTIME_CONFIG__ = {
       webApiBase: "/preview-api",
-      androidApiBase: "https://b.test.brightos.world/api",
+      androidApiBase: "https://b.test.brai.one/api",
     };
     window.Capacitor = {
       isNativePlatform: () => true,
       getPlatform: () => "android",
     };
 
-    expect(defaultApiBase()).toBe("https://b.test.brightos.world/api");
+    expect(defaultApiBase()).toBe("https://b.test.brai.one/api");
   });
 });

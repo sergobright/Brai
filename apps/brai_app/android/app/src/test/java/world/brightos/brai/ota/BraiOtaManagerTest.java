@@ -45,7 +45,7 @@ public class BraiOtaManagerTest {
         assertEquals("network_connection_lost", BraiOtaManager.updateErrorCode(new SocketException("Software caused connection abort")));
         assertEquals("local_archive_missing", BraiOtaManager.updateErrorCode(new FileNotFoundException("open failed: ENOENT")));
         assertEquals("network_timeout", BraiOtaManager.updateErrorCode(new SocketTimeoutException("timeout")));
-        assertEquals("network_unavailable", BraiOtaManager.updateErrorCode(new UnknownHostException("app.brightos.world")));
+        assertEquals("network_unavailable", BraiOtaManager.updateErrorCode(new UnknownHostException("app.brai.one")));
         assertEquals("archive_invalid_zip", BraiOtaManager.updateErrorCode(new ZipException("bad zip")));
         assertEquals("archive_checksum_mismatch", BraiOtaManager.updateErrorCode(new BraiOtaException("archive_checksum_mismatch")));
     }

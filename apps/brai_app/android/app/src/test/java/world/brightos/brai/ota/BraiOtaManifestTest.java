@@ -17,7 +17,7 @@ public class BraiOtaManifestTest {
     public void validatesTrustedCompatibleManifest() throws Exception {
         BraiOtaManifest manifest = BraiOtaManifest.parse(validManifest());
 
-        manifest.validate(new URL("https://app.brightos.world/mobile-update/manifest.json"), 1);
+        manifest.validate(new URL("https://app.brai.one/mobile-update/manifest.json"), 1);
 
         assertEquals("0.0.1", manifest.otaVersion);
         assertEquals(1, manifest.targetApkVersion);
@@ -29,7 +29,7 @@ public class BraiOtaManifestTest {
     public void acceptsNewerInstalledApkVersion() throws Exception {
         BraiOtaManifest manifest = BraiOtaManifest.parse(validManifest().replace("\"targetApkVersion\":1", "\"targetApkVersion\":2"));
 
-        manifest.validate(new URL("https://app.brightos.world/mobile-update/manifest.json"), 3);
+        manifest.validate(new URL("https://app.brai.one/mobile-update/manifest.json"), 3);
 
         assertTrue(manifest.isCompatibleWith(3));
     }
@@ -41,7 +41,7 @@ public class BraiOtaManifestTest {
         assertFalse(manifest.isCompatibleWith(1));
         BraiOtaException error = assertThrows(
             BraiOtaException.class,
-            () -> manifest.validate(new URL("https://app.brightos.world/mobile-update/manifest.json"), 1)
+            () -> manifest.validate(new URL("https://app.brai.one/mobile-update/manifest.json"), 1)
         );
         assertTrue(error.getMessage().contains("apk_required"));
     }
@@ -50,7 +50,7 @@ public class BraiOtaManifestTest {
     public void checksStableTargetIdentity() throws Exception {
         BraiOtaManifest manifest = BraiOtaManifest.parse(manifestWithApkTarget("2", "a", "stable", 0, 2));
 
-        manifest.validate(new URL("https://app.brightos.world/mobile-update/manifest.json"), 2, "a", "stable", 0);
+        manifest.validate(new URL("https://app.brai.one/mobile-update/manifest.json"), 2, "a", "stable", 0);
 
         assertTrue(manifest.isCompatibleWith(3, "a", "stable", 0));
         assertFalse(manifest.isCompatibleWith(2, "b", "stable", 0));
@@ -61,7 +61,7 @@ public class BraiOtaManifestTest {
     public void checksPreviewTargetIdentity() throws Exception {
         BraiOtaManifest manifest = BraiOtaManifest.parse(manifestWithApkTarget("2", "a", "preview", 6, 20006));
 
-        manifest.validate(new URL("https://app.brightos.world/mobile-update/manifest.json"), 2, "a", "preview", 6);
+        manifest.validate(new URL("https://app.brai.one/mobile-update/manifest.json"), 2, "a", "preview", 6);
 
         assertTrue(manifest.isCompatibleWith(2, "a", "preview", 7));
         assertFalse(manifest.isCompatibleWith(2, "a", "preview", 5));
@@ -83,7 +83,7 @@ public class BraiOtaManifestTest {
         assertThrows(
             BraiOtaException.class,
             () -> BraiOtaManifest.parse(validManifest().replace("\"schemaVersion\":2", "\"schemaVersion\":1"))
-                .validate(new URL("https://app.brightos.world/mobile-update/manifest.json"), 1)
+                .validate(new URL("https://app.brai.one/mobile-update/manifest.json"), 1)
         );
     }
 
@@ -91,14 +91,14 @@ public class BraiOtaManifestTest {
     public void rejectsCrossOriginArchiveUrl() throws Exception {
         BraiOtaManifest manifest = BraiOtaManifest.parse(
             validManifest().replace(
-                "https://app.brightos.world/mobile-update/bundles/0.0.1/bundle.zip",
+                "https://app.brai.one/mobile-update/bundles/0.0.1/bundle.zip",
                 "https://evil.example.test/mobile-update/bundles/0.0.1/bundle.zip"
             )
         );
 
         BraiOtaException error = assertThrows(
             BraiOtaException.class,
-            () -> manifest.validate(new URL("https://app.brightos.world/mobile-update/manifest.json"), 1)
+            () -> manifest.validate(new URL("https://app.brai.one/mobile-update/manifest.json"), 1)
         );
         assertTrue(error.getMessage().contains("archive_url_untrusted_host"));
     }
@@ -108,7 +108,7 @@ public class BraiOtaManifestTest {
         assertThrows(
             BraiOtaException.class,
             () -> BraiOtaManifest.parse(validManifest().replace("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "not-a-hash"))
-                .validate(new URL("https://app.brightos.world/mobile-update/manifest.json"), 1)
+                .validate(new URL("https://app.brai.one/mobile-update/manifest.json"), 1)
         );
     }
 
@@ -135,7 +135,7 @@ public class BraiOtaManifestTest {
             + "\"otaVersion\":\"0.0.1\","
             + "\"targetApkVersion\":1,"
             + "\"publishedAt\":\"2026-06-15T00:00:00Z\","
-            + "\"archiveUrl\":\"https://app.brightos.world/mobile-update/bundles/0.0.1/bundle.zip\","
+            + "\"archiveUrl\":\"https://app.brai.one/mobile-update/bundles/0.0.1/bundle.zip\","
             + "\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\","
             + "\"sizeBytes\":1234,"
             + "\"entrypoint\":\"index.html\","

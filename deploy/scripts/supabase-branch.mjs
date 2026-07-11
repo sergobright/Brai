@@ -267,10 +267,37 @@ async function copySchemaData(pool, { sourceSchema, targetSchema }) {
         FROM ${qualifiedTable(sourceSchema, table)}
       `);
     }
+    await resetCopiedSequences(pool, targetSchema, copyTables);
     await pool.query("COMMIT");
   } catch (error) {
     await pool.query("ROLLBACK");
     throw error;
+  }
+}
+
+async function resetCopiedSequences(pool, schema, tables) {
+  const result = await pool.query(`
+    SELECT
+      table_name,
+      column_name,
+      pg_get_serial_sequence(format('%I.%I', table_schema, table_name), column_name) AS sequence_name
+    FROM information_schema.columns
+    WHERE table_schema = $1
+      AND table_name = ANY($2::text[])
+      AND (is_identity = 'YES' OR column_default LIKE 'nextval(%')
+    ORDER BY table_name, column_name
+  `, [schema, tables]);
+
+  for (const { table_name: table, column_name: column, sequence_name: sequence } of result.rows) {
+    if (!sequence) continue;
+    await pool.query(`
+      SELECT setval(
+        $1::regclass,
+        GREATEST(COALESCE(MAX(${quoteIdentifier(column)}), 0) + 1, 1),
+        false
+      )
+      FROM ${qualifiedTable(schema, table)}
+    `, [sequence]);
   }
 }
 

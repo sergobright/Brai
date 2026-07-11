@@ -7,12 +7,12 @@ This archived runbook records the completed move from frozen SQLite to Supabase 
 - `BRAI_DATABASE_URL` is the server-side Postgres DSN for the API, scheduler, deploy ledger scripts, preview branches, Dev, and production.
 - SQLite is not a runtime fallback. `BRAI_DATA_STORE`, `BRAI_DB`, and SQLite import helpers are not part of the active runtime contract.
 - Web and Android keep using the Brai Node API. They must not receive Supabase service credentials or call Supabase Data API directly.
-- On the one-VPS deployment, Temporal keeps using hidden Supabase databases `temporal` and `temporal_visibility`; Brai product tables live in `postgres.public`, visible in Supabase Studio at `https://supabase.brightos.world`.
+- On the one-VPS deployment, Temporal keeps using hidden Supabase databases `temporal` and `temporal_visibility`; Brai product tables live in `postgres.public`, visible in Supabase Studio at `https://supabase.brai.one`.
 
 ## Protected Env Files
 
 - Production runtime env: `/etc/brai/brai-api.env`
-- Production Supabase Studio: `https://supabase.brightos.world` through Caddy unified basic auth, proxying localhost-only Studio on `127.0.0.1:54323`.
+- Production Supabase Studio: `https://supabase.brai.one` through Caddy unified basic auth, proxying localhost-only Studio on `127.0.0.1:54323`.
 - Supabase deploy automation env: `/etc/brai/supabase-deploy.env`
 - Preview and Dev runtime envs: `/srv/projects/brai-envs/<environment>/brai-api.env`
 - GitHub delivery secrets: `BRAI_DEPLOY_SSH_KEY`; Supabase lifecycle secrets stay on the VPS.

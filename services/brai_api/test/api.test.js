@@ -51,10 +51,10 @@ test('health exposes safe deployment metadata and CORS denies untrusted origins'
 
   try {
     const health = await jsonRequest(fixture.url, '/health', {
-      headers: { origin: 'https://app.brightos.world' }
+      headers: { origin: 'https://app.brai.one' }
     });
     assert.equal(health.status, 200);
-    assert.equal(health.headers.get('access-control-allow-origin'), 'https://app.brightos.world');
+    assert.equal(health.headers.get('access-control-allow-origin'), 'https://app.brai.one');
     assert.equal(health.body.database.dialect, 'postgres');
     assert.equal(health.body.database.branch, 'brai_preview_test');
     assert.equal(health.body.branch, 'codex/test-hardening');
@@ -70,6 +70,11 @@ test('health exposes safe deployment metadata and CORS denies untrusted origins'
     });
     assert.equal(evilPreflight.status, 204);
     assert.equal(evilPreflight.headers.get('access-control-allow-origin'), null);
+
+    const legacyOrigin = await jsonRequest(fixture.url, '/health', {
+      headers: { origin: 'https://app.brightos.world' }
+    });
+    assert.equal(legacyOrigin.headers.get('access-control-allow-origin'), null);
 
     const cliHealth = await jsonRequest(fixture.url, '/health');
     assert.equal(cliHealth.headers.get('access-control-allow-origin'), '*');

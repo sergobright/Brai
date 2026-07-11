@@ -156,7 +156,7 @@ describe("BraiApp settings", () => {
       targetApkVersion: "2",
       nativeEnvironment: "preview-a",
       nativePreviewSlot: "A",
-      nativeOtaChannel: "a.test.brightos.world/mobile-update",
+      nativeOtaChannel: "a.test.brai.one/mobile-update",
       lastCheckStatus: "apk_required",
     });
 
@@ -169,7 +169,7 @@ describe("BraiApp settings", () => {
 
     expect(screen.getByText("Нужен новый APK")).toBeInTheDocument();
     expect(screen.getByText(/Требуется APK v2/)).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Открыть APK-релизы" })).toHaveAttribute("href", "https://a.test.brightos.world/releases/");
+    expect(screen.getByRole("link", { name: "Открыть APK-релизы" })).toHaveAttribute("href", "https://a.test.brai.one/releases/");
   });
 
   it("shows production APK requirements only inside Engine", async () => {
