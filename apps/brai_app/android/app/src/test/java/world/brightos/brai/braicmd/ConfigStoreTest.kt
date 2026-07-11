@@ -1,6 +1,7 @@
 package world.brightos.brai.braicmd
 
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -52,5 +53,19 @@ class ConfigStoreTest {
         store.overlayEnabled = true
 
         assertTrue(ConfigStore(RuntimeEnvironment.getApplication()).overlayEnabled)
+    }
+
+    @Test
+    fun oldBraiApiDomainMigratesToCurrentBuildFlavor() {
+        store.serverUrl = "https://e.test.brightos.world/api"
+
+        assertEquals(AppConstants.DEFAULT_SERVER_URL, store.serverUrl)
+    }
+
+    @Test
+    fun customServerUrlIsPreserved() {
+        store.serverUrl = "https://brai.example.org/api"
+
+        assertEquals("https://brai.example.org/api", store.serverUrl)
     }
 }

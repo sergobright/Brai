@@ -2,6 +2,7 @@ package world.brightos.brai.braicmd
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.net.Uri
 import java.util.UUID
 
 enum class ContextDeliveryMode {
@@ -20,7 +21,7 @@ class ConfigStore(context: Context) {
     var serverUrl: String
         get() {
             val value = prefs.getString(AppConstants.KEY_SERVER_URL, AppConstants.DEFAULT_SERVER_URL).orEmpty()
-            return if (value in LEGACY_SERVER_URLS) AppConstants.DEFAULT_SERVER_URL else value
+            return if (isLegacyBraiServerUrl(value)) AppConstants.DEFAULT_SERVER_URL else value
         }
         set(value) = prefs.edit().putString(AppConstants.KEY_SERVER_URL, value.trim()).apply()
 
@@ -185,5 +186,15 @@ class ConfigStore(context: Context) {
             "https://your-server.example.com",
             "http://192.168.1.9:8787"
         )
+
+        private fun isLegacyBraiServerUrl(value: String): Boolean {
+            if (value in LEGACY_SERVER_URLS) return true
+            val uri = runCatching { Uri.parse(value) }.getOrNull() ?: return false
+            val host = uri.host?.lowercase().orEmpty()
+            return host == "api.brightos.world" ||
+                host == "app.brightos.world" ||
+                host == "dev.brightos.world" ||
+                host.matches(Regex("^[a-e]\\.test\\.brightos\\.world$"))
+        }
     }
 }

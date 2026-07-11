@@ -61,6 +61,11 @@ test('health exposes safe deployment metadata and CORS denies untrusted origins'
     assert.equal(health.body.commit, 'abc123');
     assert.equal(JSON.stringify(health.body).includes('postgres://'), false);
 
+    const previewHealth = await jsonRequest(fixture.url, '/health', {
+      headers: { origin: 'https://e.test.brai.one' }
+    });
+    assert.equal(previewHealth.headers.get('access-control-allow-origin'), 'https://e.test.brai.one');
+
     const evilPreflight = await fetch(`${fixture.url}/auth/otp/verify`, {
       method: 'OPTIONS',
       headers: {
