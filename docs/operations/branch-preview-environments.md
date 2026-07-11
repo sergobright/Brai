@@ -225,10 +225,11 @@ Preview and Dev runtime credentials live in `/srv/projects/brai-envs/<environmen
 and are deploy-writable so CI can update schema-scoped DSNs after Supabase schema creation.
 Dev and Preview rebuilds copy current production data into their schema after migrations, excluding
 production Better Auth session, account, and verification rows. Those test env files set
-`BRAI_TEST_EMAIL_LOGIN=true`. Preview/Dev web still starts on the login screen and creates a normal
-Brai session only after the user enters the copied primary account email; it never asks for a
-password or OTP. Android keeps password-only login, and opening either surface never creates a
-session by itself. Production env files must not set this flag and web production keeps OTP login.
+`BRAI_TEST_EMAIL_LOGIN=true`. Preview/Dev web and Android still start on the login screen and
+create a normal Better Auth Brai session only after the user enters an email; they never ask for a
+password or OTP. The first email-only test login creates that environment's user, and repeated
+logins with the same email reuse it. Opening either surface never creates a session by itself.
+Production env files must not set this flag, and production web/Android keep OTP login.
 
 Use [Supabase Postgres Cutover](supabase-postgres-cutover.md) only as the archived record of the
 completed cutover. Active production, Dev, and preview writes use Supabase Postgres only.

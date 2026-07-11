@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { betterAuth } from 'better-auth';
 import { emailOTP } from 'better-auth/plugins';
 import { Resend } from 'resend';
@@ -29,6 +30,7 @@ const DEFAULT_ALLOWED_HOSTS = [
   'localhost',
   '127.0.0.1'
 ];
+const testOtpCapture = new AsyncLocalStorage();
 
 export function createBraiAuth({
   databaseUrl,
@@ -45,7 +47,7 @@ export function createBraiAuth({
     max: postgresPoolMax(process.env.BRAI_PG_POOL_MAX)
   });
   const resend = resendApiKey ? new Resend(resendApiKey) : null;
-  const sender = sendOtp ?? (async ({ email, otp }) => {
+  const deliverySender = sendOtp ?? (async ({ email, otp }) => {
     if (!resend) {
       const error = new Error('resend_api_key_required');
       error.status = 503;
@@ -58,6 +60,16 @@ export function createBraiAuth({
       ...renderOtpEmail({ otp })
     });
   });
+  const sender = async ({ email, otp, type }) => {
+    const capture = testOtpCapture.getStore();
+    if (capture) {
+      capture.email = email;
+      capture.otp = otp;
+      capture.type = type;
+      return;
+    }
+    await deliverySender({ email, otp, type });
+  };
 
   const options = {
     database: db,
@@ -84,6 +96,25 @@ export function createBraiAuth({
 
   return {
     auth,
+    testEmailLogin: async ({ email, name = email, headers }) => {
+      const capture = {};
+      const sendResponse = await testOtpCapture.run(capture, () => auth.api.sendVerificationOTP({
+        body: { email, type: 'sign-in' },
+        headers,
+        asResponse: true
+      }));
+      if (!sendResponse.ok) return sendResponse;
+      if (!capture.otp) {
+        const error = new Error('test_otp_capture_failed');
+        error.status = 503;
+        throw error;
+      }
+      return auth.api.signInEmailOTP({
+        body: { email, otp: capture.otp, name },
+        headers,
+        asResponse: true
+      });
+    },
     close: () => db.end()
   };
 }

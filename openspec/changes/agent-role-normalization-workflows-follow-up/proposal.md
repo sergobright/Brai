@@ -11,8 +11,8 @@ keeps an explicit user gesture instead of creating a session on page load.
 - Preserve immutable raw Inbox text and provenance before normalization.
 - Reject semantically empty normalization input without invoking Codex CLI.
 - Expose actual completed, running, failed, skipped, and pending workflow steps.
-- Keep Web Preview/Dev email-only login, Android password login, and production
-  web OTP login as three distinct authentication modes.
+- Keep Preview/Dev email-only login and production OTP login consistent across
+  web and Android.
 - Continue using only the local Codex CLI for Inbox normalization.
 
 ## Delivery Guard

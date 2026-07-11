@@ -43,7 +43,7 @@
 - Timer и Activities сохраняют local-first state перед sync.
 - Dexie outbox является durable client-side очередью для offline-first событий.
 - LocalStorage можно использовать только для lightweight preferences или immediate crash/back drafts, не как основной источник sync.
-- API calls из browser web идут через same-origin `/api`; Android WebView использует совместимую session/password auth модель.
+- API calls из browser web идут через same-origin `/api`; Android WebView использует тот же Better Auth flow: production OTP, Preview/Dev email-only test login.
 
 ## Component boundaries
 

@@ -48,18 +48,20 @@ test('email OTP message renders the reusable responsive card', () => {
   assert.match(message.text, /Brai · brai\.one/);
 });
 
-test('test email login requires an explicit matching primary email', async () => {
+test('test email login creates or reuses a Better Auth user without sending OTP mail', async () => {
+  const sentOtps = [];
   const fixture = await createFixture([
     '2026-07-01T09:00:00.000Z',
     '2026-07-01T09:00:01.000Z',
     '2026-07-01T09:00:02.000Z',
-    '2026-07-01T09:00:03.000Z'
+    '2026-07-01T09:00:03.000Z',
+    '2026-07-01T09:00:04.000Z'
   ], {
     sessionSecret: SESSION_SECRET,
-    testEmailLogin: true
+    testEmailLogin: true,
+    sendOtp: ({ email, otp }) => sentOtps.push({ email, otp })
   });
   try {
-    seedPrimaryUser(fixture, 'primary-user');
     const session = await jsonRequest(fixture.url, '/auth/session');
     assert.equal(session.status, 200);
     assert.equal(session.body.authenticated, false);
@@ -73,37 +75,49 @@ test('test email login requires an explicit matching primary email', async () =>
     assert.equal(empty.status, 400);
     assert.equal(empty.headers.get('set-cookie'), null);
 
-    const nativeBypass = await jsonRequest(fixture.url, '/auth/test-email-login', {
+    const rejectedOrigin = await jsonRequest(fixture.url, '/auth/test-email-login', {
+      method: 'POST',
+      headers: { origin: 'https://app.brai.one' },
+      body: JSON.stringify({ email: 'auth.user@example.test' })
+    });
+    assert.equal(rejectedOrigin.status, 403);
+    assert.equal(rejectedOrigin.headers.get('set-cookie'), null);
+
+    const first = await jsonRequest(fixture.url, '/auth/test-email-login', {
       method: 'POST',
       headers: { origin: 'capacitor://localhost' },
-      body: JSON.stringify({ email: 'primary-user@example.com' })
+      body: JSON.stringify({ email: ' Auth.User@example.test ' })
     });
-    assert.equal(nativeBypass.status, 403);
-    assert.equal(nativeBypass.headers.get('set-cookie'), null);
-
-    const rejected = await jsonRequest(fixture.url, '/auth/test-email-login', {
-      method: 'POST',
-      headers: { origin: 'https://a.test.brightos.world' },
-      body: JSON.stringify({ email: 'wrong@example.com' })
-    });
-    assert.equal(rejected.status, 401);
-    assert.equal(rejected.headers.get('set-cookie'), null);
-
-    const accepted = await jsonRequest(fixture.url, '/auth/test-email-login', {
-      method: 'POST',
-      headers: { origin: 'https://a.test.brightos.world' },
-      body: JSON.stringify({ email: ' PRIMARY-USER@example.com ' })
-    });
-    assert.equal(accepted.status, 200);
-    assert.equal(accepted.body.authenticated, true);
-    assert.equal(accepted.body.user.id, 'primary-user');
-    const cookie = accepted.headers.get('set-cookie');
-    assert.match(cookie, /^brai_session=/);
+    assert.equal(first.status, 200);
+    assert.equal(first.body.authenticated, true);
+    assert.equal(first.body.user.email, 'auth.user@example.test');
+    assert.equal(fixture.store.primaryUserId(), first.body.user.id);
+    assert.equal(sentOtps.length, 0);
+    const firstCookie = first.headers.get('set-cookie');
+    assert.match(firstCookie, /better-auth\.session_token=/);
 
     const activities = await jsonRequest(fixture.url, '/v1/activities', {
-      headers: { cookie }
+      headers: { cookie: firstCookie, origin: 'capacitor://localhost' }
     });
     assert.equal(activities.status, 200);
+
+    const repeat = await jsonRequest(fixture.url, '/auth/test-email-login', {
+      method: 'POST',
+      headers: { origin: 'https://a.test.brai.one' },
+      body: JSON.stringify({ email: 'auth.user@example.test' })
+    });
+    assert.equal(repeat.status, 200);
+    assert.equal(repeat.body.user.id, first.body.user.id);
+    assert.equal(sentOtps.length, 0);
+
+    const second = await jsonRequest(fixture.url, '/auth/test-email-login', {
+      method: 'POST',
+      headers: { origin: 'https://a.test.brai.one' },
+      body: JSON.stringify({ email: 'second@example.com' })
+    });
+    assert.equal(second.status, 200);
+    assert.notEqual(second.body.user.id, first.body.user.id);
+    assert.equal(fixture.store.primaryUserId(), first.body.user.id);
   } finally {
     await fixture.close();
   }
