@@ -1229,6 +1229,7 @@ function isTrustedAppOrigin(origin) {
 function isTestEmailLoginOrigin(origin) {
   if (origin === 'https://dev.brightos.world') return true;
   if (/^https:\/\/[a-e]\.test\.brightos\.world$/.test(origin ?? '')) return true;
+  if (/^https:\/\/[a-e]\.test\.brai\.one$/.test(origin ?? '')) return true;
   return /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin ?? '');
 }
 
