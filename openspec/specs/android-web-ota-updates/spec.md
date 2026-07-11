@@ -23,7 +23,7 @@ Brai Android SHALL discover mobile web-layer updates from a self-hosted update m
 #### Scenario: Manifest is requested
 - **WHEN** the Android app has network access and performs an update check
 - **THEN** it requests the configured self-hosted manifest URL
-- **AND** the production default is `https://app.brightos.world/mobile-update/manifest.json`
+- **AND** the production default is `https://app.brai.one/mobile-update/manifest.json`
 
 #### Scenario: Manifest describes a bundle
 - **WHEN** the manifest is valid

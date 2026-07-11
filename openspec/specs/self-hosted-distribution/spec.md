@@ -39,7 +39,7 @@ Brai SHALL distinguish open-source/self-hostable dependencies from managed propr
 Brai SHALL select its API base URL from deployment/runtime configuration rather than exposing an in-app user-editable server URL setting.
 
 #### Scenario: Production web deployment runs
-- **WHEN** the client runs as the `app.brightos.world` web app
+- **WHEN** the client runs as the `app.brai.one` web app
 - **THEN** it uses same-origin `/api/*`
 - **AND** Brai API authorizes data requests using session cookies or explicit Bearer auth without exposing private tokens in the browser bundle
 
@@ -53,7 +53,7 @@ Brai SHALL host Android web-layer OTA updates on the configured Brai server rath
 
 #### Scenario: Production app checks for updates
 - **WHEN** the production Android app checks for web-layer updates
-- **THEN** it uses the Brai self-hosted update manifest under `app.brightos.world`
+- **THEN** it uses the Brai self-hosted update manifest under `app.brai.one`
 - **AND** does not require a proprietary OTA service account
 
 #### Scenario: Self-hosted deployment is configured
