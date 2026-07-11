@@ -25,10 +25,11 @@ completed.
 
 `GET /auth/session` only reads an existing Better Auth or signed legacy session.
 It never creates one. Preview/Dev explicitly enables `POST
-/auth/test-email-login`; the route accepts only the primary account email and
-creates the normal primary session cookie. The route is absent in production.
-The shared client selects email-only for non-production web, password for every
-native shell, and OTP for production web.
+/auth/test-email-login`; the route accepts any valid email from trusted
+Preview/Dev, localhost, or Capacitor origins, then creates or reuses the normal
+Better Auth user/session without sending OTP mail. The route is absent in
+production. The shared client selects email-only for non-production web/Android
+and OTP for production web/Android.
 
 The deployment env migration removes `BRAI_TEST_AUTO_LOGIN`, enables
 `BRAI_TEST_EMAIL_LOGIN`, and rotates the Preview/Dev signed-session secret once

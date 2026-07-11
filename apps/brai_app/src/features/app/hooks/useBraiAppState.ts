@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type SetStateAction } from "react";
-import { BraiApi } from "@/shared/api/braiApi";
+import { BraiApi, DEFAULT_APP_SETTINGS, type AppSettings } from "@/shared/api/braiApi";
 import { defaultApiBase, isProductionEnvironment } from "@/shared/config/runtime";
 import {
   acknowledgeAndroidActionsWidgetStatusChanges,
@@ -19,7 +19,7 @@ import { acknowledgeInboxEvents, loadInboxState, markInboxAttempt, markInboxFail
 import { getBraiLocalStorageItem, setBraiLocalStorageItem } from "@/shared/storage/localStorageKeys";
 import { projectHistoryData, projectTimerState } from "@/shared/storage/projection";
 import { acknowledgeEvents, enqueueFocusIntervalEdit, enqueueFocusSessionDelete, enqueueFocusSessionEdit, enqueueStartActionFocus, enqueueStopActionFocus, enqueueSwitchActionFocus, enqueueTimerEvent, loadCanonicalState, loadGoalCache, loadHistoryCache, markAttempt, markFailure, pendingEvents, saveCanonicalState, saveGoalCache, saveHistoryCache, saveIgnoredEvents } from "@/shared/storage/syncStore";
-import { tickTimerState } from "@/shared/time/format";
+import { setDisplayTimeZone, tickTimerState } from "@/shared/time/format";
 import type { ActionsState } from "@/shared/types/activities";
 import { emptyActionsState } from "@/shared/types/activities";
 import type { InboxState } from "@/shared/types/inbox";
@@ -39,6 +39,7 @@ import { useBraiVersion } from "./useBraiVersion";
 
 const ANDROID_ACTIONS_WIDGET_STATUS_POLL_MS = 250;
 const ANDROID_ACTIONS_WIDGET_SNAPSHOT_DEBOUNCE_MS = 75;
+const APP_SETTINGS_STORAGE_KEY = "brai_app_settings";
 
 /**
  * Owns the Brai client state machine, local cache loading, and sync flow.
@@ -48,7 +49,8 @@ export function useBraiAppState(initialSection: SectionId) {
   const { setTheme, theme } = useBraiTheme();
   const { bundlePublishedAt, otaCheckedAt, otaRefreshing, otaState, refreshOtaStateOnce } =
     useBraiOta();
-  const [todayKey] = useState(() => moscowTodayKey());
+  const [appSettings, setAppSettingsState] = useState<AppSettings>(loadAppSettingsPreference);
+  const [todayKey, setTodayKey] = useState(() => moscowTodayKey());
   const [apiBase, setApiBase] = useState(defaultApiBase());
   const api = useMemo(() => new BraiApi(apiBase), [apiBase]);
   const { refreshVersionOnce, versionCheckedAt, versionError, versionRefreshing, versionState } = useBraiVersion(api);
@@ -93,8 +95,15 @@ export function useBraiAppState(initialSection: SectionId) {
   const [mobileContextPanel, setMobileContextPanel] = useState<MobileContextPanel | null>(null);
   const [mobileContextPanelClosing, setMobileContextPanelClosing] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [authMode] = useState(() => resolveAuthMode(isNativeShell(), isProductionEnvironment()));
+  const [authMode] = useState(() => resolveAuthMode(isProductionEnvironment()));
   const mobileViewport = useMobileNavigationViewport();
+
+  function applyAppSettings(settings: AppSettings) {
+    setDisplayTimeZone(settings.display_timezone);
+    setAppSettingsState(settings);
+    setTodayKey(moscowTodayKey());
+    saveAppSettingsPreference(settings);
+  }
 
   function setTimerSnapshot(nextState: TimerState) {
     setTimer((current) => (current.server_revision > nextState.server_revision ? current : nextState));
@@ -190,13 +199,15 @@ export function useBraiAppState(initialSection: SectionId) {
   async function refreshAll(sourceApi = apiRef.current) {
     setBusy(true);
     try {
-      const [nextState, nextHistory, nextGoal, nextActions, nextInbox] = await Promise.all([
+      const [nextSettings, nextState, nextHistory, nextGoal, nextActions, nextInbox] = await Promise.all([
+        sourceApi.settings(),
         sourceApi.state(),
         sourceApi.history(),
         sourceApi.goal(),
         sourceApi.actions(),
         sourceApi.inbox(),
       ]);
+      applyAppSettings(nextSettings);
       const [queued, queuedInbox] = await Promise.all([pendingEvents(), pendingInboxEvents()]);
       let queuedActions = await pendingActionEvents();
       const accepted =
@@ -301,6 +312,21 @@ export function useBraiAppState(initialSection: SectionId) {
     historyGoalRevisionRef.current = serverRevision;
     setHistory(projectHistoryData(normalizedHistory, await pendingEvents()));
     setGoal(nextGoal);
+  }
+
+  async function updateAppSettings(patch: Parameters<BraiApi["updateSettings"]>[0]) {
+    setBusy(true);
+    try {
+      const nextSettings = await apiRef.current.updateSettings(patch);
+      applyAppSettings(nextSettings);
+      setTimer((current) => ({ ...current, timezone: nextSettings.display_timezone }));
+      await refreshHistoryAndGoal(apiRef.current, timerRevisionRef.current);
+    } catch (error) {
+      handleError(error);
+      throw error;
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function refreshActionsAndFlush(sourceApi = apiRef.current) {
@@ -644,6 +670,7 @@ export function useBraiAppState(initialSection: SectionId) {
     try {
       const result = await api.testEmailLogin(email);
       if (result.authenticated) {
+        authDisplayNameRef.current = result.user?.name ?? "";
         await ensureClientUser(result.user?.id ?? null);
         resetUserSnapshots();
         setSyncStatus("connecting");
@@ -652,27 +679,6 @@ export function useBraiAppState(initialSection: SectionId) {
     } catch (error) {
       setSyncStatus("auth_required");
       throw error;
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function onLogin(password: string) {
-    setBusy(true);
-    try {
-      const result = await api.login(password);
-      if (result.authenticated) {
-        authDisplayNameRef.current = result.user?.name ?? "";
-        await ensureClientUser(result.user?.id ?? null);
-        resetUserSnapshots();
-        setSyncStatus("connecting");
-        await refreshAll();
-        return true;
-      }
-      return false;
-    } catch {
-      setSyncStatus("auth_required");
-      return false;
     } finally {
       setBusy(false);
     }
@@ -1028,7 +1034,25 @@ export function useBraiAppState(initialSection: SectionId) {
     setSyncStatus,
   });
 
-  return { actionOverlayOpen, actions, actionsInfoActive, active, authDisplayName: authDisplayNameRef.current, authMode, bundlePublishedAt, busy, displaySyncStatus, focusBackground, focusContextPanel, focusGoalActive, focusHistoryActive, goal, history, inbox, inboxInfoActive, localSnapshotReady, markMobileContextPanelClosing, mobileContextPanel, mobileMenuOpen, ...actionCommands, ...inboxCommands, onDeleteFocusSession, onEditFocusInterval, onEditFocusSession, onEmailLogin, onLogin, onLogout, onRequestOtp, onStart, onStartActionFocus, onStop, onStopActionFocus, onSwitchActionFocus, onVerifyOtp, openSettingsPage, otaCheckedAt, otaRefreshing, otaState, refreshEngineOnce, refreshOtaStateOnce, section, selectSection, setActionOverlayOpen, setFocusBackground, setMobileContextPanel: setMobileContextPanelState, setMobileMenuOpen, setTheme, swipeNavigation, theme, timer, timerBusy, todayKey, toggleActionsInfoPanel, toggleFocusContextPanel, toggleInboxInfoPanel, totalPendingCount, versionCheckedAt, versionError, versionRefreshing, versionState };
+  return { actionOverlayOpen, actions, actionsInfoActive, active, appSettings, authDisplayName: authDisplayNameRef.current, authMode, bundlePublishedAt, busy, displaySyncStatus, focusBackground, focusContextPanel, focusGoalActive, focusHistoryActive, goal, history, inbox, inboxInfoActive, localSnapshotReady, markMobileContextPanelClosing, mobileContextPanel, mobileMenuOpen, ...actionCommands, ...inboxCommands, onDeleteFocusSession, onEditFocusInterval, onEditFocusSession, onEmailLogin, onLogout, onRequestOtp, onStart, onStartActionFocus, onStop, onStopActionFocus, onSwitchActionFocus, onUpdateAppSettings: updateAppSettings, onVerifyOtp, openSettingsPage, otaCheckedAt, otaRefreshing, otaState, refreshEngineOnce, refreshOtaStateOnce, section, selectSection, setActionOverlayOpen, setFocusBackground, setMobileContextPanel: setMobileContextPanelState, setMobileMenuOpen, setTheme, swipeNavigation, theme, timer, timerBusy, todayKey, toggleActionsInfoPanel, toggleFocusContextPanel, toggleInboxInfoPanel, totalPendingCount, versionCheckedAt, versionError, versionRefreshing, versionState };
+}
+
+function loadAppSettingsPreference(): AppSettings {
+  if (typeof window === "undefined") return DEFAULT_APP_SETTINGS;
+  try {
+    const parsed = JSON.parse(getBraiLocalStorageItem(APP_SETTINGS_STORAGE_KEY) ?? "null") as Partial<AppSettings> | null;
+    const settings = { ...DEFAULT_APP_SETTINGS, ...(parsed ?? {}) };
+    setDisplayTimeZone(settings.display_timezone);
+    return settings;
+  } catch {
+    setDisplayTimeZone(DEFAULT_APP_SETTINGS.display_timezone);
+    return DEFAULT_APP_SETTINGS;
+  }
+}
+
+function saveAppSettingsPreference(settings: AppSettings) {
+  if (typeof window === "undefined") return;
+  setBraiLocalStorageItem(APP_SETTINGS_STORAGE_KEY, JSON.stringify(settings));
 }
 
 function loadFocusContextPanelPreference(): FocusContextPanel {

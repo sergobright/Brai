@@ -133,6 +133,14 @@ export function cloneSourceForRemote(remote) {
   return Object.keys(remote.env ?? {}).length > 0 ? remote.url : ROOT;
 }
 
+export function commandFailureMessage(command, code, stdout, stderr) {
+  const tail = (value) => String(value ?? "").trim().split("\n").slice(-40).join("\n").slice(-6000);
+  const parts = [`${command} exited ${code}`];
+  if (tail(stderr)) parts.push(`stderr:\n${tail(stderr)}`);
+  if (tail(stdout)) parts.push(`stdout:\n${tail(stdout)}`);
+  return parts.join("\n");
+}
+
 async function fetchBranch(checkout, branch, remote) {
   await runCommand("git", [
     "-C",
@@ -226,7 +234,7 @@ function runCommand(command, args, { cwd = ROOT, env = process.env, allowFailure
     child.on("close", (code) => {
       const result = { code, stdout, stderr };
       if (code === 0 || allowFailure) resolve(result);
-      else reject(Object.assign(new Error(`${command} exited ${code}: ${stderr || stdout}`), result));
+      else reject(Object.assign(new Error(commandFailureMessage(command, code, stdout, stderr)), result));
     });
   });
 }

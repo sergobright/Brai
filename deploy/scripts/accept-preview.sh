@@ -2,6 +2,11 @@
 set -euo pipefail
 
 BASE_BRANCH="${BRAI_ACCEPT_BASE:-main}"
+MODE="accept"
+if [[ "${1:-}" == "--cancel" ]]; then
+  MODE="cancel"
+  shift
+fi
 BRANCH="${1:-}"
 INFRA_DOCS_LABEL="brai-delivery:infra-docs"
 TECHNICAL_NO_PREVIEW_LABEL="brai-delivery:technical-no-preview"
@@ -9,10 +14,13 @@ MERGE_METHOD="${BRAI_ACCEPT_MERGE_METHOD:-squash}"
 
 usage() {
   cat <<'USAGE'
-usage: deploy/scripts/accept-preview.sh [codex/<task-branch>]
+usage: deploy/scripts/accept-preview.sh [--cancel] [codex/<task-branch>]
 
 Creates or reuses a GitHub PR from a Brai preview branch into the accepted base, then
 enables GitHub merge/auto-merge for the exact pushed head commit.
+
+With --cancel, disables auto-merge for the branch's open acceptance PR and records an
+idempotent local cancellation receipt.
 USAGE
 }
 
@@ -202,6 +210,21 @@ mark_reconcile_required() {
   echo "Run: node scripts/brai-task.mjs acceptance-reconcile $BRANCH"
 }
 
+cancel_acceptance() {
+  local pr_number pr_url
+  pr_number="$(gh pr list --base "$BASE_BRANCH" --head "$BRANCH" --state open --json number --jq ".[0].number // \"\"")"
+  if [[ -z "$pr_number" ]]; then
+    echo "No open acceptance PR for $BRANCH; acceptance is already absent."
+    write_acceptance_marker "cancelled"
+    return
+  fi
+  pr_url="$(gh pr view "$pr_number" --json url --jq ".url")"
+  gh pr merge "$pr_number" --disable-auto >/dev/null 2>&1 || true
+  write_acceptance_marker "cancelled" "$pr_number" "$pr_url"
+  echo "Acceptance cancelled for $BRANCH"
+  echo "PR: $pr_url"
+}
+
 if [[ -n "$(git status --porcelain)" ]]; then
   echo "Working tree must be clean before accepting preview work." >&2
   exit 1
@@ -211,6 +234,11 @@ ensure_acceptance_marker_writable
 
 git fetch origin "$BASE_BRANCH:refs/remotes/origin/$BASE_BRANCH" "$BRANCH:refs/remotes/origin/$BRANCH"
 HEAD_SHA="$(git rev-parse "origin/$BRANCH")"
+
+if [[ "$MODE" == "cancel" ]]; then
+  cancel_acceptance
+  exit 0
+fi
 
 if git merge-base --is-ancestor "$HEAD_SHA" "origin/$BASE_BRANCH"; then
   echo "Preview branch already accepted: $HEAD_SHA is included in origin/$BASE_BRANCH"

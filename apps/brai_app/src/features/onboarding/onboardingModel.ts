@@ -13,7 +13,7 @@ export type OnboardingStep =
   | "path"
   | "name"
   | "profile-version"
-  | "cloud-password"
+  | "cloud-login"
   | "self-hosted-key"
   | "setup-start"
   | "features"
@@ -78,8 +78,8 @@ export function loadOnboardingState(): OnboardingState {
     const parsed = JSON.parse(raw) as Partial<OnboardingState>;
     return {
       complete: Boolean(parsed.complete),
-      step: isOnboardingStep(parsed.step) ? parsed.step : "start",
-      history: Array.isArray(parsed.history) ? parsed.history.filter(isOnboardingStep) : [],
+      step: normalizeOnboardingStep(parsed.step) ?? "start",
+      history: Array.isArray(parsed.history) ? parsed.history.map(normalizeOnboardingStep).filter(isDefinedOnboardingStep) : [],
       path: parsed.path === "new" || parsed.path === "existing" ? parsed.path : null,
       profileVersion: parsed.profileVersion === "cloud" || parsed.profileVersion === "self-hosted" ? parsed.profileVersion : null,
       voiceMode: parsed.voiceMode === "provider" || parsed.voiceMode === "local" || parsed.voiceMode === "cloud" ? parsed.voiceMode : null,
@@ -105,6 +105,15 @@ function isOnboardingStep(value: unknown): value is OnboardingStep {
   return typeof value === "string" && orderedSteps.includes(value as OnboardingStep);
 }
 
+function normalizeOnboardingStep(value: unknown): OnboardingStep | null {
+  if (value === "cloud-password") return "cloud-login";
+  return isOnboardingStep(value) ? value : null;
+}
+
+function isDefinedOnboardingStep(value: OnboardingStep | null): value is OnboardingStep {
+  return value != null;
+}
+
 const orderedSteps: OnboardingStep[] = [
   "start",
   "welcome-1",
@@ -114,7 +123,7 @@ const orderedSteps: OnboardingStep[] = [
   "path",
   "name",
   "profile-version",
-  "cloud-password",
+  "cloud-login",
   "self-hosted-key",
   "setup-start",
   "features",

@@ -1,5 +1,6 @@
 node_modules/
 .npm/
+.log4brains/
 .android/
 .cache/
 .config/

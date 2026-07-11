@@ -230,6 +230,14 @@ if command -v systemctl >/dev/null 2>&1 && [[ "${BRAI_RESTART_SERVICE:-true}" !=
   echo "Restarting $SERVICE_NAME..."
   "${BRAI_SUDO:-sudo}" systemctl restart "$SERVICE_NAME"
   wait_for_preview_api
+  if [[ "$ENVIRONMENT" == "prod" ]]; then
+    echo "Running Codex CLI service smoke as brai..."
+    "${BRAI_SUDO:-sudo}" -u brai env \
+      HOME=/srv/opt/codex-runtime/brai \
+      CODEX_HOME=/srv/opt/codex-runtime/brai \
+      BRAI_CODEX_MODEL="${BRAI_CODEX_MODEL:-gpt-5.4-mini}" \
+      "$SCRIPT_DIR/codex-cli-smoke.sh"
+  fi
   if [[ -n "$ADMIN_SERVICE_NAME" ]]; then
     echo "Restarting $ADMIN_SERVICE_NAME..."
     "${BRAI_SUDO:-sudo}" systemctl restart "$ADMIN_SERVICE_NAME"

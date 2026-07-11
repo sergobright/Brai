@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, vi } from "vitest";
-import { clientDb } from "@/shared/storage/db";
+import { DEFAULT_APP_SETTINGS } from "@/shared/api/braiApi";
+import { clientDb, setMeta } from "@/shared/storage/db";
 
 const otaPlugin = vi.hoisted(() => ({
   getState: vi.fn(),
@@ -60,6 +61,7 @@ export function setupBraiAppTest() {
   beforeEach(async () => {
     const db = clientDb();
     await Promise.all(db.tables.map((table) => table.clear()));
+    await setMeta("currentUserId", "test-user");
     otaPlugin.getState.mockReset();
     otaPlugin.checkForUpdates.mockReset();
     otaPlugin.markReady.mockReset();
@@ -132,6 +134,12 @@ export function setupBraiAppTest() {
       }
       if (url.endsWith("/v1/version")) {
         return new Response(JSON.stringify(testVersionState("0.0.10")), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.endsWith("/v1/settings")) {
+        return new Response(JSON.stringify(DEFAULT_APP_SETTINGS), {
           status: 200,
           headers: { "content-type": "application/json" },
         });

@@ -53,7 +53,7 @@ Brai clients SHALL record activity mutations locally before showing the mutation
 - **AND** it syncs when the API becomes available
 
 ### Requirement: Activities API is authenticated
-Activities API endpoints SHALL require the same Bearer token or password-session authorization used by existing v1 API endpoints.
+Activities API endpoints SHALL require the same Bearer token or Brai API session-cookie authorization used by existing v1 API endpoints.
 
 #### Scenario: Unauthorized request
 - **WHEN** a request without valid authorization calls an Activities v1 endpoint

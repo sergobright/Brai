@@ -837,9 +837,7 @@ describe("mobile OTA publish scripts", () => {
     registry = JSON.parse(await readFile(path.join(envsRoot, "preview-slots.json"), "utf8"));
     expect(registry.A.status).toBe("free");
     expect(registry.A.branch).toBeNull();
-    const statusHtml = await readFile(path.join(envsRoot, "preview-status/index.html"), "utf8");
-    expect(statusHtml).toContain("Brai Preview Slots");
-    expect(statusHtml).toContain("APK versionCode");
+    await expect(readFile(path.join(envsRoot, "preview-status/index.html"), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   it("commits preview APK counters per branch and stable version only after a ready preview", async () => {

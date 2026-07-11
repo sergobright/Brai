@@ -14,6 +14,7 @@ import {
   KeyRound,
   Lock,
   LoaderCircle,
+  Mail,
   Mic,
   MonitorUp,
   Radio,
@@ -59,8 +60,8 @@ import {
 type OnboardingFlowProps = {
   authRequired: boolean;
   busy: boolean;
-  authMode: "otp" | "password";
-  onLogin: (password: string) => Promise<boolean>;
+  authMode: "email" | "otp";
+  onEmailLogin: (email: string) => Promise<void>;
   onRequestOtp: (email: string) => Promise<void>;
   onStartupScreenChange: (active: boolean) => void;
   onVerifyOtp: (email: string, otp: string) => Promise<void>;
@@ -126,7 +127,7 @@ export function OnboardingFlow({
   authMode,
   busy,
   onDone,
-  onLogin,
+  onEmailLogin,
   onOpenNativeCmdSettings,
   onRequestOtp,
   onStartupScreenChange,
@@ -160,7 +161,9 @@ export function OnboardingFlow({
   const isAndroid = isNativeShell() && platformName() === "android";
 
   useEffect(() => {
+    const initialStep = stepRef.current;
     const loadTimer = window.setTimeout(() => {
+      if (stepRef.current !== initialStep) return;
       const next = loadInitialOnboardingState(authRequired);
       stateRef.current = next;
       stepRef.current = next.step;
@@ -286,11 +289,14 @@ export function OnboardingFlow({
     if (screenTransitionDelayMs === 0) {
       saveOnboardingState(next);
       stateRef.current = next;
+      stepRef.current = next.step;
       setState(next);
       return;
     }
     if (transitionTimerRef.current != null) window.clearTimeout(transitionTimerRef.current);
     if (transitionFrameRef.current != null) window.cancelAnimationFrame(transitionFrameRef.current);
+    stateRef.current = next;
+    stepRef.current = next.step;
     setScreenTransitioning(true);
     transitionTimerRef.current = window.setTimeout(() => {
       saveOnboardingState(next);
@@ -413,7 +419,7 @@ export function OnboardingFlow({
   }
 
   function chooseProfileVersion(profileVersion: ProfileVersion) {
-    go(profileVersion === "cloud" ? "cloud-password" : "self-hosted-key", { profileVersion });
+    go(profileVersion === "cloud" ? "cloud-login" : "self-hosted-key", { profileVersion });
   }
 
   function chooseVoiceMode(voiceMode: VoiceMode) {
@@ -422,15 +428,8 @@ export function OnboardingFlow({
     if (voiceMode === "cloud") go("cloud-privacy", { voiceMode });
   }
 
-  async function submitCloudLogin(password: string) {
-    setError("");
-    try {
-      const authenticated = await onLogin(password);
-      if (!authenticated) throw new Error("Login failed");
-      go("setup-start");
-    } catch {
-      setError("Пароль не подошел. Проверьте его и попробуйте снова.");
-    }
+  async function submitCloudLogin(email: string) {
+    await onEmailLogin(email);
   }
 
   async function submitAccessKey(key: string) {
@@ -633,20 +632,21 @@ export function OnboardingFlow({
           title="Какой профиль подключаем?"
           text="Выберите источник существующего профиля."
           choices={[
-            { icon: Cloud, title: "Облачная версия", text: "Авторизация паролем через серверы Brai.", onClick: () => chooseProfileVersion("cloud") },
+            { icon: Cloud, title: "Облачная версия", text: "Авторизация через Better Auth на серверах Brai.", onClick: () => chooseProfileVersion("cloud") },
             { icon: Server, title: "Self-hosted версия", text: "Подключение по ключу доступа вашего сервера.", onClick: () => chooseProfileVersion("self-hosted") },
           ]}
         />
       );
     }
 
-    if (state.step === "cloud-password") {
+    if (state.step === "cloud-login") {
       return (
         <OnboardingAuthForm
           busy={busy}
-          intro={<InfoBlock icon={Lock} title="Вход в облачный профиль" text="Пока для входа нужен только пароль." />}
-          mode="password"
-          onLogin={submitCloudLogin}
+          intro={<InfoBlock icon={Mail} title="Вход в облачный профиль" text={authMode === "otp" ? "Введите email, получите код и подтвердите вход." : "Введите email, код в Dev/Preview не нужен."} />}
+          mode={authMode}
+          onAuthenticated={() => go("setup-start")}
+          onEmailLogin={submitCloudLogin}
           onRequestOtp={onRequestOtp}
           onVerifyOtp={onVerifyOtp}
         />
@@ -773,7 +773,7 @@ export function OnboardingFlow({
     if (state.step === "voice-ready") return <InfoScreen icon={CheckCircle2} title="Голосовое управление настроено" text="Brai CMD готов принимать голос, работать с очередью и вставлять результат в поле."><PrimaryButton onClick={completeSetup}>Готово</PrimaryButton></InfoScreen>;
     if (state.step === "login-check") return <InfoScreen icon={Lock} title="Проверяем вход" text="Если профиль уже открыт, вы попадете в кабинет. Если нет — доступ будет ограничен входом и настройками."><PrimaryButton onClick={() => authRequired ? go("locked") : onDone()}>Продолжить</PrimaryButton></InfoScreen>;
     if (state.step === "locked") return <InfoScreen icon={Lock} title="Нужен вход" text="Пока вы не вошли, доступны только вход и настройки Brai CMD."><SecondaryButton onClick={openCmdSettings}>Настройки Brai CMD</SecondaryButton><PrimaryButton onClick={() => go("login")}>Войти</PrimaryButton></InfoScreen>;
-    if (state.step === "login") return <OnboardingAuthForm busy={busy} mode={authMode} onLogin={onLogin} onRequestOtp={onRequestOtp} onVerifyOtp={onVerifyOtp} />;
+    if (state.step === "login") return <OnboardingAuthForm busy={busy} mode={authMode} onEmailLogin={onEmailLogin} onRequestOtp={onRequestOtp} onVerifyOtp={onVerifyOtp} />;
     if (state.step === "cmd-settings") {
       return (
         <InfoScreen
@@ -1106,26 +1106,33 @@ function OnboardingAuthForm({
   busy,
   intro,
   mode,
-  onLogin,
+  onAuthenticated,
+  onEmailLogin,
   onRequestOtp,
   onVerifyOtp,
 }: {
   busy: boolean;
   intro?: ReactNode;
-  mode: "otp" | "password";
-  onLogin: (password: string) => Promise<unknown>;
+  mode: "email" | "otp";
+  onAuthenticated?: () => void;
+  onEmailLogin: (email: string) => Promise<void>;
   onRequestOtp: (email: string) => Promise<void>;
   onVerifyOtp: (email: string, otp: string) => Promise<void>;
 }) {
-  const [password, setPassword] = useState("");
   const [email, setEmail] = useState("");
   const [otp, setOtp] = useState("");
   const [otpSent, setOtpSent] = useState(false);
   const [error, setError] = useState("");
 
-  async function submitPassword(event: FormEvent<HTMLFormElement>) {
+  async function submitEmail(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    await onLogin(password);
+    setError("");
+    try {
+      await onEmailLogin(email);
+      onAuthenticated?.();
+    } catch {
+      setError("Email не подошёл.");
+    }
   }
 
   async function submitOtp(event: FormEvent<HTMLFormElement>) {
@@ -1138,33 +1145,38 @@ function OnboardingAuthForm({
         return;
       }
       await onVerifyOtp(email, otp);
+      onAuthenticated?.();
     } catch {
       setError(otpSent ? "Код не подошел." : "Не удалось отправить код.");
     }
   }
 
-  if (mode === "password") {
+  if (mode === "email") {
     return (
-      <form className="flex min-h-0 flex-1 flex-col overflow-hidden" onSubmit={submitPassword}>
+      <form className="flex min-h-0 flex-1 flex-col overflow-hidden" onSubmit={submitEmail}>
         <div className="grid min-h-0 flex-1 content-center gap-4 overflow-hidden py-4">
           {intro}
           <FieldGroup>
-            <Field>
-              <FieldLabel htmlFor="onboarding-password">Пароль</FieldLabel>
+            <Field data-invalid={Boolean(error)}>
+              <FieldLabel htmlFor="onboarding-email">Email</FieldLabel>
               <Input
-                id="onboarding-password"
-                value={password}
-                type="password"
-                autoComplete="current-password"
-                aria-label="Пароль"
+                id="onboarding-email"
+                value={email}
+                type="email"
+                autoComplete="email"
+                inputMode="email"
+                placeholder="email"
+                aria-label="Email"
+                aria-invalid={Boolean(error)}
                 disabled={busy}
-                onChange={(event) => setPassword(event.target.value)}
+                onChange={(event) => setEmail(event.target.value)}
               />
+              <FieldDescription>{error || "В Dev/Preview код не нужен."}</FieldDescription>
             </Field>
           </FieldGroup>
         </div>
         <StepActions>
-          <PrimaryButton disabled={busy || !password}>Открыть</PrimaryButton>
+          <PrimaryButton disabled={busy || !email}>Войти</PrimaryButton>
         </StepActions>
       </form>
     );

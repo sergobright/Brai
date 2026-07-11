@@ -38,6 +38,10 @@ const codexModel = process.env.BRAI_CODEX_MODEL?.trim() || null;
 const codexFallbackModel = process.env.BRAI_CODEX_FALLBACK_MODEL?.trim() || null;
 const parsedCodexTimeoutMs = Number(process.env.BRAI_CODEX_TIMEOUT_MS);
 const codexTimeoutMs = Number.isFinite(parsedCodexTimeoutMs) ? parsedCodexTimeoutMs : null;
+const inboxExternalAi = {
+  groqApiKey: process.env.BRAI_INBOX_GROQ_API_KEY ?? process.env.GROQ_API_KEY ?? '',
+  openaiApiKey: process.env.BRAI_INBOX_OPENAI_API_KEY ?? process.env.OPENAI_API_KEY ?? ''
+};
 const releaseDir =
   process.env.BRAI_RELEASE_DIR ?? path.resolve(serviceRoot, '..', '..', 'deploy', 'releases');
 const databaseBranch = process.env.BRAI_SUPABASE_BRANCH ?? '';
@@ -65,7 +69,8 @@ const inboxWorkflow = await createInboxWorkflowRuntime({
   codexBin,
   codexModel,
   codexFallbackModel,
-  codexTimeoutMs
+  codexTimeoutMs,
+  externalAi: inboxExternalAi
 });
 await inboxWorkflow.recoverQueued();
 inboxWorkflow.startQueuedReconciler();
@@ -91,6 +96,7 @@ const runtime = createBraiServer({
   codexModel,
   codexFallbackModel,
   codexTimeoutMs,
+  inboxExternalAi,
   inboxWorkflowStarter: inboxWorkflow.start,
   testEmailLogin,
   braiCmd: {

@@ -4,6 +4,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { TextDecoder } from 'node:util';
+import {
+  DEFAULT_INBOX_IMAGE_MODEL,
+  DEFAULT_INBOX_TEXT_MODEL
+} from './store-app-settings.js';
 import { INBOX_WORKFLOW_DEFINITION_VERSION } from './store-workflows.js';
 import { scopedUserId } from './user-scope.js';
 
@@ -11,6 +15,8 @@ export const INBOX_BODY_LIMIT_BYTES = 16 * 1024 * 1024;
 export const DEFAULT_INBOX_CODEX_BIN = '/srv/opt/codex-cli/bin/codex';
 export const DEFAULT_INBOX_CODEX_MODEL = 'gpt-5.4-mini';
 
+const GROQ_CHAT_COMPLETIONS_URL = 'https://api.groq.com/openai/v1/chat/completions';
+const OPENAI_RESPONSES_URL = 'https://api.openai.com/v1/responses';
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 const PDF_SIGNATURE = Buffer.from('%PDF-');
 const MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024;
@@ -352,6 +358,7 @@ export async function processInboxItem({
   codexModel,
   codexFallbackModel,
   codexTimeoutMs,
+  externalAi = {},
   imageDescriber,
   normalizer,
   nowDate = new Date()
@@ -375,6 +382,7 @@ export async function processInboxItem({
         codexBin,
         codexModel,
         codexTimeoutMs,
+        externalAi,
         imageDescriber,
         nowDate
       });
@@ -398,6 +406,7 @@ export async function processInboxItem({
         codexBin,
         codexModel: attempt > 1 && codexFallbackModel ? codexFallbackModel : codexModel,
         codexTimeoutMs,
+        externalAi,
         normalizer,
         nowDate
       });
@@ -497,6 +506,7 @@ export async function describeInboxImagesForWorkflow({
   codexBin,
   codexModel,
   codexTimeoutMs,
+  externalAi = {},
   imageDescriber,
   nowDate = new Date()
 }) {
@@ -513,7 +523,16 @@ export async function describeInboxImagesForWorkflow({
   });
   if (!active) return { ok: false, error: 'workflow_not_active' };
   const agent = store.getAgent(INBOX_IMAGE_AGENT_ID);
-  const result = await describeImages({ agent, codexBin, codexModel, codexTimeoutMs, imageDescriber, imagePaths });
+  const result = await describeImages({
+    agent,
+    settings: store.appSettings?.(),
+    codexBin,
+    codexModel,
+    codexTimeoutMs,
+    externalAi,
+    imageDescriber,
+    imagePaths
+  });
   recordInboxImageAiLog(store, {
     agent,
     dt: nowDate.toISOString(),
@@ -544,6 +563,7 @@ export async function normalizeInboxRawForWorkflow({
   codexBin,
   codexModel,
   codexTimeoutMs,
+  externalAi = {},
   normalizer,
   nowDate = new Date()
 }) {
@@ -570,9 +590,11 @@ export async function normalizeInboxRawForWorkflow({
   const agent = store.getAgent(INBOX_NORMALIZER_AGENT_ID);
   const result = await normalizeInbox({
     agent,
+    settings: store.appSettings?.(),
     codexBin,
     codexModel,
     codexTimeoutMs,
+    externalAi,
     normalizer,
     item,
     classes,
@@ -804,12 +826,24 @@ function throwStatus(message, status) {
   throw error;
 }
 
-async function describeImages({ agent, codexBin, codexModel, codexTimeoutMs, imageDescriber, imagePaths }) {
+async function describeImages({ agent, settings, codexBin, codexModel, codexTimeoutMs, externalAi, imageDescriber, imagePaths }) {
   const startedAt = Date.now();
-  const model = codexModel ?? optionalText(agent?.llm_model) ?? '';
+  const external = settings?.model_provider_mode === 'external';
+  const model = external
+    ? cleanText(settings?.inbox_image_model) || DEFAULT_INBOX_IMAGE_MODEL
+    : codexModel ?? optionalText(agent?.llm_model) ?? '';
   try {
     const result = imageDescriber
       ? { text: await imageDescriber({ imagePaths }), model }
+      : external
+        ? { text: await openAiImageText({
+            apiKey: externalAi?.openaiApiKey,
+            fetchImpl: externalAi?.fetch,
+            model,
+            promptTemplate: optionalBodyText(agent?.llm_prompt_template) ?? DEFAULT_IMAGE_PROMPT_TEMPLATE,
+            timeoutMs: Number.isFinite(codexTimeoutMs) ? codexTimeoutMs : agent?.llm_timeout_ms,
+            imagePaths
+          }), model }
       : { text: await codexText({
         codexBin,
         codexModel: model || null,
@@ -829,9 +863,11 @@ async function describeImages({ agent, codexBin, codexModel, codexTimeoutMs, ima
 
 async function normalizeInbox({
   agent,
+  settings,
   codexBin,
   codexModel,
   codexTimeoutMs,
+  externalAi,
   normalizer,
   item,
   classes,
@@ -841,11 +877,29 @@ async function normalizeInbox({
   strictOutputSchema
 }) {
   const startedAt = Date.now();
-  const model = codexModel ?? optionalText(agent?.llm_model) ?? DEFAULT_INBOX_CODEX_MODEL;
+  const external = settings?.model_provider_mode === 'external';
+  const model = external
+    ? cleanText(settings?.inbox_text_model) || DEFAULT_INBOX_TEXT_MODEL
+    : codexModel ?? optionalText(agent?.llm_model) ?? DEFAULT_INBOX_CODEX_MODEL;
   let result;
   try {
     result = normalizer
       ? { text: await normalizer({ item, classes, imageDescription, validationError }), model }
+      : external
+        ? { text: await groqText({
+            apiKey: externalAi?.groqApiKey,
+            fetchImpl: externalAi?.fetch,
+            model,
+            promptTemplate: renderNormalizerPrompt(
+              optionalBodyText(agent?.llm_prompt_template) ?? DEFAULT_NORMALIZER_PROMPT_TEMPLATE,
+              item,
+              classes,
+              imageDescription,
+              validationError
+            ),
+            timeoutMs: Number.isFinite(codexTimeoutMs) ? codexTimeoutMs : agent?.llm_timeout_ms,
+            outputSchema: strictOutputSchema ? outputSchema : null
+          }), model }
       : { text: await codexText({
         codexBin,
         codexModel: model || null,
@@ -1062,6 +1116,127 @@ function normalizeBlocks({ imageDescription, analysis }) {
     imageDescription ? `## Описание картинки\n\n${imageDescription}` : '',
     analysis ? `## Разбор\n\n${analysis}` : ''
   ].filter(Boolean).join('\n\n').trim();
+}
+
+async function groqText({ apiKey, fetchImpl = fetch, model, promptTemplate, timeoutMs = 3000, outputSchema = null }) {
+  if (!apiKey) throw new Error('GROQ_API_KEY is not configured');
+  const body = {
+    model,
+    messages: [
+      { role: 'system', content: DEFAULT_NORMALIZER_CODEX_INSTRUCTIONS },
+      { role: 'user', content: promptTemplate }
+    ],
+    temperature: 0
+  };
+  if (outputSchema) {
+    body.response_format = {
+      type: 'json_schema',
+      json_schema: {
+        name: 'inbox_normalization',
+        schema: outputSchema
+      }
+    };
+  }
+  const payload = await requestJson(GROQ_CHAT_COMPLETIONS_URL, {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${apiKey}`,
+      'content-type': 'application/json'
+    },
+    body: JSON.stringify(body),
+    timeoutMs,
+    timeoutMessage: 'groq_inbox_timeout',
+    fetchImpl
+  });
+  const text = extractChatText(payload);
+  if (!text) throw new Error('groq_inbox_empty_response');
+  return text;
+}
+
+async function openAiImageText({ apiKey, fetchImpl = fetch, model, promptTemplate, timeoutMs = 3000, imagePaths }) {
+  if (!apiKey) throw new Error('OPENAI_API_KEY is not configured');
+  const payload = await requestJson(OPENAI_RESPONSES_URL, {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${apiKey}`,
+      'content-type': 'application/json'
+    },
+    body: JSON.stringify({
+      model,
+      input: [
+        {
+          role: 'user',
+          content: [
+            { type: 'input_text', text: promptTemplate },
+            ...imagePaths.map((imagePath) => ({
+              type: 'input_image',
+              image_url: imageDataUrl(imagePath),
+              detail: 'auto'
+            }))
+          ]
+        }
+      ]
+    }),
+    timeoutMs,
+    timeoutMessage: 'openai_image_inbox_timeout',
+    fetchImpl
+  });
+  const text = extractResponseText(payload);
+  if (!text) throw new Error('openai_image_empty_response');
+  return text;
+}
+
+async function requestJson(url, { method, headers, body, timeoutMs, timeoutMessage, fetchImpl }) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  let response;
+  try {
+    response = await fetchImpl(url, { method, headers, body, signal: controller.signal });
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') throw new Error(timeoutMessage);
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+  const text = await response.text();
+  const payload = text ? parseJson(text) ?? { raw: text } : {};
+  if (!response.ok) throw new Error(providerError(payload) || `provider_http_${response.status}`);
+  return payload;
+}
+
+function extractChatText(payload) {
+  return cleanText(payload?.choices?.[0]?.message?.content);
+}
+
+function extractResponseText(payload) {
+  const direct = cleanText(payload?.output_text);
+  if (direct) return direct;
+  const chunks = [];
+  for (const item of Array.isArray(payload?.output) ? payload.output : []) {
+    for (const content of Array.isArray(item?.content) ? item.content : []) {
+      const text = cleanText(content?.text);
+      if (text) chunks.push(text);
+    }
+  }
+  return chunks.join('\n').trim();
+}
+
+function imageDataUrl(imagePath) {
+  const extension = path.extname(imagePath).slice(1).toLowerCase();
+  const mime = CONTENT_TYPES_BY_EXTENSION.get(extension) ?? 'image/png';
+  return `data:${mime};base64,${fs.readFileSync(imagePath).toString('base64')}`;
+}
+
+function providerError(payload) {
+  return cleanText(payload?.error?.message) || cleanText(payload?.message) || cleanText(payload?.raw);
+}
+
+function parseJson(value) {
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
 }
 
 function codexText({

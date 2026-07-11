@@ -39,8 +39,10 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
   const [mobileDockMenu, setMobileDockMenu] = useState<"left" | "right" | null>(null);
   const [startupIntroComplete, setStartupIntroComplete] = useState(false);
   const [onboardingStartupActive, setOnboardingStartupActive] = useState(true);
-  const [onboardingVisible, setOnboardingVisible] = useState(() => process.env.NODE_ENV === "test" ? shouldShowOnboarding(false) : true);
-  const onboardingActive = nativeAndroid && onboardingVisible;
+  const [onboardingVisible, setOnboardingVisible] = useState(() => shouldShowOnboarding(false));
+  const startupReady = app.localSnapshotReady || app.displaySyncStatus === "auth_required" || app.displaySyncStatus === "offline" || app.displaySyncStatus === "sync_failed";
+  const onboardingAuthRequired = startupReady && app.displaySyncStatus === "auth_required";
+  const onboardingActive = nativeAndroid && (onboardingVisible || onboardingAuthRequired);
   const dockOverflowOpen = mobileDockMenu != null;
   const [actionsMobileCreateDraft, setActionsMobileCreateDraft] = useStoredMobileCreateDraft(ACTIONS_MOBILE_CREATE_DRAFT_STORAGE_KEY);
   const [inboxMobileCreateDraft, setInboxMobileCreateDraft] = useStoredMobileCreateDraft(INBOX_MOBILE_CREATE_DRAFT_STORAGE_KEY);
@@ -48,7 +50,6 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
   const sectionRef = useRef(app.section);
   const selectSectionRef = useRef(app.selectSection);
   const adjacentSection = app.swipeNavigation.visual?.to;
-  const startupReady = app.localSnapshotReady || app.displaySyncStatus === "auth_required" || app.displaySyncStatus === "offline" || app.displaySyncStatus === "sync_failed";
   const handleStartupIntroComplete = useCallback(() => setStartupIntroComplete(true), []);
   const mobileMenuSwipe = useLeftEdgeMenuSwipe(
     () => setMobileDockMenu("left"),
@@ -147,7 +148,6 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
             busy={app.busy}
             mode={app.authMode}
             onEmailLogin={app.onEmailLogin}
-            onLogin={app.onLogin}
             onRequestOtp={app.onRequestOtp}
             onVerifyOtp={app.onVerifyOtp}
           />
@@ -221,7 +221,11 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
             onRefreshEngine={app.refreshEngineOnce}
           />
         ) : screenSection === "settings" ? (
-          <SettingsSection />
+          <SettingsSection
+            settings={app.appSettings}
+            busy={app.busy}
+            onUpdate={app.onUpdateAppSettings}
+          />
         ) : screenSection === "brai-cmd" ? (
           <BraiCmdSection />
         ) : null}
@@ -234,10 +238,10 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
       {onboardingActive ? (
         <OnboardingFlow
           authRequired={startupReady && app.displaySyncStatus === "auth_required"}
-          authMode={app.authMode === "email" ? "password" : app.authMode}
+          authMode={app.authMode}
           busy={app.busy}
           onDone={() => setOnboardingVisible(false)}
-          onLogin={app.onLogin}
+          onEmailLogin={app.onEmailLogin}
           onOpenNativeCmdSettings={openNativeBraiCmdSettings}
           onRequestOtp={app.onRequestOtp}
           onStartupScreenChange={setOnboardingStartupActive}

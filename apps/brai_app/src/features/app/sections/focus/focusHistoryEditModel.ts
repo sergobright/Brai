@@ -1,4 +1,4 @@
-import { MOSCOW_OFFSET_MS } from "@/shared/time/format";
+import { formatLocalTimeInput, setLocalClock } from "@/shared/time/format";
 import type { FocusSessionInterval, TimerSession } from "@/shared/types/timer";
 
 export type FocusEditField = "start" | "duration" | "end";
@@ -59,8 +59,7 @@ export function draftUtcRange(draft: FocusEditDraft): { startedAtUtc: string; en
 }
 
 export function formatTimeInput(utcMs: number): string {
-  const shifted = new Date(utcMs + MOSCOW_OFFSET_MS).toISOString();
-  return shifted.slice(11, 16);
+  return formatLocalTimeInput(utcMs);
 }
 
 export function formatDurationInput(startMs: number, endMs: number): string {
@@ -85,11 +84,11 @@ export function applyFocusInput(draft: FocusEditDraft, field: FocusEditField, va
   const minutes = parseInputMinutes(field, value);
   if (minutes == null) return null;
   if (field === "start") {
-    const nextStartMs = setMoscowClock(draft.startMs, minutes);
+    const nextStartMs = setLocalClock(draft.startMs, minutes);
     const delta = nextStartMs - draft.startMs;
     return validDraft({ ...draft, startMs: nextStartMs, endMs: draft.endMs + delta });
   }
-  if (field === "end") return validDraft({ ...draft, endMs: setMoscowClock(draft.endMs, minutes) });
+  if (field === "end") return validDraft({ ...draft, endMs: setLocalClock(draft.endMs, minutes) });
   return validDraft({ ...draft, endMs: draft.startMs + minutes * 60000 });
 }
 
@@ -121,17 +120,6 @@ function parseInputMinutes(field: FocusEditField, value: string): number | null 
   if (field !== "duration" && hours > 23) return null;
   const total = hours * 60 + minutes;
   return field === "duration" && total <= 0 ? null : total;
-}
-
-function setMoscowClock(utcMs: number, minutesOfDay: number): number {
-  const shifted = new Date(utcMs + MOSCOW_OFFSET_MS);
-  return Date.UTC(
-    shifted.getUTCFullYear(),
-    shifted.getUTCMonth(),
-    shifted.getUTCDate(),
-    Math.floor(minutesOfDay / 60),
-    minutesOfDay % 60,
-  ) - MOSCOW_OFFSET_MS;
 }
 
 function validDraft(draft: FocusEditDraft): FocusEditDraft | null {

@@ -87,6 +87,34 @@ export type TechnicalLog = {
   expires_at_utc: string;
 };
 
+export type ModelProviderMode = "internal" | "external";
+
+export type AppSettings = {
+  display_timezone: string;
+  model_provider_mode: ModelProviderMode;
+  inbox_text_provider: "groq";
+  inbox_text_model: string;
+  inbox_image_provider: "openai";
+  inbox_image_model: string;
+  external_ai: {
+    groq_configured: boolean;
+    openai_configured: boolean;
+  };
+};
+
+export const DEFAULT_APP_SETTINGS: AppSettings = {
+  display_timezone: "Europe/Moscow",
+  model_provider_mode: "internal",
+  inbox_text_provider: "groq",
+  inbox_text_model: "openai/gpt-oss-120b",
+  inbox_image_provider: "openai",
+  inbox_image_model: "gpt-4.1-mini",
+  external_ai: {
+    groq_configured: false,
+    openai_configured: false,
+  },
+};
+
 /**
  * Wraps the Brai HTTP API with typed client methods.
  */
@@ -115,13 +143,6 @@ export class BraiApi {
     return this.request("/auth/test-email-login", {
       method: "POST",
       json: { email },
-    });
-  }
-
-  async login(password: string): Promise<AuthSession> {
-    return this.request("/auth/login", {
-      method: "POST",
-      json: { password },
     });
   }
 
@@ -171,6 +192,17 @@ export class BraiApi {
 
   async version(): Promise<AppVersionState> {
     return this.request("/v1/version");
+  }
+
+  async settings(): Promise<AppSettings> {
+    return this.request("/v1/settings");
+  }
+
+  async updateSettings(patch: Partial<Pick<AppSettings, "display_timezone" | "model_provider_mode" | "inbox_text_model" | "inbox_image_model">>): Promise<AppSettings> {
+    return this.request("/v1/settings", {
+      method: "PATCH",
+      json: patch,
+    });
   }
 
   async syncEvents(params: {

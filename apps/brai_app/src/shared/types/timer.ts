@@ -55,7 +55,7 @@ export interface TimerSession {
 export interface TimerState {
   server_time_utc: string;
   server_revision: number;
-  timezone: "Europe/Moscow";
+  timezone: string;
   active_session: TimerSession | null;
   elapsed_seconds: number;
   active_interval?: FocusSessionInterval | null;
@@ -119,7 +119,7 @@ export interface GoalDay {
 }
 
 export interface GoalData {
-  timezone: "Europe/Moscow";
+  timezone: string;
   start_date: string;
   end_date: string;
   days_count: number;

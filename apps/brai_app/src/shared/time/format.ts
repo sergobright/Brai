@@ -1,6 +1,28 @@
 import type { TimerSession, TimerState } from "@/shared/types/timer";
 
 export const MOSCOW_OFFSET_MS = 3 * 60 * 60 * 1000;
+export const DEFAULT_DISPLAY_TIME_ZONE = "Europe/Moscow";
+
+let displayTimeZone = DEFAULT_DISPLAY_TIME_ZONE;
+
+export function getDisplayTimeZone(): string {
+  return displayTimeZone;
+}
+
+export function setDisplayTimeZone(timeZone: string): void {
+  displayTimeZone = normalizeTimeZone(timeZone);
+}
+
+export function normalizeTimeZone(timeZone: string | null | undefined): string {
+  const value = timeZone === "UTC+0" || timeZone === "UTC+00:00" || timeZone === "Etc/UTC" ? "UTC" : String(timeZone ?? "").trim();
+  if (!value) return DEFAULT_DISPLAY_TIME_ZONE;
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: value }).format(new Date(0));
+    return value;
+  } catch {
+    return DEFAULT_DISPLAY_TIME_ZONE;
+  }
+}
 
 /**
  * Advances active timer and interval elapsed counters against the current clock.
@@ -77,8 +99,8 @@ export function moscowDateTime(utcIso: string | null | undefined): string {
   if (!utcIso) return "";
   const ms = Date.parse(utcIso);
   if (!Number.isFinite(ms)) return "";
-  const shifted = new Date(ms + MOSCOW_OFFSET_MS).toISOString();
-  return `${shifted.slice(0, 10)} ${shifted.slice(11, 16)}`;
+  const parts = zonedParts(ms);
+  return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}`;
 }
 
 export function moscowTime(utcIso: string | null | undefined): string {
@@ -104,4 +126,70 @@ export function sessionDuration(session: TimerSession): number {
       (Date.parse(session.ended_at_utc) - Date.parse(session.started_at_utc)) / 1000,
     ),
   );
+}
+
+export function localDateFromUtcMs(utcMs: number, timeZone = displayTimeZone): string {
+  const parts = zonedParts(utcMs, timeZone);
+  return `${parts.year}-${parts.month}-${parts.day}`;
+}
+
+export function localHourFromUtcMs(utcMs: number, timeZone = displayTimeZone): number {
+  return Number(zonedParts(utcMs, timeZone).hour);
+}
+
+export function localDateStartUtcMs(dateString: string, timeZone = displayTimeZone): number {
+  const [year, month, day] = dateString.split("-").map(Number);
+  const localAsUtc = Date.UTC(year, month - 1, day);
+  let candidate = localAsUtc - timeZoneOffsetMs(localAsUtc, timeZone);
+  candidate = localAsUtc - timeZoneOffsetMs(candidate, timeZone);
+  return candidate;
+}
+
+export function addDays(dateString: string, days: number): string {
+  const [year, month, day] = dateString.split("-").map(Number);
+  return new Date(Date.UTC(year, month - 1, day + days)).toISOString().slice(0, 10);
+}
+
+export function formatLocalTimeInput(utcMs: number, timeZone = displayTimeZone): string {
+  const parts = zonedParts(utcMs, timeZone);
+  return `${parts.hour}:${parts.minute}`;
+}
+
+export function setLocalClock(utcMs: number, minutesOfDay: number, timeZone = displayTimeZone): number {
+  const parts = zonedParts(utcMs, timeZone);
+  return localDateStartUtcMs(`${parts.year}-${parts.month}-${parts.day}`, timeZone) + minutesOfDay * 60_000;
+}
+
+function zonedParts(utcMs: number, timeZone = displayTimeZone) {
+  const formatter = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  });
+  const parts = Object.fromEntries(formatter.formatToParts(new Date(utcMs)).map((part) => [part.type, part.value]));
+  return {
+    year: parts.year ?? "1970",
+    month: parts.month ?? "01",
+    day: parts.day ?? "01",
+    hour: parts.hour ?? "00",
+    minute: parts.minute ?? "00",
+    second: parts.second ?? "00",
+  };
+}
+
+function timeZoneOffsetMs(utcMs: number, timeZone: string): number {
+  const parts = zonedParts(utcMs, timeZone);
+  return Date.UTC(
+    Number(parts.year),
+    Number(parts.month) - 1,
+    Number(parts.day),
+    Number(parts.hour),
+    Number(parts.minute),
+    Number(parts.second),
+  ) - Math.floor(utcMs / 1000) * 1000;
 }

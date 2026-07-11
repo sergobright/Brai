@@ -13,6 +13,9 @@
     "public:guard": "scripts/use-node22.sh node scripts/check-public-branch.mjs",
     "socraticode:ensure": "scripts/use-node22.sh node scripts/brai-socraticode-preflight.mjs --ensure",
     "socraticode:preflight": "scripts/use-node22.sh node scripts/brai-socraticode-preflight.mjs",
+    "adr:list": "scripts/run-log4brains.sh adr list",
+    "adr:preview": "scripts/run-log4brains.sh preview",
+    "adr:build": "scripts/run-log4brains.sh build",
     "task:start": "scripts/use-node22.sh node scripts/brai-task.mjs start",
     "task:doctor": "scripts/use-node22.sh node scripts/brai-task.mjs doctor",
     "task:test": "scripts/use-node22.sh node --test scripts/*.test.mjs deploy/scripts/*.test.mjs",
@@ -32,7 +35,8 @@
     "publish:client-web-layer": "deploy/scripts/publish-client-web-layer.sh",
     "publish:web": "deploy/scripts/publish-web.sh",
     "publish:mobile-bundle": "deploy/scripts/publish-mobile-bundle.sh",
-    "publish:apk": "deploy/scripts/publish-capacitor-apk.sh"
+    "publish:apk": "deploy/scripts/publish-capacitor-apk.sh",
+    "publish:adr": "deploy/scripts/publish-adr-site.sh"
   },
   "devDependencies": {
     "@fission-ai/openspec": "1.4.1"

@@ -88,6 +88,67 @@ test('health exposes safe deployment metadata and CORS denies untrusted origins'
   }
 });
 
+test('settings update timezone and model provider mode without exposing secrets', async () => {
+  const fixture = await createFixture([
+    '2026-06-12T22:00:00.000Z',
+    '2026-06-12T22:00:00.000Z',
+    '2026-06-12T22:00:00.000Z',
+    '2026-06-12T22:00:00.000Z'
+  ], {
+    inboxExternalAi: {
+      groqApiKey: 'test-groq-key',
+      openaiApiKey: 'test-openai-key'
+    }
+  });
+
+  try {
+    const defaults = await request(fixture.url, '/v1/settings');
+    assert.equal(defaults.status, 200);
+    assert.equal(defaults.body.display_timezone, 'Europe/Moscow');
+    assert.equal(defaults.body.model_provider_mode, 'internal');
+    assert.deepEqual(defaults.body.external_ai, {
+      groq_configured: true,
+      openai_configured: true
+    });
+    assert.equal(JSON.stringify(defaults.body).includes('test-groq-key'), false);
+    assert.equal(JSON.stringify(defaults.body).includes('test-openai-key'), false);
+
+    const updated = await request(fixture.url, '/v1/settings', {
+      method: 'PATCH',
+      body: JSON.stringify({
+        display_timezone: 'UTC',
+        model_provider_mode: 'external'
+      })
+    });
+    assert.equal(updated.status, 200);
+    assert.equal(updated.body.display_timezone, 'UTC');
+    assert.equal(updated.body.model_provider_mode, 'external');
+    assert.equal(updated.body.inbox_text_model, 'openai/gpt-oss-120b');
+    assert.equal(updated.body.inbox_image_model, 'gpt-4.1-mini');
+
+    const state = await request(fixture.url, '/v1/timer/state');
+    assert.equal(state.body.timezone, 'UTC');
+    await request(fixture.url, '/v1/timer/events/sync', {
+      method: 'POST',
+      body: JSON.stringify({
+        device: { device_id: 'settings-device', platform: 'web' },
+        events: [
+          syncEvent('settings-start', 1, 'start', '2026-06-12T20:30:00.000Z'),
+          syncEvent('settings-stop', 2, 'stop', '2026-06-12T21:30:00.000Z')
+        ]
+      })
+    });
+    const history = await request(fixture.url, '/v1/sessions');
+    assert.equal(history.body.groups['2026-06-12'].total_seconds, 3600);
+    assert.equal(history.body.groups['2026-06-13'], undefined);
+
+    const logs = fixture.store.listLogs({ limit: 10 });
+    assert.equal(logs.some((log) => log.operation === 'settings.update'), true);
+  } finally {
+    await fixture.close();
+  }
+});
+
 test('goal summary splits cross-midnight sessions', async () => {
   const fixture = await createFixture([
     '2026-06-12T20:30:00.000Z',

@@ -5,7 +5,6 @@ Brai uses one VPS for seven active app environments:
 - Production: `app.brai.one`, branch `main`;
 - Dev: `dev.brai.one`, branch `dev`;
 - Preview A-E: `a.test.brai.one` through `e.test.brai.one`, branches `codex/*`;
-- Preview status: `previews.brai.one`.
 
 ## Agent Flow
 
@@ -18,7 +17,8 @@ Follow-up branches keep the exact task base recorded by the starter in `.brai-ta
 After the project owner accepts a preview, a dirty acceptance PR is resolved in the same branch with `node scripts/brai-task.mjs acceptance-reconcile <codex-branch>`. That command is the only approved exception to the frozen-base rule: it verifies the accepted PR, merges current `origin/main` into the same `codex/*` branch, and leaves any real conflicts for the agent to resolve before pushing the same branch again. Do not create a replacement branch or PR for accepted conflict resolution.
 
 A pushed preview-class `codex/*` branch allocates or reuses a preview slot through `deploy/scripts/preview-slots.sh`, deploys that slot, and reports the slot URL. If all slots `A` through `E` are occupied, the branch enters the preview queue until a slot is released. No push means no slot/deploy/queue.
-`deploy/scripts/preview-slots.sh status` is read-only: it takes a shared lock and must not rewrite the slot registry or status page.
+`pull_request` opened, synchronize, and reopened events do not run the full delivery workflow; the `codex/*` push run is the authoritative check/deploy source. `pull_request.closed` remains enabled only to record no-preview merges and release abandoned preview slots.
+`deploy/scripts/preview-slots.sh status` is read-only: it takes a shared lock and must not rewrite the slot registry.
 
 Each preview slot uses its own Supabase preview branch. After slot allocation, CI creates or reuses
 `brai-preview-<safe-codex-branch>-<hash>`, applies `supabase/migrations/*.sql`, refreshes the
@@ -33,7 +33,7 @@ Slot release deletes the matching Supabase preview branch before freeing the Bra
 Supabase branch delete is a delivery blocker because each preview slot must release its isolated
 database state before the slot is reused.
 
-If the preview branch changes the Android native boundary, deploy also builds a slot-specific preview APK and records `brai-<slot>-vN-previewM.apk`, APK `vN`, branch-local preview `M`, and `versionCode=N*10000+M` in the preview slot registry/status page. Preview OTA manifests then target the same release key, build kind, stable `N`, and preview `M`, so stale slot APKs block with an APK update screen instead of silently running an incompatible web bundle.
+If the preview branch changes the Android native boundary, deploy also builds a slot-specific preview APK and records `brai-<slot>-vN-previewM.apk`, APK `vN`, branch-local preview `M`, and `versionCode=N*10000+M` in the preview slot registry. Preview OTA manifests then target the same release key, build kind, stable `N`, and preview `M`, so stale slot APKs block with an APK update screen instead of silently running an incompatible web bundle.
 
 Infrastructure/documentation-only branches can use the Temporal no-preview path when the delivery class is `infra-docs`. Strict technical-only branches can use the same no-preview path as `technical-no-preview` when the changed files are limited to tests, test configuration, or narrowly allowed agent-operation bookkeeping that is proven by CI rather than browser review. That path records `delivery_classified` and `no_preview_required`, then dispatches Temporal handoff/merge activities instead of allocating a slot. Temporal marks `supabase_preview`, `preview_deploy`, `accepted_preview_promotion`, `supabase_preview_release`, and `slot_release` as `not_applicable`; after `no_preview_merged`, the branch lifecycle is complete without a slot.
 
@@ -161,11 +161,12 @@ Repository secret:
 The deploy user needs write access to `/srv/projects/brai-envs/` for CI uploads,
 preview/dev source checkouts, preview/dev web/OTA outputs, per-environment runtime env files, and
 preview slot state. For production deploys it also needs write access to the existing production
-web/OTA targets:
+web/OTA and ADR static-site targets:
 
 ```text
 /srv/projects/brai/deploy/web
 /srv/projects/brai/deploy/mobile-update
+/srv/projects/brai-envs/prod/adr
 ```
 
 Runtime database writes go to Supabase Postgres through `BRAI_DATABASE_URL`. SQLite files are not
@@ -199,7 +200,7 @@ systemctl restart brai-admin-preview-e.service
 
 The Ansible sudoers template is `deploy/ansible/templates/brai-deploy-sudoers.j2`.
 
-Deploy scripts normalize public web, OTA, release, and preview slot files through
+Deploy scripts normalize public web, OTA, release, ADR, and preview slot files through
 `deploy/scripts/permissions.sh`. New publish paths must use that helper or Ansible-owned
 equivalent logic so they preserve group-write instead of resetting trees to `go=rX`.
 Accepted-preview release and OTA sync must execute from `/srv/projects/brai-envs/*/source`;
@@ -225,10 +226,11 @@ Preview and Dev runtime credentials live in `/srv/projects/brai-envs/<environmen
 and are deploy-writable so CI can update schema-scoped DSNs after Supabase schema creation.
 Dev and Preview rebuilds copy current production data into their schema after migrations, excluding
 production Better Auth session, account, and verification rows. Those test env files set
-`BRAI_TEST_EMAIL_LOGIN=true`. Preview/Dev web still starts on the login screen and creates a normal
-Brai session only after the user enters the copied primary account email; it never asks for a
-password or OTP. Android keeps password-only login, and opening either surface never creates a
-session by itself. Production env files must not set this flag and web production keeps OTP login.
+`BRAI_TEST_EMAIL_LOGIN=true`. Preview/Dev web and Android still start on the login screen and
+create a normal Better Auth Brai session only after the user enters an email; they never ask for a
+password or OTP. The first email-only test login creates that environment's user, and repeated
+logins with the same email reuse it. Opening either surface never creates a session by itself.
+Production env files must not set this flag, and production web/Android keep OTP login.
 
 Use [Supabase Postgres Cutover](supabase-postgres-cutover.md) only as the archived record of the
 completed cutover. Active production, Dev, and preview writes use Supabase Postgres only.
