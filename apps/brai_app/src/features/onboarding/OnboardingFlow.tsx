@@ -14,6 +14,7 @@ import {
   KeyRound,
   Lock,
   LoaderCircle,
+  Mail,
   Mic,
   MonitorUp,
   Radio,
@@ -418,7 +419,7 @@ export function OnboardingFlow({
   }
 
   function chooseProfileVersion(profileVersion: ProfileVersion) {
-    go(profileVersion === "cloud" ? "cloud-password" : "self-hosted-key", { profileVersion });
+    go(profileVersion === "cloud" ? "cloud-login" : "self-hosted-key", { profileVersion });
   }
 
   function chooseVoiceMode(voiceMode: VoiceMode) {
@@ -638,11 +639,11 @@ export function OnboardingFlow({
       );
     }
 
-    if (state.step === "cloud-password") {
+    if (state.step === "cloud-login") {
       return (
         <OnboardingAuthForm
           busy={busy}
-          intro={<InfoBlock icon={Lock} title="Вход в облачный профиль" text={authMode === "otp" ? "Введите email и одноразовый код." : "Введите email для входа без кода."} />}
+          intro={<InfoBlock icon={Mail} title="Вход в облачный профиль" text={authMode === "otp" ? "Введите email, получите код и подтвердите вход." : "Введите email, код в Dev/Preview не нужен."} />}
           mode={authMode}
           onAuthenticated={() => go("setup-start")}
           onEmailLogin={submitCloudLogin}

@@ -47,6 +47,12 @@ async function submitEmailLogin(email: string) {
   fireEvent.submit(input.closest("form") as HTMLFormElement);
 }
 
+function expectNoPasswordPrompt() {
+  expect(screen.queryByLabelText("Пароль")).not.toBeInTheDocument();
+  expect(screen.queryByText(/пароль/i)).not.toBeInTheDocument();
+  expect(document.querySelector('input[type="password"]')).not.toBeInTheDocument();
+}
+
 describe("BraiApp onboarding", () => {
   setupBraiAppTest();
   afterEach(() => vi.useRealTimers());
@@ -397,17 +403,51 @@ describe("BraiApp onboarding", () => {
       name: "Test",
       path: "existing",
       profileVersion: "cloud",
-      step: "cloud-password",
+      step: "cloud-login",
       voiceMode: null,
     }));
 
     render(<BraiApp />);
 
+    expect(await screen.findByText("Вход в облачный профиль")).toBeInTheDocument();
+    expect(screen.getByLabelText("Email")).toBeInTheDocument();
+    expectNoPasswordPrompt();
     await submitEmailLogin("wrong@example.test");
 
     expect(await screen.findByText("Email не подошёл.")).toBeInTheDocument();
     expect(screen.getByText("Вход в облачный профиль")).toBeInTheDocument();
+    expectNoPasswordPrompt();
     expect(screen.queryByText("Начинаем настройку")).not.toBeInTheDocument();
+  });
+
+  it("keeps cloud onboarding production on OTP without a password prompt", async () => {
+    stubAndroidCapacitor();
+    window.__BRAI_RUNTIME_CONFIG__ = { environment: "prod" };
+    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      if (url.endsWith("/auth/session")) {
+        return new Response(JSON.stringify({ authenticated: false }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return Promise.reject(new Error("offline"));
+    });
+    window.localStorage.setItem(ONBOARDING_STORAGE_KEY, JSON.stringify({
+      complete: false,
+      history: ["profile-version"],
+      name: "Test",
+      path: "existing",
+      profileVersion: "cloud",
+      step: "cloud-login",
+      voiceMode: null,
+    }));
+
+    render(<BraiApp />);
+
+    expect(await screen.findByText("Вход в облачный профиль")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Получить код" })).toBeInTheDocument();
+    expectNoPasswordPrompt();
   });
 
   it("keeps a completed onboarding locked when cabinet login fails", async () => {
@@ -436,6 +476,8 @@ describe("BraiApp onboarding", () => {
     render(<BraiApp />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Войти" }, { timeout: 5_000 }));
+    expect(await screen.findByLabelText("Email")).toBeInTheDocument();
+    expectNoPasswordPrompt();
     await submitEmailLogin("wrong@example.test");
 
     await waitFor(() => expect(cmdPlugin.setOverlayEnabled).toHaveBeenCalledWith({ enabled: true }));
@@ -480,6 +522,8 @@ describe("BraiApp onboarding", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Войти" }, { timeout: 5_000 }));
     expect(cmdPlugin.setVoiceOnlyMode).not.toHaveBeenCalledWith({ enabled: false });
+    expect(await screen.findByLabelText("Email")).toBeInTheDocument();
+    expectNoPasswordPrompt();
     await submitEmailLogin("test@example.test");
 
     expect(await screen.findByRole("heading", { name: "Действия" })).toBeInTheDocument();
