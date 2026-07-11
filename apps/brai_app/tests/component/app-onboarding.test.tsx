@@ -41,6 +41,12 @@ function emptyAppSnapshotResponse(url: string): Response | null {
   return null;
 }
 
+async function submitEmailLogin(email: string) {
+  const input = await screen.findByLabelText("Email");
+  fireEvent.change(input, { target: { value: email } });
+  fireEvent.submit(input.closest("form") as HTMLFormElement);
+}
+
 describe("BraiApp onboarding", () => {
   setupBraiAppTest();
   afterEach(() => vi.useRealTimers());
@@ -397,8 +403,7 @@ describe("BraiApp onboarding", () => {
 
     render(<BraiApp />);
 
-    fireEvent.change(await screen.findByLabelText("Email"), { target: { value: "wrong@example.test" } });
-    fireEvent.click(screen.getByRole("button", { name: "Войти" }));
+    await submitEmailLogin("wrong@example.test");
 
     expect(await screen.findByText("Email не подошёл.")).toBeInTheDocument();
     expect(screen.getByText("Вход в облачный профиль")).toBeInTheDocument();
@@ -431,8 +436,7 @@ describe("BraiApp onboarding", () => {
     render(<BraiApp />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Войти" }, { timeout: 5_000 }));
-    fireEvent.change(await screen.findByLabelText("Email"), { target: { value: "wrong@example.test" } });
-    fireEvent.click(screen.getByRole("button", { name: "Войти" }));
+    await submitEmailLogin("wrong@example.test");
 
     await waitFor(() => expect(cmdPlugin.setOverlayEnabled).toHaveBeenCalledWith({ enabled: true }));
     expect(cmdPlugin.setVoiceOnlyMode).toHaveBeenCalledWith({ enabled: true });
@@ -476,8 +480,7 @@ describe("BraiApp onboarding", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Войти" }, { timeout: 5_000 }));
     expect(cmdPlugin.setVoiceOnlyMode).not.toHaveBeenCalledWith({ enabled: false });
-    fireEvent.change(await screen.findByLabelText("Email"), { target: { value: "test@example.test" } });
-    fireEvent.click(screen.getByRole("button", { name: "Войти" }));
+    await submitEmailLogin("test@example.test");
 
     expect(await screen.findByRole("heading", { name: "Действия" })).toBeInTheDocument();
     await waitFor(() => expect(cmdPlugin.setVoiceOnlyMode).toHaveBeenCalledWith({ enabled: false }));
