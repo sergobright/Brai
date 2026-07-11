@@ -1,0 +1,11 @@
+[Unit]
+Description=Run Brai production Postgres Telegram backup daily
+
+[Timer]
+OnCalendar=*-*-* 00:00:00 UTC
+Persistent=true
+AccuracySec=1min
+Unit=brai-db-telegram-backup.service
+
+[Install]
+WantedBy=timers.target

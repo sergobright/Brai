@@ -82,6 +82,62 @@
         - brai-env-contract
         - targeted-infra-apply
 
+    - name: Check Brai DB Telegram backup env file exists
+      ansible.builtin.stat:
+        path: "{{ brai_db_telegram_backup_env_source }}"
+      register: brai_db_telegram_backup_env_file
+      tags:
+        - brai-db-backup
+        - targeted-infra-apply
+
+    - name: Refuse to create Brai DB Telegram backup secrets from source
+      ansible.builtin.fail:
+        msg: "{{ brai_db_telegram_backup_env_source }} is missing; create it on the server with TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID outside Git, then rerun this playbook."
+      when: not brai_db_telegram_backup_env_file.stat.exists
+      tags:
+        - brai-db-backup
+        - targeted-infra-apply
+
+    - name: Ensure Brai DB Telegram backup env file permissions
+      ansible.builtin.file:
+        path: "{{ brai_db_telegram_backup_env_source }}"
+        state: file
+        owner: root
+        group: root
+        mode: "0600"
+      when: brai_db_telegram_backup_env_file.stat.exists
+      tags:
+        - brai-db-backup
+        - targeted-infra-apply
+
+    - name: Check Brai DB Telegram backup encryption key exists
+      ansible.builtin.stat:
+        path: "{{ brai_db_telegram_backup_key_source }}"
+      register: brai_db_telegram_backup_key_file
+      tags:
+        - brai-db-backup
+        - targeted-infra-apply
+
+    - name: Refuse to create Brai DB Telegram backup encryption key from source
+      ansible.builtin.fail:
+        msg: "{{ brai_db_telegram_backup_key_source }} is missing; create it on the server outside Git before enabling Telegram DB backups."
+      when: not brai_db_telegram_backup_key_file.stat.exists
+      tags:
+        - brai-db-backup
+        - targeted-infra-apply
+
+    - name: Ensure Brai DB Telegram backup encryption key permissions
+      ansible.builtin.file:
+        path: "{{ brai_db_telegram_backup_key_source }}"
+        state: file
+        owner: root
+        group: root
+        mode: "0600"
+      when: brai_db_telegram_backup_key_file.stat.exists
+      tags:
+        - brai-db-backup
+        - targeted-infra-apply
+
     - name: Check Brai Temporal worker secret reference files exist
       ansible.builtin.stat:
         path: "{{ item }}"
@@ -473,6 +529,17 @@
         group: root
         mode: "0755"
 
+    - name: Install Brai DB Telegram backup script
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../scripts/backup-postgres-to-telegram.sh"
+        dest: /srv/opt/brai-db-telegram-backup.sh
+        owner: root
+        group: root
+        mode: "0755"
+      tags:
+        - brai-db-backup
+        - targeted-infra-apply
+
     - name: Install Brai Temporal worker systemd unit
       ansible.builtin.copy:
         src: "{{ playbook_dir }}/../systemd/brai-temporal-worker.service"
@@ -483,6 +550,31 @@
       notify:
         - Reload systemd
         - Restart Brai Temporal worker
+
+    - name: Install Brai DB Telegram backup systemd units
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../systemd/{{ item }}"
+        dest: "/etc/systemd/system/{{ item }}"
+        owner: root
+        group: root
+        mode: "0644"
+      loop:
+        - brai-db-telegram-backup.service
+        - brai-db-telegram-backup.timer
+      notify: Reload systemd
+      tags:
+        - brai-db-backup
+        - targeted-infra-apply
+
+    - name: Enable Brai DB Telegram backup timer
+      ansible.builtin.systemd_service:
+        name: brai-db-telegram-backup.timer
+        enabled: true
+        state: started
+        daemon_reload: true
+      tags:
+        - brai-db-backup
+        - targeted-infra-apply
 
     - name: Validate generated Brai Caddy routes against current host config
       block:

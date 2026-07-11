@@ -28,6 +28,8 @@ brai_service_user: brai
 brai_service_group: brai
 brai_protected_env_dir: /etc/brai
 brai_api_env_source: /etc/brai/brai-api.env
+brai_db_telegram_backup_env_source: /etc/brai/brai-db-telegram-backup.env
+brai_db_telegram_backup_key_source: /etc/brai/brai-db-telegram-backup.key
 brai_api_domain: api.brai.one
 brai_api_legacy_domains:
   - api.brightos.world
