@@ -392,10 +392,13 @@ export function createBraiServer({
         }
         const text = await response.text();
         const payload = parseJson(text);
+        let vaultPrepared = null;
         if (response.ok && payload?.user?.id) {
+          vaultPrepared = true;
           try {
             await ensureUserVault({ userId: payload.user.id, email: payload.user.email });
           } catch (error) {
+            vaultPrepared = false;
             logger.error?.('Failed to prepare user vault', {
               error: error instanceof Error ? error.message : String(error),
               userId: payload.user.id,
@@ -410,10 +413,8 @@ export function createBraiServer({
               userId: payload.user.id,
               reason: 'vault_prepare_failed',
               message: 'OTP verify vault preparation failed',
-              jsonData: { route: url.pathname, status_code: 503 }
+              jsonData: { route: url.pathname, auth_completed: true }
             });
-            sendJson(req, res, 503, { error: 'vault_prepare_failed' });
-            return;
           }
           store.claimFirstUser(payload.user.id, now().toISOString());
         }
@@ -429,7 +430,8 @@ export function createBraiServer({
           jsonData: {
             route: url.pathname,
             status_code: response.status,
-            user_created_or_authenticated: Boolean(payload?.user?.id)
+            user_created_or_authenticated: Boolean(payload?.user?.id),
+            vault_prepared: vaultPrepared
           }
         });
         relayAuthText(req, res, response, text, payload);

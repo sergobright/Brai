@@ -283,6 +283,50 @@ test('email OTP prepares per-user vault folder on successful sign-in', async () 
   }
 });
 
+test('email OTP sign-in survives vault preparation failure after consuming OTP', async () => {
+  const sentOtps = new Map();
+  const errors = [];
+  const fixture = await createFixture([
+    '2026-07-01T10:00:00.000Z',
+    '2026-07-01T10:00:01.000Z',
+    '2026-07-01T10:00:02.000Z'
+  ], {
+    sessionSecret: SESSION_SECRET,
+    sendOtp: ({ email, otp }) => sentOtps.set(email, otp),
+    prepareUserVault: async () => {
+      throw new Error('syncthing unavailable');
+    },
+    logger: { error: (...args) => errors.push(args) }
+  });
+
+  try {
+    await jsonRequest(fixture.url, '/auth/otp/send', {
+      method: 'POST',
+      body: JSON.stringify({ email: 'sergey@example.com' })
+    });
+    const verify = await jsonRequest(fixture.url, '/auth/otp/verify', {
+      method: 'POST',
+      body: JSON.stringify({ email: 'sergey@example.com', otp: sentOtps.get('sergey@example.com') })
+    });
+
+    assert.equal(verify.status, 200);
+    assert.equal(verify.body.authenticated, true);
+    assert.equal(verify.body.user.email, 'sergey@example.com');
+    assert.match(verify.headers.get('set-cookie'), /better-auth\.session_token=/);
+    assert.equal(errors.length, 1);
+
+    const logs = fixture.store.db
+      .prepare("SELECT operation, status, reason, json_data FROM logs WHERE source = 'auth' ORDER BY id ASC")
+      .all();
+    assert.equal(logs.some((log) => log.reason === 'vault_prepare_failed'), true);
+    const completed = logs.findLast((log) => log.operation === 'auth.otp_verify');
+    assert.equal(completed.status, 'done');
+    assert.equal(JSON.parse(completed.json_data).vault_prepared, false);
+  } finally {
+    await fixture.close();
+  }
+});
+
 test('user vault preparer creates per-user subfolder and sync folder label by email', async () => {
   const root = await fs.promises.mkdtemp(path.join(process.env.TMPDIR || '/tmp', 'brai-vault-'));
   const commands = [];
