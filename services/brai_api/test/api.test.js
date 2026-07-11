@@ -140,12 +140,23 @@ test('draw scenes are stored under the authenticated user Draws vault folder', a
     assert.equal(loaded.status, 200);
     assert.equal(loaded.body.scene.source, 'test');
 
+    fs.writeFileSync(filePath, JSON.stringify({ elements: null, appState: null, files: null }));
+    const normalized = await request(fixture.url, `/v1/draws/${encodeURIComponent('Схема.excalidraw')}`);
+    assert.equal(normalized.status, 200);
+    assert.equal(normalized.body.scene.type, 'excalidraw');
+    assert.equal(normalized.body.scene.version, 2);
+    assert.equal(normalized.body.scene.source, 'brai');
+    assert.deepEqual(normalized.body.scene.elements, []);
+    assert.deepEqual(normalized.body.scene.appState, {});
+    assert.deepEqual(normalized.body.scene.files, {});
+
     const renamed = await request(fixture.url, `/v1/draws/${encodeURIComponent('Схема.excalidraw')}/rename`, {
       method: 'POST',
       body: JSON.stringify({ name: 'Новая схема' })
     });
     assert.equal(renamed.status, 200);
     assert.equal(renamed.body.name, 'Новая схема.excalidraw');
+    assert.equal(renamed.body.scene.source, 'brai');
     assert.equal(fs.existsSync(filePath), false);
     assert.equal(fs.existsSync(path.join(vaultRoot, 'draw-user', 'Draws', 'Новая схема.excalidraw')), true);
 

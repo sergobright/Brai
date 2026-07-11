@@ -13,12 +13,21 @@ test("normalizes static route html files into slash-safe index files", () => {
     fs.writeFileSync(path.join(tmp, "404.html"), "not found");
     fs.writeFileSync(path.join(tmp, "_not-found.html"), "next not found");
     fs.writeFileSync(path.join(tmp, "focus.html"), "focus");
+    fs.writeFileSync(path.join(tmp, "factory.html"), "factory");
+    fs.writeFileSync(path.join(tmp, "draws.html"), "draws");
     fs.mkdirSync(path.join(tmp, "focus"), { recursive: true });
     fs.writeFileSync(path.join(tmp, "focus", "__next.focus.txt"), "rsc");
     fs.mkdirSync(path.join(tmp, "docs"), { recursive: true });
     fs.writeFileSync(path.join(tmp, "docs", "page.html"), "docs page");
 
-    assert.deepEqual(normalizeNextStaticExport(tmp), ["docs/page/index.html", "focus/index.html"]);
+    assert.deepEqual(normalizeNextStaticExport(tmp), [
+      "docs/page/index.html",
+      "draws/index.html",
+      "factory/index.html",
+      "focus/index.html",
+    ]);
+    assert.equal(fs.readFileSync(path.join(tmp, "draws", "index.html"), "utf8"), "draws");
+    assert.equal(fs.readFileSync(path.join(tmp, "factory", "index.html"), "utf8"), "factory");
     assert.equal(fs.readFileSync(path.join(tmp, "focus", "index.html"), "utf8"), "focus");
     assert.equal(fs.readFileSync(path.join(tmp, "docs", "page", "index.html"), "utf8"), "docs page");
     assert.equal(fs.existsSync(path.join(tmp, "index", "index.html")), false);

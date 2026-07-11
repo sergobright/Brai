@@ -1300,7 +1300,7 @@ function readDrawScene(vaultRoot, fileName) {
   const drawsDir = ensureScopedDrawsDir(vaultRoot);
   const filePath = safeDrawScenePath(drawsDir, fileName);
   if (!fs.existsSync(filePath)) return null;
-  const scene = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+  const scene = normalizeDrawScene(JSON.parse(fs.readFileSync(filePath, 'utf8')));
   return { ...drawSceneSummary(drawsDir, fileName), scene };
 }
 
@@ -1327,7 +1327,7 @@ function renameDrawScene(vaultRoot, fromName, toName) {
     throw error;
   }
   if (fromPath !== toPath) fs.renameSync(fromPath, toPath);
-  const scene = JSON.parse(fs.readFileSync(toPath, 'utf8'));
+  const scene = normalizeDrawScene(JSON.parse(fs.readFileSync(toPath, 'utf8')));
   return { ...drawSceneSummary(drawsDir, toName), scene };
 }
 
