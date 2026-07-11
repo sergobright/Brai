@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {
   SESSION_SECRET,
+  WEB_PASSWORD,
   actionEvent,
   createFixture,
   inboxRequest,
@@ -12,6 +13,21 @@ import {
 } from '../test-support/api.js';
 import { renderOtpEmail } from '../src/auth.js';
 import { createUserVaultPreparer } from '../src/server.js';
+
+function seedPrimaryUser(fixture, id = 'test-user') {
+  fixture.store.db
+    .prepare(`
+      INSERT INTO "user" ("id", "name", "email", "emailVerified", "createdAt", "updatedAt")
+      VALUES (?, ?, ?, true, ?, ?)
+    `)
+    .run(id, 'Test User', `${id}@example.com`, '2026-07-01T09:00:00.000Z', '2026-07-01T09:00:00.000Z');
+  fixture.store.db
+    .prepare(`
+      INSERT INTO app_settings (key, value, updated_at_utc)
+      VALUES ('primary_user_id', ?, ?)
+    `)
+    .run(id, '2026-07-01T09:00:00.000Z');
+}
 
 test('email OTP message renders the reusable responsive card', () => {
   const message = renderOtpEmail({ otp: '<123456>' });
@@ -29,7 +45,115 @@ test('email OTP message renders the reusable responsive card', () => {
   assert.match(message.html, /&lt;123456&gt;/);
   assert.doesNotMatch(message.html, /<123456>/);
   assert.match(message.text, /<123456>/);
-  assert.match(message.text, /Brai · brightos\.world/);
+  assert.match(message.text, /Brai · brai\.one/);
+});
+
+test('test email login requires an explicit matching primary email', async () => {
+  const fixture = await createFixture([
+    '2026-07-01T09:00:00.000Z',
+    '2026-07-01T09:00:01.000Z',
+    '2026-07-01T09:00:02.000Z',
+    '2026-07-01T09:00:03.000Z'
+  ], {
+    sessionSecret: SESSION_SECRET,
+    testEmailLogin: true
+  });
+  try {
+    seedPrimaryUser(fixture, 'primary-user');
+    const session = await jsonRequest(fixture.url, '/auth/session');
+    assert.equal(session.status, 200);
+    assert.equal(session.body.authenticated, false);
+    assert.equal(session.headers.get('set-cookie'), null);
+
+    const empty = await jsonRequest(fixture.url, '/auth/test-email-login', {
+      method: 'POST',
+      headers: { origin: 'https://a.test.brightos.world' },
+      body: JSON.stringify({ email: '' })
+    });
+    assert.equal(empty.status, 400);
+    assert.equal(empty.headers.get('set-cookie'), null);
+
+    const nativeBypass = await jsonRequest(fixture.url, '/auth/test-email-login', {
+      method: 'POST',
+      headers: { origin: 'capacitor://localhost' },
+      body: JSON.stringify({ email: 'primary-user@example.com' })
+    });
+    assert.equal(nativeBypass.status, 403);
+    assert.equal(nativeBypass.headers.get('set-cookie'), null);
+
+    const rejected = await jsonRequest(fixture.url, '/auth/test-email-login', {
+      method: 'POST',
+      headers: { origin: 'https://a.test.brightos.world' },
+      body: JSON.stringify({ email: 'wrong@example.com' })
+    });
+    assert.equal(rejected.status, 401);
+    assert.equal(rejected.headers.get('set-cookie'), null);
+
+    const accepted = await jsonRequest(fixture.url, '/auth/test-email-login', {
+      method: 'POST',
+      headers: { origin: 'https://a.test.brightos.world' },
+      body: JSON.stringify({ email: ' PRIMARY-USER@example.com ' })
+    });
+    assert.equal(accepted.status, 200);
+    assert.equal(accepted.body.authenticated, true);
+    assert.equal(accepted.body.user.id, 'primary-user');
+    const cookie = accepted.headers.get('set-cookie');
+    assert.match(cookie, /^brai_session=/);
+
+    const activities = await jsonRequest(fixture.url, '/v1/activities', {
+      headers: { cookie }
+    });
+    assert.equal(activities.status, 200);
+  } finally {
+    await fixture.close();
+  }
+});
+
+test('password login requires the configured password and opens the primary account', async () => {
+  const fixture = await createFixture([
+    '2026-07-01T09:00:00.000Z',
+    '2026-07-01T09:00:01.000Z'
+  ], {
+    sessionSecret: SESSION_SECRET,
+    webPassword: WEB_PASSWORD
+  });
+  try {
+    seedPrimaryUser(fixture, 'primary-user');
+    const rejected = await jsonRequest(fixture.url, '/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ password: 'wrong' })
+    });
+    assert.equal(rejected.status, 401);
+    assert.equal(rejected.headers.get('set-cookie'), null);
+
+    const accepted = await jsonRequest(fixture.url, '/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ password: WEB_PASSWORD })
+    });
+    assert.equal(accepted.status, 200);
+    assert.equal(accepted.body.user.id, 'primary-user');
+    assert.match(accepted.headers.get('set-cookie'), /^brai_session=/);
+  } finally {
+    await fixture.close();
+  }
+});
+
+test('test email login is unavailable unless explicitly enabled', async () => {
+  const fixture = await createFixture(['2026-07-01T09:00:00.000Z'], {
+    sessionSecret: SESSION_SECRET
+  });
+  try {
+    seedPrimaryUser(fixture);
+    const response = await jsonRequest(fixture.url, '/auth/test-email-login', {
+      method: 'POST',
+      headers: { origin: 'https://a.test.brightos.world' },
+      body: JSON.stringify({ email: 'test-user@example.com' })
+    });
+    assert.equal(response.status, 404);
+    assert.equal(response.headers.get('set-cookie'), null);
+  } finally {
+    await fixture.close();
+  }
 });
 
 test('email OTP signs in, claims legacy data, and isolates the next user', async () => {
@@ -105,7 +229,7 @@ test('email OTP signs in, claims legacy data, and isolates the next user', async
 
     await jsonRequest(fixture.url, '/v1/activities/events/sync', {
       method: 'POST',
-      headers: { cookie: second.cookie, origin: 'https://app.brightos.world' },
+      headers: { cookie: second.cookie, origin: 'https://app.brai.one' },
       body: JSON.stringify({
         device: { device_id: 'second-web', platform: 'web' },
         events: [

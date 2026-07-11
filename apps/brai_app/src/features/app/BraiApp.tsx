@@ -146,6 +146,7 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
           <AuthPanel
             busy={app.busy}
             mode={app.authMode}
+            onEmailLogin={app.onEmailLogin}
             onLogin={app.onLogin}
             onRequestOtp={app.onRequestOtp}
             onVerifyOtp={app.onVerifyOtp}

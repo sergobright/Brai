@@ -1,6 +1,12 @@
 http://{{ brai_public_site_domain }} {
-  redir https://{{ brai_public_site_domain }}{uri} permanent
+  redir https://{{ brai_public_site_domain }}{uri} 308
 }
+
+{% for domain in brai_public_site_legacy_domains %}
+http://{{ domain }}, {{ domain }} {
+  redir https://{{ brai_public_site_domain }}{uri} 308
+}
+{% endfor %}
 
 {{ brai_public_site_domain }} {
   encode zstd gzip
@@ -16,8 +22,14 @@ http://{{ brai_public_site_domain }} {
 }
 
 http://{{ brai_syncthing_domain }} {
-  redir https://{{ brai_syncthing_domain }}{uri} permanent
+  redir https://{{ brai_syncthing_domain }}{uri} 308
 }
+
+{% for domain in brai_syncthing_legacy_domains %}
+http://{{ domain }}, {{ domain }} {
+  redir https://{{ brai_syncthing_domain }}{uri} 308
+}
+{% endfor %}
 
 {{ brai_syncthing_domain }} {
   import brai_unified_basic_auth
@@ -34,8 +46,14 @@ http://{{ brai_syncthing_domain }} {
 }
 
 http://{{ brai_supabase_studio_domain }} {
-  redir https://{{ brai_supabase_studio_domain }}{uri} permanent
+  redir https://{{ brai_supabase_studio_domain }}{uri} 308
 }
+
+{% for domain in brai_supabase_studio_legacy_domains %}
+http://{{ domain }}, {{ domain }} {
+  redir https://{{ brai_supabase_studio_domain }}{uri} 308
+}
+{% endfor %}
 
 {{ brai_supabase_studio_domain }} {
   import brai_unified_basic_auth
@@ -49,9 +67,58 @@ http://{{ brai_supabase_studio_domain }} {
   reverse_proxy 127.0.0.1:{{ brai_supabase_studio_port }}
 }
 
-http://{{ brai_envs.prod.domain }} {
-  redir https://{{ brai_envs.prod.domain }}{uri} permanent
+http://{{ brai_api_domain }} {
+  redir https://{{ brai_api_domain }}{uri} 308
 }
+
+{% for domain in brai_api_legacy_domains %}
+http://{{ domain }}, {{ domain }} {
+  redir https://{{ brai_api_domain }}{uri} 308
+}
+{% endfor %}
+
+{{ brai_api_domain }} {
+  encode zstd gzip
+  tls {
+    issuer acme {
+      disable_http_challenge
+    }
+  }
+
+  reverse_proxy 127.0.0.1:{{ brai_envs.prod.api_port }}
+}
+
+http://{{ brai_temporal_ui_domain }} {
+  redir https://{{ brai_temporal_ui_domain }}{uri} 308
+}
+
+{% for domain in brai_temporal_ui_legacy_domains %}
+http://{{ domain }}, {{ domain }} {
+  redir https://{{ brai_temporal_ui_domain }}{uri} 308
+}
+{% endfor %}
+
+{{ brai_temporal_ui_domain }} {
+  {{ brai_basic_auth_directive }}
+  encode zstd gzip
+  tls {
+    issuer acme {
+      disable_http_challenge
+    }
+  }
+
+  reverse_proxy 127.0.0.1:{{ brai_temporal_ui_port }}
+}
+
+http://{{ brai_envs.prod.domain }} {
+  redir https://{{ brai_envs.prod.domain }}{uri} 308
+}
+
+{% for domain in brai_envs.prod.legacy_domains | default([]) %}
+http://{{ domain }}, {{ domain }} {
+  redir https://{{ brai_envs.prod.domain }}{uri} 308
+}
+{% endfor %}
 
 {{ brai_envs.prod.domain }} {
   encode zstd gzip
@@ -73,6 +140,11 @@ http://{{ brai_envs.prod.domain }} {
   handle /apple-touch-icon* {
     root * {{ brai_repo }}/deploy/web
     file_server
+  }
+
+  @admin path /admin /admin/*
+  handle @admin {
+    reverse_proxy 127.0.0.1:{{ brai_envs.prod.admin_port }}
   }
 
   handle_path /api/* {
@@ -102,8 +174,14 @@ http://{{ brai_envs.prod.domain }} {
 
 {% for name, env in brai_envs.items() if name != 'prod' %}
 http://{{ env.domain }} {
-  redir https://{{ env.domain }}{uri} permanent
+  redir https://{{ env.domain }}{uri} 308
 }
+
+{% for domain in env.legacy_domains | default([]) %}
+http://{{ domain }}, {{ domain }} {
+  redir https://{{ env.domain }}{uri} 308
+}
+{% endfor %}
 
 {{ env.domain }} {
   encode zstd gzip
@@ -119,6 +197,12 @@ http://{{ env.domain }} {
 
   handle /releases* {
     reverse_proxy 127.0.0.1:{{ env.api_port }}
+  }
+
+  @admin path /admin /admin/*
+  handle @admin {
+    {{ brai_basic_auth_directive }}
+    reverse_proxy 127.0.0.1:{{ env.admin_port }}
   }
 
   handle_path /mobile-update/* {
@@ -137,8 +221,14 @@ http://{{ env.domain }} {
 {% endfor %}
 
 http://{{ brai_preview_status_domain }} {
-  redir https://{{ brai_preview_status_domain }}{uri} permanent
+  redir https://{{ brai_preview_status_domain }}{uri} 308
 }
+
+{% for domain in brai_preview_status_legacy_domains %}
+http://{{ domain }}, {{ domain }} {
+  redir https://{{ brai_preview_status_domain }}{uri} 308
+}
+{% endfor %}
 
 {{ brai_preview_status_domain }} {
   {{ brai_basic_auth_directive }}

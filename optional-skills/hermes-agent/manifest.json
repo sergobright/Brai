@@ -1,0 +1,31 @@
+{
+  "mirror": "hermes-agent-skills",
+  "source": {
+    "repo_url": "https://github.com/NousResearch/hermes-agent",
+    "commit": "f7c9feb395caa27ec79386b1ed3ae7b4675486a1"
+  },
+  "synced_at_utc": "2026-07-10T21:08:46.900Z",
+  "destination_root": "optional-skills/hermes-agent",
+  "trees": [
+    {
+      "kind": "bundled",
+      "source_dir": "skills",
+      "destination_dir": "optional-skills/hermes-agent/skills",
+      "skill_count": 72,
+      "file_count": 451,
+      "byte_count": 5940246,
+      "sanitized_file_count": 1,
+      "sanitized_replacement_count": 4
+    },
+    {
+      "kind": "official_optional",
+      "source_dir": "optional-skills",
+      "destination_dir": "optional-skills/hermes-agent/optional-skills",
+      "skill_count": 102,
+      "file_count": 500,
+      "byte_count": 6687496,
+      "sanitized_file_count": 0,
+      "sanitized_replacement_count": 0
+    }
+  ]
+}

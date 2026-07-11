@@ -13,6 +13,7 @@ Environment=TEMPORAL_ADDRESS=127.0.0.1:7233
 Environment=TEMPORAL_NAMESPACE=default
 Environment=BRAI_ROOT=/srv/projects/brai
 Environment=BRAI_ENVS_ROOT=/srv/projects/brai-envs
+EnvironmentFile=-/etc/brai/brai-temporal-worker.env
 ExecStart=/srv/opt/node-v22.16.0/bin/node src/worker.mjs
 Restart=always
 RestartSec=5

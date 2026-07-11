@@ -16,6 +16,12 @@ Postgres `events` table.
 - **AND** a technical explanation is stored in `logs`
 - **AND** accepted replay excludes the ignored row
 
+#### Scenario: Canonical event migration is complete
+- **WHEN** every legacy timer, activity, and inbox event has a field-equivalent row in `events`
+- **AND** no projection or database object depends on the legacy tables
+- **THEN** Brai removes `timer_events`, `activity_events`, and `inbox_events` with restricted drops
+- **AND** any parity conflict or dependency aborts the cleanup without data loss
+
 ### Requirement: Technical logs exclude AI outputs
 Brai SHALL store technical runtime summaries in `logs` without secrets or AI
 outputs.

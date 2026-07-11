@@ -2,8 +2,9 @@ export const aiLogMethods = {
   recordAiLog(input) {
     const info = this.db.prepare(`
       INSERT INTO ai_logs (
-        agent_id, agent_version, dt, status, json_data, ai_title, flow_id, flow_command, trace_id
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        agent_id, agent_version, dt, status, json_data, ai_title, flow_id, flow_command, trace_id,
+        workflow_id, run_id, attempt_number
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       input.agentId,
       input.agentVersion,
@@ -13,7 +14,10 @@ export const aiLogMethods = {
       input.aiTitle,
       input.flowId ?? null,
       input.flowCommand ?? null,
-      input.traceId ?? null
+      input.traceId ?? null,
+      input.workflowId ?? null,
+      input.runId ?? null,
+      Number.isInteger(input.attemptNumber) ? input.attemptNumber : null
     );
     this.recordLog?.({
       dt: input.dt ?? new Date().toISOString(),
@@ -27,7 +31,10 @@ export const aiLogMethods = {
         agent_id: input.agentId,
         agent_version: input.agentVersion,
         flow_id: input.flowId ?? null,
-        flow_command: input.flowCommand ?? null
+        flow_command: input.flowCommand ?? null,
+        workflow_id: input.workflowId ?? null,
+        run_id: input.runId ?? null,
+        attempt_number: Number.isInteger(input.attemptNumber) ? input.attemptNumber : null
       }
     });
     return Number(info.lastInsertRowid);
@@ -39,7 +46,8 @@ export const aiLogMethods = {
     return this.db
       .prepare(
         `
-          SELECT id, agent_id, agent_version, dt, status, json_data, ai_title, flow_id, flow_command, trace_id
+          SELECT id, agent_id, agent_version, dt, status, json_data, ai_title, flow_id, flow_command, trace_id,
+            workflow_id, run_id, attempt_number
           FROM ai_logs
           ORDER BY dt DESC, id DESC
           LIMIT ?
@@ -50,29 +58,6 @@ export const aiLogMethods = {
         ...row,
         json_data: parseJsonObject(row.json_data)
       }));
-  },
-
-  listLatestInboxAiLogs(inboxIds = []) {
-    const ids = [...new Set(inboxIds.filter((id) => typeof id === 'string' && id.trim()).map((id) => id.trim()))];
-    if (ids.length === 0) return [];
-    const placeholders = ids.map(() => '?').join(', ');
-    const rows = this.db
-      .prepare(
-        `
-          SELECT id, agent_id, agent_version, dt, status, json_data, ai_title, flow_id, flow_command, trace_id
-          FROM ai_logs
-          WHERE flow_id IN (${placeholders})
-            AND agent_id IN ('inbox.image_describer', 'inbox.normalizer')
-          ORDER BY dt DESC, id DESC
-        `
-      )
-      .all(...ids);
-    const seen = new Set();
-    return rows.flatMap((row) => {
-      if (!row.flow_id || seen.has(row.flow_id)) return [];
-      seen.add(row.flow_id);
-      return [{ ...row, json_data: parseJsonObject(row.json_data) }];
-    });
   }
 };
 

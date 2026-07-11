@@ -6,6 +6,6 @@
 - [ ] Run client lint/tests/build.
 - [ ] Verify OTA manifest metadata when publishing OTA.
 - [ ] For Preview native-boundary changes, verify exact target release key, build kind, stable `N`, and preview `M`.
-- [ ] For preview native-boundary changes, verify slot APK file `brai-vN-previewM.apk` and APK `vN` are recorded.
+- [ ] For preview native-boundary changes, verify slot APK file `brai-<slot>-vN-previewM.apk` and APK `vN` are recorded.
 - [ ] Verify APK signing env is external when building APK.
 - [ ] Confirm no generated artifacts or signing files are staged.

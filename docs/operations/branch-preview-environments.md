@@ -2,10 +2,10 @@
 
 Brai uses one VPS for seven active app environments:
 
-- Production: `app.brightos.world`, branch `main`;
-- Dev: `dev.brightos.world`, branch `dev`;
-- Preview A-E: `a.test.brightos.world` through `e.test.brightos.world`, branches `codex/*`;
-- Preview status: `previews.brightos.world`.
+- Production: `app.brai.one`, branch `main`;
+- Dev: `dev.brai.one`, branch `dev`;
+- Preview A-E: `a.test.brai.one` through `e.test.brai.one`, branches `codex/*`;
+- Preview status: `previews.brai.one`.
 
 ## Agent Flow
 
@@ -21,9 +21,9 @@ A pushed preview-class `codex/*` branch allocates or reuses a preview slot throu
 `deploy/scripts/preview-slots.sh status` is read-only: it takes a shared lock and must not rewrite the slot registry or status page.
 
 Each preview slot uses its own Supabase preview branch. After slot allocation, CI creates or reuses
-`brai-preview-<safe-codex-branch>-<hash>` as a schema-only branch, applies
-`supabase/migrations/*.sql`, applies idempotent test seed data from `supabase/preview_seed.sql`,
-writes the branch runtime DSN to
+`brai-preview-<safe-codex-branch>-<hash>`, applies `supabase/migrations/*.sql`, refreshes the
+preview schema data from the production DB, enables test-only `BRAI_TEST_EMAIL_LOGIN=true`, writes
+the branch runtime DSN to
 `/srv/projects/brai-envs/<preview>/brai-api.env`, and records only `supabase_branch_name`,
 `supabase_branch_id`, and `supabase_branch_status` in `preview-slots.json`. Connection strings and
 tokens must never be written to the slot registry.
@@ -33,9 +33,9 @@ Slot release deletes the matching Supabase preview branch before freeing the Bra
 Supabase branch delete is a delivery blocker because each preview slot must release its isolated
 database state before the slot is reused.
 
-If the preview branch changes the Android native boundary, deploy also builds a slot-specific preview APK and records `brai-vN-previewM.apk`, APK `vN`, preview `M`, and `versionCode=N*10000+M` in the preview slot registry/status page. Preview OTA manifests then target the same release key, build kind, stable `N`, and preview `M`, so stale slot APKs block with an APK update screen instead of silently running an incompatible web bundle.
+If the preview branch changes the Android native boundary, deploy also builds a slot-specific preview APK and records `brai-<slot>-vN-previewM.apk`, APK `vN`, branch-local preview `M`, and `versionCode=N*10000+M` in the preview slot registry/status page. Preview OTA manifests then target the same release key, build kind, stable `N`, and preview `M`, so stale slot APKs block with an APK update screen instead of silently running an incompatible web bundle.
 
-Infrastructure/documentation-only branches can use the Temporal no-preview path when the delivery class is `infra-docs`. Strict technical-only branches can use the same no-preview path as `technical-no-preview` when the changed files are limited to tests, test configuration, or narrowly allowed agent-operation bookkeeping that is proven by CI rather than browser review. That path records `delivery_classified`, `no_preview_required`, `delivery_handoff_*`, and `auto_merge_*` events instead of allocating a slot. Temporal then marks `supabase_preview`, `preview_deploy`, `accepted_preview_promotion`, `supabase_preview_release`, and `slot_release` as `not_applicable`; after `pr_merged`, the branch lifecycle is complete without a slot.
+Infrastructure/documentation-only branches can use the Temporal no-preview path when the delivery class is `infra-docs`. Strict technical-only branches can use the same no-preview path as `technical-no-preview` when the changed files are limited to tests, test configuration, or narrowly allowed agent-operation bookkeeping that is proven by CI rather than browser review. That path records `delivery_classified` and `no_preview_required`, then dispatches Temporal handoff/merge activities instead of allocating a slot. Temporal marks `supabase_preview`, `preview_deploy`, `accepted_preview_promotion`, `supabase_preview_release`, and `slot_release` as `not_applicable`; after `no_preview_merged`, the branch lifecycle is complete without a slot.
 
 Local dev server URLs are agent-only verification aids. The user-facing handoff for preview-class project changes is the preview slot URL after `deploy-preview` succeeds; if CI/deploy is not complete, report that blocker instead of asking the project owner to open `localhost` or `127.0.0.1`.
 
@@ -79,12 +79,13 @@ deploy/scripts/postgres-smoke.mjs "$BRAI_DATABASE_URL"
 Repository Codex hooks are defined in `.codex/hooks.json`:
 
 - `PreToolUse` recursively inspects namespaced, custom, and nested tool calls such as `functions.apply_patch`, `custom_tool_call`, and `multi_tool_use.parallel`. Before a valid task state exists, only explicitly read-only shell commands and the official task starter are allowed; unknown shell commands are treated as write-like and blocked.
+- Safe SocratiCode codebase tools such as `codebase_status`, `codebase_search`, `codebase_context_search`, graph queries, and symbol queries mark the local task as having used SocratiCode. Destructive SocratiCode maintenance tools are blocked by the guard.
 - The local `.brai-task/` marker must come from `scripts/brai-task-start.sh` (`mode: new`) or an explicit same-thread `node scripts/brai-task.mjs follow-up` (`mode: follow-up`). Automatically created or manual markers are invalid for project-file writes.
 - The `.brai-task/task.json` `base` SHA is the frozen task base for follow-up, commit, push, and handoff checks. The guard blocks manual `origin/main` refresh commands in active `codex/*` task branches.
 - When Codex provides a thread id, the marker must match the current thread. A different or missing thread id blocks project-file writes, commits, and pushes; start a new task branch instead of continuing the auto-selected branch.
 - Manual creation or switching of `codex/*` branches through `git switch`, `git checkout`, `git branch`, or `git worktree` is blocked; use the task starter or same-thread follow-up marker instead.
 - If the current branch or its remote head is already included in `origin/main`, it is treated as accepted work and cannot receive more project-file changes. Start a new task branch even if Codex Desktop selected the old branch by default.
-- `pre-commit` marks local write intent, and `Stop` derives implementation work from Git state: dirty files, staged changes, local commits or diff against `origin/main`, marker validity, and the exact preview receipt for the current `HEAD`.
+- `pre-commit` marks local write intent, and `Stop` derives implementation work from Git state: dirty files, staged changes, local commits or diff against `origin/main`, marker validity, SocratiCode usage or exact-only fallback, and the exact preview/delivery receipt for the current `HEAD`.
 - `node scripts/brai-task.mjs doctor --strict` prints the same guard state and exits nonzero when the checkout is not ready for handoff.
 
 Codex requires new or changed repo hooks to be reviewed and trusted through `/hooks`; that trust is local Codex security state and is not committed to Git.
@@ -126,12 +127,12 @@ For no-preview work, `node scripts/brai-task.mjs handoff` creates or reuses the 
 Preview acceptance flow:
 
 ```text
-codex/* accepted -> accept-preview.sh -> PR/merge queue into main -> production release/deploy -> release preview slot -> delete accepted branch/worktree
+codex/* accepted -> accept-preview.sh -> PR/merge queue into main -> production release/deploy -> delete preview/test schemas -> release preview slot -> delete accepted branch/worktree
 ```
 
-Temporal is the required CI/CD control ledger for this flow. See
-[Temporal CI/CD Orchestration](temporal-ci-cd.md). GitHub Actions still runs the existing checks and deploy scripts, but strict Temporal signals gate the critical transitions. Failed Temporal recording is a blocker, not a reason to bypass checks, deploy jobs, slot registry, or branch protection.
-If this flow changes, update the Temporal workflow state, signals, tests, and the Temporal CI/CD document in the same branch; required delivery work must not live only in GitHub Actions or shell scripts.
+Temporal is the required CI/CD orchestrator for this flow. See
+[Temporal CI/CD Orchestration](temporal-ci-cd.md). GitHub Actions still runs checks and reports external facts, but deploy/release/promotion/cleanup side effects run as Temporal activities. Failed Temporal dispatch or a Temporal blocker is not a reason to bypass checks, deploy jobs, slot registry, or branch protection.
+If this flow changes, update the Temporal workflow state, dispatch/events, tests, and the Temporal CI/CD document in the same branch; required delivery work must not live only in GitHub Actions or shell scripts.
 
 Acceptance trigger:
 
@@ -140,7 +141,7 @@ Acceptance trigger:
 - If the acceptance PR is `mergeStateStatus: DIRTY` or `BEHIND`, `accept-preview.sh` writes `status=reconcile_required`. Run `node scripts/brai-task.mjs acceptance-reconcile <codex-branch>`, resolve conflicts if any, commit, push the same branch, rerun `node scripts/brai-task.mjs release-notes ...`, rerun `scripts/brai-preview-handoff.sh`, and rerun `deploy/scripts/accept-preview.sh <codex-branch>`. The original preview slot remains leased to that branch until production promotion releases it.
 - After starting acceptance, monitor GitHub Actions until production deploy and preview-slot release finish, or report the exact PR/check/merge-queue/deploy/release blocker. Accepted preview slots are released only by the successful `deploy-prod` post-step, after metadata promotion and production deploy; that step also republishes occupied preview OTA manifests from their own preview source checkouts so slot content stays preview-specific while `otaVersion` catches up to the production build ledger. Occupied preview OTA refreshes reuse the preview source checkout's existing static export and fail if it is missing instead of rebuilding the Next client. The first successful release attempt requires a real slot release and fails if the accepted branch did not release one.
 - If `deploy-prod` is rerun after the accepted preview was already promoted and its slot was already released, the rerun is idempotent: promotion succeeds only when the production build ledger already contains the accepted build for the same target commit, and the release step treats the already-free slot as released.
-- After the accepted preview slot release succeeds, CI runs best-effort accepted branch cleanup. It deletes eligible `codex/*` remote head refs through the GitHub API and asks `/srv/opt/brai-main-sync.sh --prune-accepted-branches ...` to remove matching clean local task worktrees under `.codex-worktrees/`. Cleanup never makes an accepted production deploy fail; skipped dirty, active, or mismatched worktrees are left for manual inspection or the next cleanup pass.
+- Before a preview slot is released, CI must delete the branch preview schema and all branch-scoped API test schemas. Legacy unscoped `brai_test_*` schemas are collected only after a 24-hour safety window. After slot release, CI deletes eligible `codex/*` remote head refs through the GitHub API and asks `/srv/opt/brai-main-sync.sh --prune-accepted-branches ...` to remove matching clean local task worktrees under `.codex-worktrees/`. Any cleanup command failure blocks Temporal completion and must be fixed or retried; active or mismatched branches are excluded before destructive cleanup.
 
 ## Required GitHub Settings
 
@@ -175,6 +176,10 @@ The deploy user must not need read or write access to `/srv/projects/brai/.git`.
 ```text
 caddy validate --config /etc/caddy/Caddyfile
 systemctl reload caddy
+/srv/opt/brai-main-sync.sh *
+sudo -u brai /srv/opt/node-v22.16.0/bin/npm --prefix /srv/projects/brai/services/brai_temporal ci
+systemctl restart brai-temporal-worker.service
+systemd-run --unit=brai-temporal-worker-delayed-restart --on-active=* --collect /bin/systemctl restart brai-temporal-worker.service
 sudo -u brai /srv/projects/brai-envs/prod/source/deploy/scripts/complete-operation-activities.sh --local operation:agent-task:*
 systemctl restart brai-api.service
 systemctl restart brai-api-dev.service
@@ -183,6 +188,13 @@ systemctl restart brai-api-preview-b.service
 systemctl restart brai-api-preview-c.service
 systemctl restart brai-api-preview-d.service
 systemctl restart brai-api-preview-e.service
+systemctl restart brai-admin.service
+systemctl restart brai-admin-dev.service
+systemctl restart brai-admin-preview-a.service
+systemctl restart brai-admin-preview-b.service
+systemctl restart brai-admin-preview-c.service
+systemctl restart brai-admin-preview-d.service
+systemctl restart brai-admin-preview-e.service
 ```
 
 The Ansible sudoers template is `deploy/ansible/templates/brai-deploy-sudoers.j2`.
@@ -198,7 +210,7 @@ and deploy/preview artifact roots stay `2775` so future files inherit `brai-depl
 
 ### Supabase Runtime Maintenance
 
-Supabase lifecycle configuration lives outside Git on the VPS. The brightos.world server runs
+Supabase lifecycle configuration lives outside Git on the VPS. The brai.one server runs
 self-hosted Supabase, so preview and Dev isolation use separate Postgres schemas with connection
 URLs carrying an explicit `search_path`:
 
@@ -211,9 +223,27 @@ SUPABASE_SELF_HOSTED_DATABASE_URL
 Production runtime credentials live in `/etc/brai/brai-api.env`, including `BRAI_DATABASE_URL`.
 Preview and Dev runtime credentials live in `/srv/projects/brai-envs/<environment>/brai-api.env`
 and are deploy-writable so CI can update schema-scoped DSNs after Supabase schema creation.
+Dev and Preview rebuilds copy current production data into their schema after migrations, excluding
+production Better Auth session, account, and verification rows. Those test env files set
+`BRAI_TEST_EMAIL_LOGIN=true`. Preview/Dev web still starts on the login screen and creates a normal
+Brai session only after the user enters the copied primary account email; it never asks for a
+password or OTP. Android keeps password-only login, and opening either surface never creates a
+session by itself. Production env files must not set this flag and web production keeps OTP login.
 
 Use [Supabase Postgres Cutover](supabase-postgres-cutover.md) only as the archived record of the
 completed cutover. Active production, Dev, and preview writes use Supabase Postgres only.
+
+Use `deploy/scripts/list-operation-activities.sh [--status New|Done|all] [--limit <N>] [--json]`
+to list Codex operation activities. Default mode SSHes through `brai-deploy@localhost` and
+executes the helper from deploy-owned `/srv/projects/brai-envs/prod/source`, then re-enters
+the protected runtime boundary as `brai`. Default output is a table of open `New` rows with
+`id`, `title`, `status`, UTC timestamps, truncated `reason`, and truncated `description_md`.
+For same-host maintenance without a deploy SSH key, use `--host-local`; for machine-readable
+output use `--json`.
+
+```bash
+deploy/scripts/list-operation-activities.sh --host-local --status New --limit 50
+```
 
 Use `deploy/scripts/complete-operation-activities.sh <operation-activity-id>...` to
 mark Codex operation activities as `Done`. The default mode SSHes through
@@ -242,27 +272,30 @@ ansible-playbook -i deploy/ansible/inventory.example.ini deploy/ansible/brai.yml
 ```
 
 The current local VPS setup keeps the existing production service name `brai-api.service`.
-Production and preview services run from the source checkout uploaded into
-`/srv/projects/brai-envs/<environment>/source/services/brai_api` as the configured service user/group.
+Production and preview API services run from the source checkout uploaded into
+`/srv/projects/brai-envs/<environment>/source/services/brai_api`; Admin services run from the
+matching `/srv/projects/brai-envs/<environment>/source/admin` checkout as the configured service user/group.
 The limited `brai-deploy` user owns `/srv/projects/brai-envs`, publishes only the deployment
-artifacts above, and uses sudo only for Caddy validation, Caddy reload, and matching Brai API service restarts.
+artifacts above, and uses sudo only for Caddy validation, Caddy reload, and matching Brai API/Admin service restarts.
 The Brai runtime user also belongs to the `brai-deploy` group and API units run with
 `SupplementaryGroups=brai-deploy` for deploy artifact coordination without broadening the sudo
 boundary. Runtime DB access uses protected Supabase Postgres env values.
 
-Production Caddy routes keep `app.brightos.world` public: the app shell is not protected by
+Production Caddy routes keep `app.brai.one` public: the app shell is not protected by
 Caddy Basic Auth, `/api/*` is proxied to the production Brai API without injected Bearer
-headers, `/mobile-update/*` remains public for Android OTA, and retired live URLs
+headers, `/admin` is proxied to Brai Admin without Caddy Basic Auth but still requires the
+Brai primary-user account gate, `/mobile-update/*` remains public for Android OTA, and retired live URLs
 `/timer*` and `/history*` stay 404 unless a later accepted requirement brings them back.
 Application auth owns browser sessions and `/v1/*` data access. Before installing the
-managed Brai block, Ansible prunes unmanaged top-level `brightos.world` and
-`app.brightos.world` blocks from `/etc/caddy/Caddyfile`; the separate `api.brightos.world`
-block remains outside this managed block because Android direct API traffic still uses it.
+managed Brai block, Ansible prunes legacy unmanaged Brai blocks from `/etc/caddy/Caddyfile`.
+The direct API route is part of the same managed block and legacy `.brightos.world` hosts return
+permanent redirects to their `.brai.one` counterparts.
 
 Preview Caddy routes keep the app shell protected with the unified Caddy Basic Auth login, but
 `/mobile-update/*` stays public for Android OTA and `/api/*` is proxied to the matching Brai API without
-Caddy Basic Auth or injected bearer headers. Brai API auth remains responsible for `/v1/*` data access,
-so newly installed Preview A-E apps may need their own in-app login session before sync turns green.
+Caddy Basic Auth or injected bearer headers. `/admin` is also behind unified Caddy Basic Auth and then
+the Brai primary-user account gate. Brai API auth remains responsible for `/v1/*` data access, so newly
+installed Preview A-E apps may need their own in-app login session before sync turns green.
 
 If an environment exists before its first CI deploy, publish a baseline web/OTA layer without changing APK versions:
 

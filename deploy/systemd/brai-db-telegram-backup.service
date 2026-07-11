@@ -1,0 +1,16 @@
+[Unit]
+Description=Brai production Postgres Telegram backup
+After=network-online.target docker.service brai-supabase.service
+Wants=network-online.target
+Requires=docker.service brai-supabase.service
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/brai/brai-api.env
+EnvironmentFile=/etc/brai/brai-db-telegram-backup.env
+ExecStart=/srv/opt/brai-db-telegram-backup.sh
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=full
+ReadWritePaths=/tmp

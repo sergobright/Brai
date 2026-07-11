@@ -6,7 +6,7 @@
 
 - Follow the parent Brai `AGENTS.md` branch, delivery, and security rules.
 - Do not use or recreate a separate admin Git repository.
-- `npm run live-deploy` is only a host-local helper: build current admin source, restart `brai-admin.service`, and check `127.0.0.1:3040`.
+- Admin deploys through the parent Brai environment flow, not a standalone admin helper.
 
 ## Admin-Specific Rules
 
@@ -15,4 +15,4 @@
 - Read tables, columns, indexes, and foreign keys from Postgres introspection; do not hardcode schema lists.
 - Render SQL `NULL` and missing cell values as empty visible cells, not as the text `NULL`.
 - For visible UI changes, reuse/sync parent primitives from `/srv/projects/brai/apps/brai_app/src/shared/ui` before adding admin-local UI code.
-- Public route stays `admin.brightos.world` behind unified Caddy Basic Auth; the app binds only to localhost.
+- Public route is `/admin` inside each Brai environment domain. Production uses the Brai account gate; dev and preview also use unified Caddy Basic Auth. Admin app services bind only to localhost.

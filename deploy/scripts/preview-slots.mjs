@@ -103,7 +103,7 @@ function updateOwnedSlot(registry, branch, commit, now, status) {
   const existing = findByBranch(registry, branch);
   if (!existing) throw new Error(`branch has no preview slot: ${branch}`);
   if (status === "ready" && existing.entry.apk_build_kind === "preview" && existing.entry.apk_preview_iteration) {
-    commitPreviewCounter(registry, existing.entry.apk_version, existing.entry.apk_preview_iteration);
+    commitPreviewCounter(registry, branch, existing.entry.apk_version, existing.entry.apk_preview_iteration);
   }
   Object.assign(existing.entry, {
     status,
@@ -118,7 +118,7 @@ function nextApkPreview(registry, branch, commit, stableVersion, now) {
   const existing = findByBranch(registry, branch);
   if (!existing) throw new Error(`branch has no preview slot: ${branch}`);
   const version = positiveInteger(stableVersion, "stable APK version");
-  const iteration = positiveInteger(committedPreviewCounter(registry, version) + 1, "APK preview iteration");
+  const iteration = positiveInteger(committedPreviewCounter(registry, version, branch) + 1, "APK preview iteration");
   const versionCode = version * 10000 + iteration;
   Object.assign(existing.entry, {
     commit: commit ?? existing.entry.commit,
@@ -212,7 +212,13 @@ function findByBranch(registry, branch) {
 }
 
 function readRegistry() {
-  const initial = { ...Object.fromEntries(slots.map((slot) => [slot, defaultSlot(slot)])), queue: [], apk_preview_counter: 0, apk_preview_counters: {} };
+  const initial = {
+    ...Object.fromEntries(slots.map((slot) => [slot, defaultSlot(slot)])),
+    queue: [],
+    apk_preview_counter: 0,
+    apk_preview_counters: {},
+    apk_preview_branch_counters: {},
+  };
   if (!fs.existsSync(registryPath)) return initial;
   const parsed = JSON.parse(fs.readFileSync(registryPath, "utf8"));
   for (const slot of slots) {
@@ -223,14 +229,23 @@ function readRegistry() {
     queue: normalizeQueue(parsed.queue),
     apk_preview_counter: Number.isInteger(Number(parsed.apk_preview_counter)) ? Number(parsed.apk_preview_counter) : 0,
     apk_preview_counters: normalizePreviewCounters(parsed.apk_preview_counters),
+    apk_preview_branch_counters: normalizeBranchPreviewCounters(parsed.apk_preview_branch_counters),
   };
+  for (const slot of slots) {
+    const entry = registry[slot];
+    if (entry?.status === "ready" && entry.branch && entry.apk_build_kind === "preview" && entry.apk_preview_iteration) {
+      commitPreviewCounter(registry, entry.branch, entry.apk_version, entry.apk_preview_iteration);
+    }
+  }
   registry.apk_preview_counter = committedPreviewCounter(registry);
   return registry;
 }
 
-function committedPreviewCounter(registry, stableVersion = null) {
+function committedPreviewCounter(registry, stableVersion = null, branch = null) {
   const versionKey = stableVersion == null ? null : String(stableVersion);
-  let counter = versionKey
+  let counter = branch && versionKey
+    ? positivePreviewCounter(registry.apk_preview_branch_counters?.[versionKey]?.[branch])
+    : versionKey
     ? positivePreviewCounter(registry.apk_preview_counters?.[versionKey])
     : positivePreviewCounter(registry.apk_preview_counter);
   for (const slot of slots) {
@@ -239,7 +254,8 @@ function committedPreviewCounter(registry, stableVersion = null) {
       entry?.status === "ready" &&
       entry.apk_build_kind === "preview" &&
       entry.apk_preview_iteration &&
-      (!versionKey || String(entry.apk_version) === versionKey)
+      (!versionKey || String(entry.apk_version) === versionKey) &&
+      (!branch || entry.branch === branch)
     ) {
       counter = Math.max(counter, positiveInteger(entry.apk_preview_iteration, "APK preview iteration"));
     }
@@ -247,9 +263,16 @@ function committedPreviewCounter(registry, stableVersion = null) {
   return counter;
 }
 
-function commitPreviewCounter(registry, stableVersion, previewIteration) {
+function commitPreviewCounter(registry, branch, stableVersion, previewIteration) {
+  requireBranch(branch);
   const version = positiveInteger(stableVersion, "stable APK version");
   const iteration = positiveInteger(previewIteration, "APK preview iteration");
+  registry.apk_preview_branch_counters ??= {};
+  registry.apk_preview_branch_counters[String(version)] ??= {};
+  registry.apk_preview_branch_counters[String(version)][branch] = Math.max(
+    positivePreviewCounter(registry.apk_preview_branch_counters[String(version)][branch]),
+    iteration,
+  );
   registry.apk_preview_counters ??= {};
   registry.apk_preview_counters[String(version)] = Math.max(
     positivePreviewCounter(registry.apk_preview_counters[String(version)]),
@@ -266,6 +289,25 @@ function normalizePreviewCounters(value) {
     const counter = Number(raw);
     if (Number.isInteger(version) && version > 0 && Number.isInteger(counter) && counter > 0) {
       counters[String(version)] = counter;
+    }
+  }
+  return counters;
+}
+
+function normalizeBranchPreviewCounters(value) {
+  const counters = {};
+  if (!value || typeof value !== "object" || Array.isArray(value)) return counters;
+  for (const [versionKey, rawBranches] of Object.entries(value)) {
+    const version = Number(versionKey);
+    if (!Number.isInteger(version) || version <= 0 || !rawBranches || typeof rawBranches !== "object" || Array.isArray(rawBranches)) {
+      continue;
+    }
+    for (const [branch, rawCounter] of Object.entries(rawBranches)) {
+      const counter = Number(rawCounter);
+      if (branch && Number.isInteger(counter) && counter > 0) {
+        counters[String(version)] ??= {};
+        counters[String(version)][branch] = counter;
+      }
     }
   }
   return counters;

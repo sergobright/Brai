@@ -6,11 +6,11 @@
 
 ## Источники данных
 
-- Supabase Postgres является runtime source of truth для timer canonical state, sessions, Activities, activity events, auth, deploy/version ledger, agents, schedules и AI logs.
+- Supabase Postgres является runtime source of truth для timer canonical state, sessions, Activities, auth, deploy/version ledger, agents, schedules и AI logs.
 - `BRAI_DATABASE_URL` - server-side Supabase/Postgres DSN для runtime API, scheduler, deploy ledger scripts, production, Dev и preview environments. Runtime запускается только с Postgres URL и обязан fail-fast без него.
 - Node API остаётся единственной data API boundary. Web/Android не получают Supabase service credentials и не ходят напрямую в Supabase Data API.
-- Timer sync основан на event log и deterministic replay.
-- Activities sync использует отдельный event log: `activities` и `activity_events`.
+- Timer, Activity и Inbox sync используют один canonical `events` ledger с `event_domain` и domain-local revision; retired `timer_events`, `activity_events` и `inbox_events` отсутствуют.
+- Timer replay и Activity/Inbox projections читают accepted domain rows из `events`; ignored rows сохраняются там же для idempotency и аудита.
 - Main work entities живут identity-уровнем в таблице `items`; временные роли сущностей живут в `item_roles`, справочник ролей - в `item_role_types`.
 - Server schema metadata регистрируется в таблице `table_descriptions`.
 - Runtime AI-агенты регистрируются в таблице `agents`.
@@ -57,7 +57,7 @@
 - Каждый runtime AI-агент при фактическом срабатывании пишет ровно одну строку в `ai_logs`: `agent_id`, `agent_version`, UTC `dt`, `status`, единый `json_data`, короткий русский `ai_title`, и nullable `flow_id`/`flow_command`.
 - Migration должна быть idempotent для повторного запуска.
 - Не меняй canonical data shape без проверки API consumers и client cache projection.
-- Preview `codex/*` использует отдельную schema-only Supabase preview branch, применяет все migrations и idempotent `supabase/preview_seed.sql` с тестовыми данными. Dev использует долгоживущую `brai-dev` branch без automatic prod refresh.
+- Preview `codex/*` и Dev используют отдельные Supabase/Postgres schemas, применяют все migrations и при каждой пересборке тестового окружения refresh-ят данные из production DB. `supabase/preview_seed.sql` остаётся fallback seed для flow без self-hosted prod source. Dev/Preview включают explicit email-only login через `BRAI_TEST_EMAIL_LOGIN=true`; открытие web или Android само по себе не создаёт сессию. Production не включает test-email endpoint.
 
 ## Sync rules
 
@@ -71,7 +71,8 @@
 
 - Internal API v1 требует Bearer auth или valid password-auth session cookie; external Inbox API требует Inbox API key.
 - Browser web `/api/*` идёт через same-origin Caddy proxy and is authorized by Brai API session cookies or explicit Bearer auth; Caddy must not inject a private Bearer token for public browser routes.
-- Direct Capacitor Android uses password-auth session cookies against `https://api.brightos.world`.
+- Direct Capacitor Android uses password-auth session cookies against `https://api.brai.one`.
+- Browser Web в Preview/Dev требует ввод точного email primary account и только после этого создаёт test session без password/OTP; production browser сохраняет email OTP.
 - Не embed private Bearer token или Inbox API key в web bundle, OTA bundle или docs.
 - External Inbox API contract is documented in `docs/api/inbox-api.md`.
 - Any Inbox API route, payload, response, auth, MIME, limit, storage, DB mapping, processing, or error-code change must update `docs/api/inbox-api.md` in the same commit.

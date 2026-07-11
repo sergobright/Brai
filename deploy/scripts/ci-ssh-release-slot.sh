@@ -147,6 +147,7 @@ process.stdin.on("end", () => {
   else
     node deploy/scripts/supabase-branch.mjs delete-preview --branch "$RELEASE_BRANCH" >&2
   fi
+  node deploy/scripts/cleanup-test-schemas.mjs --branch "$RELEASE_BRANCH" --legacy-before-hours 24 >&2
 fi
 RELEASE_JSON="$(bash deploy/scripts/preview-slots.sh release "$RELEASE_BRANCH")"
 printf '%s\n' "$RELEASE_JSON"

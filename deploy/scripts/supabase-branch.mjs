@@ -6,71 +6,100 @@ import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
+import { expandPreservedTables, orderTablesByDependencies, tablesToReset } from "./copy-table-order.mjs";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(scriptDir, "../..");
 const requireFromApi = createRequire(path.join(root, "services/brai_api/package.json"));
 const { Pool } = requireFromApi("pg");
-const [command, ...argv] = process.argv.slice(2);
-const args = parseArgs(argv);
+const POST_PRODUCTION_SEED_MIGRATION_MARKER = "brai:reapply-after-production-seed";
 const LEGACY_DATABASE_ENV_KEYS = new Set([
   "BRAI_DATA_STORE",
   "BRAI_DB",
   "BRAI_LEGACY_SQLITE_PATH",
 ]);
+const RETIRED_RUNTIME_ENV_KEYS = new Set(["BRAI_TEST_AUTO_LOGIN"]);
+const TEST_DATA_RESET_PRESERVED_TABLES = new Set([
+  "agents",
+  "role_contracts",
+  "role_statuses",
+  "schema_migrations",
+  "supabase_migration_files",
+  "table_descriptions",
+  "workflow_definitions"
+]);
+const TEST_DATA_COPY_EXCLUDED_TABLES = new Set([
+  "account",
+  "session",
+  "verification"
+]);
 
-if (command === "preview-env") {
-  const branch = required(args, "branch");
-  const envFile = required(args, "runtime-env");
-  const name = args.name || (isSelfHosted() ? previewSchemaName(branch) : previewBranchName(branch));
-  const { databaseUrl, details } = isSelfHosted()
-    ? await ensureSelfHostedSchema(name)
-    : ensureCloudBranch(name, { persistent: false, withData: false });
-  assertBranchReady(name, details, databaseUrl);
-  upsertEnvFile(envFile, {
-    BRAI_DATABASE_URL: databaseUrl,
-    BRAI_SUPABASE_BRANCH: name
-  });
-  await applyMigrations(databaseUrl);
-  await applyPreviewSeed(databaseUrl);
-  updatePreviewRegistry(branch, name, details);
-  console.log(JSON.stringify({ ok: true, branch: name, id: branchId(details), status: branchStatus(details), envFile }, null, 2));
-} else if (command === "dev-env") {
-  const envFile = required(args, "runtime-env");
-  const name = args.name || (isSelfHosted() ? "brai_dev" : "brai-dev");
-  const { databaseUrl, details } = isSelfHosted()
-    ? await ensureSelfHostedSchema(name)
-    : ensureCloudBranch(name, { persistent: true, withData: true });
-  assertBranchReady(name, details, databaseUrl);
-  upsertEnvFile(envFile, {
-    BRAI_DATABASE_URL: databaseUrl,
-    BRAI_SUPABASE_BRANCH: name
-  });
-  await applyMigrations(databaseUrl);
-  console.log(JSON.stringify({ ok: true, branch: name, envFile }, null, 2));
-} else if (command === "delete-preview") {
-  const branch = required(args, "branch");
-  const name = args.name || (isSelfHosted() ? previewSchemaName(branch) : previewBranchName(branch));
-  if (isSelfHosted()) {
-    const deleted = await dropSelfHostedSchema(name);
-    console.log(JSON.stringify({ ok: true, branch: name, deleted }, null, 2));
-  } else {
-    const projectRef = requiredEnv("SUPABASE_PROJECT_REF");
-    const get = runSupabase(["branches", "get", name, "--project-ref", projectRef], { allowFailure: true });
-    if (get.status !== 0) {
-      if (!isMissingBranch(get)) throw new Error(`Cannot verify Supabase preview branch before delete: ${get.stderr || get.stdout}`);
-      console.log(JSON.stringify({ ok: true, branch: name, deleted: false }, null, 2));
-      process.exit(0);
+if (fileURLToPath(import.meta.url) === path.resolve(process.argv[1] || "")) {
+  await main();
+}
+
+async function main() {
+  const [command, ...argv] = process.argv.slice(2);
+  const args = parseArgs(argv);
+  if (command === "preview-env") {
+    const branch = required(args, "branch");
+    const envFile = required(args, "runtime-env");
+    const name = args.name || (isSelfHosted() ? previewSchemaName(branch) : previewBranchName(branch));
+    const { databaseUrl, details } = isSelfHosted()
+      ? await ensureSelfHostedSchema(name)
+      : ensureCloudBranch(name, { persistent: false, withData: false });
+    assertBranchReady(name, details, databaseUrl);
+    upsertEnvFile(envFile, {
+      BRAI_DATABASE_URL: databaseUrl,
+      BRAI_SUPABASE_BRANCH: name,
+      BRAI_TEST_EMAIL_LOGIN: "true",
+      ...rotatedSessionSecret(envFile)
+    });
+    await applyMigrations(databaseUrl);
+    const seededFromProduction = await seedTestDataFromProduction(databaseUrl);
+    if (!seededFromProduction) await applyPreviewSeed(databaseUrl);
+    updatePreviewRegistry(branch, name, details);
+    console.log(JSON.stringify({ ok: true, branch: name, id: branchId(details), status: branchStatus(details), envFile, seededFromProduction }, null, 2));
+  } else if (command === "dev-env") {
+    const envFile = required(args, "runtime-env");
+    const name = args.name || (isSelfHosted() ? "brai_dev" : "brai-dev");
+    const { databaseUrl, details } = isSelfHosted()
+      ? await ensureSelfHostedSchema(name)
+      : ensureCloudBranch(name, { persistent: true, withData: true });
+    assertBranchReady(name, details, databaseUrl);
+    upsertEnvFile(envFile, {
+      BRAI_DATABASE_URL: databaseUrl,
+      BRAI_SUPABASE_BRANCH: name,
+      BRAI_TEST_EMAIL_LOGIN: "true",
+      ...rotatedSessionSecret(envFile)
+    });
+    await applyMigrations(databaseUrl);
+    const seededFromProduction = await seedTestDataFromProduction(databaseUrl);
+    console.log(JSON.stringify({ ok: true, branch: name, envFile, seededFromProduction }, null, 2));
+  } else if (command === "delete-preview") {
+    const branch = required(args, "branch");
+    const name = args.name || (isSelfHosted() ? previewSchemaName(branch) : previewBranchName(branch));
+    if (isSelfHosted()) {
+      const deleted = await dropSelfHostedSchema(name);
+      console.log(JSON.stringify({ ok: true, branch: name, deleted }, null, 2));
+    } else {
+      const projectRef = requiredEnv("SUPABASE_PROJECT_REF");
+      const get = runSupabase(["branches", "get", name, "--project-ref", projectRef], { allowFailure: true });
+      if (get.status !== 0) {
+        if (!isMissingBranch(get)) throw new Error(`Cannot verify Supabase preview branch before delete: ${get.stderr || get.stdout}`);
+        console.log(JSON.stringify({ ok: true, branch: name, deleted: false }, null, 2));
+        return;
+      }
+      runSupabase(["branches", "delete", name, "--project-ref", projectRef]);
+      console.log(JSON.stringify({ ok: true, branch: name, deleted: true }, null, 2));
     }
-    runSupabase(["branches", "delete", name, "--project-ref", projectRef]);
-    console.log(JSON.stringify({ ok: true, branch: name, deleted: true }, null, 2));
+  } else if (command === "migrate") {
+    const databaseUrl = args["postgres-url"] || process.env.BRAI_DATABASE_URL;
+    await applyMigrations(databaseUrl);
+    console.log(JSON.stringify({ ok: true, migrated: true }, null, 2));
+  } else {
+    throw new Error("usage: supabase-branch.mjs preview-env --branch <codex/...> --runtime-env <path> | dev-env --runtime-env <path> | delete-preview --branch <codex/...> | migrate --postgres-url <url>");
   }
-} else if (command === "migrate") {
-  const databaseUrl = args["postgres-url"] || process.env.BRAI_DATABASE_URL;
-  await applyMigrations(databaseUrl);
-  console.log(JSON.stringify({ ok: true, migrated: true }, null, 2));
-} else {
-  throw new Error("usage: supabase-branch.mjs preview-env --branch <codex/...> --runtime-env <path> | dev-env --runtime-env <path> | delete-preview --branch <codex/...> | migrate --postgres-url <url>");
 }
 
 function ensureCloudBranch(name, { persistent, withData }) {
@@ -210,6 +239,271 @@ async function applyPreviewSeed(databaseUrl) {
   }
 }
 
+async function seedTestDataFromProduction(targetDatabaseUrl) {
+  if (process.env.BRAI_SUPABASE_SEED_FROM_PROD === "false") return false;
+  if (!isSelfHosted()) return false;
+  if (process.env.BRAI_SUPABASE_DRY_RUN === "true") return true;
+  const sourceDatabaseUrl = process.env.BRAI_PROD_DATABASE_URL || process.env.BRAI_DATABASE_URL || "";
+  if (!sourceDatabaseUrl) throw new Error("BRAI_PROD_DATABASE_URL is required to seed test data from production");
+
+  const sourceSchema = searchPathSchema(sourceDatabaseUrl);
+  const targetSchema = searchPathSchema(targetDatabaseUrl);
+  if (sourceSchema === targetSchema) {
+    throw new Error(`Refusing to seed test data: source and target schema are both ${sourceSchema}`);
+  }
+
+  const adminUrl = selfHostedDatabaseUrl();
+  const postSeedMigrations = postProductionSeedMigrations();
+  const pool = new Pool({ connectionString: adminUrl, ssl: postgresSsl(adminUrl) });
+  try {
+    await copySchemaData(pool, { sourceSchema, targetSchema, postSeedMigrations });
+  } finally {
+    await pool.end();
+  }
+  return true;
+}
+
+function postProductionSeedMigrations() {
+  const migrationsDir = path.join(root, "supabase/migrations");
+  return fs.readdirSync(migrationsDir)
+    .filter((name) => name.endsWith(".sql"))
+    .sort()
+    .map((name) => ({ name, sql: fs.readFileSync(path.join(migrationsDir, name), "utf8") }))
+    .filter(({ sql }) => sql.includes(POST_PRODUCTION_SEED_MIGRATION_MARKER));
+}
+
+export async function copySchemaData(pool, { sourceSchema, targetSchema, postSeedMigrations = [] }) {
+  const targetTables = await schemaTables(pool, targetSchema);
+  const dependencies = await foreignKeyDependencies(pool, targetSchema);
+  const preservedTables = expandPreservedTables(TEST_DATA_RESET_PRESERVED_TABLES, dependencies);
+  const truncatableTables = tablesToReset(targetTables, preservedTables);
+  if (truncatableTables.length === 0) return;
+
+  const sourceTables = new Set(await schemaTables(pool, sourceSchema));
+  const copyTables = orderTablesByDependencies(
+    truncatableTables.filter((table) => sourceTables.has(table) && !TEST_DATA_COPY_EXCLUDED_TABLES.has(table)),
+    { dependencies, fallbackOrder: migrationTableOrder() }
+  );
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ");
+    await client.query(`SET LOCAL search_path TO ${quoteIdentifier(targetSchema)}, public`);
+    await client.query(`TRUNCATE TABLE ${truncatableTables.map((table) => qualifiedTable(targetSchema, table)).join(", ")} CONTINUE IDENTITY CASCADE`);
+    for (const table of copyTables) {
+      const columns = await commonColumns(client, sourceSchema, targetSchema, table);
+      if (columns.length === 0) continue;
+      const columnList = columns.map(quoteIdentifier).join(", ");
+      await client.query(`
+        INSERT INTO ${qualifiedTable(targetSchema, table)} (${columnList})
+        OVERRIDING SYSTEM VALUE
+        SELECT ${columnList}
+        FROM ${qualifiedTable(sourceSchema, table)}
+      `);
+    }
+    for (const { sql } of postSeedMigrations) await client.query(sql);
+    await reseedOwnedSequences(client, { schema: targetSchema, tables: copyTables });
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function inspectOwnedSequences(queryable, { schema, tables = null, lockOwnedTables = false }) {
+  const metadata = await queryable.query(`
+    SELECT
+      target.table_name,
+      target.column_name,
+      sequence_namespace.nspname AS sequence_schema,
+      sequence_class.relname AS sequence_name,
+      sequence_config.seqstart::text AS start_value,
+      sequence_config.seqincrement::text AS increment,
+      sequence_config.seqmin::text AS min_limit,
+      sequence_config.seqmax::text AS max_limit,
+      sequence_config.seqcache::text AS cache_size,
+      sequence_config.seqcycle AS cycles,
+      (target.is_identity = 'YES') AS is_identity
+    FROM information_schema.columns target
+    CROSS JOIN LATERAL (
+      SELECT pg_get_serial_sequence(
+        format('%I.%I', target.table_schema, target.table_name),
+        target.column_name
+      )::regclass AS sequence_oid
+    ) owned
+    JOIN pg_class sequence_class
+      ON sequence_class.oid = owned.sequence_oid
+     AND sequence_class.relkind = 'S'
+    JOIN pg_namespace sequence_namespace
+      ON sequence_namespace.oid = sequence_class.relnamespace
+    JOIN pg_sequence sequence_config
+      ON sequence_config.seqrelid = sequence_class.oid
+    WHERE target.table_schema = $1
+      AND owned.sequence_oid IS NOT NULL
+      AND ($2::text[] IS NULL OR target.table_name = ANY($2::text[]))
+    ORDER BY target.table_name, target.ordinal_position
+  `, [schema, tables]);
+
+  if (lockOwnedTables && metadata.rows.length > 0) {
+    const ownedTables = [...new Set(metadata.rows.map((sequence) => sequence.table_name))];
+    await queryable.query(`
+      LOCK TABLE ${ownedTables.map((table) => qualifiedTable(schema, table)).join(", ")}
+      IN SHARE MODE
+    `);
+  }
+
+  const sequences = [];
+  for (const sequence of metadata.rows) {
+    const state = await queryable.query(`
+      SELECT last_value::text AS last_value, is_called
+      FROM ${qualifiedTable(sequence.sequence_schema, sequence.sequence_name)}
+    `);
+    const values = await queryable.query(`
+      SELECT
+        MIN(${quoteIdentifier(sequence.column_name)})::text AS min_value,
+        MAX(${quoteIdentifier(sequence.column_name)})::text AS max_value
+      FROM ${qualifiedTable(schema, sequence.table_name)}
+    `);
+    sequences.push({
+      ...sequence,
+      ...state.rows[0],
+      ...values.rows[0]
+    });
+  }
+  return sequences;
+}
+
+export function sequenceAllocationStatus(sequence) {
+  const increment = BigInt(sequence.increment);
+  const lastValue = BigInt(sequence.last_value);
+  const minLimit = BigInt(sequence.min_limit);
+  const maxLimit = BigInt(sequence.max_limit);
+  const cacheSize = BigInt(sequence.cache_size ?? "1");
+  const boundaryText = increment > 0n ? sequence.max_value : sequence.min_value;
+  const boundary = boundaryText == null ? null : BigInt(boundaryText);
+  let nextValue = sequence.is_called ? lastValue + increment : lastValue;
+  if (cacheSize > 1n) {
+    return { safe: false, reason: "cached", nextValue, boundary, cacheSize };
+  }
+  if (nextValue > maxLimit || nextValue < minLimit) {
+    if (!sequence.cycles) return { safe: false, reason: "exhausted", nextValue, boundary };
+    nextValue = increment > 0n ? minLimit : maxLimit;
+  }
+  if (boundary == null) return { safe: true, reason: "empty", nextValue };
+  if (sequence.cycles) return { safe: false, reason: "cycling", nextValue, boundary };
+
+  const safe = increment > 0n ? nextValue > boundary : nextValue < boundary;
+  return {
+    safe,
+    reason: safe ? "ahead" : "collision",
+    nextValue,
+    boundary
+  };
+}
+
+export async function reseedOwnedSequences(queryable, { schema, tables }) {
+  const sequences = await inspectOwnedSequences(queryable, { schema, tables });
+  const reseeded = [];
+  for (const sequence of sequences) {
+    const status = sequenceAllocationStatus(sequence);
+    if (status.safe) continue;
+    if (status.reason === "cached" || status.reason === "cycling") {
+      throw new Error(`Unsupported unsafe sequence ${sequence.sequence_schema}.${sequence.sequence_name}: ${status.reason}`);
+    }
+    if (status.reason !== "collision" && status.reason !== "exhausted") {
+      throw new Error(`Unknown unsafe sequence state ${sequence.sequence_schema}.${sequence.sequence_name}: ${status.reason}`);
+    }
+    const restartValue = status.boundary == null
+      ? BigInt(sequence.start_value)
+      : status.boundary + BigInt(sequence.increment);
+    if (restartValue < BigInt(sequence.min_limit) || restartValue > BigInt(sequence.max_limit)) {
+      throw new Error(`Cannot reseed exhausted sequence ${sequence.sequence_schema}.${sequence.sequence_name}`);
+    }
+    await queryable.query(`
+      ALTER SEQUENCE ${qualifiedTable(sequence.sequence_schema, sequence.sequence_name)}
+      RESTART WITH ${restartValue}
+    `);
+    reseeded.push({ ...sequence, allocation: status });
+  }
+  return reseeded;
+}
+
+export function unsafeOwnedSequenceAllocations(sequences) {
+  return sequences
+    .map((sequence) => ({ ...sequence, allocation: sequenceAllocationStatus(sequence) }))
+    .filter((sequence) => !sequence.allocation.safe);
+}
+
+async function schemaTables(pool, schema) {
+  const result = await pool.query(`
+    SELECT table_name
+    FROM information_schema.tables
+    WHERE table_schema = $1
+      AND table_type = 'BASE TABLE'
+    ORDER BY table_name
+  `, [schema]);
+  return result.rows.map((row) => row.table_name);
+}
+
+async function commonColumns(pool, sourceSchema, targetSchema, table) {
+  const result = await pool.query(`
+    SELECT target.column_name
+    FROM information_schema.columns target
+    JOIN information_schema.columns source
+      ON source.table_schema = $1
+     AND source.table_name = target.table_name
+     AND source.column_name = target.column_name
+    WHERE target.table_schema = $2
+      AND target.table_name = $3
+    ORDER BY target.ordinal_position
+  `, [sourceSchema, targetSchema, table]);
+  return result.rows.map((row) => row.column_name);
+}
+
+async function foreignKeyDependencies(pool, schema) {
+  const result = await pool.query(`
+    SELECT DISTINCT
+      child.relname AS table_name,
+      parent.relname AS referenced_table
+    FROM pg_constraint fk
+    JOIN pg_class child ON child.oid = fk.conrelid
+    JOIN pg_namespace child_namespace ON child_namespace.oid = child.relnamespace
+    JOIN pg_class parent ON parent.oid = fk.confrelid
+    JOIN pg_namespace parent_namespace ON parent_namespace.oid = parent.relnamespace
+    WHERE fk.contype = 'f'
+      AND child_namespace.nspname = $1
+      AND parent_namespace.nspname = $1
+  `, [schema]);
+  return result.rows.map((row) => ({
+    table: row.table_name,
+    referencedTable: row.referenced_table
+  }));
+}
+
+function migrationTableOrder() {
+  const migrationsDir = path.join(root, "supabase/migrations");
+  const names = [];
+  for (const entry of fs.readdirSync(migrationsDir).filter((name) => name.endsWith(".sql")).sort()) {
+    const sql = fs.readFileSync(path.join(migrationsDir, entry), "utf8");
+    for (const match of sql.matchAll(/CREATE TABLE IF NOT EXISTS\s+("[^"]+"|[a-z_][a-z0-9_]*)/gi)) {
+      names.push(match[1].replace(/^"|"$/g, "").replaceAll('""', '"'));
+    }
+  }
+  return names;
+}
+
+function searchPathSchema(databaseUrl) {
+  const options = new URL(databaseUrl).searchParams.get("options") || "";
+  const match = options.match(/search_path=([^,\s]+)/);
+  return match?.[1] || "public";
+}
+
+function qualifiedTable(schema, table) {
+  return `${quoteIdentifier(schema)}.${quoteIdentifier(table)}`;
+}
+
 function runSupabase(args, { allowFailure = false } = {}) {
   if (process.env.BRAI_SUPABASE_DRY_RUN === "true") {
     if (args.includes("json")) return { status: 0, stdout: JSON.stringify({ id: "dry-run", name: args[2], status: "healthy" }), stderr: "" };
@@ -326,8 +620,17 @@ function normalizeEnvLine(line, replacedKeys) {
   const match = line.match(/^\s*(?:export\s+)?([A-Z0-9_]+)=(.*)$/);
   if (!match) return "";
   const [, key, rawValue] = match;
-  if (replacedKeys.has(key) || LEGACY_DATABASE_ENV_KEYS.has(key)) return "";
+  if (replacedKeys.has(key) || LEGACY_DATABASE_ENV_KEYS.has(key) || RETIRED_RUNTIME_ENV_KEYS.has(key)) return "";
   return `${key}=${shellQuote(parseEnvValue(rawValue))}`;
+}
+
+function rotatedSessionSecret(filePath) {
+  if (!fs.existsSync(filePath)) return {};
+  const legacyAutoLogin = fs.readFileSync(filePath, "utf8").split(/\r?\n/).some((line) => {
+    const match = line.match(/^\s*(?:export\s+)?BRAI_TEST_AUTO_LOGIN=(.*)$/);
+    return match && /^(1|true|yes)$/i.test(parseEnvValue(match[1]));
+  });
+  return legacyAutoLogin ? { BRAI_SESSION_SECRET: crypto.randomBytes(32).toString("base64url") } : {};
 }
 
 function parseEnvValue(value) {

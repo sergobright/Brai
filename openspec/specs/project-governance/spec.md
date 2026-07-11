@@ -7,11 +7,16 @@ This specification defines the durable workflow and documentation rules for Brai
 ## Requirements
 
 ### Requirement: OpenSpec is the accepted requirements source
-Accepted durable requirements for Brai SHALL be recorded under `openspec/specs/`.
+Accepted durable requirements, architecture rules, workflow rules, and system invariants for Brai SHALL be recorded under `openspec/specs/`.
 
 #### Scenario: Durable project rule is discovered
 - **WHEN** a durable behavior, architecture constraint, workflow rule, local service, or project invariant is established
 - **THEN** the requirement is recorded or updated in `openspec/specs/`
+
+#### Scenario: System architecture is defined
+- **WHEN** Brai defines durable system architecture in human-readable form
+- **THEN** OpenSpec contains the accepted source of truth for that architecture
+- **AND** implementation-specific documentation does not override accepted OpenSpec requirements
 
 ### Requirement: Planned changes use OpenSpec changes
 Planned requirement changes MUST be represented under `openspec/changes/<change-id>/` before implementation begins.
@@ -19,6 +24,16 @@ Planned requirement changes MUST be represented under `openspec/changes/<change-
 #### Scenario: New feature or behavior is requested
 - **WHEN** work changes accepted requirements or adds a new capability
 - **THEN** a change directory is created with proposal, spec deltas, tasks, and design when needed before implementation
+
+#### Scenario: Architecture, data model, or workflow changes are planned
+- **WHEN** a planned change affects architecture, data models, dependencies, security, performance, migration, workflows, or more than one module
+- **THEN** the OpenSpec change includes `design.md`
+- **AND** workflow changes are planned through OpenSpec before implementation code changes
+
+#### Scenario: Architecture documentation is requested during OpenSpec preparation
+- **WHEN** an OpenSpec preparation task defines future system architecture
+- **THEN** it records the planned architecture inside the change directory
+- **AND** it does not create tracked documentation outside the change folder unless the task explicitly asks for accepted docs updates
 
 ### Requirement: Completed changes are archived into specs
 Completed OpenSpec changes SHALL be archived so accepted deltas are merged into `openspec/specs/` and historical change material moves under `openspec/changes/archive/`.
@@ -119,7 +134,7 @@ Brai SHALL name any new or renamed database foreign-key column that references `
 - **AND** shortened names such as `item_id`, `role_type_id`, or `event_type_id` are not introduced for plural parent tables
 
 ### Requirement: SocratiCode is used for semantic code search
-Agents and maintainers MUST use SocratiCode for semantic code search after confirming the project codebase index is complete.
+Agents and maintainers MUST use SocratiCode for semantic code search after confirming the project codebase index is complete. Brai SHALL keep `/srv/projects/brai` on one canonical shared SocratiCode index, `codebase_brightos_brai`, with automatic file watching and fail-closed freshness checks.
 
 #### Scenario: Semantic code search is needed
 - **WHEN** an agent needs to find code by behavior, responsibility, feature, or natural-language meaning
@@ -137,8 +152,20 @@ Agents and maintainers MUST use SocratiCode for semantic code search after confi
 
 #### Scenario: SocratiCode freshness is checked
 - **WHEN** SocratiCode behavior, agent rules, OpenSpec routing, or repository context indexing changes
-- **THEN** `npm run socraticode:ensure` can create or catch up the shared index and start the watcher
-- **AND** `npm run socraticode:preflight` verifies the local MCP config, context artifact registry, complete shared index, and active watcher state
+- **THEN** `npm run socraticode:ensure` can create or catch up the shared index, refresh context artifacts, rebuild stale code graphs, and start the watcher
+- **AND** `npm run socraticode:preflight` verifies the local MCP config, canonical shared collection, context artifact registry, complete shared index, fresh code graph, and active watcher state
+- **AND** stale or incomplete SocratiCode state is a blocking preflight failure
+
+#### Scenario: SocratiCode watcher is managed as runtime support
+- **WHEN** the Brai host boots or SocratiCode watcher process exits
+- **THEN** `brai-socraticode-watcher.service` restarts the watcher daemon for `/srv/projects/brai`
+- **AND** the daemon runs safe catch-up on startup and every 60 seconds while file watching remains the primary freshness mechanism
+
+#### Scenario: Implementation work is handed off
+- **WHEN** an agent has implementation work to hand off
+- **THEN** the task marker must show SocratiCode was used through a codebase status, search, context search, graph, or symbol query
+- **AND** handoff and final Stop checks fail closed when the marker is missing
+- **AND** exact string or file discovery may bypass SocratiCode only with an explicit `socraticode-exact-only` task marker reason
 
 #### Scenario: Exact repository inspection is needed
 - **WHEN** an agent needs exact string matching, file discovery, or non-semantic repository inspection

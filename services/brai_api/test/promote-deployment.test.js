@@ -103,7 +103,7 @@ test('accepted preview promotion records deployment and required build ledger ro
       slot: 'A',
       branch: 'codex/build-ledger',
       commit: 'abc-target-dir',
-      domain: 'a.test.brightos.world',
+      domain: 'a.test.brai.one',
       webOtaVersion: '0.0.41',
       shortChanges: 'Восстановлена запись версий сборок.',
       detailedChanges: 'Promotion переносит deployment metadata и обязательно пишет build ledger.',
@@ -135,7 +135,7 @@ test('accepted preview promotion records deployment and required build ledger ro
       '--target-commit',
       'merge-target-dir',
       '--target-domain',
-      'app.brightos.world',
+      'app.brai.one',
       '--reason',
       'Нужно завершать деплой только после записи версии сборки.'
     ], { cwd: repoRoot });
@@ -192,7 +192,7 @@ test('accepted preview promotion uses release-note reason when source reason is 
       slot: 'A',
       branch: 'codex/reason-fallback',
       commit: 'abc-reason',
-      domain: 'a.test.brightos.world',
+      domain: 'a.test.brai.one',
       webOtaVersion: '0.0.42',
       shortChanges: 'Исправлена причина версии.',
       detailedChanges: 'Promotion не должен брать generic reason из deployment metadata.',
@@ -224,7 +224,7 @@ test('accepted preview promotion uses release-note reason when source reason is 
       '--target-commit',
       'merge-reason',
       '--target-domain',
-      'app.brightos.world',
+      'app.brai.one',
     ], { cwd: repoRoot });
 
     const promoted = new BraiStore(targetDatabase.url);
@@ -265,7 +265,7 @@ test('accepted promotion rejects missing authored source notes before deployment
       '--target-commit',
       'merge-missing-notes',
       '--target-domain',
-      'app.brightos.world',
+      'app.brai.one',
       '--source-short-changes',
       'Branch deployment',
       '--source-details',

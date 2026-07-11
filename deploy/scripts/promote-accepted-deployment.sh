@@ -61,7 +61,7 @@ process.exit(1);
     SOURCE_POSTGRES_URL="$(env -i bash -c 'set -a; . "$1"; printf "%s" "${BRAI_DATABASE_URL:-}"' _ "$ENVS_ROOT/preview-${SLOT,,}/brai-api.env")"
   fi
   : "${SOURCE_POSTGRES_URL:?Preview BRAI_DATABASE_URL is required for accepted promotion}"
-  TARGET_DOMAIN="app.brightos.world"
+  TARGET_DOMAIN="app.brai.one"
   SOURCE_COMMIT="$("$NODE_BIN" -e '
 const fs = require("node:fs");
 const path = process.env.BRAI_PREVIEW_REGISTRY || `${process.env.BRAI_ENVS_ROOT || "/srv/projects/brai-envs"}/preview-slots.json`;

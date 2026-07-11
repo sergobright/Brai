@@ -17,7 +17,7 @@
 - `apps/brai_app/android/app/src/main/java/world/brightos/brai/` - native Android код приложения; `ota/`, `timer/`, and `capabilities/` - частые точки входа.
 - `services/brai_api/` - Node API, WebSocket/HTTP server и Supabase Postgres-backed store.
 - `services/brai_temporal/` - Temporal worker/client для required CI/CD control ledger preview и promotion flows.
-- `admin/` - техническая admin-панель для protected admin subdomain.
+- `admin/` - техническая admin-панель, доступная как `/admin` внутри prod/dev/preview окружений.
 - `deploy/scripts/` - publish scripts; `deploy/systemd/` - service units; `deploy/web/` и `deploy/mobile-update/bundles/` - опубликованные артефакты.
 - `deploy/ansible/` и `deploy/environments.json` - one-VPS production/preview environment setup and routing source.
 - `docs/operations/branch-preview-environments.md` - branch preview workflow, CI secrets, deploy-user boundary and branch protection steps.
@@ -61,6 +61,7 @@
 - `deploy/scripts/preview-slots.sh` - lock-protected preview slot registry commands.
 - `deploy/scripts/accept-preview.sh <codex-branch>` - deterministic acceptance entrypoint when the project owner accepts a preview; creates/reuses PR into `main` and enables merge/auto-merge.
 - `deploy/scripts/complete-operation-activities.sh <operation-activity-id>...` - host/deploy-context helper that runs from deploy-owned prod source and marks Codex operation activities as `Done` in the runtime database.
+- `deploy/scripts/list-operation-activities.sh [--status New|Done|all] [--limit <N>] [--json]` - read-only host/deploy-context helper that lists Codex operation activities from the runtime database.
 - `npm --prefix services/brai_api test` - тесты Brai API.
 - `npm --prefix services/brai_api start` - запуск Brai API.
 - `npm --prefix services/brai_temporal test` - state tests для Temporal CI/CD workflow package.

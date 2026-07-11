@@ -27,8 +27,13 @@ describe("inbox store", () => {
       id: created.inboxId,
       title: "Входящее важное",
       description_md: "строка\n2",
-      source: "",
+      source: "brai-app",
+      source_key: created.deviceId,
+      explanation_text: "Входящее важное",
       is_normalized: false,
+      item_roles_id: null,
+      workflow_status: "queued",
+      workflow_step: "ingest",
       pending: true,
     });
     expect("status" in item).toBe(false);

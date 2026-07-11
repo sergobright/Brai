@@ -81,7 +81,7 @@ test('version endpoint returns preview APK release metadata from release index',
         schemaVersion: 2,
         sections: {
           production: {
-            file: 'brai-v2-preview7.apk',
+            file: 'brai-a-v2-preview7.apk',
             apkVersion: 2,
             versionCode: 20007,
             releaseKey: 'a',
@@ -100,7 +100,7 @@ test('version endpoint returns preview APK release metadata from release index',
 
     assert.equal(response.status, 200);
     assert.deepEqual(response.body.target_apk, {
-      file: 'brai-v2-preview7.apk',
+      file: 'brai-a-v2-preview7.apk',
       version: 2,
       version_code: 20007,
       release_key: 'a',

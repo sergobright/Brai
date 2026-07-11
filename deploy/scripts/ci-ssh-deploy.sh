@@ -77,6 +77,16 @@ cd "$REMOTE_UPLOAD"
 allocation_field() {
   node -e 'let raw = ""; process.stdin.on("data", c => raw += c); process.stdin.on("end", () => { const value = JSON.parse(raw)[process.argv[1]]; console.log(value == null ? "" : value); });' "$1"
 }
+env_database_url() {
+  local env_file="$1"
+  (
+    set -a
+    # shellcheck source=/dev/null
+    . "$env_file"
+    set +a
+    printf '%s' "${BRAI_DATABASE_URL:-}"
+  )
+}
 mark_preview_failed() {
   if [[ "$BRAI_BRANCH" == codex/* && -n "${BRAI_PREVIEW_SLOT:-}" ]]; then
     deploy/scripts/preview-slots.sh failed "$BRAI_BRANCH" "$BRAI_COMMIT" >/dev/null || true
@@ -146,6 +156,7 @@ umask 0002
 npm ci
 npm --prefix apps/brai_app ci
 npm --prefix services/brai_api ci
+npm --prefix admin ci
 export BRAI_BRANCH BRAI_COMMIT
 export BRAI_NATIVE_APK_CHANGE
 export BRAI_ROOT="$SOURCE_ROOT"
@@ -165,6 +176,10 @@ if [[ "$ENVIRONMENT" == "prod" && -r "/etc/brai/brai-api.env" ]]; then
 elif [[ "$ENVIRONMENT" == "prod" ]]; then
   echo "/etc/brai/brai-api.env is required and must be readable for production deploy" >&2
   exit 1
+elif [[ "$ENVIRONMENT" == preview-* || "$ENVIRONMENT" == "dev" ]]; then
+  [[ -r "/etc/brai/brai-api.env" ]] || { echo "/etc/brai/brai-api.env is required and must be readable for test data seed" >&2; exit 1; }
+  export BRAI_PROD_DATABASE_URL="$(env_database_url /etc/brai/brai-api.env)"
+  [[ -n "$BRAI_PROD_DATABASE_URL" ]] || { echo "BRAI_DATABASE_URL is missing in /etc/brai/brai-api.env" >&2; exit 1; }
 fi
 if [[ "$ENVIRONMENT" == "prod" ]]; then
   : "${BRAI_DATABASE_URL:?BRAI_DATABASE_URL is required for production deploy}"

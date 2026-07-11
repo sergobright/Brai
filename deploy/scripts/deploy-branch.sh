@@ -33,6 +33,8 @@ DOMAIN="${DEPLOY_META[2]}"
 ENV_PATH="${DEPLOY_META[3]}"
 SERVICE_NAME="${DEPLOY_META[4]}"
 API_PORT="${DEPLOY_META[5]:-}"
+ADMIN_SERVICE_NAME="${DEPLOY_META[6]:-}"
+ADMIN_PORT="${DEPLOY_META[7]:-}"
 
 GIT_SUBJECT="$(git -C "$ROOT" log -1 --format=%s "$COMMIT" 2>/dev/null || true)"
 GIT_BODY="$(git -C "$ROOT" log -1 --format=%b "$COMMIT" 2>/dev/null || true)"
@@ -80,6 +82,23 @@ wait_for_preview_api() {
   done
   echo "Preview API health check failed ($ENVIRONMENT): $url" >&2
   "${BRAI_SUDO:-sudo}" journalctl -u "$SERVICE_NAME" -n 80 --no-pager >&2 || true
+  return 1
+}
+
+wait_for_admin() {
+  [[ -n "$ADMIN_PORT" ]] || return 0
+  local url="http://127.0.0.1:$ADMIN_PORT/admin"
+  local attempt
+  for attempt in {1..20}; do
+    if "$NODE_BIN" -e 'fetch(process.argv[1]).then((res) => process.exit(res.ok ? 0 : 1)).catch(() => process.exit(1));' "$url"; then
+      return 0
+    fi
+    sleep 0.5
+  done
+  echo "Admin health check failed ($ENVIRONMENT): $url" >&2
+  if [[ -n "$ADMIN_SERVICE_NAME" ]]; then
+    "${BRAI_SUDO:-sudo}" journalctl -u "$ADMIN_SERVICE_NAME" -n 80 --no-pager >&2 || true
+  fi
   return 1
 }
 
@@ -135,7 +154,7 @@ fi
 
 ANDROID_API="https://$DOMAIN/api"
 if [[ "$ENVIRONMENT" == "prod" ]]; then
-  ANDROID_API="https://api.brightos.world"
+  ANDROID_API="https://api.brai.one"
 fi
 
 export BRAI_ROOT="$ROOT"
@@ -162,6 +181,9 @@ if [[ "$ENVIRONMENT" == preview-* && "$BRANCH" == codex/* && "${BRAI_NATIVE_APK_
 fi
 
 "$SCRIPT_DIR/publish-client-web-layer.sh"
+
+echo "Building Brai Admin..."
+(cd "$ROOT/admin" && npm run build)
 
 if [[ "$ENVIRONMENT" == "prod" ]]; then
   RELEASE_TARGET="${BRAI_RELEASE_TARGET:-$ROOT/deploy/releases}"
@@ -208,6 +230,11 @@ if command -v systemctl >/dev/null 2>&1 && [[ "${BRAI_RESTART_SERVICE:-true}" !=
   echo "Restarting $SERVICE_NAME..."
   "${BRAI_SUDO:-sudo}" systemctl restart "$SERVICE_NAME"
   wait_for_preview_api
+  if [[ -n "$ADMIN_SERVICE_NAME" ]]; then
+    echo "Restarting $ADMIN_SERVICE_NAME..."
+    "${BRAI_SUDO:-sudo}" systemctl restart "$ADMIN_SERVICE_NAME"
+    wait_for_admin
+  fi
 fi
 
 if [[ "$ENVIRONMENT" == preview-* ]]; then

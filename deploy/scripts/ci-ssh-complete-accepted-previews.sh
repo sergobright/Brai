@@ -24,7 +24,8 @@ signal_temporal_preview() {
   local branch="$1"
   local event="$2"
   local reason="${3:-}"
-  local args=(preview --branch "$branch" --sha "$TARGET_COMMIT" --event "$event" --source complete-accepted-previews)
+  local source_sha="${4:-$TARGET_COMMIT}"
+  local args=(preview --branch "$branch" --sha "$source_sha" --event "$event" --source complete-accepted-previews)
   if [[ -n "$reason" ]]; then
     args+=(--reason "$reason")
   fi
@@ -88,8 +89,8 @@ filter_cleanup_branches_to_active_previews() {
   [[ "${#CLEANUP_BRANCHES[@]}" -gt 0 ]] || return 0
   local active_list
   if ! active_list="$(active_preview_branches)"; then
-    echo "Warning: could not inspect active preview slots; falling back to recent merged cleanup." >&2
-    return 0
+    echo "Could not inspect active preview slots; accepted preview cleanup cannot continue safely." >&2
+    return 1
   fi
 
   declare -A active=()
@@ -126,11 +127,13 @@ REQUIRED_BRANCHES=()
 declare -A REQUIRED_SHORT_CHANGES=()
 declare -A REQUIRED_DETAILED_CHANGES=()
 declare -A REQUIRED_REASONS=()
+declare -A REQUIRED_SOURCE_SHAS=()
 declare -A SEEN=()
-while IFS=$'\t' read -r branch short_b64 detailed_b64 reason_b64; do
+while IFS=$'\t' read -r branch source_sha short_b64 detailed_b64 reason_b64; do
   if [[ -n "$branch" && -z "${SEEN[$branch]:-}" ]]; then
     REQUIRED_BRANCHES+=("$branch")
     SEEN[$branch]=required
+    REQUIRED_SOURCE_SHAS[$branch]="$source_sha"
     REQUIRED_SHORT_CHANGES[$branch]="$(printf '%s' "$short_b64" | base64 -d)"
     REQUIRED_DETAILED_CHANGES[$branch]="$(printf '%s' "$detailed_b64" | base64 -d)"
     REQUIRED_REASONS[$branch]="$(printf '%s' "$reason_b64" | base64 -d)"
@@ -144,6 +147,7 @@ process.stdin.on("end", () => {
     const notes = preview.releaseNotes;
     console.log([
       preview.branch,
+      preview.sha || "",
       Buffer.from(notes.short_changes, "utf8").toString("base64"),
       Buffer.from(notes.detailed_changes, "utf8").toString("base64"),
       Buffer.from(notes.reason, "utf8").toString("base64"),
@@ -168,11 +172,12 @@ fi
 
 for index in "${!REQUIRED_BRANCHES[@]}"; do
   branch="${REQUIRED_BRANCHES[$index]}"
+  source_sha="${REQUIRED_SOURCE_SHAS[$branch]:-$TARGET_COMMIT}"
   echo "Completing accepted preview $branch -> $TARGET_BRANCH@$TARGET_COMMIT."
   if [[ "$MODE" == "all" || "$MODE" == "promote" ]]; then
     RECORD_PRODUCTION_RELEASE=false
-    signal_temporal_preview "$branch" pr_merged
-    signal_temporal_preview "$branch" accepted_preview_started
+    signal_temporal_preview "$branch" pr_merged "" "$source_sha"
+    signal_temporal_preview "$branch" accepted_preview_started "" "$source_sha"
     if BRAI_SOURCE_BRANCH="$branch" \
       BRAI_TARGET_ENVIRONMENT="$TARGET_ENVIRONMENT" \
       BRAI_TARGET_BRANCH="$TARGET_BRANCH" \
@@ -182,25 +187,25 @@ for index in "${!REQUIRED_BRANCHES[@]}"; do
       BRAI_SOURCE_REASON="${REQUIRED_REASONS[$branch]}" \
       BRAI_RECORD_PRODUCTION_RELEASE="$RECORD_PRODUCTION_RELEASE" \
         "$SCRIPT_DIR/ci-ssh-promote-deployment.sh"; then
-      signal_temporal_preview "$branch" accepted_preview_promoted
+      signal_temporal_preview "$branch" accepted_preview_promoted "" "$source_sha"
     else
-      signal_temporal_preview "$branch" accepted_preview_failed "accepted preview promotion failed"
+      signal_temporal_preview "$branch" accepted_preview_failed "accepted preview promotion failed" "$source_sha"
       exit 1
     fi
   fi
 
   if [[ "$MODE" == "all" || "$MODE" == "release" ]]; then
-    signal_temporal_preview "$branch" supabase_preview_release_started
-    signal_temporal_preview "$branch" slot_release_started
+    signal_temporal_preview "$branch" supabase_preview_release_started "" "$source_sha"
+    signal_temporal_preview "$branch" slot_release_started "" "$source_sha"
     if BRAI_BRANCH="$branch" \
       BRAI_ACCEPTED_PREVIEW=true \
       BRAI_REQUIRE_PREVIEW_SLOT_RELEASE=true \
         "$SCRIPT_DIR/ci-ssh-release-slot.sh"; then
-      signal_temporal_preview "$branch" supabase_preview_released
-      signal_temporal_preview "$branch" slot_released
+      signal_temporal_preview "$branch" supabase_preview_released "" "$source_sha"
+      signal_temporal_preview "$branch" slot_released "" "$source_sha"
     else
-      signal_temporal_preview "$branch" supabase_preview_release_failed "accepted preview Supabase release failed" || true
-      signal_temporal_preview "$branch" slot_release_failed "accepted preview slot release failed"
+      signal_temporal_preview "$branch" supabase_preview_release_failed "accepted preview Supabase release failed" "$source_sha" || true
+      signal_temporal_preview "$branch" slot_release_failed "accepted preview slot release failed" "$source_sha"
       exit 1
     fi
   fi
@@ -234,7 +239,8 @@ cleanup_previously_accepted_preview() {
 
 for branch in "${CLEANUP_BRANCHES[@]}"; do
   if ! cleanup_previously_accepted_preview "$branch"; then
-    echo "Best-effort cleanup failed for previously accepted preview $branch; continuing." >&2
+    echo "Required cleanup failed for previously accepted preview $branch." >&2
+    exit 1
   fi
 done
 

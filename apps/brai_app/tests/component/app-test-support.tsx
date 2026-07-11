@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, vi } from "vitest";
 import { clientDb } from "@/shared/storage/db";
 
@@ -167,6 +167,7 @@ export function setupBraiAppTest() {
     });
     Object.defineProperty(window, "innerWidth", { configurable: true, writable: true, value: 360 });
     window.history.replaceState(null, "", "/");
+    delete window.__BRAI_RUNTIME_CONFIG__;
     window.localStorage.clear();
     window.localStorage.setItem("brai_onboarding_state_v1", JSON.stringify({ complete: true, step: "login-check", history: [], path: null, profileVersion: null, voiceMode: null, name: "" }));
     document.cookie = "sidebar_state=; path=/; max-age=0";
@@ -174,11 +175,13 @@ export function setupBraiAppTest() {
   });
 
   afterEach(() => {
-    delete window.Capacitor;
-    delete window.BraiAndroidBack;
-    delete document.documentElement.dataset.sidebarState;
+    cleanup();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
+    delete window.Capacitor;
+    delete window.BraiAndroidBack;
+    delete window.__BRAI_RUNTIME_CONFIG__;
+    delete document.documentElement.dataset.sidebarState;
   });
 }
 

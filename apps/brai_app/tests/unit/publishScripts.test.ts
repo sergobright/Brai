@@ -81,8 +81,8 @@ describe("mobile OTA publish scripts", () => {
         NEXT_PUBLIC_BRAI_BRANCH: "codex/x</script>\u2028",
         NEXT_PUBLIC_BRAI_COMMIT: "abc123",
         NEXT_PUBLIC_BRAI_API: "/api",
-        NEXT_PUBLIC_BRAI_ANDROID_API: "https://a.test.brightos.world/api",
-        NEXT_PUBLIC_BRAI_OTA_CHANNEL: "a.test.brightos.world/mobile-update",
+        NEXT_PUBLIC_BRAI_ANDROID_API: "https://a.test.brai.one/api",
+        NEXT_PUBLIC_BRAI_OTA_CHANNEL: "a.test.brai.one/mobile-update",
       },
     });
 
@@ -98,8 +98,8 @@ describe("mobile OTA publish scripts", () => {
       branch: "codex/x</script>\u2028",
       commit: "abc123",
       webApiBase: "/api",
-      androidApiBase: "https://a.test.brightos.world/api",
-      otaChannel: "a.test.brightos.world/mobile-update",
+      androidApiBase: "https://a.test.brai.one/api",
+      otaChannel: "a.test.brai.one/mobile-update",
     });
   });
 
@@ -121,7 +121,7 @@ describe("mobile OTA publish scripts", () => {
         BRAI_APP_VERSION: "9.9.9",
         BRAI_WEB_TARGET: path.join(envRoot, "web"),
         BRAI_MOBILE_TARGET: path.join(envRoot, "mobile-update"),
-        BRAI_UPDATE_BASE_URL: "https://a.test.brightos.world/mobile-update",
+        BRAI_UPDATE_BASE_URL: "https://a.test.brai.one/mobile-update",
         BRAI_MOBILE_BUNDLE_VERSION: "9.9.9-preview.42",
         BRAI_ENVIRONMENT: "preview-a",
         BRAI_TARGET_APK_VERSION: "2999",
@@ -133,7 +133,7 @@ describe("mobile OTA publish scripts", () => {
     await expect(readFile(path.join(envRoot, "web/index.html"), "utf8")).resolves.toContain("env");
     expect(manifest.otaVersion).toBe("9.9.9");
     expect(manifest.targetApkVersion).toBe(2999);
-    expect(manifest.archiveUrl).toBe("https://a.test.brightos.world/mobile-update/bundles/9.9.9-preview.42/bundle.zip");
+    expect(manifest.archiveUrl).toBe("https://a.test.brai.one/mobile-update/bundles/9.9.9-preview.42/bundle.zip");
   });
 
   it("publishes a baseline web layer for a selected non-production environment", async () => {
@@ -163,10 +163,10 @@ describe("mobile OTA publish scripts", () => {
     await expect(readFile(path.join(target, "web/index.html"), "utf8")).resolves.toContain("baseline");
     expect(runtimeConfig).toContain('"environment": "preview-b"');
     expect(runtimeConfig).toContain('"previewSlot": "B"');
-    expect(runtimeConfig).toContain('"androidApiBase": "https://b.test.brightos.world/api"');
+    expect(runtimeConfig).toContain('"androidApiBase": "https://b.test.brai.one/api"');
     expect(manifest.otaVersion).toBe("9.9.9");
     expect(manifest.targetApkVersion).toBe(2999);
-    expect(manifest.archiveUrl).toBe("https://b.test.brightos.world/mobile-update/bundles/9.9.9/bundle.zip");
+    expect(manifest.archiveUrl).toBe("https://b.test.brai.one/mobile-update/bundles/9.9.9/bundle.zip");
   });
 
   it("does not force a new Preview APK for web-only OTA bundles", async () => {
@@ -193,7 +193,7 @@ describe("mobile OTA publish scripts", () => {
         BRAI_APP_VERSION: "9.9.9",
         BRAI_WEB_TARGET: path.join(envRoot, "web"),
         BRAI_MOBILE_TARGET: path.join(envRoot, "mobile-update"),
-        BRAI_UPDATE_BASE_URL: "https://a.test.brightos.world/mobile-update",
+        BRAI_UPDATE_BASE_URL: "https://a.test.brai.one/mobile-update",
         BRAI_MOBILE_BUNDLE_VERSION: "9.9.9-preview.42",
         BRAI_RELEASE_TARGET: releaseDir,
         BRAI_ENVIRONMENT: "preview-a",
@@ -229,7 +229,7 @@ describe("mobile OTA publish scripts", () => {
         BRAI_APP_VERSION: "9.9.9",
         BRAI_WEB_TARGET: path.join(envRoot, "web"),
         BRAI_MOBILE_TARGET: path.join(envRoot, "mobile-update"),
-        BRAI_UPDATE_BASE_URL: "https://a.test.brightos.world/mobile-update",
+        BRAI_UPDATE_BASE_URL: "https://a.test.brai.one/mobile-update",
         BRAI_MOBILE_BUNDLE_VERSION: "9.9.9-preview.42",
         BRAI_RELEASE_TARGET: releaseDir,
         BRAI_ENVIRONMENT: "preview-a",
@@ -244,13 +244,18 @@ describe("mobile OTA publish scripts", () => {
 
   it("keeps production app public and protects only preview web shells in Caddy", async () => {
     const template = await readFile(path.join(workspaceRoot, "deploy/ansible/templates/Caddyfile.j2"), "utf8");
+    const playbook = await readFile(path.join(workspaceRoot, "deploy/ansible/brai.yml"), "utf8");
     const nonProductionStart = template.indexOf("{% for name, env in brai_envs.items() if name != 'prod' %}");
     expect(nonProductionStart).toBeGreaterThanOrEqual(0);
-    const productionTemplate = template.slice(template.indexOf("{{ brai_envs.prod.domain }} {"), nonProductionStart);
+    const productionTemplate = template.slice(template.indexOf("{{ brai_envs.prod.domain }}"), nonProductionStart);
     const nonProductionTemplate = template.slice(nonProductionStart);
     const productionApiBlock = productionTemplate.slice(
       productionTemplate.indexOf("handle_path /api/*"),
-      productionTemplate.indexOf("handle /releases*"),
+      productionTemplate.indexOf("handle_path /mobile-update/*"),
+    );
+    const productionAdminBlock = productionTemplate.slice(
+      productionTemplate.indexOf("handle @admin"),
+      productionTemplate.indexOf("handle_path /api/*"),
     );
     const productionShellBlock = productionTemplate.slice(
       productionTemplate.indexOf("handle {"),
@@ -261,6 +266,10 @@ describe("mobile OTA publish scripts", () => {
       nonProductionTemplate.indexOf("handle /releases*"),
     );
     const mobileIndex = nonProductionTemplate.indexOf("handle_path /mobile-update/*");
+    const adminBlock = nonProductionTemplate.slice(
+      nonProductionTemplate.indexOf("handle @admin"),
+      mobileIndex,
+    );
     const mobileBlock = nonProductionTemplate.slice(mobileIndex, nonProductionTemplate.indexOf("handle {"));
     const webShellBlock = nonProductionTemplate.slice(
       nonProductionTemplate.indexOf("handle {"),
@@ -268,16 +277,30 @@ describe("mobile OTA publish scripts", () => {
     );
 
     expect(productionTemplate).toContain("{{ brai_envs.prod.domain }}");
+    expect(template).toContain("{{ brai_api_domain }}");
+    expect(template).toContain("{{ brai_temporal_ui_domain }}");
+    expect(template).toContain("brai_api_legacy_domains");
+    expect(template).toContain("redir https://{{ brai_api_domain }}{uri} 308");
     expect(productionApiBlock).not.toContain("brai_basic_auth_directive");
     expect(productionApiBlock).not.toContain("header_up Authorization");
+    expect(productionAdminBlock).toContain("brai_envs.prod.admin_port");
+    expect(productionAdminBlock).not.toContain("brai_basic_auth_directive");
+    expect(productionTemplate).toContain("@admin path /admin /admin/*");
+    expect(productionTemplate.indexOf("handle @admin")).toBeLessThan(productionTemplate.indexOf("handle {"));
     expect(productionShellBlock).not.toContain("brai_basic_auth_directive");
     expect(nonProductionTemplate).not.toMatch(/\{\{ env\.domain \}\} \{\n\s+\{\{ brai_basic_auth_directive \}\}/);
     expect(apiBlock).not.toContain("brai_basic_auth_directive");
     expect(apiBlock).not.toContain("header_up Authorization");
+    expect(adminBlock).toContain("brai_basic_auth_directive");
+    expect(adminBlock).toContain("env.admin_port");
+    expect(nonProductionTemplate).toContain("@admin path /admin /admin/*");
     expect(mobileIndex).toBeGreaterThan(nonProductionTemplate.indexOf("handle /releases*"));
     expect(mobileIndex).toBeLessThan(nonProductionTemplate.indexOf("handle {"));
     expect(mobileBlock).toContain('header /manifest.json Cache-Control "no-store"');
     expect(webShellBlock).toContain("brai_basic_auth_directive");
+    expect(playbook.match(/{{ brai_supabase_studio_domain }}/g)?.length ?? 0).toBeGreaterThanOrEqual(6);
+    expect(playbook).toContain("{{ brai_api_legacy_domains[0] }}");
+    expect(playbook).toMatch(/Ensure non-production deploy artifact ownership[\s\S]*recurse: true/);
   });
 
   it("uses the public API endpoint for production Android bundles", async () => {
@@ -285,9 +308,9 @@ describe("mobile OTA publish scripts", () => {
     const buildApk = await readFile(path.join(workspaceRoot, "deploy/scripts/build-android-env-apk.sh"), "utf8");
     const gradle = await readFile(path.join(workspaceRoot, "apps/brai_app/android/app/build.gradle"), "utf8");
 
-    expect(deployBranch).toContain('ANDROID_API="https://api.brightos.world"');
+    expect(deployBranch).toContain('ANDROID_API="https://api.brai.one"');
     expect(deployBranch).toContain('export NEXT_PUBLIC_BRAI_ANDROID_API="$ANDROID_API"');
-    expect(buildApk).toContain('ANDROID_API="https://api.brightos.world"');
+    expect(buildApk).toContain('ANDROID_API="https://api.brai.one"');
     expect(buildApk).toContain('export NEXT_PUBLIC_BRAI_ANDROID_API="$ANDROID_API"');
     expect(buildApk).toContain('export JAVA_HOME="/srv/opt/jdk-21"');
     expect(buildApk).toContain('SIGNING_ENV="${BRAI_ANDROID_SIGNING_ENV:-/srv/projects/brai-envs/android-signing/signing.env}"');
@@ -298,7 +321,7 @@ describe("mobile OTA publish scripts", () => {
     expect(gradle).toContain("tasks.register('validateBraiAndroidApiBundle')");
     expect(gradle).toContain("brai-runtime-config.js");
     expect(gradle).toContain("Non-production runtime config contains production API");
-    expect(gradle).toContain("https://a.test.brightos.world/api");
+    expect(gradle).toContain("https://a.test.brai.one/api");
     expect(gradle).not.toContain("BRAI_PROD_FALLBACK_BUNDLE_VERSION");
     expect(gradle).not.toContain("BRAI_NON_PROD_FALLBACK_BUNDLE_VERSION");
     expect(gradle).not.toContain("?: '0.0.10'");
@@ -315,16 +338,20 @@ describe("mobile OTA publish scripts", () => {
     expect(gradle).toContain("previewe: 'https://e.test.brai.one/api'");
     expect(gradle).toContain('"https://e.test.brai.one/mobile-update/manifest.json"');
     expect(ansible).toContain("domain: e.test.brai.one");
-    expect(`${gradle}\n${ansible}`).not.toContain("e.test.brightos.world");
+    expect(gradle).not.toContain("https://e.test.brightos.world/api");
+    expect(ansible).toContain("- e.test.brightos.world");
   });
 
   it("marks preview ready only after the service restart succeeds", async () => {
     const deployBranch = await readFile(path.join(workspaceRoot, "deploy/scripts/deploy-branch.sh"), "utf8");
     const restartIndex = deployBranch.indexOf('"${BRAI_SUDO:-sudo}" systemctl restart "$SERVICE_NAME"');
+    const adminRestartIndex = deployBranch.indexOf('"${BRAI_SUDO:-sudo}" systemctl restart "$ADMIN_SERVICE_NAME"');
     const readyIndex = deployBranch.indexOf('"$SCRIPT_DIR/preview-slots.sh" ready "$BRANCH" "$COMMIT"');
 
     expect(restartIndex).toBeGreaterThan(0);
+    expect(adminRestartIndex).toBeGreaterThan(restartIndex);
     expect(readyIndex).toBeGreaterThan(restartIndex);
+    expect(readyIndex).toBeGreaterThan(adminRestartIndex);
   });
 
   it("resolves OTA app versions from the build ledger before deployed files", async () => {
@@ -375,15 +402,26 @@ describe("mobile OTA publish scripts", () => {
 
   it("keeps preview runtime Supabase env mandatory and artifacts writable by the deploy group", async () => {
     const deploy = await readFile(path.join(workspaceRoot, "deploy/scripts/deploy-branch.sh"), "utf8");
+    const ciDeploy = await readFile(path.join(workspaceRoot, "deploy/scripts/ci-ssh-deploy.sh"), "utf8");
     const playbook = await readFile(path.join(workspaceRoot, "deploy/ansible/brai.yml"), "utf8");
     const service = await readFile(path.join(workspaceRoot, "deploy/ansible/templates/brai-api.service.j2"), "utf8");
+    const adminService = await readFile(path.join(workspaceRoot, "deploy/ansible/templates/brai-admin.service.j2"), "utf8");
+    const sudoers = await readFile(path.join(workspaceRoot, "deploy/ansible/templates/brai-deploy-sudoers.j2"), "utf8");
 
     expect(deploy).toContain(': "${POSTGRES_URL:?BRAI_DATABASE_URL is required for $ENVIRONMENT deploy}"');
+    expect(deploy).toContain("(cd \"$ROOT/admin\" && npm run build)");
+    expect(ciDeploy).toContain("npm --prefix admin ci");
     expect(service).toContain("EnvironmentFile={{ brai_env_root }}/{{ item.value.path }}/brai-api.env");
     expect(service).not.toContain("EnvironmentFile=-");
     expect(service).not.toContain("BRAI_LEGACY_SQLITE_PATH");
     expect(service).toContain('Group={{ brai_deploy_user }}');
     expect(service).toContain('UMask=0002');
+    expect(adminService).toContain("WorkingDirectory={{ brai_env_root }}/{{ item.value.path }}/source/admin");
+    expect(adminService).toContain("EnvironmentFile={{ brai_env_root }}/{{ item.value.path }}/brai-api.env");
+    expect(adminService).toContain("NODE_ENV=production");
+    expect(adminService).toContain("BRAI_ADMIN_API_BASE=http://127.0.0.1:{{ item.value.api_port }}");
+    expect(adminService).toContain("-p {{ item.value.admin_port }}");
+    expect(sudoers).toContain("systemctl restart {{ env.admin_service }}");
     expect(playbook).toContain("Ensure non-production data directories keep deploy setgid");
     expect(playbook).toContain('group: "{{ brai_deploy_user }}"');
     expect(playbook).toContain('mode: "2775"');
@@ -463,7 +501,7 @@ describe("mobile OTA publish scripts", () => {
     expect(manifest).toMatchObject({
       schemaVersion: 2,
       otaVersion: bundleVersion,
-      archiveUrl: `https://app.brightos.world/mobile-update/bundles/${bundleVersion}/bundle.zip`,
+      archiveUrl: `https://app.brai.one/mobile-update/bundles/${bundleVersion}/bundle.zip`,
       entrypoint: "index.html",
       targetApkVersion: 2999,
       targetApkReleaseKey: "production",
@@ -596,7 +634,7 @@ describe("mobile OTA publish scripts", () => {
     expect(index.sections.a).toMatchObject({
       title: "Preview A",
       applicationId: "world.brightos.brai.preview.a.work",
-      file: "brai-v2-preview6.apk",
+      file: "brai-a-v2-preview6.apk",
       apkVersion: 2,
       versionCode: 20006,
       releaseKey: "a",
@@ -605,8 +643,8 @@ describe("mobile OTA publish scripts", () => {
     });
     expect(html).toContain("<h2>Preview A</h2>");
     expect(html).toContain('<p class="version">v2-preview6</p>');
-    expect(html).toContain('<a class="download" href="./brai-v2-preview6.apk">Скачать</a>');
-    await expect(readFile(path.join(root, "deploy/releases/brai-v2-preview6.apk"), "utf8")).resolves.toBe("preview-apk");
+    expect(html).toContain('<a class="download" href="./brai-a-v2-preview6.apk">Скачать</a>');
+    await expect(readFile(path.join(root, "deploy/releases/brai-a-v2-preview6.apk"), "utf8")).resolves.toBe("preview-apk");
   });
 
   it("replaces an existing APK instead of rewriting it in place", async () => {
@@ -745,7 +783,7 @@ describe("mobile OTA publish scripts", () => {
       path.join(envsRoot, "preview-b/mobile-update/manifest.json"),
       JSON.stringify({
         otaVersion: "0.0.67",
-        archiveUrl: "https://b.test.brightos.world/mobile-update/bundles/0.0.67/bundle.zip",
+        archiveUrl: "https://b.test.brai.one/mobile-update/bundles/0.0.67/bundle.zip",
       }),
     );
     await execFileAsync("bash", [path.join(workspaceRoot, "deploy/scripts/sync-occupied-preview-ota-manifests.sh"), "--local"], {
@@ -766,7 +804,7 @@ describe("mobile OTA publish scripts", () => {
     await expect(readFile(path.join(envsRoot, "preview-b/web/index.html"), "utf8")).resolves.toContain("preview-b-content");
     expect(syncScript).toContain("BRAI_BUILD_CLIENT=false");
     expect(manifest.otaVersion).toBe("0.0.68");
-    expect(manifest.archiveUrl).toBe("https://b.test.brightos.world/mobile-update/bundles/0.0.68/bundle.zip");
+    expect(manifest.archiveUrl).toBe("https://b.test.brai.one/mobile-update/bundles/0.0.68/bundle.zip");
   });
 
   it("allocates, reuses, and releases preview slots with the lock wrapper", async () => {
@@ -804,7 +842,7 @@ describe("mobile OTA publish scripts", () => {
     expect(statusHtml).toContain("APK versionCode");
   });
 
-  it("commits preview APK counters per stable version only after a ready preview", async () => {
+  it("commits preview APK counters per branch and stable version only after a ready preview", async () => {
     const root = await fixtureRoot("brai-slots-apk-counter-");
     const envsRoot = path.join(root, "envs");
     const env = {
@@ -833,29 +871,32 @@ describe("mobile OTA publish scripts", () => {
     registry = JSON.parse(await readFile(path.join(envsRoot, "preview-slots.json"), "utf8"));
     expect(registry.apk_preview_counter).toBe(1);
     expect(registry.apk_preview_counters).toMatchObject({ 2: 1 });
+    expect(registry.apk_preview_branch_counters).toMatchObject({ 2: { "codex/one": 1 } });
 
     registry.apk_preview_counter = 0;
     await writeFile(path.join(envsRoot, "preview-slots.json"), JSON.stringify(registry));
     await execFileAsync("node", [slotScript, "allocate", "codex/two", "def"], { env });
     await execFileAsync("node", [slotScript, "next-apk-preview", "codex/two", "def", "2"], { env });
     registry = JSON.parse(await readFile(path.join(envsRoot, "preview-slots.json"), "utf8"));
-    expect(registry.B).toMatchObject({ apk_preview_iteration: 2, apk_version_code: 20002 });
-    expect(registry.apk_preview_counter).toBe(1);
-
-    await execFileAsync("node", [slotScript, "release", "codex/two"], { env });
-
-    await execFileAsync("node", [slotScript, "release", "codex/one"], { env });
-    await execFileAsync("node", [slotScript, "allocate", "codex/two", "def"], { env });
-    await execFileAsync("node", [slotScript, "next-apk-preview", "codex/two", "def", "2"], { env });
-    registry = JSON.parse(await readFile(path.join(envsRoot, "preview-slots.json"), "utf8"));
-
-    expect(registry.A).toMatchObject({ apk_preview_iteration: 2, apk_version_code: 20002 });
+    expect(registry.B).toMatchObject({ apk_preview_iteration: 1, apk_version_code: 20001 });
     expect(registry.apk_preview_counter).toBe(1);
 
     await execFileAsync("node", [slotScript, "ready", "codex/two", "def"], { env });
     registry = JSON.parse(await readFile(path.join(envsRoot, "preview-slots.json"), "utf8"));
+    expect(registry.apk_preview_branch_counters).toMatchObject({ 2: { "codex/one": 1, "codex/two": 1 } });
+
+    await execFileAsync("node", [slotScript, "allocate", "codex/two", "def2"], { env });
+    await execFileAsync("node", [slotScript, "next-apk-preview", "codex/two", "def2", "2"], { env });
+    registry = JSON.parse(await readFile(path.join(envsRoot, "preview-slots.json"), "utf8"));
+
+    expect(registry.B).toMatchObject({ apk_preview_iteration: 2, apk_version_code: 20002 });
+    expect(registry.apk_preview_counter).toBe(1);
+
+    await execFileAsync("node", [slotScript, "ready", "codex/two", "def2"], { env });
+    registry = JSON.parse(await readFile(path.join(envsRoot, "preview-slots.json"), "utf8"));
     expect(registry.apk_preview_counter).toBe(2);
     expect(registry.apk_preview_counters).toMatchObject({ 2: 2 });
+    expect(registry.apk_preview_branch_counters).toMatchObject({ 2: { "codex/one": 1, "codex/two": 2 } });
 
     await execFileAsync("node", [slotScript, "allocate", "codex/three", "ghi"], { env });
     await execFileAsync("node", [slotScript, "next-apk-preview", "codex/three", "ghi", "3"], { env });

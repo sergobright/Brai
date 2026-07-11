@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { braiCmdConfigFromEnv } from './brai-cmd.js';
+import { createInboxWorkflowRuntime } from './inbox-workflow-runtime.js';
 import { isPostgresUrl } from './postgres-sync-db.js';
 import { createBraiServer } from './server.js';
 
@@ -24,7 +25,7 @@ const sessionSecret = process.env.BRAI_SESSION_SECRET;
 const betterAuthSecret = process.env.BETTER_AUTH_SECRET ?? sessionSecret;
 const betterAuthUrl = process.env.BETTER_AUTH_URL ?? null;
 const resendApiKey = process.env.RESEND_API_KEY ?? null;
-const authFromEmail = process.env.BRAI_AUTH_FROM ?? 'Brai <auth@mail.brightos.world>';
+const authFromEmail = process.env.BRAI_AUTH_FROM ?? 'Brai <auth@mail.brai.one>';
 const inboxApiKey = process.env.BRAI_INBOX_API_KEY;
 const inboxStorageRoot =
   process.env.BRAI_INBOX_STORAGE_ROOT ?? path.join(dataRoot, 'inbox-attachments');
@@ -39,6 +40,9 @@ const parsedCodexTimeoutMs = Number(process.env.BRAI_CODEX_TIMEOUT_MS);
 const codexTimeoutMs = Number.isFinite(parsedCodexTimeoutMs) ? parsedCodexTimeoutMs : null;
 const releaseDir =
   process.env.BRAI_RELEASE_DIR ?? path.resolve(serviceRoot, '..', '..', 'deploy', 'releases');
+const databaseBranch = process.env.BRAI_SUPABASE_BRANCH ?? '';
+const testEmailLogin = /^(1|true|yes)$/i.test(process.env.BRAI_TEST_EMAIL_LOGIN ?? '')
+  && /^brai[-_]((preview[-_])|dev(?:$|[-_]))/i.test(databaseBranch);
 
 if (!token) {
   console.error('BRAI_TOKEN is required');
@@ -55,6 +59,16 @@ if (!sessionSecret) {
   process.exit(1);
 }
 
+const inboxWorkflow = await createInboxWorkflowRuntime({
+  databaseUrl,
+  storageRoot: inboxStorageRoot,
+  codexBin,
+  codexModel,
+  codexFallbackModel,
+  codexTimeoutMs
+});
+await inboxWorkflow.recoverQueued();
+inboxWorkflow.startQueuedReconciler();
 const runtime = createBraiServer({
   databaseUrl,
   dataRoot,
@@ -77,6 +91,8 @@ const runtime = createBraiServer({
   codexModel,
   codexFallbackModel,
   codexTimeoutMs,
+  inboxWorkflowStarter: inboxWorkflow.start,
+  testEmailLogin,
   braiCmd: {
     config: braiCmdConfigFromEnv(process.env)
   }
@@ -85,9 +101,16 @@ runtime.server.listen(port, '127.0.0.1', () => {
   console.log(`Brai API listening on 127.0.0.1:${port}`);
 });
 
+let stopping = false;
 for (const signal of ['SIGINT', 'SIGTERM']) {
-  process.on(signal, async () => {
-    await runtime.close();
+  process.once(signal, async () => {
+    if (stopping) return;
+    stopping = true;
+    try {
+      await runtime.close();
+    } finally {
+      await inboxWorkflow.close();
+    }
     process.exit(0);
   });
 }

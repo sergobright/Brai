@@ -41,7 +41,7 @@ if [[ ! -f "$SOURCE" ]]; then
 fi
 
 if [[ "$APK_BUILD_KIND" == "preview" ]]; then
-  FILENAME="brai-v$APK_VERSION-preview$APK_PREVIEW_ITERATION.apk"
+  FILENAME="brai-$RELEASE_ENV-v$APK_VERSION-preview$APK_PREVIEW_ITERATION.apk"
 elif [[ "$RELEASE_ENV" == "production" ]]; then
   FILENAME="brai-v$APK_VERSION.apk"
 else

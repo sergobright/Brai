@@ -2,6 +2,8 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { describe, expect, it, vi } from "vitest";
 import { cmdPlugin, openProfileMenuItem, setupBraiAppTest, stubAndroidCapacitor } from "./app-test-support";
 import { BraiApp } from "@/features/app/BraiApp";
+import { resolveAuthMode } from "@/features/app/appModel";
+import { AuthPanel } from "@/features/app/chrome/AppChrome";
 import { FocusSection } from "@/features/app/sections/focus/FocusSection";
 import { pendingEvents, saveGoalCache, saveHistoryCache } from "@/shared/storage/syncStore";
 import { emptyGoal, emptyHistory } from "@/shared/types/timer";
@@ -47,6 +49,36 @@ describe("BraiApp shell", () => {
     await waitFor(() => expect(cmdPlugin.setOverlayEnabled).toHaveBeenCalledWith({ enabled: true }));
     expect(cmdPlugin.setVoiceOnlyMode).toHaveBeenCalledWith({ enabled: false });
     expect(cmdPlugin.ensureAccess).toHaveBeenCalledWith({ displayName: "Test" });
+  });
+
+  it("uses explicit email-only login on Preview web", async () => {
+    const auth = authPanelProps();
+    auth.onEmailLogin.mockRejectedValue(new Error("invalid_email"));
+    render(<AuthPanel {...auth} mode={resolveAuthMode(false, false)} />);
+
+    const email = screen.getByRole("textbox", { name: "Email" });
+    expect(screen.queryByLabelText("Код из письма")).not.toBeInTheDocument();
+    fireEvent.change(email, { target: { value: "primary@example.com" } });
+    fireEvent.click(screen.getByRole("button", { name: "Войти" }));
+
+    await waitFor(() => expect(auth.onEmailLogin).toHaveBeenCalledWith("primary@example.com"));
+    expect(await screen.findByText("Email не подошёл")).toBeInTheDocument();
+    expect(auth.onRequestOtp).not.toHaveBeenCalled();
+  });
+
+  it("keeps Android login password-only", async () => {
+    render(<AuthPanel {...authPanelProps()} mode={resolveAuthMode(true, false)} />);
+
+    expect(screen.getByLabelText("Пароль")).toHaveAttribute("type", "password");
+    expect(screen.queryByRole("textbox", { name: "Email" })).not.toBeInTheDocument();
+  });
+
+  it("keeps production Web on the OTP flow", async () => {
+    render(<AuthPanel {...authPanelProps()} mode={resolveAuthMode(false, true)} />);
+
+    expect(screen.getByRole("textbox", { name: "Email" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Получить код" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Войти" })).not.toBeInTheDocument();
   });
 
   it("keeps collapsed desktop rail action icons clickable", async () => {
@@ -1012,6 +1044,16 @@ function requestUrl(input: RequestInfo | URL): string {
   if (typeof input === "string") return input;
   if (input instanceof URL) return input.toString();
   return input.url;
+}
+
+function authPanelProps() {
+  return {
+    busy: false,
+    onEmailLogin: vi.fn(async () => undefined),
+    onLogin: vi.fn(async () => undefined),
+    onRequestOtp: vi.fn(async () => undefined),
+    onVerifyOtp: vi.fn(async () => undefined),
+  };
 }
 
 function captureIntervals() {

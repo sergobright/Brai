@@ -1,6 +1,8 @@
 import Link from "next/link";
+import Image from "next/image";
+import { headers } from "next/headers";
 import type { ReactNode } from "react";
-import { ArrowDownUp, CalendarClock, ChevronDown, ChevronFirst, ChevronLast, ChevronLeft, ChevronRight, Command, Database, Table2, Workflow } from "lucide-react";
+import { ArrowDownUp, CalendarClock, ChevronDown, ChevronFirst, ChevronLast, ChevronLeft, ChevronRight, Command, Database, FileKey2, Table2, Workflow } from "lucide-react";
 import { AnimatedThemeToggler } from "@/shared/ui/animated-theme-toggler";
 import { BraiCmdAdminSection } from "@/app/BraiCmdAdminSection";
 import { Badge } from "@/shared/ui/badge";
@@ -10,7 +12,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/shared/ui
 import { ScrollArea } from "@/shared/ui/scroll-area";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/shared/ui/table";
 import { formatBytes, formatCell } from "@/lib/format";
-import { PAGE_SIZE, readDatabaseView } from "@/lib/database";
+import { PAGE_SIZE, readDatabaseView, readPrimaryUserId, readRoleContractsAdmin, readWorkflowAdminSummary } from "@/lib/database";
 import { readBraiCmdAdminSummary } from "@/lib/braiCmdSummary";
 import type { DbForeignKey, DbIncomingForeignKey, DbSortDirection, DbTable, DbView } from "@/lib/database";
 
@@ -18,10 +20,17 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 type SearchParams = Promise<Record<string, string | string[] | undefined>>;
-type SectionName = "database" | "handlers" | "schedules" | "brai-cmd";
+type AdminAccess = { status: "allowed" | "forbidden" | "not_configured" | "signed_out" | "unavailable" };
+type AdminSessionResponse = { authenticated?: boolean; user?: { id?: unknown } | null };
+type RequestHeaders = { get(name: string): string | null };
+type SectionName = "database" | "handlers" | "schedules" | "workflows" | "role-contracts" | "brai-cmd";
 type TabName = "rows" | "relations" | "columns" | "indexes";
 
 export default async function Home({ searchParams }: { searchParams: SearchParams }) {
+  const requestHeaders = await headers();
+  const access = await readAdminAccess(requestHeaders);
+  if (access.status !== "allowed") return <AdminAccessPanel loginHref={resolveLoginHref(requestHeaders)} status={access.status} />;
+
   const params = await searchParams;
   const requestedTable = first(params.table);
   const requestedPage = Number(first(params.page) ?? "1");
@@ -35,6 +44,8 @@ export default async function Home({ searchParams }: { searchParams: SearchParam
     sortDirection,
   });
   const braiCmdSummary = activeSection === "brai-cmd" ? await readBraiCmdAdminSummary() : null;
+  const workflowSummary = activeSection === "workflows" ? await readWorkflowAdminSummary() : null;
+  const roleContracts = activeSection === "role-contracts" ? await readRoleContractsAdmin() : null;
   const selectedName = view.selectedTable?.name ?? "";
 
   return (
@@ -42,6 +53,10 @@ export default async function Home({ searchParams }: { searchParams: SearchParam
       <PrimaryRail activeSection={activeSection} />
       {activeSection === "handlers" ? (
         <HandlersRail count={view.rowCount} />
+      ) : activeSection === "workflows" && workflowSummary ? (
+        <MetadataRail count={workflowSummary.definitions.length} title="Workflows" />
+      ) : activeSection === "role-contracts" && roleContracts ? (
+        <MetadataRail count={roleContracts.length} title="Role contracts" />
       ) : activeSection === "schedules" ? (
         <SchedulesRail count={view.selectedTable?.name === "handler_schedules" ? view.rowCount : 0} />
       ) : activeSection === "brai-cmd" && braiCmdSummary ? (
@@ -54,6 +69,10 @@ export default async function Home({ searchParams }: { searchParams: SearchParam
           <div className="grid min-w-0 gap-3.5 pb-6">
             {activeSection === "handlers" ? (
               <HandlersSection rows={view.selectedTable?.name === "handlers" ? view.rows : []} />
+            ) : activeSection === "workflows" && workflowSummary ? (
+              <WorkflowsSection summary={workflowSummary} />
+            ) : activeSection === "role-contracts" && roleContracts ? (
+              <RoleContractsSection rows={roleContracts} />
             ) : activeSection === "schedules" ? (
               <SchedulesSection sortDirection={sortDirection} view={view} />
             ) : activeSection === "brai-cmd" && braiCmdSummary ? (
@@ -87,6 +106,86 @@ export default async function Home({ searchParams }: { searchParams: SearchParam
           </div>
         </ScrollArea>
       </section>
+    </main>
+  );
+}
+
+async function readAdminAccess(requestHeaders: RequestHeaders): Promise<AdminAccess> {
+  try {
+    const userId = await readAuthenticatedUserId(requestHeaders);
+    if (!userId) return { status: "signed_out" };
+
+    const primaryUserId = await readPrimaryUserId();
+    if (!primaryUserId) return { status: "not_configured" };
+    return { status: userId === primaryUserId ? "allowed" : "forbidden" };
+  } catch (error) {
+    console.error("Brai Admin auth check failed", error);
+    return { status: "unavailable" };
+  }
+}
+
+async function readAuthenticatedUserId(requestHeaders: RequestHeaders) {
+  const cookie = requestHeaders.get("cookie");
+  if (!cookie) return null;
+
+  const response = await fetch(`${resolveAdminApiBase()}/auth/session`, {
+    cache: "no-store",
+    headers: { cookie },
+  });
+  if (!response.ok) throw new Error(`Brai API session check failed: ${response.status}`);
+
+  const session = (await response.json()) as AdminSessionResponse;
+  const userId = session.authenticated ? session.user?.id : null;
+  return typeof userId === "string" && userId ? userId : null;
+}
+
+function resolveAdminApiBase() {
+  const value = process.env.BRAI_ADMIN_API_BASE ?? "http://127.0.0.1:3020";
+  const url = new URL(value);
+  if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error("BRAI_ADMIN_API_BASE must be an HTTP URL");
+  return url.href.replace(/\/+$/, "");
+}
+
+function resolveLoginHref(requestHeaders: RequestHeaders) {
+  const host = requestHeaders.get("x-forwarded-host") ?? requestHeaders.get("host");
+  if (!host) return "/";
+  const proto = requestHeaders.get("x-forwarded-proto") ?? (host.startsWith("127.") || host.startsWith("localhost") ? "http" : "https");
+  return `${proto}://${host}/`;
+}
+
+function AdminAccessPanel({ loginHref, status }: { loginHref: string; status: Exclude<AdminAccess["status"], "allowed"> }) {
+  const copy = {
+    forbidden: {
+      title: "Доступ закрыт",
+      text: "Админка доступна только основному аккаунту Brai.",
+    },
+    not_configured: {
+      title: "Основной аккаунт не задан",
+      text: "Сначала войдите в основное приложение, чтобы Brai назначил primary user.",
+    },
+    signed_out: {
+      title: "Требуется вход",
+      text: "Войдите в основной аккаунт Brai, затем вернитесь в админку.",
+    },
+    unavailable: {
+      title: "Админка временно недоступна",
+      text: "Не удалось проверить сессию через Brai API.",
+    },
+  }[status];
+
+  return (
+    <main className="grid min-h-dvh place-items-center bg-background p-4 text-foreground">
+      <Card className="grid w-full max-w-md gap-4 p-6">
+        <div className="grid gap-2">
+          <h1 className="m-0 text-xl font-semibold">{copy.title}</h1>
+          <p className="m-0 text-sm leading-6 text-muted-foreground">{copy.text}</p>
+        </div>
+        {status === "signed_out" || status === "not_configured" ? (
+          <a className="inline-flex h-9 items-center justify-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90" href={loginHref}>
+            Войти в Brai
+          </a>
+        ) : null}
+      </Card>
     </main>
   );
 }
@@ -138,7 +237,7 @@ function EntityHeader({
 function PrimaryRail({ activeSection }: { activeSection: SectionName }) {
   return (
     <aside className="flex items-center gap-2 border-b bg-card px-3 py-2 md:min-h-0 md:flex-col md:border-b-0 md:border-r md:px-0 md:py-3">
-      <nav className="flex gap-2 md:flex-col" aria-label="Основное меню">
+      <nav className="flex min-w-0 gap-2 overflow-x-auto md:flex-col md:overflow-visible" aria-label="Основное меню">
         <ButtonLink
           aria-current={activeSection === "database" ? "page" : undefined}
           href="/"
@@ -167,6 +266,24 @@ function PrimaryRail({ activeSection }: { activeSection: SectionName }) {
           <span className="sr-only">Расписания автоматизаций</span>
         </ButtonLink>
         <ButtonLink
+          aria-current={activeSection === "workflows" ? "page" : undefined}
+          href="/?section=workflows"
+          size="icon-lg"
+          variant={activeSection === "workflows" ? "default" : "outline"}
+        >
+          <Workflow className="size-5" />
+          <span className="sr-only">Product workflows</span>
+        </ButtonLink>
+        <ButtonLink
+          aria-current={activeSection === "role-contracts" ? "page" : undefined}
+          href="/?section=role-contracts"
+          size="icon-lg"
+          variant={activeSection === "role-contracts" ? "default" : "outline"}
+        >
+          <FileKey2 className="size-5" />
+          <span className="sr-only">Role contracts</span>
+        </ButtonLink>
+        <ButtonLink
           aria-current={activeSection === "brai-cmd" ? "page" : undefined}
           href="/?section=brai-cmd"
           size="icon-lg"
@@ -183,6 +300,120 @@ function PrimaryRail({ activeSection }: { activeSection: SectionName }) {
         variant="circle"
       />
     </aside>
+  );
+}
+
+function MetadataRail({ count, title }: { count: number; title: string }) {
+  return (
+    <aside className="grid min-h-0 border-b bg-card md:border-b-0 md:border-r">
+      <div className="grid content-start gap-3 p-3">
+        <header className="grid gap-1">
+          <div className="text-sm font-semibold">{title}</div>
+          <div className="text-xs text-muted-foreground">{count} записей</div>
+        </header>
+        <Card className="p-3">
+          <p className="m-0 text-sm text-muted-foreground">Read-only operational metadata.</p>
+        </Card>
+      </div>
+    </aside>
+  );
+}
+
+function WorkflowsSection({ summary }: { summary: Awaited<ReturnType<typeof readWorkflowAdminSummary>> }) {
+  return (
+    <>
+      <Card>
+        <CardHeader className="gap-2 p-4 md:p-5">
+          <div className="flex items-center gap-2 text-sm text-muted-foreground"><Workflow className="size-4" />Process source of truth</div>
+          <h1 className="m-0 text-2xl font-semibold leading-none">Workflows</h1>
+          <p className="m-0 text-sm leading-6 text-muted-foreground">Версии, JSON schemas, Mermaid/Kroki diagrams и последние executions.</p>
+        </CardHeader>
+      </Card>
+      <div className="grid gap-3.5">
+        {summary.definitions.map((definition) => (
+          <Card className="grid gap-4 p-4" key={`${text(definition, "id")}:${text(definition, "version")}`}>
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="grid gap-1">
+                <h2 className="m-0 text-lg font-semibold">{text(definition, "title")}</h2>
+                <code className="text-xs text-muted-foreground">{text(definition, "id")} v{text(definition, "version")}</code>
+              </div>
+              <div className="flex gap-2"><Badge>{text(definition, "status")}</Badge><Badge variant="outline">{text(definition, "task_queue")}</Badge></div>
+            </div>
+            <p className="m-0 text-sm text-muted-foreground">{text(definition, "description")}</p>
+            {typeof definition.diagramDataUrl === "string" ? (
+              <div className="overflow-hidden rounded-lg border border-border bg-background p-3">
+                <Image className="h-auto w-full" src={definition.diagramDataUrl} alt={`Workflow ${text(definition, "title")}`} width={900} height={360} unoptimized />
+              </div>
+            ) : (
+              <pre className="m-0 overflow-x-auto rounded-lg border border-border bg-muted/35 p-3 text-xs">{text(definition, "diagram_mermaid")}</pre>
+            )}
+            <div className="grid gap-2 text-xs text-muted-foreground sm:grid-cols-2">
+              <div>Input: <code>{text(definition, "input_schema_version")}</code></div>
+              <div>Output: <code>{text(definition, "output_schema_version")}</code></div>
+            </div>
+            <div className="grid gap-2 lg:grid-cols-2">
+              <SchemaDetails label="Input schema" value={text(definition, "input_schema_json")} />
+              <SchemaDetails label="Output schema" value={text(definition, "output_schema_json")} />
+            </div>
+          </Card>
+        ))}
+      </div>
+      <Panel description={`${summary.executions.length} последних запусков`} title="Workflow executions">
+        <Card className="divide-y divide-border overflow-hidden">
+          {summary.executions.length ? summary.executions.map((execution) => (
+            <div className="grid gap-2 p-3 text-sm md:grid-cols-[minmax(0,1fr)_auto]" key={text(execution, "workflow_id")}>
+              <div className="grid min-w-0 gap-1">
+                <code className="truncate text-xs">{text(execution, "workflow_id")}</code>
+                <span className="text-muted-foreground">{text(execution, "current_step")} · attempts {text(execution, "attempt_count")}</span>
+                <span className="break-all text-xs text-muted-foreground">run {text(execution, "run_id") || "—"} · raw {text(execution, "raw_record_id")}</span>
+                {text(execution, "last_error") ? <span className="text-destructive">{text(execution, "last_error")}</span> : null}
+              </div>
+              <Badge variant="outline">{text(execution, "status")}</Badge>
+            </div>
+          )) : <p className="m-0 p-4 text-sm text-muted-foreground">Запусков пока нет.</p>}
+        </Card>
+      </Panel>
+    </>
+  );
+}
+
+function SchemaDetails({ label, value }: { label: string; value: string }) {
+  return (
+    <details className="rounded-lg border border-border bg-muted/20 p-3">
+      <summary className="cursor-pointer text-sm font-medium">{label}</summary>
+      <pre className="mb-0 mt-3 overflow-x-auto whitespace-pre-wrap break-words text-xs text-muted-foreground">{value}</pre>
+    </details>
+  );
+}
+
+function RoleContractsSection({ rows }: { rows: Array<Record<string, unknown>> }) {
+  return (
+    <>
+      <Card>
+        <CardHeader className="gap-2 p-4 md:p-5">
+          <div className="flex items-center gap-2 text-sm text-muted-foreground"><FileKey2 className="size-4" />Agent context</div>
+          <h1 className="m-0 text-2xl font-semibold leading-none">Role contracts</h1>
+          <p className="m-0 text-sm leading-6 text-muted-foreground">Role table, lifecycle, workflow ownership, schemas и event rules.</p>
+        </CardHeader>
+      </Card>
+      <div className="grid gap-3.5 lg:grid-cols-2">
+        {rows.map((row) => (
+          <Card className="grid gap-3 p-4" key={text(row, "id")}>
+            <div className="flex items-start justify-between gap-3">
+              <div><h2 className="m-0 text-base font-semibold">{text(row, "role_title")}</h2><code className="text-xs text-muted-foreground">{text(row, "role_key")}</code></div>
+              <Badge variant="outline">{text(row, "owner")}</Badge>
+            </div>
+            <dl className="m-0 grid gap-2 text-sm">
+              <div><dt className="text-xs text-muted-foreground">Payload</dt><dd className="m-0"><code>{text(row, "payload_table")}.{text(row, "link_column")}</code></dd></div>
+              <div><dt className="text-xs text-muted-foreground">Workflow</dt><dd className="m-0">{text(row, "workflow_title") || "—"}</dd></div>
+              <div><dt className="text-xs text-muted-foreground">Schemas</dt><dd className="m-0 break-words">{text(row, "input_schema_version") || "—"} → {text(row, "output_schema_version") || "—"}</dd></div>
+              <div><dt className="text-xs text-muted-foreground">Lifecycle</dt><dd className="m-0 break-words font-mono text-xs">{text(row, "lifecycle_json")}</dd></div>
+              <div><dt className="text-xs text-muted-foreground">Events</dt><dd className="m-0 break-words font-mono text-xs">{text(row, "event_rules_json")}</dd></div>
+            </dl>
+          </Card>
+        ))}
+      </div>
+    </>
   );
 }
 
@@ -875,12 +1106,16 @@ function parseTab(value: string | undefined): TabName {
 function parseSection(value: string | undefined): SectionName {
   if (value === "schedules") return "schedules";
   if (value === "handlers") return "handlers";
+  if (value === "workflows") return "workflows";
+  if (value === "role-contracts") return "role-contracts";
   return value === "brai-cmd" ? "brai-cmd" : "database";
 }
 
 function fixedSectionTable(section: SectionName) {
   if (section === "handlers") return "handlers";
   if (section === "schedules") return "handler_schedules";
+  if (section === "workflows") return "workflow_definitions";
+  if (section === "role-contracts") return "role_contracts";
   return undefined;
 }
 

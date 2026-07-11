@@ -1,4 +1,3 @@
-import crypto from 'node:crypto';
 import {
   FUTURE_EVENT_TOLERANCE_MS,
   INBOX_EVENT_PAYLOAD_VERSION,
@@ -13,14 +12,22 @@ import { scopeSql, scopedUserId } from './user-scope.js';
 
 export const inboxEventMethods = {
   listInbox() {
-    const scope = scopeSql();
+    const scope = scopeSql('i');
     return this.db
       .prepare(
         `
-          SELECT * FROM inbox
-          WHERE deleted_at_utc IS NULL
+          SELECT i.*,
+            w.status AS workflow_status,
+            w.current_step AS workflow_step,
+            w.attempt_count AS workflow_attempt_count,
+            w.last_error AS workflow_last_error,
+            w.workflow_id AS temporal_workflow_id,
+            w.run_id AS temporal_run_id
+          FROM inbox i
+          LEFT JOIN workflow_executions w ON w.id = i.workflow_execution_id
+          WHERE i.deleted_at_utc IS NULL
             ${scope.clause}
-          ORDER BY created_at_utc DESC, updated_at_utc DESC, id ASC
+          ORDER BY i.created_at_utc DESC, i.updated_at_utc DESC, i.id ASC
         `
       )
       .all(...scope.params)
@@ -46,10 +53,33 @@ export const inboxEventMethods = {
   getInboxItem(inboxId) {
     const id = sanitizeText(inboxId);
     if (!id) return null;
-    const scope = scopeSql();
+    const scope = scopeSql('i');
     return formatInboxItem(this.db
-      .prepare(`SELECT * FROM inbox WHERE id = ?${scope.clause}`)
+      .prepare(`
+        SELECT i.*,
+          w.status AS workflow_status,
+          w.current_step AS workflow_step,
+          w.attempt_count AS workflow_attempt_count,
+          w.last_error AS workflow_last_error,
+          w.workflow_id AS temporal_workflow_id,
+          w.run_id AS temporal_run_id
+        FROM inbox i
+        LEFT JOIN workflow_executions w ON w.id = i.workflow_execution_id
+        WHERE i.id = ? ${scope.clause}
+      `)
       .get(id, ...scope.params));
+  }
+,
+
+  getInboxIngestFingerprint(inboxId) {
+    const id = sanitizeText(inboxId);
+    if (!id) return null;
+    const scope = scopeSql();
+    return this.db.prepare(`
+      SELECT ingest_payload_hash
+      FROM inbox
+      WHERE id = ? ${scope.clause}
+    `).get(id, ...scope.params) ?? null;
   }
 ,
 
@@ -113,6 +143,8 @@ export const inboxEventMethods = {
     responseRequired,
     relatedInboxId,
     recordTypeId,
+    ingestIdempotencyHash,
+    ingestPayloadHash,
     nowIso
   }) {
     const receivedAt = nowIso ?? new Date().toISOString();
@@ -144,41 +176,10 @@ export const inboxEventMethods = {
           source_key: sourceKey,
           response_required: responseRequired === true,
           related_inbox_id: relatedInboxId,
-          record_type_id: recordTypeId
+          record_type_id: recordTypeId,
+          ingest_idempotency_hash: ingestIdempotencyHash,
+          ingest_payload_hash: ingestPayloadHash
         }
-      }, receivedAt);
-
-      if (result.accepted_event) this.projectAcceptedInboxEvents([result.accepted_event], receivedAt);
-      return result;
-    });
-    return run();
-  }
-,
-
-  createInboxNormalizationEvent({ inboxId, payload, nowIso }) {
-    const id = sanitizeText(inboxId);
-    if (!id) return { event_id: null };
-    const receivedAt = nowIso ?? new Date().toISOString();
-    const deviceId = 'inbox-ai';
-
-    const run = this.db.transaction(() => {
-      this.upsertDevice(
-        {
-          device_id: deviceId,
-          platform: 'server',
-          display_name: 'Inbox AI'
-        },
-        receivedAt,
-        { lastSyncAtUtc: receivedAt, lastServerClockOffsetMs: 0 }
-      );
-
-      const result = this.ingestInboxEvent(deviceId, {
-        event_id: `inbox:ai:${cryptoRandomId()}`,
-        client_sequence: this.nextInboxClientSequence(deviceId),
-        type: 'normalize',
-        inbox_id: id,
-        occurred_at_utc: receivedAt,
-        payload: payload && typeof payload === 'object' ? payload : {}
       }, receivedAt);
 
       if (result.accepted_event) this.projectAcceptedInboxEvents([result.accepted_event], receivedAt);
@@ -278,7 +279,7 @@ export const inboxEventMethods = {
     run();
 
     const serverRevision = this.getInboxServerRevision();
-    this.recordLog({
+    recordInboxTechnicalLog(this, {
       dt: receivedAt,
       source: 'sync',
       operation: 'inbox.events_sync',
@@ -356,6 +357,10 @@ export const inboxEventMethods = {
     } else if (!inboxId) {
       status = 'ignored';
       ignoreReason = 'inbox_id_required';
+      occurredAt = Number.isFinite(occurredMs) ? new Date(occurredMs).toISOString() : receivedAt;
+    } else if (rawType === 'create' && inboxOwnerDiffers(this, inboxId)) {
+      status = 'ignored';
+      ignoreReason = 'inbox_id_conflict';
       occurredAt = Number.isFinite(occurredMs) ? new Date(occurredMs).toISOString() : receivedAt;
     } else if (!Number.isFinite(occurredMs)) {
       status = 'ignored';
@@ -450,13 +455,15 @@ export const inboxEventMethods = {
         rawEvent: parseJsonObject(event.payload_json).raw_event ?? event
       });
     }
+    const linked = event.inbox_id ? this.getInboxItem(event.inbox_id) : null;
     return this.insertEventRecord({
       eventId: event.event_id,
       eventDomain: 'inbox',
       eventType: event.type,
       eventAction: `inbox.${event.type}`,
       title: `Inbox ${event.type}`,
-      itemsId: event.inbox_id,
+      itemsId: linked?.item_roles_id ? event.inbox_id : null,
+      itemRolesId: linked?.item_roles_id ?? null,
       subjectType: 'inbox',
       subjectId: event.inbox_id,
       actorType: event.device_id === 'inbox-ai' ? 'agent' : 'user',
@@ -491,6 +498,11 @@ export const inboxEventMethods = {
   projectAcceptedInboxEvents(events, nowIso) {
     const inboxIds = new Set(events.map((event) => event.inbox_id).filter(Boolean));
     for (const inboxId of inboxIds) this.projectInboxItem(inboxId, nowIso);
+    for (const event of events) {
+      if (event.type === 'create' && event.inbox_id) {
+        this.ensureInboxWorkflowExecution({ inboxId: event.inbox_id, nowIso });
+      }
+    }
   }
 ,
 
@@ -499,7 +511,7 @@ export const inboxEventMethods = {
     const events = this.db
       .prepare(
         `
-          SELECT event_id, subject_id AS inbox_id, event_type AS type,
+          SELECT id, event_id, device_id, subject_id AS inbox_id, event_type AS type,
             occurred_at_utc, received_at_utc, domain_sequence AS server_sequence, payload_json, user_id
           FROM events
           WHERE event_domain = 'inbox'
@@ -519,12 +531,13 @@ export const inboxEventMethods = {
       if (event.type === 'create') {
         const title = sanitizeText(payload.title);
         if (!title) continue;
+        const uiEvent = event.device_id !== 'inbox-api';
         item = {
           id: inboxId,
           title,
           description_text: normalizeMarkdownSource(payload.description_md ?? item?.description_text ?? ''),
-          source: sanitizeText(payload.source) ?? item?.source ?? '',
-          source_key: sanitizeText(payload.source_key) ?? item?.source_key ?? '',
+          source: sanitizeText(payload.source) ?? item?.source ?? (uiEvent ? 'brai-app' : ''),
+          source_key: sanitizeText(payload.source_key) ?? item?.source_key ?? (uiEvent ? event.device_id : ''),
           response_required: normalizeBoolean(payload.response_required) ? 1 : 0,
           related_inbox_id: sanitizeText(payload.related_inbox_id) ?? item?.related_inbox_id ?? null,
           record_type_id: normalizeInboxRecordTypeId(payload.record_type_id, item?.record_type_id ?? 4),
@@ -538,9 +551,16 @@ export const inboxEventMethods = {
           )),
           explanation_text: typeof payload.explanation_text === 'string'
             ? normalizeMarkdownSource(payload.explanation_text)
-            : item?.explanation_text ?? '',
+            : item?.explanation_text ?? (uiEvent ? normalizeMarkdownSource(title) : ''),
           normalization_text: item?.normalization_text ?? '',
           is_normalized: item?.is_normalized ?? 0,
+          initial_event_id: item?.initial_event_id ?? event.id,
+          ingest_idempotency_hash: event.device_id === 'inbox-api'
+            ? sanitizeText(payload.ingest_idempotency_hash) ?? item?.ingest_idempotency_hash ?? null
+            : item?.ingest_idempotency_hash ?? null,
+          ingest_payload_hash: event.device_id === 'inbox-api'
+            ? sanitizeText(payload.ingest_payload_hash) ?? item?.ingest_payload_hash ?? null
+            : item?.ingest_payload_hash ?? null,
           created_at_utc: item?.created_at_utc ?? event.occurred_at_utc,
           updated_at_utc: event.occurred_at_utc,
           deleted_at_utc: null,
@@ -556,7 +576,7 @@ export const inboxEventMethods = {
         item.description_text = normalizeMarkdownSource(payload.description_md ?? '');
         item.updated_at_utc = event.occurred_at_utc;
         item.last_event_id = event.event_id;
-      } else if (event.type === 'normalize' && item) {
+      } else if ((event.type === 'normalize' || event.type === 'normalized') && item) {
         const title = sanitizeText(payload.title);
         if (title) item.title = title;
         if (typeof payload.description_md === 'string') {
@@ -592,8 +612,9 @@ export const inboxEventMethods = {
             id, title, description_text, source, source_key, response_required,
             related_inbox_id, record_type_id, item_date, author, preliminary_section,
             urgency, attachment_links_json, explanation_text, normalization_text,
-            is_normalized, created_at_utc, updated_at_utc, deleted_at_utc, last_event_id, user_id
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            is_normalized, created_at_utc, updated_at_utc, deleted_at_utc, last_event_id,
+            initial_event_id, ingest_idempotency_hash, ingest_payload_hash, user_id
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT(id) DO UPDATE SET
             title = excluded.title,
             description_text = excluded.description_text,
@@ -613,7 +634,10 @@ export const inboxEventMethods = {
             created_at_utc = excluded.created_at_utc,
             updated_at_utc = excluded.updated_at_utc,
             deleted_at_utc = excluded.deleted_at_utc,
-            last_event_id = excluded.last_event_id
+            last_event_id = excluded.last_event_id,
+            initial_event_id = COALESCE(inbox.initial_event_id, excluded.initial_event_id),
+            ingest_idempotency_hash = COALESCE(inbox.ingest_idempotency_hash, excluded.ingest_idempotency_hash),
+            ingest_payload_hash = COALESCE(inbox.ingest_payload_hash, excluded.ingest_payload_hash)
           WHERE inbox.user_id IS NOT DISTINCT FROM excluded.user_id
             OR inbox.user_id IS NULL
             OR excluded.user_id IS NULL
@@ -640,6 +664,9 @@ export const inboxEventMethods = {
         item.updated_at_utc ?? nowIso,
         item.deleted_at_utc ?? null,
         item.last_event_id ?? null,
+        item.initial_event_id ?? null,
+        item.ingest_idempotency_hash ?? null,
+        item.ingest_payload_hash ?? null,
         scopedUserId()
       );
   }
@@ -678,6 +705,20 @@ function sanitizeClassKey(value) {
   return /^[a-z][a-z0-9_-]{1,62}$/.test(text) ? text : '';
 }
 
-function cryptoRandomId() {
-  return crypto.randomUUID();
+function inboxOwnerDiffers(store, inboxId) {
+  const existing = store.db.prepare('SELECT user_id FROM inbox WHERE id = ?').get(inboxId);
+  return Boolean(existing) && existing.user_id !== scopedUserId();
+}
+
+export function recordInboxTechnicalLog(store, input) {
+  try {
+    store.recordLog(input);
+  } catch (error) {
+    try {
+      (store.logger ?? console).error?.('Inbox technical log failed', {
+        operation: input.operation,
+        error: error instanceof Error ? error.message : String(error)
+      });
+    } catch {}
+  }
 }

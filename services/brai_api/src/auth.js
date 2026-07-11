@@ -2,9 +2,9 @@ import { betterAuth } from 'better-auth';
 import { emailOTP } from 'better-auth/plugins';
 import { Resend } from 'resend';
 import { Pool } from 'pg';
-import { isPostgresUrl } from './postgres-sync-db.js';
+import { isPostgresUrl, postgresPoolMax } from './postgres-sync-db.js';
 
-const DEFAULT_FROM = 'Brai <auth@mail.brightos.world>';
+const DEFAULT_FROM = 'Brai <auth@mail.brai.one>';
 const OTP_EXPIRES_IN_SECONDS = 5 * 60;
 const LOGO_CONTENT_ID = 'brai-logo';
 const LOGO_ATTACHMENT_CONTENT = [
@@ -21,11 +21,11 @@ const LOGO_ATTACHMENT_CONTENT = [
   'qpnTFIOJqfqXZy3CAHY5I4G2tV5W3fHIKgmJJBEo4TSEf95Fjm2KgeskWGU33U2LlhlyA/kEJSTSgYwQTgPq7lN0hzlMLOimhWP17kLRM4iikZBIFzJKOCBWFyKLJfnDTCb4IBrpbJzoiJZB1IyERLqRccJpiBw5RCkxWmmGtJINjmzk9I0Zpte4lJAIAllDOA1IgdEKsbqWTkumaeFYA3tTVIyERNDIOsJpQB0ROpDP7IBulJ7WghzuiIJBNIyERCaQtYQDUDOy+tXZVEslWf1OCylD1EvYIRlUQiIoZDXhNCD7l3LjOuck1h101NPUcKwRgynaRUIiG9AkCKcB2QbI4raEiTnpaf16KIVoIzIcSyJ70KQIR4hEqOhsQiKoJfF1mn6klYRENqHpEU4FlTp46Vml1AGqO6mFhhDFIiGRrWiyhNOA4jLIzka9eQmJbEeTJ5yERFOCJJyERICQhJOQCBCScBISAUISTkIiQEjCSUgECEk4CYkAIQknIREgJOEkJAKEJJyERICQhJOQCBD/D4WhqHeF9/bQAAAAAElFTkSuQmCC'
 ].join('');
 const DEFAULT_ALLOWED_HOSTS = [
-  'brightos.world',
-  'app.brightos.world',
-  'api.brightos.world',
-  'dev.brightos.world',
-  '*.test.brightos.world',
+  'brai.one',
+  'app.brai.one',
+  'api.brai.one',
+  'dev.brai.one',
+  '*.test.brai.one',
   'localhost',
   '127.0.0.1'
 ];
@@ -39,7 +39,11 @@ export function createBraiAuth({
   sendOtp = null
 }) {
   if (!isPostgresUrl(databaseUrl)) throw new Error('BRAI_DATABASE_URL must be a postgres:// or postgresql:// URL');
-  const db = new Pool({ connectionString: databaseUrl, ssl: postgresSsl(databaseUrl) });
+  const db = new Pool({
+    connectionString: databaseUrl,
+    ssl: postgresSsl(databaseUrl),
+    max: postgresPoolMax(process.env.BRAI_PG_POOL_MAX)
+  });
   const resend = resendApiKey ? new Resend(resendApiKey) : null;
   const sender = sendOtp ?? (async ({ email, otp }) => {
     if (!resend) {
@@ -61,7 +65,7 @@ export function createBraiAuth({
     baseURL: baseURL ?? {
       allowedHosts: DEFAULT_ALLOWED_HOSTS,
       protocol: 'auto',
-      fallback: 'https://app.brightos.world'
+      fallback: 'https://app.brai.one'
     },
     advanced: {
       trustedProxyHeaders: true
@@ -104,7 +108,7 @@ export function renderOtpEmail({ otp }) {
       'Код действует 5 минут.',
       'Если вы не запрашивали код, просто проигнорируйте это письмо.',
       '',
-      'Brai · brightos.world'
+      'Brai · brai.one'
     ].join('\n'),
     attachments: [
       {
@@ -147,7 +151,7 @@ export function renderOtpEmail({ otp }) {
               </td>
             </tr>
             <tr>
-              <td style="padding:18px 24px;border-top:1px solid #f1f1f3;text-align:center;color:#a1a1aa;font-size:12px;line-height:1.5;">Brai · brightos.world</td>
+              <td style="padding:18px 24px;border-top:1px solid #f1f1f3;text-align:center;color:#a1a1aa;font-size:12px;line-height:1.5;">Brai · brai.one</td>
             </tr>
           </table>
         </td>

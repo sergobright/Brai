@@ -27,6 +27,14 @@ test("accepted branch cleanup can be scoped to one branch", () => {
   assert.deepEqual(cleanupCandidates({ pulls, branches: ["codex/two"] }), ["codex/two"]);
 });
 
+test("explicit merged branch cleanup ignores stale open PR visibility", () => {
+  const pulls = [{ merged_at: "2026-07-10T00:00:00Z", base: { ref: "main" }, head: { ref: "codex/done" } }];
+  const openPulls = [{ base: { ref: "main" }, head: { ref: "codex/done" } }];
+
+  assert.deepEqual(cleanupCandidates({ pulls, openPulls, branches: ["codex/done"] }), ["codex/done"]);
+  assert.deepEqual(cleanupCandidates({ pulls, openPulls }), []);
+});
+
 test("accepted branch delete treats missing refs as idempotent", async () => {
   const calls = [];
   const originalFetch = globalThis.fetch;

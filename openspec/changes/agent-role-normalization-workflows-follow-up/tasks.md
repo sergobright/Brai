@@ -1,0 +1,6 @@
+- [x] 1. Preserve raw Inbox text and provenance in client and server projections.
+- [x] 2. Add workflow v3, empty-input rejection, prompt hardening, and raw-input backfill.
+- [x] 3. Return and render actual workflow step states, including image skip.
+- [x] 4. Replace Preview/Dev auto-login with explicit primary-email login.
+- [x] 5. Add API, client, migration, and deployment regression tests.
+- [ ] 6. Run review, QA, and verified Preview A handoff.

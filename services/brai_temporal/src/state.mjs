@@ -26,6 +26,10 @@ const PROMOTION_TASKS = {
 };
 
 export const PREVIEW_EVENTS = new Set([
+  "preview_deploy_requested",
+  "no_preview_handoff_requested",
+  "no_preview_merged_requested",
+  "slot_release_requested",
   "branch_pushed",
   "delivery_classified",
   "delivery_classification_failed",
@@ -57,10 +61,14 @@ export const PREVIEW_EVENTS = new Set([
   "supabase_preview_release_failed",
   "release_failed",
   "released",
+  "abandoned_closed",
+  "no_preview_merged",
+  "superseded_closed",
   "branch_deleted"
 ]);
 
 export const PROMOTION_EVENTS = new Set([
+  "promotion_requested",
   "promotion_started",
   "dev_deploy_started",
   "dev_supabase_migration_started",
@@ -79,7 +87,8 @@ export const PROMOTION_EVENTS = new Set([
   "prod_version_recorded",
   "prod_deploy_passed",
   "prod_deploy_failed",
-  "released"
+  "released",
+  "superseded_closed"
 ]);
 
 export function previewWorkflowId(branch) {
@@ -126,6 +135,32 @@ export function applyPreviewEvent(state, rawEvent) {
   if (event.slot) state.slot = event.slot;
 
   switch (event.type) {
+    case "preview_deploy_requested":
+      state.status = event.type;
+      state.terminal = false;
+      state.previewDeploy = "not_started";
+      resetTask(state, "supabase_preview", event);
+      resetTask(state, "preview_deploy", event);
+      break;
+    case "no_preview_handoff_requested":
+      state.status = event.type;
+      state.terminal = false;
+      state.handoff = "not_started";
+      state.autoMerge = "not_started";
+      resetTask(state, "delivery_handoff", event);
+      resetTask(state, "auto_merge", event);
+      break;
+    case "no_preview_merged_requested":
+      state.status = event.type;
+      state.terminal = false;
+      resetTask(state, "delivery_handoff", event);
+      break;
+    case "slot_release_requested":
+      state.status = event.type;
+      state.terminal = false;
+      resetTask(state, "supabase_preview_release", event);
+      resetTask(state, "slot_release", event);
+      break;
     case "branch_pushed":
       const classification = state.tasks.delivery_classification;
       const keepClassification = classification?.status === "passed" && classification.sha === event.sha;
@@ -300,13 +335,33 @@ export function applyPreviewEvent(state, rawEvent) {
       state.status = "branch_deleted";
       state.terminal = true;
       break;
+    case "abandoned_closed":
+      setTask(state, "slot_release", "passed", event);
+      if (state.tasks.supabase_preview_release.status !== "passed") {
+        setTask(state, "supabase_preview_release", "not_applicable", event);
+      }
+      state.status = "abandoned_closed";
+      state.terminal = true;
+      break;
+    case "no_preview_merged":
+      setTask(state, "accepted_for_target", "passed", event);
+      state.status = "no_preview_merged";
+      state.terminal = true;
+      break;
+    case "superseded_closed":
+      state.status = "superseded_closed";
+      state.terminal = true;
+      break;
     default:
       state.status = "waiting_for_fix";
       setUnknownBlocker(state, event);
   }
 
   refreshGates(state, PREVIEW_TASKS);
-  if (isNoPreviewRequired(state) && state.tasks.accepted_for_target.status === "passed" && state.gates.complete) state.terminal = true;
+  if (isNoPreviewRequired(state) && state.tasks.accepted_for_target.status === "passed" && state.gates.complete) {
+    state.status = "no_preview_merged";
+    state.terminal = true;
+  }
   if (
     event.source === "complete-accepted-previews" &&
     state.tasks.accepted_for_target.status === "passed" &&
@@ -349,6 +404,17 @@ export function applyPromotionEvent(state, rawEvent) {
   remember(state, event);
 
   switch (event.type) {
+    case "promotion_requested":
+      state.status = event.type;
+      state.terminal = false;
+      state.deploy = "not_started";
+      resetTask(state, "supabase_migration", event);
+      resetTask(state, "deploy", event);
+      resetTask(state, "version_recorded", event);
+      if (state.target === "prod") {
+        resetTask(state, "accepted_previews", event);
+      }
+      break;
     case "promotion_started":
       state.status = "promotion_started";
       break;
@@ -406,6 +472,10 @@ export function applyPromotionEvent(state, rawEvent) {
       break;
     case "released":
       state.status = "released";
+      state.terminal = true;
+      break;
+    case "superseded_closed":
+      state.status = "superseded_closed";
       state.terminal = true;
       break;
     default:

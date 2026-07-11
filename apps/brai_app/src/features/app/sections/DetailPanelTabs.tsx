@@ -86,6 +86,7 @@ export function DetailEmptyTab() {
 
 export function DetailAttachments({ links }: { links: string[] }) {
   const [previewLink, setPreviewLink] = useState<string | null>(null);
+  const [missingImageLinks, setMissingImageLinks] = useState<ReadonlySet<string>>(() => new Set());
   const files = links.filter(Boolean);
   if (files.length === 0) return null;
 
@@ -98,28 +99,43 @@ export function DetailAttachments({ links }: { links: string[] }) {
           const name = attachmentName(link);
           if (isImageAttachment(link)) {
             const previewHref = attachmentHref(attachmentPreviewLink(link));
+            const missing = missingImageLinks.has(link);
             return (
               <button
                 key={link}
                 type="button"
-                className="group grid min-w-0 overflow-hidden rounded-lg border border-border bg-secondary/30 text-left transition-colors hover:border-primary focus-visible:outline-0 focus-visible:ring-2 focus-visible:ring-ring"
-                aria-label={`Открыть вложение ${name}`}
+                className={cn(
+                  "group grid min-w-0 overflow-hidden rounded-lg border border-border bg-secondary/30 text-left transition-colors hover:border-primary focus-visible:outline-0 focus-visible:ring-2 focus-visible:ring-ring",
+                  missing && "cursor-default hover:border-border",
+                )}
+                aria-label={missing ? `Недоступное вложение ${name}` : `Открыть вложение ${name}`}
+                disabled={missing}
                 onClick={() => setPreviewLink(link)}
               >
-                {/* Private attachment dimensions are unknown, so native img is the least surprising renderer. */}
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={previewHref}
-                  alt={name}
-                  loading="lazy"
-                  draggable={false}
-                  className="aspect-[16/10] w-full bg-muted object-cover [touch-action:pan-y]"
-                  onError={(event) => {
-                    if (event.currentTarget.dataset.fallback === "1") return;
-                    event.currentTarget.dataset.fallback = "1";
-                    event.currentTarget.src = href;
-                  }}
-                />
+                {missing ? (
+                  <span className="grid aspect-[16/10] w-full place-items-center gap-2 bg-muted px-3 text-center text-sm text-muted-foreground">
+                    <File className="size-5" aria-hidden="true" />
+                    <span>Файл недоступен</span>
+                  </span>
+                ) : (
+                  // Private attachment dimensions are unknown, so native img is the least surprising renderer.
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={previewHref}
+                    alt={name}
+                    loading="lazy"
+                    draggable={false}
+                    className="aspect-[16/10] w-full bg-muted object-cover [touch-action:pan-y]"
+                    onError={(event) => {
+                      if (event.currentTarget.dataset.fallback === "1") {
+                        setMissingImageLinks((current) => new Set(current).add(link));
+                        return;
+                      }
+                      event.currentTarget.dataset.fallback = "1";
+                      event.currentTarget.src = href;
+                    }}
+                  />
+                )}
                 <span className="truncate px-2.5 py-2 text-sm text-muted-foreground group-hover:text-foreground">{name}</span>
               </button>
             );
@@ -168,6 +184,10 @@ export function DetailAttachments({ links }: { links: string[] }) {
             draggable={false}
             className="max-h-full max-w-full object-contain"
             onClick={(event) => event.stopPropagation()}
+            onError={() => {
+              setMissingImageLinks((current) => new Set(current).add(previewLink));
+              setPreviewLink(null);
+            }}
           />
         </div>
       ) : null}

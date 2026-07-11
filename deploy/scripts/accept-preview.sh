@@ -46,6 +46,11 @@ fi
 CALL_ROOT="$(git rev-parse --show-toplevel)"
 
 find_acceptance_root() {
+  if [[ "${BRAI_ACCEPT_ALLOW_DETACHED_ROOT:-false}" == "true" ]]; then
+    echo "$CALL_ROOT"
+    return
+  fi
+
   local current_branch
   current_branch="$(git -C "$CALL_ROOT" branch --show-current)"
   if [[ "$current_branch" == "$BRANCH" ]]; then

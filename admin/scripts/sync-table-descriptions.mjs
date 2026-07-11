@@ -10,14 +10,14 @@ const DESCRIPTIONS = [
     title: "Действия",
     short_description: "Текущий список действий.",
     long_description:
-      "Хранит рабочее состояние действий Brai: название, статус, описание, сортировку, удаление и восстановление.\nЭто быстрая проекция из activity_events, чтобы интерфейс не пересчитывал весь журнал событий при каждом открытии.",
+      "Хранит рабочее состояние действий Brai: название, статус, описание, сортировку, удаление и восстановление.\nЭто быстрая проекция activity-domain записей canonical events ledger.",
   },
   {
-    table_name: "activity_events",
-    title: "События действий",
-    short_description: "Журнал изменений действий.",
+    table_name: "events",
+    title: "События",
+    short_description: "Единый canonical журнал domain-событий.",
     long_description:
-      "Хранит каждое клиентское событие по действиям: создание, изменение статуса, переименование, описание, сортировку, удаление и восстановление.\nНужна для синхронизации между устройствами, аудита изменений и восстановления текущей таблицы activities.",
+      "Хранит timer, activity, inbox и system события с domain-local revision, статусом accepted/ignored и universal role links.\nИспользуется для синхронизации, deterministic replay, projections и аудита; прежние отдельные event tables удалены.",
   },
   {
     table_name: "app_settings",
@@ -76,32 +76,25 @@ const DESCRIPTIONS = [
       "Хранит устройства, которые отправляют события таймера и действий: stable device_id, платформу, имя, последнее появление, последнюю синхронизацию и смещение часов.\nНужна, чтобы сервер понимал источник событий и мог проверять последовательность клиентских изменений.",
   },
   {
-    table_name: "timer_events",
-    title: "События фокуса",
-    short_description: "Журнал событий фокуса.",
-    long_description:
-      "Хранит start, stop и edit_session события фокуса с временем события, устройством, клиентской и серверной последовательностью.\nНужна для deterministic replay: сервер восстанавливает Focus-сессии из событий и может объяснить, почему история выглядит именно так.",
-  },
-  {
     table_name: "focus_session_sources",
     title: "Источники Focus-сессий",
     short_description: "Связи Focus-сессий и событий.",
     long_description:
-      "Связывает итоговые Focus-сессии с событиями фокуса, из которых эти сессии получились.\nНужна для аудита replay: можно открыть сессию и увидеть конкретные start/stop события, устройство и роль каждого события.",
+      "Связывает итоговые Focus-сессии с timer-domain записями canonical events ledger.\nНужна для аудита replay: можно открыть сессию и увидеть конкретные start/stop события, устройство и роль каждого события.",
   },
   {
-    table_name: "focus_session_versions",
-    title: "Версии Focus-сессий",
-    short_description: "История значений Focus-сессий.",
+    table_name: "focus_session_intervals",
+    title: "Интервалы Focus-сессий",
+    short_description: "Текущие интервалы работы внутри Focus-сессий.",
     long_description:
-      "Хранит версии старта, финиша и длительности Focus-сессий. Только одна версия на сессию может быть текущей.\nНужна для редактирования истории без потери старых значений: кто и когда изменил сессию видно через linked timer_events и timer_devices.",
+      "Хранит время старта, завершения и длительность интервалов Focus.\ncreated_event_id и ended_event_id ссылаются по domain event id на timer-записи canonical events ledger.",
   },
   {
     table_name: "focus_sessions",
     title: "Сессии фокуса",
     short_description: "Стабильные Focus-сессии.",
     long_description:
-      "Хранит стабильные идентификаторы Focus-сессий. Редактируемые время старта, финиша и длительность лежат в focus_session_versions.\nНужна, чтобы правки меняли текущую версию, но не меняли identity сессии.",
+      "Хранит стабильные идентификаторы Focus-сессий, происхождение и soft-delete.\nВремя старта, финиша и длительность находится в focus_session_intervals, а domain history — в events.",
   },
   {
     table_name: "version_types",

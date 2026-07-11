@@ -4,9 +4,9 @@ Brai uses separate version lines for APK and OTA/web.
 
 - APK uses the public integer counter `vN`; the current public baseline is `v2`.
 - Android `versionName` is `N`; Android `versionCode` defaults to the same `N`.
-- Native-boundary preview builds reserve the next stable `N` for the task branch and use a global preview iteration `M`; their Android `versionCode` is `N * 10000 + M`.
+- Native-boundary preview builds reserve the next stable `N` for the task branch and use a branch-local preview iteration `M`; their Android `versionCode` is `N * 10000 + M`.
 - Preview `M` is committed only after the preview deploy is fully ready; failed builds and failed deploys retry the same `M`.
-- Preview APK filenames are `brai-vN-previewM.apk`; accepted stable filenames remain `brai-vN.apk`, `brai-dev-vN.apk`, and `brai-a-vN.apk` through `brai-e-vN.apk`.
+- Preview APK filenames are slot-specific `brai-a-vN-previewM.apk` through `brai-e-vN-previewM.apk`; accepted stable filenames remain `brai-vN.apk`, `brai-dev-vN.apk`, and `brai-a-vN.apk` through `brai-e-vN.apk`.
 - Preview APKs are transient separate applications from the stable Preview A-E baseline, so rejected preview APKs cannot update into accepted stable APKs.
 - OTA/web uses `X.Y.Z`; the old fourth public digit is not shown or compared.
 - `build_versions` stores accepted production build rows (`version_type_id='build'`) and a separate APK row (`version_type_id='apk'`).
@@ -25,9 +25,9 @@ Build and publish a release APK only when native Android code, Capacitor config,
 - Production: `Brai`, `brai-vN.apk`
 - Dev: `Brai Dev`, `brai-dev-vN.apk`
 - Preview A-E: `Brai A`...`Brai E`, `brai-a-vN.apk`...`brai-e-vN.apk`
-- Active native preview work temporarily replaces its slot card with `Preview A`...`Preview E` and the active `brai-vN-previewM.apk` artifact.
+- Active native preview work temporarily replaces its slot card with `Preview A`...`Preview E` and the active slot-specific `brai-<slot>-vN-previewM.apk` artifact.
 
-The Dev APK belongs to the persistent protected Dev environment on `dev.brightos.world`. Dev deploys use the long-lived Supabase `brai-dev` branch and must keep APK, OTA/web, API, and version ledger in sync.
+The Dev APK belongs to the persistent protected Dev environment on `dev.brai.one`. Dev deploys use the long-lived Supabase `brai-dev` branch and must keep APK, OTA/web, API, and version ledger in sync.
 
 ## OTA Manifest
 

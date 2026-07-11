@@ -21,6 +21,7 @@ runtime_paths=(
 )
 dependency_paths=(
   "$root/node_modules"
+  "$root/admin/node_modules"
   "$root/apps/brai_app/node_modules"
   "$root/services/brai_api/node_modules"
   "$root/services/brai_temporal/node_modules"
@@ -72,6 +73,7 @@ sudo find "$root" \
   -path "$root/deploy/mobile-update" -prune -o \
   -path "$root/deploy/releases" -prune -o \
   -path "$root/node_modules" -prune -o \
+  -path "$root/admin/node_modules" -prune -o \
   -path "$root/apps/brai_app/node_modules" -prune -o \
   -path "$root/services/brai_api/node_modules" -prune -o \
   -path "$root/services/brai_temporal/node_modules" -prune -o \
@@ -86,6 +88,7 @@ sudo find "$root" \
   -path "$root/deploy/mobile-update" -prune -o \
   -path "$root/deploy/releases" -prune -o \
   -path "$root/node_modules" -prune -o \
+  -path "$root/admin/node_modules" -prune -o \
   -path "$root/apps/brai_app/node_modules" -prune -o \
   -path "$root/services/brai_api/node_modules" -prune -o \
   -path "$root/services/brai_temporal/node_modules" -prune -o \
@@ -107,6 +110,7 @@ if getent group brai-deploy >/dev/null 2>&1; then
   for deploy_tool in \
     "$root/deploy/scripts/create-operation-activity.sh" \
     "$root/deploy/scripts/complete-operation-activities.sh" \
+    "$root/deploy/scripts/list-operation-activities.sh" \
     "$root/deploy/scripts/sync-occupied-preview-ota-manifests.sh"
   do
     if [ -f "$deploy_tool" ]; then

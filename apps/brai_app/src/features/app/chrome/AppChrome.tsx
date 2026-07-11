@@ -301,13 +301,15 @@ function IconGlyph({ emoji, className = "" }: { emoji: string; className?: strin
 export function AuthPanel({
   busy,
   mode,
+  onEmailLogin,
   onLogin,
   onRequestOtp,
   onVerifyOtp,
 }: {
   busy: boolean;
-  mode: "otp" | "password";
-  onLogin: (password: string) => Promise<boolean>;
+  mode: "email" | "otp" | "password";
+  onEmailLogin: (email: string) => Promise<void>;
+  onLogin: (password: string) => Promise<void>;
   onRequestOtp: (email: string) => Promise<void>;
   onVerifyOtp: (email: string, otp: string) => Promise<void>;
 }) {
@@ -337,6 +339,16 @@ export function AuthPanel({
     }
   }
 
+  async function submitEmail(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError("");
+    try {
+      await onEmailLogin(email);
+    } catch {
+      setError("Email не подошёл");
+    }
+  }
+
   if (mode === "password") {
     return (
       <Card className="mt-[52px] grid w-[min(520px,100%)] justify-items-start gap-3 p-6" render={<form onSubmit={submitPassword} />}>
@@ -353,6 +365,31 @@ export function AuthPanel({
         <Button disabled={busy || !password}>
           <Lock aria-hidden="true" />
           Открыть
+        </Button>
+      </Card>
+    );
+  }
+
+  if (mode === "email") {
+    return (
+      <Card className="mt-[52px] grid w-[min(520px,100%)] justify-items-start gap-3 p-6" render={<form onSubmit={submitEmail} />}>
+        <Mail aria-hidden="true" className="size-5 text-muted-foreground" />
+        <h2 className="m-0 text-base leading-[1.2]">Вход</h2>
+        <Input
+          className="my-0.5 mb-1"
+          value={email}
+          type="email"
+          autoComplete="email"
+          inputMode="email"
+          placeholder="email"
+          aria-label="Email"
+          disabled={busy}
+          onChange={(event) => setEmail(event.target.value)}
+        />
+        {error ? <p className="m-0 text-sm text-destructive">{error}</p> : null}
+        <Button disabled={busy || !email}>
+          <Mail aria-hidden="true" />
+          Войти
         </Button>
       </Card>
     );

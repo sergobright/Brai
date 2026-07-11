@@ -61,16 +61,19 @@ export function createBraiServer({
   codexTimeoutMs = null,
   inboxImageDescriber = null,
   inboxNormalizer = null,
+  inboxWorkflowStarter = null,
   inboxAutoProcess = true,
   braiCmd = {},
   branch = process.env.BRAI_BRANCH || null,
   commit = process.env.BRAI_COMMIT || null,
   databaseBranch = process.env.BRAI_SUPABASE_BRANCH || null,
+  testEmailLogin = false,
   now = () => new Date(),
   logger = console
 }) {
   fs.mkdirSync(dataRoot, { recursive: true });
   const store = new BraiStore(databaseUrl);
+  store.logger = logger;
   const braiCmdRuntime = createBraiCmdRuntime(braiCmd);
   const resolvedVaultRoot =
     typeof vaultRoot === 'string' && vaultRoot.trim()
@@ -104,23 +107,91 @@ export function createBraiServer({
     if (!inboxAutoProcess || !inboxId) return;
     setTimeout(() => {
       void withUserScope(ownerUserId, async () => {
-        await processInboxItem({
-          store,
-          inboxId,
-          storageRoot: inboxStorageRoot,
-          codexBin,
-          codexModel,
-          codexFallbackModel,
-          codexTimeoutMs,
-          imageDescriber: inboxImageDescriber,
-          normalizer: inboxNormalizer,
-          nowDate: now()
-        });
+        const started = inboxWorkflowStarter
+          ? await inboxWorkflowStarter({ ownerUserId, inboxId })
+          : await processInboxItem({
+              store,
+              inboxId,
+              storageRoot: inboxStorageRoot,
+              codexBin,
+              codexModel,
+              codexFallbackModel,
+              codexTimeoutMs,
+              imageDescriber: inboxImageDescriber,
+              normalizer: inboxNormalizer,
+              nowDate: now()
+            });
+        if (started?.completion) await started.completion;
         const state = inboxState(store, now());
         broadcast(sockets, { type: 'inbox_synced', inbox_state: state }, ownerUserId);
       }).catch((error) => {
-        logger.error?.('Inbox AI processing failed', {
-          error: error instanceof Error ? error.message : String(error),
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        let queuedForRetry = false;
+        let terminalReconcilePending = false;
+        try {
+          withUserScope(ownerUserId, () => {
+            const execution = store.getInboxWorkflowExecution(inboxId);
+            if (inboxWorkflowStarter && execution?.status === 'queued') {
+              queuedForRetry = true;
+              recordRuntimeLog(store, logger, {
+                source: 'workflow',
+                operation: 'inbox.workflow_dispatch',
+                status: 'failed',
+                severityText: 'ERROR',
+                reason: errorMessage,
+                message: 'Inbox workflow dispatch failed; queued for retry',
+                jsonData: {
+                  inbox_id: inboxId,
+                  workflow_id: execution.workflow_id,
+                  workflow_status: execution.status,
+                  retry_scheduled: true
+                }
+              });
+              return;
+            }
+            if (inboxWorkflowStarter && execution?.status === 'running') {
+              terminalReconcilePending = true;
+              recordRuntimeLog(store, logger, {
+                source: 'workflow',
+                operation: 'inbox.workflow_completion_observer',
+                status: 'failed',
+                severityText: 'WARN',
+                reason: errorMessage,
+                message: 'Inbox workflow completion observer failed; durable reconciliation remains active',
+                jsonData: {
+                  inbox_id: inboxId,
+                  workflow_id: execution.workflow_id,
+                  run_id: execution.run_id,
+                  workflow_status: execution.status,
+                  terminal_reconcile_pending: true
+                }
+              });
+              return;
+            }
+            if (execution) {
+              store.failInboxWorkflow({
+                inboxId,
+                workflowId: execution.workflow_id,
+                runId: execution.run_id,
+                reason: errorMessage,
+                step: execution.current_step,
+                nowIso: now().toISOString()
+              });
+            }
+          });
+        } catch (statusError) {
+          logger.error?.('Inbox workflow failure status update failed', {
+            error: statusError instanceof Error ? statusError.message : String(statusError),
+            inboxId
+          });
+        }
+        const message = queuedForRetry
+          ? 'Inbox workflow dispatch failed; queued for retry'
+          : terminalReconcilePending
+            ? 'Inbox workflow completion observer failed; durable reconciliation remains active'
+            : 'Inbox AI processing failed';
+        logger.error?.(message, {
+          error: errorMessage,
           inboxId
         });
       });
@@ -186,6 +257,47 @@ export function createBraiServer({
           return;
         }
         sendJson(req, res, 200, { authenticated: false, user: null });
+        return;
+      }
+
+      if (url.pathname === '/auth/test-email-login' && req.method === 'POST') {
+        if (!testEmailLogin) {
+          sendJson(req, res, 404, { error: 'not_found' });
+          return;
+        }
+        if (!isTestEmailLoginOrigin(req.headers.origin)) {
+          sendJson(req, res, 403, { error: 'origin_not_allowed' });
+          return;
+        }
+        const body = await readJson(req);
+        const email = cleanEmail(body.email);
+        const primary = store.primaryUser();
+        if (!email || !primary?.id || cleanEmail(primary.email) !== email) {
+          recordRuntimeLog(store, logger, {
+            traceId,
+            source: 'auth',
+            operation: 'auth.test_email_login',
+            status: 'failed',
+            severityText: 'WARN',
+            reason: email ? 'invalid_email' : 'email_required',
+            message: 'Test email login rejected',
+            jsonData: { route: url.pathname, email_present: Boolean(email) }
+          });
+          sendJson(req, res, email ? 401 : 400, { error: email ? 'invalid_email' : 'email_required' });
+          return;
+        }
+
+        const cookie = createSessionCookie(sessionSecret, now(), shouldUseSecureCookie(req));
+        recordRuntimeLog(store, logger, {
+          traceId,
+          source: 'auth',
+          operation: 'auth.test_email_login',
+          status: 'done',
+          userId: primary.id,
+          message: 'Test email login completed',
+          jsonData: { route: url.pathname, secure_cookie: shouldUseSecureCookie(req) }
+        });
+        sendJson(req, res, 200, { authenticated: true, user: publicAuthUser(primary) }, { 'set-cookie': cookie });
         return;
       }
 
@@ -616,6 +728,16 @@ export function createBraiServer({
         return;
       }
 
+      const inboxWorkflowMatch = req.method === 'GET'
+        ? url.pathname.match(/^\/v1\/inbox\/([^/]+)\/workflow$/)
+        : null;
+      if (inboxWorkflowMatch) {
+        const inboxId = decodeURIComponent(inboxWorkflowMatch[1]);
+        const details = store.getInboxWorkflowDetails(inboxId);
+        sendJson(req, res, details ? 200 : 404, details ?? { error: 'not_found' });
+        return;
+      }
+
       if (req.method === 'GET' && url.pathname === '/v1/events') {
         sendJson(req, res, 200, { events: store.listEvents({ limit: url.searchParams.get('limit') }) });
         return;
@@ -931,29 +1053,23 @@ export function inboxState(store, nowDate) {
 }
 
 function addInboxAiProcessingState(store, inbox) {
-  const pendingIds = inbox.filter((item) => !item.is_normalized).map((item) => item.id);
-  const logs = new Map(store.listLatestInboxAiLogs(pendingIds).map((log) => [log.flow_id, log]));
   return inbox.map((item) => {
-    const log = logs.get(item.id);
-    if (!log || log.status !== 'failed') return item;
+    if (item.workflow_status === 'failed' || item.workflow_status === 'needs_review') {
+      return {
+        ...item,
+        ai_processing_status: item.workflow_status,
+        ai_processing_error: item.workflow_last_error || 'Ошибка AI-обработки'
+      };
+    }
+    if (item.workflow_status === 'queued' || item.workflow_status === 'running') {
+      return { ...item, ai_processing_status: 'running', ai_processing_error: null };
+    }
     return {
       ...item,
-      ai_processing_status: 'failed',
-      ai_processing_error: inboxAiFailureText(log)
+      ai_processing_status: null,
+      ai_processing_error: null
     };
   });
-}
-
-function inboxAiFailureText(log) {
-  const metadata = log.json_data?.metadata;
-  return cleanShortText(log.ai_title)
-    || cleanShortText(metadata?.error_message)
-    || cleanShortText(metadata?.error)
-    || 'Ошибка AI-обработки';
-}
-
-function cleanShortText(value) {
-  return typeof value === 'string' ? value.trim().replace(/\s+/g, ' ').slice(0, 120) : '';
 }
 
 function actionsCompatState(state) {
@@ -1095,22 +1211,25 @@ function requestPathname(req) {
 }
 
 function isAllowedCorsOrigin(origin, pathname = '/') {
-  if (origin === 'https://brightos.world') return pathname === '/auth/session';
+  if (origin === 'https://brai.one') return pathname === '/auth/session';
   if (isTrustedAppOrigin(origin)) return true;
-  if (origin === 'https://previews.brightos.world') return true;
+  if (origin === 'https://previews.brai.one') return true;
   return false;
 }
 
 function isTrustedAppOrigin(origin) {
-  if (origin === 'https://app.brightos.world') return true;
-  if (origin === 'https://dev.brightos.world') return true;
-  if (/^https:\/\/[a-e]\.test\.brightos\.world$/.test(origin)) return true;
   if (origin === 'https://app.brai.one') return true;
   if (origin === 'https://dev.brai.one') return true;
   if (/^https:\/\/[a-e]\.test\.brai\.one$/.test(origin)) return true;
   if (origin === 'capacitor://localhost') return true;
   if (origin === 'https://localhost' || origin === 'http://localhost') return true;
   return /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin);
+}
+
+function isTestEmailLoginOrigin(origin) {
+  if (origin === 'https://dev.brightos.world') return true;
+  if (/^https:\/\/[a-e]\.test\.brightos\.world$/.test(origin ?? '')) return true;
+  return /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin ?? '');
 }
 
 function requiresTrustedOrigin(req, authContext) {
@@ -1236,7 +1355,7 @@ function parseCookies(header) {
 
 function shouldUseSecureCookie(req) {
   const host = req.headers.host ?? '';
-  return host.includes('brightos.world') || req.headers['x-forwarded-proto'] === 'https';
+  return host.includes('brai.one') || req.headers['x-forwarded-proto'] === 'https';
 }
 
 export function createUserVaultPreparer({

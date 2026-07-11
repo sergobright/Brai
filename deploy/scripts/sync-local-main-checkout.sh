@@ -175,6 +175,7 @@ restore_task_state_access() {
 preserve_agent_dependency_paths() {
   for dependency_path in \
     node_modules \
+    admin/node_modules \
     apps/brai_app/node_modules \
     services/brai_api/node_modules \
     services/brai_temporal/node_modules
@@ -244,6 +245,7 @@ find "$REPO" \
   -path "$REPO/deploy/mobile-update" -prune -o \
   -path "$REPO/deploy/releases" -prune -o \
   -path "$REPO/node_modules" -prune -o \
+  -path "$REPO/admin/node_modules" -prune -o \
   -path "$REPO/apps/brai_app/node_modules" -prune -o \
   -path "$REPO/services/brai_api/node_modules" -prune -o \
   -path "$REPO/services/brai_temporal/node_modules" -prune -o \
@@ -259,6 +261,7 @@ find "$REPO" \
   -path "$REPO/deploy/mobile-update" -prune -o \
   -path "$REPO/deploy/releases" -prune -o \
   -path "$REPO/node_modules" -prune -o \
+  -path "$REPO/admin/node_modules" -prune -o \
   -path "$REPO/apps/brai_app/node_modules" -prune -o \
   -path "$REPO/services/brai_api/node_modules" -prune -o \
   -path "$REPO/services/brai_temporal/node_modules" -prune -o \
@@ -275,6 +278,7 @@ git_cmd clean -fd \
   -e deploy/mobile-update/ \
   -e deploy/releases/ \
   -e node_modules/ \
+  -e admin/node_modules/ \
   -e apps/brai_app/node_modules/ \
   -e services/brai_api/node_modules/ \
   -e services/brai_temporal/node_modules/
@@ -297,6 +301,7 @@ if [ "${BRAI_MAIN_SYNC_LOCK_CHECKOUT:-1}" = "1" ]; then
     -path "$REPO/deploy/mobile-update" -prune -o \
     -path "$REPO/deploy/releases" -prune -o \
     -path "$REPO/node_modules" -prune -o \
+    -path "$REPO/admin/node_modules" -prune -o \
     -path "$REPO/apps/brai_app/node_modules" -prune -o \
     -path "$REPO/services/brai_api/node_modules" -prune -o \
     -path "$REPO/services/brai_temporal/node_modules" -prune -o \
@@ -312,6 +317,7 @@ if [ "${BRAI_MAIN_SYNC_LOCK_CHECKOUT:-1}" = "1" ]; then
     -path "$REPO/deploy/mobile-update" -prune -o \
     -path "$REPO/deploy/releases" -prune -o \
     -path "$REPO/node_modules" -prune -o \
+    -path "$REPO/admin/node_modules" -prune -o \
     -path "$REPO/apps/brai_app/node_modules" -prune -o \
     -path "$REPO/services/brai_api/node_modules" -prune -o \
     -path "$REPO/services/brai_temporal/node_modules" -prune -o \
@@ -334,6 +340,7 @@ if [ "${BRAI_MAIN_SYNC_LOCK_CHECKOUT:-1}" = "1" ]; then
     for deploy_tool in \
       deploy/scripts/create-operation-activity.sh \
       deploy/scripts/complete-operation-activities.sh \
+      deploy/scripts/list-operation-activities.sh \
       deploy/scripts/record-runtime-log.mjs \
       deploy/scripts/sync-occupied-preview-ota-manifests.sh
     do

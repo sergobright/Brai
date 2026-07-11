@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 
-const url = process.env.BRAI_ADMIN_VISUAL_URL ?? "http://127.0.0.1:3040/?table=activities&page=1";
+const url = process.env.BRAI_ADMIN_VISUAL_URL ?? "http://127.0.0.1:3040/admin?table=activities&page=1";
 const session = `brai-admin-visual-${process.pid}`;
 
 function run(args) {
