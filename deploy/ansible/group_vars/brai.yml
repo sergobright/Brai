@@ -9,8 +9,7 @@ brai_public_site_legacy_domains:
 brai_github_repository: sergobright/Brai
 brai_public_site_root: "{{ brai_repo }}/deploy/site"
 brai_adr_domain: adr.brai.one
-brai_adr_legacy_domains:
-  - adr.brightos.world
+brai_adr_legacy_domains: []
 brai_adr_root: "{{ brai_env_root }}/prod/adr"
 brai_syncthing_domain: sync.brai.one
 brai_syncthing_legacy_domains:
