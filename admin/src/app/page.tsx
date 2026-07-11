@@ -3,6 +3,7 @@ import { headers } from "next/headers";
 import type { ReactNode } from "react";
 import { ArrowDownUp, CalendarClock, ChevronDown, ChevronFirst, ChevronLast, ChevronLeft, ChevronRight, Command, Database, FileKey2, Table2, Webhook, Workflow } from "lucide-react";
 import { RoleContractsRail, RoleContractsWorkspace, WorkflowsRail, WorkflowsWorkspace, type RoleFilters, type WorkflowFilters } from "@/app/admin-observability";
+import { AdminInteractionFeedback } from "@/app/admin-observability-client";
 import { AnimatedThemeToggler } from "@/shared/ui/animated-theme-toggler";
 import { BraiCmdAdminSection } from "@/app/BraiCmdAdminSection";
 import { Badge } from "@/shared/ui/badge";
@@ -91,6 +92,7 @@ export default async function Home({ searchParams }: { searchParams: SearchParam
 
   return (
     <main className="admin-shell grid h-dvh min-h-0 bg-background text-foreground max-md:grid-rows-[auto_minmax(0,2fr)_minmax(0,3fr)] md:grid-cols-[4.5rem_20rem_minmax(0,1fr)]">
+      <AdminInteractionFeedback />
       <PrimaryRail activeSection={activeSection} />
       {activeSection === "handlers" ? (
         <HandlersRail count={view.rowCount} />
@@ -234,6 +236,7 @@ function AdminAccessPanel({ loginHref, status }: { loginHref: string; status: Ex
 
   return (
     <main className="grid min-h-dvh place-items-center bg-background p-4 text-foreground">
+      <AdminInteractionFeedback />
       <Card className="grid w-full max-w-md gap-4 p-6">
         <div className="grid gap-2">
           <h1 className="m-0 text-xl font-semibold">{copy.title}</h1>
