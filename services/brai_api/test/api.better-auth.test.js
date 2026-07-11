@@ -11,7 +11,7 @@ import {
   jsonRequest,
   request
 } from '../test-support/api.js';
-import { renderOtpEmail } from '../src/auth.js';
+import { OTP_EMAIL_SUBJECT, renderOtpEmail } from '../src/auth.js';
 import { createUserVaultPreparer } from '../src/server.js';
 
 function seedPrimaryUser(fixture, id = 'test-user') {
@@ -32,6 +32,7 @@ function seedPrimaryUser(fixture, id = 'test-user') {
 test('email OTP message renders the reusable responsive card', () => {
   const message = renderOtpEmail({ otp: '<123456>' });
 
+  assert.equal(OTP_EMAIL_SUBJECT, 'Код входа в Brai');
   assert.match(message.html, /Ваш одноразовый код/);
   assert.match(message.html, /Введите этот код в Brai, чтобы завершить вход\./);
   assert.match(message.html, /Код действует 5 минут\./);
