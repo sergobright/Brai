@@ -1,43 +1,43 @@
-# Supabase Postgres as runtime source of truth
+# Supabase Postgres как источник истины для runtime
 
 - Status: accepted
-- Deciders: Project owner, Codex
+- Deciders: Владелец проекта, Codex
 - Date: 2026-07-09
-- Tags: postgres, supabase, runtime, data
+- Tags: postgres, supabase, runtime, данные
 
-## Context
+## Контекст
 
-Brai runtime state includes timer canonical state, sessions, Activities, activity events, auth, deployment/version ledger, agents, schedules, runtime logs, and AI logs. The project needs one runtime database authority across production, Dev, and preview environments.
+Runtime-состояние Brai включает каноническое состояние таймера, sessions, Activities, activity events, auth, deployment/version ledger, agents, schedules, runtime logs и AI logs. Проекту нужен один источник истины runtime-БД для production, Dev и preview environments.
 
-## Decision
+## Решение
 
-Brai uses Supabase Postgres as the runtime source of truth. `BRAI_DATABASE_URL` is a server-side protected DSN for API, scheduler, deploy ledger scripts, production, Dev, and preview environments. The Node API remains the data boundary; web and Android clients do not receive Supabase service credentials or call the Supabase Data API directly.
+Brai использует Supabase Postgres как runtime source of truth. `BRAI_DATABASE_URL` - защищенный server-side DSN для API, scheduler, deploy ledger scripts, production, Dev и preview environments. Node API остается границей данных; web и Android clients не получают Supabase service credentials и не вызывают Supabase Data API напрямую.
 
-## Alternatives Considered
+## Рассмотренные альтернативы
 
-- Keep SQLite as runtime fallback: rejected because current runtime, deploy ledger, Dev, production, and preview paths must fail fast without Postgres.
-- Let clients use Supabase directly: rejected because service credentials and data contracts must stay behind the Node API boundary.
+- Оставить SQLite как runtime fallback: отклонено, потому что текущие runtime, deploy ledger, Dev, production и preview paths должны fail fast без Postgres.
+- Разрешить clients использовать Supabase напрямую: отклонено, потому что service credentials и data contracts должны оставаться за Node API boundary.
 
-## Consequences
+## Последствия
 
-- Positive: production, Dev, and previews share one database model with isolated schemas and migration history.
-- Negative: live runtime claims require environment-specific Postgres verification.
-- Risk: protected DSN handling must stay outside Git and out of logs.
+- Плюс: production, Dev и previews используют одну database model с изолированными schemas и migration history.
+- Минус: live runtime claims требуют environment-specific Postgres verification.
+- Риск: обработка protected DSN должна оставаться вне Git и вне logs.
 
-## Confirmation
+## Проверка
 
-Before rules, migrations, handoff, or claims about runtime tables, verify the real environment, DSN source without secrets, table presence, columns, indexes, constraints, and relevant rows.
+Перед rules, migrations, handoff или claims о runtime tables проверяйте реальную environment, DSN source без секретов, наличие tables, columns, indexes, constraints и relevant rows.
 
-## Links
+## Ссылки
 
 - `docs/guidelines/04-api-data-sync-migrations.md`
 - `openspec/specs/project-governance/spec.md`
 - `openspec/specs/repository-operations/spec.md`
 
-## Supersedes
+## Заменяет
 
-None.
+Нет.
 
-## Superseded By
+## Заменено
 
-None.
+Нет.

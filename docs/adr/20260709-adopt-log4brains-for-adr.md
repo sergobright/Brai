@@ -1,44 +1,44 @@
-# Adopt Log4brains for ADRs
+# Принять Log4brains для ADR
 
 - Status: accepted
-- Deciders: Project owner, Codex
+- Deciders: Владелец проекта, Codex
 - Date: 2026-07-09
-- Tags: adr, log4brains, documentation
+- Tags: adr, log4brains, документация
 
-## Context
+## Контекст
 
-Brai needs a first-class ADR methodology and browsable architecture decision knowledge base. The project already uses docs-as-code and OpenSpec, so ADR tooling should stay repository-local and reproducible.
+Brai нужна полноценная ADR-методология и просматриваемая база знаний по архитектурным решениям. Проект уже использует docs-as-code и OpenSpec, поэтому инструменты ADR должны оставаться локальными для репозитория и воспроизводимыми.
 
-## Decision
+## Решение
 
-Brai stores ADRs under `docs/adr/`, uses Log4brains as a pinned local devDependency for listing, previewing, and building ADRs, and publishes the generated static site at protected `adr.brai.one`.
+Brai хранит ADR в `docs/adr/`, использует Log4brains как закрепленную локальную devDependency для списка, preview и сборки ADR, а сгенерированный статический сайт публикует на защищенном `adr.brai.one`.
 
-## Alternatives Considered
+## Рассмотренные альтернативы
 
-- Plain Markdown only: rejected for this rollout because the project owner explicitly chose Log4brains and full ADR visibility.
-- Global `npm install -g log4brains`: rejected because project tooling should be pinned and reproducible.
-- Public ADR site: rejected because `adr.brai.one` is a technical subdomain and should use unified Caddy basic authentication.
+- Только обычный Markdown: отклонено для этого внедрения, потому что владелец проекта явно выбрал Log4brains и полную видимость ADR.
+- Глобальный `npm install -g log4brains`: отклонено, потому что инструменты проекта должны быть закрепленными и воспроизводимыми.
+- Публичный ADR-сайт: отклонено, потому что `adr.brai.one` - технический поддомен и должен использовать единую базовую аутентификацию Caddy.
 
-## Consequences
+## Последствия
 
-- Positive: ADRs are easy to browse and search as a generated static site.
-- Negative: Log4brains brings a large and partly deprecated dependency tree.
-- Risk: if Log4brains maintenance becomes a blocker, ADR Markdown remains usable and can be rendered by another tool.
+- Плюс: ADR легко просматривать и искать как сгенерированный статический сайт.
+- Минус: Log4brains приносит большое дерево зависимостей с частично устаревшими пакетами.
+- Риск: если сопровождение Log4brains станет блокером, ADR Markdown останется пригодным и может быть отрендерен другим инструментом.
 
-## Confirmation
+## Проверка
 
-Run `npm run adr:list` and `npm run adr:build` after ADR changes.
+Запускайте `npm run adr:list` и `npm run adr:build` после изменений ADR.
 
-## Links
+## Ссылки
 
 - `.log4brains.yml`
 - `docs/adr/index.md`
 - `openspec/changes/adopt-adr-methodology/proposal.md`
 
-## Supersedes
+## Заменяет
 
-None.
+Нет.
 
-## Superseded By
+## Заменено
 
-None.
+Нет.

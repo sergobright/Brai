@@ -1,43 +1,43 @@
-# Branch preview delivery flow
+# Процесс доставки preview-веток
 
 - Status: accepted
-- Deciders: Project owner, Codex
+- Deciders: Владелец проекта, Codex
 - Date: 2026-06-29
 - Tags: delivery, preview, deployment
 
-## Context
+## Контекст
 
-Runtime/product changes need visible verification before acceptance, while docs/infra-only changes can be proven by checks and no-preview handoff.
+Runtime/product-изменения требуют видимой проверки перед acceptance, а docs/infra-only изменения можно подтверждать checks и no-preview handoff.
 
-## Decision
+## Решение
 
-`main` deploys production. `codex/*` branches use the task starter and delivery classification. Runtime/product branches deploy to preview slots A through E; docs/infra and technical-no-preview branches can use the no-preview path.
+`main` деплоит production. Ветки `codex/*` используют task starter и delivery classification. Runtime/product branches деплоятся в preview slots A-E; docs/infra и technical-no-preview branches могут использовать no-preview path.
 
-## Alternatives Considered
+## Рассмотренные альтернативы
 
-- Commit directly to `main`: rejected because implementation work needs checks and handoff before acceptance.
-- Require preview for every change: rejected because docs/infra changes do not need browser slot allocation.
+- Commit напрямую в `main`: отклонено, потому что работа по реализации требует checks и handoff перед acceptance.
+- Требовать preview для каждого изменения: отклонено, потому что docs/infra changes не требуют выделения browser slot.
 
-## Consequences
+## Последствия
 
-- Positive: product work gets reviewable preview URLs, while technical docs/infra work avoids unnecessary slot usage.
-- Negative: agents must follow starter and handoff procedures exactly.
-- Risk: misclassification can either skip needed preview or waste preview capacity.
+- Плюс: product work получает preview URLs для ревью, а техническая docs/infra work избегает лишнего использования slots.
+- Минус: агенты должны точно соблюдать starter и handoff procedures.
+- Риск: misclassification может либо пропустить нужный preview, либо потратить preview capacity впустую.
 
-## Confirmation
+## Проверка
 
-Use `scripts/brai-task-start.sh <task-slug>` before tracked project-file work and classify delivery before handoff.
+Используйте `scripts/brai-task-start.sh <task-slug>` перед tracked project-file work и классифицируйте delivery перед handoff.
 
-## Links
+## Ссылки
 
 - `AGENTS.md`
 - `docs/operations/branch-preview-environments.md`
 - `docs/guidelines/07-git-versioning-repository-sync.md`
 
-## Supersedes
+## Заменяет
 
-None.
+Нет.
 
-## Superseded By
+## Заменено
 
-None.
+Нет.

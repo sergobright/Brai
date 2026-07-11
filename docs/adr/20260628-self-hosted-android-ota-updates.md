@@ -1,43 +1,43 @@
-# Self-hosted Android OTA updates
+# Самостоятельно размещаемые OTA-обновления Android
 
 - Status: accepted
-- Deciders: Project owner, Codex
+- Deciders: Владелец проекта, Codex
 - Date: 2026-06-28
 - Tags: android, ota, self-hosted, deployment
 
-## Context
+## Контекст
 
-Brai is a self-hosted productivity app. Android web-layer updates need a durable update mechanism without requiring a managed proprietary OTA service account.
+Brai - self-hosted приложение для продуктивности. Android-обновления веб-слоя требуют устойчивого механизма обновлений без обязательного аккаунта в управляемом проприетарном OTA-сервисе.
 
-## Decision
+## Решение
 
-Brai hosts Android web-layer OTA manifests and bundles on the configured Brai server. OTA artifacts must not contain private credentials, and future self-hosted deployments can target their own update manifests.
+Brai размещает OTA-манифесты и bundles Android web-layer на настроенном сервере Brai. OTA-артефакты не должны содержать приватные credentials, а будущие self-hosted deployments могут использовать собственные манифесты обновлений.
 
-## Alternatives Considered
+## Рассмотренные альтернативы
 
-- Use a managed proprietary OTA service: rejected for the default path because it weakens the self-hosted model.
-- Require every web-layer change to ship as a new APK: rejected because OTA-eligible web changes can be delivered without crossing the native boundary.
+- Использовать управляемый проприетарный OTA-сервис: отклонено для стандартного пути, потому что это ослабляет self-hosted модель.
+- Требовать новый APK для каждого изменения веб-слоя: отклонено, потому что подходящие для OTA веб-изменения можно доставлять без пересечения нативной границы.
 
-## Consequences
+## Последствия
 
-- Positive: update infrastructure remains self-hostable and under project control.
-- Negative: Brai owns manifest publishing, rollback retention, and compatibility checks.
-- Risk: native-boundary changes still require APK releases and compatibility gating.
+- Плюс: инфраструктура обновлений остается self-hostable и под контролем проекта.
+- Минус: Brai отвечает за публикацию манифестов, хранение rollback-версий и проверки совместимости.
+- Риск: изменения нативной границы по-прежнему требуют APK releases и compatibility gating.
 
-## Confirmation
+## Проверка
 
-Verify OTA manifests and bundles through the Android web OTA release checklist before release.
+Перед release проверяйте OTA-манифесты и bundles по Android web OTA release checklist.
 
-## Links
+## Ссылки
 
 - `openspec/specs/self-hosted-distribution/spec.md`
 - `openspec/specs/app-delivery/spec.md`
 - `docs/guidelines/05-android-web-ota-releases.md`
 
-## Supersedes
+## Заменяет
 
-None.
+Нет.
 
-## Superseded By
+## Заменено
 
-None.
+Нет.

@@ -1,43 +1,43 @@
-# SocratiCode semantic search
+# Семантический поиск SocratiCode
 
 - Status: accepted
-- Deciders: Project owner, Codex
+- Deciders: Владелец проекта, Codex
 - Date: 2026-07-05
-- Tags: agents, search, codebase-context
+- Tags: агенты, поиск, codebase-context
 
-## Context
+## Контекст
 
-Agents often need to find code by behavior, responsibility, feature, or natural-language meaning. Exact string search remains useful but is not enough for architecture exploration.
+Агентам часто нужно искать код по поведению, ответственности, фиче или смыслу на естественном языке. Точный строковый поиск остается полезным, но его недостаточно для архитектурного исследования.
 
-## Decision
+## Решение
 
-Brai uses SocratiCode as the default path for semantic codebase exploration after confirming the active project path is indexed. Exact string and file discovery still use `rg`.
+Brai использует SocratiCode как путь по умолчанию для семантического исследования кодовой базы после подтверждения, что активный путь проекта проиндексирован. Точный строковый поиск и поиск файлов по-прежнему используют `rg`.
 
-## Alternatives Considered
+## Рассмотренные альтернативы
 
-- Use only `rg`: rejected because semantic exploration requires behavior-level discovery.
-- Read broad file trees speculatively: rejected because it wastes context and increases stale assumptions.
+- Использовать только `rg`: отклонено, потому что семантическое исследование требует поиска на уровне поведения.
+- Спекулятивно читать широкие деревья файлов: отклонено, потому что это тратит контекст и увеличивает число устаревших предположений.
 
-## Consequences
+## Последствия
 
-- Positive: agents can find relevant responsibilities faster with shared context artifacts.
-- Negative: SocratiCode freshness must be checked when indexing behavior or context artifacts change.
-- Risk: semantic results can be stale if the shared index or watcher is not healthy.
+- Плюс: агенты быстрее находят релевантные ответственности с общими контекстными артефактами.
+- Минус: актуальность SocratiCode нужно проверять при изменениях поведения индексации или контекстных артефактов.
+- Риск: семантические результаты могут устареть, если общий index или watcher нездоровы.
 
-## Confirmation
+## Проверка
 
-Run `npm run socraticode:preflight` when SocratiCode behavior, agent rules, OpenSpec routing, or context indexing changes.
+Запускайте `npm run socraticode:preflight`, когда меняется поведение SocratiCode, правила агентов, OpenSpec routing или индексация контекста.
 
-## Links
+## Ссылки
 
 - `memory-bank/decisionLog.md`
 - `openspec/specs/project-governance/spec.md`
 - `docs/guidelines/10-agent-tools-openspec.md`
 
-## Supersedes
+## Заменяет
 
-None.
+Нет.
 
-## Superseded By
+## Заменено
 
-None.
+Нет.

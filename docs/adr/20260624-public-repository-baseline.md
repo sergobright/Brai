@@ -1,43 +1,43 @@
-# Public repository baseline
+# Базовая линия публичного репозитория
 
 - Status: accepted
-- Deciders: Project owner, Codex
+- Deciders: Владелец проекта, Codex
 - Date: 2026-06-24
-- Tags: repository, public-safety, governance
+- Tags: репозиторий, публичная-безопасность, управление
 
-## Context
+## Контекст
 
-Brai needed a public-safe development baseline. The previous bootstrap history contained runtime artifacts and private development context that should not be exposed through public source control.
+Brai нужна была публично безопасная базовая линия разработки. Предыдущая bootstrap-история содержала runtime-артефакты и приватный контекст разработки, которые нельзя раскрывать через публичную систему контроля версий.
 
-## Decision
+## Решение
 
-Brai public development starts from a clean public repository baseline. Future public work uses one canonical repository instead of separate public/private source branches.
+Публичная разработка Brai начинается от чистой базовой линии публичного репозитория. Дальнейшая публичная работа использует один канонический репозиторий вместо отдельных публичных и приватных исходных веток.
 
-## Alternatives Considered
+## Рассмотренные альтернативы
 
-- Keep existing private history and scrub later: rejected because reachable history would remain risky.
-- Maintain separate public and private source branches: rejected because branch divergence would make delivery and review harder.
+- Оставить существующую приватную историю и почистить позже: отклонено, потому что достижимая история осталась бы рискованной.
+- Поддерживать отдельные публичные и приватные исходные ветки: отклонено, потому что расхождение веток усложнило бы доставку и ревью.
 
-## Consequences
+## Последствия
 
-- Positive: public development has one clean accepted base.
-- Negative: older private bootstrap history is intentionally not available in public Git.
-- Risk: useful private context must be re-recorded only when it is public-safe.
+- Плюс: у публичной разработки есть одна чистая принятая база.
+- Минус: старая приватная bootstrap-история намеренно недоступна в публичном Git.
+- Риск: полезный приватный контекст нужно заново фиксировать только тогда, когда он публично безопасен.
 
-## Confirmation
+## Проверка
 
-Run `npm run public:guard` before publishing or merging public branches.
+Запускайте `npm run public:guard` перед публикацией или merge публичных веток.
 
-## Links
+## Ссылки
 
 - `memory-bank/decisionLog.md`
 - `memory-bank/activeContext.md`
 - `docs/guidelines/01-sources-of-truth.md`
 
-## Supersedes
+## Заменяет
 
-None.
+Нет.
 
-## Superseded By
+## Заменено
 
-None.
+Нет.

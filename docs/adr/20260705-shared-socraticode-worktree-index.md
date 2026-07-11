@@ -1,43 +1,43 @@
-# Shared SocratiCode worktree index
+# Общий индекс SocratiCode для worktrees
 
 - Status: accepted
-- Deciders: Project owner, Codex
+- Deciders: Владелец проекта, Codex
 - Date: 2026-07-05
-- Tags: agents, worktrees, codebase-context
+- Tags: агенты, worktrees, codebase-context
 
-## Context
+## Контекст
 
-Brai implementation work runs in Git worktrees. Path-hash indexing can make every new worktree look like a different unindexed project.
+Работа по реализации в Brai выполняется в Git worktrees. Индексация по path-hash может заставить каждый новый worktree выглядеть как отдельный неиндексированный проект.
 
-## Decision
+## Решение
 
-Brai commits a stable SocratiCode `projectId` and provides `npm run socraticode:ensure` so main and task worktrees share one semantic index.
+Brai коммитит стабильный SocratiCode `projectId` и предоставляет `npm run socraticode:ensure`, чтобы main и task worktrees использовали один семантический index.
 
-## Alternatives Considered
+## Рассмотренные альтернативы
 
-- Index each worktree independently: rejected because it duplicates work and leaves new task branches cold.
-- Require manual MCP bootstrap per worktree: rejected because it is easy to forget and hard to verify.
+- Индексировать каждый worktree отдельно: отклонено, потому что это дублирует работу и оставляет новые task branches без прогретого индекса.
+- Требовать ручной MCP bootstrap для каждого worktree: отклонено, потому что об этом легко забыть и трудно проверить.
 
-## Consequences
+## Последствия
 
-- Positive: semantic search, code graph, and context artifacts converge across main and task worktrees.
-- Negative: project identity changes must be deliberate and verified.
-- Risk: stale watcher state can still require ensure/preflight repair.
+- Плюс: semantic search, code graph и context artifacts сходятся между main и task worktrees.
+- Минус: изменения project identity должны быть намеренными и проверенными.
+- Риск: stale watcher state все еще может требовать ensure/preflight repair.
 
-## Confirmation
+## Проверка
 
-Run `npm run socraticode:ensure` when the shared index is missing, incomplete, or stale.
+Запускайте `npm run socraticode:ensure`, когда общий index отсутствует, неполный или устарел.
 
-## Links
+## Ссылки
 
 - `.socraticode.json`
 - `.socraticodecontextartifacts.json`
 - `memory-bank/decisionLog.md`
 
-## Supersedes
+## Заменяет
 
-None.
+Нет.
 
-## Superseded By
+## Заменено
 
-None.
+Нет.

@@ -1,43 +1,43 @@
-# OpenSpec as accepted requirements source
+# OpenSpec как источник принятых требований
 
 - Status: accepted
-- Deciders: Project owner, Codex
+- Deciders: Владелец проекта, Codex
 - Date: 2026-06-24
-- Tags: openspec, governance, requirements
+- Tags: openspec, управление, требования
 
-## Context
+## Контекст
 
-Brai needs durable requirements that are explicit, reviewable, and validated independently from chat context or implementation memory.
+Brai нужны устойчивые требования, которые явно описаны, доступны для ревью и проверяются независимо от контекста чата или памяти реализации.
 
-## Decision
+## Решение
 
-Accepted durable behavior, workflow rules, architecture constraints, services, and invariants live in `openspec/specs/`. Planned changes start under `openspec/changes/<change-id>/` before implementation unless an emergency direct edit is explicitly approved.
+Принятое устойчивое поведение, правила рабочих процессов, архитектурные ограничения, сервисы и инварианты живут в `openspec/specs/`. Планируемые изменения до реализации начинаются в `openspec/changes/<change-id>/`, если только экстренная прямая правка не одобрена явно.
 
-## Alternatives Considered
+## Рассмотренные альтернативы
 
-- Store requirements only in Memory Bank: rejected because Memory Bank is context, not strict requirement validation.
-- Store requirements only in docs/guidelines: rejected because those files are working rules, not change proposals with tasks and validation.
+- Хранить требования только в Memory Bank: отклонено, потому что Memory Bank - это контекст, а не строгая валидация требований.
+- Хранить требования только в `docs/guidelines`: отклонено, потому что эти файлы являются рабочими правилами, а не предложениями изменений с задачами и проверкой.
 
-## Consequences
+## Последствия
 
-- Positive: requirements changes have an explicit proposal/spec/tasks path.
-- Negative: small governance changes need a little ceremony.
-- Risk: completed changes must be archived so active proposals do not become stale.
+- Плюс: изменения требований проходят явный путь proposal/spec/tasks.
+- Минус: небольшим изменениям управления нужна дополнительная процедура.
+- Риск: завершенные изменения нужно архивировать, чтобы активные предложения не устаревали.
 
-## Confirmation
+## Проверка
 
-Run `npm run openspec:validate` after changing specs or rules.
+Запускайте `npm run openspec:validate` после изменения спецификаций или правил.
 
-## Links
+## Ссылки
 
 - `openspec/config.yaml`
 - `openspec/specs/project-governance/spec.md`
 - `docs/guidelines/10-agent-tools-openspec.md`
 
-## Supersedes
+## Заменяет
 
-None.
+Нет.
 
-## Superseded By
+## Заменено
 
-None.
+Нет.
