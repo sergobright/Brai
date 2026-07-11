@@ -37,7 +37,7 @@ test('email OTP message renders the reusable responsive card', () => {
   assert.match(message.html, /Код действует 5 минут\./);
   assert.match(message.html, /max-width:600px/);
   assert.match(message.html, /@media only screen and \(max-width: 620px\)/);
-  assert.match(message.html, /<img src="https:\/\/app\.brai\.one\/brand\/brai-logo-email-white-bg\.png"/);
+  assert.match(message.html, /<img src="https:\/\/brai\.one\/brai-logo-email-white-bg\.png"/);
   assert.match(message.html, /alt="Brai"/);
   assert.doesNotMatch(message.html, /cid:/);
   assert.doesNotMatch(message.html, /data:image/);

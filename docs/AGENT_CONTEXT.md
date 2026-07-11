@@ -34,7 +34,7 @@
 | --- | --- |
 | `brai-logo-transparent.png` / `brai-logo-transparent.svg` | Основной вариант для UI, сайта и макетов, где фон задаёт контейнер. Подходит для тёмных, цветных и фото-фонов; не ставить на светлый фон без проверки контраста, потому что `Br` белые. |
 | `brai-logo-white-bg.png` / `brai-logo-white-bg.svg` | Для белых и светлых поверхностей, документов, писем, презентаций и экспортов: `Br` чёрные, красный остаётся без изменения. |
-| `brai-logo-email-white-bg.png` | Маленький `300x142` PNG для email; в письмах использовать как публичный HTTPS image URL, а не как MIME attachment. |
+| `brai-logo-email-white-bg.png` | Маленький `300x142` PNG для email; в письмах использовать публичный `https://brai.one/brai-logo-email-white-bg.png` из `landing/public`, а не MIME attachment. |
 | `brai-logo-black-bg.png` / `brai-logo-black-bg.svg` | Для тёмных блоков, заставок и экспортов, где нужна встроенная чёрная подложка и предсказуемый контраст: `Br` белые, красный остаётся без изменения. |
 
 `brai-logo-source.png`, `brai-logo-black.png`, app icons, favicons и launcher assets являются отдельными иконками/прежними исходниками; wordmark-размещения по умолчанию берут один из трёх вариантов выше.

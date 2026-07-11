@@ -6,7 +6,7 @@ import { isPostgresUrl, postgresPoolMax } from './postgres-sync-db.js';
 
 const DEFAULT_FROM = 'Brai <auth@mail.brai.one>';
 const OTP_EXPIRES_IN_SECONDS = 5 * 60;
-const LOGO_URL = 'https://app.brai.one/brand/brai-logo-email-white-bg.png';
+const LOGO_URL = 'https://brai.one/brai-logo-email-white-bg.png';
 const DEFAULT_ALLOWED_HOSTS = [
   'brai.one',
   'app.brai.one',
