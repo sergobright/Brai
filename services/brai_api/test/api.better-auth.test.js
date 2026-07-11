@@ -89,6 +89,15 @@ test('test email login requires an explicit matching primary email', async () =>
     assert.equal(rejected.status, 401);
     assert.equal(rejected.headers.get('set-cookie'), null);
 
+    const currentPreviewOrigin = await jsonRequest(fixture.url, '/auth/test-email-login', {
+      method: 'POST',
+      headers: { origin: 'https://a.test.brai.one' },
+      body: JSON.stringify({ email: ' PRIMARY-USER@example.com ' })
+    });
+    assert.equal(currentPreviewOrigin.status, 200);
+    assert.equal(currentPreviewOrigin.body.authenticated, true);
+    assert.match(currentPreviewOrigin.headers.get('set-cookie'), /^brai_session=/);
+
     const accepted = await jsonRequest(fixture.url, '/auth/test-email-login', {
       method: 'POST',
       headers: { origin: 'https://a.test.brightos.world' },
