@@ -1310,7 +1310,6 @@ function requestPathname(req) {
 function isAllowedCorsOrigin(origin, pathname = '/') {
   if (origin === 'https://brai.one') return pathname === '/auth/session';
   if (isTrustedAppOrigin(origin)) return true;
-  if (origin === 'https://previews.brai.one') return true;
   return false;
 }
 

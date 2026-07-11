@@ -410,14 +410,6 @@
       changed_when: false
       when: not ansible_check_mode
 
-    - name: Create preview slot status directory
-      ansible.builtin.file:
-        path: "{{ brai_env_root }}/preview-status"
-        state: directory
-        owner: "{{ brai_deploy_user }}"
-        group: "{{ brai_deploy_user }}"
-        mode: "2775"
-
     - name: Ensure public landing root exists
       ansible.builtin.file:
         path: "{{ brai_public_site_root }}"
@@ -468,15 +460,6 @@
       loop:
         - "{{ brai_env_root }}/preview-slots.json"
         - "{{ brai_env_root }}/preview-slots.lock"
-      when: not ansible_check_mode
-
-    - name: Ensure preview status ownership
-      ansible.builtin.file:
-        path: "{{ brai_env_root }}/preview-status"
-        owner: "{{ brai_deploy_user }}"
-        group: "{{ brai_deploy_user }}"
-        mode: "u=rwX,g=rwX,o=rX"
-        recurse: true
       when: not ansible_check_mode
 
     - name: Ensure per-environment Brai API env placeholders exist

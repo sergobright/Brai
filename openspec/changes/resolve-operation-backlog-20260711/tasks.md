@@ -1,0 +1,8 @@
+- [x] 1. Close operations already verified as resolved or obsolete.
+- [ ] 2. Rotate exposed runtime secrets and verify old values are rejected.
+- [x] 3. Repair guard, runtime permissions, database pools, diagnostics, and tool runtimes.
+- [x] 4. Improve acceptance, handoff, delegation, SocratiCode, dependency, and app-server workflows.
+- [x] 5. Remove preview status HTTP/HTML functionality while keeping the slot registry.
+- [x] 6. Remove CID email attachments and add Android overlay visual QA.
+- [ ] 7. Run repository, runtime, browser/email, Android, and delivery verification.
+- [ ] 8. Close every remediated operation and verify the open list is empty.

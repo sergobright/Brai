@@ -44,6 +44,7 @@ brai_temporal_ui_legacy_domains:
 brai_temporal_deploy_host: 127.0.0.1
 brai_temporal_ui_port: 8233
 brai_temporal_deploy_ssh_port: 22
+brai_temporal_local_port: 17233
 brai_temporal_deploy_ssh_key_path: /etc/brai/brai-temporal-deploy-ssh-key
 brai_temporal_github_token_path: /etc/brai/brai-temporal-github-token
 brai_basic_auth_directive: "import brai_unified_basic_auth"
@@ -111,6 +112,3 @@ brai_envs:
     admin_port: 3046
     service: brai-api-preview-e.service
     admin_service: brai-admin-preview-e.service
-brai_preview_status_domain: previews.brai.one
-brai_preview_status_legacy_domains:
-  - previews.brightos.world

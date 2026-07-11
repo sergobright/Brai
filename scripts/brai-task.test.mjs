@@ -29,6 +29,7 @@ import {
   taskWorktreeParent,
   validateTaskMarker,
   validateTaskThread,
+  validateDelegatedPaths,
   validateSocraticodeRequirement,
   validateDeliveryReceipt,
   validatePreviewReceipt,
@@ -233,6 +234,14 @@ test("hook analysis allows official acceptance reconcile command with escalation
   assert.equal(result.write, true);
   assert.equal(result.officialAcceptanceReconcile, true);
   assert.equal(result.blockedReason, undefined);
+
+  const repair = analyzeHookInput(JSON.stringify({
+    tool_name: "functions.exec_command",
+    tool_input: { cmd: "node scripts/brai-task.mjs acceptance-repair codex/foo", sandbox_permissions: "require_escalated" },
+  }));
+  assert.equal(repair.ok, true);
+  assert.equal(repair.write, true);
+  assert.equal(repair.officialAcceptanceReconcile, true);
 });
 
 test("codex project pre-tool hook is unconditional and uses the installed guard", () => {
@@ -580,7 +589,7 @@ test("operation activity completion helper has a narrow shell contract", () => {
   assert.match(helper, /sudo -n -u "\$SERVICE_USER"/);
   assert.match(helper, /BRAI_DATABASE_URL is required/);
   assert.match(helper, /new Pool/);
-  assert.match(helper, /\^operation\[:\._-\]/);
+  assert.match(helper, /activity:operation/);
   assert.match(helper, /activity_type_id = 'operation'/);
   assert.match(helper, /author = 'Codex'/);
   assert.match(helper, /deleted_at_utc IS NULL/);
@@ -657,6 +666,13 @@ test("publish permission helper normalizes entire bounded artifact trees", () =>
   assert.match(script, /find "\$target" -type f -exec chmod 0664/);
 });
 
+test("ADR publishing uses writable cache and output fallbacks", () => {
+  const runner = fs.readFileSync(path.resolve(import.meta.dirname, "run-log4brains.sh"), "utf8");
+  const publisher = fs.readFileSync(path.resolve(import.meta.dirname, "../deploy/scripts/publish-adr-site.sh"), "utf8");
+  assert.match(runner, /brai-log4brains-tool-/);
+  assert.match(publisher, /brai-log4brains-out-/);
+});
+
 test("API test wrapper can read protected test env through brai-deploy group", () => {
   const script = fs.readFileSync(path.resolve(import.meta.dirname, "brai-api-test.sh"), "utf8");
   const useNode = fs.readFileSync(path.resolve(import.meta.dirname, "use-node22.sh"), "utf8");
@@ -669,6 +685,16 @@ test("API test wrapper can read protected test env through brai-deploy group", (
   assert.match(useNode, /NODE_BIN="\$\(command -v node\)"/);
   assert.match(useNode, /"\$NODE_BIN" "\$ROOT\/scripts\/require-node22\.mjs"/);
   assert.match(workflow, /run: scripts\/brai-api-test\.sh/);
+});
+
+test("production deploy runs a schema-constrained Codex CLI smoke as brai", () => {
+  const deploy = fs.readFileSync(new URL("../deploy/scripts/deploy-branch.sh", import.meta.url), "utf8");
+  const smoke = fs.readFileSync(new URL("../deploy/scripts/codex-cli-smoke.sh", import.meta.url), "utf8");
+  assert.match(deploy, /sudo[^\n]*-u brai env/);
+  assert.match(deploy, /codex-cli-smoke\.sh/);
+  assert.match(smoke, /--output-schema/);
+  assert.match(smoke, /--ephemeral/);
+  assert.match(smoke, /"ok":true/);
 });
 
 test("operation activity completion helper rejects unsafe ids", () => {
@@ -696,6 +722,20 @@ test("operation activity completion helper rejects duplicate ids before DB acces
   });
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /Duplicate operation activity id/);
+});
+
+test("operation activity completion helper accepts legacy operation ids before DB access", () => {
+  const result = spawnSync("bash", [
+    "deploy/scripts/complete-operation-activities.sh",
+    "--local",
+    "activity:operation:legacy-id",
+  ], {
+    cwd: path.resolve(import.meta.dirname, ".."),
+    encoding: "utf8",
+    env: { ...process.env, BRAI_DATABASE_URL: "" },
+  });
+  assert.notEqual(result.status, 0);
+  assert.doesNotMatch(result.stderr, /Invalid operation activity id/);
 });
 
 test("main checkout sync removes dangling dependency symlinks before relinking", () => {
@@ -855,6 +895,9 @@ test("task marker is bound to the current Codex thread when one exists", () => {
   assert.deepEqual(validateTaskThread({ threadId: "thread-a" }, "thread-a"), { ok: true });
   assert.match(validateTaskThread({}, "thread-a").message, /no Codex thread id/);
   assert.match(validateTaskThread({ threadId: "thread-b" }, "thread-a").message, /thread-b/);
+  assert.deepEqual(validateTaskThread({ threadId: "thread-b", delegations: [{ threadId: "thread-a", paths: ["docs"] }] }, "thread-a"), { ok: true });
+  assert.deepEqual(validateDelegatedPaths({ threadId: "thread-b", delegations: [{ threadId: "thread-a", paths: ["docs"] }] }, "thread-a", ["docs/a.md"]), { ok: true });
+  assert.match(validateDelegatedPaths({ threadId: "thread-b", delegations: [{ threadId: "thread-a", paths: ["docs"] }] }, "thread-a", ["services/api.js"]).message, /services\/api\.js/);
 });
 
 test("follow-up keeps the original task base after origin-main advances", () => {
@@ -1239,7 +1282,6 @@ test("workspace preflight fails task worktrees with non-writable tracked source"
 test("preview slot status is shared-lock read-only", () => {
   const envRoot = fs.mkdtempSync(path.join(os.tmpdir(), "brai-preview-slots-"));
   const registry = path.join(envRoot, "preview-slots.json");
-  const statusDir = path.join(envRoot, "preview-status");
   const result = spawnSync("bash", ["deploy/scripts/preview-slots.sh", "status"], {
     cwd: process.cwd(),
     encoding: "utf8",
@@ -1249,13 +1291,12 @@ test("preview slot status is shared-lock read-only", () => {
       BRAI_ENVS_ROOT: envRoot,
       BRAI_PREVIEW_REGISTRY: registry,
       BRAI_PREVIEW_LOCK: path.join(envRoot, "preview-slots.lock"),
-      BRAI_PREVIEW_STATUS_DIR: statusDir,
     },
   });
   assert.equal(result.status, 0, result.stderr || result.stdout);
   assert.equal(fs.existsSync(registry), false);
   assert.equal(fs.existsSync(path.join(envRoot, "preview-slots.lock")), false);
-  assert.equal(fs.existsSync(path.join(statusDir, "index.html")), false);
+  assert.equal(fs.existsSync(path.join(envRoot, "preview-status")), false);
   assert.match(fs.readFileSync(new URL("../deploy/scripts/preview-slots.sh", import.meta.url), "utf8"), /flock -s 9/);
 });
 
@@ -2027,12 +2068,14 @@ test("task state rejects squash-merged branch by merged PR head oid", () => {
 test("accept preview checks verified preview before PR actions", () => {
   const script = fs.readFileSync(path.join(process.cwd(), "deploy/scripts/accept-preview.sh"), "utf8");
   const acceptancePreflightCall = script.indexOf("\nensure_acceptance_marker_writable\n");
+  const acceptancePrLookup = script.indexOf('PR_NUMBER="$(gh pr list');
+  const acceptanceMerge = script.indexOf('gh pr merge "$PR_NUMBER"');
   assert.ok(script.indexOf("require-preview") > 0);
-  assert.ok(script.indexOf("require-preview") < script.indexOf("gh pr list"));
-  assert.ok(script.indexOf("require-preview") < script.indexOf("gh pr merge"));
+  assert.ok(script.indexOf("require-preview") < acceptancePrLookup);
+  assert.ok(script.indexOf("require-preview") < acceptanceMerge);
   assert.ok(acceptancePreflightCall > 0);
-  assert.ok(acceptancePreflightCall < script.indexOf("gh pr list"));
-  assert.ok(acceptancePreflightCall < script.indexOf("gh pr merge"));
+  assert.ok(acceptancePreflightCall < acceptancePrLookup);
+  assert.ok(acceptancePreflightCall < acceptanceMerge);
   assert.match(script, /mergeStateStatus/);
   assert.match(script, /reconcile_required/);
   assert.match(script, /acceptance-reconcile/);
@@ -2041,6 +2084,9 @@ test("accept preview checks verified preview before PR actions", () => {
   assert.match(script, /mktemp "\$dir\/\.acceptance-write\.XXXXXX"/);
   assert.match(script, /write_acceptance_marker/);
   assert.match(script, /acceptance\.json/);
+  assert.match(script, /--cancel/);
+  assert.match(script, /gh pr merge "\$pr_number" --disable-auto/);
+  assert.match(script, /write_acceptance_marker "cancelled"/);
   assert.match(script, /deliveryClass/);
   assert.match(script, /CALL_ROOT="\$\(git rev-parse --show-toplevel\)"/);
   assert.match(script, /git -C "\$CALL_ROOT" worktree list --porcelain/);

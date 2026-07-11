@@ -67,6 +67,8 @@
 - `deploy/scripts/accept-preview.sh <codex-branch>` - deterministic acceptance entrypoint when the project owner accepts a preview; creates/reuses PR into `main` and enables merge/auto-merge.
 - `deploy/scripts/complete-operation-activities.sh <operation-activity-id>...` - host/deploy-context helper that runs from deploy-owned prod source and marks Codex operation activities as `Done` in the runtime database.
 - `deploy/scripts/list-operation-activities.sh [--status New|Done|all] [--limit <N>] [--json]` - read-only host/deploy-context helper that lists Codex operation activities from the runtime database.
+- `deploy/scripts/postgres-diagnostics.mjs` - read-only Postgres connection and pool diagnostics using `BRAI_DATABASE_URL` from the protected host environment.
+- `scripts/brai-npm-update.sh <prefix> <package...>` - updates package manifests and lockfiles without replacing linked task-worktree `node_modules`.
 - `npm --prefix services/brai_api test` - тесты Brai API.
 - `npm --prefix services/brai_api start` - запуск Brai API.
 - `npm --prefix services/brai_temporal test` - state tests для Temporal CI/CD workflow package.

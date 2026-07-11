@@ -89,6 +89,13 @@ export function sandboxCheckMode(command, env = process.env) {
     };
   }
 
+  if (/\bansible(?:-playbook)?\b/.test(text)) {
+    return {
+      mode: "require_escalated",
+      reason: "Ansible starts local helper processes and sockets that are not authoritative inside the Codex sandbox.",
+    };
+  }
+
   if (/\bnode scripts\/brai-task\.mjs access-contract --server\b/.test(text)) {
     return {
       mode: "require_escalated",
@@ -111,6 +118,13 @@ export function sandboxCheckMode(command, env = process.env) {
     return {
       mode: "require_escalated",
       reason: "Operation activity helpers enter the protected host deploy/runtime DB boundary.",
+    };
+  }
+
+  if (/\bdeploy\/scripts\/postgres-diagnostics\.mjs\b/.test(text)) {
+    return {
+      mode: "require_escalated",
+      reason: "PostgreSQL diagnostics use the protected host runtime database boundary.",
     };
   }
 

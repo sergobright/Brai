@@ -5,7 +5,7 @@ ROOT="${BRAI_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/permissions.sh"
 
-OUT="${BRAI_ADR_BUILD_DIR:-$ROOT/.log4brains/out}"
+OUT="${BRAI_ADR_BUILD_DIR:-${TMPDIR:-/tmp}/brai-log4brains-out-${UID}}"
 TARGET="${BRAI_ADR_TARGET:-/srv/projects/brai-envs/prod/adr}"
 
 "$ROOT/scripts/run-log4brains.sh" build --out "$OUT"

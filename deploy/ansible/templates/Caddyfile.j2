@@ -243,25 +243,3 @@ http://{{ domain }}, {{ domain }} {
   }
 }
 {% endfor %}
-
-http://{{ brai_preview_status_domain }} {
-  redir https://{{ brai_preview_status_domain }}{uri} 308
-}
-
-{% for domain in brai_preview_status_legacy_domains %}
-http://{{ domain }}, {{ domain }} {
-  redir https://{{ brai_preview_status_domain }}{uri} 308
-}
-{% endfor %}
-
-{{ brai_preview_status_domain }} {
-  {{ brai_basic_auth_directive }}
-  encode zstd gzip
-  tls {
-    issuer acme {
-      disable_http_challenge
-    }
-  }
-  root * {{ brai_env_root }}/preview-status
-  file_server
-}

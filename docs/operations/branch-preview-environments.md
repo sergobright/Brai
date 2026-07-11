@@ -5,7 +5,6 @@ Brai uses one VPS for seven active app environments:
 - Production: `app.brai.one`, branch `main`;
 - Dev: `dev.brai.one`, branch `dev`;
 - Preview A-E: `a.test.brai.one` through `e.test.brai.one`, branches `codex/*`;
-- Preview status: `previews.brai.one`.
 
 ## Agent Flow
 
@@ -19,7 +18,7 @@ After the project owner accepts a preview, a dirty acceptance PR is resolved in 
 
 A pushed preview-class `codex/*` branch allocates or reuses a preview slot through `deploy/scripts/preview-slots.sh`, deploys that slot, and reports the slot URL. If all slots `A` through `E` are occupied, the branch enters the preview queue until a slot is released. No push means no slot/deploy/queue.
 `pull_request` opened, synchronize, and reopened events do not run the full delivery workflow; the `codex/*` push run is the authoritative check/deploy source. `pull_request.closed` remains enabled only to record no-preview merges and release abandoned preview slots.
-`deploy/scripts/preview-slots.sh status` is read-only: it takes a shared lock and must not rewrite the slot registry or status page.
+`deploy/scripts/preview-slots.sh status` is read-only: it takes a shared lock and must not rewrite the slot registry.
 
 Each preview slot uses its own Supabase preview branch. After slot allocation, CI creates or reuses
 `brai-preview-<safe-codex-branch>-<hash>`, applies `supabase/migrations/*.sql`, refreshes the
@@ -34,7 +33,7 @@ Slot release deletes the matching Supabase preview branch before freeing the Bra
 Supabase branch delete is a delivery blocker because each preview slot must release its isolated
 database state before the slot is reused.
 
-If the preview branch changes the Android native boundary, deploy also builds a slot-specific preview APK and records `brai-<slot>-vN-previewM.apk`, APK `vN`, branch-local preview `M`, and `versionCode=N*10000+M` in the preview slot registry/status page. Preview OTA manifests then target the same release key, build kind, stable `N`, and preview `M`, so stale slot APKs block with an APK update screen instead of silently running an incompatible web bundle.
+If the preview branch changes the Android native boundary, deploy also builds a slot-specific preview APK and records `brai-<slot>-vN-previewM.apk`, APK `vN`, branch-local preview `M`, and `versionCode=N*10000+M` in the preview slot registry. Preview OTA manifests then target the same release key, build kind, stable `N`, and preview `M`, so stale slot APKs block with an APK update screen instead of silently running an incompatible web bundle.
 
 Infrastructure/documentation-only branches can use the Temporal no-preview path when the delivery class is `infra-docs`. Strict technical-only branches can use the same no-preview path as `technical-no-preview` when the changed files are limited to tests, test configuration, or narrowly allowed agent-operation bookkeeping that is proven by CI rather than browser review. That path records `delivery_classified` and `no_preview_required`, then dispatches Temporal handoff/merge activities instead of allocating a slot. Temporal marks `supabase_preview`, `preview_deploy`, `accepted_preview_promotion`, `supabase_preview_release`, and `slot_release` as `not_applicable`; after `no_preview_merged`, the branch lifecycle is complete without a slot.
 
