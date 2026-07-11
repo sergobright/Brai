@@ -48,6 +48,22 @@ describe("BraiApi", () => {
     expect(response.target_apk?.file).toBe("brai-v2.apk");
   });
 
+  it("sends explicit preview email login to the test auth endpoint", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ authenticated: false, user: null }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+
+    await new BraiApi("/api").testEmailLogin("primary@example.com");
+
+    expect(fetchMock).toHaveBeenCalledWith("/api/auth/test-email-login", expect.objectContaining({
+      method: "POST",
+      body: JSON.stringify({ email: "primary@example.com" }),
+    }));
+  });
+
   it("sends global stop metadata with synced timer events", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(

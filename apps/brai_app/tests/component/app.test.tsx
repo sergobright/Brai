@@ -1,7 +1,9 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { openProfileMenuItem, setupBraiAppTest, stubAndroidCapacitor, useUnauthenticatedSession } from "./app-test-support";
+import { openProfileMenuItem, setupBraiAppTest, stubAndroidCapacitor } from "./app-test-support";
 import { BraiApp } from "@/features/app/BraiApp";
+import { resolveAuthMode } from "@/features/app/appModel";
+import { AuthPanel } from "@/features/app/chrome/AppChrome";
 import { FocusSection } from "@/features/app/sections/focus/FocusSection";
 import { pendingEvents, saveGoalCache, saveHistoryCache } from "@/shared/storage/syncStore";
 import { emptyGoal, emptyHistory } from "@/shared/types/timer";
@@ -28,56 +30,34 @@ describe("BraiApp shell", () => {
   });
 
   it("uses explicit email-only login on Preview web", async () => {
-    window.__BRAI_RUNTIME_CONFIG__ = { environment: "preview-a", previewSlot: "A" };
-    useUnauthenticatedSession();
-    const fetchMock = vi.mocked(fetch);
-    fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
-      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
-      if (url.endsWith("/auth/session")) return unauthenticatedSessionResponse();
-      if (url.endsWith("/auth/test-email-login")) {
-        return new Response(JSON.stringify({ error: "invalid_email" }), {
-          status: 401,
-          headers: { "content-type": "application/json" },
-        });
-      }
-      return Promise.reject(new Error("offline"));
-    });
-    render(<BraiApp />);
+    const auth = authPanelProps();
+    auth.onEmailLogin.mockRejectedValue(new Error("invalid_email"));
+    render(<AuthPanel {...auth} mode={resolveAuthMode(false, false)} />);
 
-    const email = await screen.findByRole("textbox", { name: "Email" }, { timeout: 15_000 });
+    const email = screen.getByRole("textbox", { name: "Email" });
     expect(screen.queryByLabelText("Код из письма")).not.toBeInTheDocument();
     fireEvent.change(email, { target: { value: "primary@example.com" } });
     fireEvent.click(screen.getByRole("button", { name: "Войти" }));
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
-      "/api/auth/test-email-login",
-      expect.objectContaining({ method: "POST" }),
-    ));
+    await waitFor(() => expect(auth.onEmailLogin).toHaveBeenCalledWith("primary@example.com"));
     expect(await screen.findByText("Email не подошёл")).toBeInTheDocument();
-    expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/auth/otp/"))).toBe(false);
-  }, 20_000);
+    expect(auth.onRequestOtp).not.toHaveBeenCalled();
+  });
 
   it("keeps Android login password-only", async () => {
-    stubAndroidCapacitor();
-    window.__BRAI_RUNTIME_CONFIG__ = { environment: "preview-a", previewSlot: "A" };
-    useUnauthenticatedSession();
+    render(<AuthPanel {...authPanelProps()} mode={resolveAuthMode(true, false)} />);
 
-    render(<BraiApp />);
-
-    expect(await screen.findByLabelText("Пароль", {}, { timeout: 15_000 })).toHaveAttribute("type", "password");
+    expect(screen.getByLabelText("Пароль")).toHaveAttribute("type", "password");
     expect(screen.queryByRole("textbox", { name: "Email" })).not.toBeInTheDocument();
-  }, 20_000);
+  });
 
   it("keeps production Web on the OTP flow", async () => {
-    window.__BRAI_RUNTIME_CONFIG__ = { environment: "prod" };
-    useUnauthenticatedSession();
+    render(<AuthPanel {...authPanelProps()} mode={resolveAuthMode(false, true)} />);
 
-    render(<BraiApp />);
-
-    expect(await screen.findByRole("textbox", { name: "Email" }, { timeout: 15_000 })).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Email" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Получить код" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Войти" })).not.toBeInTheDocument();
-  }, 20_000);
+  });
 
   it("keeps collapsed desktop rail action icons clickable", async () => {
     Object.defineProperty(window, "innerWidth", { configurable: true, writable: true, value: 1200 });
@@ -1015,10 +995,6 @@ function authSessionResponse(): Response {
   return jsonResponse({ authenticated: true, user: { id: "test-user", email: "test@example.com", name: "Test" } });
 }
 
-function unauthenticatedSessionResponse(): Response {
-  return jsonResponse({ authenticated: false, user: null });
-}
-
 function emptyInboxResponse(): Response {
   return jsonResponse({ server_time_utc: "2026-06-22T06:00:00.000Z", server_revision: 1, inbox: [] });
 }
@@ -1046,6 +1022,16 @@ function requestUrl(input: RequestInfo | URL): string {
   if (typeof input === "string") return input;
   if (input instanceof URL) return input.toString();
   return input.url;
+}
+
+function authPanelProps() {
+  return {
+    busy: false,
+    onEmailLogin: vi.fn(async () => undefined),
+    onLogin: vi.fn(async () => undefined),
+    onRequestOtp: vi.fn(async () => undefined),
+    onVerifyOtp: vi.fn(async () => undefined),
+  };
 }
 
 function captureIntervals() {

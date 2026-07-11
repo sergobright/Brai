@@ -27,7 +27,7 @@ import { emptyInboxState } from "@/shared/types/inbox";
 import type { GoalData, HistoryData, SyncStatus, TimerState } from "@/shared/types/timer";
 import { emptyGoal, emptyHistory, emptyTimerState } from "@/shared/types/timer";
 import type { FocusBackgroundMode, FocusContextPanel, MobileContextPanel, SectionId } from "../appModel";
-import { FOCUS_BACKGROUND_STORAGE_KEY, FOCUS_CONTEXT_PANEL_STORAGE_KEY, sectionFromLocation, syncSectionUrl } from "../appModel";
+import { FOCUS_BACKGROUND_STORAGE_KEY, FOCUS_CONTEXT_PANEL_STORAGE_KEY, resolveAuthMode, sectionFromLocation, syncSectionUrl } from "../appModel";
 import { moscowTodayKey, normalizeHistory } from "../appUtils";
 import { isMobileNavigationViewport, useMobileNavigationViewport, useSectionSwipeNavigation } from "../navigation/useSectionSwipeNavigation";
 import { createBraiActionCommands } from "./useBraiActionCommands";
@@ -92,9 +92,7 @@ export function useBraiAppState(initialSection: SectionId) {
   const [mobileContextPanel, setMobileContextPanel] = useState<MobileContextPanel | null>(null);
   const [mobileContextPanelClosing, setMobileContextPanelClosing] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [authMode] = useState<"email" | "otp" | "password">(() =>
-    isNativeShell() ? "password" : isProductionEnvironment() ? "otp" : "email",
-  );
+  const [authMode] = useState(() => resolveAuthMode(isNativeShell(), isProductionEnvironment()));
   const mobileViewport = useMobileNavigationViewport();
 
   function setTimerSnapshot(nextState: TimerState) {
