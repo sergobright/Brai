@@ -4,7 +4,23 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { BraiApi, type OtpSendResult } from "@/shared/api/braiApi";
 import { defaultApiBase } from "@/shared/config/runtime";
-import { AuthPanel } from "./chrome/AppChrome";
+import Galaxy from "@/shared/ui/galaxy";
+import { AuthPanel, authDarkThemeStyle } from "./chrome/AppChrome";
+
+const AUTH_GALAXY_ACTIVE = {
+  density: 2,
+  glowIntensity: 0.2,
+  hueShift: 140,
+  mouseInteraction: false,
+  mouseRepulsion: false,
+  rotationSpeed: 0.1,
+  saturation: 0,
+  speed: 1,
+  starSpeed: 1,
+  twinkleIntensity: 0.3,
+  repulsionStrength: 2.5,
+  autoCenterRepulsion: 0,
+} as const;
 
 export function AuthPage() {
   const router = useRouter();
@@ -60,9 +76,16 @@ export function AuthPage() {
   }
 
   return (
-    <main className="grid min-h-dvh place-items-center bg-background px-4 py-10 text-foreground" data-auth-page>
+    <main
+      className="relative isolate grid min-h-dvh place-items-center overflow-hidden bg-background px-4 py-10 text-foreground"
+      style={authDarkThemeStyle}
+      data-auth-page
+    >
+      <div className="auth-galaxy-background pointer-events-none absolute inset-0 z-0" aria-hidden="true">
+        <Galaxy {...AUTH_GALAXY_ACTIVE} />
+      </div>
       {ready ? (
-        <div className="grid w-[min(520px,100%)] justify-items-center gap-4">
+        <div className="relative z-10 grid w-full max-w-md justify-items-center gap-4">
           <AuthPanel
             busy={busy}
             className="m-0"

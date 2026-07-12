@@ -10,6 +10,7 @@ test("shows the standalone auth page on mobile and desktop", async ({ page }) =>
   await page.goto("/auth");
 
   await expect(page.locator("[data-auth-page]")).toBeVisible();
+  await expect(page.locator(".auth-galaxy-background canvas")).toBeVisible();
   await expect(page.locator("[data-app-shell]")).toHaveCount(0);
   await expect(page.getByRole("textbox", { name: "Email" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Получить код" })).toBeVisible();

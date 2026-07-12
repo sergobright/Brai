@@ -30,6 +30,26 @@ const syncStatusIconToneClasses: Record<Tone, string> = {
 
 export { syncStatusIconToneClasses };
 
+export const authDarkThemeStyle = {
+  "--background": "#050607",
+  "--foreground": "#f4f4f5",
+  "--card": "#0f1115",
+  "--card-foreground": "#f4f4f5",
+  "--popover": "#0f1115",
+  "--popover-foreground": "#f4f4f5",
+  "--primary": "#f4f4f5",
+  "--primary-foreground": "#15171a",
+  "--secondary": "#1b2026",
+  "--secondary-foreground": "#f4f4f5",
+  "--muted": "#1b2026",
+  "--muted-foreground": "#a1a1aa",
+  "--accent": "#20252d",
+  "--accent-foreground": "#f4f4f5",
+  "--border": "#2a3038",
+  "--input": "#343a44",
+  "--ring": "#d4d4d8",
+} as CSSProperties;
+
 export function ScreenHeader({
   title,
   icon: Icon,
@@ -360,7 +380,11 @@ export function AuthPanel({
   const otpInputId = `${inputId}-otp`;
 
   return (
-    <Card className={cx(className, "h-[430px] w-full sm:max-w-md")} render={<form onSubmit={submitOtp} />}>
+    <Card
+      className={cx(className, "w-full sm:max-w-md")}
+      style={authDarkThemeStyle}
+      render={<form onSubmit={submitOtp} />}
+    >
       <CardHeader>
         <CardTitle>Вход в Brai</CardTitle>
         <CardDescription>
@@ -387,7 +411,7 @@ export function AuthPanel({
               Мы отправим одноразовый код на эту почту.
             </FieldDescription>
           </Field>
-          <div className="h-[132px]">
+          <div className="h-[140px]">
             {otpSent ? (
               <Field data-invalid={Boolean(error)}>
                 <FieldLabel htmlFor={otpInputId}>Код</FieldLabel>
