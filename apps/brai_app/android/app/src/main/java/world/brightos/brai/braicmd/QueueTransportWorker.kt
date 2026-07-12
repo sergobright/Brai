@@ -23,7 +23,12 @@ internal data class QueueTransportResult(
     val permanentFailureMessage: String? = null
 )
 
-internal class QueueTransportWorker(context: Context) {
+internal class QueueTransportWorker(
+    context: Context,
+    private val directTranscriber: ((File) -> SpeechProviderResult)? = null,
+    private val directPostProcessor: ((String, String) -> LlmProviderResult)? = null,
+    private val cloudPostProcessor: ((String, String) -> CloudPostProcessingResponse)? = null
+) {
     private val appContext = context.applicationContext
     private val client = NetworkClient(appContext)
     private var autoInsertTranscriptFile: String? = null
@@ -92,12 +97,13 @@ internal class QueueTransportWorker(context: Context) {
         val response = transcribeAudio(file, ConversationContextStore.read(file), ScreenshotContextStore.read(file))
         val text = response.text.trim()
         if (text.isBlank()) throw QueueEmptyModelException()
-        val transcriptFile = PendingTranscriptStore.add(
+        val transcriptFile = PendingTranscriptStore.addForAudio(
             appContext,
+            file,
             text,
             PendingTranscriptKind.MainDictation
         )
-        recordStats(file, response)
+        recordStatsOnce(file, response)
         if (file.name == autoInsertAudioFileName) autoInsertTranscriptFile = transcriptFile.name
         if (response.fallbackUsed) {
             fallbackUsed = true
@@ -113,7 +119,7 @@ internal class QueueTransportWorker(context: Context) {
             val response = transcribeAudio(file, null, null)
             transcript = response.text.trim()
             if (transcript.isBlank()) throw QueueEmptyModelException()
-            recordStats(file, response)
+            recordStatsOnce(file, response)
             // Persist before Inbox delivery so retries never retranscribe a completed upload.
             InboxPayloadStore.saveTranscript(file, transcript)
         }
@@ -151,46 +157,50 @@ internal class QueueTransportWorker(context: Context) {
         screenshotFile: File?
     ): DictationResponse {
         val config = ConfigStore(appContext)
-        if (config.transcriptionProviderMode != "key") {
-            return client.uploadAudio(file, conversationContext, screenshotFile)
+        val checkpoint = TranscriptionCheckpointStore.read(file)
+        val raw = checkpoint?.response ?: if (config.transcriptionProviderMode == "key") {
+            val speech = directTranscriber?.invoke(file) ?: SpeechProviderClient(appContext).transcribe(file)
+            DictationResponse(
+                text = speech.text,
+                provider = speech.provider,
+                model = speech.model,
+                fallbackUsed = false,
+                audioDurationMs = audioDurationMs(file),
+                postProcessed = false,
+                postProcessingProvider = "",
+                postProcessingModel = "",
+                postProcessingInputChars = 0,
+                postProcessingOutputChars = 0
+            )
+        } else {
+            client.uploadAudio(file, conversationContext, screenshotFile)
         }
-        val speech = SpeechProviderClient(appContext).transcribe(file)
-        var text = speech.text
-        var postProcessed = false
-        var postProvider = ""
-        var postModel = ""
-        var inputChars = 0
-        var outputChars = 0
-        if (config.postProcessingEnabled && text.isNotBlank()) {
-            if (config.postProcessingProviderMode == "key") {
-                val result = LlmProviderClient(appContext).postProcess(text, config.postProcessingPrompt)
-                text = result.text
-                postProvider = result.provider
-                postModel = result.model
-                inputChars = result.inputChars
-                outputChars = result.outputChars
-            } else {
-                val result = client.postProcessText(text, config.postProcessingPrompt)
-                text = result.text
-                postProvider = result.provider
-                postModel = result.model
-                inputChars = result.inputChars
-                outputChars = result.outputChars
-            }
-            postProcessed = true
+        if (checkpoint == null && raw.text.isNotBlank()) TranscriptionCheckpointStore.save(file, raw)
+        if (!config.postProcessingEnabled || raw.postProcessed || raw.text.isBlank()) return raw
+
+        return if (config.postProcessingProviderMode == "key") {
+            val result = directPostProcessor?.invoke(raw.text, config.postProcessingPrompt)
+                ?: LlmProviderClient(appContext).postProcess(raw.text, config.postProcessingPrompt)
+            raw.copy(
+                text = result.text,
+                postProcessed = true,
+                postProcessingProvider = result.provider,
+                postProcessingModel = result.model,
+                postProcessingInputChars = result.inputChars,
+                postProcessingOutputChars = result.outputChars
+            )
+        } else {
+            val result = cloudPostProcessor?.invoke(raw.text, config.postProcessingPrompt)
+                ?: client.postProcessText(raw.text, config.postProcessingPrompt)
+            raw.copy(
+                text = result.text,
+                postProcessed = true,
+                postProcessingProvider = result.provider,
+                postProcessingModel = result.model,
+                postProcessingInputChars = result.inputChars,
+                postProcessingOutputChars = result.outputChars
+            )
         }
-        return DictationResponse(
-            text = text,
-            provider = speech.provider,
-            model = speech.model,
-            fallbackUsed = false,
-            audioDurationMs = audioDurationMs(file),
-            postProcessed = postProcessed,
-            postProcessingProvider = postProvider,
-            postProcessingModel = postModel,
-            postProcessingInputChars = inputChars,
-            postProcessingOutputChars = outputChars
-        )
     }
 
     private fun audioDurationMs(file: File): Long = runCatching {
@@ -214,6 +224,12 @@ internal class QueueTransportWorker(context: Context) {
                 cloudRequest = response.postProcessed && response.postProcessingProvider == "brai-cloud"
             )
         )
+    }
+
+    private fun recordStatsOnce(file: File, response: DictationResponse) {
+        if (TranscriptionCheckpointStore.read(file)?.statsRecorded == true) return
+        recordStats(file, response)
+        TranscriptionCheckpointStore.markStatsRecorded(file, response)
     }
 
     private fun result(

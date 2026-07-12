@@ -35,6 +35,21 @@ object PendingTranscriptStore {
         return file
     }
 
+    fun addForAudio(
+        context: Context,
+        audioFile: File,
+        text: String,
+        kind: PendingTranscriptKind = PendingTranscriptKind.MainDictation
+    ): File {
+        val dir = transcriptsDir(context).apply { mkdirs() }
+        val suffix = when (kind) {
+            PendingTranscriptKind.MainDictation -> MAIN_DICTATION_SUFFIX
+            PendingTranscriptKind.ChatReply -> CHAT_REPLY_SUFFIX
+        }
+        val safeAudioName = audioFile.name.replace(Regex("[^A-Za-z0-9._-]"), "_")
+        return File(dir, "$safeAudioName$suffix").apply { writeText(text.trim(), Charsets.UTF_8) }
+    }
+
     fun list(context: Context, kind: PendingTranscriptKind? = null): List<PendingTranscript> =
         transcriptsDir(context)
             .listFiles { file -> file.isFile && file.name.endsWith(".txt", ignoreCase = true) }

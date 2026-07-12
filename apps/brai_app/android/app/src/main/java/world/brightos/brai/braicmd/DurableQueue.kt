@@ -177,7 +177,8 @@ internal object AudioQueueStore {
         ".inbox.txt",
         ".receiver.txt",
         ".inbox-prefix.txt",
-        ".inbox-action.txt"
+        ".inbox-action.txt",
+        TranscriptionCheckpointStore.SUFFIX
     )
 
     fun list(context: Context): List<File> =
@@ -195,7 +196,11 @@ internal object AudioQueueStore {
 
     fun complete(context: Context, audioFile: File): Boolean {
         if (!audioFile.exists()) return true
-        if (RecordingArchiveStore.onAudioProcessed(context, audioFile)) return true
+        if (RecordingArchiveStore.onAudioProcessed(context, audioFile)) {
+            sidecarSuffixes.forEach { suffix -> File("${audioFile.absolutePath}$suffix").delete() }
+            File("${audioFile.absolutePath}.metadata.json").delete()
+            return true
+        }
         val doneFile = File(audioFile.parentFile, "${audioFile.name}.done")
         val excludedFromQueue = audioFile.renameTo(doneFile) || audioFile.delete()
         if (!excludedFromQueue) return false

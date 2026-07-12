@@ -192,21 +192,6 @@ class NetworkClient(context: Context) {
         }
         val json = readJson(connection)
         val serverText = json.optString("text")
-        if (shouldPostProcess && config.postProcessingProviderMode == "key" && serverText.trim().isNotBlank()) {
-            val processed = LlmProviderClient(appContext).postProcess(serverText, postProcessingPrompt())
-            return DictationResponse(
-                text = processed.text,
-                provider = json.optString("provider"),
-                model = json.optString("model"),
-                fallbackUsed = json.optBoolean("fallbackUsed", false),
-                audioDurationMs = durationMs,
-                postProcessed = true,
-                postProcessingProvider = processed.provider,
-                postProcessingModel = processed.model,
-                postProcessingInputChars = processed.inputChars,
-                postProcessingOutputChars = processed.outputChars
-            )
-        }
         return DictationResponse(
             text = serverText,
             provider = json.optString("provider"),
