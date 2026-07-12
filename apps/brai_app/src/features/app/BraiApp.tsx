@@ -267,10 +267,8 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
       {onboardingActive ? (
         <OnboardingFlow
           authRequired={startupReady && app.displaySyncStatus === "auth_required"}
-          authMode={app.authMode}
           busy={app.busy}
           onDone={() => setOnboardingVisible(false)}
-          onEmailLogin={app.onEmailLogin}
           onOpenNativeCmdSettings={openNativeBraiCmdSettings}
           onRequestOtp={app.onRequestOtp}
           onStartupScreenChange={setOnboardingStartupActive}

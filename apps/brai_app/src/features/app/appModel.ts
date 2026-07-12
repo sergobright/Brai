@@ -7,7 +7,6 @@ export type FocusBackgroundMode = "galaxy" | "evil-eye";
 export type MobileContextPanel = "actions-info" | "inbox-info" | "focus-goal" | "focus-history";
 export type ThemeMode = "light" | "dark";
 export type Tone = "ok" | "warn" | "bad" | "muted";
-export type AuthMode = "email" | "otp";
 export const SECTION_GRID_CLASS = "grid gap-3.5";
 export const navItems: Array<{ id: PrimarySectionId; label: string; icon: LucideIcon; group: "Platform" | "Time"; }> = [
   { id: "actions", label: "Действия", icon: SquareTerminal, group: "Platform" },
@@ -18,11 +17,6 @@ export const navItems: Array<{ id: PrimarySectionId; label: string; icon: Lucide
 ];
 export const FOCUS_CONTEXT_PANEL_STORAGE_KEY = "brai_focus_context_panel";
 export const FOCUS_BACKGROUND_STORAGE_KEY = "brai_focus_background";
-
-export function resolveAuthMode(production: boolean): AuthMode {
-  void production;
-  return "otp";
-}
 
 export function sectionTitle(section: SectionId): string {
   if (section === "archive") return "Архив";

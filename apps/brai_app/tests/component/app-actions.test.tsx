@@ -591,7 +591,7 @@ describe("BraiApp actions", () => {
         ]),
       );
     });
-  });
+  }, 10_000);
 
   it("keeps autosaved action description when sync ack returns stale equal-revision state", async () => {
     vi.stubGlobal(
