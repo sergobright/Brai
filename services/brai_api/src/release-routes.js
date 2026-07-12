@@ -185,7 +185,7 @@ export function serveRelease(req, res, url, releaseDir, sendJson, store = null) 
       bytes: stat.size
     }));
   }
-  res.writeHead(200, { 'content-type': contentType });
+  res.writeHead(200, { 'content-type': contentType, 'content-length': stat.size });
   fs.createReadStream(filePath).pipe(res);
 }
 

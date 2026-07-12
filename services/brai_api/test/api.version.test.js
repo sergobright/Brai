@@ -177,6 +177,7 @@ test('release login uses short air password and ignores app sessions', async () 
 
     const apk = await fetch(`${fixture.url}/releases/brai.apk`, { headers: { cookie: releaseCookie } });
     assert.equal(apk.status, 200);
+    assert.equal(apk.headers.get('content-length'), String(Buffer.byteLength('fake-apk')));
     assert.equal(await apk.text(), 'fake-apk');
   } finally {
     await fixture.close();

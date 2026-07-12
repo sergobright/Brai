@@ -1006,7 +1006,8 @@ describe("mobile OTA publish scripts", () => {
     expect(html).toContain("<h2>Brai</h2>");
     expect(html).toContain("<h2>Brai Dev</h2>");
     expect(html).toContain("Brai E");
-    expect(html).toContain('<p class="version">v1</p>');
+    expect(html).toContain('<div class="version-row"><p class="version">v1</p><span class="size">');
+    expect(html).toContain("0 МБ</span>");
     expect(html).toContain("23 июня 2026, 12:13 МСК");
     expect(html).toContain('<a class="download" href="./brai-v1.apk">Скачать</a>');
     expect(html).toContain('<span class="download" aria-disabled="true">Скачать</span>');
@@ -1054,7 +1055,7 @@ describe("mobile OTA publish scripts", () => {
 
     const html = await readFile(path.join(releaseDir, "index.html"), "utf8");
     expect(html).toContain("<h2>Brai</h2>");
-    expect(html).toContain('<p class="version">v7</p>');
+    expect(html).toContain('<div class="version-row"><p class="version">v7</p><span class="size">0 МБ</span></div>');
     expect(html).toContain('<a class="download" href="./brai-v7.apk">Скачать</a>');
   });
 
