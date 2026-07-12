@@ -9,6 +9,7 @@ describe("Android startup", () => {
       "utf8",
     );
 
+    expect(source).toContain("setOnboardingVoiceOnly(false)");
     expect(source).not.toContain("setOnboardingVoiceOnly(true)");
   });
 });

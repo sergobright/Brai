@@ -43,7 +43,6 @@ public final class BraiOtaManager {
     private static final String KEY_CANDIDATE_VERSION = "candidateBundleVersion";
     private static final String KEY_CANDIDATE_PATH = "candidateBundlePath";
     private static final String KEY_AVAILABLE_VERSION = "availableBundleVersion";
-    private static final String KEY_UPDATE_AVAILABLE = "updateAvailable";
     private static final String KEY_APK_UPDATE_REQUIRED = "apkUpdateRequired";
     private static final String KEY_FAILED_VERSIONS = "failedBundleVersions";
     private static final String KEY_LAST_STATUS = "lastCheckStatus";
@@ -159,11 +158,17 @@ public final class BraiOtaManager {
         state.put("previousStableBundleVersion", prefs.getString(KEY_PREVIOUS_STABLE_VERSION, null));
         state.put("candidateBundleVersion", prefs.getString(KEY_CANDIDATE_VERSION, null));
         String availableVersion = prefs.getString(KEY_AVAILABLE_VERSION, null);
-        boolean apkRequired = prefs.getBoolean(KEY_APK_UPDATE_REQUIRED, false);
+        boolean apkRequired = isApkUpdateRequired(
+            prefs.getBoolean(KEY_APK_UPDATE_REQUIRED, false),
+            installedVersionCodeOrZero(),
+            prefs.getString(KEY_LAST_TARGET_APK_VERSION_CODE, null)
+        );
         state.put("availableBundleVersion", availableVersion);
-        state.put("updateAvailable", prefs.getBoolean(
-            KEY_UPDATE_AVAILABLE,
-            isUpdateAvailable(availableVersion, activeBundleVersion, prefs.getString(KEY_CANDIDATE_VERSION, null), apkRequired)
+        state.put("updateAvailable", isUpdateAvailable(
+            availableVersion,
+            activeBundleVersion,
+            prefs.getString(KEY_CANDIDATE_VERSION, null),
+            apkRequired
         ));
         state.put("apkUpdateRequired", apkRequired);
         state.put("lastCheckStatus", prefs.getString(KEY_LAST_STATUS, "unknown"));
@@ -227,7 +232,6 @@ public final class BraiOtaManager {
             .remove(KEY_CANDIDATE_VERSION)
             .remove(KEY_CANDIDATE_PATH)
             .remove(KEY_AVAILABLE_VERSION)
-            .remove(KEY_UPDATE_AVAILABLE)
             .remove(KEY_APK_UPDATE_REQUIRED)
             .putString(KEY_LAST_STATUS, "candidate_promoted")
             .remove(KEY_LAST_ERROR)
@@ -300,7 +304,6 @@ public final class BraiOtaManager {
                     .putString(KEY_CANDIDATE_VERSION, manifest.otaVersion)
                     .putString(KEY_CANDIDATE_PATH, bundleDir.getAbsolutePath())
                     .putString(KEY_AVAILABLE_VERSION, manifest.otaVersion)
-                    .putBoolean(KEY_UPDATE_AVAILABLE, true)
                     .putBoolean(KEY_APK_UPDATE_REQUIRED, false)
                     .putString(KEY_LAST_STATUS, "candidate_ready_for_next_start")
                     .remove(KEY_LAST_ERROR)
@@ -541,7 +544,6 @@ public final class BraiOtaManager {
     private synchronized void recordAvailableUpdate(BraiOtaManifest manifest, boolean apkRequired) {
         prefs.edit()
             .putString(KEY_AVAILABLE_VERSION, manifest.otaVersion)
-            .putBoolean(KEY_UPDATE_AVAILABLE, true)
             .putBoolean(KEY_APK_UPDATE_REQUIRED, apkRequired)
             .apply();
     }
@@ -549,7 +551,6 @@ public final class BraiOtaManager {
     private synchronized void clearAvailableUpdate() {
         prefs.edit()
             .remove(KEY_AVAILABLE_VERSION)
-            .remove(KEY_UPDATE_AVAILABLE)
             .remove(KEY_APK_UPDATE_REQUIRED)
             .apply();
     }
@@ -588,6 +589,15 @@ public final class BraiOtaManager {
         if (availableVersion == null || availableVersion.trim().isEmpty()) return false;
         if (activeVersion != null && BraiOtaVersion.compare(availableVersion, activeVersion) <= 0) return false;
         return candidateVersion == null || !availableVersion.equals(activeVersion);
+    }
+
+    static boolean isApkUpdateRequired(boolean storedRequired, int installedVersionCode, String targetVersionCode) {
+        if (!storedRequired) return false;
+        try {
+            return installedVersionCode < Integer.parseInt(targetVersionCode);
+        } catch (NumberFormatException | NullPointerException ignored) {
+            return true;
+        }
     }
 
     static int downloadProgressPercent(long bytes, long totalBytes) {

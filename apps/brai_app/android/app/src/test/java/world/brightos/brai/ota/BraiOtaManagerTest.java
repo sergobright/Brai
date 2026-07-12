@@ -42,6 +42,13 @@ public class BraiOtaManagerTest {
     }
 
     @Test
+    public void installedTargetApkClearsStoredApkUpdateRequirement() {
+        assertFalse(BraiOtaManager.isApkUpdateRequired(true, 60004, "60004"));
+        assertTrue(BraiOtaManager.isApkUpdateRequired(true, 60003, "60004"));
+        assertTrue(BraiOtaManager.isApkUpdateRequired(true, 60004, null));
+    }
+
+    @Test
     public void roundsDownloadProgressPercent() {
         assertEquals(67, BraiOtaManager.downloadProgressPercent(2, 3));
         assertEquals(100, BraiOtaManager.downloadProgressPercent(5, 3));
