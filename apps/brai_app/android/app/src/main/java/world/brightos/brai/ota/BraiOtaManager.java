@@ -42,6 +42,9 @@ public final class BraiOtaManager {
     private static final String KEY_PREVIOUS_STABLE_PATH = "previousStableBundlePath";
     private static final String KEY_CANDIDATE_VERSION = "candidateBundleVersion";
     private static final String KEY_CANDIDATE_PATH = "candidateBundlePath";
+    private static final String KEY_AVAILABLE_VERSION = "availableBundleVersion";
+    private static final String KEY_UPDATE_AVAILABLE = "updateAvailable";
+    private static final String KEY_APK_UPDATE_REQUIRED = "apkUpdateRequired";
     private static final String KEY_FAILED_VERSIONS = "failedBundleVersions";
     private static final String KEY_LAST_STATUS = "lastCheckStatus";
     private static final String KEY_LAST_ERROR = "lastUpdateError";
@@ -155,6 +158,14 @@ public final class BraiOtaManager {
         state.put("stableBundleVersion", prefs.getString(KEY_STABLE_VERSION, null));
         state.put("previousStableBundleVersion", prefs.getString(KEY_PREVIOUS_STABLE_VERSION, null));
         state.put("candidateBundleVersion", prefs.getString(KEY_CANDIDATE_VERSION, null));
+        String availableVersion = prefs.getString(KEY_AVAILABLE_VERSION, null);
+        boolean apkRequired = prefs.getBoolean(KEY_APK_UPDATE_REQUIRED, false);
+        state.put("availableBundleVersion", availableVersion);
+        state.put("updateAvailable", prefs.getBoolean(
+            KEY_UPDATE_AVAILABLE,
+            isUpdateAvailable(availableVersion, activeBundleVersion, prefs.getString(KEY_CANDIDATE_VERSION, null), apkRequired)
+        ));
+        state.put("apkUpdateRequired", apkRequired);
         state.put("lastCheckStatus", prefs.getString(KEY_LAST_STATUS, "unknown"));
         state.put("lastUpdateError", prefs.getString(KEY_LAST_ERROR, null));
         state.put("targetApkVersion", prefs.getString(KEY_LAST_TARGET_APK_VERSION, null));
@@ -215,6 +226,9 @@ public final class BraiOtaManager {
             .putString(KEY_STABLE_PATH, candidatePath)
             .remove(KEY_CANDIDATE_VERSION)
             .remove(KEY_CANDIDATE_PATH)
+            .remove(KEY_AVAILABLE_VERSION)
+            .remove(KEY_UPDATE_AVAILABLE)
+            .remove(KEY_APK_UPDATE_REQUIRED)
             .putString(KEY_LAST_STATUS, "candidate_promoted")
             .remove(KEY_LAST_ERROR)
             .apply();
@@ -244,6 +258,7 @@ public final class BraiOtaManager {
             );
         } catch (BraiOtaException error) {
             if ("apk_required".equals(error.getMessage())) {
+                recordAvailableUpdate(manifest, true);
                 recordStatus("apk_required", error.getMessage());
                 return;
             }
@@ -252,9 +267,11 @@ public final class BraiOtaManager {
 
         synchronized (this) {
             if (!manifest.isNewerThan(activeBundleVersion)) {
+                clearAvailableUpdate();
                 recordStatus("up_to_date", null);
                 return;
             }
+            recordAvailableUpdate(manifest, false);
             if (failedVersions().contains(manifest.otaVersion)) {
                 recordStatus("skipped_failed_bundle", manifest.otaVersion);
                 return;
@@ -282,6 +299,9 @@ public final class BraiOtaManager {
                 prefs.edit()
                     .putString(KEY_CANDIDATE_VERSION, manifest.otaVersion)
                     .putString(KEY_CANDIDATE_PATH, bundleDir.getAbsolutePath())
+                    .putString(KEY_AVAILABLE_VERSION, manifest.otaVersion)
+                    .putBoolean(KEY_UPDATE_AVAILABLE, true)
+                    .putBoolean(KEY_APK_UPDATE_REQUIRED, false)
                     .putString(KEY_LAST_STATUS, "candidate_ready_for_next_start")
                     .remove(KEY_LAST_ERROR)
                     .apply();
@@ -518,6 +538,22 @@ public final class BraiOtaManager {
         editor.apply();
     }
 
+    private synchronized void recordAvailableUpdate(BraiOtaManifest manifest, boolean apkRequired) {
+        prefs.edit()
+            .putString(KEY_AVAILABLE_VERSION, manifest.otaVersion)
+            .putBoolean(KEY_UPDATE_AVAILABLE, true)
+            .putBoolean(KEY_APK_UPDATE_REQUIRED, apkRequired)
+            .apply();
+    }
+
+    private synchronized void clearAvailableUpdate() {
+        prefs.edit()
+            .remove(KEY_AVAILABLE_VERSION)
+            .remove(KEY_UPDATE_AVAILABLE)
+            .remove(KEY_APK_UPDATE_REQUIRED)
+            .apply();
+    }
+
     private static int nativeApkVersionNumber() throws BraiOtaException {
         try {
             int version = Integer.parseInt(nativeApkVersion());
@@ -545,6 +581,13 @@ public final class BraiOtaManager {
 
     static boolean shouldPreferFallbackBundle(String stableVersion, String fallbackVersion) {
         return stableVersion != null && fallbackVersion != null && BraiOtaVersion.compare(fallbackVersion, stableVersion) > 0;
+    }
+
+    static boolean isUpdateAvailable(String availableVersion, String activeVersion, String candidateVersion, boolean apkRequired) {
+        if (apkRequired) return true;
+        if (availableVersion == null || availableVersion.trim().isEmpty()) return false;
+        if (activeVersion != null && BraiOtaVersion.compare(availableVersion, activeVersion) <= 0) return false;
+        return candidateVersion == null || !availableVersion.equals(activeVersion);
     }
 
     static int downloadProgressPercent(long bytes, long totalBytes) {

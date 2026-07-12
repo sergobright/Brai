@@ -6,7 +6,6 @@ import android.content.Context
 import android.os.Bundle
 import android.os.SystemClock
 import android.view.accessibility.AccessibilityNodeInfo
-import android.widget.Toast
 import world.brightos.brai.capabilities.BraiAccessibilityService
 import kotlin.math.max
 import kotlin.math.min
@@ -17,7 +16,6 @@ internal class AccessibilityTextInserter(private val service: BraiAccessibilityS
         copyToClipboard(text)
         val node = focusedNode?.takeIf { it.refresh() } ?: findNode()
         if (node == null) {
-            Toast.makeText(service, "Нет активного поля ввода, текст скопирован в буфер", Toast.LENGTH_SHORT).show()
             return false
         }
         val direct = runCatching { insertDirect(node, text) }.getOrDefault(false)
@@ -26,7 +24,6 @@ internal class AccessibilityTextInserter(private val service: BraiAccessibilityS
             if (!pasted) {
                 val menuPasted = runCatching { pasteViaContextMenu(node) }.getOrDefault(false)
                 if (!menuPasted) {
-                    Toast.makeText(service, "Не удалось вставить текст", Toast.LENGTH_SHORT).show()
                     return false
                 }
             }

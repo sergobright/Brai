@@ -110,7 +110,7 @@ class RecordingService : Service() {
             screenshotFile = null
             InboxPayloadStore.delete(file)
             file.delete()
-            BraiCmdBus.post(RecorderState.Error(error.message ?: "Не удалось начать запись"))
+            BraiCmdBus.post(RecorderState.Error("Запись не началась"))
             stopSelf()
         }
     }
@@ -131,7 +131,7 @@ class RecordingService : Service() {
 
         val pendingFile = finalizeRecording(recordingFile)
         if (!pendingFile.exists()) {
-            BraiCmdBus.post(RecorderState.Error("Не удалось сохранить запись"))
+            BraiCmdBus.post(RecorderState.Error("Запись не сохранена"))
             stopRecordingForeground()
             stopSelf()
             return
@@ -142,7 +142,7 @@ class RecordingService : Service() {
         if (ConfigStore(this).onboardingQueuePaused) {
             BraiCmdPlugin.notifyOnboardingEvent("queueSaved", null)
             postPendingState(
-                message = "Запись сохранена в очереди. Отправка временно остановлена для проверки.",
+                message = "Ждёт сервер",
                 reason = PendingReason.Network
             )
             stopRecordingForeground()
@@ -242,7 +242,7 @@ class RecordingService : Service() {
 
     private fun postQueueState(transport: QueueTransportResult, snapshot: BraiCmdQueueSnapshot) {
         if (transport.status != QueueTransportStatus.Drained) {
-            val failure = transport.failure ?: IOException("Не удалось отправить очередь")
+            val failure = transport.failure ?: IOException("Не удалось сохранить в очередь")
             val (message, reason) = pendingStatusFor(failure)
             postPendingState(snapshot, message, reason)
             return
@@ -258,7 +258,7 @@ class RecordingService : Service() {
                 )
             )
             transport.permanentFailureMessage != null -> BraiCmdBus.post(RecorderState.Error(transport.permanentFailureMessage))
-            transport.inboxDelivered -> BraiCmdBus.post(RecorderState.InboxDelivered)
+            transport.inboxDelivered -> BraiCmdBus.post(RecorderState.InboxDelivered(transport.serverNotice))
             snapshot.readyToInsert.total > 0 -> BraiCmdBus.post(
                 RecorderState.TranscriptReady(
                     transcripts = snapshot.readyToInsert.total,
@@ -269,7 +269,7 @@ class RecordingService : Service() {
             )
             snapshot.transport.total > 0 -> postPendingState(
                 snapshot,
-                "Есть сохраненные данные в очереди",
+                "Не удалось сохранить в очередь",
                 PendingReason.Unknown
             )
             else -> BraiCmdBus.post(RecorderState.Idle)
@@ -315,25 +315,33 @@ class RecordingService : Service() {
     private fun pendingStatusFor(error: Throwable): Pair<String, PendingReason> =
         when (error) {
             is QueueAuthBlockedException ->
-                Pair("Данные сохранены. Обновите доступ и повторите отправку.", PendingReason.Server)
+                Pair("Обновите доступ", PendingReason.Server)
             is QueueEmptyModelException ->
-                Pair("Данные сохранены. Модель вернула пустой текст; повторю автоматически.", PendingReason.Transcription)
+                Pair("Ждёт модель", PendingReason.Transcription)
             is UnknownHostException ->
-                Pair("Данные сохранены. Нет интернета; отправлю, когда связь вернется.", PendingReason.Network)
+                Pair("Ждёт интернет", PendingReason.Network)
             is SocketTimeoutException ->
-                Pair("Данные сохранены. Сервер долго не отвечает; повторю автоматически.", PendingReason.Server)
+                Pair("Ждёт сервер", PendingReason.Server)
             is ServerResponseException ->
                 if (error.statusCode == 401 || error.statusCode == 403) {
-                    Pair("Данные сохранены. Обновите доступ и повторите отправку.", PendingReason.Server)
+                    Pair("Обновите доступ", PendingReason.Server)
                 } else if (error.code == "upstream_error") {
-                    Pair("Данные сохранены. Модель сейчас не отвечает; повторю автоматически.", PendingReason.Transcription)
+                    Pair("Ждёт модель", PendingReason.Transcription)
+                } else if (error.statusCode == 413) {
+                    Pair("Файл слишком большой", PendingReason.Server)
+                } else if (error.statusCode == 415) {
+                    Pair("Формат не поддержан", PendingReason.Server)
+                } else if (error.statusCode == 422) {
+                    Pair("Данные повреждены", PendingReason.Server)
+                } else if (error.statusCode == 400) {
+                    Pair("Запрос отклонён", PendingReason.Server)
                 } else {
-                    Pair("Данные сохранены. Сервер не принял запрос; повторю автоматически.", PendingReason.Server)
+                    Pair("Ждёт сервер", PendingReason.Server)
                 }
             is IOException ->
-                Pair("Данные сохранены. Сейчас нет связи с сервером; повторю автоматически.", PendingReason.Network)
+                Pair("Ждёт интернет", PendingReason.Network)
             else ->
-                Pair("Данные сохранены. Не удалось отправить сейчас; повторю автоматически.", PendingReason.Unknown)
+                Pair("Не удалось сохранить в очередь", PendingReason.Unknown)
         }
 
     private fun startRecordingForeground() {
@@ -449,7 +457,7 @@ class RecordingService : Service() {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) context.startForegroundService(intent) else context.startService(intent)
             } catch (error: Throwable) {
                 screenshotFile?.delete()
-                BraiCmdBus.post(RecorderState.Error(error.message ?: "Android заблокировал запуск микрофона"))
+                BraiCmdBus.post(RecorderState.Error("Запись не началась"))
             }
         }
 
@@ -457,7 +465,7 @@ class RecordingService : Service() {
             try {
                 context.startService(Intent(context, RecordingService::class.java).setAction(ACTION_STOP))
             } catch (error: Throwable) {
-                BraiCmdBus.post(RecorderState.Error(error.message ?: "Не удалось остановить запись"))
+                BraiCmdBus.post(RecorderState.Error("Запись не остановлена"))
             }
         }
 
@@ -465,7 +473,7 @@ class RecordingService : Service() {
             try {
                 context.startService(Intent(context, RecordingService::class.java).setAction(ACTION_CANCEL))
             } catch (error: Throwable) {
-                BraiCmdBus.post(RecorderState.Error(error.message ?: "Не удалось отменить запись"))
+                BraiCmdBus.post(RecorderState.Error("Запись не остановлена"))
             }
         }
 
@@ -496,7 +504,7 @@ class RecordingService : Service() {
                 true
             } catch (error: Throwable) {
                 workerStartRequested.set(false)
-                BraiCmdBus.post(RecorderState.Error(error.message ?: "Не удалось повторить отправку сохраненной записи"))
+                BraiCmdBus.post(RecorderState.Error("Повтор не запущен"))
                 false
             }
         }
@@ -508,7 +516,7 @@ class RecordingService : Service() {
                 BraiCmdPlugin.notifyOnboardingEvent("queueSaved", null)
                 BraiCmdBus.post(
                     RecorderState.Pending(
-                        message = "Скриншот сохранен в очереди. Отправка временно остановлена для проверки.",
+                        message = "Ждёт сервер",
                         recordings = snapshot.transport.total,
                         transcripts = snapshot.readyToInsert.total,
                         reason = PendingReason.Network

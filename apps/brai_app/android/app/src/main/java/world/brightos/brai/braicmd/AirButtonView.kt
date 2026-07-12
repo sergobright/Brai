@@ -33,6 +33,7 @@ class AirButtonView(context: Context) : View(context) {
 
     private var state: RecorderState = RecorderState.Idle
     private var queueBadge: QueueBadgeState? = null
+    private var updateAvailable = false
 
     fun setRecorderState(next: RecorderState) {
         state = next
@@ -41,6 +42,12 @@ class AirButtonView(context: Context) : View(context) {
 
     fun setQueueState(failedCount: Int, readyCount: Int) {
         queueBadge = resolveQueueBadgeState(failedCount, readyCount)
+        invalidate()
+    }
+
+    fun setUpdateAvailable(available: Boolean) {
+        if (updateAvailable == available) return
+        updateAvailable = available
         invalidate()
     }
 
@@ -59,6 +66,7 @@ class AirButtonView(context: Context) : View(context) {
             else -> Unit
         }
         queueBadge?.let { drawQueueBadge(canvas, it) }
+        if (updateAvailable) drawUpdateDot(canvas)
 
         if (state is RecorderState.Recording || state is RecorderState.Uploading) {
             postInvalidateOnAnimation()
@@ -112,6 +120,23 @@ class AirButtonView(context: Context) : View(context) {
         canvas.drawText(label, badgeX, badgeY - (textPaint.descent() + textPaint.ascent()) / 2f, textPaint)
     }
 
+    private fun drawUpdateDot(canvas: Canvas) {
+        val radius = max(resources.displayMetrics.density * 4.5f, width * 0.065f)
+        val dotX = width * 0.77f
+        val dotY = height * 0.77f
+        val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.FILL
+            color = COLOR_UPDATE_DOT
+        }
+        val stroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE
+            strokeWidth = max(1f, radius * 0.22f)
+            color = COLOR_UPDATE_DOT_STROKE
+        }
+        canvas.drawCircle(dotX, dotY, radius, fill)
+        canvas.drawCircle(dotX, dotY, radius, stroke)
+    }
+
     private fun drawError(canvas: Canvas, cx: Float, cy: Float) {
         textPaint.color = currentIconColor()
         textPaint.textSize = width * 0.26f
@@ -127,6 +152,8 @@ class AirButtonView(context: Context) : View(context) {
         private const val COLOR_ICON_RED_SOFT = 0xB8FF2020.toInt()
         private const val COLOR_BADGE_GREEN = 0xFF2ED36F.toInt()
         private const val COLOR_BADGE_TEXT = 0xFF050505.toInt()
+        private const val COLOR_UPDATE_DOT = 0xFFFFD24A.toInt()
+        private const val COLOR_UPDATE_DOT_STROKE = 0xFF241C00.toInt()
     }
 }
 

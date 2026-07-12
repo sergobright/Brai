@@ -9,6 +9,7 @@ import android.view.WindowManager
 import android.widget.TextView
 import world.brightos.brai.capabilities.BraiAccessibilityService
 import kotlin.math.max
+import kotlin.math.min
 
 internal class OverlayStatusBubble(
     private val service: BraiAccessibilityService,
@@ -19,20 +20,26 @@ internal class OverlayStatusBubble(
     private var params: WindowManager.LayoutParams? = null
     private var hideRunnable: Runnable? = null
 
-    fun show(title: String, subtitle: String, buttonParams: WindowManager.LayoutParams) {
+    fun show(
+        notice: BraiCmdNotice,
+        buttonParams: WindowManager.LayoutParams,
+        durationMs: Long = STATUS_BUBBLE_MS
+    ) {
+        val text = braiCmdNoticeText(notice.text)
+        if (text.isBlank()) return
         val bubble = view ?: TextView(service).apply {
-            setTextColor(COLOR_TEXT)
             textSize = 14f
             typeface = Typeface.DEFAULT_BOLD
             setPadding(service.dp(12), service.dp(8), service.dp(12), service.dp(8))
-            background = roundedBackground(COLOR_BUBBLE)
             view = this
         }
-        bubble.text = "$title\n$subtitle"
+        bubble.text = text
+        bubble.setTextColor(textColor(notice.tone))
+        bubble.background = roundedBackground(backgroundColor(notice.tone))
 
         if (params == null) {
             params = WindowManager.LayoutParams(
-                service.dp(190),
+                service.dp(BUBBLE_WIDTH_DP),
                 WindowManager.LayoutParams.WRAP_CONTENT,
                 WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
@@ -50,7 +57,7 @@ internal class OverlayStatusBubble(
         }
 
         hideRunnable?.let { handler.removeCallbacks(it) }
-        hideRunnable = Runnable { hide() }.also { handler.postDelayed(it, STATUS_BUBBLE_MS) }
+        hideRunnable = Runnable { hide() }.also { handler.postDelayed(it, durationMs) }
     }
 
     fun update(buttonParams: WindowManager.LayoutParams?) {
@@ -71,11 +78,25 @@ internal class OverlayStatusBubble(
         params = null
     }
 
-    private fun bubbleX(buttonParams: WindowManager.LayoutParams): Int =
-        max(service.dp(8), buttonParams.x - service.dp(198))
+    private fun bubbleX(buttonParams: WindowManager.LayoutParams): Int {
+        val screenWidth = service.resources.displayMetrics.widthPixels
+        val margin = service.dp(8)
+        val width = service.dp(BUBBLE_WIDTH_DP)
+        val gap = service.dp(8)
+        val buttonCenter = buttonParams.x + (buttonParams.width / 2)
+        val preferred = if (buttonCenter < screenWidth / 2) {
+            buttonParams.x + buttonParams.width + gap
+        } else {
+            buttonParams.x - width - gap
+        }
+        return preferred.coerceIn(margin, max(margin, screenWidth - width - margin))
+    }
 
-    private fun bubbleY(buttonParams: WindowManager.LayoutParams): Int =
-        max(service.dp(8), buttonParams.y + service.dp(2))
+    private fun bubbleY(buttonParams: WindowManager.LayoutParams): Int {
+        val screenHeight = service.resources.displayMetrics.heightPixels
+        val margin = service.dp(8)
+        return min(max(margin, buttonParams.y + service.dp(2)), max(margin, screenHeight - service.dp(56)))
+    }
 
     private fun roundedBackground(color: Int): GradientDrawable =
         GradientDrawable().apply {
@@ -83,9 +104,24 @@ internal class OverlayStatusBubble(
             cornerRadius = service.dp(10).toFloat()
         }
 
+    private fun backgroundColor(tone: BraiCmdNoticeTone): Int = when (tone) {
+        BraiCmdNoticeTone.Update -> COLOR_UPDATE
+        BraiCmdNoticeTone.LocalError -> COLOR_RED
+        BraiCmdNoticeTone.LocalSuccess,
+        BraiCmdNoticeTone.ServerSuccess -> COLOR_GREEN
+    }
+
+    private fun textColor(tone: BraiCmdNoticeTone): Int =
+        if (tone == BraiCmdNoticeTone.Update) COLOR_UPDATE_TEXT else COLOR_WHITE
+
     companion object {
-        private const val STATUS_BUBBLE_MS = 7_000L
-        private const val COLOR_BUBBLE = 0xFF10251B.toInt()
-        private const val COLOR_TEXT = 0xFFC7DCD2.toInt()
+        const val STATUS_BUBBLE_MS = 3_000L
+        const val UPDATE_BUBBLE_MS = 1_500L
+        private const val BUBBLE_WIDTH_DP = 190
+        private const val COLOR_RED = 0xFF7A1212.toInt()
+        private const val COLOR_GREEN = 0xFF0B4A2B.toInt()
+        private const val COLOR_UPDATE = 0xFFFFD24A.toInt()
+        private const val COLOR_WHITE = 0xFFFFFFFF.toInt()
+        private const val COLOR_UPDATE_TEXT = 0xFF1B1600.toInt()
     }
 }

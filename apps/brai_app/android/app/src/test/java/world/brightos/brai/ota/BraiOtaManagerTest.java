@@ -34,6 +34,14 @@ public class BraiOtaManagerTest {
     }
 
     @Test
+    public void updateIndicatorFollowsAvailableVersionOrApkRequirement() {
+        assertFalse(BraiOtaManager.isUpdateAvailable(null, "0.0.73", null, false));
+        assertFalse(BraiOtaManager.isUpdateAvailable("0.0.73", "0.0.73", null, false));
+        assertTrue(BraiOtaManager.isUpdateAvailable("0.0.74", "0.0.73", null, false));
+        assertTrue(BraiOtaManager.isUpdateAvailable("0.0.73", "0.0.73", null, true));
+    }
+
+    @Test
     public void roundsDownloadProgressPercent() {
         assertEquals(67, BraiOtaManager.downloadProgressPercent(2, 3));
         assertEquals(100, BraiOtaManager.downloadProgressPercent(5, 3));

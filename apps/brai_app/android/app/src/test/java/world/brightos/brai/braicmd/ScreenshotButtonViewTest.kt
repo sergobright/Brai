@@ -26,7 +26,7 @@ class ScreenshotButtonViewTest {
 
     @Test
     fun successfulActionReplacesItsGlyphWithTheCleanCheckState() {
-        assertFalse(shouldDrawContextActionGlyph(ContextButtonGlyph.Image, RecorderState.InboxDelivered))
+        assertFalse(shouldDrawContextActionGlyph(ContextButtonGlyph.Image, RecorderState.InboxDelivered()))
     }
 
     @Test

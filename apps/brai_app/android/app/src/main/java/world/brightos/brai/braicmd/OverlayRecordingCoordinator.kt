@@ -5,7 +5,6 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Handler
 import android.view.ViewConfiguration
-import android.widget.Toast
 import world.brightos.brai.capabilities.BraiAccessibilityService
 import java.io.File
 
@@ -161,10 +160,11 @@ internal class OverlayRecordingCoordinator(
             is RecorderState.Uploading -> return
             else -> Unit
         }
-        if (service.insertNextPendingTranscriptIntoFocusedField(showToast = true)) {
+        val hadSavedText = PendingTranscriptStore.list(service).isNotEmpty()
+        if (service.insertNextPendingTranscriptIntoFocusedField(showToast = false)) {
             Haptics.transcriptionReady(service)
-        } else {
-            Toast.makeText(service, "Нет сохраненных текстов для вставки", Toast.LENGTH_SHORT).show()
+        } else if (!hadSavedText) {
+            BraiCmdBus.post(RecorderState.Error("Нет сохранённых текстов"))
         }
     }
 
@@ -172,17 +172,17 @@ internal class OverlayRecordingCoordinator(
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M &&
             service.checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED
         ) {
-            BraiCmdBus.post(RecorderState.Error("Откройте Brai Cmd и разрешите доступ к микрофону"))
+            BraiCmdBus.post(RecorderState.Error("Разрешите микрофон"))
             return
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             service.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         ) {
-            BraiCmdBus.post(RecorderState.Error("Откройте Brai Cmd и разрешите уведомления"))
+            BraiCmdBus.post(RecorderState.Error("Разрешите уведомления"))
             return
         }
         if (config.authToken.isBlank()) {
-            BraiCmdBus.post(RecorderState.Error("Откройте Brai Cmd и получите доступ"))
+            BraiCmdBus.post(RecorderState.Error("Получите доступ Brai CMD"))
             return
         }
         activeButton = if (useScreenshot) RecordingButton.Context else RecordingButton.Main
@@ -231,17 +231,17 @@ internal class OverlayRecordingCoordinator(
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M &&
             service.checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED
         ) {
-            BraiCmdBus.post(RecorderState.Error("Откройте Brai Cmd и разрешите доступ к микрофону"))
+            BraiCmdBus.post(RecorderState.Error("Разрешите микрофон"))
             return false
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             service.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         ) {
-            BraiCmdBus.post(RecorderState.Error("Откройте Brai Cmd и разрешите уведомления"))
+            BraiCmdBus.post(RecorderState.Error("Разрешите уведомления"))
             return false
         }
         if (config.authToken.isBlank()) {
-            BraiCmdBus.post(RecorderState.Error("Откройте Brai Cmd и получите доступ"))
+            BraiCmdBus.post(RecorderState.Error("Получите доступ Brai CMD"))
             return false
         }
         return true
@@ -264,7 +264,7 @@ internal class OverlayRecordingCoordinator(
             return
         }
         if (config.authToken.isBlank()) {
-            BraiCmdBus.post(RecorderState.Error("Откройте Brai Cmd и получите доступ"))
+            BraiCmdBus.post(RecorderState.Error("Получите доступ Brai CMD"))
             return
         }
         activeButton = RecordingButton.Context
@@ -285,7 +285,7 @@ internal class OverlayRecordingCoordinator(
             }
             if (!RecordingService.enqueueScreenshot(service, screenshotFile)) {
                 screenshotFile.delete()
-                BraiCmdBus.post(RecorderState.Error("Не удалось сохранить скриншот в очереди"))
+                BraiCmdBus.post(RecorderState.Error("Скриншот не сохранён"))
             }
         }
     }

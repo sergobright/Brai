@@ -17,7 +17,8 @@ data class DictationResponse(
     val text: String,
     val provider: String,
     val model: String,
-    val fallbackUsed: Boolean
+    val fallbackUsed: Boolean,
+    val notice: BraiCmdNotice?
 )
 
 data class AccessResponse(
@@ -38,7 +39,9 @@ class ServerResponseException(
     val code: String,
     val json: JSONObject?,
     message: String
-) : IllegalStateException(message)
+) : IllegalStateException(message) {
+    constructor(statusCode: Int, code: String, message: String) : this(statusCode, code, null, message)
+}
 
 class NetworkClient(context: Context) {
     private val appContext = context.applicationContext
@@ -163,7 +166,8 @@ class NetworkClient(context: Context) {
             text = json.optString("text"),
             provider = json.optString("provider"),
             model = json.optString("model"),
-            fallbackUsed = json.optBoolean("fallbackUsed", false)
+            fallbackUsed = json.optBoolean("fallbackUsed", false),
+            notice = noticeFromJson(json.optJSONObject("notice"))
         )
     }
 
@@ -172,7 +176,7 @@ class NetworkClient(context: Context) {
         conversationContext: VisibleConversationContext?,
         screenshotFile: File?,
         idempotencyKey: String
-    ) {
+    ): BraiCmdNotice? {
         val connection = openAuthenticatedConnection("/v1/brai-cmd/inbox", "POST").apply {
             doOutput = true
             readTimeout = DEFAULT_READ_TIMEOUT_MS
@@ -203,7 +207,18 @@ class NetworkClient(context: Context) {
         if (attachments.length() > 0) body.put("attachments", attachments)
         val bytes = body.toString().toByteArray(Charsets.UTF_8)
         connection.outputStream.use { it.write(bytes) }
-        readJson(connection)
+        return noticeFromJson(readJson(connection).optJSONObject("notice"))
+    }
+
+    private fun noticeFromJson(json: JSONObject?): BraiCmdNotice? {
+        json ?: return null
+        val text = braiCmdNoticeText(json.optString("text"))
+        if (text.isBlank()) return null
+        return BraiCmdNotice(
+            key = json.optString("key"),
+            text = text,
+            tone = serverNoticeTone(json.optString("tone"))
+        )
     }
 
     private fun openPublicConnection(path: String, method: String): HttpURLConnection {

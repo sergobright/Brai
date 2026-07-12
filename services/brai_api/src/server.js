@@ -701,7 +701,11 @@ export function createBraiServer({
         const result = await withUserScope(ownerUserId, () => receiveInboxRequest(inboxBody, requestNow, { route: url.pathname }));
         const state = await withUserScope(ownerUserId, () => inboxState(store, requestNow));
         broadcast(sockets, { type: 'inbox_synced', inbox_state: state }, ownerUserId);
-        sendJson(req, res, result.created ? 201 : 200, { ok: true, target: 'inbox', ...result, state });
+        const notice = store.braiCmdNotice(
+          result.created ? 'message.inbox.created.default' : 'message.inbox.duplicate.default',
+          'success'
+        );
+        sendJson(req, res, result.created ? 201 : 200, { ok: true, target: 'inbox', ...result, state, notice });
         if (result.created) processInboxLater({ ownerUserId, inboxId: result.inbox_id });
         return;
       }

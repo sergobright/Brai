@@ -125,6 +125,7 @@ test('Brai Cmd access tokens, health, admin summary, and migrations work in Brai
     assert.equal(admin.status, 200);
     const summary = await admin.json();
     assert.equal(summary.totals.activeTokens, 1);
+    assert.equal(summary.settings.messages['message.inbox.created.default'], 'Отправлено во входящие');
 
     const settings = await fetch(`${fixture.url}/v1/brai-cmd/admin/settings`, {
       method: 'PUT',
@@ -132,9 +133,13 @@ test('Brai Cmd access tokens, health, admin summary, and migrations work in Brai
         authorization: `Bearer ${TOKEN}`,
         'content-type': 'application/json'
       },
-      body: JSON.stringify({ registrationEnabled: false })
+      body: JSON.stringify({
+        registrationEnabled: false,
+        messages: { 'message.inbox.created.default': 'Отправлено.' }
+      })
     });
     assert.equal(settings.status, 200);
+    assert.equal((await settings.json()).settings.messages['message.inbox.created.default'], 'Отправлено');
 
     const revoked = await fetch(`${fixture.url}/v1/brai-cmd/admin/tokens/${tokenRows[0].id}/revoke`, {
       method: 'POST',
@@ -201,6 +206,7 @@ test('Brai Cmd dictation accepts multipart audio and stores only usage metrics',
     assert.equal(processed.status, 200);
     assert.equal(processed.body.text, 'processed transcript');
     assert.equal(processed.body.postProcessed, true);
+    assert.equal(processed.body.notice, null);
     assert.equal(postProcessCalls, 1);
 
     const context = await dictate(fixture.url, token, 'device-2', {
@@ -209,6 +215,7 @@ test('Brai Cmd dictation accepts multipart audio and stores only usage metrics',
     });
     assert.equal(context.status, 200);
     assert.equal(context.body.text, 'context reply');
+    assert.equal(context.body.notice, null);
     assert.equal(contextReplyCalls, 1);
 
     const usage = fixture.store.db.prepare('SELECT * FROM brai_cmd_usage_events ORDER BY created_at_utc').all();
@@ -277,6 +284,11 @@ test('Brai Cmd inbox route accepts Android access token and creates Inbox contex
     });
 
     assert.equal(response.status, 201);
+    assert.deepEqual(response.body.notice, {
+      key: 'message.inbox.created.default',
+      text: 'Отправлено во входящие',
+      tone: 'success'
+    });
     const item = response.body.state.inbox[0];
     assert.equal(item.title, 'разбери экран');
     assert.equal(item.explanation_text, 'разбери экран');
@@ -304,6 +316,11 @@ test('Brai Cmd inbox route accepts Android access token and creates Inbox contex
       })
     });
     assert.equal(duplicate.status, 200);
+    assert.deepEqual(duplicate.body.notice, {
+      key: 'message.inbox.duplicate.default',
+      text: 'Уже во входящих',
+      tone: 'success'
+    });
     const conflict = await jsonRequest(fixture.url, '/v1/brai-cmd/inbox', {
       method: 'POST',
       headers: {

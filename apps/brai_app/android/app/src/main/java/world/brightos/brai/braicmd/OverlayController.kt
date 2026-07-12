@@ -16,8 +16,9 @@ import android.view.View
 import android.view.ViewConfiguration
 import android.view.WindowManager
 import android.widget.FrameLayout
-import android.widget.Toast
 import world.brightos.brai.capabilities.BraiAccessibilityService
+import world.brightos.brai.ota.BraiOtaManager
+import world.brightos.brai.ota.BraiOtaRegistry
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
@@ -103,8 +104,12 @@ class OverlayController(private val service: BraiAccessibilityService) {
     private var contextOriginalHub: OverlayAnchor? = null
     private var contextMenuProgress = 0f
     private var contextActionFinishRunnable: Runnable? = null
+    private var updateNoticeRunnable: Runnable? = null
+    private var updateRefreshRunnable: Runnable? = null
     private var hiddenForScreenshot = false
     private var inputButtonRequested = false
+    private var updateAvailable = false
+    private var apkUpdateRequired = false
     private var downRawX = 0f
     private var downRawY = 0f
     private var downX = 0
@@ -116,64 +121,63 @@ class OverlayController(private val service: BraiAccessibilityService) {
     private var hubTouchHandledOnDown = false
 
     private val busListener: (RecorderState) -> Unit = { state ->
-        if (state is RecorderState.InsertText) {
-            pendingRetry.cancel()
-            service.insertTextIntoFocusedField(state.text)
-            Haptics.transcriptionReady(service)
-        } else if (state is RecorderState.TranscriptReady) {
-            val autoInsertFile = state.autoInsertTranscriptFile
-            if (autoInsertFile != null) {
-                if (service.insertPendingTranscriptIntoFocusedField(autoInsertFile, showToast = false)) {
-                    pendingRetry.cancel()
+        when (state) {
+            is RecorderState.InsertText -> {
+                cancelUpdateNotice()
+                pendingRetry.cancel()
+                if (service.insertTextIntoFocusedField(state.text)) {
                     Haptics.transcriptionReady(service)
-                    if (state.fallbackUsed) showFallbackBubble(state)
                 } else {
-                    Toast.makeText(service, "Текст скопирован в буфер. Откройте нужное поле и зажмите кнопку, чтобы вставить снова.", Toast.LENGTH_LONG).show()
+                    showNotice(BraiCmdNotice("Вставка не удалась", BraiCmdNoticeTone.LocalError))
                 }
-            } else if (state.transcripts > 0) {
-                if (state.fallbackUsed) showFallbackBubble(state)
-                val ready = BraiCmdQueue.snapshot(service).readyToInsert
-                val message = when {
-                    ready.mainDictation > 0 && ready.chatReply > 0 ->
-                        "Готово к вставке: диктовка — ${ready.mainDictation}, чат — ${ready.chatReply}."
-                    ready.chatReply > 0 ->
-                        "Готовых ответов чата: ${ready.chatReply}. Зажмите кнопку чата для вставки."
-                    else ->
-                        "Сохраненных текстов: ${ready.mainDictation}. Зажмите кнопку диктовки для вставки."
-                }
-                Toast.makeText(service, message, Toast.LENGTH_LONG).show()
             }
-        } else if (state is RecorderState.Pending) {
-            showStatusBubble(
-                title = if (state.recordings > 0) "Запись сохранена" else "Текст сохранен",
-                subtitle = when {
-                    state.reason == PendingReason.Network -> "Ждет интернет"
-                    state.reason == PendingReason.Transcription -> "Ждет модель"
-                    state.reason == PendingReason.Server -> "Ждет сервер"
-                    state.recordings > 0 -> "Повторю автоматически"
-                    state.transcripts > 0 -> "Зажмите, чтобы вставить"
-                    else -> "Повторю автоматически"
+            is RecorderState.TranscriptReady -> {
+                cancelUpdateNotice()
+                state.autoInsertTranscriptFile?.let { autoInsertFile ->
+                    if (service.insertPendingTranscriptIntoFocusedField(autoInsertFile, showToast = false)) {
+                        pendingRetry.cancel()
+                        Haptics.transcriptionReady(service)
+                    }
                 }
-            )
-            val toast = when {
-                state.reason == PendingReason.Network -> "Запись сохранена, ждет интернет"
-                state.reason == PendingReason.Transcription -> "Запись сохранена, ждет модель"
-                state.reason == PendingReason.Server -> "Запись сохранена, ждет сервер"
-                state.recordings > 0 -> "Запись сохранена, повторю автоматически"
-                else -> "Текст сохранен, зажмите кнопку для вставки"
             }
-            Toast.makeText(service, toast, Toast.LENGTH_LONG).show()
-            if (state.recordings > 0 && !config.onboardingQueuePaused) pendingRetry.schedule()
-        } else if (state is RecorderState.InboxDelivered) {
-            pendingRetry.cancel()
-            showStatusBubble("Отправлено", "Во входящие")
-            Toast.makeText(service, "Отправлено во входящие", Toast.LENGTH_SHORT).show()
-        } else if (state is RecorderState.Error) {
-            showStatusBubble("Ошибка", state.message)
-            Toast.makeText(service, state.message, Toast.LENGTH_SHORT).show()
-            pendingRetry.schedule()
-        } else if (state is RecorderState.Recording || state is RecorderState.Uploading || state is RecorderState.Idle) {
-            pendingRetry.cancel()
+            is RecorderState.Pending -> {
+                cancelUpdateNotice()
+                val tone = if (state.recordings > 0 || state.reason != PendingReason.Unknown) {
+                    BraiCmdNoticeTone.LocalError
+                } else {
+                    BraiCmdNoticeTone.LocalSuccess
+                }
+                showNotice(BraiCmdNotice(state.message, tone))
+                if (state.recordings > 0 && !config.onboardingQueuePaused) pendingRetry.schedule()
+            }
+            is RecorderState.InboxDelivered -> {
+                pendingRetry.cancel()
+                val notice = state.notice ?: BraiCmdNotice(
+                    text = "Отправлено во входящие",
+                    tone = BraiCmdNoticeTone.ServerSuccess,
+                    key = "message.inbox.created.default"
+                )
+                showNotice(notice, scheduleUpdate = true)
+            }
+            is RecorderState.Error -> {
+                cancelUpdateNotice()
+                showNotice(BraiCmdNotice(state.message, BraiCmdNoticeTone.LocalError))
+                pendingRetry.schedule()
+            }
+            is RecorderState.Notice -> {
+                if (shouldShowUpdateNoticeAfter(state.notice)) {
+                    showNotice(state.notice, scheduleUpdate = true)
+                } else {
+                    cancelUpdateNotice()
+                    showNotice(state.notice)
+                }
+            }
+            is RecorderState.Recording,
+            is RecorderState.Uploading,
+            is RecorderState.Idle -> {
+                cancelUpdateNotice()
+                pendingRetry.cancel()
+            }
         }
         updateScreenshotButtonVisibility()
         updateButtonStates(state)
@@ -198,12 +202,15 @@ class OverlayController(private val service: BraiAccessibilityService) {
         pendingRetry.start()
         applyIconSettings()
         updateQueueIndicators()
+        startUpdateIndicatorRefresh()
     }
 
     fun stop() {
         BraiCmdBus.removeListener(busListener)
         config.unregisterChangeListener(settingsListener)
         pendingRetry.stop()
+        stopUpdateIndicatorRefresh()
+        cancelUpdateNotice()
         recording.cancelLongPress()
         hideCancelButton()
         statusBubble.hide()
@@ -486,7 +493,7 @@ class OverlayController(private val service: BraiAccessibilityService) {
         val originalHub = screenshotButtonAnchor()
         val layout = geometry().radialMenuLayout(originalHub, actionSize, actions.size, visibleMainButtonAnchor())
         if (layout == null || layout.actions.size != actions.size) {
-            Toast.makeText(service, "Недостаточно места для кнопок Brai Cmd", Toast.LENGTH_SHORT).show()
+            showNotice(BraiCmdNotice("Мало места для кнопок", BraiCmdNoticeTone.LocalError))
             return
         }
         val originalPoint = contextMenuHubPoint(originalHub, actionSize)
@@ -783,14 +790,15 @@ class OverlayController(private val service: BraiAccessibilityService) {
 
     private fun insertNextChatReply(): Boolean {
         if (contextMenuState != ContextMenuState.OpenIdle) return false
+        val hadChatReply = PendingTranscriptStore.list(service, PendingTranscriptKind.ChatReply).isNotEmpty()
         val inserted = service.insertNextPendingTranscriptIntoFocusedField(
-            showToast = true,
+            showToast = false,
             kind = PendingTranscriptKind.ChatReply
         )
         if (inserted) {
             Haptics.transcriptionReady(service)
-        } else {
-            Toast.makeText(service, "Нет готового ответа чата для вставки", Toast.LENGTH_SHORT).show()
+        } else if (!hadChatReply) {
+            showNotice(BraiCmdNotice("Нет ответа чата", BraiCmdNoticeTone.LocalError))
         }
         updateQueueIndicators()
         return true
@@ -845,6 +853,7 @@ class OverlayController(private val service: BraiAccessibilityService) {
             failedCount = snapshot.failedTransport.main + snapshot.failedTransport.unknown,
             readyCount = mainReady
         )
+        button?.setUpdateAvailable(shouldShowUpdateDot(updateAvailable, apkUpdateRequired))
         contextActionButtons.forEach { (menuAction, view) ->
             val chatReady = if (menuAction.action == ContextButtonAction.ChatContextInbox) {
                 snapshot.readyToInsert.chatReply
@@ -926,17 +935,75 @@ class OverlayController(private val service: BraiAccessibilityService) {
         runCatching { windowManager.updateViewLayout(view, lp) }
     }
 
-    private fun showFallbackBubble(state: RecorderState.TranscriptReady) {
-        val subtitle = when {
-            state.provider == "groq" && state.model.contains("turbo", ignoreCase = true) -> "Использован Groq Turbo"
-            state.provider == "openai" -> "Использован OpenAI"
-            else -> "Использована запасная"
+    private fun showNotice(
+        notice: BraiCmdNotice,
+        durationMs: Long = OverlayStatusBubble.STATUS_BUBBLE_MS,
+        scheduleUpdate: Boolean = false
+    ) {
+        val clean = notice.copy(text = braiCmdNoticeText(notice.text))
+        if (clean.text.isBlank()) return
+        if (!scheduleUpdate && clean.tone != BraiCmdNoticeTone.Update) cancelUpdateNotice()
+        statusAnchorParams()?.let { anchor ->
+            statusBubble.show(clean, anchor, durationMs)
+            if (scheduleUpdate && shouldShowUpdateNoticeAfter(clean)) scheduleUpdateNotice()
         }
-        showStatusBubble("Основная модель не ответила", subtitle)
     }
 
-    private fun showStatusBubble(title: String, subtitle: String) {
-        statusAnchorParams()?.let { statusBubble.show(title, subtitle, it) }
+    private fun scheduleUpdateNotice() {
+        cancelUpdateNotice()
+        refreshUpdateIndicator(startCheck = false)
+        if (!shouldShowUpdateDot(updateAvailable, apkUpdateRequired)) return
+        updateNoticeRunnable = Runnable {
+            updateNoticeRunnable = null
+            refreshUpdateIndicator(startCheck = false)
+            if (!shouldShowUpdateDot(updateAvailable, apkUpdateRequired)) return@Runnable
+            showNotice(
+                BraiCmdNotice(
+                    text = if (apkUpdateRequired) "Нужен новый APK" else "Доступно обновление",
+                    tone = BraiCmdNoticeTone.Update
+                ),
+                durationMs = OverlayStatusBubble.UPDATE_BUBBLE_MS
+            )
+        }.also { retryHandler.postDelayed(it, OverlayStatusBubble.STATUS_BUBBLE_MS) }
+    }
+
+    private fun cancelUpdateNotice() {
+        updateNoticeRunnable?.let(retryHandler::removeCallbacks)
+        updateNoticeRunnable = null
+    }
+
+    private fun startUpdateIndicatorRefresh() {
+        refreshUpdateIndicator(startCheck = true)
+        scheduleNextUpdateIndicatorRefresh()
+    }
+
+    private fun stopUpdateIndicatorRefresh() {
+        updateRefreshRunnable?.let(retryHandler::removeCallbacks)
+        updateRefreshRunnable = null
+    }
+
+    private fun scheduleNextUpdateIndicatorRefresh() {
+        updateRefreshRunnable?.let(retryHandler::removeCallbacks)
+        updateRefreshRunnable = Runnable {
+            refreshUpdateIndicator(startCheck = true)
+            scheduleNextUpdateIndicatorRefresh()
+        }.also { retryHandler.postDelayed(it, OTA_INDICATOR_REFRESH_MS) }
+    }
+
+    private fun refreshUpdateIndicator(startCheck: Boolean) {
+        val manager = BraiOtaRegistry.getManager() ?: BraiOtaManager(service)
+        if (startCheck) manager.checkForUpdatesAsync()
+        applyUpdateIndicatorState(manager)
+        if (startCheck) {
+            retryHandler.postDelayed({ applyUpdateIndicatorState(manager) }, OTA_CHECK_SETTLE_MS)
+        }
+    }
+
+    private fun applyUpdateIndicatorState(manager: BraiOtaManager) {
+        val state = manager.stateJson()
+        updateAvailable = state.optBoolean("updateAvailable", false)
+        apkUpdateRequired = state.optBoolean("apkUpdateRequired", false)
+        button?.setUpdateAvailable(shouldShowUpdateDot(updateAvailable, apkUpdateRequired))
     }
 
     private fun statusAnchorParams(): WindowManager.LayoutParams? =
@@ -1057,6 +1124,8 @@ class OverlayController(private val service: BraiAccessibilityService) {
         const val CONTEXT_ACTION_COLLAPSE_MS = 220L
         const val CONTEXT_ACTION_SUCCESS_MS = 1000L
         const val CONTEXT_ACTION_TERMINAL_MS = 800L
+        const val OTA_INDICATOR_REFRESH_MS = 5 * 60 * 1000L
+        const val OTA_CHECK_SETTLE_MS = 8_000L
         val contextActionSettingKeys = setOf(
             AppConstants.KEY_CONTEXT_ACTION_IDEA_ENABLED,
             AppConstants.KEY_CONTEXT_ACTION_SCREENSHOT_ENABLED,

@@ -19,6 +19,7 @@ internal data class QueueTransportResult(
     val provider: String = "",
     val model: String = "",
     val inboxDelivered: Boolean = false,
+    val serverNotice: BraiCmdNotice? = null,
     val permanentFailureMessage: String? = null
 )
 
@@ -30,6 +31,7 @@ internal class QueueTransportWorker(context: Context) {
     private var provider = ""
     private var model = ""
     private var inboxDelivered = false
+    private var serverNotice: BraiCmdNotice? = null
     private var permanentFailureMessage: String? = null
 
     fun run(autoInsertAudioFileName: String?): QueueTransportResult {
@@ -81,9 +83,9 @@ internal class QueueTransportWorker(context: Context) {
     private fun processAudio(file: File, autoInsertAudioFileName: String?) {
         when {
             file.length() < MIN_AUDIO_BYTES ->
-                throw QueueCorruptItemException("Запись повреждена и перемещена в карантин.")
+                throw QueueCorruptItemException("Данные повреждены")
             file.length() > NetworkClient.MAX_AUDIO_BYTES ->
-                throw QueueCorruptItemException("Запись слишком большая и перемещена в карантин.")
+                throw QueueCorruptItemException("Файл слишком большой")
         }
 
         val action = AudioQueueStore.action(file)
@@ -126,7 +128,7 @@ internal class QueueTransportWorker(context: Context) {
             // Persist before Inbox delivery so retries never retranscribe a completed upload.
             InboxPayloadStore.saveTranscript(file, transcript)
         }
-        client.uploadInboxCommand(
+        serverNotice = client.uploadInboxCommand(
             transcript = inboxDeliveryText(action, InboxPayloadStore.readTextPrefix(file), transcript),
             conversationContext = ConversationContextStore.read(file),
             screenshotFile = ScreenshotContextStore.read(file),
@@ -137,8 +139,8 @@ internal class QueueTransportWorker(context: Context) {
     }
 
     private fun processScreenshot(file: File) {
-        if (file.length() <= 0L) throw QueueCorruptItemException("Скриншот поврежден и перемещен в карантин.")
-        client.uploadInboxCommand(
+        if (file.length() <= 0L) throw QueueCorruptItemException("Данные повреждены")
+        serverNotice = client.uploadInboxCommand(
             transcript = SCREENSHOT_INBOX_TEXT,
             conversationContext = null,
             screenshotFile = file,
@@ -168,6 +170,7 @@ internal class QueueTransportWorker(context: Context) {
             provider = provider,
             model = model,
             inboxDelivered = inboxDelivered,
+            serverNotice = serverNotice,
             permanentFailureMessage = permanentFailureMessage
         )
 
@@ -175,12 +178,12 @@ internal class QueueTransportWorker(context: Context) {
         when (error) {
             is QueueCorruptItemException -> error.message.orEmpty()
             is ServerResponseException -> when (error.statusCode) {
-                413 -> "Данные слишком большие и перемещены в карантин."
-                415 -> "Формат данных не поддерживается; элемент перемещен в карантин."
-                422 -> "Данные повреждены; элемент перемещен в карантин."
-                else -> "Сервер отклонил данные; элемент перемещен в карантин."
+                413 -> "Файл слишком большой"
+                415 -> "Формат не поддержан"
+                422 -> "Данные повреждены"
+                else -> "Запрос отклонён"
             }
-            else -> "Элемент очереди поврежден и перемещен в карантин."
+            else -> "Данные повреждены"
         }
 
     private sealed class PendingItem(open val file: File) {

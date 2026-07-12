@@ -1,25 +1,77 @@
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 
+const DEFAULT_BRAI_CMD_MESSAGES = Object.freeze({
+  'message.inbox.created.default': 'Отправлено во входящие',
+  'message.inbox.duplicate.default': 'Уже во входящих',
+  'message.dictate.success.main': ''
+});
+
 export const braiCmdStoreMethods = {
   braiCmdSettings() {
     const row = this.db.prepare("SELECT value FROM brai_cmd_settings WHERE key = 'registration_enabled'").get();
-    return { registrationEnabled: row?.value !== 'false' };
+    return {
+      registrationEnabled: row?.value !== 'false',
+      messages: this.braiCmdMessages()
+    };
+  },
+
+  braiCmdMessages() {
+    const rows = this.db.prepare("SELECT key, value FROM brai_cmd_settings WHERE key LIKE 'message.%'").all();
+    const saved = Object.fromEntries(rows.map((row) => [row.key, cleanNoticeText(row.value)]));
+    return { ...DEFAULT_BRAI_CMD_MESSAGES, ...saved };
+  },
+
+  braiCmdNotice(key, tone = 'success') {
+    const text = this.braiCmdMessages()[key] ?? DEFAULT_BRAI_CMD_MESSAGES[key] ?? '';
+    const clean = cleanNoticeText(text);
+    return clean ? { key, text: clean, tone: cleanNoticeTone(tone) } : null;
   },
 
   setBraiCmdRegistrationEnabled(registrationEnabled) {
+    return this.setBraiCmdSettings({ registrationEnabled });
+  },
+
+  setBraiCmdSettings({ registrationEnabled, messages } = {}) {
+    const now = new Date().toISOString();
+    const touched = {};
+    if (registrationEnabled !== undefined) {
+      this.db.prepare(`
+        INSERT INTO brai_cmd_settings (key, value, updated_at_utc)
+        VALUES ('registration_enabled', ?, ?)
+        ON CONFLICT(key) DO UPDATE SET
+          value = excluded.value,
+          updated_at_utc = excluded.updated_at_utc
+      `).run(registrationEnabled ? 'true' : 'false', now);
+      touched.registration_enabled = Boolean(registrationEnabled);
+    }
+    if (messages && typeof messages === 'object' && !Array.isArray(messages)) {
+      const upsert = this.db.prepare(`
+        INSERT INTO brai_cmd_settings (key, value, updated_at_utc)
+        VALUES (?, ?, ?)
+        ON CONFLICT(key) DO UPDATE SET
+          value = excluded.value,
+          updated_at_utc = excluded.updated_at_utc
+      `);
+      for (const [key, value] of Object.entries(messages)) {
+        if (!Object.hasOwn(DEFAULT_BRAI_CMD_MESSAGES, key)) continue;
+        upsert.run(key, cleanNoticeText(value), now);
+        touched[key] = true;
+      }
+    }
+    if (Object.keys(touched).length === 0) return this.braiCmdSettings();
     this.db.prepare(`
       INSERT INTO brai_cmd_settings (key, value, updated_at_utc)
-      VALUES ('registration_enabled', ?, ?)
+      VALUES ('messages_revision', ?, ?)
       ON CONFLICT(key) DO UPDATE SET
         value = excluded.value,
         updated_at_utc = excluded.updated_at_utc
-    `).run(registrationEnabled ? 'true' : 'false', new Date().toISOString());
+    `).run(now, now);
     safeRecordLog(this, {
       source: 'brai-cmd',
       operation: 'brai_cmd.admin_settings_update',
       status: 'done',
       message: 'Brai Cmd admin settings updated',
-      jsonData: { registration_enabled: Boolean(registrationEnabled) }
+      jsonData: touched
     });
     return this.braiCmdSettings();
   },
@@ -605,6 +657,14 @@ function cleanMetadata(value) {
 function safeNumber(value) {
   const number = Number(value ?? 0);
   return Number.isFinite(number) ? Math.max(0, Math.round(number)) : 0;
+}
+
+function cleanNoticeText(value) {
+  return String(value ?? '').trim().replace(/[.。．]+$/u, '').trim().slice(0, 120);
+}
+
+function cleanNoticeTone(value) {
+  return ['success', 'warning', 'error', 'info'].includes(value) ? value : 'success';
 }
 
 function safeRecordLog(store, input) {

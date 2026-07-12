@@ -72,4 +72,25 @@ class OverlayInteractionStateTest {
             )
         )
     }
+
+    @Test
+    fun noticeTextDropsFinalDots() {
+        assertEquals("Ждёт интернет", braiCmdNoticeText("  Ждёт интернет. "))
+        assertEquals("Доступно обновление", braiCmdNoticeText("Доступно обновление。"))
+    }
+
+    @Test
+    fun updateNoticeChainsOnlyAfterServerSuccess() {
+        assertTrue(shouldShowUpdateNoticeAfter(BraiCmdNotice("Отправлено", BraiCmdNoticeTone.ServerSuccess)))
+        assertFalse(shouldShowUpdateNoticeAfter(BraiCmdNotice("Текст скопирован", BraiCmdNoticeTone.LocalSuccess)))
+        assertFalse(shouldShowUpdateNoticeAfter(BraiCmdNotice("Ждёт интернет", BraiCmdNoticeTone.LocalError)))
+        assertFalse(shouldShowUpdateNoticeAfter(null))
+    }
+
+    @Test
+    fun updateDotUsesOnlyAvailableOrApkRequiredFlags() {
+        assertFalse(shouldShowUpdateDot(updateAvailable = false, apkUpdateRequired = false))
+        assertTrue(shouldShowUpdateDot(updateAvailable = true, apkUpdateRequired = false))
+        assertTrue(shouldShowUpdateDot(updateAvailable = false, apkUpdateRequired = true))
+    }
 }

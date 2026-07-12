@@ -128,7 +128,10 @@ export async function handleBraiCmdAdminRoute({ req, res, url, store, sendJson }
       url.pathname === '/v1/airwhisper/admin/settings'
     )) {
       const body = await readJsonBody(req, 64 * 1024);
-      const settings = store.setBraiCmdRegistrationEnabled(Boolean(body.registrationEnabled));
+      const settings = store.setBraiCmdSettings({
+        ...(Object.hasOwn(body, 'registrationEnabled') ? { registrationEnabled: Boolean(body.registrationEnabled) } : {}),
+        ...(Object.hasOwn(body, 'messages') ? { messages: body.messages } : {})
+      });
       sendJson(req, res, 200, { settings });
       return;
     }
@@ -406,7 +409,8 @@ async function handleDictate({ req, res, store, runtime, access, sendJson, route
         postProcessingMs
       },
       postProcessed,
-      postProcessingModel
+      postProcessingModel,
+      notice: store.braiCmdNotice('message.dictate.success.main')
     });
   } catch (error) {
     store.recordBraiCmdUsage({
