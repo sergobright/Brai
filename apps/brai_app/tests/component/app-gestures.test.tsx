@@ -255,6 +255,8 @@ describe("BraiApp gestures", () => {
         author: "",
         preliminary_section: "",
         urgency: "",
+        status: "New",
+        completed_at_utc: null,
         attachment_links: ["/v1/inbox/attachments/codex-inbox-image-previews-demo.png"],
         explanation_text: "",
         normalization_text: "",

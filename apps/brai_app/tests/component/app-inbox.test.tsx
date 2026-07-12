@@ -167,6 +167,8 @@ describe("BraiApp inbox", () => {
           author: "",
           preliminary_section: "",
           urgency: "",
+          status: "New",
+          completed_at_utc: null,
           attachment_links: ["/v1/inbox/attachments/photo.png", "/v1/inbox/attachments/brief.pdf"],
           explanation_text: "Сырой текст",
           normalization_text: "",

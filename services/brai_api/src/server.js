@@ -7,6 +7,7 @@ import { WebSocketServer } from 'ws';
 import {
   INBOX_BODY_LIMIT_BYTES,
   hasInboxApiKey,
+  inboxIngestIdempotencyHash,
   inboxRequestTarget,
   processInboxItem,
   receiveInbox,
@@ -679,6 +680,44 @@ export function createBraiServer({
 
       if (url.pathname === '/v1/in' || url.pathname.startsWith('/v1/in/')) {
         sendJson(req, res, 404, { error: 'not_found' });
+        return;
+      }
+
+      if (url.pathname === '/v1/inbox/status') {
+        if (req.method !== 'POST') {
+          sendJson(req, res, 405, { error: 'method_not_allowed' });
+          return;
+        }
+        if (!hasInboxApiKey(req, inboxApiKey)) {
+          recordRuntimeLog(store, logger, {
+            traceId,
+            source: 'auth',
+            operation: 'auth.denied',
+            status: 'failed',
+            severityText: 'WARN',
+            reason: 'invalid_inbox_api_key',
+            message: 'Inbox status API request unauthorized',
+            jsonData: {
+              method: req.method ?? 'POST',
+              path: url.pathname,
+              api_key_header_present: Boolean(req.headers['x-brai-api-key'] || req.headers['x-api-key']),
+              bearer_present: Boolean(req.headers.authorization)
+            }
+          });
+          sendJson(req, res, 401, { error: 'unauthorized' });
+          return;
+        }
+        const requestNow = now();
+        const body = await readJson(req, { limit: 4096 });
+        const ownerUserId = store.primaryUserId();
+        const result = await withUserScope(ownerUserId, () => store.setInboxApiStatus({
+          ingestIdempotencyHash: inboxIngestIdempotencyHash(body.idempotency_key),
+          status: body.status,
+          nowIso: requestNow.toISOString()
+        }));
+        const state = await withUserScope(ownerUserId, () => inboxState(store, requestNow));
+        broadcast(sockets, { type: 'inbox_synced', inbox_state: state }, ownerUserId);
+        sendJson(req, res, 200, { ok: true, target: 'inbox', ...result, state });
         return;
       }
 

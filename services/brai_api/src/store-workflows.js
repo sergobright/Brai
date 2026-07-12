@@ -341,11 +341,18 @@ export const workflowStoreMethods = {
     if (!operationId) throw businessError('workflow_id_required');
     const temporalRunId = sanitizeText(runId);
     const now = nowIso ?? new Date().toISOString();
-    const eventPayload = normalizedEventPayload({ workflowId: operationId, normalized, normalizationText });
     const run = this.db.transaction(() => {
       const inbox = this.getInboxItem(id);
       if (!inbox) throw businessError('raw_record_missing');
       if (inbox.deleted_at_utc) throw businessError('raw_record_deleted');
+      const forcedClassKey = sanitizeText(inbox.preliminary_section);
+      const finalNormalized = {
+        ...normalized,
+        classKey: forcedClassKey || normalized.classKey,
+        classTitle: forcedClassKey && forcedClassKey !== normalized.classKey ? '' : normalized.classTitle,
+        classDescription: forcedClassKey && forcedClassKey !== normalized.classKey ? '' : normalized.classDescription
+      };
+      const eventPayload = normalizedEventPayload({ workflowId: operationId, normalized: finalNormalized, normalizationText });
 
       const executionScope = scopeSql('w');
       const execution = this.db.prepare(`
@@ -377,7 +384,7 @@ export const workflowStoreMethods = {
           || existingEvent.item_roles_id !== inbox.item_roles_id
           || JSON.stringify(parseJsonObject(existingEvent.payload_json)) !== JSON.stringify(eventPayload)
         ) throw businessError('idempotency_conflict');
-        return { ok: true, idempotent: true, items_id: id, item_roles_id: inbox.item_roles_id };
+        return { ok: true, idempotent: true, items_id: id, item_roles_id: inbox.item_roles_id, class_key: finalNormalized.classKey };
       }
       if (execution.status !== 'running') throw businessError('workflow_execution_not_running');
 
@@ -395,7 +402,7 @@ export const workflowStoreMethods = {
       this.db.prepare(`
         INSERT INTO items (id, user_id, title, description, author, created_at_utc, updated_at_utc, deleted_at_utc)
         VALUES (?, ?, ?, ?, ?, ?, ?, NULL)
-      `).run(id, scopedUserId(), normalized.title, normalized.description, inbox.author ?? '', now, now);
+      `).run(id, scopedUserId(), finalNormalized.title, finalNormalized.description, inbox.author ?? '', now, now);
 
       const role = this.db.prepare(`
         INSERT INTO item_roles (
@@ -416,11 +423,11 @@ export const workflowStoreMethods = {
         throw businessError('initial_event_role_conflict');
       }
 
-      if (normalized.classKey && !this.db.prepare('SELECT key FROM inbox_classes WHERE key = ?').get(normalized.classKey)) {
+      if (finalNormalized.classKey && !this.db.prepare('SELECT key FROM inbox_classes WHERE key = ?').get(finalNormalized.classKey)) {
         this.upsertInboxClass({
-          key: normalized.classKey,
-          title: normalized.classTitle || normalized.classKey,
-          description: normalized.classDescription || 'Класс предложен AI-разбором Inbox.',
+          key: finalNormalized.classKey,
+          title: finalNormalized.classTitle || finalNormalized.classKey,
+          description: finalNormalized.classDescription || 'Класс предложен AI-разбором Inbox.',
           status: 'candidate',
           createdByAgentId: 'inbox.normalizer',
           nowIso: now
@@ -432,7 +439,7 @@ export const workflowStoreMethods = {
         SET title = ?, description_text = ?, preliminary_section = ?, normalization_text = ?,
           is_normalized = 1, item_roles_id = ?, updated_at_utc = ?
         WHERE id = ? AND item_roles_id IS NULL
-      `).run(normalized.title, normalized.description, normalized.classKey, normalizationText, role.id, now, id);
+      `).run(finalNormalized.title, finalNormalized.description, finalNormalized.classKey, normalizationText, role.id, now, id);
       if (linkedInbox.changes !== 1) throw businessError('raw_record_link_conflict');
       this.db.prepare(`
         UPDATE events
@@ -476,7 +483,7 @@ export const workflowStoreMethods = {
           AND run_id IS NOT DISTINCT FROM ?
       `).run(localStatus, completedAt, now, execution.id, operationId, temporalRunId);
       if (updatedExecution.changes !== 1) throw businessError('workflow_execution_changed');
-      return { ok: true, idempotent: false, items_id: id, item_roles_id: role.id, workflow_execution_id: execution.id };
+      return { ok: true, idempotent: false, items_id: id, item_roles_id: role.id, workflow_execution_id: execution.id, class_key: finalNormalized.classKey };
     });
     const result = run();
     if (!result.idempotent) {

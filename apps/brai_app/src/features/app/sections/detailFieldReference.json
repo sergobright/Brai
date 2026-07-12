@@ -119,6 +119,16 @@
         "filledBy": "Default 0 при ingest; workflow apply ставит 1 вместе с item_roles_id"
       },
       {
+        "name": "status",
+        "meaning": "Служебное состояние Inbox-записи",
+        "filledBy": "Default New; внешний Inbox status API может выставить Done для agent operation-записей"
+      },
+      {
+        "name": "completed_at_utc",
+        "meaning": "Когда служебная operation-запись закрыта",
+        "filledBy": "Внешний Inbox status API ставит при Done и очищает при New"
+      },
+      {
         "name": "item_roles_id",
         "meaning": "Ссылка нормализованной Inbox-роли на item_roles",
         "filledBy": "Пусто у raw-записи; workflow apply заполняет после создания entity и role"

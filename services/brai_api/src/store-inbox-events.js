@@ -2,6 +2,7 @@ import {
   FUTURE_EVENT_TOLERANCE_MS,
   INBOX_EVENT_PAYLOAD_VERSION,
   INBOX_EVENT_TYPES,
+  INBOX_STATUSES,
   formatInboxItem,
   normalizeMarkdownSource,
   parseJsonArray,
@@ -143,6 +144,7 @@ export const inboxEventMethods = {
     responseRequired,
     relatedInboxId,
     recordTypeId,
+    preliminarySection = '',
     ingestIdempotencyHash,
     ingestPayloadHash,
     nowIso
@@ -177,6 +179,7 @@ export const inboxEventMethods = {
           response_required: responseRequired === true,
           related_inbox_id: relatedInboxId,
           record_type_id: recordTypeId,
+          preliminary_section: preliminarySection,
           ingest_idempotency_hash: ingestIdempotencyHash,
           ingest_payload_hash: ingestPayloadHash
         }
@@ -184,6 +187,93 @@ export const inboxEventMethods = {
 
       if (result.accepted_event) this.projectAcceptedInboxEvents([result.accepted_event], receivedAt);
       return result;
+    });
+    return run();
+  }
+,
+
+  setInboxApiStatus({ ingestIdempotencyHash, status, nowIso }) {
+    const cleanHash = sanitizeText(ingestIdempotencyHash);
+    if (!cleanHash) throw statusError('idempotency_key_required', 400);
+    if (!INBOX_STATUSES.has(status)) throw statusError('invalid_status', 400);
+    const receivedAt = nowIso ?? new Date().toISOString();
+    const deviceId = 'inbox-api';
+
+    const run = this.db.transaction(() => {
+      this.upsertDevice(
+        {
+          device_id: deviceId,
+          platform: 'server',
+          display_name: 'Inbox API'
+        },
+        receivedAt,
+        { lastSyncAtUtc: receivedAt, lastServerClockOffsetMs: 0 }
+      );
+
+      const scope = scopeSql();
+      const item = this.db.prepare(`
+        SELECT id, status, record_type_id, preliminary_section
+        FROM inbox
+        WHERE ingest_idempotency_hash = ?
+          AND deleted_at_utc IS NULL
+          ${scope.clause}
+        ORDER BY created_at_utc DESC, id ASC
+        LIMIT 1
+      `).get(cleanHash, ...scope.params);
+      if (!item || item.record_type_id !== 2 || item.preliminary_section !== 'operation') {
+        throw statusError('not_found', 404);
+      }
+      if (item.status === status) return { inbox_id: item.id, changed: false, status };
+
+      const clientSequence = this.nextInboxClientSequence(deviceId);
+      const eventId = `inbox:api:${cleanHash.slice(0, 32)}:status:${String(status).toLowerCase()}:${clientSequence}`;
+      const linked = this.getInboxItem(item.id);
+      const eventSequence = this.insertEventRecord({
+        eventId,
+        eventDomain: 'inbox',
+        eventType: 'set_status',
+        eventAction: 'inbox.set_status',
+        title: 'Inbox status',
+        itemsId: linked?.item_roles_id ? item.id : null,
+        itemRolesId: linked?.item_roles_id ?? null,
+        subjectType: 'inbox',
+        subjectId: item.id,
+        actorType: 'agent',
+        actorId: deviceId,
+        deviceId,
+        clientSequence,
+        occurredAtUtc: receivedAt,
+        receivedAtUtc: receivedAt,
+        status: 'accepted',
+        payloadVersion: INBOX_EVENT_PAYLOAD_VERSION,
+        payloadJson: JSON.stringify({ status })
+      });
+      if (!eventSequence) throw statusError('status_event_conflict', 409);
+      this.projectAcceptedInboxEvents([{
+        event_id: eventId,
+        inbox_id: item.id,
+        type: 'set_status',
+        occurred_at_utc: receivedAt,
+        server_sequence: eventSequence,
+        payload_json: JSON.stringify({ status })
+      }], receivedAt);
+      recordInboxTechnicalLog(this, {
+        dt: receivedAt,
+        source: 'inbox',
+        operation: 'inbox.status',
+        status: 'done',
+        eventDomain: 'inbox',
+        eventId,
+        itemsId: linked?.item_roles_id ? item.id : null,
+        deviceId,
+        message: 'Inbox operation status changed',
+        jsonData: {
+          inbox_id: item.id,
+          status,
+          changed: true
+        }
+      });
+      return { inbox_id: item.id, changed: true, status };
     });
     return run();
   }
@@ -543,7 +633,7 @@ export const inboxEventMethods = {
           record_type_id: normalizeInboxRecordTypeId(payload.record_type_id, item?.record_type_id ?? 4),
           item_date: item?.item_date ?? null,
           author: item?.author ?? '',
-          preliminary_section: item?.preliminary_section ?? '',
+          preliminary_section: sanitizeClassKey(payload.preliminary_section) || item?.preliminary_section || '',
           urgency: item?.urgency ?? '',
           attachment_links_json: JSON.stringify(normalizeStringList(
             payload.attachment_links,
@@ -554,6 +644,8 @@ export const inboxEventMethods = {
             : item?.explanation_text ?? (uiEvent ? normalizeMarkdownSource(title) : ''),
           normalization_text: item?.normalization_text ?? '',
           is_normalized: item?.is_normalized ?? 0,
+          status: item?.status ?? 'New',
+          completed_at_utc: item?.completed_at_utc ?? null,
           initial_event_id: item?.initial_event_id ?? event.id,
           ingest_idempotency_hash: event.device_id === 'inbox-api'
             ? sanitizeText(payload.ingest_idempotency_hash) ?? item?.ingest_idempotency_hash ?? null
@@ -593,6 +685,11 @@ export const inboxEventMethods = {
         }
         item.updated_at_utc = event.occurred_at_utc;
         item.last_event_id = event.event_id;
+      } else if (event.type === 'set_status' && item && INBOX_STATUSES.has(payload.status)) {
+        item.status = payload.status;
+        item.completed_at_utc = payload.status === 'Done' ? event.occurred_at_utc : null;
+        item.updated_at_utc = event.occurred_at_utc;
+        item.last_event_id = event.event_id;
       } else if (event.type === 'delete' && item) {
         item.deleted_at_utc = event.occurred_at_utc;
         item.updated_at_utc = event.occurred_at_utc;
@@ -612,9 +709,10 @@ export const inboxEventMethods = {
             id, title, description_text, source, source_key, response_required,
             related_inbox_id, record_type_id, item_date, author, preliminary_section,
             urgency, attachment_links_json, explanation_text, normalization_text,
-            is_normalized, created_at_utc, updated_at_utc, deleted_at_utc, last_event_id,
-            initial_event_id, ingest_idempotency_hash, ingest_payload_hash, user_id
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            is_normalized, status, completed_at_utc, created_at_utc, updated_at_utc,
+            deleted_at_utc, last_event_id, initial_event_id, ingest_idempotency_hash,
+            ingest_payload_hash, user_id
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT(id) DO UPDATE SET
             title = excluded.title,
             description_text = excluded.description_text,
@@ -631,6 +729,8 @@ export const inboxEventMethods = {
             explanation_text = excluded.explanation_text,
             normalization_text = excluded.normalization_text,
             is_normalized = excluded.is_normalized,
+            status = excluded.status,
+            completed_at_utc = excluded.completed_at_utc,
             created_at_utc = excluded.created_at_utc,
             updated_at_utc = excluded.updated_at_utc,
             deleted_at_utc = excluded.deleted_at_utc,
@@ -660,6 +760,8 @@ export const inboxEventMethods = {
         item.explanation_text ?? '',
         item.normalization_text ?? '',
         item.is_normalized === 1 ? 1 : 0,
+        INBOX_STATUSES.has(item.status) ? item.status : 'New',
+        item.completed_at_utc ?? null,
         item.created_at_utc,
         item.updated_at_utc ?? nowIso,
         item.deleted_at_utc ?? null,
@@ -708,6 +810,12 @@ function sanitizeClassKey(value) {
 function inboxOwnerDiffers(store, inboxId) {
   const existing = store.db.prepare('SELECT user_id FROM inbox WHERE id = ?').get(inboxId);
   return Boolean(existing) && existing.user_id !== scopedUserId();
+}
+
+function statusError(message, status) {
+  const error = new Error(message);
+  error.status = status;
+  return error;
 }
 
 export function recordInboxTechnicalLog(store, input) {

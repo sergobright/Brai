@@ -30,13 +30,16 @@ describe("inbox store", () => {
       source: "brai-app",
       source_key: created.deviceId,
       explanation_text: "Входящее важное",
+      status: "New",
+      completed_at_utc: null,
       is_normalized: false,
       item_roles_id: null,
       workflow_status: "queued",
       workflow_step: "ingest",
       pending: true,
     });
-    expect("status" in item).toBe(false);
+    expect(item.status).toBe("New");
+    expect(item.completed_at_utc).toBeNull();
   });
 
   it("projects pending descriptions and coalesces repeated description edits", async () => {
@@ -101,6 +104,8 @@ function state(serverRevision: number, id: string, title: string, descriptionMd 
         author: "",
         preliminary_section: "",
         urgency: "",
+        status: "New",
+        completed_at_utc: null,
         attachment_links: [],
         explanation_text: "",
         normalization_text: "",

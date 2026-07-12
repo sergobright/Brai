@@ -42,8 +42,23 @@ Response:
 | `source_key` | `inbox.source_key` | Стабильный ключ источника/устройства. |
 | `response_required` | `inbox.response_required` | Boolean. |
 | `record_type_id` | `inbox.record_type_id` | Внешний API принимает только `1` или `2`; default `1`. |
+| `preliminary_section` | `inbox.preliminary_section` | Внешний API принимает только `operation` и только вместе с `record_type_id=2`; class форсируется при normalizer apply. |
 | `attachments[]` | `inbox.attachment_links_json` | Whitelisted MIME attachments, включая изображения. |
 | `idempotency_key` | `inbox.ingest_idempotency_hash` | Для одного владельца тот же key + тот же payload возвращает существующую запись; другой payload получает `409`. Исходный key не хранится. |
+
+Для agent operation-записей `idempotency_key` обязателен и служит стабильным operation id. Если `source_key` не передан, server ставит туда этот же id:
+
+```json
+{
+  "target": "inbox",
+  "record_type_id": 2,
+  "source": "codex",
+  "idempotency_key": "operation:agent-task:example",
+  "preliminary_section": "operation",
+  "text": "Короткий заголовок операции",
+  "description": "## Что сделать\n...\n\n## Почему\n..."
+}
+```
 
 Legacy image shortcut всё ещё поддерживается для Android compatibility:
 
@@ -54,6 +69,19 @@ Legacy image shortcut всё ещё поддерживается для Android 
   "image_mime": "image/png"
 }
 ```
+
+### `POST /v1/inbox/status`
+
+API-key protected endpoint для служебного статуса agent operation-записей. UI и `/v1/inbox/events/sync` этот статус не меняют.
+
+```json
+{
+  "idempotency_key": "operation:agent-task:example",
+  "status": "Done"
+}
+```
+
+`status` принимает только `New` или `Done`. `Done` заполняет `inbox.completed_at_utc`, `New` очищает его. Endpoint ищет только operation-записи, созданные через `record_type_id=2`, `preliminary_section=operation` и тот же `idempotency_key`.
 
 ### `POST /v1/brai-cmd/inbox`
 
@@ -68,6 +96,8 @@ Brai CMD отправляет:
 | `attachments[]` | `inbox.attachment_links_json` |
 | `idempotency_key` | stable Inbox event id |
 
+Inbox state responses include read-model fields `status` and `completed_at_utc` for service-side lifecycle consumers.
+
 ## Processing
 
 После создания записи server создаёт raw Inbox role row без `item_roles_id`, первый event без role link и запускает environment-local Temporal workflow `InboxNormalizationWorkflow`:
@@ -81,6 +111,7 @@ DB/business errors останавливают workflow без повторног
 Если API перезапустился между raw ingest и Temporal start, startup reconciliation повторно запускает оставшиеся `queued` executions по тому же stable workflow id.
 
 `explanation_text` не перезаписывается: это source transcript/raw request.
+Если raw запись уже имеет `preliminary_section=operation`, normalizer получает это как hint, а apply сохраняет `operation` даже если model вернула другой class key.
 
 Если `inbox.normalizer` возвращает class key, которого нет в `inbox_classes`, server добавляет строку со статусом `candidate`.
 
@@ -144,8 +175,12 @@ inbox.normalizer
 | --- | --- | --- |
 | 400 | `text_required` | Нет `text`. |
 | 400 | `invalid_record_type` | API получил record type не `1` и не `2`. |
+| 400 | `invalid_preliminary_section` | `preliminary_section` не `operation` или передан не с `record_type_id=2`. |
+| 400 | `operation_idempotency_key_required` | Operation-запись передана без `idempotency_key`. |
+| 400 | `invalid_status` | Status endpoint получил статус не `New`/`Done`. |
 | 400 | `unsupported_attachment_mime` | MIME attachment не разрешён. |
 | 400 | `invalid_attachment` / `invalid_image` | Base64 или bytes не проходят проверку. |
 | 401 | `unauthorized` | Нет Inbox API key или он неверный. |
 | 409 | `idempotency_conflict` | Тот же `idempotency_key` повторён с другим payload. |
+| 409 | `status_event_conflict` | Status endpoint не смог записать уникальное status event. |
 | 413 | `request_too_large` / `attachment_too_large` / `attachments_too_large` | Превышены лимиты. |

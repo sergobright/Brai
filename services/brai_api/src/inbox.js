@@ -45,6 +45,7 @@ const CONTENT_TYPES_BY_EXTENSION = new Map(
 );
 const INBOX_IMAGE_AGENT_ID = 'inbox.image_describer';
 const INBOX_NORMALIZER_AGENT_ID = 'inbox.normalizer';
+const INBOX_OPERATION_CLASS = 'operation';
 const DEFAULT_IMAGE_PROMPT_TEMPLATE = [
   'Опиши изображение для Inbox на русском языке.',
   'Нужно детальное, фактическое описание: что видно, какой интерфейс/экран, важные тексты, объекты, состояния, числа и возможный пользовательский контекст.',
@@ -91,6 +92,11 @@ export function hasInboxApiKey(req, apiKey) {
     || req.headers.authorization === `Bearer ${apiKey}`;
 }
 
+export function inboxIngestIdempotencyHash(idempotencyKey) {
+  const key = optionalText(idempotencyKey);
+  return key ? fullHash(`${scopedUserId() ?? 'unclaimed'}\0${key}`) : null;
+}
+
 function inboxTarget(value) {
   if (value == null || value === '') return null;
   const target = optionalText(value);
@@ -131,16 +137,18 @@ async function receiveInboxInner({
   const attachments = decodeAttachments(body);
   const nowIso = nowDate.toISOString();
   const idempotencyKey = optionalText(body?.idempotency_key);
-  const ingestIdempotencyHash = idempotencyKey
-    ? fullHash(`${scopedUserId() ?? 'unclaimed'}\0${idempotencyKey}`)
-    : null;
+  const ingestIdempotencyHash = inboxIngestIdempotencyHash(idempotencyKey);
   const stableId = ingestIdempotencyHash?.slice(0, 32) ?? null;
   const inboxId = stableId ? `inbox:api:${stableId}` : `inbox:api:${crypto.randomUUID()}`;
   const eventId = stableId ? `inbox:api:${stableId}:create` : `inbox:api:${crypto.randomUUID()}:create`;
   const source = optionalText(body?.source) ?? 'inbox';
-  const sourceKey = optionalText(body?.source_key) ?? '';
   const responseRequired = optionalBoolean(body?.response_required, 'invalid_response_required');
   const recordTypeId = inboxRecordTypeId(body?.record_type_id ?? body?.record_type);
+  const preliminarySection = inboxPreliminarySection(body?.preliminary_section, recordTypeId);
+  if (preliminarySection === INBOX_OPERATION_CLASS && !idempotencyKey) {
+    throwStatus('operation_idempotency_key_required', 400);
+  }
+  const sourceKey = optionalText(body?.source_key) ?? (preliminarySection === INBOX_OPERATION_CLASS ? idempotencyKey : '');
   const ingestPayloadHash = fullHash(JSON.stringify({
     text,
     descriptionText,
@@ -148,6 +156,7 @@ async function receiveInboxInner({
     sourceKey,
     responseRequired,
     recordTypeId,
+    preliminarySection,
     attachments: attachments.map((attachment) => ({ mime: attachment.mime, sha256: fullHash(attachment.bytes) }))
   }));
   const existingInboxId = stableId ? store.inboxIdForEvent(eventId) : null;
@@ -163,6 +172,7 @@ async function receiveInboxInner({
       source,
       sourceKey,
       recordTypeId,
+      preliminarySection,
       responseRequired,
       idempotencyKey,
       logContext,
@@ -225,6 +235,7 @@ async function receiveInboxInner({
       responseRequired,
       relatedInboxId,
       recordTypeId,
+      preliminarySection,
       ingestIdempotencyHash,
       ingestPayloadHash,
       nowIso
@@ -242,6 +253,7 @@ async function receiveInboxInner({
         source,
         sourceKey,
         recordTypeId,
+        preliminarySection,
         responseRequired,
         idempotencyKey,
         logContext,
@@ -264,6 +276,7 @@ async function receiveInboxInner({
     source,
     sourceKey,
     recordTypeId,
+    preliminarySection,
     responseRequired,
     idempotencyKey,
     logContext,
@@ -285,6 +298,7 @@ function recordInboxIngestLog(store, {
   source,
   sourceKey,
   recordTypeId,
+  preliminarySection,
   responseRequired,
   idempotencyKey,
   logContext,
@@ -310,6 +324,8 @@ function recordInboxIngestLog(store, {
       description_present: Boolean(body?.description_text || body?.description || body?.content_text || body?.description_json || body?.content),
       response_required: responseRequired === true,
       record_type_id: recordTypeId,
+      preliminary_section: preliminarySection || null,
+      operation_inbox: preliminarySection === INBOX_OPERATION_CLASS,
       idempotency_key_present: Boolean(idempotencyKey),
       created,
       attachment_count: attachments.length,
@@ -424,7 +440,7 @@ export async function processInboxItem({
           return {
             ...applied,
             image_described: prepared.imageRequired,
-            class_key: result.normalized.classKey
+            class_key: applied.class_key ?? result.normalized.classKey
           };
         } catch (error) {
           store.failInboxWorkflow({
@@ -898,6 +914,16 @@ function inboxRecordTypeId(value) {
   throwStatus('invalid_record_type', 400);
 }
 
+function inboxPreliminarySection(value, recordTypeId) {
+  const raw = optionalText(value);
+  if (!raw) return '';
+  const key = cleanClassKey(raw);
+  if (key !== INBOX_OPERATION_CLASS || recordTypeId !== 2) {
+    throwStatus('invalid_preliminary_section', 400);
+  }
+  return key;
+}
+
 function referencesPreviousMessage(value) {
   const text = value.toLocaleLowerCase('ru');
   return /(предыдущ|прошл|previous|last)/.test(text) && /(прикреп|добав|attach|append)/.test(text);
@@ -1080,12 +1106,16 @@ function cleanNormalizedTitle(value) {
 }
 
 function renderNormalizerPrompt(template, item, classes, imageDescription, validationError = '') {
-  const prompt = template
+  const basePrompt = template
     .replaceAll('{{classes}}', JSON.stringify(classes, null, 2))
     .replaceAll('{{text}}', rawInboxText(item))
     .replaceAll('{{description}}', item.description_md || '')
     .replaceAll('{{image_description}}', imageDescription || '')
     .replaceAll('{{validation_error}}', validationError || '');
+  const preliminarySection = cleanClassKey(item?.preliminary_section);
+  const prompt = preliminarySection
+    ? `${basePrompt}\n\nПредварительный тип из ingest: ${preliminarySection}. Если он задан, верни его как class_key.`
+    : basePrompt;
   return validationError
     ? `${prompt}\n\nОшибка валидации предыдущего ответа:\n${validationError}\nИсправь JSON и верни только валидный объект.`
     : prompt;

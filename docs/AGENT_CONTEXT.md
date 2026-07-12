@@ -66,8 +66,8 @@
 - `npm run android:build:env-apk -- <flavor>` - сборка и публикация Android APK flavor (`production`, `previewA`-`previewE`) with matching web fallback.
 - `deploy/scripts/preview-slots.sh` - lock-protected preview slot registry commands.
 - `deploy/scripts/accept-preview.sh <codex-branch>` - deterministic acceptance entrypoint when the project owner accepts a preview; creates/reuses PR into `main` and enables merge/auto-merge.
-- `deploy/scripts/complete-operation-activities.sh <operation-activity-id>...` - host/deploy-context helper that runs from deploy-owned prod source and marks Codex operation activities as `Done` in the runtime database.
-- `deploy/scripts/list-operation-activities.sh [--status New|Done|all] [--limit <N>] [--json]` - read-only host/deploy-context helper that lists Codex operation activities from the runtime database.
+- Agent operation records are now created through the external Inbox API with `record_type_id=2`, `preliminary_section=operation`, and stable `idempotency_key=operation:...`; close them through `POST /v1/inbox/status`.
+- `deploy/scripts/complete-operation-activities.sh` and `deploy/scripts/list-operation-activities.sh` are legacy helpers for old `activities.operation` rows.
 - `deploy/scripts/postgres-diagnostics.mjs` - read-only Postgres connection and pool diagnostics using `BRAI_DATABASE_URL` from the protected host environment.
 - `deploy/scripts/supavisor-auth-diagnostics.sh [since]` - read-only bounded Supavisor SCRAM/circuit-breaker diagnostics from `supabase-pooler` logs and current pooler sockets.
 - `scripts/brai-npm-update.sh <prefix> <package...>` - updates package manifests and lockfiles without replacing linked task-worktree `node_modules`.

@@ -134,7 +134,7 @@ describe("BraiApp shell", () => {
   });
 
   it("redirects anonymous web users to the standalone auth page without rendering the cabinet shell", async () => {
-    vi.mocked(globalThis.fetch).mockImplementation(async (input: RequestInfo | URL) => {
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       const url = requestUrl(input);
       if (url.includes("/auth/session")) {
         return new Response(JSON.stringify({ authenticated: false, user: null }), {
@@ -142,8 +142,14 @@ describe("BraiApp shell", () => {
           headers: { "content-type": "application/json" },
         });
       }
+      if (url.endsWith("/v1/version")) {
+        return new Response(JSON.stringify(testVersionState("0.0.10")), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
       return Promise.reject(new Error("offline"));
-    });
+    }));
 
     render(<BraiApp />);
 

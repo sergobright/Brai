@@ -264,6 +264,146 @@ test('Inbox API rejects unsupported API record types', async () => {
   }
 });
 
+test('Inbox API creates operation rows and updates service status by idempotency key', async () => {
+  const fixture = await createFixture([
+    '2026-06-27T10:00:00.000Z',
+    '2026-06-27T10:00:01.000Z',
+    '2026-06-27T10:00:02.000Z',
+    '2026-06-27T10:00:03.000Z',
+    '2026-06-27T10:00:04.000Z',
+    '2026-06-27T10:00:05.000Z'
+  ]);
+  const operationId = 'operation:agent-task:test';
+
+  try {
+    const response = await inboxRequest(fixture.url, '/v1/', {
+      method: 'POST',
+      body: JSON.stringify({
+        text: 'Проверить служебный процесс',
+        description: '## Что сделать\nПроверить процесс.\n\n## Почему\nНайден procedural blocker.',
+        record_type_id: 2,
+        preliminary_section: 'operation',
+        idempotency_key: operationId,
+        source: 'codex'
+      })
+    });
+
+    assert.equal(response.status, 201);
+    const item = response.body.state.inbox[0];
+    assert.equal(item.record_type_id, 2);
+    assert.equal(item.source, 'codex');
+    assert.equal(item.source_key, operationId);
+    assert.equal(item.preliminary_section, 'operation');
+    assert.equal(item.status, 'New');
+    assert.equal(item.completed_at_utc, null);
+    assert.equal(item.is_normalized, false);
+    assert.equal(fixture.store.db.prepare("SELECT status FROM inbox_classes WHERE key = 'operation'").get().status, 'active');
+
+    const duplicate = await inboxRequest(fixture.url, '/v1/', {
+      method: 'POST',
+      body: JSON.stringify({
+        text: 'Проверить служебный процесс',
+        description: '## Что сделать\nПроверить процесс.\n\n## Почему\nНайден procedural blocker.',
+        record_type_id: 2,
+        preliminary_section: 'operation',
+        idempotency_key: operationId,
+        source: 'codex'
+      })
+    });
+    assert.equal(duplicate.status, 200);
+    assert.equal(tableCount(fixture, 'inbox'), 1);
+    assert.equal(eventDomainCount(fixture, 'inbox'), 1);
+
+    const done = await inboxRequest(fixture.url, '/v1/inbox/status', {
+      method: 'POST',
+      body: JSON.stringify({ idempotency_key: operationId, status: 'Done' })
+    });
+    assert.equal(done.status, 200);
+    assert.equal(done.body.changed, true);
+    assert.equal(done.body.state.inbox[0].status, 'Done');
+    assert.ok(done.body.state.inbox[0].completed_at_utc);
+    assert.equal(eventDomainCount(fixture, 'inbox'), 2);
+
+    const repeatedDone = await inboxRequest(fixture.url, '/v1/inbox/status', {
+      method: 'POST',
+      body: JSON.stringify({ idempotency_key: operationId, status: 'Done' })
+    });
+    assert.equal(repeatedDone.status, 200);
+    assert.equal(repeatedDone.body.changed, false);
+    assert.equal(eventDomainCount(fixture, 'inbox'), 2);
+
+    const reopened = await inboxRequest(fixture.url, '/v1/inbox/status', {
+      method: 'POST',
+      body: JSON.stringify({ idempotency_key: operationId, status: 'New' })
+    });
+    assert.equal(reopened.status, 200);
+    assert.equal(reopened.body.changed, true);
+    assert.equal(reopened.body.state.inbox[0].status, 'New');
+    assert.equal(reopened.body.state.inbox[0].completed_at_utc, null);
+    assert.equal(eventDomainCount(fixture, 'inbox'), 3);
+
+    const invalidStatus = await inboxRequest(fixture.url, '/v1/inbox/status', {
+      method: 'POST',
+      body: JSON.stringify({ idempotency_key: operationId, status: 'Closed' })
+    });
+    assert.equal(invalidStatus.status, 400);
+    assert.equal(invalidStatus.body.error, 'invalid_status');
+
+    const unauthorized = await inboxRequest(fixture.url, '/v1/inbox/status', {
+      method: 'POST',
+      headers: { 'x-brai-api-key': 'wrong' },
+      body: JSON.stringify({ idempotency_key: operationId, status: 'Done' })
+    }, false);
+    assert.equal(unauthorized.status, 401);
+    assert.equal(eventDomainCount(fixture, 'inbox'), 3);
+  } finally {
+    await fixture.close();
+  }
+});
+
+test('Inbox API requires operation metadata to use agent record type and idempotency', async () => {
+  const fixture = await createFixture(['2026-06-27T10:00:00.000Z']);
+
+  try {
+    const missingIdempotency = await inboxRequest(fixture.url, '/v1/', {
+      method: 'POST',
+      body: JSON.stringify({
+        text: 'Нельзя без idempotency',
+        record_type_id: 2,
+        preliminary_section: 'operation'
+      })
+    });
+    const wrongRecordType = await inboxRequest(fixture.url, '/v1/', {
+      method: 'POST',
+      body: JSON.stringify({
+        text: 'Нельзя как human API',
+        record_type_id: 1,
+        preliminary_section: 'operation',
+        idempotency_key: 'operation:bad-record-type'
+      })
+    });
+    const unsupportedClass = await inboxRequest(fixture.url, '/v1/', {
+      method: 'POST',
+      body: JSON.stringify({
+        text: 'Нельзя произвольный preliminary class',
+        record_type_id: 2,
+        preliminary_section: 'task',
+        idempotency_key: 'operation:bad-class'
+      })
+    });
+
+    assert.equal(missingIdempotency.status, 400);
+    assert.equal(missingIdempotency.body.error, 'operation_idempotency_key_required');
+    assert.equal(wrongRecordType.status, 400);
+    assert.equal(wrongRecordType.body.error, 'invalid_preliminary_section');
+    assert.equal(unsupportedClass.status, 400);
+    assert.equal(unsupportedClass.body.error, 'invalid_preliminary_section');
+    assert.equal(tableCount(fixture, 'inbox'), 0);
+  } finally {
+    await fixture.close();
+  }
+});
+
 test('Inbox API rejects invalid api key without mutating inbox', async () => {
   const fixture = await createFixture(['2026-06-27T10:00:00.000Z']);
 
@@ -398,6 +538,63 @@ test('Inbox AI processing describes images, normalizes text, and suggests a new 
   } finally {
     await fixture.close();
     fs.rmSync(storageRoot, { recursive: true, force: true });
+  }
+});
+
+test('Inbox operation class is forced even when the normalizer returns another class', async () => {
+  const fixture = await createFixture([
+    '2026-06-27T10:00:00.000Z',
+    '2026-06-27T10:00:01.000Z',
+    '2026-06-27T10:00:02.000Z',
+    '2026-06-27T10:00:03.000Z',
+    '2026-06-27T10:00:04.000Z'
+  ], {
+    inboxAutoProcess: true,
+    inboxNormalizer: async ({ item }) => {
+      assert.equal(item.preliminary_section, 'operation');
+      return {
+        title: 'Нормализованная операция',
+        description: 'Агент создал служебную операцию.',
+        class_key: 'task',
+        class_title: '',
+        class_description: '',
+        normalization: 'Normalizer предложил task, но ingest type должен остаться operation.'
+      };
+    }
+  });
+  const operationId = 'operation:agent-task:forced-class';
+
+  try {
+    const response = await inboxRequest(fixture.url, '/v1/', {
+      method: 'POST',
+      body: JSON.stringify({
+        text: 'Проверить forced operation class',
+        description: '## Что сделать\nПроверить forced class.\n\n## Почему\nAI не должен менять тип.',
+        record_type_id: 2,
+        preliminary_section: 'operation',
+        idempotency_key: operationId
+      })
+    });
+    assert.equal(response.status, 201);
+    await waitFor(() => fixture.store.db.prepare('SELECT is_normalized FROM inbox WHERE id = ?').get(response.body.inbox_id)?.is_normalized === 1);
+
+    const item = fixture.store.db.prepare('SELECT * FROM inbox WHERE id = ?').get(response.body.inbox_id);
+    assert.equal(item.title, 'Нормализованная операция');
+    assert.equal(item.preliminary_section, 'operation');
+    assert.equal(item.status, 'New');
+    assert.ok(item.item_roles_id);
+    const normalizedEvent = fixture.store.db.prepare("SELECT payload_json FROM events WHERE subject_id = ? AND event_type = 'normalized'").get(response.body.inbox_id);
+    assert.equal(JSON.parse(normalizedEvent.payload_json).preliminary_section, 'operation');
+
+    const done = await inboxRequest(fixture.url, '/v1/inbox/status', {
+      method: 'POST',
+      body: JSON.stringify({ idempotency_key: operationId, status: 'Done' })
+    });
+    assert.equal(done.status, 200);
+    assert.equal(done.body.state.inbox[0].status, 'Done');
+    assert.ok(done.body.state.inbox[0].completed_at_utc);
+  } finally {
+    await fixture.close();
   }
 });
 

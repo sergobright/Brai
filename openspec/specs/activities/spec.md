@@ -7,8 +7,9 @@ TBD - created by archiving change add-actions-task-list. Update Purpose after ar
 Brai SHALL provide an Activities module for task records synchronized between Web and Android.
 
 Activity records SHALL reference `activity_types` through `activity_type_id`.
-User-created records SHALL use `activity_type_id = action`. Agent-created task
-records SHALL use `activity_type_id = operation`.
+User-created records SHALL use `activity_type_id = action`. New agent-created
+operation records SHALL be routed through Inbox rather than Activities; legacy
+`activity_type_id = operation` rows MAY remain for historical compatibility.
 
 #### Scenario: Activity is deleted
 - **WHEN** the user deletes an activity
@@ -24,9 +25,8 @@ records SHALL use `activity_type_id = operation`.
 
 #### Scenario: Agent operation is recorded
 - **WHEN** the agent decides that a follow-up task or procedural blocker must be tracked
-- **THEN** it is stored in `activities` with `activity_type_id = operation`
-- **AND** `author` records the agent name as text
-- **AND** `reason` records the context for why the agent decided the operation is needed
+- **THEN** new records are created as Inbox operation records
+- **AND** legacy `activities` operation rows are not required for the new flow
 
 #### Scenario: User activity is recorded
 - **WHEN** a user creates an activity from the product interface
