@@ -112,6 +112,8 @@ deploy/scripts/accept-preview.sh <codex-branch>
 
 Then monitor the PR/merge queue, `deploy-prod`, metadata promotion, and preview-slot release until completion or a concrete blocker.
 
+Acceptance PRs are serialized by PR number. If an earlier open `codex/*` PR targets `main`, a later acceptance records `waiting_for_turn` and must be retried after the earlier PR merges or closes. This keeps `main` stable while a reconciled accepted branch reruns its exact preview and prevents repeated reconcile/preview cycles without weakening exact-head verification.
+
 If acceptance reports `mergeStateStatus: DIRTY` or `BEHIND`, run the same-branch `acceptance-reconcile` command, resolve conflicts if any, push the same branch, rerun preview handoff for the new head, and rerun `accept-preview.sh`. Do not create a replacement branch or PR for accepted conflict resolution.
 
 ## Checks

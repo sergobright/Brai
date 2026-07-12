@@ -210,6 +210,21 @@ mark_reconcile_required() {
   echo "Run: node scripts/brai-task.mjs acceptance-reconcile $BRANCH"
 }
 
+wait_for_earlier_acceptance() {
+  local earlier_pr earlier_number earlier_branch earlier_url
+  earlier_pr="$(gh pr list --base "$BASE_BRANCH" --state open --limit 1000 --json number,headRefName,url --jq \
+    "map(select((.number < $PR_NUMBER) and (.headRefName | startswith(\"codex/\")))) | sort_by(.number) | .[0] | select(.) | [.number, .headRefName, .url] | @tsv")"
+  if [[ -z "$earlier_pr" ]]; then
+    return 1
+  fi
+  IFS=$'\t' read -r earlier_number earlier_branch earlier_url <<<"$earlier_pr"
+  write_acceptance_marker "waiting_for_turn" "$PR_NUMBER" "$PR_URL"
+  echo "Acceptance is waiting for earlier PR #$earlier_number ($earlier_branch)"
+  echo "Earlier PR: $earlier_url"
+  echo "Current PR: $PR_URL"
+  return 0
+}
+
 cancel_acceptance() {
   local pr_number pr_url
   pr_number="$(gh pr list --base "$BASE_BRANCH" --head "$BRANCH" --state open --json number --jq ".[0].number // \"\"")"
@@ -326,6 +341,10 @@ fi
 if [[ "$PR_HEAD" != "$HEAD_SHA" ]]; then
   echo "PR head mismatch for $BRANCH: PR has $PR_HEAD, origin has $HEAD_SHA" >&2
   exit 1
+fi
+
+if wait_for_earlier_acceptance; then
+  exit 3
 fi
 
 PR_MERGE_STATE="$(gh pr view "$PR_NUMBER" --json mergeStateStatus --jq ".mergeStateStatus // \"\"")"

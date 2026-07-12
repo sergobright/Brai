@@ -99,6 +99,12 @@ Native-boundary preview branches SHALL publish a slot-specific preview APK befor
 - **AND** the agent monitors the GitHub PR, merge queue, `deploy-prod`, metadata promotion, and preview-slot release until completion or an explicit blocker is known
 - **AND** the work is merged into `main` before production deploy
 
+#### Scenario: Accepted previews contend for main
+- **WHEN** more than one open `codex/*` acceptance PR targets `main`
+- **THEN** only the lowest PR number may start merge or auto-merge
+- **AND** later acceptance receipts use status `waiting_for_turn` until every earlier acceptance PR merges or closes
+- **AND** a reconciled preview is not invalidated by a later acceptance advancing `main` during verification
+
 #### Scenario: Preview branch is accepted or deleted
 - **WHEN** a `codex/*` preview branch is accepted, abandoned, or deleted
 - **THEN** its preview schema is removed

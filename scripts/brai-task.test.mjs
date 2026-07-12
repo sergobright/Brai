@@ -1430,6 +1430,7 @@ test("acceptance markers block preview acceptance but not infra docs CI fixes", 
   assert.equal(isBlockingAcceptanceReceipt({ ...base, status: "acceptance_started", deliveryClass: "runtime-preview" }), true);
   assert.equal(isBlockingAcceptanceReceipt({ ...base, status: "acceptance_started", deliveryClass: "infra-docs" }), false);
   assert.equal(isBlockingAcceptanceReceipt({ ...base, status: "acceptance_started" }), false);
+  assert.equal(isBlockingAcceptanceReceipt({ ...base, status: "waiting_for_turn" }), true);
   assert.equal(isBlockingAcceptanceReceipt({ ...base, status: "reconcile_required", deliveryClass: "runtime-preview" }), true);
   assert.equal(isBlockingAcceptanceReceipt({ ...base, status: "reconcile_started", deliveryClass: "runtime-preview" }), false);
   assert.equal(isBlockingAcceptanceReceipt({ ...base, status: "merged", deliveryClass: "infra-docs" }), true);
@@ -2137,6 +2138,9 @@ test("accept preview checks verified preview before PR actions", () => {
   assert.match(script, /mergeStateStatus/);
   assert.match(script, /reconcile_required/);
   assert.match(script, /acceptance-reconcile/);
+  assert.match(script, /waiting_for_turn/);
+  assert.match(script, /\.number < \$PR_NUMBER/);
+  assert.ok(script.indexOf("wait_for_earlier_acceptance") < script.indexOf('PR_MERGE_STATE="$(gh pr view'));
   assert.match(script, /BEHIND/);
   assert.match(script, /Brai task state must not be a symlink/);
   assert.match(script, /mktemp "\$dir\/\.acceptance-write\.XXXXXX"/);
