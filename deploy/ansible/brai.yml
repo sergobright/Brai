@@ -293,24 +293,40 @@
       ansible.builtin.file:
         path: "{{ brai_syncthing_vault_path }}"
         state: directory
-        owner: root
-        group: "{{ brai_deploy_user }}"
+        owner: "{{ brai_syncthing_user }}"
+        group: "{{ brai_source_group }}"
         mode: "2770"
 
     - name: Ensure existing Syncthing vault contents are writable by sync group
       ansible.builtin.file:
         path: "{{ brai_syncthing_vault_path }}"
         state: directory
-        group: "{{ brai_deploy_user }}"
+        owner: "{{ brai_syncthing_user }}"
+        group: "{{ brai_source_group }}"
         mode: "u=rwX,g=rwX,o="
         recurse: true
+
+    - name: Ensure existing Syncthing vault directories keep sync setgid
+      ansible.builtin.command:
+        argv:
+          - find
+          - "{{ brai_syncthing_vault_path }}"
+          - -type
+          - d
+          - -exec
+          - chmod
+          - "2770"
+          - "{}"
+          - "+"
+      changed_when: false
+      when: not ansible_check_mode
 
     - name: Restore Syncthing vault root setgid mode
       ansible.builtin.file:
         path: "{{ brai_syncthing_vault_path }}"
         state: directory
-        owner: root
-        group: "{{ brai_deploy_user }}"
+        owner: "{{ brai_syncthing_user }}"
+        group: "{{ brai_source_group }}"
         mode: "2770"
 
     - name: Check Syncthing systemd service template
