@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useEffect, useMemo, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ArrowLeft, Check, CheckCircle2, CircleHelp, Download, LoaderCircle, Trash2, X, XCircle } from "lucide-react";
 import {
   deleteBraiCmdAudio,
@@ -392,6 +392,7 @@ function ProviderPage({ capability, snapshot, onBack, onSnapshot }: { capability
   const [manualModel, setManualModel] = useState(false);
   const [testing, setTesting] = useState(false);
   const [result, setResult] = useState<BraiCmdProviderTestResult | null>(null);
+  const providerRequestRef = useRef(0);
   const providers = speech ? SPEECH_PROVIDERS : PROVIDERS;
   const hasProfile = snapshot.settings.providerProfiles.some((profile) => profile.providerId === providerId && profile.configured);
 
@@ -401,6 +402,7 @@ function ProviderPage({ capability, snapshot, onBack, onSnapshot }: { capability
   }
 
   function chooseMode(value: string) {
+    providerRequestRef.current += 1;
     const nextMode = value as BraiCmdProviderMode;
     setMode(nextMode);
     setResult(null);
@@ -409,9 +411,11 @@ function ProviderPage({ capability, snapshot, onBack, onSnapshot }: { capability
   }
 
   async function probeProvider() {
+    const requestId = ++providerRequestRef.current;
     setTesting(true);
     try {
       const tested = await probeBraiCmdProvider({ providerId, apiKey, baseUrl, capability });
+      if (requestId !== providerRequestRef.current) return;
       setResult(tested);
       if (tested?.ok) {
         const nextModels = tested.models ?? [];
@@ -421,18 +425,20 @@ function ProviderPage({ capability, snapshot, onBack, onSnapshot }: { capability
         setVerified(true);
       }
     } finally {
-      setTesting(false);
+      if (requestId === providerRequestRef.current) setTesting(false);
     }
   }
 
   async function connectProvider() {
+    const requestId = ++providerRequestRef.current;
     setTesting(true);
     try {
       const connected = await connectBraiCmdProvider({ providerId, apiKey, model, baseUrl, capability });
+      if (requestId !== providerRequestRef.current) return;
       setResult(connected);
       if (connected?.ok && connected.state) onSnapshot(connected.state);
     } finally {
-      setTesting(false);
+      if (requestId === providerRequestRef.current) setTesting(false);
     }
   }
 
@@ -482,7 +488,7 @@ function ProviderPage({ capability, snapshot, onBack, onSnapshot }: { capability
             <FieldGroup className="gap-4">
               <Field>
                 <FieldLabel htmlFor="brai-cmd-provider-id">Поставщик</FieldLabel>
-                <Select value={providerId} onValueChange={(value) => { setProviderId(value as BraiCmdProviderId); setVerified(false); setResult(null); setModel(""); }}>
+                <Select value={providerId} onValueChange={(value) => { providerRequestRef.current += 1; setTesting(false); setProviderId(value as BraiCmdProviderId); setVerified(false); setResult(null); setModel(""); }}>
                   <SelectTrigger id="brai-cmd-provider-id" className="w-full"><SelectValue /></SelectTrigger>
                   <SelectContent>{providers.map((provider) => <SelectItem key={provider.id} value={provider.id}>{provider.label}</SelectItem>)}</SelectContent>
                 </Select>
@@ -490,12 +496,12 @@ function ProviderPage({ capability, snapshot, onBack, onSnapshot }: { capability
               {providerId === "custom-openai" ? (
                 <Field>
                   <FieldLabel htmlFor="brai-cmd-provider-base-url">Base URL</FieldLabel>
-                  <Input id="brai-cmd-provider-base-url" placeholder="https://example.com/v1" value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} />
+                  <Input id="brai-cmd-provider-base-url" placeholder="https://example.com/v1" value={baseUrl} onChange={(event) => { providerRequestRef.current += 1; setTesting(false); setBaseUrl(event.target.value); setVerified(false); setResult(null); }} />
                 </Field>
               ) : null}
               <Field>
                 <FieldLabel htmlFor="brai-cmd-provider-key">API ключ</FieldLabel>
-                <Input id="brai-cmd-provider-key" autoComplete="off" placeholder={hasProfile ? "Ключ сохранён; оставьте пустым, чтобы использовать его" : "API-ключ"} type="password" value={apiKey} onChange={(event) => { setApiKey(event.target.value); setVerified(false); }} />
+                <Input id="brai-cmd-provider-key" autoComplete="off" placeholder={hasProfile ? "Ключ сохранён; оставьте пустым, чтобы использовать его" : "API-ключ"} type="password" value={apiKey} onChange={(event) => { providerRequestRef.current += 1; setTesting(false); setApiKey(event.target.value); setVerified(false); setResult(null); }} />
               </Field>
               {!verified ? (
                 <Button className="w-full sm:w-fit" disabled={testing} type="button" onClick={() => void probeProvider()}>

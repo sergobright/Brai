@@ -173,6 +173,7 @@ export function OnboardingFlow({
   const transitionTimerRef = useRef<number | null>(null);
   const transitionFrameRef = useRef<number | null>(null);
   const failedCheckTimerRef = useRef<number | null>(null);
+  const providerRequestRef = useRef(0);
   const isAndroid = isNativeShell() && platformName() === "android";
 
   useEffect(() => {
@@ -331,6 +332,7 @@ export function OnboardingFlow({
   }
 
   function go(step: OnboardingStep, next?: Partial<OnboardingState>) {
+    providerRequestRef.current += 1;
     setError("");
     setMessage("");
     setCheckingStep(null);
@@ -347,6 +349,7 @@ export function OnboardingFlow({
   }
 
   function back() {
+    providerRequestRef.current += 1;
     const current = stateRef.current;
     const previous = previousOnboardingStep(current);
     if (!previous) return;
@@ -482,8 +485,10 @@ export function OnboardingFlow({
     }
     setError("");
     setCheckingStep("provider-key");
+    const requestId = ++providerRequestRef.current;
     if (!providerVerified) {
       const result = await probeBraiCmdProvider({ providerId: provider, apiKey: providerKey, capability: "speech" });
+      if (requestId !== providerRequestRef.current) return;
       setCheckingStep(null);
       if (!result?.ok) {
         setError(result?.message || "Не удалось проверить ключ поставщика.");
@@ -502,6 +507,7 @@ export function OnboardingFlow({
       return;
     }
     const result = await connectBraiCmdProvider({ providerId: provider, apiKey: providerKey, model: providerModel, capability: "speech" });
+    if (requestId !== providerRequestRef.current) return;
     setCheckingStep(null);
     if (!result?.ok) {
       setError(result?.message || "Не удалось подключить модель.");
@@ -798,6 +804,8 @@ export function OnboardingFlow({
         <StepScreen actions={<CheckActionButton disabled={!provider || providerKey.trim().length < 8 || (providerVerified && !providerModel)} status={checkStatus("provider-key")} onClick={testProviderKey} />}>
           <InfoBlock icon={KeyRound} title="Ключ поставщика" text="Выберите поставщика, введите ключ и сохраните его для голосового модуля." />
           <Select value={provider} onValueChange={(value) => {
+            providerRequestRef.current += 1;
+            setCheckingStep(null);
             setProvider(value as BraiCmdProviderId);
             setProviderVerified(false);
             setProviderManualModel(false);
@@ -815,6 +823,8 @@ export function OnboardingFlow({
             </SelectContent>
           </Select>
           <Input value={providerKey} type="password" aria-label="Ключ поставщика" placeholder="API-ключ" onChange={(event) => {
+            providerRequestRef.current += 1;
+            setCheckingStep(null);
             setProviderKey(event.target.value);
             setProviderVerified(false);
             setProviderManualModel(false);
