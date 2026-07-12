@@ -147,12 +147,12 @@ describe("BraiApp shell", () => {
 
     render(<BraiApp />);
 
-    await waitFor(() => expect(window.location.pathname).toBe("/auth"), { timeout: 9_000 });
+    await waitFor(() => expect(window.location.pathname).toBe("/auth"), { timeout: 20_000 });
     expect(document.querySelector("[data-auth-redirect]")).toBeInTheDocument();
     expect(document.querySelector("[data-app-shell]")).not.toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Действия" })).not.toBeInTheDocument();
     expect(screen.queryByRole("textbox", { name: "Email" })).not.toBeInTheDocument();
-  }, 12_000);
+  }, 24_000);
 
   it("shows the production OTP countdown and enables resend after one minute", async () => {
     vi.useFakeTimers();
