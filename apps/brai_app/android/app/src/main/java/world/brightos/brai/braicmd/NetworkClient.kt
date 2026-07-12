@@ -9,7 +9,11 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.BufferedOutputStream
 import java.io.File
+import java.io.IOException
+import java.net.ConnectException
 import java.net.HttpURLConnection
+import java.net.SocketTimeoutException
+import java.net.UnknownHostException
 import java.net.URL
 import java.util.UUID
 
@@ -38,7 +42,18 @@ class ServerResponseException(
     val code: String,
     val json: JSONObject?,
     message: String
-) : IllegalStateException(message)
+) : IllegalStateException(message) {
+    constructor(statusCode: Int, code: String, message: String) : this(statusCode, code, null, message)
+}
+
+internal const val PRELIMINARY_TIMEOUT_MS = 15_000
+
+internal fun preliminaryFailureCode(error: Throwable): String = when (error) {
+    is SocketTimeoutException -> "preliminary_timeout"
+    is UnknownHostException, is ConnectException, is IOException -> "preliminary_network"
+    is ServerResponseException -> "preliminary_server"
+    else -> "preliminary_unknown"
+}
 
 class NetworkClient(context: Context) {
     private val appContext = context.applicationContext
@@ -57,6 +72,8 @@ class NetworkClient(context: Context) {
     fun requestPreliminaryProfile(displayName: String, deviceFingerprint: String): PreliminaryProfileResponse {
         val connection = openPublicConnection("/v1/brai-cmd/preliminary-profile", "POST").apply {
             doOutput = true
+            connectTimeout = PRELIMINARY_TIMEOUT_MS
+            readTimeout = PRELIMINARY_TIMEOUT_MS
             setRequestProperty("Content-Type", "application/json; charset=utf-8")
         }
         val body = JSONObject()

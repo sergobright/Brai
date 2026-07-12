@@ -121,6 +121,19 @@ describe("Brai CMD bridge", () => {
     expect(plugin.retryQueue).toHaveBeenCalledWith();
   });
 
+  it("logs only the safe preliminary failure category", async () => {
+    vi.stubGlobal("Capacitor", {
+      isNativePlatform: () => true,
+      getPlatform: () => "android",
+    });
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    plugin.preparePreliminaryProfile.mockRejectedValue(Object.assign(new Error("private network detail"), { code: "preliminary_timeout" }));
+    const { prepareBraiCmdPreliminaryProfile } = await import("@/shared/platform/braiCmd");
+
+    await expect(prepareBraiCmdPreliminaryProfile("Fixture User")).resolves.toBeNull();
+    expect(warning).toHaveBeenCalledWith("Brai CMD preliminary profile failed", { code: "preliminary_timeout" });
+  });
+
   it("listens to onboarding events on Android native bridge", async () => {
     vi.stubGlobal("Capacitor", {
       isNativePlatform: () => true,

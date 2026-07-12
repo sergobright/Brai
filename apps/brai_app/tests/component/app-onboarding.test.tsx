@@ -284,9 +284,16 @@ describe("BraiApp onboarding", () => {
     });
   });
 
-  it("continues from the name step when preliminary profile creation is offline", async () => {
+  it("keeps preliminary onboarding fail-closed and allows retry after a server error", async () => {
     stubAndroidCapacitor();
-    cmdPlugin.preparePreliminaryProfile.mockRejectedValueOnce(new Error("offline"));
+    cmdPlugin.preparePreliminaryProfile
+      .mockRejectedValueOnce(Object.assign(new Error("offline"), { code: "preliminary_timeout" }))
+      .mockResolvedValueOnce({
+        preliminaryStatus: "ready",
+        preliminaryUserId: "prelim-retry",
+        preliminaryClaimToken: "claim-retry",
+        deviceFingerprint: "fingerprint-retry",
+      });
     window.localStorage.setItem(ONBOARDING_STORAGE_KEY, JSON.stringify({
       complete: false,
       history: ["path"],
@@ -301,11 +308,20 @@ describe("BraiApp onboarding", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Продолжить" }));
 
+    expect(await screen.findByText("Не удалось проверить устройство на сервере Brai. Повторите.")).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Имя" })).toBeInTheDocument();
+    expect(screen.queryByText("Brai CMD")).not.toBeInTheDocument();
+    expect(JSON.parse(window.localStorage.getItem(ONBOARDING_STORAGE_KEY) || "{}")).not.toHaveProperty("preliminaryUserId");
+
+    const retry = screen.getByRole("button", { name: "Продолжить" });
+    await waitFor(() => expect(retry).toBeEnabled());
+    fireEvent.click(retry);
+
     expect(await screen.findByText("Brai CMD")).toBeInTheDocument();
-    expect(screen.queryByText("Нет соединения с серверами Brai, повторите.")).not.toBeInTheDocument();
+    expect(cmdPlugin.preparePreliminaryProfile).toHaveBeenCalledTimes(2);
     expect(JSON.parse(window.localStorage.getItem(ONBOARDING_STORAGE_KEY) || "{}")).toMatchObject({
-      preliminaryUserId: "",
-      preliminaryClaimToken: "",
+      preliminaryUserId: "prelim-retry",
+      preliminaryClaimToken: "claim-retry",
       duplicatePreliminaryUserId: "",
     });
   });

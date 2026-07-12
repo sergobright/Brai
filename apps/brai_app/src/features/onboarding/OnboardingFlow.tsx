@@ -95,7 +95,7 @@ const OnboardingChromeContext = createContext<{
 const screenTransitionDelayMs = process.env.NODE_ENV === "test" ? 0 : 280;
 const providerOptions = ["Groq", "OpenAI", "Deepgram", "AssemblyAI"] as const;
 const manualConfirmDelayMs = 3000;
-const nameSubmitMuteMs = 2000;
+const nameSubmitMuteMs = process.env.NODE_ENV === "test" ? 0 : 2000;
 const verificationMinVisibleMs = process.env.NODE_ENV === "test" ? 1 : 1000;
 const failedCheckVisibleMs = process.env.NODE_ENV === "test" ? 100 : 2000;
 const welcomeSlides = [
@@ -523,14 +523,7 @@ export function OnboardingFlow({
       if (isAndroid) {
         const profile = await prepareBraiCmdPreliminaryProfile(displayName);
         if (!profile) {
-          setPreliminaryDeviceFingerprint("");
-          setNameDuplicateBlocked(false);
-          go("setup-start", {
-            name: displayName,
-            preliminaryUserId: "",
-            preliminaryClaimToken: "",
-            duplicatePreliminaryUserId: "",
-          });
+          setError("Не удалось проверить устройство на сервере Brai. Повторите.");
           return;
         }
         setPreliminaryDeviceFingerprint(profile.deviceFingerprint ?? "");

@@ -71,7 +71,11 @@ export async function prepareBraiCmdPreliminaryProfile(displayName: string): Pro
   if (!isNativeAndroid()) return null;
   try {
     return await BraiCmd.preparePreliminaryProfile({ displayName });
-  } catch {
+  } catch (error) {
+    const code = typeof error === "object" && error !== null && "code" in error && typeof error.code === "string"
+      ? error.code
+      : "preliminary_unknown";
+    console.warn("Brai CMD preliminary profile failed", { code });
     return null;
   }
 }
