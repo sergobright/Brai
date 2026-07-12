@@ -9,8 +9,13 @@ import { pendingEvents, saveGoalCache, saveHistoryCache } from "@/shared/storage
 import { emptyGoal, emptyHistory } from "@/shared/types/timer";
 import { shouldSnapSlidingNumber } from "@/shared/ui/sliding-number";
 
+const drawsCanvasSpy = vi.hoisted(() => vi.fn());
+
 vi.mock("@/features/app/sections/draws/DrawsCanvas", () => ({
-  DrawsCanvas: () => <div data-testid="draws-canvas" />,
+  DrawsCanvas: (props: Record<string, unknown>) => {
+    drawsCanvasSpy(props);
+    return <div data-testid="draws-canvas" />;
+  },
 }));
 
 describe("BraiApp shell", () => {
@@ -183,6 +188,24 @@ describe("BraiApp shell", () => {
     const editor = screen.getByRole("textbox", { name: "Название рисунка: Рисунок" });
     expect(editor).toBeVisible();
     expect(editor).toHaveTextContent("Рисунок");
+  });
+
+  it("strips Excalidraw collaborators from loaded Draws app state", async () => {
+    drawsCanvasSpy.mockClear();
+    stubDrawsFetch({
+      type: "excalidraw",
+      version: 2,
+      source: "test",
+      elements: [],
+      appState: { collaborators: {}, viewBackgroundColor: "#ffffff" },
+      files: {},
+    });
+
+    render(<BraiApp initialSection="draws" />);
+
+    await waitFor(() => expect(drawsCanvasSpy).toHaveBeenCalled());
+    const initialData = drawsCanvasSpy.mock.calls.at(-1)?.[0].initialData as Record<string, unknown>;
+    expect(initialData.appState).toEqual({ viewBackgroundColor: "#ffffff" });
   });
 
   it("keeps contextual actions before the rightmost sync status", async () => {
@@ -1065,7 +1088,14 @@ function emptyInboxResponse(): Response {
   return jsonResponse({ server_time_utc: "2026-06-22T06:00:00.000Z", server_revision: 1, inbox: [] });
 }
 
-function stubDrawsFetch() {
+function stubDrawsFetch(scene: Record<string, unknown> = {
+  type: "excalidraw",
+  version: 2,
+  source: "test",
+  elements: [],
+  appState: { viewBackgroundColor: "#ffffff" },
+  files: {},
+}) {
   vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
     const url = requestUrl(input);
     if (url.endsWith("/auth/session")) return authSessionResponse();
@@ -1078,6 +1108,15 @@ function stubDrawsFetch() {
           updated_at_utc: "2026-07-11T12:00:00.000Z",
           size_bytes: 0,
         }],
+      });
+    }
+    if (url.includes("/v1/draws/")) {
+      return jsonResponse({
+        name: "Рисунок.excalidraw",
+        title: "Рисунок",
+        updated_at_utc: "2026-07-11T12:00:00.000Z",
+        size_bytes: 0,
+        scene,
       });
     }
     return Promise.reject(new Error("offline"));

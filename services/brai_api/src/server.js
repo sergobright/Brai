@@ -1391,13 +1391,17 @@ function normalizeDrawScene(scene) {
     error.status = 400;
     throw error;
   }
+  const appState = scene.appState && typeof scene.appState === 'object' && !Array.isArray(scene.appState)
+    ? { ...scene.appState }
+    : {};
+  delete appState.collaborators;
   return {
     ...scene,
     type: 'excalidraw',
     version: Number.isFinite(scene.version) ? scene.version : 2,
     source: typeof scene.source === 'string' ? scene.source : 'brai',
     elements: Array.isArray(scene.elements) ? scene.elements : [],
-    appState: scene.appState && typeof scene.appState === 'object' && !Array.isArray(scene.appState) ? scene.appState : {},
+    appState,
     files: scene.files && typeof scene.files === 'object' && !Array.isArray(scene.files) ? scene.files : {}
   };
 }

@@ -27,7 +27,7 @@ const emptyScene = (): Record<string, unknown> => ({
   version: 2,
   source: "brai",
   elements: [],
-  appState: { viewBackgroundColor: "#ffffff" },
+  appState: sanitizeDrawAppState({ viewBackgroundColor: "#ffffff" }),
   files: {},
 });
 
@@ -60,7 +60,7 @@ export function DrawsSection({ theme, onFullscreenChange }: { theme: ThemeMode; 
     setStatus("loading");
     try {
       const loaded = await api.draw(name);
-      setScene(loaded.scene);
+      setScene(sanitizeDrawScene(loaded.scene));
       setDraws((current) => upsertDraw(current, loaded));
       setStatus("idle");
     } catch (error) {
@@ -134,7 +134,7 @@ export function DrawsSection({ theme, onFullscreenChange }: { theme: ThemeMode; 
       setDraws((currentDraws) => upsertDraw(currentDraws.filter((draw) => draw.name !== name), renamed));
       if (name === activeName) {
         setActiveName(renamed.name);
-        setScene(renamed.scene);
+        setScene(sanitizeDrawScene(renamed.scene));
       }
       setStatus("saved");
     } catch {
@@ -149,7 +149,7 @@ export function DrawsSection({ theme, onFullscreenChange }: { theme: ThemeMode; 
       version: 2,
       source: "brai",
       elements,
-      appState,
+      appState: sanitizeDrawAppState(appState),
       files,
     } as Record<string, unknown>;
     pendingSceneRef.current = nextScene;
@@ -268,6 +268,20 @@ export function DrawsSection({ theme, onFullscreenChange }: { theme: ThemeMode; 
 function upsertDraw(draws: DrawSceneSummary[], next: DrawSceneSummary): DrawSceneSummary[] {
   const rest = draws.filter((draw) => draw.name !== next.name);
   return [next, ...rest].sort((left, right) => right.updated_at_utc.localeCompare(left.updated_at_utc) || left.name.localeCompare(right.name));
+}
+
+function sanitizeDrawScene(scene: Record<string, unknown>): Record<string, unknown> {
+  return {
+    ...scene,
+    appState: sanitizeDrawAppState(scene.appState),
+  };
+}
+
+function sanitizeDrawAppState(appState: unknown): Record<string, unknown> {
+  if (!appState || typeof appState !== "object" || Array.isArray(appState)) return {};
+  const serializableAppState = { ...appState as Record<string, unknown> };
+  delete serializableAppState.collaborators;
+  return serializableAppState;
 }
 
 function defaultUntitledName(draws: DrawSceneSummary[]): string {

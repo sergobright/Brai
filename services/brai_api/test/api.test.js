@@ -150,6 +150,11 @@ test('draw scenes are stored under the authenticated user Draws vault folder', a
     assert.deepEqual(normalized.body.scene.appState, {});
     assert.deepEqual(normalized.body.scene.files, {});
 
+    fs.writeFileSync(filePath, JSON.stringify({ elements: [], appState: { collaborators: {}, viewBackgroundColor: '#ffffff' }, files: {} }));
+    const normalizedAppState = await request(fixture.url, `/v1/draws/${encodeURIComponent('Схема.excalidraw')}`);
+    assert.equal(normalizedAppState.status, 200);
+    assert.deepEqual(normalizedAppState.body.scene.appState, { viewBackgroundColor: '#ffffff' });
+
     const renamed = await request(fixture.url, `/v1/draws/${encodeURIComponent('Схема.excalidraw')}/rename`, {
       method: 'POST',
       body: JSON.stringify({ name: 'Новая схема' })
