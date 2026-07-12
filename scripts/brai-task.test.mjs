@@ -717,18 +717,18 @@ test("operation activity completion helper rejects unsafe ids", () => {
 test("operation activity helper transports remote payload through stdin JSON", () => {
   const script = fs.readFileSync(new URL("../deploy/scripts/create-operation-activity.sh", import.meta.url), "utf8");
   assert.match(script, /--stdin-json/);
-  assert.match(script, /printf '%s' "\$payload_json" \| ssh/);
+  assert.match(script, /printf '%s\\n' "\$payload_json" \| ssh/);
   assert.doesNotMatch(script, /bash -s -- "\$DEPLOY_REPO" "\$SERVICE_USER" "\$OPERATION_ID"/);
 
   const result = spawnSync("bash", ["deploy/scripts/create-operation-activity.sh", "--local", "--stdin-json"], {
     cwd: path.resolve(import.meta.dirname, ".."),
     encoding: "utf8",
-    input: JSON.stringify({
+    input: `${JSON.stringify({
       id: "operation:agent-task:stdin-probe",
       title: "Проверка stdin payload",
       reason: "Пробелы и спецсимволы: $() ; & | ' \"",
       description: "Русский текст и перенос\nстроки доходят до защищённой DB boundary.",
-    }),
+    })}\n`,
     env: { ...process.env, BRAI_DATABASE_URL: "", BRAI_API_ENV_FILE: "/nonexistent" },
   });
   assert.notEqual(result.status, 0);
@@ -848,6 +848,18 @@ test("production deploy resolves ledger version through the shared resolver", ()
   assert.doesNotMatch(script, /version_type_id = 'release'/);
   assert.doesNotMatch(script, /version_type_id = 'build'/);
   assert.doesNotMatch(script, /version_type_id = 'apk'/);
+});
+
+test("remote deploy installs dependencies before replacing the active source tree", () => {
+  const deploy = fs.readFileSync(new URL("../deploy/scripts/ci-ssh-deploy.sh", import.meta.url), "utf8");
+  const stageIndex = deploy.indexOf('cd "$REMOTE_UPLOAD"');
+  const installIndex = deploy.indexOf("npm --prefix services/brai_api ci", stageIndex);
+  const previousIndex = deploy.indexOf('mv "$SOURCE_ROOT" "$PREVIOUS_SOURCE"', installIndex);
+  const publishIndex = deploy.indexOf('mv "$REMOTE_UPLOAD" "$SOURCE_ROOT"', previousIndex);
+  assert.ok(stageIndex > 0);
+  assert.ok(stageIndex < installIndex);
+  assert.ok(installIndex < previousIndex);
+  assert.ok(previousIndex < publishIndex);
 });
 
 test("preview deploy requires Postgres and preserves artifact setgid", () => {

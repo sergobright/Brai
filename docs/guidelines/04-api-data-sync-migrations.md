@@ -21,6 +21,7 @@
 - При любом изменении runtime/API/sync/deploy/admin/auth/background/native/server side effect всегда проверь, нужен ли новый или изменённый `logs` writer, reader, admin metadata и test.
 - Логируй один bounded summary на operation/batch: operation/status/reason/duration/correlation ids/counts/compact flags. Если есть durable ledger, `logs` хранит summary и ссылки на ledger ids.
 - Не пиши secrets, credentials, tokens, cookies, OTP, passwords, raw payloads, full stdout/stderr, base64, file paths, transcripts, большие AI outputs или пользовательский контент без явной необходимости.
+- При диагностике deployed/runtime путей ищи только в заранее названных файлах или с узкими glob include/exclude. Не запускай рекурсивный `rg`/`find` по env, dependency, build, cache, backup и optional-skill деревьям; для secret-bearing путей проверяй только имена полей, права, timestamps или bounded metadata без значений.
 - Если меняются поля, статусы или смысл операции, обнови `json_data` так, чтобы максимум пользы помещался в минимальный объём.
 
 ## Runtime schema verification

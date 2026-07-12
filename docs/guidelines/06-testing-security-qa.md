@@ -61,6 +61,7 @@ scripts/use-node22.sh node scripts/brai-sandbox-check-mode.mjs -- <command>
 
 - Визуальные изменения проверяй на desktop и mobile.
 - Для complex interaction используй Playwright flow, а не только component test.
+- Для изменённого authenticated deep route preview handoff обязан проверить опубликованный URL реальным browser flow после входа: открыть сам route, дождаться готового UI, собрать `pageerror`/console errors и подтвердить отсутствие runtime crash. Локальный static build, HEAD/status и unauthenticated redirect эту проверку не заменяют.
 - Для copied visual block проверяй, что source structure/style не был заменён custom implementation.
 - Для product surfaces проверяй отсутствие новых ручных `panelClass`/border-surface containers.
 

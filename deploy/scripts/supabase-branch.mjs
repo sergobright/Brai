@@ -210,9 +210,7 @@ async function applyMigrations(databaseUrl) {
       )
     `);
     const migrationsDir = path.join(root, "supabase/migrations");
-    for (const entry of fs.readdirSync(migrationsDir).filter((name) => name.endsWith(".sql")).sort()) {
-      const version = entry.match(/^(\d+)/)?.[1] || "";
-      if (!version) throw new Error(`Invalid Supabase migration filename: ${entry}`);
+    for (const { name: entry, version } of migrationFileEntries(migrationsDir)) {
       const existing = await pool.query("SELECT 1 FROM supabase_migration_files WHERE version = $1", [version]);
       if (existing.rows.length > 0) continue;
       await pool.query(fs.readFileSync(path.join(migrationsDir, entry), "utf8"));
@@ -224,6 +222,22 @@ async function applyMigrations(databaseUrl) {
   } finally {
     await pool.end();
   }
+}
+
+export function migrationFileEntries(migrationsDir) {
+  const entries = fs.readdirSync(migrationsDir)
+    .filter((name) => name.endsWith(".sql"))
+    .sort()
+    .map((name) => ({ name, version: name.match(/^(\d+)/)?.[1] || "" }));
+  for (const entry of entries) {
+    if (!entry.version) throw new Error(`Invalid Supabase migration filename: ${entry.name}`);
+  }
+  const duplicates = entries.filter((entry, index) => entries.findIndex(({ version }) => version === entry.version) !== index);
+  if (duplicates.length > 0) {
+    const versions = [...new Set(duplicates.map(({ version }) => version))];
+    throw new Error(`Duplicate Supabase migration version: ${versions.join(", ")}`);
+  }
+  return entries;
 }
 
 async function applyPreviewSeed(databaseUrl) {

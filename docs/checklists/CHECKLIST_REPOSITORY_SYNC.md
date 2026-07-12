@@ -21,6 +21,7 @@
 - [ ] Push the `codex/*` task branch to `origin` unless the task is explicitly local-only/no-push.
 - [ ] Classify delivery with the guard: preview-class runtime/product or `infra-docs`.
 - [ ] For preview-class work, wait for CI/deploy to assign or reuse a preview slot.
+- [ ] If an authenticated deep route changed, verify that exact published preview route after login in a real browser and record page/console error results before handoff.
 - [ ] For preview-class work, record release notes with `node scripts/brai-task.mjs release-notes --short "..." --details "..." --reason "..."`, then run `scripts/brai-preview-handoff.sh`, let it wait through transient `queued` / `in_progress` states, and use its verified preview letter, URL, branch, and commit only after success.
 - [ ] For `infra-docs` or `technical-no-preview` work, run `node scripts/brai-task.mjs handoff` and use its verified no-preview PR state only after the PR is `MERGED`; `OPEN`, `BEHIND`, `BLOCKED`, `DIRTY`, failed checks, cleanup failures, and auto-merge-only states are blockers.
 - [ ] If all preview slots are occupied, report queued status and queue position/source when available.

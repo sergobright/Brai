@@ -392,12 +392,13 @@ describe("mobile OTA publish scripts", () => {
     expect(script).not.toContain("BRAI_DB");
   });
 
-  it("restores stale preview source permissions before deploy cleanup", async () => {
+  it("restores stale source permissions only after staged dependencies are complete", async () => {
     const script = await readFile(path.join(workspaceRoot, "deploy/scripts/ci-ssh-deploy.sh"), "utf8");
 
     expect(script).toContain('find "$SOURCE_ROOT" -user "$(id -u)" -exec chmod u+rwX,g+rwX {} + || true');
-    expect(script).toContain('rm -rf "$SOURCE_ROOT" || { sleep 2; rm -rf "$SOURCE_ROOT"; }');
-    expect(script.indexOf('find "$SOURCE_ROOT" -user "$(id -u)"')).toBeLessThan(script.indexOf('rm -rf "$SOURCE_ROOT"'));
+    expect(script).toContain('mv "$SOURCE_ROOT" "$PREVIOUS_SOURCE"');
+    expect(script.indexOf('npm --prefix services/brai_api ci')).toBeLessThan(script.indexOf('find "$SOURCE_ROOT" -user "$(id -u)"'));
+    expect(script.indexOf('find "$SOURCE_ROOT" -user "$(id -u)"')).toBeLessThan(script.indexOf('mv "$SOURCE_ROOT" "$PREVIOUS_SOURCE"'));
   });
 
   it("keeps preview runtime Supabase env mandatory and artifacts writable by the deploy group", async () => {

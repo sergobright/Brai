@@ -142,21 +142,28 @@ if [[ "$ENVIRONMENT" == "prod" ]]; then
   export BRAI_PUBLIC_SITE_TARGET="$DEPLOY_REPO/deploy/site"
   export BRAI_MOBILE_TARGET="$DEPLOY_REPO/deploy/mobile-update"
 fi
-if [[ -d "$SOURCE_ROOT" ]]; then
-  find "$SOURCE_ROOT" -user "$(id -u)" -exec chmod u+rwX,g+rwX {} + || true
-fi
-rm -rf "$SOURCE_ROOT" || { sleep 2; rm -rf "$SOURCE_ROOT"; }
-mkdir -p "$(dirname "$SOURCE_ROOT")"
-mv "$REMOTE_UPLOAD" "$SOURCE_ROOT"
-find "$SOURCE_ROOT" -user "$(id -u)" -exec chmod u+rwX,g+rwX {} +
-find "$SOURCE_ROOT" -type d -user "$(id -u)" -exec chmod g+s {} +
-
-cd "$SOURCE_ROOT"
+cd "$REMOTE_UPLOAD"
 umask 0002
 npm ci
 npm --prefix apps/brai_app ci
 npm --prefix services/brai_api ci
 npm --prefix admin ci
+find "$REMOTE_UPLOAD" -user "$(id -u)" -exec chmod u+rwX,g+rwX {} +
+find "$REMOTE_UPLOAD" -type d -user "$(id -u)" -exec chmod g+s {} +
+
+if [[ -d "$SOURCE_ROOT" ]]; then
+  find "$SOURCE_ROOT" -user "$(id -u)" -exec chmod u+rwX,g+rwX {} + || true
+fi
+PREVIOUS_SOURCE="${SOURCE_ROOT}.previous-$$"
+rm -rf "$PREVIOUS_SOURCE"
+mkdir -p "$(dirname "$SOURCE_ROOT")"
+if [[ -d "$SOURCE_ROOT" ]]; then
+  mv "$SOURCE_ROOT" "$PREVIOUS_SOURCE"
+fi
+mv "$REMOTE_UPLOAD" "$SOURCE_ROOT"
+rm -rf "$PREVIOUS_SOURCE"
+
+cd "$SOURCE_ROOT"
 export BRAI_BRANCH BRAI_COMMIT
 export BRAI_NATIVE_APK_CHANGE
 export BRAI_ROOT="$SOURCE_ROOT"

@@ -177,7 +177,7 @@ test('workflow observability migration adds process json and telemetry tables id
   const pool = new Pool({ connectionString: database.url });
   try {
     const migration = fs.readFileSync(
-      path.resolve(import.meta.dirname, '../../../supabase/migrations/0015_admin_role_workflow_observability.sql'),
+      path.resolve(import.meta.dirname, '../../../supabase/migrations/0016_admin_role_workflow_observability.sql'),
       'utf8'
     );
     await pool.query(migration);
