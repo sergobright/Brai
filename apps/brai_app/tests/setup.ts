@@ -19,3 +19,14 @@ vi.mock("geist/font/mono", () => ({
     variable: "__geistMono_mock",
   },
 }));
+
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({
+    back: vi.fn(),
+    forward: vi.fn(),
+    prefetch: vi.fn(),
+    push: (href: string) => window.history.pushState(window.history.state, "", href),
+    refresh: vi.fn(),
+    replace: (href: string) => window.history.replaceState(window.history.state, "", href),
+  }),
+}));

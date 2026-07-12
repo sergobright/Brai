@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useRouter } from "next/navigation";
 import { BookOpen, Crown, Info, Settings } from "lucide-react";
 import { ensureBraiCmdAccess, openBraiCmdSettings, setBraiCmdOverlayEnabled, setBraiCmdQueuePausedMode, setBraiCmdVoiceOnlyMode } from "@/shared/platform/braiCmd";
 import { installAndroidBackHandler, isNativeShell, platformName } from "@/shared/platform/platform";
@@ -37,6 +38,7 @@ const INBOX_MOBILE_CREATE_DRAFT_STORAGE_KEY = "brai_inbox_mobile_create_draft";
 
 export function BraiApp({ initialSection = "actions" }: { initialSection?: SectionId }) {
   const app = useBraiAppState(initialSection);
+  const router = useRouter();
   const nativeAndroid = useMountedNativeAndroid();
   const [mobileDockMenu, setMobileDockMenu] = useState<"left" | "right" | null>(null);
   const [startupIntroComplete, setStartupIntroComplete] = useState(false);
@@ -63,6 +65,7 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
     () => setMobileDockMenu("left"),
     !app.mobileMenuOpen && !mobileDockMenu && !app.mobileContextPanel && !app.actionOverlayOpen,
   );
+  const webAuthRequired = !nativeAndroid && app.displaySyncStatus === "auth_required";
 
   function openMobileMenu() {
     app.setMobileMenuOpen(true);
@@ -94,6 +97,11 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
   useEffect(() => {
     document.documentElement.dataset.theme = onboardingActive ? "dark" : app.theme;
   }, [app.theme, onboardingActive]);
+
+  useEffect(() => {
+    if (!webAuthRequired || window.location.pathname === "/auth") return;
+    router.replace("/auth");
+  }, [router, webAuthRequired]);
 
   useEffect(() => {
     if (!nativeAndroid) return;
@@ -245,6 +253,10 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
         ) : null}
       </>
     );
+  }
+
+  if (webAuthRequired) {
+    return <main className="min-h-dvh bg-background" data-auth-redirect />;
   }
 
   return (

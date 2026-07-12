@@ -135,6 +135,27 @@ describe("BraiApp shell", () => {
     expect(screen.queryByRole("button", { name: "Войти" })).not.toBeInTheDocument();
   });
 
+  it("redirects anonymous web users to the standalone auth page without rendering the cabinet shell", async () => {
+    vi.mocked(globalThis.fetch).mockImplementation(async (input: RequestInfo | URL) => {
+      const url = requestUrl(input);
+      if (url.endsWith("/auth/session")) {
+        return new Response(JSON.stringify({ authenticated: false, user: null }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return Promise.reject(new Error("offline"));
+    });
+
+    render(<BraiApp />);
+
+    await waitFor(() => expect(window.location.pathname).toBe("/auth"));
+    expect(document.querySelector("[data-auth-redirect]")).toBeInTheDocument();
+    expect(document.querySelector("[data-app-shell]")).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Действия" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: "Email" })).not.toBeInTheDocument();
+  });
+
   it("shows the production OTP countdown and enables resend after one minute", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-07-12T10:00:00.000Z"));

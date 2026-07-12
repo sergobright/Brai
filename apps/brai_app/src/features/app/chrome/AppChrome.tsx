@@ -302,12 +302,14 @@ function IconGlyph({ emoji, className = "" }: { emoji: string; className?: strin
 
 export function AuthPanel({
   busy,
+  className = "mt-[52px]",
   mode,
   onEmailLogin,
   onRequestOtp,
   onVerifyOtp,
 }: {
   busy: boolean;
+  className?: string;
   mode: "email" | "otp";
   onEmailLogin: (email: string) => Promise<void>;
   onRequestOtp: (email: string) => Promise<OtpSendResult>;
@@ -365,7 +367,7 @@ export function AuthPanel({
 
   if (mode === "email") {
     return (
-      <Card className="mt-[52px] grid w-[min(520px,100%)] justify-items-start gap-3 p-6" render={<form onSubmit={submitEmail} />}>
+      <Card className={cx(className, "grid w-[min(520px,100%)] justify-items-start gap-3 p-6")} render={<form onSubmit={submitEmail} />}>
         <Mail aria-hidden="true" className="size-5 text-muted-foreground" />
         <h2 className="m-0 text-base leading-[1.2]">Вход</h2>
         <Input
@@ -389,7 +391,7 @@ export function AuthPanel({
   }
 
   return (
-    <Card className="mt-[52px] grid w-[min(520px,100%)] justify-items-start gap-3 p-6" render={<form onSubmit={submitOtp} />}>
+    <Card className={cx(className, "grid w-[min(520px,100%)] justify-items-start gap-3 p-6")} render={<form onSubmit={submitOtp} />}>
       <Mail aria-hidden="true" className="size-5 text-muted-foreground" />
       <h2 className="m-0 text-base leading-[1.2]">Вход</h2>
       <Input
