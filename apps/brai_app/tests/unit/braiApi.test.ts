@@ -64,6 +64,51 @@ describe("BraiApi", () => {
     }));
   });
 
+  it("sends onboarding preliminary context with auth requests", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
+      new Response(JSON.stringify({ authenticated: false, user: null }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    const api = new BraiApi("/api");
+
+    await api.testEmailLogin("primary@example.com", {
+      name: "Fixture User",
+      duplicatePreliminaryUserId: "prelim-duplicate",
+      preliminaryClaimToken: "claim-token",
+      deviceFingerprint: "android-id",
+    });
+    await api.verifyOtp("primary@example.com", "123456", {
+      name: "Fixture User",
+      preliminaryUserId: "prelim-ready",
+      preliminaryClaimToken: "claim-token",
+      deviceFingerprint: "android-id",
+    });
+
+    expect(fetchMock.mock.calls[0][1]).toEqual(expect.objectContaining({
+      method: "POST",
+      body: JSON.stringify({
+        email: "primary@example.com",
+        name: "Fixture User",
+        preliminaryUserId: "prelim-duplicate",
+        preliminaryClaimToken: "claim-token",
+        deviceFingerprint: "android-id",
+      }),
+    }));
+    expect(fetchMock.mock.calls[1][1]).toEqual(expect.objectContaining({
+      method: "POST",
+      body: JSON.stringify({
+        email: "primary@example.com",
+        otp: "123456",
+        name: "Fixture User",
+        preliminaryUserId: "prelim-ready",
+        preliminaryClaimToken: "claim-token",
+        deviceFingerprint: "android-id",
+      }),
+    }));
+  });
+
   it("sends global stop metadata with synced timer events", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(

@@ -518,6 +518,11 @@ export const activityEventMethods = {
         activity.last_event_id ?? null,
         scopedUserId()
       );
+    this.ensureActivityRoleLink({
+      ...activity,
+      author: '',
+      updated_at_utc: activity.updated_at_utc ?? nowIso
+    });
   }
 ,
 
@@ -696,6 +701,11 @@ export const activityEventMethods = {
         activity.last_event_id ?? null,
         scopedUserId()
       );
+      this.ensureActivityRoleLink({
+        ...activity,
+        author: '',
+        updated_at_utc: activity.updated_at_utc ?? nowIso
+      });
     }
   }
 

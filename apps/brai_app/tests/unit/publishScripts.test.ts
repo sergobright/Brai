@@ -1,16 +1,35 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmod, copyFile, mkdir, mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
+import { chmod, copyFile, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import fs from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import vm from "node:vm";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
 const execFileAsync = promisify(execFile);
 const workspaceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
 const appStaticRoutes = ["brai-cmd", "draws", "engine", "evil-eye", "factory", "focus", "inbox"];
+const fixtureRoots: string[] = [];
+
+afterEach(async () => {
+  await Promise.all(fixtureRoots.splice(0).map(async (root) => {
+    makeWritable(root);
+    await rm(root, { recursive: true, force: true });
+  }));
+});
+
+function makeWritable(root: string) {
+  if (!fs.existsSync(root)) return;
+  fs.chmodSync(root, 0o700);
+  for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+    const child = path.join(root, entry.name);
+    if (entry.isDirectory()) makeWritable(child);
+    else fs.chmodSync(child, 0o600);
+  }
+}
 
 describe("mobile OTA publish scripts", () => {
   it("publishes browser web and Android OTA from one web-layer command", async () => {
@@ -403,8 +422,14 @@ describe("mobile OTA publish scripts", () => {
 
     expect(script).toContain('find "$SOURCE_ROOT" -user "$(id -u)" -exec chmod u+rwX,g+rwX {} + || true');
     expect(script).toContain('mv "$SOURCE_ROOT" "$PREVIOUS_SOURCE"');
+    expect(script).toContain('check_deploy_headroom "$ENVS_ROOT"');
+    expect(script).toContain('BRAI_DEPLOY_MIN_FREE_GB:-4');
+    expect(script).toContain('cleanup_stale_preview_previous_sources "${PREVIOUS_SOURCE:-}"');
     expect(script.indexOf('npm --prefix services/brai_api ci')).toBeLessThan(script.indexOf('find "$SOURCE_ROOT" -user "$(id -u)"'));
     expect(script.indexOf('find "$SOURCE_ROOT" -user "$(id -u)"')).toBeLessThan(script.indexOf('mv "$SOURCE_ROOT" "$PREVIOUS_SOURCE"'));
+    expect(script.indexOf('check_deploy_headroom "$ENVS_ROOT"')).toBeLessThan(script.indexOf('npm ci'));
+    expect(script.indexOf('deploy/scripts/deploy-branch.sh')).toBeLessThan(script.indexOf('rm -rf "$PREVIOUS_SOURCE"', script.indexOf('deploy/scripts/deploy-branch.sh')));
+    expect(script).toContain('"$ENVS_ROOT"/preview-[a-e]');
   });
 
   it("keeps preview runtime Supabase env mandatory and artifacts writable by the deploy group", async () => {
@@ -468,6 +493,12 @@ describe("mobile OTA publish scripts", () => {
     expect(buildNonproduction).toContain('BRAI_BUILD_CLIENT=false "$SCRIPT_DIR/build-android-env-apk.sh" "$flavor"');
     expect(releaseSlot).toContain('section?.apkBuildKind === "stable"');
     expect(releaseSlot).toContain('Stable Preview ${SLOT_META[0]} APK baseline already exists; skipping rebuild.');
+    expect(releaseSlot).toContain('stop_preview_unit_if_exists "brai-api-preview-$SLOT_LOWER.service"');
+    expect(releaseSlot).toContain('stop_preview_unit_if_exists "brai-admin-preview-$SLOT_LOWER.service"');
+    expect(releaseSlot).toContain('cleanup_released_preview_slot_artifacts');
+    expect(releaseSlot).toContain('rm -rf "$slot_root/source" "$slot_root"/source.previous-* "$slot_root/web" "$slot_root/mobile-update"');
+    expect(releaseSlot).not.toContain('rm -rf "$slot_root/data"');
+    expect(releaseSlot).not.toContain('rm -rf "$slot_root/vault"');
     expect(releaseSlot).toContain('deploy/scripts/build-android-env-apk.sh "preview${SLOT_META[0]}" >&2');
   });
 
@@ -1064,7 +1095,9 @@ describe("mobile OTA publish scripts", () => {
 });
 
 async function fixtureRoot(prefix: string) {
-  return await mkdtemp(path.join(tmpdir(), prefix));
+  const root = await mkdtemp(path.join(tmpdir(), prefix));
+  fixtureRoots.push(root);
+  return root;
 }
 
 async function writeStaticExport(root: string, marker: string) {

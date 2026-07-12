@@ -623,6 +623,7 @@ export const timerEventMethods = {
         this.applyFocusSessionDelete(event);
       }
     }
+    this.syncFocusSessionRoleLinks(nowIso);
   }
 ,
 

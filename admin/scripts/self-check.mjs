@@ -64,6 +64,27 @@ try {
       value text NOT NULL,
       updated_at_utc text NOT NULL
     );
+    CREATE TABLE "user" (
+      id text PRIMARY KEY,
+      name text NOT NULL,
+      email text NOT NULL UNIQUE
+    );
+    CREATE TABLE preliminary_users (
+      id text PRIMARY KEY,
+      display_name text NOT NULL,
+      device_fingerprint_hash text NOT NULL UNIQUE,
+      device_fingerprint_kind text NOT NULL DEFAULT 'android_id',
+      install_id_hash text NOT NULL DEFAULT '',
+      claim_token_hash text NOT NULL UNIQUE,
+      status text NOT NULL,
+      user_id text REFERENCES "user"(id),
+      created_at_utc text NOT NULL,
+      updated_at_utc text NOT NULL,
+      last_seen_at_utc text NOT NULL,
+      converted_at_utc text,
+      client_version text NOT NULL DEFAULT '',
+      app_package text NOT NULL DEFAULT ''
+    );
     CREATE TABLE brai_cmd_access_tokens (
       id text PRIMARY KEY,
       display_name text NOT NULL,
@@ -75,7 +96,8 @@ try {
       activated_at_utc text,
       last_used_at_utc text,
       client_version text NOT NULL DEFAULT '',
-      app_package text NOT NULL DEFAULT ''
+      app_package text NOT NULL DEFAULT '',
+      preliminary_users_id text REFERENCES preliminary_users(id)
     );
     CREATE TABLE brai_cmd_usage_events (
       id text PRIMARY KEY,
@@ -235,13 +257,23 @@ try {
   await db.query("INSERT INTO app_settings (key, value, updated_at_utc) VALUES ('primary_user_id', 'user-1', '2026-01-01T00:00:00.000Z')");
   await db.query(`INSERT INTO ${quoteIdentifier('odd"table;drop')} (payload) VALUES ($1)`, ["safe"]);
   await db.query("INSERT INTO brai_cmd_settings (key, value, updated_at_utc) VALUES ('registration_enabled', 'false', '2026-01-01T00:00:00.000Z')");
+  await db.query("INSERT INTO \"user\" (id, name, email) VALUES ('auth-1', 'Registered Demo', 'demo@example.com')");
+  await db.query(`
+    INSERT INTO preliminary_users (
+      id, display_name, device_fingerprint_hash, claim_token_hash, status, user_id,
+      created_at_utc, updated_at_utc, last_seen_at_utc, converted_at_utc
+    ) VALUES
+      ('prelim-1', 'Demo', 'fingerprint-1', 'claim-1', 'converted', 'auth-1', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z', '2026-01-03T00:00:00.000Z', '2026-01-02T00:00:00.000Z'),
+      ('prelim-2', 'Pending', 'fingerprint-2', 'claim-2', 'active', NULL, '2026-01-04T00:00:00.000Z', '2026-01-04T00:00:00.000Z', '2026-01-04T00:00:00.000Z', NULL)
+  `);
   await db.query(`
     INSERT INTO brai_cmd_access_tokens (
       id, display_name, token_hash, device_id_hash, status, source,
-      created_at_utc, activated_at_utc, last_used_at_utc, client_version, app_package
+      created_at_utc, activated_at_utc, last_used_at_utc, client_version, app_package, preliminary_users_id
     ) VALUES
-      ('token-1', 'Demo', 'hash-1', 'device-1', 'active', 'self_service', '2026-01-01T00:00:00.000Z', '2026-01-01T00:05:00.000Z', '2026-01-03T00:00:00.000Z', '42', 'world.brightos.brai'),
-      ('token-2', 'Retired', 'hash-2', NULL, 'revoked', 'admin', '2026-01-02T00:00:00.000Z', NULL, NULL, '', '')
+      ('token-1', 'Demo', 'hash-1', 'device-1', 'active', 'self_service', '2026-01-01T00:00:00.000Z', '2026-01-01T00:05:00.000Z', '2026-01-03T00:00:00.000Z', '42', 'world.brightos.brai', 'prelim-1'),
+      ('token-2', 'Retired', 'hash-2', NULL, 'revoked', 'admin', '2026-01-02T00:00:00.000Z', NULL, NULL, '', '', NULL),
+      ('token-3', 'Pending', 'hash-3', 'device-3', 'active', 'self_service', '2026-01-04T00:00:00.000Z', '2026-01-04T00:05:00.000Z', NULL, '42', 'world.brightos.brai', 'prelim-2')
   `);
   await db.query(`
     INSERT INTO brai_cmd_usage_events (
@@ -363,13 +395,19 @@ try {
 
   const braiCmdSummary = await readBraiCmdAdminSummary({ databaseUrl });
   assert.equal(braiCmdSummary.settings.registrationEnabled, false, "brai cmd registration state is readable");
-  assert.equal(braiCmdSummary.totals.activeTokens, 1, "brai cmd active token count is aggregated");
+  assert.equal(braiCmdSummary.totals.activeTokens, 2, "brai cmd active token count is aggregated");
   assert.equal(braiCmdSummary.totals.revokedTokens, 1, "brai cmd revoked token count is aggregated");
+  assert.equal(braiCmdSummary.totals.registeredTokens, 1, "brai cmd registered token count is aggregated");
+  assert.equal(braiCmdSummary.totals.preliminaryTokens, 1, "brai cmd preliminary token count is aggregated");
+  assert.equal(braiCmdSummary.totals.legacyTokens, 1, "brai cmd legacy token count is aggregated");
   assert.equal(braiCmdSummary.totals.requests, 2, "brai cmd request total is aggregated");
   assert.equal(braiCmdSummary.totals.errors, 1, "brai cmd error total is aggregated");
-  assert.equal(braiCmdSummary.tokens[0].displayName, "Retired", "brai cmd tokens sort by creation date desc");
-  assert.equal(braiCmdSummary.tokens[1].usage.requests, 2, "brai cmd usage rolls up per token");
+  assert.equal(braiCmdSummary.tokens[0].displayName, "Pending", "brai cmd tokens sort by creation date desc");
+  assert.equal(braiCmdSummary.tokens[0].owner.type, "preliminary", "brai cmd preliminary owner is attached");
+  assert.equal(braiCmdSummary.tokens.find((token) => token.displayName === "Demo").usage.requests, 2, "brai cmd usage rolls up per token");
+  assert.equal(braiCmdSummary.tokens.find((token) => token.displayName === "Demo").owner.type, "registered", "brai cmd registered owner is attached");
   assert.equal(braiCmdSummary.recentUsage[0].errorCode, "timeout", "recent brai cmd usage sorts newest first");
+  assert.equal(braiCmdSummary.recentUsage[0].owner.type, "registered", "recent brai cmd owner is attached");
   assert.equal(braiCmdSummary.recentUsage[0].fallbackUsed, true, "recent brai cmd fallback flag is preserved");
 
   const workflowSummary = await readWorkflowAdminSummary(databaseUrl);

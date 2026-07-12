@@ -128,7 +128,9 @@ During the post-deploy accepted-preview release step, occupied preview OTA manif
 from each preview slot's own source checkout so their `otaVersion` follows the production build
 ledger without replacing preview content with production content. That refresh reuses the preview
 source checkout's existing static export and only rewrites runtime config, `version.json`, and OTA
-metadata. `prod_deploy_passed` completes the
+metadata. Failed preview slots are skipped by this OTA refresh because their source checkout may not
+have a valid static export; recovering or releasing the failed preview remains a separate preview
+workflow task. `prod_deploy_passed` completes the
 promotion workflow only after prior required steps have succeeded in GitHub Actions. Russian
 human-readable `build_versions` release notes are part of the existing version/ledger recording
 step; changing their text source does not add a new Temporal gate.

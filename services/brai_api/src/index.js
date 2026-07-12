@@ -20,7 +20,7 @@ if (!databaseUrl || !isPostgresUrl(databaseUrl)) {
 const dataRoot = process.env.BRAI_DATA_ROOT ?? path.join(serviceRoot, 'data');
 const token = process.env.BRAI_TOKEN;
 const webPassword = process.env.BRAI_WEB_PASSWORD;
-const releasePassword = process.env.BRAI_RELEASE_PASSWORD ?? webPassword;
+const releasePassword = process.env.BRAI_RELEASE_PASSWORD;
 const sessionSecret = process.env.BRAI_SESSION_SECRET;
 const betterAuthSecret = process.env.BETTER_AUTH_SECRET ?? sessionSecret;
 const betterAuthUrl = process.env.BETTER_AUTH_URL ?? null;

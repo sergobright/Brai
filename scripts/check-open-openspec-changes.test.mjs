@@ -6,8 +6,14 @@ import path from "node:path";
 
 import { completedActiveOpenSpecChanges } from "./check-open-openspec-changes.mjs";
 
-test("OpenSpec guard treats archive-only open task as completed active change", () => {
+function tmpRoot(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "openspec-guard-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  return root;
+}
+
+test("OpenSpec guard treats archive-only open task as completed active change", (t) => {
+  const root = tmpRoot(t);
   const changes = path.join(root, "openspec", "changes");
   fs.mkdirSync(path.join(changes, "ready"), { recursive: true });
   fs.writeFileSync(
@@ -18,8 +24,8 @@ test("OpenSpec guard treats archive-only open task as completed active change", 
   assert.deepEqual(completedActiveOpenSpecChanges(changes), ["ready"]);
 });
 
-test("OpenSpec guard leaves active change alone when non-archive work remains", () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "openspec-guard-"));
+test("OpenSpec guard leaves active change alone when non-archive work remains", (t) => {
+  const root = tmpRoot(t);
   const changes = path.join(root, "openspec", "changes");
   fs.mkdirSync(path.join(changes, "active"), { recursive: true });
   fs.writeFileSync(

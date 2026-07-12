@@ -1,4 +1,4 @@
-import test from "node:test";
+import test, { after } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
@@ -40,6 +40,21 @@ import {
 import { acceptedPreviewBranches } from "../deploy/scripts/accepted-preview-branches.mjs";
 import { classifyDeployDelivery } from "../deploy/scripts/classify-delivery.mjs";
 import { diffRange, requiresNativeApkChange } from "../deploy/scripts/detect-native-apk-change.mjs";
+
+const tempRoots = new Set();
+
+after(() => {
+  for (const root of tempRoots) {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+  tempRoots.clear();
+});
+
+function tempRoot(prefix) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  tempRoots.add(root);
+  return root;
+}
 
 test("valid codex task branch names are strict", () => {
   assert.equal(CODEX_BRANCH_RE.test("codex/enforce-branch-preview-guards"), true);
@@ -191,7 +206,7 @@ test("SocratiCode requirement blocks implementation handoff without marker", () 
 });
 
 test("hook analysis blocks base refresh inside an active task branch", () => {
-  const repo = fs.mkdtempSync(path.join(os.tmpdir(), "brai-task-base-refresh-"));
+  const repo = tempRoot("brai-task-base-refresh-");
   const previous = process.cwd();
   try {
     git(["init"], repo);
@@ -391,7 +406,7 @@ test("hook analysis blocks known host-only commands without escalation", () => {
 });
 
 test("hook analysis blocks stale repo-local task starter", () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "brai-task-stale-starter-"));
+  const tmp = tempRoot("brai-task-stale-starter-");
   const previous = process.cwd();
   try {
     git(["init"], tmp);
@@ -853,13 +868,23 @@ test("production deploy resolves ledger version through the shared resolver", ()
 test("remote deploy installs dependencies before replacing the active source tree", () => {
   const deploy = fs.readFileSync(new URL("../deploy/scripts/ci-ssh-deploy.sh", import.meta.url), "utf8");
   const stageIndex = deploy.indexOf('cd "$REMOTE_UPLOAD"');
+  const headroomIndex = deploy.indexOf('check_deploy_headroom "$ENVS_ROOT"');
   const installIndex = deploy.indexOf("npm --prefix services/brai_api ci", stageIndex);
   const previousIndex = deploy.indexOf('mv "$SOURCE_ROOT" "$PREVIOUS_SOURCE"', installIndex);
   const publishIndex = deploy.indexOf('mv "$REMOTE_UPLOAD" "$SOURCE_ROOT"', previousIndex);
+  const deployBranchIndex = deploy.indexOf("deploy/scripts/deploy-branch.sh", publishIndex);
+  const previousCleanupIndex = deploy.indexOf('rm -rf "$PREVIOUS_SOURCE"', deployBranchIndex);
   assert.ok(stageIndex > 0);
+  assert.ok(headroomIndex > 0);
   assert.ok(stageIndex < installIndex);
+  assert.ok(headroomIndex < installIndex);
   assert.ok(installIndex < previousIndex);
   assert.ok(previousIndex < publishIndex);
+  assert.ok(publishIndex < deployBranchIndex);
+  assert.ok(deployBranchIndex < previousCleanupIndex);
+  assert.match(deploy, /BRAI_DEPLOY_MIN_FREE_GB:-4/);
+  assert.match(deploy, /cleanup_stale_preview_previous_sources "\$\{PREVIOUS_SOURCE:-\}"/);
+  assert.match(deploy, /"\$ENVS_ROOT"\/preview-\[a-e\]/);
 });
 
 test("preview deploy requires Postgres and preserves artifact setgid", () => {
@@ -886,12 +911,16 @@ test("preview deploy requires Postgres and preserves artifact setgid", () => {
   assert.doesNotMatch(script, /normalize_public_tree "\$TARGET_ROOT"/);
   assert.match(playbook, /Ensure non-production data directories keep deploy setgid/);
   assert.match(playbook, /Ensure nested non-production data directories keep deploy setgid/);
+  assert.match(playbook, /Ensure Syncthing vault root is writable by sync group/);
+  assert.match(playbook, /Ensure existing Syncthing vault directories keep sync setgid/);
+  assert.match(playbook, /owner: "{{ brai_syncthing_user }}"/);
+  assert.match(playbook, /group: "{{ brai_source_group }}"/);
   assert.doesNotMatch(playbook, /SQLite|sqlite|brai\.sqlite/);
   assert.match(playbook, /mode: "2775"/);
   assert.match(unit, /EnvironmentFile={{ brai_env_root }}\/{{ item.value.path }}\/brai-api.env/);
   assert.doesNotMatch(unit, /BRAI_LEGACY_SQLITE_PATH|EnvironmentFile=-/);
   assert.match(unit, /Group={{ brai_deploy_user }}/);
-  assert.match(unit, /SupplementaryGroups={{ brai_service_group }} {{ brai_deploy_user }}/);
+  assert.match(unit, /SupplementaryGroups={{ brai_service_group }} {{ brai_deploy_user }} {{ brai_source_group }}/);
   assert.match(unit, /UMask=0002/);
 });
 
@@ -959,7 +988,7 @@ test("task marker is bound to the current Codex thread when one exists", () => {
 });
 
 test("follow-up keeps the original task base after origin-main advances", () => {
-  const repo = fs.mkdtempSync(path.join(os.tmpdir(), "brai-task-follow-up-base-"));
+  const repo = tempRoot("brai-task-follow-up-base-");
   const script = path.resolve(process.cwd(), "scripts/brai-task.mjs");
   git(["init"], repo);
   git(["config", "user.email", "test@example.invalid"], repo);
@@ -1001,7 +1030,7 @@ test("follow-up keeps the original task base after origin-main advances", () => 
 });
 
 test("task state rejects a branch with another task marker", () => {
-  const repo = fs.mkdtempSync(path.join(os.tmpdir(), "brai-task-wrong-marker-"));
+  const repo = tempRoot("brai-task-wrong-marker-");
   const previous = process.cwd();
   try {
     git(["init"], repo);
@@ -1037,7 +1066,7 @@ test("task state rejects a branch with another task marker", () => {
 });
 
 test("task state keeps the original task base when origin-main advances", () => {
-  const repo = fs.mkdtempSync(path.join(os.tmpdir(), "brai-task-frozen-base-"));
+  const repo = tempRoot("brai-task-frozen-base-");
   const previous = process.cwd();
   try {
     git(["init"], repo);
@@ -1130,7 +1159,7 @@ test("task starter creates writable nested worktrees from repo and supports lega
   assert.equal(taskWorktreeParent("/srv/projects/brai"), "/srv/projects/brai/.codex-worktrees");
   assert.equal(taskWorktreeParent("/srv/projects/brai/.codex-worktrees/existing-task"), "/srv/projects/brai/.codex-worktrees");
   assert.equal(taskWorktreeParent("/srv/projects/brai-worktrees/existing-task"), "/srv/projects/brai-worktrees");
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "brai-task-source-"));
+  const tmp = tempRoot("brai-task-source-");
   const canonical = path.join(tmp, "brai");
   const worktree = path.join(tmp, "brai-worktrees", "existing-task");
   const nestedWorktree = path.join(canonical, ".codex-worktrees", "nested-task");
@@ -1141,7 +1170,7 @@ test("task starter creates writable nested worktrees from repo and supports lega
 });
 
 test("task starter blocks another open branch in the same Codex thread", () => {
-  const parent = fs.mkdtempSync(path.join(os.tmpdir(), "brai-task-thread-"));
+  const parent = tempRoot("brai-task-thread-");
   const open = path.join(parent, "public-site-live");
   const accepted = path.join(parent, "accepted-task");
   for (const [taskPath, branch] of [
@@ -1171,8 +1200,8 @@ test("task starter blocks another open branch in the same Codex thread", () => {
 });
 
 test("task starter ignores squash-merged infra docs branches with delivery receipt", () => {
-  const control = fs.mkdtempSync(path.join(os.tmpdir(), "brai-task-control-"));
-  const parent = fs.mkdtempSync(path.join(os.tmpdir(), "brai-task-squash-"));
+  const control = tempRoot("brai-task-control-");
+  const parent = tempRoot("brai-task-squash-");
   const merged = path.join(parent, "merged-task");
   const open = path.join(parent, "open-task");
   const previous = process.cwd();
@@ -1238,8 +1267,8 @@ test("task starter ignores squash-merged infra docs branches with delivery recei
 });
 
 test("task starter does not ignore infra docs delivery receipt for the wrong commit", () => {
-  const control = fs.mkdtempSync(path.join(os.tmpdir(), "brai-task-control-"));
-  const parent = fs.mkdtempSync(path.join(os.tmpdir(), "brai-task-wrong-receipt-"));
+  const control = tempRoot("brai-task-control-");
+  const parent = tempRoot("brai-task-wrong-receipt-");
   const taskPath = path.join(parent, "wrong-receipt-task");
   const previous = process.cwd();
   try {
@@ -1297,7 +1326,7 @@ test("task starter does not ignore infra docs delivery receipt for the wrong com
 });
 
 test("task starter links existing dependency dirs into new worktrees", () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "brai-task-"));
+  const tmp = tempRoot("brai-task-");
   const source = path.join(tmp, "source");
   const target = path.join(tmp, "target");
   fs.mkdirSync(path.join(source, "services/brai_api/node_modules"), { recursive: true });
@@ -1308,8 +1337,8 @@ test("task starter links existing dependency dirs into new worktrees", () => {
 });
 
 test("workspace preflight checks allowlisted dirs and rejects symlink escapes", () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "brai-preflight-"));
-  const outside = fs.mkdtempSync(path.join(os.tmpdir(), "brai-preflight-outside-"));
+  const root = tempRoot("brai-preflight-");
+  const outside = tempRoot("brai-preflight-outside-");
   fs.mkdirSync(path.join(root, ".brai-task"));
   fs.mkdirSync(path.join(root, "apps/brai_app/android/app/build"), { recursive: true });
   fs.symlinkSync(outside, path.join(root, "node_modules"), "dir");
@@ -1322,7 +1351,7 @@ test("workspace preflight checks allowlisted dirs and rejects symlink escapes", 
 });
 
 test("workspace preflight fails task worktrees with non-writable tracked source", () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "brai-preflight-source-"));
+  const root = tempRoot("brai-preflight-source-");
   fs.mkdirSync(path.join(root, ".brai-task"));
   fs.writeFileSync(path.join(root, ".brai-task", "task.json"), "{}\n");
   fs.writeFileSync(path.join(root, "package.json"), "{}\n", { mode: 0o444 });
@@ -1338,7 +1367,7 @@ test("workspace preflight fails task worktrees with non-writable tracked source"
 });
 
 test("preview slot status is shared-lock read-only", () => {
-  const envRoot = fs.mkdtempSync(path.join(os.tmpdir(), "brai-preview-slots-"));
+  const envRoot = tempRoot("brai-preview-slots-");
   const registry = path.join(envRoot, "preview-slots.json");
   const result = spawnSync("bash", ["deploy/scripts/preview-slots.sh", "status"], {
     cwd: process.cwd(),
@@ -1359,7 +1388,7 @@ test("preview slot status is shared-lock read-only", () => {
 });
 
 test("task starter can enable checked-in git hooks", () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "brai-task-hooks-"));
+  const tmp = tempRoot("brai-task-hooks-");
   git(["init"], tmp);
   enableGitHooks(tmp);
   assert.equal(git(["config", "core.hooksPath"], tmp).stdout.trim(), ".githooks");
@@ -1430,6 +1459,7 @@ test("acceptance markers block preview acceptance but not infra docs CI fixes", 
   assert.equal(isBlockingAcceptanceReceipt({ ...base, status: "acceptance_started", deliveryClass: "runtime-preview" }), true);
   assert.equal(isBlockingAcceptanceReceipt({ ...base, status: "acceptance_started", deliveryClass: "infra-docs" }), false);
   assert.equal(isBlockingAcceptanceReceipt({ ...base, status: "acceptance_started" }), false);
+  assert.equal(isBlockingAcceptanceReceipt({ ...base, status: "waiting_for_turn" }), true);
   assert.equal(isBlockingAcceptanceReceipt({ ...base, status: "reconcile_required", deliveryClass: "runtime-preview" }), true);
   assert.equal(isBlockingAcceptanceReceipt({ ...base, status: "reconcile_started", deliveryClass: "runtime-preview" }), false);
   assert.equal(isBlockingAcceptanceReceipt({ ...base, status: "merged", deliveryClass: "infra-docs" }), true);
@@ -1437,7 +1467,7 @@ test("acceptance markers block preview acceptance but not infra docs CI fixes", 
 });
 
 test("task state blocks local implementation work without exact preview receipt", () => {
-  const repo = fs.mkdtempSync(path.join(os.tmpdir(), "brai-task-state-"));
+  const repo = tempRoot("brai-task-state-");
   const previous = process.cwd();
   try {
     git(["init"], repo);
@@ -1492,7 +1522,7 @@ test("task state blocks local implementation work without exact preview receipt"
 });
 
 test("task state allows infra-docs work with exact delivery receipt", () => {
-  const repo = fs.mkdtempSync(path.join(os.tmpdir(), "brai-task-docs-state-"));
+  const repo = tempRoot("brai-task-docs-state-");
   const previous = process.cwd();
   try {
     git(["init"], repo);
@@ -1567,7 +1597,7 @@ test("task state allows infra-docs work with exact delivery receipt", () => {
 });
 
 test("task state blocks handoff receipts when SocratiCode was not used", () => {
-  const repo = fs.mkdtempSync(path.join(os.tmpdir(), "brai-task-socraticode-required-"));
+  const repo = tempRoot("brai-task-socraticode-required-");
   const previous = process.cwd();
   try {
     git(["init"], repo);
@@ -1743,7 +1773,7 @@ test("preview handoff waits for an in-progress delivery run before writing a rec
 });
 
 test("no-preview acceptance diffs ignore reconciled main-only runtime paths", () => {
-  const repo = fs.mkdtempSync(path.join(os.tmpdir(), "brai-task-no-preview-reconcile-"));
+  const repo = tempRoot("brai-task-no-preview-reconcile-");
   const previous = process.cwd();
   try {
     git(["init"], repo);
@@ -1846,7 +1876,7 @@ test("delivery handoff preserves accepted no-preview class after squash merge", 
 });
 
 test("task state allows exact delivery receipt after infra-docs branch was squash-merged", () => {
-  const repo = fs.mkdtempSync(path.join(os.tmpdir(), "brai-task-docs-accepted-"));
+  const repo = tempRoot("brai-task-docs-accepted-");
   const previous = process.cwd();
   try {
     git(["init"], repo);
@@ -1911,7 +1941,7 @@ test("task state allows exact delivery receipt after infra-docs branch was squas
 });
 
 test("task state rejects same-thread writes after local acceptance marker", () => {
-  const repo = fs.mkdtempSync(path.join(os.tmpdir(), "brai-task-accepted-marker-"));
+  const repo = tempRoot("brai-task-accepted-marker-");
   const previous = process.cwd();
   try {
     git(["init"], repo);
@@ -1978,7 +2008,7 @@ test("task state rejects same-thread writes after local acceptance marker", () =
 });
 
 test("acceptance reconcile merges current main into the same accepted branch", () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "brai-task-reconcile-"));
+  const root = tempRoot("brai-task-reconcile-");
   const remote = path.join(root, "origin.git");
   const repo = path.join(root, "repo");
   const script = path.join(process.cwd(), "scripts/brai-task.mjs");
@@ -2077,7 +2107,7 @@ test("acceptance reconcile merges current main into the same accepted branch", (
 });
 
 test("task state rejects squash-merged branch by merged PR head oid", () => {
-  const repo = fs.mkdtempSync(path.join(os.tmpdir(), "brai-task-merged-pr-"));
+  const repo = tempRoot("brai-task-merged-pr-");
   const previousCwd = process.cwd();
   const previousMergedPrs = process.env.BRAI_TEST_MERGED_PRS_JSON;
   try {
@@ -2137,6 +2167,10 @@ test("accept preview checks verified preview before PR actions", () => {
   assert.match(script, /mergeStateStatus/);
   assert.match(script, /reconcile_required/);
   assert.match(script, /acceptance-reconcile/);
+  assert.match(script, /waiting_for_turn/);
+  assert.match(script, /\.number < \$PR_NUMBER/);
+  assert.match(script, /\.title \| startswith\(\\"Accept \\"\)/);
+  assert.ok(script.indexOf("wait_for_earlier_acceptance") < script.indexOf('PR_MERGE_STATE="$(gh pr view'));
   assert.match(script, /BEHIND/);
   assert.match(script, /Brai task state must not be a symlink/);
   assert.match(script, /mktemp "\$dir\/\.acceptance-write\.XXXXXX"/);
@@ -2180,6 +2214,13 @@ test("accepted preview stale cleanup is required", () => {
   assert.match(cleanupLoop, /Required cleanup failed/);
   assert.match(cleanupLoop, /exit 1/);
   assert.match(releaseScript, /cleanup-test-schemas\.mjs --branch "\$RELEASE_BRANCH" --legacy-before-hours 24/);
+  assert.match(releaseScript, /stop_preview_unit_if_exists "brai-api-preview-\$SLOT_LOWER\.service"/);
+  assert.match(releaseScript, /stop_preview_unit_if_exists "brai-admin-preview-\$SLOT_LOWER\.service"/);
+  assert.match(releaseScript, /cleanup_released_preview_slot_artifacts/);
+  assert.match(releaseScript, /"\$ENVS_ROOT"\/preview-\[a-e\]/);
+  assert.match(releaseScript, /rm -rf "\$slot_root\/source" "\$slot_root"\/source\.previous-\* "\$slot_root\/web" "\$slot_root\/mobile-update"/);
+  assert.doesNotMatch(releaseScript, /rm -rf .*data/);
+  assert.doesNotMatch(releaseScript, /rm -rf .*vault/);
   assert.match(workflow, /dispatch-promotion --target prod/);
   assert.match(temporalWorkflow, /cleanupAcceptedBranches\(\{ recentMerged: true \}\)/);
   assert.match(cleanupScript, /BRAI_ACTIVE_PREVIEW_BRANCHES_JSON="\$ACTIVE_BRANCHES_JSON"/);
@@ -2229,7 +2270,7 @@ test("accepted preview branch lookup skips no-preview delivery PRs", () => {
 });
 
 function setupInfraDocsHandoffFixture({ prState, mergeStateStatus = "CLEAN", autoMerge = false, mergedAt = null, jobConclusions = {}, label = "brai-delivery:infra-docs" }) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "brai-task-handoff-"));
+  const root = tempRoot("brai-task-handoff-");
   const remote = path.join(root, "origin.git");
   const repo = path.join(root, "repo");
   const bin = path.join(root, "bin");
@@ -2314,7 +2355,7 @@ fi
 }
 
 function setupPreviewHandoffFixture() {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "brai-task-preview-handoff-"));
+  const root = tempRoot("brai-task-preview-handoff-");
   const remote = path.join(root, "origin.git");
   const repo = path.join(root, "repo");
   const bin = path.join(root, "bin");

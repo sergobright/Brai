@@ -10,6 +10,11 @@ export type BraiCmdUsage = {
   totalMs: number;
 };
 
+export type BraiCmdOwnerSummary =
+  | { type: "legacy"; label: string }
+  | { type: "preliminary"; label: string; preliminaryUserId: string }
+  | { type: "registered"; label: string; preliminaryUserId: string; userId: string; email: string | null; name: string | null };
+
 export type BraiCmdTokenSummary = {
   id: string;
   displayName: string;
@@ -21,12 +26,14 @@ export type BraiCmdTokenSummary = {
   clientVersion: string;
   appPackage: string;
   deviceBound: boolean;
+  owner: BraiCmdOwnerSummary;
   usage: BraiCmdUsage;
 };
 
 export type BraiCmdRecentUsage = {
   id: string;
   displayName: string;
+  owner: BraiCmdOwnerSummary;
   createdAt: string;
   success: boolean;
   errorCode: string | null;
@@ -48,6 +55,12 @@ export type BraiCmdAdminSummary = {
   totals: BraiCmdUsage & {
     activeTokens: number;
     revokedTokens: number;
+    preliminaryTokens: number;
+    registeredTokens: number;
+    legacyTokens: number;
+    preliminaryUsage: BraiCmdUsage;
+    registeredUsage: BraiCmdUsage;
+    legacyUsage: BraiCmdUsage;
   };
   tokens: BraiCmdTokenSummary[];
   recentUsage: BraiCmdRecentUsage[];

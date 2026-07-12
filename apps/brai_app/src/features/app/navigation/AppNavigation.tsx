@@ -1,21 +1,21 @@
 "use client";
 
 import { useCallback, useEffect, useRef, type TouchEventHandler } from "react";
-import { Archive, ChevronDown, ChevronUp, Command, Cpu, Download, Ellipsis, Flag, LogOut, Menu, Pencil, Settings, Tag, type LucideIcon } from "lucide-react";
-import type { AppVersionState } from "@/shared/api/braiApi";
-import { useAppVersion, useEnvironmentBadgeLabel } from "@/shared/config/runtime";
+import { Archive, ChevronDown, ChevronUp, Cpu, Download, Ellipsis, Flag, Menu, Pencil, Tag, type LucideIcon } from "lucide-react";
+import { BraiUserAvatar, BraiUserDropdownMenu, BraiUserMenuPanel } from "@/components/shadcn-space/dropdown-menu/dropdown-menu-01";
+import type { AppVersionState, AuthUser } from "@/shared/api/braiApi";
+import { useAppVersion } from "@/shared/config/runtime";
 import { installAndroidBackHandler } from "@/shared/platform/platform";
 import type { BraiOtaState } from "@/shared/platform/ota";
-import { Avatar, AvatarFallback } from "@/shared/ui/avatar";
 import { FloatingDock } from "@/shared/ui/floating-dock";
 import { formatHourMinute } from "@/shared/time/format";
 import type { SyncStatus, TimerState } from "@/shared/types/timer";
-import { Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarGroupContent, SidebarGroupLabel, SidebarHeader, SidebarMenu, SidebarMenuButton, SidebarMenuItem } from "@/shared/ui/sidebar";
-import { EnvironmentBadge, StatusPill } from "../chrome/AppChrome";
+import { Sidebar, SidebarContent, SidebarFooter, SidebarMenuButton } from "@/shared/ui/sidebar";
+import { StatusPill } from "../chrome/AppChrome";
 import { cx } from "../appUtils";
 import { useMobileSheetDrag } from "../hooks/useMobileSheetDrag";
 import type { PrimarySectionId, SectionId } from "../appModel";
-import { isPrimarySection, navHref, navItems, sectionTitle } from "../appModel";
+import { isPrimarySection, navHref, navItems } from "../appModel";
 import { engineSectionView } from "../sections/engine/engineModel";
 
 export function DesktopRail({
@@ -27,6 +27,8 @@ export function DesktopRail({
   versionError,
   versionRefreshing,
   syncStatus,
+  authUser,
+  onProfile,
   onSettings,
   onBraiCmd,
   onEngine,
@@ -41,6 +43,8 @@ export function DesktopRail({
   versionError: boolean;
   versionRefreshing: boolean;
   syncStatus: SyncStatus;
+  authUser: AuthUser | null;
+  onProfile: () => void;
   onSettings: () => void;
   onBraiCmd: () => void;
   onEngine: () => void;
@@ -53,31 +57,10 @@ export function DesktopRail({
       className="desktop-rail max-[860px]:hidden"
       aria-label="Основная навигация"
     >
-      <SidebarHeader>
-        <ProfileMenu compact />
-      </SidebarHeader>
-      <SidebarContent>
-        <PageMenu
-          expanded={false}
-          forceActionMenu
-          showEngineItem={false}
-          section={section}
-          appVersionState={appVersionState}
-          otaRefreshing={otaRefreshing}
-          otaState={otaState}
-          versionError={versionError}
-          versionRefreshing={versionRefreshing}
-          onSettings={onSettings}
-          onBraiCmd={onBraiCmd}
-          onEngine={onEngine}
-          onArchive={onArchive}
-          onLogout={onLogout}
-        />
-      </SidebarContent>
-      <SidebarFooter>
+      <SidebarContent className="min-h-0" />
+      <SidebarFooter className="items-center gap-2">
         <DesktopRailStatus syncStatus={syncStatus} pendingCount={pendingCount} />
-        <BraiCmdMenuItem active={section === "brai-cmd"} onClick={onBraiCmd} />
-        <EngineMenuItem
+        <EngineRailButton
           active={section === "engine"}
           appVersionState={appVersionState}
           otaRefreshing={otaRefreshing}
@@ -86,17 +69,36 @@ export function DesktopRail({
           versionRefreshing={versionRefreshing}
           onClick={onEngine}
         />
+        <BraiUserDropdownMenu
+          activeSection={section}
+          align="end"
+          showEngine={false}
+          side="right"
+          trigger={
+            <button
+              type="button"
+              className="rail-profile flex size-10 items-center justify-center rounded-full border-0 bg-transparent p-0 outline-none transition-colors hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring/50"
+              aria-label="Открыть меню профиля"
+            >
+              <BraiUserAvatar user={authUser} className="size-8" />
+            </button>
+          }
+          user={authUser}
+          onArchive={onArchive}
+          onBraiCmd={onBraiCmd}
+          onEngine={onEngine}
+          onLogout={onLogout}
+          onProfile={onProfile}
+          onSettings={onSettings}
+        />
       </SidebarFooter>
     </Sidebar>
   );
 }
 
 function DesktopRailStatus({ syncStatus, pendingCount }: { syncStatus: SyncStatus; pendingCount: number }) {
-  const environmentLabel = useEnvironmentBadgeLabel();
-
   return (
-    <div className="desktop-rail-status flex flex-col items-center gap-1 py-1">
-      {environmentLabel ? <EnvironmentBadge label={environmentLabel} /> : null}
+    <div className="desktop-rail-status flex items-center justify-center py-1">
       <StatusPill status={syncStatus} pendingCount={pendingCount} />
     </div>
   );
@@ -211,12 +213,9 @@ const MOBILE_DOCK_PLACEHOLDER_ITEMS = [
 export function MobileDockOverflowSheet({
   side,
   section,
-  appVersionState,
-  otaRefreshing,
-  otaState,
-  versionError,
-  versionRefreshing,
+  authUser,
   onClose,
+  onProfile,
   onSettings,
   onBraiCmd,
   onDraws,
@@ -226,12 +225,9 @@ export function MobileDockOverflowSheet({
 }: {
   side: "left" | "right";
   section: SectionId;
-  appVersionState: AppVersionState | null;
-  otaRefreshing: boolean;
-  otaState: BraiOtaState | null;
-  versionError: boolean;
-  versionRefreshing: boolean;
+  authUser: AuthUser | null;
   onClose: () => void;
+  onProfile: () => void;
   onSettings: () => void;
   onBraiCmd: () => void;
   onDraws: () => void;
@@ -326,32 +322,25 @@ export function MobileDockOverflowSheet({
       >
         {side === "left" ? (
           <>
-            <header className="relative flex min-h-12 items-start justify-between gap-4 px-6 pt-4">
+            <header className="relative min-h-6 px-6 pt-2">
               <button type="button" className="sr-only" aria-label="Закрыть панель: Левое меню" onClick={() => closeSheet()}>
                 Закрыть
               </button>
               <div className="mobile-dock-overflow-drag-zone absolute left-1/2 top-0 flex h-6 w-32 -translate-x-1/2 touch-none cursor-grab items-start justify-center pt-1.5 active:cursor-grabbing">
                 <span className="mobile-dock-overflow-grabber h-1 w-11 rounded-full bg-muted-foreground/30" aria-hidden="true" />
               </div>
-              <h2 className="m-0 text-lg font-semibold leading-tight">Больше</h2>
             </header>
-            <div className="min-h-0 px-2 pb-4">
-              <SidebarMenu>
-                <ActionMenuItem large icon={Settings} label="Настройки" active={section === "settings"} onClick={() => closeThen(onSettings)} />
-                <ActionMenuItem large icon={Archive} label="Архив" active={section === "archive"} onClick={() => closeThen(onArchive)} />
-                <ActionMenuItem large icon={LogOut} label="Выйти" onClick={() => closeThenAsync(onLogout)} />
-                <BraiCmdMenuItem large active={section === "brai-cmd"} onClick={() => closeThen(onBraiCmd)} />
-                <EngineMenuItem
-                  large
-                  active={section === "engine"}
-                  appVersionState={appVersionState}
-                  otaRefreshing={otaRefreshing}
-                  otaState={otaState}
-                  versionError={versionError}
-                  versionRefreshing={versionRefreshing}
-                  onClick={() => closeThen(onEngine)}
-                />
-              </SidebarMenu>
+            <div className="min-h-0 px-3 pb-4">
+              <BraiUserMenuPanel
+                activeSection={section}
+                user={authUser}
+                onArchive={() => closeThen(onArchive)}
+                onBraiCmd={() => closeThen(onBraiCmd)}
+                onEngine={() => closeThen(onEngine)}
+                onLogout={() => closeThenAsync(onLogout)}
+                onProfile={() => closeThen(onProfile)}
+                onSettings={() => closeThen(onSettings)}
+              />
             </div>
           </>
         ) : (
@@ -396,90 +385,8 @@ function MobileDockOverflowActionButton({
   );
 }
 
-function PageMenu({
-  expanded,
-  forceActionMenu = false,
-  showEngineItem = true,
-  section,
-  appVersionState,
-  otaRefreshing,
-  otaState,
-  versionError,
-  versionRefreshing,
-  onSettings,
-  onBraiCmd,
-  onEngine,
-  onArchive,
-  onLogout,
-}: {
-  expanded: boolean;
-  forceActionMenu?: boolean;
-  showEngineItem?: boolean;
-  section: SectionId;
-  appVersionState: AppVersionState | null;
-  otaRefreshing: boolean;
-  otaState: BraiOtaState | null;
-  versionError: boolean;
-  versionRefreshing: boolean;
-  onSettings: () => void;
-  onBraiCmd: () => void;
-  onEngine: () => void;
-  onArchive: () => void;
-  onLogout: () => void | Promise<void>;
-}) {
-  const showActionMenu = forceActionMenu || section === "actions" || section === "draws" || section === "settings" || section === "brai-cmd" || section === "archive" || section === "engine";
-
-  return (
-    <>
-      {expanded ? (
-        <SidebarGroup>
-          <SidebarGroupLabel>Меню страницы</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <div className="px-2 py-1.5 text-sm font-medium text-sidebar-foreground" data-rail-page-title>{sectionTitle(section)}</div>
-          </SidebarGroupContent>
-        </SidebarGroup>
-      ) : null}
-      {showActionMenu ? (
-        <SidebarGroup>
-          <SidebarGroupLabel>Действия</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              <ActionMenuItem icon={Settings} label="Настройки" active={section === "settings"} onClick={onSettings} />
-              <ActionMenuItem icon={Archive} label="Архив" active={section === "archive"} onClick={onArchive} />
-              <ActionMenuItem icon={LogOut} label="Выйти" onClick={onLogout} />
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
-      ) : null}
-      {showActionMenu && showEngineItem ? (
-        <SidebarGroup className="mt-auto">
-          <SidebarGroupContent>
-            <SidebarMenu>
-              <BraiCmdMenuItem active={section === "brai-cmd"} onClick={onBraiCmd} />
-              <EngineMenuItem
-                active={section === "engine"}
-                appVersionState={appVersionState}
-                otaRefreshing={otaRefreshing}
-                otaState={otaState}
-                versionError={versionError}
-                versionRefreshing={versionRefreshing}
-                onClick={onEngine}
-              />
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
-      ) : null}
-    </>
-  );
-}
-
-function BraiCmdMenuItem({ active, large = false, onClick }: { active: boolean; large?: boolean; onClick: () => void }) {
-  return <ActionMenuItem large={large} icon={Command} label="Brai Cmd" active={active} onClick={onClick} />;
-}
-
-function EngineMenuItem({
+function EngineRailButton({
   active,
-  large = false,
   appVersionState,
   otaRefreshing,
   otaState,
@@ -488,7 +395,6 @@ function EngineMenuItem({
   onClick,
 }: {
   active: boolean;
-  large?: boolean;
   appVersionState: AppVersionState | null;
   otaRefreshing: boolean;
   otaState: BraiOtaState | null;
@@ -507,81 +413,18 @@ function EngineMenuItem({
   });
   const Icon = view.hasUpdate ? Download : Cpu;
 
-  return <ActionMenuItem large={large} icon={Icon} label="Engine" active={active} onClick={onClick} />;
-}
-
-function ActionMenuItem({
-  icon: Icon,
-  label,
-  active = false,
-  large = false,
-  onClick,
-}: {
-  icon: LucideIcon;
-  label: string;
-  active?: boolean;
-  large?: boolean;
-  onClick: () => void | Promise<void>;
-}) {
   return (
-    <SidebarMenuItem>
-      <SidebarMenuButton
-        type="button"
-        aria-label={label}
-        className={large ? "gap-3 px-3 text-base [&>svg]:size-5" : undefined}
-        isActive={active}
-        size={large ? "lg" : "default"}
-        tooltip={label}
-        onClick={() => void onClick()}
-      >
-        <Icon aria-hidden="true" />
-        <span>{label}</span>
-      </SidebarMenuButton>
-    </SidebarMenuItem>
-  );
-}
-
-function ProfileMenu({ compact = false }: { compact?: boolean }) {
-  if (compact) {
-    return (
-      <SidebarMenu>
-        <SidebarMenuItem>
-          <div className="rail-profile flex h-12 w-full items-center justify-center rounded-md p-2">
-            <ProfileAvatar />
-          </div>
-        </SidebarMenuItem>
-      </SidebarMenu>
-    );
-  }
-
-  return (
-    <SidebarMenu>
-      <SidebarMenuItem>
-        <div className="rail-profile flex h-12 w-full items-center gap-2 rounded-md p-2 text-left text-sm">
-          <ProfileAvatar />
-          <ProfileText />
-        </div>
-      </SidebarMenuItem>
-    </SidebarMenu>
-  );
-}
-
-function ProfileAvatar() {
-  return (
-    <Avatar className="profile-avatar h-8 w-8 rounded-full">
-      <AvatarFallback className="rounded-full bg-primary text-xs font-semibold text-primary-foreground">
-        BO
-      </AvatarFallback>
-    </Avatar>
-  );
-}
-
-function ProfileText() {
-  return (
-    <div className="grid flex-1 text-left text-sm leading-tight">
-      <span className="truncate font-semibold">Brai</span>
-      <span className="truncate text-xs">Workspace</span>
-    </div>
+    <SidebarMenuButton
+      type="button"
+      aria-label="Engine"
+      className="size-10 justify-center p-0"
+      isActive={active}
+      tooltip="Engine"
+      onClick={onClick}
+    >
+      <Icon aria-hidden="true" />
+      <span className="sr-only">Engine</span>
+    </SidebarMenuButton>
   );
 }
 

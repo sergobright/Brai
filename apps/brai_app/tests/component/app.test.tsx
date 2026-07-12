@@ -28,7 +28,7 @@ describe("BraiApp shell", () => {
       expect(screen.getAllByRole("button", { name: title }).length).toBeGreaterThan(0);
     });
     expect(screen.queryByRole("button", { name: "Цели фокусировки" })).not.toBeInTheDocument();
-    expect(screen.getAllByRole("button", { name: "Настройки" }).length).toBeGreaterThan(0);
+    expect(screen.queryByRole("button", { name: "Настройки" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Открыть меню" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Открыть левое меню" })).toBeInTheDocument();
     await waitFor(() => expect(screen.getByRole("button", { name: "Информация о действиях" })).toBeInTheDocument());
@@ -208,9 +208,11 @@ describe("BraiApp shell", () => {
     await waitFor(() => expect(screen.getByRole("heading", { name: "Engine" })).toBeInTheDocument());
     expect(window.location.pathname).toBe("/engine");
 
-    fireEvent.click(screen.getByRole("button", { name: "Настройки" }));
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Открыть меню профиля" }), { button: 0, ctrlKey: false });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Настройки" }));
     await waitFor(() => expect(screen.getByRole("heading", { name: "Настройки" })).toBeInTheDocument());
-    fireEvent.click(screen.getByRole("button", { name: "Архив" }));
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Открыть меню профиля" }), { button: 0, ctrlKey: false });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Архив" }));
     await waitFor(() => expect(screen.getByRole("heading", { name: "Архив" })).toBeInTheDocument());
   });
 
@@ -1107,15 +1109,15 @@ describe("BraiApp shell", () => {
     expect(rail).not.toHaveTextContent("Фокус");
     expect(rail.querySelector(".desktop-rail-status .status-pill")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Engine/ }).closest('[data-sidebar="footer"]')).toBeInTheDocument();
-    expect(rail).toContainElement(screen.getByRole("button", { name: "Настройки" }));
-    expect(rail).toContainElement(screen.getByRole("button", { name: "Архив" }));
     expect(rail).toContainElement(screen.getByRole("button", { name: /Engine/ }));
+    expect(rail).toContainElement(screen.getByRole("button", { name: "Открыть меню профиля" }));
+    expect(rail).not.toContainElement(screen.queryByRole("button", { name: "Настройки" }));
+    expect(rail).not.toContainElement(screen.queryByRole("button", { name: "Архив" }));
 
     fireEvent.click(screen.getAllByRole("button", { name: "Фокус" }).at(-1) as HTMLElement);
     await waitFor(() => expect(screen.getByRole("heading", { name: "Фокус" })).toBeInTheDocument());
     expect(rail).not.toHaveTextContent("Меню страницы");
-    expect(rail).toContainElement(within(rail as HTMLElement).getByRole("button", { name: "Настройки" }));
-    expect(rail).toContainElement(within(rail as HTMLElement).getByRole("button", { name: "Архив" }));
+    expect(rail).toContainElement(within(rail as HTMLElement).getByRole("button", { name: "Открыть меню профиля" }));
   });
 
   it("keeps the desktop rail collapsed regardless of the old sidebar cookie", async () => {
@@ -1154,7 +1156,9 @@ describe("BraiApp shell", () => {
     const sheet = document.querySelector(".mobile-dock-overflow-sheet") as HTMLElement;
     expect(within(sheet).getByRole("button", { name: "Настройки" })).toBeInTheDocument();
     expect(within(sheet).getByRole("button", { name: "Архив" })).toBeInTheDocument();
-    expect(within(sheet).getByRole("button", { name: "Выйти" })).toBeInTheDocument();
+    expect(within(sheet).getByRole("button", { name: "Профиль" })).toBeInTheDocument();
+    expect(within(sheet).getByRole("button", { name: "Brai CMD" })).toBeInTheDocument();
+    expect(within(sheet).getByRole("button", { name: "Выход" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Открыть меню профиля" })).not.toBeInTheDocument();
 
     fireEvent.click(document.querySelector(".mobile-dock-overflow-backdrop") as HTMLElement);
