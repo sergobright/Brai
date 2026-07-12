@@ -29,6 +29,8 @@ Build and publish a release APK only when native Android code, Capacitor config,
 
 The Dev APK belongs to the persistent protected Dev environment on `dev.brai.one`. Dev deploys use the long-lived Supabase `brai-dev` branch and must keep APK, OTA/web, API, and version ledger in sync.
 
+The production API renders `/releases/` from the shared `releases.json` with the renderer shipped in the production source. APK publishers still refresh the static `index.html` compatibility artifact, but a preview branch's older renderer must not determine the page served to users.
+
 ## OTA Manifest
 
 The mobile OTA manifest uses schema version 2:
