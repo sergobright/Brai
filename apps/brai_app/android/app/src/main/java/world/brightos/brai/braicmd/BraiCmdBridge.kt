@@ -13,8 +13,10 @@ import world.brightos.brai.capabilities.BraiAccessibilityService
 internal object BraiCmdBridge {
     fun snapshot(context: Context): JSObject {
         val appContext = context.applicationContext
+        val config = ConfigStore(appContext)
         return JSObject()
             .put("native", true)
+            .put("overlayEnabled", config.overlayEnabled)
             .put("permissions", permissionsJson(appContext))
             .put("settings", settingsJson(appContext))
             .put("stats", BraiCmdStatsStore(appContext).snapshotJson())

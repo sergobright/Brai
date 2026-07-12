@@ -431,7 +431,7 @@ export function OnboardingFlow({
   function chooseVoiceMode(voiceMode: VoiceMode) {
     if (voiceMode === "provider") go("provider-key", { voiceMode });
     if (voiceMode === "local") go("local-server", { voiceMode });
-    if (voiceMode === "cloud") go("microphone", { voiceMode });
+    if (voiceMode === "cloud") go("cloud-privacy", { voiceMode });
   }
 
   async function submitCloudLogin(email: string) {

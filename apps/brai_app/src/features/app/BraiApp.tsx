@@ -125,7 +125,7 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
   }), []);
 
   function renderSectionScreen(screenSection: SectionId, isActivePage: boolean) {
-    const hideScreenHeader = screenSection === "draws" && drawsFullscreenActive;
+    const hideScreenHeader = screenSection === "brai-cmd" || (screenSection === "draws" && drawsFullscreenActive);
 
     return (
       <>

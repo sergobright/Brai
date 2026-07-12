@@ -56,6 +56,15 @@ class ConfigStoreTest {
     }
 
     @Test
+    fun settingsSnapshotIncludesOverlayEnabled() {
+        store.overlayEnabled = true
+
+        val snapshot = BraiCmdBridge.snapshot(RuntimeEnvironment.getApplication())
+
+        assertTrue(snapshot.optBoolean("overlayEnabled"))
+    }
+
+    @Test
     fun oldBraiApiDomainMigratesToCurrentBuildFlavor() {
         store.serverUrl = "https://e.test.brightos.world/api"
 

@@ -1,13 +1,14 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { ArrowLeft, Check, Download, Trash2, X } from "lucide-react";
+import { Fragment, useEffect, useMemo, useState, type ReactNode } from "react";
+import { ArrowLeft, Check, CheckCircle2, CircleHelp, Download, LoaderCircle, Trash2, X, XCircle } from "lucide-react";
 import {
   deleteBraiCmdAudio,
   downloadBraiCmdAudio,
   getBraiCmdSettings,
   openBraiCmdPermission,
   saveBraiCmdProvider,
+  setBraiCmdOverlayEnabled,
   testBraiCmdConnection,
   testBraiCmdProvider,
   updateBraiCmdSettings,
@@ -24,9 +25,11 @@ import { installAndroidBackHandler } from "@/shared/platform/platform";
 import { Alert, AlertAction, AlertDescription, AlertTitle } from "@/shared/ui/alert";
 import { Badge } from "@/shared/ui/badge";
 import { Button } from "@/shared/ui/button";
-import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/shared/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/shared/ui/card";
+import { Field, FieldContent, FieldDescription, FieldGroup, FieldLabel, FieldTitle } from "@/shared/ui/field";
 import { Input } from "@/shared/ui/input";
 import { Label } from "@/shared/ui/label";
+import { RadioGroup, RadioGroupItem } from "@/shared/ui/radio-group";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/shared/ui/select";
 import { Separator } from "@/shared/ui/separator";
 import { Switch } from "@/shared/ui/switch";
@@ -34,7 +37,7 @@ import { Textarea } from "@/shared/ui/textarea";
 import { SECTION_GRID_CLASS } from "../../appModel";
 import { cx } from "../../appUtils";
 
-const PROVIDERS: Array<{ id: BraiCmdProviderId; label: string; baseUrl?: string }> = [
+const PROVIDERS: Array<{ id: BraiCmdProviderId; label: string }> = [
   { id: "openai", label: "OpenAI" },
   { id: "groq", label: "Groq" },
   { id: "openrouter", label: "OpenRouter" },
@@ -58,12 +61,16 @@ const CONTEXT_ACTIONS: Array<{ id: keyof BraiCmdContextActions; title: string; t
 ];
 
 type CmdPage = "main" | "provider" | "audio";
+type ConnectionStatus = "idle" | "testing" | "ok" | "error";
+type ConnectionState = { status: ConnectionStatus; message: string };
+
+const initialConnection: ConnectionState = { status: "idle", message: "Протестируйте подключение" };
 
 export function BraiCmdSection() {
   const [snapshot, setSnapshot] = useState<BraiCmdSnapshot | null>(null);
   const [page, setPage] = useState<CmdPage>("main");
   const [loading, setLoading] = useState(true);
-  const [connection, setConnection] = useState("Протестируйте подключение");
+  const [connection, setConnection] = useState<ConnectionState>(initialConnection);
 
   useEffect(() => {
     let active = true;
@@ -88,10 +95,16 @@ export function BraiCmdSection() {
     if (next) setSnapshot(next);
   }
 
+  async function toggleOverlay(enabled: boolean) {
+    const next = await setBraiCmdOverlayEnabled(enabled);
+    if (!next) return;
+    setSnapshot((current) => current ? { ...current, ...next, overlayEnabled: next.overlayEnabled ?? enabled } : current);
+  }
+
   async function testConnection() {
-    setConnection("Проверка...");
+    setConnection({ status: "testing", message: "Проверка..." });
     const result = await testBraiCmdConnection();
-    setConnection(result?.ok ? "Всё работает" : "Подключение не работает");
+    setConnection(result?.ok ? { status: "ok", message: "Всё работает" } : { status: "error", message: "Подключение не работает" });
   }
 
   if (loading) {
@@ -100,7 +113,7 @@ export function BraiCmdSection() {
 
   if (!snapshot) {
     return (
-      <section className={cx(SECTION_GRID_CLASS, "max-w-3xl content-start")} aria-label="Brai CMD">
+      <section className={cx(SECTION_GRID_CLASS, "max-w-3xl content-start pb-[calc(6rem+env(safe-area-inset-bottom))]")} aria-label="Brai CMD">
         <h1 className="text-2xl font-semibold">Brai CMD</h1>
         <Card>
           <CardHeader>
@@ -113,16 +126,17 @@ export function BraiCmdSection() {
   }
 
   return (
-    <section className={cx(SECTION_GRID_CLASS, "max-w-3xl content-start pb-8")} aria-label="Brai CMD">
+    <section className={cx(SECTION_GRID_CLASS, "max-w-3xl content-start pb-[calc(6rem+env(safe-area-inset-bottom))] max-[860px]:pb-[calc(7rem+env(safe-area-inset-bottom))]")} aria-label="Brai CMD">
       {page === "main" ? (
         <MainPage
           snapshot={snapshot}
           connection={connection}
-          onConnectionTest={() => void testConnection()}
-          onPermission={(permission) => void openBraiCmdPermission(permission).then((next) => { if (next) setSnapshot(next); })}
-          onPatch={(patch) => void patchSettings(patch)}
-          onProvider={() => setPage("provider")}
           onAudio={() => setPage("audio")}
+          onConnectionTest={() => void testConnection()}
+          onOverlayChange={(enabled) => void toggleOverlay(enabled)}
+          onPatch={(patch) => void patchSettings(patch)}
+          onPermission={(permission) => void openBraiCmdPermission(permission).then((next) => { if (next) setSnapshot(next); })}
+          onProvider={() => setPage("provider")}
         />
       ) : page === "provider" ? (
         <ProviderPage snapshot={snapshot} onBack={() => setPage("main")} onSnapshot={setSnapshot} />
@@ -136,52 +150,79 @@ export function BraiCmdSection() {
 function MainPage({
   snapshot,
   connection,
-  onConnectionTest,
-  onPermission,
-  onPatch,
-  onProvider,
   onAudio,
+  onConnectionTest,
+  onOverlayChange,
+  onPatch,
+  onPermission,
+  onProvider,
 }: {
   snapshot: BraiCmdSnapshot;
-  connection: string;
-  onConnectionTest: () => void;
-  onPermission: (permission: BraiCmdPermissionKey) => void;
-  onPatch: (patch: BraiCmdSettingsPatch) => void;
-  onProvider: () => void;
+  connection: ConnectionState;
   onAudio: () => void;
+  onConnectionTest: () => void;
+  onOverlayChange: (enabled: boolean) => void;
+  onPatch: (patch: BraiCmdSettingsPatch) => void;
+  onPermission: (permission: BraiCmdPermissionKey) => void;
+  onProvider: () => void;
 }) {
   const { settings } = snapshot;
   return (
     <>
       <h1 className="text-2xl font-semibold">Brai CMD</h1>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Главная кнопка диктовки</CardTitle>
+          <CardDescription>Основная кнопка, которая превращает голос в текст, вставляй в поле ввода.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <SwitchRow
+            checked={Boolean(snapshot.overlayEnabled)}
+            text="Выключает основную кнопку и кнопки контекста."
+            title="Переключатель активен"
+            onCheckedChange={onOverlayChange}
+          />
+        </CardContent>
+      </Card>
+
       <Card>
         <CardHeader>
           <CardTitle className="text-base">Разрешения</CardTitle>
         </CardHeader>
-        <CardContent className="grid gap-3">
-          {PERMISSIONS.map((permission) => {
-            const granted = snapshot.permissions[permission.id];
-            return (
-              <div key={permission.id} className="flex items-center justify-between gap-3 rounded-md border bg-muted/20 p-3">
-                <div className="min-w-0">
-                  <div className="font-medium">{permission.title}</div>
-                  <div className="text-sm text-muted-foreground">{permission.text}</div>
-                </div>
-                <Button type="button" variant={granted ? "secondary" : "default"} disabled={granted} onClick={() => onPermission(permission.id)}>
-                  {granted ? "Выдано" : "Разрешить"}
-                </Button>
-              </div>
-            );
-          })}
+        <CardContent>
+          <FieldGroup className="gap-4">
+            {PERMISSIONS.map((permission, index) => {
+              const granted = snapshot.permissions[permission.id];
+              return (
+                <Fragment key={permission.id}>
+                  {index > 0 ? <Separator /> : null}
+                  <Field orientation="responsive">
+                    <FieldContent>
+                      <FieldTitle>{permission.title}</FieldTitle>
+                      <FieldDescription>{permission.text}</FieldDescription>
+                    </FieldContent>
+                    <Button className="w-full sm:w-auto" disabled={granted} type="button" variant={granted ? "secondary" : "default"} onClick={() => onPermission(permission.id)}>
+                      {granted ? "Выдано" : "Разрешить"}
+                    </Button>
+                  </Field>
+                </Fragment>
+              );
+            })}
+          </FieldGroup>
         </CardContent>
       </Card>
 
       <Card>
         <CardHeader>
           <CardTitle className="text-base">Проверка связи</CardTitle>
-          <CardAction><Button type="button" onClick={onConnectionTest}>Тест</Button></CardAction>
         </CardHeader>
-        <CardContent className="text-sm text-muted-foreground">{connection}</CardContent>
+        <CardContent className="grid gap-4">
+          <ConnectionAlert connection={connection} />
+          <Button className="w-full sm:w-fit" disabled={connection.status === "testing"} type="button" onClick={onConnectionTest}>
+            {connection.status === "testing" ? "Проверка" : "Тест"}
+          </Button>
+        </CardContent>
       </Card>
 
       <Card>
@@ -189,16 +230,20 @@ function MainPage({
           <CardTitle className="text-base">Кнопки контекста</CardTitle>
           <CardDescription>Вы можете включать и выключать набор кнопок</CardDescription>
         </CardHeader>
-        <CardContent className="grid gap-3">
-          {CONTEXT_ACTIONS.map((action) => (
-            <SwitchRow
-              key={action.id}
-              title={action.title}
-              text={action.text}
-              checked={settings.contextActions[action.id]}
-              onCheckedChange={(checked) => onPatch({ contextActions: { [action.id]: checked } as Partial<BraiCmdContextActions> })}
-            />
-          ))}
+        <CardContent>
+          <FieldGroup className="gap-4">
+            {CONTEXT_ACTIONS.map((action, index) => (
+              <Fragment key={action.id}>
+                {index > 0 ? <Separator /> : null}
+                <SwitchRow
+                  checked={settings.contextActions[action.id]}
+                  text={action.text}
+                  title={action.title}
+                  onCheckedChange={(checked) => onPatch({ contextActions: { [action.id]: checked } as Partial<BraiCmdContextActions> })}
+                />
+              </Fragment>
+            ))}
+          </FieldGroup>
         </CardContent>
       </Card>
 
@@ -206,12 +251,14 @@ function MainPage({
         <CardHeader>
           <CardTitle className="text-base">Настройки кнопок</CardTitle>
         </CardHeader>
-        <CardContent className="grid gap-5">
-          <RangeRow title="Основная иконка: непрозрачность" value={settings.mainIconOpacityPercent} min={35} max={100} onChange={(value) => onPatch({ mainIconOpacityPercent: value })} />
-          <RangeRow title="Основная иконка: размер" value={settings.mainIconSizePercent} min={70} max={130} onChange={(value) => onPatch({ mainIconSizePercent: value })} />
-          <Separator />
-          <RangeRow title="Контекст: непрозрачность" value={settings.contextIconOpacityPercent} min={35} max={100} onChange={(value) => onPatch({ contextIconOpacityPercent: value })} />
-          <RangeRow title="Контекст: размер" value={settings.contextIconSizePercent} min={70} max={130} onChange={(value) => onPatch({ contextIconSizePercent: value })} />
+        <CardContent>
+          <FieldGroup className="gap-5">
+            <RangeRow title="Основная иконка: непрозрачность" value={settings.mainIconOpacityPercent} min={35} max={100} onChange={(value) => onPatch({ mainIconOpacityPercent: value })} />
+            <RangeRow title="Основная иконка: размер" value={settings.mainIconSizePercent} min={70} max={130} onChange={(value) => onPatch({ mainIconSizePercent: value })} />
+            <Separator />
+            <RangeRow title="Контекст: непрозрачность" value={settings.contextIconOpacityPercent} min={35} max={100} onChange={(value) => onPatch({ contextIconOpacityPercent: value })} />
+            <RangeRow title="Контекст: размер" value={settings.contextIconSizePercent} min={70} max={130} onChange={(value) => onPatch({ contextIconSizePercent: value })} />
+          </FieldGroup>
         </CardContent>
       </Card>
 
@@ -219,21 +266,41 @@ function MainPage({
         <CardHeader>
           <CardTitle className="text-base">Постобработка</CardTitle>
           <CardDescription>Улучшаем с ИИ текст полученный после расшифровки.</CardDescription>
-          <CardAction><Switch checked={settings.postProcessingEnabled} onCheckedChange={(checked) => onPatch({ postProcessingEnabled: checked })} /></CardAction>
         </CardHeader>
-        {settings.postProcessingEnabled ? (
-          <CardContent className="grid gap-3">
-            <Button type="button" variant="outline" className="justify-self-start" onClick={onProvider}>
-              {settings.providerConfigured ? <Check /> : <X className="text-destructive" />}
-              Поставщик LLM
-            </Button>
-            <Textarea
-              value={settings.postProcessingPrompt}
-              rows={6}
-              onChange={(event) => onPatch({ postProcessingPrompt: event.target.value })}
+        <CardContent>
+          <FieldGroup className="gap-4">
+            <SwitchRow
+              checked={settings.postProcessingEnabled}
+              text="После расшифровки текст будет улучшаться через выбранного поставщика LLM."
+              title="Постобработка включена"
+              onCheckedChange={(checked) => onPatch({ postProcessingEnabled: checked })}
             />
-          </CardContent>
-        ) : null}
+            {settings.postProcessingEnabled ? (
+              <>
+                <Separator />
+                <Field orientation="responsive">
+                  <FieldContent>
+                    <FieldTitle>Поставщик LLM</FieldTitle>
+                    <FieldDescription>{settings.providerConfigured ? "Поставщик подключён." : "Нужно выбрать облако Brai или подключить ключ поставщика."}</FieldDescription>
+                  </FieldContent>
+                  <Button className="w-full justify-start sm:w-auto sm:justify-center" type="button" variant="outline" onClick={onProvider}>
+                    {settings.providerConfigured ? <Check className="text-emerald-600 dark:text-emerald-300" /> : <X className="text-destructive" />}
+                    Поставщик LLM
+                  </Button>
+                </Field>
+                <Field>
+                  <FieldLabel htmlFor="brai-cmd-post-processing-prompt">Промпт постобработки</FieldLabel>
+                  <Textarea
+                    id="brai-cmd-post-processing-prompt"
+                    rows={6}
+                    value={settings.postProcessingPrompt}
+                    onChange={(event) => onPatch({ postProcessingPrompt: event.target.value })}
+                  />
+                </Field>
+              </>
+            ) : null}
+          </FieldGroup>
+        </CardContent>
       </Card>
 
       <Card>
@@ -249,8 +316,10 @@ function MainPage({
         <CardHeader>
           <CardTitle className="text-base">Аудиозаписи</CardTitle>
           <CardDescription>По умолчанию на телефоне сохраняются только аудиозаписи, которые ещё не удалось обработать. Вы можете их скачать или удалить.</CardDescription>
-          <CardAction><Button type="button" variant="outline" onClick={onAudio}>Аудиозаписи</Button></CardAction>
         </CardHeader>
+        <CardContent>
+          <Button className="w-full sm:w-fit" type="button" variant="outline" onClick={onAudio}>Аудиозаписи</Button>
+        </CardContent>
       </Card>
     </>
   );
@@ -269,6 +338,13 @@ function ProviderPage({ snapshot, onBack, onSnapshot }: { snapshot: BraiCmdSnaps
   async function saveCloud() {
     const next = await updateBraiCmdSettings({ providerMode: "cloud" });
     if (next) onSnapshot(next);
+  }
+
+  function chooseMode(value: string) {
+    const nextMode = value as BraiCmdProviderMode;
+    setMode(nextMode);
+    setResult(null);
+    if (nextMode === "cloud") void saveCloud();
   }
 
   async function connectProvider() {
@@ -296,9 +372,11 @@ function ProviderPage({ snapshot, onBack, onSnapshot }: { snapshot: BraiCmdSnaps
         <CardHeader>
           <CardTitle className="text-base">Режим</CardTitle>
         </CardHeader>
-        <CardContent className="grid grid-cols-2 gap-2">
-          <Button type="button" variant={mode === "cloud" ? "default" : "outline"} onClick={() => { setMode("cloud"); void saveCloud(); }}>Облако Brai</Button>
-          <Button type="button" variant={mode === "key" ? "default" : "outline"} onClick={() => setMode("key")}>Ключ поставщика</Button>
+        <CardContent>
+          <ChoiceRadioGroup value={mode} onValueChange={chooseMode}>
+            <ChoiceRadio id="brai-cmd-provider-cloud" text="Постобработка на серверах Brai." title="Облако Brai" value="cloud" />
+            <ChoiceRadio id="brai-cmd-provider-key" text="Ваш API ключ и модель поставщика." title="Ключ поставщика" value="key" />
+          </ChoiceRadioGroup>
         </CardContent>
       </Card>
 
@@ -319,40 +397,44 @@ function ProviderPage({ snapshot, onBack, onSnapshot }: { snapshot: BraiCmdSnaps
           <CardHeader>
             <CardTitle className="text-base">Ключ поставщика</CardTitle>
           </CardHeader>
-          <CardContent className="grid gap-3">
-            <div className="grid gap-2">
-              <Label>Поставщик</Label>
-              <Select value={providerId} onValueChange={(value) => setProviderId(value as BraiCmdProviderId)}>
-                <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
-                <SelectContent>{PROVIDERS.map((provider) => <SelectItem key={provider.id} value={provider.id}>{provider.label}</SelectItem>)}</SelectContent>
-              </Select>
-            </div>
-            {providerId === "custom-openai" ? (
-              <div className="grid gap-2">
-                <Label htmlFor="brai-cmd-provider-base-url">Base URL</Label>
-                <Input id="brai-cmd-provider-base-url" value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} placeholder="https://example.com/v1" />
-              </div>
-            ) : null}
-            <div className="grid gap-2">
-              <Label htmlFor="brai-cmd-provider-key">API ключ</Label>
-              <Input id="brai-cmd-provider-key" value={apiKey} onChange={(event) => setApiKey(event.target.value)} type="password" autoComplete="off" />
-            </div>
-            {models.length > 0 ? (
-              <div className="grid gap-2">
-                <Label>Модель</Label>
-                <Select value={model} onValueChange={setModel}>
-                  <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
-                  <SelectContent>{models.map((item) => <SelectItem key={item} value={item}>{item}</SelectItem>)}</SelectContent>
+          <CardContent>
+            <FieldGroup className="gap-4">
+              <Field>
+                <FieldLabel htmlFor="brai-cmd-provider-id">Поставщик</FieldLabel>
+                <Select value={providerId} onValueChange={(value) => setProviderId(value as BraiCmdProviderId)}>
+                  <SelectTrigger id="brai-cmd-provider-id" className="w-full"><SelectValue /></SelectTrigger>
+                  <SelectContent>{PROVIDERS.map((provider) => <SelectItem key={provider.id} value={provider.id}>{provider.label}</SelectItem>)}</SelectContent>
                 </Select>
-              </div>
-            ) : (
-              <div className="grid gap-2">
-                <Label htmlFor="brai-cmd-provider-model">Модель</Label>
-                <Input id="brai-cmd-provider-model" value={model} onChange={(event) => setModel(event.target.value)} placeholder="Оставьте пустым, если поставщик отдаёт список" />
-              </div>
-            )}
-            <Button type="button" disabled={testing || apiKey.trim().length === 0} onClick={() => void connectProvider()}>{testing ? "Проверка" : "Подключить"}</Button>
-            {result ? <p className={cx("m-0 text-sm", result.ok ? "text-muted-foreground" : "text-destructive")}>{result.message}</p> : null}
+              </Field>
+              {providerId === "custom-openai" ? (
+                <Field>
+                  <FieldLabel htmlFor="brai-cmd-provider-base-url">Base URL</FieldLabel>
+                  <Input id="brai-cmd-provider-base-url" placeholder="https://example.com/v1" value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} />
+                </Field>
+              ) : null}
+              <Field>
+                <FieldLabel htmlFor="brai-cmd-provider-key">API ключ</FieldLabel>
+                <Input id="brai-cmd-provider-key" autoComplete="off" type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} />
+              </Field>
+              {models.length > 0 ? (
+                <Field>
+                  <FieldLabel htmlFor="brai-cmd-provider-model-select">Модель</FieldLabel>
+                  <Select value={model} onValueChange={setModel}>
+                    <SelectTrigger id="brai-cmd-provider-model-select" className="w-full"><SelectValue /></SelectTrigger>
+                    <SelectContent>{models.map((item) => <SelectItem key={item} value={item}>{item}</SelectItem>)}</SelectContent>
+                  </Select>
+                </Field>
+              ) : (
+                <Field>
+                  <FieldLabel htmlFor="brai-cmd-provider-model">Модель</FieldLabel>
+                  <Input id="brai-cmd-provider-model" placeholder="Оставьте пустым, если поставщик отдаёт список" value={model} onChange={(event) => setModel(event.target.value)} />
+                </Field>
+              )}
+              <Button className="w-full sm:w-fit" disabled={testing || apiKey.trim().length === 0} type="button" onClick={() => void connectProvider()}>
+                {testing ? "Проверка" : "Подключить"}
+              </Button>
+              {result ? <ProviderResultAlert result={result} /> : null}
+            </FieldGroup>
           </CardContent>
         </Card>
       )}
@@ -374,6 +456,24 @@ function AudioPage({
   const [pendingDelete, setPendingDelete] = useState<BraiCmdAudioItem | null>(null);
   const [downloadStatus, setDownloadStatus] = useState("");
   const settings = snapshot.settings;
+  const [limitDraft, setLimitDraft] = useState(String(settings.processedAudioRetentionLimit));
+
+  function commitLimit(value = limitDraft) {
+    const parsed = Number(value);
+    const next = Number.isFinite(parsed) ? Math.trunc(parsed) : 25;
+    const clamped = Math.min(999, Math.max(1, next));
+    setLimitDraft(String(clamped));
+    onPatch({ processedAudioRetentionLimit: clamped });
+  }
+
+  function changeLimit(value: string) {
+    const digits = value.replace(/\D/g, "").slice(0, 3);
+    setLimitDraft(digits);
+    if (!digits) return;
+    const parsed = Number(digits);
+    if (parsed >= 1 && parsed <= 999) onPatch({ processedAudioRetentionLimit: parsed });
+  }
+
   return (
     <>
       <PageBack title="Аудиозаписи" onBack={onBack} />
@@ -381,60 +481,73 @@ function AudioPage({
         <CardHeader>
           <CardTitle className="text-base">Настройки</CardTitle>
         </CardHeader>
-        <CardContent className="grid gap-4">
-          <div className="grid grid-cols-2 gap-2">
-            <Button type="button" variant={!settings.processedAudioRetentionEnabled ? "default" : "outline"} onClick={() => onPatch({ processedAudioRetentionEnabled: false })}>Только очередь</Button>
-            <Button type="button" variant={settings.processedAudioRetentionEnabled ? "default" : "outline"} onClick={() => onPatch({ processedAudioRetentionEnabled: true })}>Хранить больше аудиозаписей</Button>
-          </div>
-          {settings.processedAudioRetentionEnabled ? (
-            <div className="flex items-center justify-between gap-3">
-              <Label htmlFor="brai-cmd-audio-limit">Сколько аудиозаписей хранить?</Label>
-              <Input
-                id="brai-cmd-audio-limit"
-                className="w-24"
-                type="number"
-                min={1}
-                max={999}
-                value={settings.processedAudioRetentionLimit}
-                onChange={(event) => onPatch({ processedAudioRetentionLimit: Number(event.target.value) })}
-              />
-            </div>
-          ) : null}
+        <CardContent>
+          <FieldGroup className="gap-4">
+            <ChoiceRadioGroup value={settings.processedAudioRetentionEnabled ? "processed" : "queue"} onValueChange={(value) => onPatch({ processedAudioRetentionEnabled: value === "processed" })}>
+              <ChoiceRadio id="brai-cmd-audio-queue" text="Без лимита для очереди." title="Только очередь" value="queue" />
+              <ChoiceRadio id="brai-cmd-audio-processed" text="Сохранять обработанные записи." title="Хранить больше аудиозаписей" value="processed" />
+            </ChoiceRadioGroup>
+            {settings.processedAudioRetentionEnabled ? (
+              <Field orientation="responsive">
+                <FieldContent>
+                  <FieldLabel htmlFor="brai-cmd-audio-limit">Сколько аудиозаписей хранить?</FieldLabel>
+                  <FieldDescription>Лимит применяется только к обработанным аудиозаписям.</FieldDescription>
+                </FieldContent>
+                <Input
+                  id="brai-cmd-audio-limit"
+                  className="w-full sm:w-24"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  type="text"
+                  value={limitDraft}
+                  onBlur={() => commitLimit()}
+                  onChange={(event) => changeLimit(event.target.value)}
+                />
+              </Field>
+            ) : null}
+          </FieldGroup>
         </CardContent>
       </Card>
       <Card>
         <CardHeader>
           <CardTitle className="text-base">Файлы</CardTitle>
         </CardHeader>
-        <CardContent className="grid gap-3">
-          {snapshot.audio.length === 0 ? <p className="m-0 text-sm text-muted-foreground">Аудиозаписей нет</p> : null}
-          {snapshot.audio.map((item) => (
-            <div key={item.id} className="grid gap-2 rounded-md border p-3">
-              <div className="flex items-center justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="font-medium">{item.title}</div>
-                  <div className="text-sm text-muted-foreground">{item.megabytes.toFixed(2)} МБ</div>
+        <CardContent>
+          <FieldGroup className="gap-4">
+            {snapshot.audio.length === 0 ? <p className="m-0 text-sm text-muted-foreground">Аудиозаписей нет</p> : null}
+            {snapshot.audio.map((item, index) => (
+              <Fragment key={item.id}>
+                {index > 0 ? <Separator /> : null}
+                <div className="grid gap-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="grid min-w-0 gap-1.5">
+                      <div className="font-medium leading-snug">{item.title}</div>
+                      <div>
+                        <Badge variant={item.status === "queued" ? "error" : "success"}>{item.status === "queued" ? "в очереди" : "обработано"}</Badge>
+                      </div>
+                      <div className="text-sm text-muted-foreground">{item.megabytes.toFixed(2)} МБ</div>
+                    </div>
+                    <div className="flex shrink-0 gap-2">
+                      <Button type="button" size="icon-sm" variant="outline" aria-label="Скачать" onClick={() => void downloadBraiCmdAudio(item.id).then((result) => setDownloadStatus(result?.message ?? ""))}><Download /></Button>
+                      <Button type="button" size="icon-sm" variant="outline" aria-label="Удалить" onClick={() => item.status === "queued" ? setPendingDelete(item) : void deleteBraiCmdAudio(item.id).then((next) => { if (next) onSnapshot(next); })}><Trash2 /></Button>
+                    </div>
+                  </div>
+                  {pendingDelete?.id === item.id ? (
+                    <Alert variant="destructive">
+                      <Trash2 />
+                      <AlertTitle>Удалить запись из очереди?</AlertTitle>
+                      <AlertDescription>Эта аудиозапись ещё не обработана.</AlertDescription>
+                      <AlertAction>
+                        <Button type="button" size="sm" variant="destructive" onClick={() => void deleteBraiCmdAudio(item.id).then((next) => { setPendingDelete(null); if (next) onSnapshot(next); })}>Удалить</Button>
+                        <Button type="button" size="sm" variant="outline" onClick={() => setPendingDelete(null)}>Отмена</Button>
+                      </AlertAction>
+                    </Alert>
+                  ) : null}
                 </div>
-                <Badge variant={item.status === "queued" ? "error" : "secondary"}>{item.status === "queued" ? "в очереди" : "обработано"}</Badge>
-              </div>
-              <div className="flex justify-end gap-2">
-                <Button type="button" size="icon-sm" variant="outline" aria-label="Скачать" onClick={() => void downloadBraiCmdAudio(item.id).then((result) => setDownloadStatus(result?.message ?? ""))}><Download /></Button>
-                <Button type="button" size="icon-sm" variant="outline" aria-label="Удалить" onClick={() => item.status === "queued" ? setPendingDelete(item) : void deleteBraiCmdAudio(item.id).then((next) => { if (next) onSnapshot(next); })}><Trash2 /></Button>
-              </div>
-              {pendingDelete?.id === item.id ? (
-                <Alert variant="destructive">
-                  <Trash2 />
-                  <AlertTitle>Удалить запись из очереди?</AlertTitle>
-                  <AlertDescription>Эта аудиозапись ещё не обработана.</AlertDescription>
-                  <AlertAction>
-                    <Button type="button" size="sm" variant="destructive" onClick={() => void deleteBraiCmdAudio(item.id).then((next) => { setPendingDelete(null); if (next) onSnapshot(next); })}>Удалить</Button>
-                    <Button type="button" size="sm" variant="outline" onClick={() => setPendingDelete(null)}>Отмена</Button>
-                  </AlertAction>
-                </Alert>
-              ) : null}
-            </div>
-          ))}
-          {downloadStatus ? <p className="m-0 text-sm text-muted-foreground">{downloadStatus}</p> : null}
+              </Fragment>
+            ))}
+            {downloadStatus ? <p className="m-0 text-sm text-muted-foreground">{downloadStatus}</p> : null}
+          </FieldGroup>
         </CardContent>
       </Card>
     </>
@@ -452,25 +565,67 @@ function PageBack({ title, onBack }: { title: string; onBack: () => void }) {
 
 function SwitchRow({ title, text, checked, onCheckedChange }: { title: string; text: string; checked: boolean; onCheckedChange: (checked: boolean) => void }) {
   return (
-    <div className="flex items-center justify-between gap-3">
-      <div className="min-w-0">
-        <div className="font-medium">{title}</div>
-        <div className="text-sm text-muted-foreground">{text}</div>
-      </div>
-      <Switch checked={checked} onCheckedChange={onCheckedChange} />
-    </div>
+    <Field orientation="horizontal">
+      <FieldContent>
+        <FieldTitle>{title}</FieldTitle>
+        <FieldDescription>{text}</FieldDescription>
+      </FieldContent>
+      <Switch aria-label={title} checked={checked} onCheckedChange={onCheckedChange} />
+    </Field>
   );
 }
 
 function RangeRow({ title, value, min, max, onChange }: { title: string; value: number; min: number; max: number; onChange: (value: number) => void }) {
   return (
-    <div className="grid gap-2">
+    <Field>
       <div className="flex items-center justify-between gap-3">
         <Label>{title}</Label>
         <span className="text-sm font-medium text-muted-foreground">{value}%</span>
       </div>
       <input className="h-2 w-full accent-primary" type="range" min={min} max={max} value={value} onChange={(event) => onChange(Number(event.target.value))} />
-    </div>
+    </Field>
+  );
+}
+
+function ChoiceRadioGroup({ children, onValueChange, value }: { children: ReactNode; value: string; onValueChange: (value: string) => void }) {
+  return (
+    <RadioGroup className="grid gap-3 sm:grid-cols-2" value={value} onValueChange={onValueChange}>
+      {children}
+    </RadioGroup>
+  );
+}
+
+function ChoiceRadio({ id, text, title, value }: { id: string; text: string; title: string; value: string }) {
+  return (
+    <FieldLabel className="w-full cursor-pointer" htmlFor={id}>
+      <Field className="min-h-full rounded-md border p-4" orientation="horizontal">
+        <RadioGroupItem id={id} value={value} />
+        <FieldContent>
+          <FieldTitle>{title}</FieldTitle>
+          <FieldDescription>{text}</FieldDescription>
+        </FieldContent>
+      </Field>
+    </FieldLabel>
+  );
+}
+
+function ConnectionAlert({ connection }: { connection: ConnectionState }) {
+  const Icon = connection.status === "testing" ? LoaderCircle : connection.status === "ok" ? CheckCircle2 : connection.status === "error" ? XCircle : CircleHelp;
+  return (
+    <Alert variant={connection.status === "ok" ? "success" : connection.status === "error" ? "destructive" : "default"}>
+      <Icon className={connection.status === "testing" ? "animate-spin" : undefined} />
+      <AlertTitle>{connection.message}</AlertTitle>
+    </Alert>
+  );
+}
+
+function ProviderResultAlert({ result }: { result: BraiCmdProviderTestResult }) {
+  return (
+    <Alert variant={result.ok ? "success" : "destructive"}>
+      {result.ok ? <CheckCircle2 /> : <XCircle />}
+      <AlertTitle>{result.ok ? "Подключено" : "Не удалось подключить"}</AlertTitle>
+      <AlertDescription>{result.message}</AlertDescription>
+    </Alert>
   );
 }
 
@@ -487,13 +642,13 @@ function StatsGrid({ snapshot, cloudOnly = false }: { snapshot: BraiCmdSnapshot;
     ["Запросов", stats.requests.toLocaleString("ru-RU")],
   ], [cloudOnly, stats]);
   return (
-    <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+    <dl className="grid grid-cols-2 gap-x-5 gap-y-4 sm:grid-cols-4">
       {rows.map(([label, value]) => (
-        <div key={label} className="rounded-md border bg-muted/20 p-3">
-          <div className="text-sm text-muted-foreground">{label}</div>
-          <div className="mt-1 font-semibold">{value}</div>
+        <div key={label} className="grid gap-1">
+          <dt className="text-sm text-muted-foreground">{label}</dt>
+          <dd className="m-0 font-semibold">{value}</dd>
         </div>
       ))}
-    </div>
+    </dl>
   );
 }

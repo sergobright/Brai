@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { cmdPlugin, openEngineFromProfile, openProfileMenu, openProfileMenuItem, openSettingsFromProfile, otaPlugin, setupBraiAppTest, stubAndroidCapacitor, testVersionState } from "./app-test-support";
+import { braiCmdSettingsSnapshot, cmdPlugin, openEngineFromProfile, openProfileMenu, openProfileMenuItem, openSettingsFromProfile, otaPlugin, setupBraiAppTest, stubAndroidCapacitor, testVersionState } from "./app-test-support";
 import { BraiApp } from "@/features/app/BraiApp";
 
 describe("BraiApp settings", () => {
@@ -56,10 +56,67 @@ describe("BraiApp settings", () => {
     await openProfileMenuItem("Brai Cmd");
 
     await waitFor(() => expect(screen.getByRole("heading", { name: "Brai CMD" })).toBeInTheDocument());
+    expect(screen.getAllByRole("heading", { name: "Brai CMD" })).toHaveLength(1);
+    expect(screen.getByText("Главная кнопка диктовки")).toBeInTheDocument();
     expect(screen.getByText("Разрешения")).toBeInTheDocument();
     expect(screen.getByText("Проверка связи")).toBeInTheDocument();
     expect(cmdPlugin.getSettings).toHaveBeenCalledTimes(1);
     expect(cmdPlugin.openSettings).not.toHaveBeenCalled();
+  });
+
+  it("toggles the main dictation button through the native overlay flag", async () => {
+    stubAndroidCapacitor();
+    render(<BraiApp />);
+
+    await openProfileMenuItem("Brai Cmd");
+    await screen.findByText("Главная кнопка диктовки");
+
+    cmdPlugin.setOverlayEnabled.mockClear();
+    cmdPlugin.setOverlayEnabled.mockResolvedValueOnce({ overlayEnabled: false });
+    fireEvent.click(screen.getByRole("switch", { name: "Переключатель активен" }));
+
+    await waitFor(() => expect(cmdPlugin.setOverlayEnabled).toHaveBeenCalledWith({ enabled: false }));
+  });
+
+  it("shows connection test results as visible status alerts", async () => {
+    stubAndroidCapacitor();
+    render(<BraiApp />);
+
+    await openProfileMenuItem("Brai Cmd");
+    fireEvent.click(await screen.findByRole("button", { name: "Тест" }));
+
+    expect(await screen.findByText("Всё работает")).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveClass("text-emerald-700");
+
+    cmdPlugin.testConnection.mockResolvedValueOnce({ ok: false, message: "failed" });
+    fireEvent.click(screen.getByRole("button", { name: "Тест" }));
+
+    expect(await screen.findByText("Подключение не работает")).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveClass("text-destructive");
+  });
+
+  it("uses a radio group and numeric text input for audio retention", async () => {
+    stubAndroidCapacitor();
+    const processedSnapshot = braiCmdSettingsSnapshot();
+    processedSnapshot.settings.processedAudioRetentionEnabled = true;
+    processedSnapshot.settings.processedAudioRetentionLimit = 25;
+    cmdPlugin.updateSettings.mockResolvedValueOnce(processedSnapshot);
+    render(<BraiApp />);
+
+    await openProfileMenuItem("Brai Cmd");
+    fireEvent.click(await screen.findByRole("button", { name: "Аудиозаписи" }));
+
+    expect(screen.getByRole("radiogroup")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("Хранить больше аудиозаписей"));
+
+    const input = await screen.findByLabelText("Сколько аудиозаписей хранить?");
+    expect(input).toHaveAttribute("type", "text");
+    expect(input).toHaveAttribute("inputmode", "numeric");
+
+    fireEvent.change(input, { target: { value: "0" } });
+    fireEvent.blur(input);
+
+    await waitFor(() => expect(cmdPlugin.updateSettings).toHaveBeenCalledWith({ patch: { processedAudioRetentionLimit: 1 } }));
   });
 
   it("uses larger rows in the mobile menu that contains Brai Cmd", async () => {

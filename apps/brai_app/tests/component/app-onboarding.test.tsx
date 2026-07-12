@@ -742,7 +742,7 @@ describe("BraiApp onboarding", () => {
     expect(await screen.findByText("Микрофон")).toBeInTheDocument();
   });
 
-  it("starts concrete settings with microphone after choosing the Brai cloud", async () => {
+  it("shows the cloud privacy warning before microphone settings", async () => {
     stubAndroidCapacitor();
     window.localStorage.setItem(ONBOARDING_STORAGE_KEY, JSON.stringify({
       complete: false,
@@ -757,6 +757,10 @@ describe("BraiApp onboarding", () => {
     render(<BraiApp />);
 
     fireEvent.click(await screen.findByRole("button", { name: /Облако Brai/ }));
+    expect(await screen.findByText("Мы ничего не храним")).toBeInTheDocument();
+    expect(screen.getByText(/после успешной доставки расшифровки/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Согласен" }));
     expect(await screen.findByText("Микрофон")).toBeInTheDocument();
     expect(screen.getByText("Нужен для голосового ввода команд и диктовки для транскрибации")).toBeInTheDocument();
     expect(screen.getByRole("img", { name: "Разрешение микрофона Brai" })).toHaveAttribute("src", "/onboarding/settings-1-microphone.jpg");

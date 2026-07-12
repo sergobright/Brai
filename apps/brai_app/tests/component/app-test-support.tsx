@@ -65,9 +65,10 @@ function matchesMediaQuery(query: string): boolean {
   return false;
 }
 
-function braiCmdSettingsSnapshot() {
+export function braiCmdSettingsSnapshot() {
   return {
     native: true,
+    overlayEnabled: true,
     permissions: {
       accessibility: false,
       overlay: false,
