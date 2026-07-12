@@ -579,13 +579,13 @@ describe("BraiApp onboarding", () => {
 
     render(<BraiApp />);
 
-    expect(await screen.findByText("Вход в облачный профиль")).toBeInTheDocument();
+    expect(await screen.findByText("Вход в Brai")).toBeInTheDocument();
     expect(screen.getByLabelText("Email")).toBeInTheDocument();
     expectNoPasswordPrompt();
     await submitEmailLogin("wrong@example.test");
 
-    expect(await screen.findByText("Email не подошёл.")).toBeInTheDocument();
-    expect(screen.getByText("Вход в облачный профиль")).toBeInTheDocument();
+    expect(await screen.findByText("Email не подошёл")).toBeInTheDocument();
+    expect(screen.getByText("Вход в Brai")).toBeInTheDocument();
     expectNoPasswordPrompt();
     expect(screen.queryByText("Начинаем настройку")).not.toBeInTheDocument();
   });
@@ -626,7 +626,7 @@ describe("BraiApp onboarding", () => {
 
     render(<BraiApp />);
 
-    expect(await screen.findByText("Вход в облачный профиль")).toBeInTheDocument();
+    expect(await screen.findByText("Вход в Brai")).toBeInTheDocument();
     const email = screen.getByLabelText("Email");
     fireEvent.change(email, { target: { value: "primary@example.com" } });
     expect(screen.getByRole("button", { name: "Получить код" })).toBeInTheDocument();
