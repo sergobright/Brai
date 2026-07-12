@@ -37,6 +37,7 @@ test("sandbox helper marks live operation completion as requiring escalation", (
   assert.equal(sandboxCheckMode(["deploy/scripts/create-operation-activity.sh", "--id", "operation:agent-task:x"]).mode, "require_escalated");
   assert.equal(sandboxCheckMode(["deploy/scripts/list-operation-activities.sh", "--limit", "5"]).mode, "require_escalated");
   assert.equal(sandboxCheckMode(["deploy/scripts/postgres-diagnostics.mjs"]).mode, "require_escalated");
+  assert.equal(sandboxCheckMode(["deploy/scripts/supavisor-auth-diagnostics.sh"]).mode, "require_escalated");
 });
 
 test("sandbox helper marks host access checks as requiring escalation", () => {

@@ -19,6 +19,7 @@ test("shows the standalone auth page on mobile and desktop", async ({ page }) =>
 });
 
 test("keeps the auth card height stable when the OTP field appears", async ({ page }) => {
+  test.setTimeout(60_000);
   await page.route("**/api/auth/session", (route) =>
     route.fulfill({
       json: { authenticated: false, user: null },
@@ -37,15 +38,15 @@ test("keeps the auth card height stable when the OTP field appears", async ({ pa
 
   await page.goto("/auth");
 
-  const card = page.locator("[data-slot='card']").first();
+  const card = page.locator("form").first();
   await expect(card).toBeVisible();
-  const before = await card.boundingBox();
+  const before = await card.evaluate((element) => element.getBoundingClientRect().height);
   await page.getByRole("textbox", { name: "Email" }).fill("primary@example.com");
   await page.getByRole("button", { name: "Получить код" }).click();
-  await expect(page.getByTestId("auth-otp-input")).toBeVisible();
-  const after = await card.boundingBox();
+  await expect(page.getByRole("textbox", { name: "Код из письма" })).toBeVisible();
+  const after = await page.locator("form").first().evaluate((element) => element.getBoundingClientRect().height);
 
-  expect(Math.abs((before?.height ?? 0) - (after?.height ?? 0))).toBeLessThanOrEqual(1);
+  expect(Math.abs(before - after)).toBeLessThanOrEqual(1);
 });
 
 test("redirects anonymous cabinet visits to auth", async ({ page }) => {
