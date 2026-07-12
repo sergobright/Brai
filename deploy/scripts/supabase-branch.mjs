@@ -353,6 +353,7 @@ export async function copySchemaData(pool, { sourceSchema, targetSchema, postSee
         FROM ${qualifiedTable(sourceSchema, table)}
       `);
     }
+    await reseedOwnedSequences(client, { schema: targetSchema, tables: copyTables });
     for (const { sql } of postSeedMigrations) await client.query(sql);
     await reseedOwnedSequences(client, { schema: targetSchema, tables: copyTables });
     await client.query("COMMIT");
