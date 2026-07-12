@@ -58,7 +58,7 @@ test("production seed loads only explicitly marked idempotent migrations into th
   assert.doesNotMatch(script, /reapplyPostProductionSeedMigrations/);
 });
 
-test("production copy reseeds only copied tables before its transaction commits", () => {
+test("production copy reseeds copied tables before and after post-seed migrations", () => {
   const script = fs.readFileSync(path.join(repoRoot, "deploy/scripts/supabase-branch.mjs"), "utf8");
   const copyStart = script.indexOf("async function copySchemaData");
   const inspectStart = script.indexOf("export async function inspectOwnedSequences");
@@ -66,7 +66,7 @@ test("production copy reseeds only copied tables before its transaction commits"
   const begin = 'client.query("BEGIN ISOLATION LEVEL REPEATABLE READ")';
   const searchPath = "SET LOCAL search_path TO";
   const reapply = "for (const { sql } of postSeedMigrations) await client.query(sql)";
-  const reseed = "reseedOwnedSequences(client, { schema: targetSchema, tables: copyTables })";
+  const reseed = "await reseedOwnedSequences(client, { schema: targetSchema, tables: copyTables })";
 
   assert.match(copyFunction, /const client = await pool\.connect\(\)/);
   assert.ok(copyFunction.indexOf(begin) > 0);
@@ -78,9 +78,12 @@ test("production copy reseeds only copied tables before its transaction commits"
   assert.doesNotMatch(copyFunction, /RESTART IDENTITY/);
   assert.ok(copyFunction.indexOf(searchPath) < copyFunction.indexOf("TRUNCATE TABLE"));
   assert.ok(copyFunction.indexOf(reapply) > copyFunction.indexOf("OVERRIDING SYSTEM VALUE"));
-  assert.ok(copyFunction.indexOf(reapply) < copyFunction.indexOf(reseed));
-  assert.ok(copyFunction.indexOf(reseed) > copyFunction.indexOf("OVERRIDING SYSTEM VALUE"));
-  assert.ok(copyFunction.indexOf(reseed) < copyFunction.indexOf('client.query("COMMIT")'));
+  const firstReseed = copyFunction.indexOf(reseed);
+  const secondReseed = copyFunction.indexOf(reseed, firstReseed + reseed.length);
+  assert.ok(firstReseed > copyFunction.indexOf("OVERRIDING SYSTEM VALUE"));
+  assert.ok(firstReseed < copyFunction.indexOf(reapply));
+  assert.ok(secondReseed > copyFunction.indexOf(reapply));
+  assert.ok(secondReseed < copyFunction.indexOf('client.query("COMMIT")'));
   assert.doesNotMatch(copyFunction, /tables: truncatableTables/);
 });
 
