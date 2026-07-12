@@ -4,6 +4,7 @@ import { cmdPlugin, openProfileMenuItem, setupBraiAppTest, stubAndroidCapacitor,
 import { BraiApp } from "@/features/app/BraiApp";
 import { AuthPanel } from "@/features/app/chrome/AppChrome";
 import { FocusSection } from "@/features/app/sections/focus/FocusSection";
+import { BraiApi } from "@/shared/api/braiApi";
 import { setMeta } from "@/shared/storage/db";
 import { pendingEvents, saveGoalCache, saveHistoryCache } from "@/shared/storage/syncStore";
 import { emptyGoal, emptyHistory } from "@/shared/types/timer";
@@ -136,7 +137,8 @@ describe("BraiApp shell", () => {
 
   it("redirects anonymous web users to the standalone auth page without rendering the cabinet shell", async () => {
     await setMeta("currentUserId", null);
-    vi.mocked(globalThis.fetch).mockImplementation(async (input: RequestInfo | URL) => {
+    vi.spyOn(BraiApi.prototype, "session").mockResolvedValue({ authenticated: false, user: null });
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       const url = requestUrl(input);
       if (url.includes("/auth/session")) {
         return new Response(JSON.stringify({ authenticated: false, user: null }), {
@@ -145,7 +147,7 @@ describe("BraiApp shell", () => {
         });
       }
       return Promise.reject(new Error("offline"));
-    });
+    }));
 
     render(<BraiApp />);
 
