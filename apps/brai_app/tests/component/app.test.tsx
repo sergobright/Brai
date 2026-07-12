@@ -5,7 +5,6 @@ import { BraiApp } from "@/features/app/BraiApp";
 import { AuthPanel } from "@/features/app/chrome/AppChrome";
 import { FocusSection } from "@/features/app/sections/focus/FocusSection";
 import { BraiApi } from "@/shared/api/braiApi";
-import { setMeta } from "@/shared/storage/db";
 import { pendingEvents, saveGoalCache, saveHistoryCache } from "@/shared/storage/syncStore";
 import { emptyGoal, emptyHistory } from "@/shared/types/timer";
 import { shouldSnapSlidingNumber } from "@/shared/ui/sliding-number";
@@ -108,6 +107,7 @@ describe("BraiApp shell", () => {
       "https://a.test.brai.one/api/auth/otp/send",
       expect.anything(),
     );
+    expect(await screen.findByText("Email не подошёл")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Получить код" })).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Пароль")).not.toBeInTheDocument();
   });
@@ -147,7 +147,6 @@ describe("BraiApp shell", () => {
   });
 
   it("redirects anonymous web users to the standalone auth page without rendering the cabinet shell", async () => {
-    await setMeta("currentUserId", null);
     vi.spyOn(BraiApi.prototype, "session").mockResolvedValue({ authenticated: false, user: null });
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       const url = requestUrl(input);
