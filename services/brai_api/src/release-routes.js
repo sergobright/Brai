@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { renderReleasePage } from '../../../deploy/scripts/release-page.mjs';
 
 export function sendReleaseLoginPage(res, { status = 200, error = null } = {}) {
   const errorMarkup = error
@@ -178,6 +179,15 @@ export function serveRelease(req, res, url, releaseDir, sendJson, store = null) 
     : filePath.endsWith('.apk')
       ? 'application/vnd.android.package-archive'
       : 'application/octet-stream';
+  if (requested === 'index.html') {
+    const indexPath = path.join(root, 'releases.json');
+    if (fs.existsSync(indexPath)) {
+      const body = Buffer.from(renderReleasePage(JSON.parse(fs.readFileSync(indexPath, 'utf8'))));
+      res.writeHead(200, { 'content-type': contentType, 'content-length': body.length });
+      res.end(body);
+      return;
+    }
+  }
   if (filePath.endsWith('.apk')) {
     res.once('finish', () => recordReleaseFileLog(store, {
       status: 'done',
