@@ -16,6 +16,7 @@ import kotlin.math.sin
 
 class AirButtonView(context: Context) : View(context) {
     private val iconBitmap = BitmapFactory.decodeResource(resources, R.drawable.bright_command_large_hex)
+    private val marker = braiFloatingButtonMarker()
     private val iconBounds = Rect()
     private val bitmapPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
     private val strokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -67,6 +68,7 @@ class AirButtonView(context: Context) : View(context) {
         }
         queueBadge?.let { drawQueueBadge(canvas, it) }
         if (updateAvailable) drawUpdateDot(canvas)
+        drawFloatingButtonMarker(canvas, marker, cx, cy, minOf(width, height).toFloat(), textPaint)
 
         if (state is RecorderState.Recording || state is RecorderState.Uploading) {
             postInvalidateOnAnimation()

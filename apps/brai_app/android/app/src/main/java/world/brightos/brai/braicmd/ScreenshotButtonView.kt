@@ -29,6 +29,7 @@ enum class ContextButtonGlyph {
 
 class ScreenshotButtonView(context: Context) : View(context) {
     private val iconBitmap by lazy { BitmapFactory.decodeResource(resources, R.drawable.bright_command_small_circle) }
+    private val marker = braiFloatingButtonMarker()
     private val iconBounds = Rect()
     private val glyphPath = Path()
     private val bitmapPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
@@ -90,7 +91,12 @@ class ScreenshotButtonView(context: Context) : View(context) {
             drawCheck(canvas, cx, cy)
             return
         }
-        if (glyph == ContextButtonGlyph.Logo) drawIcon(canvas) else drawButtonShell(canvas, cx, cy, radius)
+        if (glyph == ContextButtonGlyph.Logo) {
+            drawIcon(canvas)
+            drawFloatingButtonMarker(canvas, marker, cx, cy, minOf(width, height).toFloat(), textPaint)
+        } else {
+            drawButtonShell(canvas, cx, cy, radius)
+        }
         if (glyph == ContextButtonGlyph.Close) {
             drawGlyph(canvas, cx, cy)
             return
@@ -131,7 +137,10 @@ class ScreenshotButtonView(context: Context) : View(context) {
     private fun drawHubTransition(canvas: Canvas, cx: Float, cy: Float, radius: Float) {
         val logoAlpha = ((1f - menuExpansionProgress) * 255).roundToInt()
         val crossAlpha = (menuExpansionProgress * 255).roundToInt()
-        if (logoAlpha > 0) drawIcon(canvas, logoAlpha)
+        if (logoAlpha > 0) {
+            drawIcon(canvas, logoAlpha)
+            drawFloatingButtonMarker(canvas, marker, cx, cy, minOf(width, height).toFloat(), textPaint, logoAlpha)
+        }
         if (crossAlpha <= 0) return
         drawButtonShell(canvas, cx, cy, radius, crossAlpha)
         strokePaint.color = COLOR_ICON_RED

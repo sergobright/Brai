@@ -21,6 +21,7 @@ def braiApkPreviewIteration = (System.getenv('BRAI_APK_PREVIEW_ITERATION') ?: '0
 def braiAndroidAppLabel = System.getenv('BRAI_ANDROID_APP_LABEL')
 def braiPreviewPackageSuffix = braiApkBuildKind == 'preview' ? '.work' : ''
 def braiAppLabel = { fallback -> braiAndroidAppLabel ?: fallback }
+def braiFloatingButtonLabel = { label -> "\"${label}\"" }
 def braiProductionAndroidApi = 'https://api.brai.one'
 def braiNonProductionAndroidApis = [
     dev: 'https://dev.brai.one/api',
@@ -81,6 +82,7 @@ android {
             buildConfigField "String", "BRAI_APK_RELEASE_KEY", '"production"'
             buildConfigField "String", "BRAI_OTA_CHANNEL", '"app.brai.one/mobile-update"'
             buildConfigField "String", "BRAI_APP_LABEL", "\"${braiAppLabel('Brai')}\""
+            buildConfigField "String", "BRAI_FLOATING_BUTTON_LABEL", braiFloatingButtonLabel("")
         }
         dev {
             dimension "environment"
@@ -94,6 +96,7 @@ android {
             buildConfigField "String", "BRAI_APK_RELEASE_KEY", '"dev"'
             buildConfigField "String", "BRAI_OTA_CHANNEL", '"dev.brai.one/mobile-update"'
             buildConfigField "String", "BRAI_APP_LABEL", "\"${braiAppLabel('Brai Dev')}\""
+            buildConfigField "String", "BRAI_FLOATING_BUTTON_LABEL", braiFloatingButtonLabel("V")
         }
         previewA {
             dimension "environment"
@@ -107,6 +110,7 @@ android {
             buildConfigField "String", "BRAI_APK_RELEASE_KEY", '"a"'
             buildConfigField "String", "BRAI_OTA_CHANNEL", '"a.test.brai.one/mobile-update"'
             buildConfigField "String", "BRAI_APP_LABEL", "\"${braiAppLabel('Brai A')}\""
+            buildConfigField "String", "BRAI_FLOATING_BUTTON_LABEL", braiFloatingButtonLabel("A")
         }
         previewB {
             dimension "environment"
@@ -120,6 +124,7 @@ android {
             buildConfigField "String", "BRAI_APK_RELEASE_KEY", '"b"'
             buildConfigField "String", "BRAI_OTA_CHANNEL", '"b.test.brai.one/mobile-update"'
             buildConfigField "String", "BRAI_APP_LABEL", "\"${braiAppLabel('Brai B')}\""
+            buildConfigField "String", "BRAI_FLOATING_BUTTON_LABEL", braiFloatingButtonLabel("B")
         }
         previewC {
             dimension "environment"
@@ -133,6 +138,7 @@ android {
             buildConfigField "String", "BRAI_APK_RELEASE_KEY", '"c"'
             buildConfigField "String", "BRAI_OTA_CHANNEL", '"c.test.brai.one/mobile-update"'
             buildConfigField "String", "BRAI_APP_LABEL", "\"${braiAppLabel('Brai C')}\""
+            buildConfigField "String", "BRAI_FLOATING_BUTTON_LABEL", braiFloatingButtonLabel("C")
         }
         previewD {
             dimension "environment"
@@ -146,6 +152,7 @@ android {
             buildConfigField "String", "BRAI_APK_RELEASE_KEY", '"d"'
             buildConfigField "String", "BRAI_OTA_CHANNEL", '"d.test.brai.one/mobile-update"'
             buildConfigField "String", "BRAI_APP_LABEL", "\"${braiAppLabel('Brai D')}\""
+            buildConfigField "String", "BRAI_FLOATING_BUTTON_LABEL", braiFloatingButtonLabel("D")
         }
         previewE {
             dimension "environment"
@@ -159,6 +166,7 @@ android {
             buildConfigField "String", "BRAI_APK_RELEASE_KEY", '"e"'
             buildConfigField "String", "BRAI_OTA_CHANNEL", '"e.test.brai.one/mobile-update"'
             buildConfigField "String", "BRAI_APP_LABEL", "\"${braiAppLabel('Brai E')}\""
+            buildConfigField "String", "BRAI_FLOATING_BUTTON_LABEL", braiFloatingButtonLabel("E")
         }
     }
     signingConfigs {
