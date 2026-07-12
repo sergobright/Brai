@@ -110,6 +110,9 @@ function runCli([command, ...args]) {
       case "follow-up":
         markFollowUp(args[0]);
         break;
+      case "recover-follow-up":
+        recoverFollowUp(args);
+        break;
       case "acceptance-reconcile":
         acceptanceReconcile(args[0]);
         break;
@@ -168,7 +171,7 @@ function runCli([command, ...args]) {
         accessContract(args);
         break;
       default:
-        throw new Error("usage: brai-task.mjs start <slug>|follow-up [branch]|acceptance-reconcile [branch]|acceptance-repair [branch]|pre-tool-use|pre-commit|pre-push <remote>|stop|classify [--base <ref>] [--head <ref>] [--github-output]|handoff [branch]|preview [branch]|release-notes --short <text> --details <text> --reason <text>|require-delivery [branch] [sha]|require-preview [branch] [sha]|doctor [--strict]|preflight [--strict]|access-contract --local|--server|socraticode-exact-only --reason <text>|socraticode-used --tool <name>|delegate --thread <id> --path <path>|revoke --thread <id>");
+        throw new Error("usage: brai-task.mjs start <slug>|follow-up [branch]|recover-follow-up [branch] --from-thread <lost-thread-id>|acceptance-reconcile [branch]|acceptance-repair [branch]|pre-tool-use|pre-commit|pre-push <remote>|stop|classify [--base <ref>] [--head <ref>] [--github-output]|handoff [branch]|preview [branch]|release-notes --short <text> --details <text> --reason <text>|require-delivery [branch] [sha]|require-preview [branch] [sha]|doctor [--strict]|preflight [--strict]|access-contract --local|--server|socraticode-exact-only --reason <text>|socraticode-used --tool <name>|delegate --thread <id> --path <path>|revoke --thread <id>");
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -251,6 +254,37 @@ function markFollowUp(branchArg) {
     createdAt: new Date().toISOString(),
   }));
   console.log(`Marked explicit follow-up for ${branch}`);
+}
+
+function recoverFollowUp(args) {
+  const fromIndex = args.indexOf("--from-thread");
+  const fromThread = fromIndex >= 0 ? String(args[fromIndex + 1] ?? "").trim() : "";
+  if (!fromThread) throw new Error("Recovery requires --from-thread <lost-thread-id>.");
+  const branch = args.find((arg, index) => !arg.startsWith("--") && index !== fromIndex + 1) ?? currentBranch();
+  if (!CODEX_BRANCH_RE.test(branch)) throw new Error(`Follow-up recovery requires codex/* branch, got: ${branch}`);
+  if (branch !== currentBranch()) throw new Error(`Current branch is ${currentBranch()}, not ${branch}`);
+  const threadId = currentThreadId();
+  if (!threadId) throw new Error("Follow-up recovery requires the current CODEX_THREAD_ID.");
+  const validation = validateTaskBranch({ requireExpectedUpstream: false });
+  if (!validation.ok) throw new Error(validation.message);
+  const marker = readTaskMarker();
+  const markerValidation = validateTaskMarker(marker, branch);
+  if (!markerValidation.ok) throw new Error(markerValidation.message);
+  if (marker.threadId !== fromThread) {
+    throw new Error(`Brai task branch belongs to ${marker.threadId || "(missing)"}, not confirmed lost thread ${fromThread}.`);
+  }
+  if (threadId === fromThread) throw new Error("Current thread already owns this branch; use follow-up.");
+  const recoveredAt = new Date().toISOString();
+  writeTaskMarker(git("rev-parse", "--show-toplevel"), {
+    ...marker,
+    threadId,
+    mode: "follow-up",
+    createdAt: recoveredAt,
+    recoveredFromThreadId: fromThread,
+    recoveredAt,
+    delegations: [],
+  });
+  console.log(`Recovered explicit follow-up for ${branch} from lost thread ${fromThread}`);
 }
 
 function acceptanceReconcile(branchArg) {
