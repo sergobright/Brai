@@ -65,6 +65,16 @@ class BraiCmdQueueTest {
     }
 
     @Test
+    fun audioQueueActionsExposeServerFunctionKeys() {
+        assertEquals("main_dictation", AudioQueueAction.MainDictation.functionKey)
+        assertEquals("idea_voice_inbox", AudioQueueAction.IdeaVoiceInbox.functionKey)
+        assertEquals("screenshot_inbox", BRAI_CMD_FUNCTION_SCREENSHOT_INBOX)
+        assertEquals("screenshot_voice_inbox", AudioQueueAction.ScreenshotVoiceInbox.functionKey)
+        assertEquals("chat_context_inbox", AudioQueueAction.ChatContextInbox.functionKey)
+        assertEquals("save_context_inbox", AudioQueueAction.SaveContextInbox.functionKey)
+    }
+
+    @Test
     fun transportIsFailedOnlyAfterAnAttemptActuallyFails() {
         recordings.mkdirs()
         val main = audio("main")

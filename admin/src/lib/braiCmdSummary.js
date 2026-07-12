@@ -1,4 +1,15 @@
-import { openReadOnlyDatabase, resolveDatabaseUrl } from "./database.js";
+import { openDatabase, openReadOnlyDatabase, resolveDatabaseUrl } from "./database.js";
+
+export const BRAI_CMD_FUNCTIONS = Object.freeze([
+  { key: "main_dictation", title: "Диктовка голос в текст" },
+  { key: "idea_voice_inbox", title: "Идея голосом во входящие" },
+  { key: "screenshot_inbox", title: "Скриншот во входящие" },
+  { key: "screenshot_voice_inbox", title: "Скриншот и голос во входящие" },
+  { key: "chat_context_inbox", title: "JSON чата и голос во входящие" },
+  { key: "save_context_inbox", title: "Сохранить JSON и голос во входящие" },
+]);
+
+const BRAI_CMD_FUNCTION_KEYS = new Set(BRAI_CMD_FUNCTIONS.map((item) => item.key));
 
 export async function readBraiCmdAdminSummary({
   databaseUrl = resolveDatabaseUrl(),
@@ -8,11 +19,10 @@ export async function readBraiCmdAdminSummary({
   let done = false;
   try {
     await client.query("START TRANSACTION READ ONLY");
-    const settingsRow = await client.query(`
-      SELECT value
+    const settingsRows = await client.query(`
+      SELECT key, value
       FROM brai_cmd_settings
-      WHERE key = 'registration_enabled'
-      LIMIT 1
+      WHERE key = 'registration_enabled' OR key LIKE 'function.%.enabled'
     `);
     const tokenRows = await client.query(`
       SELECT t.*,
@@ -70,7 +80,8 @@ export async function readBraiCmdAdminSummary({
     done = true;
     return {
       settings: {
-        registrationEnabled: settingsRow.rows[0]?.value !== "false",
+        registrationEnabled: settingsValue(settingsRows.rows, "registration_enabled") !== "false",
+        functions: formatBraiCmdFunctionSettings(settingsRows.rows),
       },
       totals: {
         ...totals,
@@ -107,6 +118,75 @@ export async function readBraiCmdAdminSummary({
     client.release();
     await db.close();
   }
+}
+
+export async function setBraiCmdFunctionEnabled(key, enabled, { databaseUrl = resolveDatabaseUrl() } = {}) {
+  if (!BRAI_CMD_FUNCTION_KEYS.has(key)) throw new Error("unknown_brai_cmd_function");
+  const db = openDatabase(databaseUrl);
+  const now = new Date().toISOString();
+  try {
+    await db.query(
+      `
+        INSERT INTO brai_cmd_settings (key, value, updated_at_utc)
+        VALUES ($1, $2, $3)
+        ON CONFLICT (key) DO UPDATE SET
+          value = EXCLUDED.value,
+          updated_at_utc = EXCLUDED.updated_at_utc
+      `,
+      [`function.${key}.enabled`, enabled ? "true" : "false", now],
+    );
+    await recordBraiCmdSettingsLog(db, now, { [`function.${key}.enabled`]: enabled });
+  } finally {
+    await db.close();
+  }
+}
+
+async function recordBraiCmdSettingsLog(db, now, jsonData) {
+  const result = await db.query(`
+    SELECT column_name
+    FROM information_schema.columns
+    WHERE table_schema = current_schema() AND table_name = 'logs'
+  `);
+  const existing = new Set(result.rows.map((row) => row.column_name));
+  const valuesByColumn = {
+    dt: now,
+    observed_at_utc: now,
+    severity_text: "INFO",
+    service: "brai-admin",
+    source: "brai-cmd",
+    operation: "brai_cmd.admin_settings_update",
+    status: "done",
+    reason: null,
+    message: "Brai Cmd admin settings updated",
+    json_data: JSON.stringify(jsonData),
+    expires_at_utc: new Date(Date.parse(now) + 180 * 24 * 60 * 60 * 1000).toISOString(),
+    created_at_utc: now,
+  };
+  const columns = Object.keys(valuesByColumn).filter((column) => existing.has(column));
+  if (!columns.includes("operation") || !columns.includes("status") || !columns.includes("message")) return;
+  await db.query(
+    `
+      INSERT INTO logs (${columns.map((column) => `"${column}"`).join(", ")})
+      VALUES (${columns.map((_, index) => `$${index + 1}`).join(", ")})
+    `,
+    columns.map((column) => valuesByColumn[column]),
+  );
+}
+
+function settingsValue(rows, key) {
+  return rows.find((row) => row.key === key)?.value;
+}
+
+function formatBraiCmdFunctionSettings(rows) {
+  const saved = new Map();
+  for (const row of rows) {
+    const match = String(row.key ?? "").match(/^function\.([a-z0-9_]+)\.enabled$/);
+    if (match && BRAI_CMD_FUNCTION_KEYS.has(match[1])) saved.set(match[1], row.value !== "false");
+  }
+  return Object.fromEntries(BRAI_CMD_FUNCTIONS.map((item) => [
+    item.key,
+    { ...item, enabled: saved.has(item.key) ? saved.get(item.key) : true },
+  ]));
 }
 
 function formatTokenSummary(row) {

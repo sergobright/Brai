@@ -124,7 +124,8 @@ class NetworkClient(context: Context) {
     fun uploadAudio(
         file: File,
         conversationContext: VisibleConversationContext? = null,
-        screenshotFile: File? = null
+        screenshotFile: File? = null,
+        braiCmdFunction: String = AudioQueueAction.MainDictation.functionKey
     ): DictationResponse {
         val boundary = "BraiCmd-${UUID.randomUUID()}"
         val connection = openAuthenticatedConnection("/v1/dictate", "POST").apply {
@@ -141,6 +142,7 @@ class NetworkClient(context: Context) {
             writeField(out, boundary, "deviceId", config.installId)
             writeField(out, boundary, "clientVersion", BuildConfig.VERSION_NAME)
             writeField(out, boundary, "appPackage", appContext.packageName)
+            writeField(out, boundary, "braiCmdFunction", braiCmdFunction)
             writeField(out, boundary, "audioDurationMs", audioDurationMs(file).toString())
             if (shouldSendHeaderContext) {
                 writeField(out, boundary, "headerContextEnabled", "true")
@@ -175,7 +177,8 @@ class NetworkClient(context: Context) {
         transcript: String,
         conversationContext: VisibleConversationContext?,
         screenshotFile: File?,
-        idempotencyKey: String
+        idempotencyKey: String,
+        braiCmdFunction: String = AudioQueueAction.IdeaVoiceInbox.functionKey
     ): BraiCmdNotice? {
         val connection = openAuthenticatedConnection("/v1/brai-cmd/inbox", "POST").apply {
             doOutput = true
@@ -202,6 +205,7 @@ class NetworkClient(context: Context) {
             .put("source", "brai-cmd")
             .put("source_key", config.installId)
             .put("record_type_id", 1)
+            .put("brai_cmd_function", braiCmdFunction)
             .put("idempotency_key", idempotencyKey)
         if (conversationContext?.isReliable() == true) body.put("description_json", conversationContext.toJson())
         if (attachments.length() > 0) body.put("attachments", attachments)

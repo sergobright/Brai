@@ -42,7 +42,7 @@ export function classifyTableGroup(tableName) {
   return SYSTEM_TABLE_PREFIXES.some((prefix) => name.startsWith(prefix)) ? "system" : "user";
 }
 
-export function openReadOnlyDatabase(databaseUrl = resolveDatabaseUrl()) {
+export function openDatabase(databaseUrl = resolveDatabaseUrl()) {
   const pool = new Pool({
     application_name: "brai-admin",
     connectionString: databaseUrl,
@@ -54,6 +54,10 @@ export function openReadOnlyDatabase(databaseUrl = resolveDatabaseUrl()) {
     query: (sql, values) => pool.query(sql, values),
     close: () => pool.end(),
   };
+}
+
+export function openReadOnlyDatabase(databaseUrl = resolveDatabaseUrl()) {
+  return openDatabase(databaseUrl);
 }
 
 export async function readDatabaseView({

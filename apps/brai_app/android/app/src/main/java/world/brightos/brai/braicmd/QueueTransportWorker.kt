@@ -101,7 +101,8 @@ internal class QueueTransportWorker(context: Context) {
         val response = client.uploadAudio(
             file,
             ConversationContextStore.read(file),
-            ScreenshotContextStore.read(file)
+            ScreenshotContextStore.read(file),
+            AudioQueueAction.MainDictation.functionKey
         )
         val text = response.text.trim()
         if (text.isBlank()) throw QueueEmptyModelException()
@@ -122,7 +123,7 @@ internal class QueueTransportWorker(context: Context) {
     private fun processInboxAudio(file: File, action: AudioQueueAction) {
         var transcript = InboxPayloadStore.readTranscript(file)
         if (transcript == null) {
-            val response = client.uploadAudio(file, null, null)
+            val response = client.uploadAudio(file, null, null, action.functionKey)
             transcript = response.text.trim()
             if (transcript.isBlank()) throw QueueEmptyModelException()
             // Persist before Inbox delivery so retries never retranscribe a completed upload.
@@ -132,7 +133,8 @@ internal class QueueTransportWorker(context: Context) {
             transcript = inboxDeliveryText(action, InboxPayloadStore.readTextPrefix(file), transcript),
             conversationContext = ConversationContextStore.read(file),
             screenshotFile = ScreenshotContextStore.read(file),
-            idempotencyKey = file.name
+            idempotencyKey = file.name,
+            braiCmdFunction = action.functionKey
         )
         completeAudio(file)
         inboxDelivered = true
@@ -144,7 +146,8 @@ internal class QueueTransportWorker(context: Context) {
             transcript = SCREENSHOT_INBOX_TEXT,
             conversationContext = null,
             screenshotFile = file,
-            idempotencyKey = file.name
+            idempotencyKey = file.name,
+            braiCmdFunction = BRAI_CMD_FUNCTION_SCREENSHOT_INBOX
         )
         if (!ScreenshotInboxStore.delete(file)) throw IOException("Не удалось удалить отправленный скриншот")
         inboxDelivered = true

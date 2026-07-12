@@ -7,13 +7,15 @@ import java.net.SocketTimeoutException
 import java.net.UnknownHostException
 import java.util.UUID
 
-internal enum class AudioQueueAction(val persistedValue: String) {
-    MainDictation("main"),
-    IdeaVoiceInbox("idea"),
-    ScreenshotVoiceInbox("screenshot_voice"),
-    ChatContextInbox("chat"),
-    SaveContextInbox("save"),
-    Unknown("unknown");
+internal const val BRAI_CMD_FUNCTION_SCREENSHOT_INBOX = "screenshot_inbox"
+
+internal enum class AudioQueueAction(val persistedValue: String, val functionKey: String) {
+    MainDictation("main", "main_dictation"),
+    IdeaVoiceInbox("idea", "idea_voice_inbox"),
+    ScreenshotVoiceInbox("screenshot_voice", "screenshot_voice_inbox"),
+    ChatContextInbox("chat", "chat_context_inbox"),
+    SaveContextInbox("save", "save_context_inbox"),
+    Unknown("unknown", "idea_voice_inbox");
 
     val contextAction: ContextButtonAction?
         get() = when (this) {

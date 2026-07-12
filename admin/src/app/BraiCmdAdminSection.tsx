@@ -1,4 +1,5 @@
-import { AudioLines, Command, ShieldCheck, TriangleAlert, UserRound } from "lucide-react";
+import { AudioLines, Command, Power, ShieldCheck, TriangleAlert, UserRound } from "lucide-react";
+import { toggleBraiCmdFunctionAction } from "@/app/actions";
 import { Badge } from "@/shared/ui/badge";
 import { Card, CardDescription, CardFrame, CardHeader, CardTitle } from "@/shared/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/shared/ui/table";
@@ -65,6 +66,48 @@ export function BraiCmdAdminSection({ summary }: { summary: BraiCmdAdminSummary 
           </p>
         </CardHeader>
       </Card>
+
+      <CardFrame className="min-w-0">
+        <Card>
+          <CardHeader className="gap-1.5 p-4">
+            <div className="flex min-w-0 items-center gap-2 text-sm text-muted-foreground">
+              <Power className="size-4 shrink-0" />
+              <span>Настройки</span>
+            </div>
+            <CardTitle className="text-base">Функции</CardTitle>
+            <CardDescription>Выключенная функция сразу получает ответ сервера: Функция временно недоступна.</CardDescription>
+          </CardHeader>
+        </Card>
+        <div className="grid gap-0 p-2 sm:grid-cols-2 xl:grid-cols-3">
+          {Object.values(summary.settings.functions).map((item) => (
+            <form action={toggleBraiCmdFunctionAction} className="flex min-w-0 items-center justify-between gap-3 rounded-lg px-3 py-2.5" key={item.key}>
+              <input name="key" type="hidden" value={item.key} />
+              <input name="enabled" type="hidden" value={item.enabled ? "false" : "true"} />
+              <div className="min-w-0">
+                <div className="truncate text-sm font-medium">{item.title}</div>
+                <Badge className="mt-1" variant={item.enabled ? "default" : "secondary"}>
+                  {item.enabled ? "Включена" : "Выключена"}
+                </Badge>
+              </div>
+              <button
+                aria-checked={item.enabled}
+                aria-label={item.enabled ? `Выключить ${item.title}` : `Включить ${item.title}`}
+                className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full border transition-colors focus-visible:ring-[3px] focus-visible:ring-ring/50 ${
+                  item.enabled ? "border-primary bg-primary" : "border-border bg-muted"
+                }`}
+                role="switch"
+                type="submit"
+              >
+                <span
+                  className={`inline-block size-5 rounded-full bg-card shadow-sm transition-transform ${
+                    item.enabled ? "translate-x-5" : "translate-x-0.5"
+                  }`}
+                />
+              </button>
+            </form>
+          ))}
+        </div>
+      </CardFrame>
 
       <section className="grid gap-3.5 sm:grid-cols-2 xl:grid-cols-6">
         {metrics.map((metric) => (

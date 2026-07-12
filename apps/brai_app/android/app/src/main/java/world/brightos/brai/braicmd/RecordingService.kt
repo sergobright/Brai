@@ -323,7 +323,9 @@ class RecordingService : Service() {
             is SocketTimeoutException ->
                 Pair("Ждёт сервер", PendingReason.Server)
             is ServerResponseException ->
-                if (error.statusCode == 401 || error.statusCode == 403) {
+                if (error.code == "function_disabled") {
+                    Pair("Функция временно недоступна", PendingReason.Server)
+                } else if (error.statusCode == 401 || error.statusCode == 403) {
                     Pair("Обновите доступ", PendingReason.Server)
                 } else if (error.code == "upstream_error") {
                     Pair("Ждёт модель", PendingReason.Transcription)

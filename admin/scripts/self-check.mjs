@@ -257,6 +257,7 @@ try {
   await db.query("INSERT INTO app_settings (key, value, updated_at_utc) VALUES ('primary_user_id', 'user-1', '2026-01-01T00:00:00.000Z')");
   await db.query(`INSERT INTO ${quoteIdentifier('odd"table;drop')} (payload) VALUES ($1)`, ["safe"]);
   await db.query("INSERT INTO brai_cmd_settings (key, value, updated_at_utc) VALUES ('registration_enabled', 'false', '2026-01-01T00:00:00.000Z')");
+  await db.query("INSERT INTO brai_cmd_settings (key, value, updated_at_utc) VALUES ('function.screenshot_inbox.enabled', 'false', '2026-01-01T00:00:00.000Z')");
   await db.query("INSERT INTO \"user\" (id, name, email) VALUES ('auth-1', 'Registered Demo', 'demo@example.com')");
   await db.query(`
     INSERT INTO preliminary_users (
@@ -395,6 +396,8 @@ try {
 
   const braiCmdSummary = await readBraiCmdAdminSummary({ databaseUrl });
   assert.equal(braiCmdSummary.settings.registrationEnabled, false, "brai cmd registration state is readable");
+  assert.equal(braiCmdSummary.settings.functions.main_dictation.enabled, true, "brai cmd default function state is readable");
+  assert.equal(braiCmdSummary.settings.functions.screenshot_inbox.enabled, false, "brai cmd disabled function state is readable");
   assert.equal(braiCmdSummary.totals.activeTokens, 2, "brai cmd active token count is aggregated");
   assert.equal(braiCmdSummary.totals.revokedTokens, 1, "brai cmd revoked token count is aggregated");
   assert.equal(braiCmdSummary.totals.registeredTokens, 1, "brai cmd registered token count is aggregated");

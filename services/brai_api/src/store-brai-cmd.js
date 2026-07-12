@@ -3,7 +3,17 @@ import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypt
 const DEFAULT_BRAI_CMD_MESSAGES = Object.freeze({
   'message.inbox.created.default': 'Отправлено во входящие',
   'message.inbox.duplicate.default': 'Уже во входящих',
-  'message.dictate.success.main': ''
+  'message.dictate.success.main': '',
+  'message.function.disabled.default': 'Функция временно недоступна'
+});
+
+const DEFAULT_BRAI_CMD_FUNCTIONS = Object.freeze({
+  main_dictation: { key: 'main_dictation', title: 'Диктовка голос в текст', enabled: true },
+  idea_voice_inbox: { key: 'idea_voice_inbox', title: 'Идея голосом во входящие', enabled: true },
+  screenshot_inbox: { key: 'screenshot_inbox', title: 'Скриншот во входящие', enabled: true },
+  screenshot_voice_inbox: { key: 'screenshot_voice_inbox', title: 'Скриншот и голос во входящие', enabled: true },
+  chat_context_inbox: { key: 'chat_context_inbox', title: 'JSON чата и голос во входящие', enabled: true },
+  save_context_inbox: { key: 'save_context_inbox', title: 'Сохранить JSON и голос во входящие', enabled: true }
 });
 
 export const braiCmdStoreMethods = {
@@ -11,7 +21,8 @@ export const braiCmdStoreMethods = {
     const row = this.db.prepare("SELECT value FROM brai_cmd_settings WHERE key = 'registration_enabled'").get();
     return {
       registrationEnabled: row?.value !== 'false',
-      messages: this.braiCmdMessages()
+      messages: this.braiCmdMessages(),
+      functions: this.braiCmdFunctions()
     };
   },
 
@@ -27,11 +38,32 @@ export const braiCmdStoreMethods = {
     return clean ? { key, text: clean, tone: cleanNoticeTone(tone) } : null;
   },
 
+  braiCmdFunctions() {
+    const rows = this.db.prepare("SELECT key, value FROM brai_cmd_settings WHERE key LIKE 'function.%.enabled'").all();
+    const saved = new Map();
+    for (const row of rows) {
+      const key = functionKeyFromSettingKey(row.key);
+      if (key && Object.hasOwn(DEFAULT_BRAI_CMD_FUNCTIONS, key)) {
+        saved.set(key, row.value !== 'false');
+      }
+    }
+    return Object.fromEntries(Object.entries(DEFAULT_BRAI_CMD_FUNCTIONS).map(([key, value]) => [
+      key,
+      { ...value, enabled: saved.has(key) ? saved.get(key) : value.enabled }
+    ]));
+  },
+
+  braiCmdFunctionEnabled(key) {
+    const normalized = cleanFunctionKey(key);
+    if (!Object.hasOwn(DEFAULT_BRAI_CMD_FUNCTIONS, normalized)) return false;
+    return this.braiCmdFunctions()[normalized]?.enabled !== false;
+  },
+
   setBraiCmdRegistrationEnabled(registrationEnabled) {
     return this.setBraiCmdSettings({ registrationEnabled });
   },
 
-  setBraiCmdSettings({ registrationEnabled, messages } = {}) {
+  setBraiCmdSettings({ registrationEnabled, messages, functions } = {}) {
     const now = new Date().toISOString();
     const touched = {};
     if (registrationEnabled !== undefined) {
@@ -56,6 +88,24 @@ export const braiCmdStoreMethods = {
         if (!Object.hasOwn(DEFAULT_BRAI_CMD_MESSAGES, key)) continue;
         upsert.run(key, cleanNoticeText(value), now);
         touched[key] = true;
+      }
+    }
+    if (functions && typeof functions === 'object' && !Array.isArray(functions)) {
+      const upsert = this.db.prepare(`
+        INSERT INTO brai_cmd_settings (key, value, updated_at_utc)
+        VALUES (?, ?, ?)
+        ON CONFLICT(key) DO UPDATE SET
+          value = excluded.value,
+          updated_at_utc = excluded.updated_at_utc
+      `);
+      for (const [key, value] of Object.entries(functions)) {
+        const normalized = cleanFunctionKey(key);
+        if (!Object.hasOwn(DEFAULT_BRAI_CMD_FUNCTIONS, normalized)) continue;
+        const enabled = cleanFunctionEnabled(value);
+        if (enabled === null) continue;
+        const settingKey = `function.${normalized}.enabled`;
+        upsert.run(settingKey, enabled ? 'true' : 'false', now);
+        touched[settingKey] = enabled;
       }
     }
     if (Object.keys(touched).length === 0) return this.braiCmdSettings();
@@ -652,6 +702,29 @@ function normalizeDisplayName(value) {
 
 function cleanMetadata(value) {
   return String(value ?? '').trim().slice(0, 120);
+}
+
+function functionKeyFromSettingKey(key) {
+  const value = String(key ?? '');
+  if (!value.startsWith('function.') || !value.endsWith('.enabled')) return '';
+  return cleanFunctionKey(value.slice('function.'.length, -'.enabled'.length));
+}
+
+function cleanFunctionKey(value) {
+  return String(value ?? '').trim().toLowerCase().replace(/[^a-z0-9_]/g, '').slice(0, 80);
+}
+
+function cleanFunctionEnabled(value) {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'string') {
+    const clean = value.trim().toLowerCase();
+    if (clean === 'true') return true;
+    if (clean === 'false') return false;
+  }
+  if (value && typeof value === 'object' && !Array.isArray(value) && typeof value.enabled === 'boolean') {
+    return value.enabled;
+  }
+  return null;
 }
 
 function safeNumber(value) {

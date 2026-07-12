@@ -36,6 +36,9 @@ const RELEASE_SESSION_COOKIE = 'brai_release_session';
 const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 30;
 const STATE_CHANGING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 const DRAW_SCENE_LIMIT_BYTES = 15 * 1024 * 1024;
+const BRAI_CMD_FUNCTION_DISABLED_CODE = 'function_disabled';
+const BRAI_CMD_FUNCTION_DISABLED_MESSAGE_KEY = 'message.function.disabled.default';
+const BRAI_CMD_CHAT_PREFIX = 'Добавить в контекст контакта';
 
 export function createBraiServer({
   databaseUrl,
@@ -690,6 +693,10 @@ export function createBraiServer({
         const access = requireBraiCmdAccess(req, store);
         const requestNow = now();
         const body = await readJson(req, { limit: INBOX_BODY_LIMIT_BYTES });
+        if (!store.braiCmdFunctionEnabled?.(braiCmdInboxFunctionKey(body))) {
+          sendBraiCmdFunctionDisabled(req, res, store, sendJson);
+          return;
+        }
         const ownerUserId = store.primaryUserId();
         const inboxBody = {
           ...body,
@@ -1456,6 +1463,41 @@ function requiresTrustedOrigin(req, authContext) {
 function redirect(res, location, extraHeaders = {}) {
   res.writeHead(303, { location, ...extraHeaders });
   res.end();
+}
+
+function braiCmdInboxFunctionKey(body) {
+  const explicit = firstTextField(body, ['brai_cmd_function', 'braiCmdFunction', 'function_key', 'functionKey']);
+  if (explicit) return explicit;
+
+  const text = typeof body?.text === 'string' ? body.text.trim() : '';
+  const hasAttachments = Array.isArray(body?.attachments) && body.attachments.length > 0;
+  const hasContext = body?.description_json && typeof body.description_json === 'object' && !Array.isArray(body.description_json);
+  if (hasAttachments && text === 'Скриншот') return 'screenshot_inbox';
+  if (hasAttachments) return 'screenshot_voice_inbox';
+  if (hasContext && text.startsWith(BRAI_CMD_CHAT_PREFIX)) return 'chat_context_inbox';
+  if (hasContext) return 'save_context_inbox';
+  return 'idea_voice_inbox';
+}
+
+function firstTextField(body, names) {
+  for (const name of names) {
+    const value = body?.[name];
+    if (typeof value === 'string' && value.trim()) return value.trim();
+  }
+  return '';
+}
+
+function sendBraiCmdFunctionDisabled(req, res, store, sendJson) {
+  const notice = store.braiCmdNotice?.(BRAI_CMD_FUNCTION_DISABLED_MESSAGE_KEY, 'error') ?? {
+    key: BRAI_CMD_FUNCTION_DISABLED_MESSAGE_KEY,
+    text: 'Функция временно недоступна',
+    tone: 'error'
+  };
+  sendJson(req, res, 403, {
+    error: notice.text,
+    code: BRAI_CMD_FUNCTION_DISABLED_CODE,
+    notice
+  });
 }
 
 function recordRuntimeLog(store, logger, input) {
