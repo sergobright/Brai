@@ -208,3 +208,27 @@ test('workflow observability migration adds process json and telemetry tables id
     await database.drop();
   }
 });
+
+test('workflow observability history repair restores marker 57 idempotently', async () => {
+  const database = await createTestDatabase([
+    '0001_brai_baseline.sql',
+    '0010_agent_role_normalization_workflows.sql',
+    '0011_inbox_workflow_reliability.sql',
+    '0012_inbox_raw_input_preservation.sql',
+    '0013_drop_legacy_event_tables.sql',
+    '0015_runtime_settings_timezone_ai_provider.sql'
+  ]);
+  const pool = new Pool({ connectionString: database.url });
+  try {
+    const migration = fs.readFileSync(
+      path.resolve(import.meta.dirname, '../../../supabase/migrations/0017_repair_workflow_observability_history.sql'),
+      'utf8'
+    );
+    await pool.query(migration);
+    await pool.query(migration);
+    assert.equal((await pool.query("SELECT COUNT(*)::int AS count FROM schema_migrations WHERE version = 57")).rows[0].count, 1);
+  } finally {
+    await pool.end();
+    await database.drop();
+  }
+});
