@@ -138,7 +138,11 @@ describe("BraiApp shell", () => {
 
   it("redirects anonymous web users to the standalone auth page without rendering the cabinet shell", async () => {
     await setMeta("currentUserId", null);
-    const sessionSpy = vi.spyOn(BraiApi.prototype, "session").mockResolvedValue({ authenticated: false, user: null });
+    let resolveSession!: (session: { authenticated: false; user: null }) => void;
+    const sessionResult = new Promise<{ authenticated: false; user: null }>((resolve) => {
+      resolveSession = resolve;
+    });
+    const sessionSpy = vi.spyOn(BraiApi.prototype, "session").mockReturnValue(sessionResult);
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       const url = requestUrl(input);
       if (url.includes("/auth/session")) {
@@ -150,18 +154,18 @@ describe("BraiApp shell", () => {
       return Promise.reject(new Error("offline"));
     }));
 
-    await act(async () => {
-      render(<BraiApp />);
-      await Promise.resolve();
-    });
-
+    render(<BraiApp />);
     await waitFor(() => expect(sessionSpy).toHaveBeenCalled());
-    await waitFor(() => expect(window.location.pathname).toBe("/auth"), { timeout: 9_000 });
+    await act(async () => {
+      resolveSession({ authenticated: false, user: null });
+      await sessionResult;
+    });
+    await waitFor(() => expect(window.location.pathname).toBe("/auth"));
     expect(document.querySelector("[data-auth-redirect]")).toBeInTheDocument();
     expect(document.querySelector("[data-app-shell]")).not.toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Действия" })).not.toBeInTheDocument();
     expect(screen.queryByRole("textbox", { name: "Email" })).not.toBeInTheDocument();
-  }, 12_000);
+  });
 
   it("shows the production OTP countdown and enables resend after one minute", async () => {
     vi.useFakeTimers();
