@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AuthPage } from "@/features/app/AuthPage";
 
@@ -17,6 +17,7 @@ describe("AuthPage", () => {
   afterEach(() => {
     cleanup();
     vi.unstubAllGlobals();
+    delete window.__BRAI_RUNTIME_CONFIG__;
     window.history.replaceState(null, "", "/");
   });
 
@@ -27,6 +28,36 @@ describe("AuthPage", () => {
     expect(screen.getByRole("button", { name: "Получить код" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "На главную" })).toHaveAttribute("href", "https://brai.one/");
     expect(document.querySelector("[data-auth-page]")).toBeInTheDocument();
+  });
+
+  it("uses email-only login on preview without requesting an OTP", async () => {
+    window.__BRAI_RUNTIME_CONFIG__ = { environment: "preview-a" };
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = requestUrl(input);
+      if (url.endsWith("/auth/session")) {
+        return jsonResponse({ authenticated: false, user: null });
+      }
+      if (url.endsWith("/auth/test-email-login")) {
+        return jsonResponse({ authenticated: true, user: { id: "primary-user", email: "primary@example.com", name: "Primary" } });
+      }
+      return Promise.reject(new Error("offline"));
+    }));
+
+    render(<AuthPage />);
+
+    const email = await screen.findByRole("textbox", { name: "Email" });
+    expect(screen.getByRole("button", { name: "Войти" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Получить код" })).not.toBeInTheDocument();
+
+    fireEvent.change(email, { target: { value: "random@example.test" } });
+    fireEvent.click(screen.getByRole("button", { name: "Войти" }));
+
+    await waitFor(() => expect(fetch).toHaveBeenCalledWith(
+      "/api/auth/test-email-login",
+      expect.objectContaining({ method: "POST" }),
+    ));
+    expect(fetch).not.toHaveBeenCalledWith("/api/auth/otp/send", expect.anything());
+    expect(window.location.pathname).toBe("/");
   });
 
   it("redirects authenticated users to the cabinet", async () => {

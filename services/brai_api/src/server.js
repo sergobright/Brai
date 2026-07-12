@@ -291,12 +291,14 @@ export function createBraiServer({
           return;
         }
 
-        const existingUser = store.getAuthUserByEmail(email);
-        const signInName = existingUser?.name || cleanName(body.name) || email;
+        const primaryUser = store.primaryUser();
+        const existingUser = primaryUser ?? store.getAuthUserByEmail(email);
+        const signInEmail = existingUser?.email || email;
+        const signInName = existingUser?.name || cleanName(body.name) || signInEmail;
         let response;
         try {
           response = await betterAuthTestEmailLogin({
-            email,
+            email: signInEmail,
             name: signInName,
             headers: requestHeaders(req)
           });

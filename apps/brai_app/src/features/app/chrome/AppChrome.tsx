@@ -324,13 +324,17 @@ function IconGlyph({ emoji, className = "" }: { emoji: string; className?: strin
 export function AuthPanel({
   busy,
   className = "mt-[52px]",
+  mode = "otp",
   onAuthenticated,
+  onEmailLogin,
   onRequestOtp,
   onVerifyOtp,
 }: {
   busy: boolean;
   className?: string;
+  mode?: "email" | "otp";
   onAuthenticated?: () => void;
+  onEmailLogin?: (email: string) => Promise<void>;
   onRequestOtp: (email: string) => Promise<OtpSendResult>;
   onVerifyOtp: (email: string, otp: string) => Promise<void>;
 }) {
@@ -342,10 +346,16 @@ export function AuthPanel({
   const [otpTimer, setOtpTimer] = useState<AuthOtpTimer>(defaultOtpTimer);
   const [error, setError] = useState("");
 
-  async function submitOtp(event: FormEvent<HTMLFormElement>) {
+  async function submitAuth(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError("");
     try {
+      if (mode === "email") {
+        if (!onEmailLogin) throw new Error("email_login_unavailable");
+        await onEmailLogin(email);
+        onAuthenticated?.();
+        return;
+      }
       if (!otpSent) {
         await requestOtpCode();
         return;
@@ -353,7 +363,7 @@ export function AuthPanel({
       await onVerifyOtp(email, otp);
       onAuthenticated?.();
     } catch {
-      setError(otpSent ? "Код не подошел" : "Не удалось отправить код");
+      setError(mode === "email" ? "Email не подошёл" : otpSent ? "Код не подошел" : "Не удалось отправить код");
     }
   }
 
@@ -383,17 +393,17 @@ export function AuthPanel({
     <Card
       className={cx(className, "w-full backdrop-blur-md sm:max-w-md")}
       style={authDarkThemeStyle}
-      render={<form onSubmit={submitOtp} />}
+      render={<form onSubmit={submitAuth} />}
     >
       <CardHeader>
         <CardTitle>Вход в Brai</CardTitle>
         <CardDescription>
-          Введите почту, чтобы получить код для входа или регистрации.
+          {mode === "email" ? "Введите почту для входа в тестовый аккаунт." : "Введите почту, чтобы получить код для входа или регистрации."}
         </CardDescription>
       </CardHeader>
       <CardContent>
         <FieldGroup className="gap-4">
-          <Field data-invalid={Boolean(error && !otpSent)}>
+          <Field data-invalid={Boolean(error && (mode === "email" || !otpSent))}>
             <FieldLabel htmlFor={emailInputId}>Почта</FieldLabel>
             <Input
               id={emailInputId}
@@ -403,16 +413,16 @@ export function AuthPanel({
               inputMode="email"
               placeholder="Введите почту"
               aria-label="Email"
-              aria-invalid={Boolean(error && !otpSent)}
-              disabled={busy || otpSent}
+              aria-invalid={Boolean(error && (mode === "email" || !otpSent))}
+              disabled={busy || (mode === "otp" && otpSent)}
               onChange={(event) => setEmail(event.target.value)}
             />
             <FieldDescription>
-              Мы отправим одноразовый код на эту почту.
+              {mode === "email" ? "Код подтверждения в этом режиме не нужен." : "Мы отправим одноразовый код на эту почту."}
             </FieldDescription>
           </Field>
           <div className="h-[140px]">
-            {otpSent ? (
+            {mode === "otp" && otpSent ? (
               <Field data-invalid={Boolean(error)}>
                 <FieldLabel htmlFor={otpInputId}>Код</FieldLabel>
                 <AuthOtpEntry
@@ -436,9 +446,9 @@ export function AuthPanel({
         </FieldGroup>
       </CardContent>
       <CardFooter>
-        <Button className="w-full" disabled={busy || !email || (otpSent && !otp)}>
-          {otpSent ? <KeyRound aria-hidden="true" /> : <Mail aria-hidden="true" />}
-          {otpSent ? "Войти" : "Получить код"}
+        <Button className="w-full" disabled={busy || !email || (mode === "otp" && otpSent && !otp)}>
+          {mode === "otp" && otpSent ? <KeyRound aria-hidden="true" /> : <Mail aria-hidden="true" />}
+          {mode === "email" || otpSent ? "Войти" : "Получить код"}
         </Button>
       </CardFooter>
     </Card>

@@ -3,12 +3,14 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { BraiApi, type OtpSendResult } from "@/shared/api/braiApi";
-import { defaultApiBase } from "@/shared/config/runtime";
+import { defaultApiBase, isProductionEnvironment } from "@/shared/config/runtime";
+import { resolveAuthMode } from "./appModel";
 import { AuthScreen } from "./AuthScreen";
 
 export function AuthPage() {
   const router = useRouter();
   const api = useMemo(() => new BraiApi(defaultApiBase()), []);
+  const authMode = resolveAuthMode(isProductionEnvironment());
   const [busy, setBusy] = useState(true);
   const [ready, setReady] = useState(false);
 
@@ -48,6 +50,17 @@ export function AuthPage() {
     }
   }
 
+  async function onEmailLogin(email: string) {
+    setBusy(true);
+    try {
+      const session = await api.testEmailLogin(email);
+      if (!session.authenticated) throw new Error("auth_failed");
+      router.replace("/");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function onVerifyOtp(email: string, otp: string) {
     setBusy(true);
     try {
@@ -64,7 +77,9 @@ export function AuthPage() {
       busy={busy}
       dataAuthPage
       formVisible={ready}
+      mode={authMode}
       showHomeLink
+      onEmailLogin={onEmailLogin}
       onRequestOtp={onRequestOtp}
       onVerifyOtp={onVerifyOtp}
     />

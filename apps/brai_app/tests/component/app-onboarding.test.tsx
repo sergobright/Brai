@@ -41,19 +41,9 @@ function emptyAppSnapshotResponse(url: string): Response | null {
   return null;
 }
 
-async function requestOtpForEmail(email: string) {
+async function submitEmailLogin(email: string) {
   const input = await screen.findByLabelText("Email");
   fireEvent.change(input, { target: { value: email } });
-  await act(async () => {
-    fireEvent.submit(input.closest("form") as HTMLFormElement);
-    await Promise.resolve();
-  });
-}
-
-async function submitOtpLogin(email: string, otp = "123456") {
-  await requestOtpForEmail(email);
-  const input = await screen.findByTestId("auth-otp-input");
-  fireEvent.change(input, { target: { value: otp } });
   await act(async () => {
     fireEvent.submit(input.closest("form") as HTMLFormElement);
     await Promise.resolve();
@@ -651,7 +641,7 @@ describe("BraiApp onboarding", () => {
     expect(cmdPlugin.setVoiceOnlyMode).not.toHaveBeenCalledWith({ enabled: false });
   });
 
-  it("does not leave cloud login after a failed code request", async () => {
+  it("does not leave cloud login after a failed preview email login", async () => {
     stubAndroidCapacitor();
     window.__BRAI_RUNTIME_CONFIG__ = { environment: "preview-a" };
     vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL) => {
@@ -679,10 +669,12 @@ describe("BraiApp onboarding", () => {
     expect(await screen.findByText("Вход в Brai")).toBeInTheDocument();
     expect(document.querySelector(".auth-galaxy-background")).toBeInTheDocument();
     expect(screen.getByLabelText("Email")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Войти" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Получить код" })).not.toBeInTheDocument();
     expectNoPasswordPrompt();
-    await requestOtpForEmail("wrong@example.test");
+    await submitEmailLogin("wrong@example.test");
 
-    expect(await screen.findByText("Не удалось отправить код")).toBeInTheDocument();
+    expect(await screen.findByText("Email не подошёл")).toBeInTheDocument();
     expect(screen.getByText("Вход в Brai")).toBeInTheDocument();
     expectNoPasswordPrompt();
     expect(screen.queryByText("Начинаем настройку")).not.toBeInTheDocument();
@@ -765,7 +757,7 @@ describe("BraiApp onboarding", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Войти" }, { timeout: 5_000 }));
     expect(await screen.findByLabelText("Email")).toBeInTheDocument();
     expectNoPasswordPrompt();
-    await requestOtpForEmail("wrong@example.test");
+    await submitEmailLogin("wrong@example.test");
 
     await waitFor(() => expect(cmdPlugin.setOverlayEnabled).toHaveBeenCalledWith({ enabled: true }));
     expect(cmdPlugin.setVoiceOnlyMode).toHaveBeenCalledWith({ enabled: true });
@@ -786,18 +778,7 @@ describe("BraiApp onboarding", () => {
           headers: { "content-type": "application/json" },
         });
       }
-      if (url.endsWith("/auth/otp/send")) {
-        return new Response(JSON.stringify({
-          success: true,
-          expires_in_seconds: 300,
-          resend_after_seconds: 60,
-          resend_strategy: "reuse",
-        }), {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        });
-      }
-      if (url.endsWith("/auth/otp/verify")) {
+      if (url.endsWith("/auth/test-email-login")) {
         verified = true;
         return new Response(JSON.stringify({ authenticated: true, user: { id: "test-user", email: "test@example.test", name: "Test" } }), {
           status: 200,
@@ -824,8 +805,10 @@ describe("BraiApp onboarding", () => {
     if (loginButton) fireEvent.click(loginButton);
     expect(cmdPlugin.setVoiceOnlyMode).not.toHaveBeenCalledWith({ enabled: false });
     expect(await screen.findByLabelText("Email")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Войти" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Получить код" })).not.toBeInTheDocument();
     expectNoPasswordPrompt();
-    await submitOtpLogin("test@example.test");
+    await submitEmailLogin("test@example.test");
 
     expect(await screen.findByRole("heading", { name: "Действия" })).toBeInTheDocument();
     await waitFor(() => expect(cmdPlugin.setVoiceOnlyMode).toHaveBeenCalledWith({ enabled: false }));

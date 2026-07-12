@@ -49,7 +49,7 @@ test('email OTP message renders the reusable responsive card', () => {
   assert.match(message.text, /Brai · brai\.one/);
 });
 
-test('test email login creates or reuses a Better Auth user without sending OTP mail', async () => {
+test('test email login creates or reuses the primary Better Auth user without sending OTP mail', async () => {
   const sentOtps = [];
   const fixture = await createFixture([
     '2026-07-01T09:00:00.000Z',
@@ -119,8 +119,10 @@ test('test email login creates or reuses a Better Auth user without sending OTP 
       body: JSON.stringify({ email: 'second@example.com' })
     });
     assert.equal(second.status, 200);
-    assert.notEqual(second.body.user.id, first.body.user.id);
+    assert.equal(second.body.user.id, first.body.user.id);
+    assert.equal(second.body.user.email, first.body.user.email);
     assert.equal(fixture.store.primaryUserId(), first.body.user.id);
+    assert.equal(sentOtps.length, 0);
   } finally {
     await fixture.close();
   }

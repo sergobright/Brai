@@ -2,6 +2,7 @@
 
 import type { OtpSendResult } from "@/shared/api/braiApi";
 import Galaxy from "@/shared/ui/galaxy";
+import type { AuthMode } from "./appModel";
 import { AuthPanel, authDarkThemeStyle } from "./chrome/AppChrome";
 import { cx } from "./appUtils";
 
@@ -25,7 +26,9 @@ export function AuthScreen({
   dataAuthPage = false,
   formVisible = true,
   layout = "page",
+  mode = "otp",
   onAuthenticated,
+  onEmailLogin,
   onRequestOtp,
   onVerifyOtp,
   showHomeLink = false,
@@ -34,7 +37,9 @@ export function AuthScreen({
   dataAuthPage?: boolean;
   formVisible?: boolean;
   layout?: "page" | "embedded";
+  mode?: AuthMode;
   onAuthenticated?: () => void;
+  onEmailLogin?: (email: string) => Promise<void>;
   onRequestOtp: (email: string) => Promise<OtpSendResult>;
   onVerifyOtp: (email: string, otp: string) => Promise<void>;
   showHomeLink?: boolean;
@@ -57,7 +62,9 @@ export function AuthScreen({
           <AuthPanel
             busy={busy}
             className="m-0"
+            mode={mode}
             onAuthenticated={onAuthenticated}
+            onEmailLogin={onEmailLogin}
             onRequestOtp={onRequestOtp}
             onVerifyOtp={onVerifyOtp}
           />
