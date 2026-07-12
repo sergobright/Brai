@@ -7,8 +7,9 @@ TBD - created by archiving change add-actions-task-list. Update Purpose after ar
 Brai SHALL provide an Activities module for task records synchronized between Web and Android.
 
 Activity records SHALL reference `activity_types` through `activity_type_id`.
-User-created records SHALL use `activity_type_id = action`. Agent-created task
-records SHALL use `activity_type_id = operation`.
+Product-created user task records SHALL use `activity_type_id = action`.
+Future product-created user operation records MAY use `activity_type_id = operation`.
+Agent service logs SHALL NOT use raw `activities` as their ingest sink.
 
 #### Scenario: Activity is deleted
 - **WHEN** the user deletes an activity
@@ -22,15 +23,35 @@ records SHALL use `activity_type_id = operation`.
 - **AND** the activity returns to the active Activities list as `New`
 - **AND** it appears above older active activities without manual order
 
-#### Scenario: Agent operation is recorded
-- **WHEN** the agent decides that a follow-up task or procedural blocker must be tracked
-- **THEN** it is stored in `activities` with `activity_type_id = operation`
-- **AND** `author` records the agent name as text
-- **AND** `reason` records the context for why the agent decided the operation is needed
-
 #### Scenario: User activity is recorded
 - **WHEN** a user creates an activity from the product interface
 - **THEN** it is stored with `activity_type_id = action`
+
+#### Scenario: User operation is recorded
+- **WHEN** a future product interface creates an operation activity
+- **THEN** it is stored with `activity_type_id = operation`
+- **AND** it enters the same raw normalization workflow as user-created actions
+
+### Requirement: Raw Activities are AI-normalized into item roles
+Activities created through the sync path SHALL start as raw records when
+`item_roles_id` is null and SHALL be normalized by the Activity workflow before
+they are linked into `items` and `item_roles`.
+
+#### Scenario: User action is created as raw data
+- **WHEN** a user creates an action through Activity sync
+- **THEN** the Activity is stored without `item_roles_id`
+- **AND** a queued `activity.raw-normalization` workflow execution is created
+
+#### Scenario: Activity normalization is applied
+- **WHEN** the Activity workflow accepts normalized output
+- **THEN** it may update `title`, `description_md`, and `reason`
+- **AND** it does not change `activity_type_id`, `author`, `status`, `completed_at_utc`, `sort_order`, or deletion fields
+- **AND** it creates or updates the related `items` and `item_roles` records
+- **AND** it writes an `activity.normalized` event
+
+#### Scenario: User changes arrive before normalization completes
+- **WHEN** status, deletion, restore, or ordering changes are accepted before Activity normalization applies
+- **THEN** those user changes are preserved after workflow apply
 
 ### Requirement: Activities use two statuses
 Activity records SHALL store status directly on the record as either `New` or `Done`.

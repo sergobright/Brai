@@ -27,6 +27,7 @@ export const INBOX_EVENT_TYPES = new Set([
   'delete'
 ]);
 export const ACTIVITY_STATUSES = new Set(['New', 'Done']);
+export const ACTIVITY_TYPES = new Set(['action', 'operation']);
 
 export function formatSession(session, timeZone = DEFAULT_TIME_ZONE) {
   if (!session) return null;
@@ -97,7 +98,16 @@ export function formatActivity(activity) {
     completed_at_utc: activity.completed_at_utc,
     sort_order: Number.isInteger(activity.sort_order) ? activity.sort_order : null,
     deleted_at_utc: activity.deleted_at_utc ?? null,
-    restored_at_utc: activity.restored_at_utc ?? null
+    restored_at_utc: activity.restored_at_utc ?? null,
+    item_roles_id: Number.isInteger(activity.item_roles_id) ? activity.item_roles_id : null,
+    initial_event_id: activity.initial_event_id ?? null,
+    workflow_execution_id: Number.isInteger(activity.workflow_execution_id) ? activity.workflow_execution_id : null,
+    workflow_status: activity.workflow_status ?? null,
+    workflow_step: activity.workflow_step ?? null,
+    workflow_attempt_count: Number.isInteger(activity.workflow_attempt_count) ? activity.workflow_attempt_count : 0,
+    workflow_last_error: activity.workflow_last_error ?? null,
+    temporal_workflow_id: activity.temporal_workflow_id ?? null,
+    temporal_run_id: activity.temporal_run_id ?? null
   };
 }
 

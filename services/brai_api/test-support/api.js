@@ -64,6 +64,9 @@ export async function createFixture(times, options = {}) {
       inboxNormalizer: options.inboxNormalizer,
       inboxWorkflowStarter: options.inboxWorkflowStarter,
       inboxAutoProcess: options.inboxAutoProcess ?? false,
+      activityNormalizer: options.activityNormalizer,
+      activityWorkflowStarter: options.activityWorkflowStarter,
+      activityAutoProcess: options.activityAutoProcess ?? false,
       braiCmd: options.braiCmd,
       branch: options.branch,
       commit: options.commit,
@@ -232,7 +235,8 @@ export async function createTestDatabase(migrations = [
   '0016_admin_role_workflow_observability.sql',
   '0017_repair_workflow_observability_history.sql',
   '0018_entity_role_data_repair.sql',
-  '0019_preliminary_brai_cmd_users.sql'
+  '0019_preliminary_brai_cmd_users.sql',
+  '0020_activity_raw_normalization_workflows.sql'
 ]) {
   const baseUrl = process.env.BRAI_TEST_DATABASE_URL?.trim();
   if (!baseUrl) throw new Error('BRAI_TEST_DATABASE_URL is required for API tests');

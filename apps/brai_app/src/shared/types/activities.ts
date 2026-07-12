@@ -16,12 +16,26 @@ export interface ActivityItem {
   sort_order: number | null;
   deleted_at_utc: string | null;
   restored_at_utc: string | null;
+  item_roles_id?: number | null;
+  initial_event_id?: string | null;
+  workflow_execution_id?: number | null;
+  workflow_status?: "queued" | "running" | "completed" | "failed" | "needs_review" | null;
+  workflow_step?: string | null;
+  workflow_attempt_count?: number;
+  workflow_last_error?: string | null;
+  temporal_workflow_id?: string | null;
+  temporal_run_id?: string | null;
+  ai_processing_status?: "running" | "failed" | "needs_review" | null;
+  ai_processing_error?: string | null;
   pending?: boolean;
 }
 
 export interface ActivityEventPayload {
+  activity_type_id?: ActivityType;
   title?: string;
   description_md?: string;
+  author?: string;
+  reason?: string;
   status?: ActivityStatus;
   ordered_ids?: string[];
 }

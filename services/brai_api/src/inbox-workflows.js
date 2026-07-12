@@ -24,6 +24,25 @@ export async function InboxNormalizationWorkflow(input) {
   }
 }
 
+export async function ActivityNormalizationWorkflow(input) {
+  const info = workflowInfo();
+  const context = {
+    ...input,
+    workflowId: info.workflowId,
+    runId: info.runId
+  };
+  try {
+    return await runActivityNormalization(context);
+  } catch (error) {
+    await activities.failActivityNormalization({
+      ...context,
+      reason: activityError(error),
+      step: error?.workflowStep
+    });
+    return { ok: false, reason: 'workflow_activity_failed' };
+  }
+}
+
 async function runInboxNormalization(context) {
   const prepared = await runActivity('prepare_raw', () => activities.prepareInboxNormalization(context));
   if (prepared.skipped) {
@@ -85,6 +104,63 @@ async function runInboxNormalization(context) {
   }
 
   await activities.failInboxNormalization({
+    ...context,
+    reason: validationError || 'normalizer_validation_failed',
+    attemptCount: 3,
+    needsReview: true
+  });
+  return { ok: false, reason: 'normalizer_validation_failed' };
+}
+
+async function runActivityNormalization(context) {
+  const prepared = await runActivity('prepare_raw', () => activities.prepareActivityNormalization(context));
+  if (prepared.skipped) {
+    if (prepared.reason !== 'already_normalized') {
+      await activities.failActivityNormalization({
+        ...context,
+        reason: prepared.reason,
+        step: prepared.reason === 'raw_input_empty' ? 'prepare_raw' : undefined,
+        needsReview: prepared.reason === 'raw_input_empty'
+      });
+    }
+    return prepared;
+  }
+
+  let validationError = '';
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    const result = await runActivity('raw_normalizer', () => activities.normalizeActivityRaw({
+      ...context,
+      attempt,
+      validationError
+    }));
+    if (result.ok) {
+      try {
+        return await activities.applyNormalizedActivity({
+          ...context,
+          normalized: result.normalized
+        });
+      } catch (error) {
+        await activities.failActivityNormalization({
+          ...context,
+          reason: activityError(error),
+          step: 'apply_normalized_raw',
+          attemptCount: attempt
+        });
+        return { ok: false, reason: 'apply_failed' };
+      }
+    }
+    if (!result.validationFailed) {
+      await activities.failActivityNormalization({
+        ...context,
+        reason: result.error,
+        attemptCount: attempt
+      });
+      return { ok: false, reason: 'normalizer_failed' };
+    }
+    validationError = result.error;
+  }
+
+  await activities.failActivityNormalization({
     ...context,
     reason: validationError || 'normalizer_validation_failed',
     attemptCount: 3,
