@@ -65,6 +65,7 @@ export async function createFixture(times, options = {}) {
     commit: options.commit,
     databaseBranch: options.databaseBranch,
     testEmailLogin: options.testEmailLogin,
+    shutdownGraceMs: options.shutdownGraceMs,
     now: () => new Date(times[Math.min(index++, times.length - 1)]),
     logger: options.logger ?? { error: () => {} }
   });
@@ -74,6 +75,7 @@ export async function createFixture(times, options = {}) {
   return {
     url: `http://127.0.0.1:${address.port}`,
     wsUrl: `ws://127.0.0.1:${address.port}`,
+    runtime,
     store: runtime.store,
     close: async () => {
       try {

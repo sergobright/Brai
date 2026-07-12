@@ -11,6 +11,8 @@ SOURCE_GROUP="${BRAI_MAIN_SOURCE_GROUP:-mark}"
 RESCUE_ROOT="${BRAI_MAIN_RESCUE_ROOT:-/srv/projects/brai-rescue}"
 LOCK_FILE="${BRAI_MAIN_SYNC_LOCK:-/tmp/brai-main-checkout-sync.lock}"
 API_ENV_FILE="${BRAI_API_ENV_FILE:-/etc/brai/brai-api.env}"
+INSTALLED_GUARD_TASK="${BRAI_INSTALLED_GUARD_TASK:-/srv/opt/brai-codex-plugins/plugins/brai-guard/hooks/brai-task.mjs}"
+PRESERVED_OPENSPEC_CHANGES=""
 
 PRUNE_MODE=0
 PRUNE_ACCEPTED_BRANCHES=()
@@ -100,6 +102,18 @@ record_runtime_log() {
     --message "$message" \
     --json "$json" >/dev/null 2>&1 || true
 }
+
+restore_openspec_changes() {
+  if [ -z "$PRESERVED_OPENSPEC_CHANGES" ] || [ ! -d "$PRESERVED_OPENSPEC_CHANGES" ]; then
+    return
+  fi
+  mkdir -p "$REPO/openspec/changes"
+  cp -a "$PRESERVED_OPENSPEC_CHANGES/." "$REPO/openspec/changes/"
+  rm -rf -- "$PRESERVED_OPENSPEC_CHANGES"
+  PRESERVED_OPENSPEC_CHANGES=""
+}
+
+trap restore_openspec_changes EXIT
 
 prune_accepted_branches() {
   local branch line worktree_path current_path current_branch status
@@ -196,6 +210,11 @@ flock 9
 
 cd "$REPO"
 
+if [ -d openspec/changes ] && [ ! -L openspec/changes ]; then
+  PRESERVED_OPENSPEC_CHANGES="$(mktemp -d /tmp/brai-openspec-changes.XXXXXX)"
+  cp -a openspec/changes/. "$PRESERVED_OPENSPEC_CHANGES/"
+fi
+
 if [ "$PRUNE_MODE" -eq 1 ]; then
   prune_accepted_branches "${PRUNE_ACCEPTED_BRANCHES[@]}"
   if command -v "$NODE_BIN" >/dev/null 2>&1; then
@@ -282,6 +301,8 @@ git_cmd clean -fd \
   -e apps/brai_app/node_modules/ \
   -e services/brai_api/node_modules/ \
   -e services/brai_temporal/node_modules/
+restore_openspec_changes
+install -D -m 0755 scripts/brai-task.mjs "$INSTALLED_GUARD_TASK"
 git_cmd config core.hooksPath .githooks
 
 if [ "${BRAI_MAIN_SYNC_LOCK_CHECKOUT:-1}" = "1" ]; then

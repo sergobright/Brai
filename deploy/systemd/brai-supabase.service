@@ -1,0 +1,16 @@
+[Unit]
+Description=Brai self-hosted Supabase stack
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/srv/opt/supabase/docker
+ExecStart=/usr/bin/docker compose -f docker-compose.yml -f docker-compose.brai.yml up -d
+ExecStop=/usr/bin/docker compose -f docker-compose.yml -f docker-compose.brai.yml stop
+RemainAfterExit=yes
+TimeoutStartSec=0
+TimeoutStopSec=120
+
+[Install]
+WantedBy=multi-user.target

@@ -1,8 +1,0 @@
-- [x] 1.1 Add branch/run scope to API test schema names and make fixture cleanup unconditional.
-- [x] 1.2 Add a bounded Postgres cleanup command with focused selection tests.
-- [x] 1.3 Run cleanup on API test-run exit and before preview slot release.
-- [x] 1.4 Make accepted-preview recovery cleanup fail closed.
-- [x] 1.5 Run API, task, Temporal, OpenSpec, and public checks.
-- [x] 1.6 Verify real Postgres branch/run cleanup and prepare `technical-no-preview` delivery.
-- [x] 1.7 Verify accepted-branch cleanup in production after merge.
-- [x] 1.8 Archive this OpenSpec change after acceptance.

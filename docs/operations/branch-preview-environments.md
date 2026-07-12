@@ -179,6 +179,7 @@ caddy validate --config /etc/caddy/Caddyfile
 systemctl reload caddy
 /srv/opt/brai-main-sync.sh *
 sudo -u brai /srv/opt/node-v22.16.0/bin/npm --prefix /srv/projects/brai/services/brai_temporal ci
+sudo -u brai /srv/projects/brai-envs/prod/source/deploy/scripts/codex-cli-smoke.sh
 systemctl restart brai-temporal-worker.service
 systemd-run --unit=brai-temporal-worker-delayed-restart --on-active=* --collect /bin/systemctl restart brai-temporal-worker.service
 sudo -u brai /srv/projects/brai-envs/prod/source/deploy/scripts/complete-operation-activities.sh --local operation:agent-task:*

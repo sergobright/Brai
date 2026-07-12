@@ -149,6 +149,7 @@ jobs:
       - run: scripts/brai-api-test.sh
         env:
           BRAI_TEST_DATABASE_URL: postgres://brai:brai@127.0.0.1:5432/brai_test
+      - run: npm run email:images:check
       - run: npm --prefix admin run lint
       - run: npm --prefix admin run self-check
         env:

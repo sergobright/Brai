@@ -2,6 +2,7 @@
 {{ brai_deploy_user }} ALL=(root) NOPASSWD: /bin/systemctl reload caddy
 {{ brai_deploy_user }} ALL=(root) NOPASSWD: /srv/opt/brai-main-sync.sh *
 {{ brai_deploy_user }} ALL=({{ brai_service_user }}) NOPASSWD: {{ brai_node_root }}/bin/npm --prefix {{ brai_repo }}/services/brai_temporal ci
+{{ brai_deploy_user }} ALL=({{ brai_service_user }}) NOPASSWD: {{ brai_env_root }}/{{ brai_envs.prod.path }}/source/deploy/scripts/codex-cli-smoke.sh
 {{ brai_deploy_user }} ALL=(root) NOPASSWD: /bin/systemctl restart brai-temporal-worker.service
 {{ brai_deploy_user }} ALL=(root) NOPASSWD: /usr/bin/systemd-run --unit=brai-temporal-worker-delayed-restart --on-active=* --collect /bin/systemctl restart brai-temporal-worker.service
 {{ brai_deploy_user }} ALL=({{ brai_service_user }}) NOPASSWD: {{ brai_env_root }}/{{ brai_envs.prod.path }}/source/deploy/scripts/create-operation-activity.sh --local *

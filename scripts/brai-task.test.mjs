@@ -301,6 +301,10 @@ test("local main sync preserves runtime dirs and hard resets to origin main", ()
   assert.match(script, /core\.hooksPath=\/dev\/null/);
   assert.match(script, /git_cmd checkout -f -B "\$BRANCH" "origin\/\$BRANCH"/);
   assert.match(script, /git_cmd reset --hard "origin\/\$BRANCH"/);
+  assert.match(script, /install -D -m 0755 scripts\/brai-task\.mjs "\$INSTALLED_GUARD_TASK"/);
+  assert.match(script, /PRESERVED_OPENSPEC_CHANGES/);
+  assert.match(script, /cp -a openspec\/changes\/\. "\$PRESERVED_OPENSPEC_CHANGES\/"/);
+  assert.match(script, /restore_openspec_changes/);
   assert.match(script, /-e data\//);
   assert.match(script, /-e deploy\/web\//);
   assert.match(script, /-e deploy\/releases\//);
@@ -688,10 +692,13 @@ test("API test wrapper can read protected test env through brai-deploy group", (
   assert.match(workflow, /run: scripts\/brai-api-test\.sh/);
 });
 
-test("production deploy does not add a privileged Codex CLI smoke step", () => {
+test("production deploy runs Codex CLI smoke through one exact service-user command", () => {
   const deploy = fs.readFileSync(new URL("../deploy/scripts/deploy-branch.sh", import.meta.url), "utf8");
-  assert.doesNotMatch(deploy, /codex-cli-smoke\.sh/);
+  const sudoers = fs.readFileSync(new URL("../deploy/ansible/templates/brai-deploy-sudoers.j2", import.meta.url), "utf8");
+  assert.match(deploy, /sudo[^\n]*-u brai "\$SCRIPT_DIR\/codex-cli-smoke\.sh"/);
   assert.doesNotMatch(deploy, /sudo[^\n]*-u brai env/);
+  assert.match(sudoers, /NOPASSWD: .*brai_envs\.prod\.path.*\/source\/deploy\/scripts\/codex-cli-smoke\.sh/);
+  assert.doesNotMatch(sudoers, /codex-cli-smoke\.sh \*/);
 });
 
 test("operation activity completion helper rejects unsafe ids", () => {
@@ -705,6 +712,28 @@ test("operation activity completion helper rejects unsafe ids", () => {
   });
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /Invalid operation activity id/);
+});
+
+test("operation activity helper transports remote payload through stdin JSON", () => {
+  const script = fs.readFileSync(new URL("../deploy/scripts/create-operation-activity.sh", import.meta.url), "utf8");
+  assert.match(script, /--stdin-json/);
+  assert.match(script, /printf '%s' "\$payload_json" \| ssh/);
+  assert.doesNotMatch(script, /bash -s -- "\$DEPLOY_REPO" "\$SERVICE_USER" "\$OPERATION_ID"/);
+
+  const result = spawnSync("bash", ["deploy/scripts/create-operation-activity.sh", "--local", "--stdin-json"], {
+    cwd: path.resolve(import.meta.dirname, ".."),
+    encoding: "utf8",
+    input: JSON.stringify({
+      id: "operation:agent-task:stdin-probe",
+      title: "Проверка stdin payload",
+      reason: "Пробелы и спецсимволы: $() ; & | ' \"",
+      description: "Русский текст и перенос\nстроки доходят до защищённой DB boundary.",
+    }),
+    env: { ...process.env, BRAI_DATABASE_URL: "", BRAI_API_ENV_FILE: "/nonexistent" },
+  });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /BRAI_DATABASE_URL is required/);
+  assert.doesNotMatch(result.stderr, /too short|syntax error/);
 });
 
 test("operation activity completion helper rejects duplicate ids before DB access", () => {
@@ -744,6 +773,16 @@ test("main checkout sync removes dangling dependency symlinks before relinking",
 
   assert.match(dependencyBlock, /\[ -L "\$dependency_path" \]/);
   assert.match(dependencyBlock, /rm -f "\$dependency_path"/);
+});
+
+test("stateful stack units preserve the shared Supabase network on recreation", () => {
+  const supabaseUnit = fs.readFileSync(new URL("../deploy/systemd/brai-supabase.service", import.meta.url), "utf8");
+  const temporalUnit = fs.readFileSync(new URL("../deploy/systemd/brai-temporal.service", import.meta.url), "utf8");
+  const playbook = fs.readFileSync(new URL("../deploy/ansible/brai.yml", import.meta.url), "utf8");
+  assert.match(supabaseUnit, /-f docker-compose\.yml -f docker-compose\.brai\.yml up -d/);
+  assert.match(temporalUnit, /Requires=docker\.service brai-supabase\.service/);
+  assert.match(playbook, /brai-supabase\.service/);
+  assert.match(playbook, /brai-temporal\.service/);
 });
 
 test("native APK detector ignores OTA web-layer changes", () => {

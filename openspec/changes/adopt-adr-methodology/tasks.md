@@ -1,7 +1,0 @@
-- [x] 1.1 Add Log4brains configuration, npm scripts, and a static ADR publish script.
-- [x] 1.2 Add `docs/adr/` index, template, and initial ADR backfill.
-- [x] 1.3 Update source-of-truth, OpenSpec, SocratiCode context, and operational docs for ADR usage.
-- [x] 1.4 Add protected Caddy/Ansible routing for `adr.brai.one`.
-- [x] 1.5 Run ADR build, OpenSpec, public guard, guard sync, and focused task tests.
-- [ ] 1.6 Complete no-preview handoff after checks.
-- [ ] 1.7 Archive this OpenSpec change after review/merge.

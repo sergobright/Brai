@@ -542,6 +542,18 @@
         - Reload systemd
         - Restart Brai Temporal worker
 
+    - name: Install Brai stateful stack systemd units
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../systemd/{{ item }}"
+        dest: "/etc/systemd/system/{{ item }}"
+        owner: root
+        group: root
+        mode: "0644"
+      loop:
+        - brai-supabase.service
+        - brai-temporal.service
+      notify: Reload systemd
+
     - name: Install Brai DB Telegram backup systemd units
       ansible.builtin.copy:
         src: "{{ playbook_dir }}/../systemd/{{ item }}"

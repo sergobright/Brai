@@ -17,6 +17,7 @@ OPERATION_ID=""
 TITLE=""
 REASON=""
 DESCRIPTION=""
+STDIN_JSON=0
 
 usage() {
   cat >&2 <<USAGE
@@ -24,6 +25,7 @@ Usage:
   $0 --id <operation-id> --title <title> --reason <reason> --description <description>
   $0 --host-local --id <operation-id> --title <title> --reason <reason> --description <description>
   $0 --local --id <operation-id> --title <title> --reason <reason> --description <description>
+  printf '%s' '<json>' | $0 --local --stdin-json
   $0 --check-access
   $0 --host-local --check-access
 
@@ -36,14 +38,27 @@ if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
   exit 0
 fi
 
-while [[ "${1:-}" == "--local" || "${1:-}" == "--host-local" || "${1:-}" == "--check-access" ]]; do
+while [[ "${1:-}" == "--local" || "${1:-}" == "--host-local" || "${1:-}" == "--check-access" || "${1:-}" == "--stdin-json" ]]; do
   case "$1" in
     --local) MODE="local" ;;
     --host-local) MODE="host-local" ;;
     --check-access) CHECK_ACCESS=1 ;;
+    --stdin-json) STDIN_JSON=1 ;;
   esac
   shift
 done
+
+if [[ "$STDIN_JSON" -eq 1 ]]; then
+  mapfile -d '' -t payload_fields < <("$NODE_BIN" -e '
+    const fs = require("node:fs");
+    const value = JSON.parse(fs.readFileSync(0, "utf8"));
+    for (const key of ["id", "title", "reason", "description"]) process.stdout.write(String(value[key] ?? "") + "\0");
+  ')
+  OPERATION_ID="${payload_fields[0]:-}"
+  TITLE="${payload_fields[1]:-}"
+  REASON="${payload_fields[2]:-}"
+  DESCRIPTION="${payload_fields[3]:-}"
+fi
 
 while [[ "$#" -gt 0 ]]; do
   case "$1" in
@@ -136,23 +151,11 @@ ssh_key() {
 }
 
 create_remote() {
-  local key_file
+  local key_file payload_json
   key_file="$(ssh_key)"
-  ssh -i "$key_file" -p "$SSH_PORT" -o BatchMode=yes -o StrictHostKeyChecking=accept-new "$DEPLOY_USER@$DEPLOY_HOST" \
-    bash -s -- "$DEPLOY_REPO" "$SERVICE_USER" "$OPERATION_ID" "$TITLE" "$REASON" "$DESCRIPTION" <<'REMOTE'
-set -euo pipefail
-DEPLOY_REPO="$1"
-SERVICE_USER="$2"
-ID="$3"
-TITLE="$4"
-REASON="$5"
-DESCRIPTION="$6"
-exec sudo -n -u "$SERVICE_USER" "$DEPLOY_REPO/deploy/scripts/create-operation-activity.sh" --local \
-  --id "$ID" \
-  --title "$TITLE" \
-  --reason "$REASON" \
-  --description "$DESCRIPTION"
-REMOTE
+  payload_json="$("$NODE_BIN" -e 'process.stdout.write(JSON.stringify({ id: process.argv[1], title: process.argv[2], reason: process.argv[3], description: process.argv[4] }))' "$OPERATION_ID" "$TITLE" "$REASON" "$DESCRIPTION")"
+  printf '%s' "$payload_json" | ssh -i "$key_file" -p "$SSH_PORT" -o BatchMode=yes -o StrictHostKeyChecking=accept-new "$DEPLOY_USER@$DEPLOY_HOST" \
+    sudo -n -u "$SERVICE_USER" "$DEPLOY_REPO/deploy/scripts/create-operation-activity.sh" --local --stdin-json
 }
 
 create_host_local() {

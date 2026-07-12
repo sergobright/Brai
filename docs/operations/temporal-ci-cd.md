@@ -224,7 +224,7 @@ Then open `https://temporal.brai.one` with the unified Caddy basic auth and look
   with `dispatch-release-preview --close-outcome released --require-release true`; and rerun or
   supersede stale `brai:promotion:prod:*` workflows. A successful new prod promotion automatically
   signals older running prod promotions as `superseded_closed`.
-- Temporal unavailable: the strict CI/CD job fails. Restart or repair `brai-temporal.service` / `brai-temporal-worker.service`, then rerun the failed GitHub Actions job.
+- Temporal unavailable: the strict CI/CD job fails. Restart or repair `brai-temporal.service` / `brai-temporal-worker.service`, then rerun the failed GitHub Actions job. The repo-managed `brai-supabase.service` always loads `/srv/opt/supabase/docker/docker-compose.brai.yml`, so recreated `supabase-db` containers retain the shared `brai-supabase` network used by Temporal.
 - Worker stopped: workflows remain in Temporal; restart `brai-temporal-worker.service`.
 - Failed preview deploy: query the workflow state and inspect `status`, `blocker`, `blockers`, and `tasks`, then fix and push the same `codex/*` branch.
 - Failed Supabase preview: check `/etc/brai/supabase-deploy.env`, self-hosted schema creation, the per-env `brai-api.env`, and `deploy/scripts/supabase-branch.mjs` output, then rerun `deploy-preview`.

@@ -1,7 +1,0 @@
-- [x] 1. Create OpenSpec change for Admin role/workflow observability.
-- [x] 2. Add schema fields/tables for `process_json`, step telemetry, trace status, heartbeats, metadata, and indexes.
-- [x] 3. Instrument Inbox workflow runtime steps, retries, skips, terminal trace status, and worker heartbeat.
-- [x] 4. Replace Admin Role Contracts card grid with navigator, URL state, role tabs, diagrams, schemas, events, diagnostics, and health.
-- [x] 5. Replace Admin Workflows card grid with navigator, generated process diagrams, cursor-paginated runs, execution detail timeline, polling, and definition view.
-- [x] 6. Add migration, runtime, admin read-model, and UI regression coverage.
-- [ ] 7. Run required checks and complete verified preview handoff.

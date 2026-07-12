@@ -1014,6 +1014,45 @@ describe("mobile OTA publish scripts", () => {
     expect(html).toContain('<p class="version">v7</p>');
     expect(html).toContain('<a class="download" href="./brai-v7.apk">Скачать</a>');
   });
+
+  it("keeps published APK metadata unchanged when staging fails", async () => {
+    const root = await fixtureRoot("brai-release-page-atomic-");
+    const releaseDir = path.join(root, "deploy/releases");
+    await mkdir(releaseDir, { recursive: true });
+    await copyFile(path.join(workspaceRoot, "deploy/environments.json"), path.join(root, "deploy/environments.json"));
+    await writeFile(path.join(releaseDir, "brai-v2.apk"), "new apk");
+    const oldJson = '{"schemaVersion":2,"sections":{}}\n';
+    await writeFile(path.join(releaseDir, "releases.json"), oldJson);
+    await writeFile(path.join(releaseDir, "index.html"), "old html\n");
+
+    await expect(execFileAsync("node", [
+      path.join(workspaceRoot, "deploy/scripts/update-release-index.mjs"),
+      "--release", "production",
+      "--file", "brai-v2.apk",
+      "--apk-version", "2",
+      "--version-code", "2",
+      "--published-at", "2026-07-11T22:00:00Z",
+    ], {
+      env: { ...process.env, BRAI_ROOT: root, BRAI_RELEASE_METADATA_FAIL_AFTER_STAGE: "1" },
+    })).rejects.toThrow(/injected release metadata failure/);
+
+    expect(await readFile(path.join(releaseDir, "releases.json"), "utf8")).toBe(oldJson);
+    expect(await readFile(path.join(releaseDir, "index.html"), "utf8")).toBe("old html\n");
+
+    await expect(execFileAsync("node", [
+      path.join(workspaceRoot, "deploy/scripts/update-release-index.mjs"),
+      "--release", "production",
+      "--file", "brai-v2.apk",
+      "--apk-version", "2",
+      "--version-code", "2",
+      "--published-at", "2026-07-11T22:00:00Z",
+    ], {
+      env: { ...process.env, BRAI_ROOT: root, BRAI_RELEASE_METADATA_FAIL_AFTER_INDEX: "1" },
+    })).rejects.toThrow(/injected release metadata swap failure/);
+
+    expect(await readFile(path.join(releaseDir, "releases.json"), "utf8")).toBe(oldJson);
+    expect(await readFile(path.join(releaseDir, "index.html"), "utf8")).toBe("old html\n");
+  });
 });
 
 async function fixtureRoot(prefix: string) {

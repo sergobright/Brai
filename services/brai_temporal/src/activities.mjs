@@ -32,6 +32,15 @@ export async function enableNoPreviewAutoMerge({ branch, sha }) {
   assertSafeBranch(branch);
   assertSafeSha(sha);
 
+  const mergedPull = await mergedPullForHead(branch, sha);
+  if (mergedPull) {
+    return {
+      code: 0,
+      stdout: `Already merged exact head ${sha} in PR #${mergedPull.number}: ${mergedPull.url}\n`,
+      stderr: ""
+    };
+  }
+
   return withSourceCheckout({ branch, sha }, async (cwd, gitEnv) =>
     runExistingScript("deploy/scripts/accept-preview.sh", [branch], {
       cwd,
@@ -43,6 +52,35 @@ export async function enableNoPreviewAutoMerge({ branch, sha }) {
       })
     })
   );
+}
+
+async function mergedPullForHead(branch, sha) {
+  const result = await runCommand("gh", [
+    "pr",
+    "list",
+    "--base",
+    "main",
+    "--head",
+    branch,
+    "--state",
+    "merged",
+    "--limit",
+    "100",
+    "--json",
+    "number,url,headRefOid,mergedAt"
+  ], { cwd: ROOT, env: await deployEnv(), allowFailure: true });
+  if (result.code !== 0) return null;
+  try {
+    return exactMergedPull(JSON.parse(result.stdout), sha);
+  } catch {
+    return null;
+  }
+}
+
+export function exactMergedPull(pulls, sha) {
+  return Array.isArray(pulls)
+    ? pulls.find((pull) => pull?.headRefOid === sha && pull?.mergedAt && pull?.number && pull?.url) ?? null
+    : null;
 }
 
 export async function completeAcceptedPreviews({ targetBranch = "main", targetEnvironment = "prod", targetCommit, mode }) {

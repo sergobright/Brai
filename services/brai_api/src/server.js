@@ -69,6 +69,7 @@ export function createBraiServer({
   commit = process.env.BRAI_COMMIT || null,
   databaseBranch = process.env.BRAI_SUPABASE_BRANCH || null,
   testEmailLogin = false,
+  shutdownGraceMs = 5000,
   now = () => new Date(),
   logger = console
 }) {
@@ -938,6 +939,11 @@ export function createBraiServer({
     }
   });
 
+  const connections = new Set();
+  server.on('connection', (socket) => {
+    connections.add(socket);
+    socket.on('close', () => connections.delete(socket));
+  });
   const wss = new WebSocketServer({ noServer: true });
   server.on('upgrade', (req, socket, head) => {
     void (async () => {
@@ -999,20 +1005,32 @@ export function createBraiServer({
     });
   });
 
+  let closePromise = null;
   return {
     server,
     store,
-    close: () =>
-      new Promise((resolve) => {
-        for (const socket of sockets) socket.close();
-        wss.close(() => {
-          server.close(async () => {
-            await authRuntime.close();
-            store.close();
+    close() {
+      if (closePromise) return closePromise;
+      closePromise = (async () => {
+        for (const socket of sockets) socket.terminate();
+        wss.close();
+        await new Promise((resolve) => {
+          const forceClose = setTimeout(() => {
+            server.closeAllConnections?.();
+            for (const connection of connections) connection.destroy();
+          }, shutdownGraceMs);
+          forceClose.unref();
+          server.close(() => {
+            clearTimeout(forceClose);
             resolve();
           });
+          server.closeIdleConnections?.();
         });
-      })
+        await authRuntime.close();
+        store.close();
+      })();
+      return closePromise;
+    }
   };
 }
 

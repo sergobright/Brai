@@ -1,0 +1,16 @@
+[Unit]
+Description=Brai self-hosted Temporal stack
+Requires=docker.service brai-supabase.service
+After=docker.service brai-supabase.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/srv/opt/temporal
+ExecStart=/usr/bin/docker compose up -d temporal temporal-ui
+ExecStop=/usr/bin/docker compose stop
+RemainAfterExit=yes
+TimeoutStartSec=0
+TimeoutStopSec=120
+
+[Install]
+WantedBy=multi-user.target
