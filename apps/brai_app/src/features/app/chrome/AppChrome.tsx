@@ -304,17 +304,13 @@ function IconGlyph({ emoji, className = "" }: { emoji: string; className?: strin
 export function AuthPanel({
   busy,
   className = "mt-[52px]",
-  mode,
   onAuthenticated,
-  onEmailLogin,
   onRequestOtp,
   onVerifyOtp,
 }: {
   busy: boolean;
   className?: string;
-  mode: "email" | "otp";
   onAuthenticated?: () => void;
-  onEmailLogin: (email: string) => Promise<void>;
   onRequestOtp: (email: string) => Promise<OtpSendResult>;
   onVerifyOtp: (email: string, otp: string) => Promise<void>;
 }) {
@@ -360,24 +356,11 @@ export function AuthPanel({
     applyOtpResult(await onRequestOtp(email));
   }
 
-  async function submitEmail(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setError("");
-    try {
-      await onEmailLogin(email);
-      onAuthenticated?.();
-    } catch {
-      setError("Email не подошёл");
-    }
-  }
-
-  const otpRequired = mode === "otp";
-  const submit = otpRequired ? submitOtp : submitEmail;
   const emailInputId = `${inputId}-email`;
   const otpInputId = `${inputId}-otp`;
 
   return (
-    <Card className={cx(className, "h-[430px] w-full sm:max-w-md")} render={<form onSubmit={submit} />}>
+    <Card className={cx(className, "h-[430px] w-full sm:max-w-md")} render={<form onSubmit={submitOtp} />}>
       <CardHeader>
         <CardTitle>Вход в Brai</CardTitle>
         <CardDescription>
@@ -397,15 +380,15 @@ export function AuthPanel({
               placeholder="Введите почту"
               aria-label="Email"
               aria-invalid={Boolean(error && !otpSent)}
-              disabled={busy || (otpRequired && otpSent)}
+              disabled={busy || otpSent}
               onChange={(event) => setEmail(event.target.value)}
             />
             <FieldDescription>
-              {otpRequired ? "Мы отправим одноразовый код на эту почту." : "В Dev/Preview код не нужен."}
+              Мы отправим одноразовый код на эту почту.
             </FieldDescription>
           </Field>
           <div className="h-[132px]">
-            {otpRequired && otpSent ? (
+            {otpSent ? (
               <Field data-invalid={Boolean(error)}>
                 <FieldLabel htmlFor={otpInputId}>Код</FieldLabel>
                 <AuthOtpEntry
@@ -429,9 +412,9 @@ export function AuthPanel({
         </FieldGroup>
       </CardContent>
       <CardFooter>
-        <Button className="w-full" disabled={busy || !email || (otpRequired && otpSent && !otp)}>
-          {otpRequired && otpSent ? <KeyRound aria-hidden="true" /> : <Mail aria-hidden="true" />}
-          {otpRequired ? (otpSent ? "Войти" : "Получить код") : "Войти"}
+        <Button className="w-full" disabled={busy || !email || (otpSent && !otp)}>
+          {otpSent ? <KeyRound aria-hidden="true" /> : <Mail aria-hidden="true" />}
+          {otpSent ? "Войти" : "Получить код"}
         </Button>
       </CardFooter>
     </Card>

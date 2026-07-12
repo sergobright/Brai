@@ -62,8 +62,6 @@ import {
 type OnboardingFlowProps = {
   authRequired: boolean;
   busy: boolean;
-  authMode: "email" | "otp";
-  onEmailLogin: (email: string) => Promise<void>;
   onRequestOtp: (email: string) => Promise<OtpSendResult>;
   onStartupScreenChange: (active: boolean) => void;
   onVerifyOtp: (email: string, otp: string) => Promise<void>;
@@ -128,10 +126,8 @@ async function waitForMinimumVerificationTime(startedAt: number) {
 
 export function OnboardingFlow({
   authRequired,
-  authMode,
   busy,
   onDone,
-  onEmailLogin,
   onOpenNativeCmdSettings,
   onRequestOtp,
   onStartupScreenChange,
@@ -432,10 +428,6 @@ export function OnboardingFlow({
     if (voiceMode === "cloud") go("microphone", { voiceMode });
   }
 
-  async function submitCloudLogin(email: string) {
-    await onEmailLogin(email);
-  }
-
   async function submitAccessKey(key: string) {
     if (key.trim().length < 8) {
       setError("Введите полный ключ доступа.");
@@ -647,9 +639,7 @@ export function OnboardingFlow({
       return (
         <OnboardingAuthForm
           busy={busy}
-          mode={authMode}
           onAuthenticated={() => go("setup-start")}
-          onEmailLogin={submitCloudLogin}
           onRequestOtp={onRequestOtp}
           onVerifyOtp={onVerifyOtp}
         />
@@ -829,7 +819,7 @@ export function OnboardingFlow({
     if (state.step === "voice-ready") return <InfoScreen icon={CheckCircle2} title="Голосовое управление настроено" text="Brai CMD готов принимать голос, работать с очередью и вставлять результат в поле."><PrimaryButton onClick={completeSetup}>Готово</PrimaryButton></InfoScreen>;
     if (state.step === "login-check") return <InfoScreen icon={Lock} title="Проверяем вход" text="Если профиль уже открыт, вы попадете в кабинет. Если нет — доступ будет ограничен входом и настройками."><PrimaryButton onClick={() => authRequired ? go("locked") : onDone()}>Продолжить</PrimaryButton></InfoScreen>;
     if (state.step === "locked") return <InfoScreen icon={Lock} title="Нужен вход" text="Пока вы не вошли, доступны только вход и настройки Brai CMD."><SecondaryButton onClick={openCmdSettings}>Настройки Brai CMD</SecondaryButton><PrimaryButton onClick={() => go("login")}>Войти</PrimaryButton></InfoScreen>;
-    if (state.step === "login") return <OnboardingAuthForm busy={busy} mode={authMode} onEmailLogin={onEmailLogin} onRequestOtp={onRequestOtp} onVerifyOtp={onVerifyOtp} />;
+    if (state.step === "login") return <OnboardingAuthForm busy={busy} onRequestOtp={onRequestOtp} onVerifyOtp={onVerifyOtp} />;
     if (state.step === "cmd-settings") {
       return (
         <InfoScreen
@@ -1196,9 +1186,7 @@ function AccessKeyForm({ onSubmit }: { onSubmit: (key: string) => void }) {
 
 function OnboardingAuthForm(props: {
   busy: boolean;
-  mode: "email" | "otp";
   onAuthenticated?: () => void;
-  onEmailLogin: (email: string) => Promise<void>;
   onRequestOtp: (email: string) => Promise<OtpSendResult>;
   onVerifyOtp: (email: string, otp: string) => Promise<void>;
 }) {

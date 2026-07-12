@@ -3,16 +3,14 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { BraiApi, type OtpSendResult } from "@/shared/api/braiApi";
-import { defaultApiBase, isProductionEnvironment } from "@/shared/config/runtime";
+import { defaultApiBase } from "@/shared/config/runtime";
 import { AuthPanel } from "./chrome/AppChrome";
-import { resolveAuthMode } from "./appModel";
 
 export function AuthPage() {
   const router = useRouter();
   const api = useMemo(() => new BraiApi(defaultApiBase()), []);
   const [busy, setBusy] = useState(true);
   const [ready, setReady] = useState(false);
-  const [mode] = useState(() => resolveAuthMode(isProductionEnvironment()));
 
   useEffect(() => {
     let cancelled = false;
@@ -61,17 +59,6 @@ export function AuthPage() {
     }
   }
 
-  async function onEmailLogin(email: string) {
-    setBusy(true);
-    try {
-      const session = await api.testEmailLogin(email);
-      if (!session.authenticated) throw new Error("auth_failed");
-      router.replace("/");
-    } finally {
-      setBusy(false);
-    }
-  }
-
   return (
     <main className="grid min-h-dvh place-items-center bg-background px-4 py-10 text-foreground" data-auth-page>
       {ready ? (
@@ -79,8 +66,6 @@ export function AuthPage() {
           <AuthPanel
             busy={busy}
             className="m-0"
-            mode={mode}
-            onEmailLogin={onEmailLogin}
             onRequestOtp={onRequestOtp}
             onVerifyOtp={onVerifyOtp}
           />

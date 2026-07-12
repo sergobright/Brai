@@ -2,7 +2,6 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { describe, expect, it, vi } from "vitest";
 import { cmdPlugin, openProfileMenuItem, setupBraiAppTest, stubAndroidCapacitor, testVersionState } from "./app-test-support";
 import { BraiApp } from "@/features/app/BraiApp";
-import { resolveAuthMode } from "@/features/app/appModel";
 import { AuthPanel } from "@/features/app/chrome/AppChrome";
 import { FocusSection } from "@/features/app/sections/focus/FocusSection";
 import { pendingEvents, saveGoalCache, saveHistoryCache } from "@/shared/storage/syncStore";
@@ -60,22 +59,22 @@ describe("BraiApp shell", () => {
     expect(cmdPlugin.ensureAccess).toHaveBeenCalledWith({ displayName: "Test" });
   });
 
-  it("uses explicit email-only login on Preview web", async () => {
+  it("requests an OTP code from the shared auth form", async () => {
     const auth = authPanelProps();
-    auth.onEmailLogin.mockRejectedValue(new Error("invalid_email"));
-    render(<AuthPanel {...auth} mode={resolveAuthMode(false)} />);
+    auth.onRequestOtp.mockRejectedValue(new Error("invalid_email"));
+    render(<AuthPanel {...auth} />);
 
     const email = screen.getByRole("textbox", { name: "Email" });
     expect(screen.queryByLabelText("Код из письма")).not.toBeInTheDocument();
     fireEvent.change(email, { target: { value: "primary@example.com" } });
-    fireEvent.click(screen.getByRole("button", { name: "Войти" }));
+    fireEvent.click(screen.getByRole("button", { name: "Получить код" }));
 
-    await waitFor(() => expect(auth.onEmailLogin).toHaveBeenCalledWith("primary@example.com"));
-    expect(await screen.findByText("Email не подошёл")).toBeInTheDocument();
-    expect(auth.onRequestOtp).not.toHaveBeenCalled();
+    await waitFor(() => expect(auth.onRequestOtp).toHaveBeenCalledWith("primary@example.com"));
+    expect(await screen.findByText("Не удалось отправить код")).toBeInTheDocument();
+    expect(auth.onVerifyOtp).not.toHaveBeenCalled();
   });
 
-  it("uses explicit email-only login on Preview Android", async () => {
+  it("uses the OTP form on Preview Android", async () => {
     stubAndroidCapacitor();
     window.__BRAI_RUNTIME_CONFIG__ = {
       environment: "preview-a",
@@ -96,12 +95,11 @@ describe("BraiApp shell", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Войти" }));
     expect(await screen.findByRole("textbox", { name: "Email" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Войти" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Получить код" })).toBeInTheDocument();
     expect(screen.queryByLabelText("Пароль")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Получить код" })).not.toBeInTheDocument();
   });
 
-  it("keeps production Android on the OTP flow", async () => {
+  it("keeps Android on the OTP flow", async () => {
     stubAndroidCapacitor();
     window.__BRAI_RUNTIME_CONFIG__ = {
       environment: "prod",
@@ -127,8 +125,8 @@ describe("BraiApp shell", () => {
     expect(screen.queryByLabelText("Пароль")).not.toBeInTheDocument();
   });
 
-  it("keeps production Web on the OTP flow", async () => {
-    render(<AuthPanel {...authPanelProps()} mode={resolveAuthMode(true)} />);
+  it("uses the OTP flow on Web", async () => {
+    render(<AuthPanel {...authPanelProps()} />);
 
     expect(screen.getByRole("textbox", { name: "Email" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Получить код" })).toBeInTheDocument();
@@ -161,7 +159,7 @@ describe("BraiApp shell", () => {
     vi.setSystemTime(new Date("2026-07-12T10:00:00.000Z"));
     try {
       const auth = authPanelProps();
-      render(<AuthPanel {...auth} mode={resolveAuthMode(true)} />);
+      render(<AuthPanel {...auth} />);
 
       fireEvent.change(screen.getByRole("textbox", { name: "Email" }), { target: { value: "primary@example.com" } });
       await act(async () => {
@@ -1260,7 +1258,6 @@ function requestUrl(input: RequestInfo | URL): string {
 function authPanelProps() {
   return {
     busy: false,
-    onEmailLogin: vi.fn(async () => undefined),
     onRequestOtp: vi.fn(async () => ({
       success: true,
       expires_in_seconds: 300,

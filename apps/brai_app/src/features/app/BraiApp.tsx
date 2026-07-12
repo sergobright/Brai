@@ -166,8 +166,6 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
         {app.displaySyncStatus === "auth_required" ? (
           <AuthPanel
             busy={app.busy}
-            mode={app.authMode}
-            onEmailLogin={app.onEmailLogin}
             onRequestOtp={app.onRequestOtp}
             onVerifyOtp={app.onVerifyOtp}
           />
@@ -264,10 +262,8 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
       {onboardingActive ? (
         <OnboardingFlow
           authRequired={startupReady && app.displaySyncStatus === "auth_required"}
-          authMode={app.authMode}
           busy={app.busy}
           onDone={() => setOnboardingVisible(false)}
-          onEmailLogin={app.onEmailLogin}
           onOpenNativeCmdSettings={openNativeBraiCmdSettings}
           onRequestOtp={app.onRequestOtp}
           onStartupScreenChange={setOnboardingStartupActive}
