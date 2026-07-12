@@ -75,6 +75,14 @@ Same-thread follow-up writes may continue an existing `codex/*` branch only befo
 node scripts/brai-task.mjs follow-up
 ```
 
+If the owning Codex thread is irretrievably lost, the project owner may explicitly authorize emergency recovery. Run this in the existing task worktree and confirm the exact former thread id:
+
+```bash
+node scripts/brai-task.mjs recover-follow-up --from-thread <lost-thread-id>
+```
+
+The command preserves the frozen task base, records the former owner in the ignored task marker, clears stale delegations, and binds the branch to the current thread. Do not edit `.brai-task/task.json` manually.
+
 The task base is frozen at starter time in `.brai-task/task.json`. Before acceptance, do not refresh that branch from the later `origin/main`: no `git fetch origin main`, `git pull origin main`, `git merge origin/main`, `git rebase origin/main`, or equivalent base-update command. Continue follow-up work on the same branch and let the acceptance PR/merge surface any real conflict; if the branch was already accepted, start a new task branch from the then-current `origin/main`.
 
 After acceptance starts, merge conflict resolution is allowed only through:
