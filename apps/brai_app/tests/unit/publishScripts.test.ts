@@ -454,6 +454,9 @@ describe("mobile OTA publish scripts", () => {
     expect(adminService).toContain("BRAI_ADMIN_API_BASE=http://127.0.0.1:{{ item.value.api_port }}");
     expect(adminService).toContain("-p {{ item.value.admin_port }}");
     expect(sudoers).toContain("systemctl restart {{ env.admin_service }}");
+    expect(sudoers).toContain("systemctl stop {{ env.admin_service }}");
+    expect(sudoers).toContain("systemctl reset-failed {{ env.admin_service }}");
+    expect(sudoers).toContain("{% if name.startswith('preview-') %}");
     expect(playbook).toContain("Ensure non-production data directories keep deploy setgid");
     expect(playbook).toContain('group: "{{ brai_deploy_user }}"');
     expect(playbook).toContain('mode: "2775"');
@@ -483,6 +486,7 @@ describe("mobile OTA publish scripts", () => {
     expect(prodBlock.indexOf('deploy/scripts/build-android-env-apk.sh production')).toBeLessThan(prodBlock.indexOf('deploy/scripts/build-nonproduction-apks.sh'));
     expect(buildApk).toContain('"${BRAI_RECORD_APK_LEDGER:-true}" != "false"');
     expect(buildApk).toContain('--next-apk true --target-branch "$BRAI_BRANCH" --target-commit "$BRAI_COMMIT"');
+    expect(releaseSlot).toContain('systemctl reset-failed "$unit"');
     expect(buildApk).toContain('preview-slots.sh" next-apk-preview "$BRAI_BRANCH" "$BRAI_COMMIT" "$BRAI_APK_VERSION"');
     expect(buildApk.indexOf('if [[ "$ENVIRONMENT" == preview-*')).toBeLessThan(buildApk.indexOf('export BRAI_APK_VERSION='));
     expect(buildApk).toContain('BUILD_CLIENT="${BRAI_BUILD_CLIENT:-true}"');

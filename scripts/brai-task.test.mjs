@@ -190,6 +190,7 @@ test("hook analysis marks safe SocratiCode codebase tools as semantic use", () =
 test("SocratiCode requirement blocks implementation handoff without marker", () => {
   assert.deepEqual(validateSocraticodeRequirement({}, false), { ok: true, required: false });
   assert.match(validateSocraticodeRequirement({}, true).message, /must use SocratiCode/);
+  assert.match(validateSocraticodeRequirement({}, true).message, /narrow infra-fix/);
   assert.deepEqual(validateSocraticodeRequirement({ socraticodeUsedAt: "2026-07-09T00:00:00.000Z" }, true), {
     ok: true,
     required: true,

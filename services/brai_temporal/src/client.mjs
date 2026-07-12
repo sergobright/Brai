@@ -197,8 +197,8 @@ async function waitForState(handle, done) {
 
   while (Date.now() <= deadline) {
     lastState = await handle.query(STATE_QUERY);
-    if (isBlocked(lastState)) throw new Error(`Temporal workflow blocked: ${JSON.stringify(lastState.blocker ?? lastState.blockers)}`);
     if (done(lastState)) return lastState;
+    if (isBlocked(lastState)) throw new Error(`Temporal workflow blocked: ${JSON.stringify(lastState.blocker ?? lastState.blockers)}`);
     await sleep(pollMs);
   }
 

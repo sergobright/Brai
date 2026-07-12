@@ -332,14 +332,12 @@ export function applyPreviewEvent(state, rawEvent) {
       state.status = "waiting_for_fix";
       break;
     case "branch_deleted":
+      markPreviewReleaseClosed(state, event);
       state.status = "branch_deleted";
       state.terminal = true;
       break;
     case "abandoned_closed":
-      setTask(state, "slot_release", "passed", event);
-      if (state.tasks.supabase_preview_release.status !== "passed") {
-        setTask(state, "supabase_preview_release", "not_applicable", event);
-      }
+      markPreviewReleaseClosed(state, event);
       state.status = "abandoned_closed";
       state.terminal = true;
       break;
@@ -349,6 +347,7 @@ export function applyPreviewEvent(state, rawEvent) {
       state.terminal = true;
       break;
     case "superseded_closed":
+      markPreviewReleaseClosed(state, event);
       state.status = "superseded_closed";
       state.terminal = true;
       break;
@@ -373,6 +372,13 @@ export function applyPreviewEvent(state, rawEvent) {
     state.terminal = true;
   }
   return state;
+}
+
+function markPreviewReleaseClosed(state, event) {
+  setTask(state, "slot_release", "passed", event);
+  if (state.tasks.supabase_preview_release.status !== "passed") {
+    setTask(state, "supabase_preview_release", "not_applicable", event);
+  }
 }
 
 export function createPromotionState(input) {

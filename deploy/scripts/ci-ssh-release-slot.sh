@@ -142,6 +142,7 @@ stop_preview_unit_if_exists() {
   command -v systemctl >/dev/null 2>&1 || return 0
   if "${BRAI_SUDO:-sudo}" systemctl cat "$unit" >/dev/null 2>&1; then
     "${BRAI_SUDO:-sudo}" systemctl stop "$unit" >&2
+    "${BRAI_SUDO:-sudo}" systemctl reset-failed "$unit" >&2 || true
   fi
 }
 cleanup_released_preview_slot_artifacts() {

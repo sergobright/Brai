@@ -1095,7 +1095,7 @@ function validateSocraticodeRequirement(marker, hasImplementationWork) {
     message:
       "Brai implementation work must use SocratiCode before handoff.\n\n" +
       "Call SocratiCode first, for example codebase_status plus codebase_search/codebase_context_search. " +
-      "If this task truly only used exact string/file inspection, run: " +
+      "For a narrow infra-fix based only on exact rg/file reads or live logs, record the exact-only marker before handoff: " +
       "node scripts/brai-task.mjs socraticode-exact-only --reason \"<why rg/file reads were sufficient>\"",
   };
 }
