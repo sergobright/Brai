@@ -118,12 +118,26 @@ fi
 
 : "${PROD_POSTGRES_URL:?BRAI_PROD_DATABASE_URL or BRAI_DATABASE_URL is required}"
 VERSION="${BRAI_APP_VERSION:-$(BRAI_DATABASE_URL="$PROD_POSTGRES_URL" "$NODE_BIN" "$ROOT/deploy/scripts/resolve-app-version.mjs" --environment prod --root "$ROOT")}"
+mapfile -t FAILED_PREVIEW_SKIP_LINES < <("$NODE_BIN" -e '
+const fs = require("node:fs");
+const registry = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+for (const slot of ["A", "B", "C", "D", "E"]) {
+  const entry = registry[slot] || {};
+  if (entry.branch && (entry.status || "free") === "failed") {
+    console.log(`Skipping failed Preview ${slot} OTA sync for ${entry.branch}.`);
+  }
+}
+' "$REGISTRY")
+for line in "${FAILED_PREVIEW_SKIP_LINES[@]}"; do
+  echo "$line" >&2
+done
 mapfile -t OCCUPIED_SLOTS < <("$NODE_BIN" -e '
 const fs = require("node:fs");
 const registry = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
 for (const slot of ["A", "B", "C", "D", "E"]) {
   const entry = registry[slot] || {};
-  if (entry.branch && (entry.status || "free") !== "free") console.log(slot);
+  const status = entry.status || "free";
+  if (entry.branch && status !== "free" && status !== "failed") console.log(slot);
 }
 ' "$REGISTRY")
 
