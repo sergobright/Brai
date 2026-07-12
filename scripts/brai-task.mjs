@@ -2236,6 +2236,7 @@ function readAcceptanceReceipt() {
 
 function isBlockingAcceptanceReceipt(receipt) {
   if (receipt?.receiptType !== ACCEPTANCE_RECEIPT_VERSION) return false;
+  if (receipt.status === "waiting_for_turn") return true;
   if (receipt.status === "already_in_base" || receipt.status === "merged") return true;
   if (receipt.status === "reconcile_required") return true;
   if (receipt.status === "reconcile_started") return false;
