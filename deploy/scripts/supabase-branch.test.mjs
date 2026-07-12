@@ -5,6 +5,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import {
+  copySourceQuery,
   inspectOwnedSequences,
   migrationFileEntries,
   reseedOwnedSequences,
@@ -80,6 +81,20 @@ test("production copy reseeds only copied tables before its transaction commits"
   assert.ok(copyFunction.indexOf(reseed) > copyFunction.indexOf("OVERRIDING SYSTEM VALUE"));
   assert.ok(copyFunction.indexOf(reseed) < copyFunction.indexOf('client.query("COMMIT")'));
   assert.doesNotMatch(copyFunction, /tables: truncatableTables/);
+});
+
+test("production copy keeps ai_logs only for agents present in the target schema", () => {
+  const query = copySourceQuery({
+    sourceSchema: "prod",
+    targetSchema: "preview",
+    table: "ai_logs",
+    columns: ["id", "agent_id", "json_data"]
+  }).replace(/\s+/g, " ").trim();
+
+  assert.equal(
+    query,
+    'SELECT source_row."id", source_row."agent_id", source_row."json_data" FROM "prod"."ai_logs" AS source_row WHERE EXISTS ( SELECT 1 FROM "preview"."agents" AS target_agent WHERE target_agent.id = source_row.agent_id )'
+  );
 });
 
 test("Postgres smoke inspects owned sequences on one repeatable-read client under SHARE locks", () => {
