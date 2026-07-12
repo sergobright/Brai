@@ -1,6 +1,9 @@
 import { defineConfig, devices } from "@playwright/test";
+import { existsSync } from "node:fs";
 
 const browserHome = process.env.BRAI_BROWSER_HOME || "/srv/projects/brai";
+const browserExecutable = process.env.BRAI_PLAYWRIGHT_EXECUTABLE_PATH
+  || (existsSync("/usr/bin/google-chrome") ? "/usr/bin/google-chrome" : undefined);
 
 export default defineConfig({
   testDir: "./tests/e2e",
@@ -17,6 +20,7 @@ export default defineConfig({
     browserName: "chromium",
     launchOptions: {
       args: ["--no-sandbox", "--disable-dev-shm-usage"],
+      executablePath: browserExecutable,
       env: {
         ...process.env,
         HOME: browserHome,
