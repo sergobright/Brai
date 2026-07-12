@@ -886,12 +886,16 @@ test("preview deploy requires Postgres and preserves artifact setgid", () => {
   assert.doesNotMatch(script, /normalize_public_tree "\$TARGET_ROOT"/);
   assert.match(playbook, /Ensure non-production data directories keep deploy setgid/);
   assert.match(playbook, /Ensure nested non-production data directories keep deploy setgid/);
+  assert.match(playbook, /Ensure Syncthing vault root is writable by sync group/);
+  assert.match(playbook, /Ensure existing Syncthing vault directories keep sync setgid/);
+  assert.match(playbook, /owner: "{{ brai_syncthing_user }}"/);
+  assert.match(playbook, /group: "{{ brai_source_group }}"/);
   assert.doesNotMatch(playbook, /SQLite|sqlite|brai\.sqlite/);
   assert.match(playbook, /mode: "2775"/);
   assert.match(unit, /EnvironmentFile={{ brai_env_root }}\/{{ item.value.path }}\/brai-api.env/);
   assert.doesNotMatch(unit, /BRAI_LEGACY_SQLITE_PATH|EnvironmentFile=-/);
   assert.match(unit, /Group={{ brai_deploy_user }}/);
-  assert.match(unit, /SupplementaryGroups={{ brai_service_group }} {{ brai_deploy_user }}/);
+  assert.match(unit, /SupplementaryGroups={{ brai_service_group }} {{ brai_deploy_user }} {{ brai_source_group }}/);
   assert.match(unit, /UMask=0002/);
 });
 
