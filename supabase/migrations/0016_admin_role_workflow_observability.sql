@@ -228,5 +228,5 @@ ALTER TABLE workflow_execution_steps ENABLE ROW LEVEL SECURITY;
 ALTER TABLE workflow_worker_heartbeats ENABLE ROW LEVEL SECURITY;
 
 INSERT INTO schema_migrations (version, applied_at_utc, description)
-VALUES (56, now()::text, 'add admin role/workflow observability telemetry')
+VALUES (57, now()::text, 'add admin role/workflow observability telemetry')
 ON CONFLICT (version) DO NOTHING;

@@ -177,7 +177,7 @@ test('workflow observability migration adds process json and telemetry tables id
   const pool = new Pool({ connectionString: database.url });
   try {
     const migration = fs.readFileSync(
-      path.resolve(import.meta.dirname, '../../../supabase/migrations/0015_admin_role_workflow_observability.sql'),
+      path.resolve(import.meta.dirname, '../../../supabase/migrations/0016_admin_role_workflow_observability.sql'),
       'utf8'
     );
     await pool.query(migration);
@@ -202,7 +202,7 @@ test('workflow observability migration adds process json and telemetry tables id
       FROM information_schema.tables
       WHERE table_name IN ('workflow_execution_steps', 'workflow_worker_heartbeats')
     `)).rows[0].count, 2);
-    assert.equal((await pool.query("SELECT COUNT(*)::int AS count FROM schema_migrations WHERE version = 56")).rows[0].count, 1);
+    assert.equal((await pool.query("SELECT COUNT(*)::int AS count FROM schema_migrations WHERE version = 57")).rows[0].count, 1);
   } finally {
     await pool.end();
     await database.drop();

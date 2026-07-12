@@ -6,12 +6,36 @@ import os from "node:os";
 import path from "node:path";
 import {
   inspectOwnedSequences,
+  migrationFiles,
   reseedOwnedSequences,
   sequenceAllocationStatus,
   unsafeOwnedSequenceAllocations
 } from "./supabase-branch.mjs";
 
 const repoRoot = path.resolve(import.meta.dirname, "../..");
+
+test("Supabase migration filenames have unique numeric versions", () => {
+  const migrationsDir = path.join(repoRoot, "supabase/migrations");
+  const files = migrationFiles(migrationsDir);
+  assert.equal(files.at(-1).name, "0016_admin_role_workflow_observability.sql");
+  assert.equal(new Set(files.map(({ version }) => version)).size, files.length);
+});
+
+test("Supabase migration discovery rejects duplicate numeric versions", () => {
+  const migrationsDir = fs.mkdtempSync(path.join(os.tmpdir(), "brai-migrations-"));
+  fs.writeFileSync(path.join(migrationsDir, "0015_first.sql"), "SELECT 1;\n");
+  fs.writeFileSync(path.join(migrationsDir, "0015_second.sql"), "SELECT 2;\n");
+  assert.throws(
+    () => migrationFiles(migrationsDir),
+    /Duplicate Supabase migration version 0015: 0015_first\.sql, 0015_second\.sql/
+  );
+});
+
+test("Supabase migration discovery rejects non-canonical filenames", () => {
+  const migrationsDir = fs.mkdtempSync(path.join(os.tmpdir(), "brai-migrations-"));
+  fs.writeFileSync(path.join(migrationsDir, "15_short.sql"), "SELECT 1;\n");
+  assert.throws(() => migrationFiles(migrationsDir), /Invalid Supabase migration filename: 15_short\.sql/);
+});
 
 test("production seed loads only explicitly marked idempotent migrations into the copy transaction", () => {
   const script = fs.readFileSync(path.join(repoRoot, "deploy/scripts/supabase-branch.mjs"), "utf8");

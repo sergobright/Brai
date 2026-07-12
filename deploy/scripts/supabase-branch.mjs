@@ -200,6 +200,8 @@ async function applyMigrations(databaseUrl) {
   if (process.env.BRAI_SUPABASE_APPLY_MIGRATIONS === "false") return;
   if (!databaseUrl) throw new Error("Cannot apply Supabase migrations without BRAI_DATABASE_URL");
   if (process.env.BRAI_SUPABASE_DRY_RUN === "true") return;
+  const migrationsDir = path.join(root, "supabase/migrations");
+  const migrations = migrationFiles(migrationsDir);
   const pool = new Pool({ connectionString: databaseUrl, ssl: postgresSsl(databaseUrl) });
   try {
     await pool.query(`
@@ -209,10 +211,7 @@ async function applyMigrations(databaseUrl) {
         applied_at_utc timestamptz NOT NULL DEFAULT now()
       )
     `);
-    const migrationsDir = path.join(root, "supabase/migrations");
-    for (const entry of fs.readdirSync(migrationsDir).filter((name) => name.endsWith(".sql")).sort()) {
-      const version = entry.match(/^(\d+)/)?.[1] || "";
-      if (!version) throw new Error(`Invalid Supabase migration filename: ${entry}`);
+    for (const { name: entry, version } of migrations) {
       const existing = await pool.query("SELECT 1 FROM supabase_migration_files WHERE version = $1", [version]);
       if (existing.rows.length > 0) continue;
       await pool.query(fs.readFileSync(path.join(migrationsDir, entry), "utf8"));
@@ -265,10 +264,8 @@ async function seedTestDataFromProduction(targetDatabaseUrl) {
 
 function postProductionSeedMigrations() {
   const migrationsDir = path.join(root, "supabase/migrations");
-  return fs.readdirSync(migrationsDir)
-    .filter((name) => name.endsWith(".sql"))
-    .sort()
-    .map((name) => ({ name, sql: fs.readFileSync(path.join(migrationsDir, name), "utf8") }))
+  return migrationFiles(migrationsDir)
+    .map(({ name }) => ({ name, sql: fs.readFileSync(path.join(migrationsDir, name), "utf8") }))
     .filter(({ sql }) => sql.includes(POST_PRODUCTION_SEED_MIGRATION_MARKER));
 }
 
@@ -485,13 +482,28 @@ async function foreignKeyDependencies(pool, schema) {
 function migrationTableOrder() {
   const migrationsDir = path.join(root, "supabase/migrations");
   const names = [];
-  for (const entry of fs.readdirSync(migrationsDir).filter((name) => name.endsWith(".sql")).sort()) {
+  for (const { name: entry } of migrationFiles(migrationsDir)) {
     const sql = fs.readFileSync(path.join(migrationsDir, entry), "utf8");
     for (const match of sql.matchAll(/CREATE TABLE IF NOT EXISTS\s+("[^"]+"|[a-z_][a-z0-9_]*)/gi)) {
       names.push(match[1].replace(/^"|"$/g, "").replaceAll('""', '"'));
     }
   }
   return names;
+}
+
+export function migrationFiles(migrationsDir) {
+  const versions = new Map();
+  return fs.readdirSync(migrationsDir)
+    .filter((name) => name.endsWith(".sql"))
+    .sort()
+    .map((name) => {
+      const version = name.match(/^(\d{4})_/)?.[1] || "";
+      if (!version) throw new Error(`Invalid Supabase migration filename: ${name}`);
+      const previous = versions.get(version);
+      if (previous) throw new Error(`Duplicate Supabase migration version ${version}: ${previous}, ${name}`);
+      versions.set(version, name);
+      return { name, version };
+    });
 }
 
 function searchPathSchema(databaseUrl) {
