@@ -549,11 +549,15 @@ export function OnboardingFlow({
       go("setup-start", { name: displayName });
     } finally {
       const remaining = Math.max(0, nameSubmitMuteMs - (Date.now() - startedAt));
-      if (nameSubmitTimerRef.current != null) window.clearTimeout(nameSubmitTimerRef.current);
-      nameSubmitTimerRef.current = window.setTimeout(() => {
+      if (remaining === 0) {
         setNameSubmitting(false);
-        nameSubmitTimerRef.current = null;
-      }, remaining);
+      } else {
+        if (nameSubmitTimerRef.current != null) window.clearTimeout(nameSubmitTimerRef.current);
+        nameSubmitTimerRef.current = window.setTimeout(() => {
+          setNameSubmitting(false);
+          nameSubmitTimerRef.current = null;
+        }, remaining);
+      }
     }
   }
 
