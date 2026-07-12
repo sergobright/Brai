@@ -25,7 +25,9 @@ export function AuthScreen({
   dataAuthPage = false,
   formVisible = true,
   layout = "page",
+  mode = "otp",
   onAuthenticated,
+  onEmailLogin,
   onRequestOtp,
   onVerifyOtp,
   showHomeLink = false,
@@ -34,7 +36,9 @@ export function AuthScreen({
   dataAuthPage?: boolean;
   formVisible?: boolean;
   layout?: "page" | "embedded";
+  mode?: "email" | "otp";
   onAuthenticated?: () => void;
+  onEmailLogin?: (email: string) => Promise<void>;
   onRequestOtp: (email: string) => Promise<OtpSendResult>;
   onVerifyOtp: (email: string, otp: string) => Promise<void>;
   showHomeLink?: boolean;
@@ -57,7 +61,9 @@ export function AuthScreen({
           <AuthPanel
             busy={busy}
             className="m-0"
+            mode={mode}
             onAuthenticated={onAuthenticated}
+            onEmailLogin={onEmailLogin}
             onRequestOtp={onRequestOtp}
             onVerifyOtp={onVerifyOtp}
           />

@@ -348,6 +348,58 @@ test('event sync is idempotent and returns canonical state', async () => {
   }
 });
 
+test('focus session recompute preserves role links and delete lifecycle', async () => {
+  const fixture = await createFixture([
+    '2026-06-14T13:30:00.000Z',
+    '2026-06-14T13:30:01.000Z',
+    '2026-06-14T13:30:02.000Z'
+  ]);
+
+  try {
+    await request(fixture.url, '/v1/timer/events/sync', {
+      method: 'POST',
+      body: JSON.stringify({
+        device: { device_id: 'web-device', platform: 'web' },
+        events: [
+          syncEvent('role-start', 1, 'start', '2026-06-14T10:00:00.000Z'),
+          syncEvent('role-stop', 2, 'stop', '2026-06-14T11:00:00.000Z')
+        ]
+      })
+    });
+    const linked = fixture.store.db
+      .prepare('SELECT id, item_roles_id FROM focus_sessions')
+      .get();
+    assert.ok(Number.isInteger(linked.item_roles_id));
+
+    fixture.store.recomputeCanonicalSessions('2026-06-14T13:31:00.000Z');
+    assert.equal(
+      fixture.store.db.prepare('SELECT item_roles_id FROM focus_sessions WHERE id = ?').get(linked.id).item_roles_id,
+      linked.item_roles_id
+    );
+
+    await request(fixture.url, '/v1/timer/events/sync', {
+      method: 'POST',
+      body: JSON.stringify({
+        device: { device_id: 'web-device', platform: 'web' },
+        events: [
+          {
+            ...syncEvent('role-delete', 3, 'delete_session', '2026-06-14T12:00:00.000Z'),
+            metadata: { focus_session_id: linked.id }
+          }
+        ]
+      })
+    });
+    assert.deepEqual(
+      fixture.store.db
+        .prepare('SELECT f.item_roles_id, r.status FROM focus_sessions f JOIN item_roles r ON r.id = f.item_roles_id WHERE f.id = ?')
+        .get(linked.id),
+      { item_roles_id: linked.item_roles_id, status: 'deleted' }
+    );
+  } finally {
+    await fixture.close();
+  }
+});
+
 test('action focus events split focus sessions into activity intervals', async () => {
   const fixture = await createFixture([
     '2026-06-14T12:30:00.000Z',

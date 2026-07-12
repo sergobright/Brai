@@ -32,6 +32,15 @@ export const authUserMethods = {
   }
 ,
 
+  getAuthUserByEmail(email) {
+    const clean = typeof email === 'string' ? email.trim().toLowerCase() : '';
+    if (!clean) return null;
+    return this.db
+      .prepare('SELECT id, name, email, "emailVerified" AS emailVerified FROM "user" WHERE lower(email) = ?')
+      .get(clean) ?? null;
+  }
+,
+
   claimFirstUser(userId, nowIso = new Date().toISOString()) {
     if (!this.getAuthUser(userId)) {
       const error = new Error('auth_user_not_found');

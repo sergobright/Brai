@@ -9,6 +9,8 @@ object AppConstants {
     const val KEY_AUTH_TOKEN = "auth_token"
     const val KEY_DISPLAY_NAME = "display_name"
     const val KEY_INSTALL_ID = "install_id"
+    const val KEY_PRELIMINARY_USER_ID = "preliminary_user_id"
+    const val KEY_PRELIMINARY_CLAIM_TOKEN = "preliminary_claim_token"
     const val KEY_LOCALE = "locale"
     const val KEY_HEADER_CONTEXT_ENABLED = "header_context_enabled"
     const val KEY_SCREENSHOT_CONTEXT_ENABLED = "screenshot_context_enabled"

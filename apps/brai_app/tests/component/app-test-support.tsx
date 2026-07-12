@@ -14,6 +14,7 @@ const cmdPlugin = vi.hoisted(() => ({
   ensureAccess: vi.fn(),
   getState: vi.fn(),
   openSettings: vi.fn(),
+  preparePreliminaryProfile: vi.fn(),
   retryQueue: vi.fn(),
   setAccessKey: vi.fn(),
   setOverlayEnabled: vi.fn(),
@@ -69,6 +70,7 @@ export function setupBraiAppTest() {
     cmdPlugin.addListener.mockReset();
     cmdPlugin.ensureAccess.mockReset();
     cmdPlugin.getState.mockReset();
+    cmdPlugin.preparePreliminaryProfile.mockReset();
     cmdPlugin.retryQueue.mockReset();
     cmdPlugin.setAccessKey.mockReset();
     cmdPlugin.setOverlayEnabled.mockReset();
@@ -84,6 +86,12 @@ export function setupBraiAppTest() {
     cmdPlugin.addListener.mockResolvedValue({ remove: vi.fn(async () => undefined) });
     cmdPlugin.ensureAccess.mockResolvedValue({ accessGranted: true });
     cmdPlugin.getState.mockResolvedValue({ accessGranted: true });
+    cmdPlugin.preparePreliminaryProfile.mockResolvedValue({
+      preliminaryStatus: "ready",
+      preliminaryUserId: "prelim-test",
+      preliminaryClaimToken: "claim-test",
+      deviceFingerprint: "fingerprint-test",
+    });
     cmdPlugin.retryQueue.mockResolvedValue({ queuePausedMode: false });
     cmdPlugin.setAccessKey.mockResolvedValue({ accessGranted: true });
     cmdPlugin.setOverlayEnabled.mockResolvedValue({ overlayEnabled: true });

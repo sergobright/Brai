@@ -221,6 +221,90 @@ describe("BraiApp onboarding", () => {
     expect(continueButton).toBeEnabled();
   });
 
+  it("creates a preliminary Brai Cmd profile before continuing from the name step", async () => {
+    stubAndroidCapacitor();
+    cmdPlugin.preparePreliminaryProfile.mockResolvedValueOnce({
+      preliminaryStatus: "ready",
+      preliminaryUserId: "prelim-1",
+      preliminaryClaimToken: "claim-1",
+      deviceFingerprint: "fingerprint-1",
+    });
+    window.localStorage.setItem(ONBOARDING_STORAGE_KEY, JSON.stringify({
+      complete: false,
+      history: ["path"],
+      name: "",
+      path: "new",
+      profileVersion: "self-hosted",
+      step: "name",
+      voiceMode: null,
+    }));
+
+    render(<BraiApp />);
+
+    fireEvent.change(await screen.findByRole("textbox", { name: "Имя" }), { target: { value: "Тестовый" } });
+    fireEvent.click(screen.getByRole("button", { name: "Продолжить" }));
+
+    expect(await screen.findByText("Brai CMD")).toBeInTheDocument();
+    expect(cmdPlugin.preparePreliminaryProfile).toHaveBeenCalledWith({ displayName: "Тестовый" });
+    expect(JSON.parse(window.localStorage.getItem(ONBOARDING_STORAGE_KEY) || "{}")).toMatchObject({
+      preliminaryUserId: "prelim-1",
+      preliminaryClaimToken: "claim-1",
+      duplicatePreliminaryUserId: "",
+    });
+  });
+
+  it("blocks repeated start-from-scratch onboarding when the device fingerprint already exists", async () => {
+    stubAndroidCapacitor();
+    cmdPlugin.preparePreliminaryProfile.mockResolvedValueOnce({
+      preliminaryStatus: "duplicate",
+      duplicateDevice: true,
+      preliminaryUserId: "prelim-old",
+      deviceFingerprint: "fingerprint-old",
+    });
+    window.localStorage.setItem(ONBOARDING_STORAGE_KEY, JSON.stringify({
+      complete: false,
+      history: ["path"],
+      name: "Тестовый",
+      path: "new",
+      profileVersion: "self-hosted",
+      step: "name",
+      voiceMode: null,
+    }));
+
+    render(<BraiApp />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Продолжить" }));
+
+    expect(await screen.findByText("Повторная регистрация невозможна. Войдите в профиль по email.")).toBeInTheDocument();
+    expect(screen.queryByText("Brai CMD")).not.toBeInTheDocument();
+    expect(JSON.parse(window.localStorage.getItem(ONBOARDING_STORAGE_KEY) || "{}")).toMatchObject({
+      duplicatePreliminaryUserId: "prelim-old",
+      preliminaryUserId: "",
+      preliminaryClaimToken: "",
+    });
+  });
+
+  it("keeps the user on the name step when preliminary profile creation is offline", async () => {
+    stubAndroidCapacitor();
+    cmdPlugin.preparePreliminaryProfile.mockRejectedValueOnce(new Error("offline"));
+    window.localStorage.setItem(ONBOARDING_STORAGE_KEY, JSON.stringify({
+      complete: false,
+      history: ["path"],
+      name: "Тестовый",
+      path: "new",
+      profileVersion: "self-hosted",
+      step: "name",
+      voiceMode: null,
+    }));
+
+    render(<BraiApp />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Продолжить" }));
+
+    expect(await screen.findByText("Нет соединения с серверами Brai, повторите.")).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Имя" })).toBeInTheDocument();
+  });
+
   it("moves from the Brai CMD introduction to floating buttons", async () => {
     stubAndroidCapacitor();
     window.localStorage.setItem(ONBOARDING_STORAGE_KEY, JSON.stringify({

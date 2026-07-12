@@ -37,9 +37,9 @@ import {
   requestAndroidMicrophone,
   requestAndroidNotifications,
 } from "@/shared/platform/androidCapabilities";
-import { ensureBraiCmdAccess, listenBraiCmdOnboardingEvents, retryBraiCmdQueue, setBraiCmdAccessKey, setBraiCmdOverlayEnabled, setBraiCmdQueuePausedMode, setBraiCmdVoiceOnlyMode, vibrateBraiCmdPress } from "@/shared/platform/braiCmd";
+import { ensureBraiCmdAccess, listenBraiCmdOnboardingEvents, prepareBraiCmdPreliminaryProfile, retryBraiCmdQueue, setBraiCmdAccessKey, setBraiCmdOverlayEnabled, setBraiCmdQueuePausedMode, setBraiCmdVoiceOnlyMode, vibrateBraiCmdPress } from "@/shared/platform/braiCmd";
 import { installAndroidBackHandler, isNativeShell, platformName } from "@/shared/platform/platform";
-import type { OtpSendResult } from "@/shared/api/braiApi";
+import type { AuthOnboardingContext, OtpSendResult } from "@/shared/api/braiApi";
 import { AnimatedShinyText } from "@/shared/ui/animated-shiny-text";
 import { Button } from "@/shared/ui/button";
 import { Card } from "@/shared/ui/card";
@@ -62,9 +62,11 @@ import {
 type OnboardingFlowProps = {
   authRequired: boolean;
   busy: boolean;
+  authMode: "email" | "otp";
+  onEmailLogin: (email: string, context?: AuthOnboardingContext) => Promise<void>;
   onRequestOtp: (email: string) => Promise<OtpSendResult>;
   onStartupScreenChange: (active: boolean) => void;
-  onVerifyOtp: (email: string, otp: string) => Promise<void>;
+  onVerifyOtp: (email: string, otp: string, context?: AuthOnboardingContext) => Promise<void>;
   onDone: () => void;
   onOpenNativeCmdSettings: () => Promise<boolean>;
   startupIntroComplete: boolean;
@@ -92,6 +94,7 @@ const OnboardingChromeContext = createContext<{
 const screenTransitionDelayMs = process.env.NODE_ENV === "test" ? 0 : 280;
 const providerOptions = ["Groq", "OpenAI", "Deepgram", "AssemblyAI"] as const;
 const manualConfirmDelayMs = 3000;
+const nameSubmitMuteMs = 2000;
 const verificationMinVisibleMs = process.env.NODE_ENV === "test" ? 1 : 1000;
 const failedCheckVisibleMs = process.env.NODE_ENV === "test" ? 100 : 2000;
 const welcomeSlides = [
@@ -126,8 +129,10 @@ async function waitForMinimumVerificationTime(startedAt: number) {
 
 export function OnboardingFlow({
   authRequired,
+  authMode,
   busy,
   onDone,
+  onEmailLogin,
   onOpenNativeCmdSettings,
   onRequestOtp,
   onStartupScreenChange,
@@ -152,12 +157,16 @@ export function OnboardingFlow({
   const [queueInserted, setQueueInserted] = useState(false);
   const [screenTransitioning, setScreenTransitioning] = useState(false);
   const [permissionFallbackStep, setPermissionFallbackStep] = useState<OnboardingStep | null>(null);
+  const [nameSubmitting, setNameSubmitting] = useState(false);
+  const [nameDuplicateBlocked, setNameDuplicateBlocked] = useState(false);
+  const [preliminaryDeviceFingerprint, setPreliminaryDeviceFingerprint] = useState("");
   const stepRef = useRef<OnboardingStep>(state.step);
   const stateRef = useRef<OnboardingState>(state);
   const manualConfirmTimerRef = useRef<number | null>(null);
   const transitionTimerRef = useRef<number | null>(null);
   const transitionFrameRef = useRef<number | null>(null);
   const failedCheckTimerRef = useRef<number | null>(null);
+  const nameSubmitTimerRef = useRef<number | null>(null);
   const isAndroid = isNativeShell() && platformName() === "android";
 
   useEffect(() => {
@@ -182,6 +191,7 @@ export function OnboardingFlow({
     if (transitionTimerRef.current != null) window.clearTimeout(transitionTimerRef.current);
     if (transitionFrameRef.current != null) window.cancelAnimationFrame(transitionFrameRef.current);
     if (failedCheckTimerRef.current != null) window.clearTimeout(failedCheckTimerRef.current);
+    if (nameSubmitTimerRef.current != null) window.clearTimeout(nameSubmitTimerRef.current);
   }, []);
 
   useEffect(() => {
@@ -415,6 +425,7 @@ export function OnboardingFlow({
   }
 
   function choosePath(path: "new" | "existing") {
+    if (path === "new") setNameDuplicateBlocked(false);
     go(path === "new" ? "name" : "profile-version", { path, profileVersion: path === "new" ? "self-hosted" : null });
   }
 
@@ -426,6 +437,73 @@ export function OnboardingFlow({
     if (voiceMode === "provider") go("provider-key", { voiceMode });
     if (voiceMode === "local") go("local-server", { voiceMode });
     if (voiceMode === "cloud") go("microphone", { voiceMode });
+  }
+
+  async function submitName() {
+    const displayName = stateRef.current.name.trim();
+    if (!isValidOnboardingName(displayName)) {
+      setError("Используйте минимум два символа: буквы, цифры или пробел.");
+      return;
+    }
+    if (nameSubmitting || nameDuplicateBlocked) return;
+    setError("");
+    setNameSubmitting(true);
+    const startedAt = Date.now();
+    try {
+      if (isAndroid) {
+        const profile = await prepareBraiCmdPreliminaryProfile(displayName);
+        if (!profile) {
+          setError("Нет соединения с серверами Brai, повторите.");
+          return;
+        }
+        setPreliminaryDeviceFingerprint(profile.deviceFingerprint ?? "");
+        if (profile.duplicateDevice || profile.preliminaryStatus === "duplicate") {
+          update({
+            duplicatePreliminaryUserId: profile.preliminaryUserId ?? "",
+            preliminaryUserId: "",
+            preliminaryClaimToken: "",
+          });
+          setNameDuplicateBlocked(true);
+          setError("Повторная регистрация невозможна. Войдите в профиль по email.");
+          return;
+        }
+        setNameDuplicateBlocked(false);
+        go("setup-start", {
+          name: displayName,
+          preliminaryUserId: profile.preliminaryUserId ?? "",
+          preliminaryClaimToken: profile.preliminaryClaimToken ?? "",
+          duplicatePreliminaryUserId: "",
+        });
+        return;
+      }
+      go("setup-start", { name: displayName });
+    } finally {
+      const remaining = Math.max(0, nameSubmitMuteMs - (Date.now() - startedAt));
+      if (nameSubmitTimerRef.current != null) window.clearTimeout(nameSubmitTimerRef.current);
+      nameSubmitTimerRef.current = window.setTimeout(() => {
+        setNameSubmitting(false);
+        nameSubmitTimerRef.current = null;
+      }, remaining);
+    }
+  }
+
+  function authOnboardingContext(): AuthOnboardingContext {
+    const current = stateRef.current;
+    return {
+      name: current.name.trim(),
+      preliminaryUserId: current.preliminaryUserId,
+      duplicatePreliminaryUserId: current.duplicatePreliminaryUserId,
+      preliminaryClaimToken: current.preliminaryClaimToken,
+      deviceFingerprint: preliminaryDeviceFingerprint,
+    };
+  }
+
+  async function submitCloudLogin(email: string) {
+    await onEmailLogin(email, authOnboardingContext());
+  }
+
+  async function submitCloudVerifyOtp(email: string, otp: string) {
+    await onVerifyOtp(email, otp, authOnboardingContext());
   }
 
   async function submitAccessKey(key: string) {
@@ -609,17 +687,25 @@ export function OnboardingFlow({
       return (
         <form className="flex min-h-0 flex-1 flex-col overflow-hidden" onSubmit={(event) => {
           event.preventDefault();
-          if (!isValidOnboardingName(state.name)) return setError("Используйте минимум два символа: буквы, цифры или пробел.");
-          go("setup-start");
+          void submitName();
         }}>
           <div className="grid min-h-0 flex-1 content-center gap-5 overflow-hidden py-2">
             <InfoBlock icon={UserRound} title="Как к вам обращаться" text="Имя будет использоваться для персонализации в обращениях Brai и будет в аккаунте при регистрации" />
             <Input autoFocus value={state.name} placeholder="Только буквы и пробел" aria-label="Имя" className="placeholder:text-muted-foreground/35" onChange={(event) => {
-              setError("");
+              if (!nameDuplicateBlocked) setError("");
               update({ name: event.target.value });
             }} />
           </div>
-          <StepActions preserveBottomGap><PrimaryButton disabled={!isValidOnboardingName(state.name)}>Продолжить</PrimaryButton></StepActions>
+          <StepActions preserveBottomGap>
+            <PrimaryButton
+              disabled={!isValidOnboardingName(state.name) || nameSubmitting || nameDuplicateBlocked}
+              icon={nameSubmitting ? LoaderCircle : undefined}
+              iconClassName={nameSubmitting ? "animate-spin" : undefined}
+              trailingArrow={!nameSubmitting}
+            >
+              {nameSubmitting ? "Проверка" : "Продолжить"}
+            </PrimaryButton>
+          </StepActions>
         </form>
       );
     }
@@ -641,7 +727,7 @@ export function OnboardingFlow({
           busy={busy}
           onAuthenticated={() => go("setup-start")}
           onRequestOtp={onRequestOtp}
-          onVerifyOtp={onVerifyOtp}
+          onVerifyOtp={submitCloudVerifyOtp}
         />
       );
     }
@@ -819,7 +905,7 @@ export function OnboardingFlow({
     if (state.step === "voice-ready") return <InfoScreen icon={CheckCircle2} title="Голосовое управление настроено" text="Brai CMD готов принимать голос, работать с очередью и вставлять результат в поле."><PrimaryButton onClick={completeSetup}>Готово</PrimaryButton></InfoScreen>;
     if (state.step === "login-check") return <InfoScreen icon={Lock} title="Проверяем вход" text="Если профиль уже открыт, вы попадете в кабинет. Если нет — доступ будет ограничен входом и настройками."><PrimaryButton onClick={() => authRequired ? go("locked") : onDone()}>Продолжить</PrimaryButton></InfoScreen>;
     if (state.step === "locked") return <InfoScreen icon={Lock} title="Нужен вход" text="Пока вы не вошли, доступны только вход и настройки Brai CMD."><SecondaryButton onClick={openCmdSettings}>Настройки Brai CMD</SecondaryButton><PrimaryButton onClick={() => go("login")}>Войти</PrimaryButton></InfoScreen>;
-    if (state.step === "login") return <OnboardingAuthForm busy={busy} onRequestOtp={onRequestOtp} onVerifyOtp={onVerifyOtp} />;
+    if (state.step === "login") return <OnboardingAuthForm busy={busy} mode={authMode} onEmailLogin={submitCloudLogin} onRequestOtp={onRequestOtp} onVerifyOtp={submitCloudVerifyOtp} />;
     if (state.step === "cmd-settings") {
       return (
         <InfoScreen
@@ -1186,7 +1272,9 @@ function AccessKeyForm({ onSubmit }: { onSubmit: (key: string) => void }) {
 
 function OnboardingAuthForm(props: {
   busy: boolean;
+  mode?: "email" | "otp";
   onAuthenticated?: () => void;
+  onEmailLogin?: (email: string) => Promise<void>;
   onRequestOtp: (email: string) => Promise<OtpSendResult>;
   onVerifyOtp: (email: string, otp: string) => Promise<void>;
 }) {

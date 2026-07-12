@@ -32,6 +32,7 @@ const BASE_JSON_HEADERS = {
   'access-control-allow-credentials': 'true'
 };
 const SESSION_COOKIE = 'brai_session';
+const RELEASE_SESSION_COOKIE = 'brai_release_session';
 const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 30;
 const STATE_CHANGING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 const DRAW_SCENE_LIMIT_BYTES = 15 * 1024 * 1024;
@@ -41,7 +42,7 @@ export function createBraiServer({
   dataRoot = path.join(process.cwd(), 'data'),
   token,
   webPassword = null,
-  releasePassword = webPassword,
+  releasePassword = null,
   sessionSecret = null,
   releaseDir = null,
   inboxApiKey = null,
@@ -290,11 +291,13 @@ export function createBraiServer({
           return;
         }
 
+        const existingUser = store.getAuthUserByEmail(email);
+        const signInName = existingUser?.name || cleanName(body.name) || email;
         let response;
         try {
           response = await betterAuthTestEmailLogin({
             email,
-            name: cleanName(body.name) ?? email,
+            name: signInName,
             headers: requestHeaders(req)
           });
         } catch (error) {
@@ -313,6 +316,7 @@ export function createBraiServer({
         const text = await response.text();
         const payload = parseJson(text);
         let vaultPrepared = null;
+        let preliminaryLinked = false;
         if (response.ok && payload?.user?.id) {
           const finalized = await prepareSignedInAuthUser({
             store,
@@ -321,6 +325,7 @@ export function createBraiServer({
             route: url.pathname,
             operation: 'auth.test_email_login',
             payload,
+            preliminaryContext: authPreliminaryContext(body),
             ensureUserVault,
             now
           });
@@ -329,6 +334,7 @@ export function createBraiServer({
             return;
           }
           vaultPrepared = finalized.vaultPrepared;
+          preliminaryLinked = finalized.preliminaryLinked;
         }
         recordRuntimeLog(store, logger, {
           traceId,
@@ -343,7 +349,8 @@ export function createBraiServer({
             route: url.pathname,
             status_code: response.status,
             user_created_or_authenticated: Boolean(payload?.user?.id),
-            vault_prepared: vaultPrepared
+            vault_prepared: vaultPrepared,
+            preliminary_linked: preliminaryLinked
           }
         });
         relayAuthText(req, res, response, text, payload);
@@ -430,10 +437,12 @@ export function createBraiServer({
           sendJson(req, res, 400, { error: 'email_otp_required' });
           return;
         }
+        const existingUser = store.getAuthUserByEmail(email);
+        const signInName = existingUser?.name || cleanName(body.name) || email;
         let response;
         try {
           response = await auth.api.signInEmailOTP({
-            body: { email, otp, name: cleanName(body.name) ?? email },
+            body: { email, otp, name: signInName },
             headers: requestHeaders(req),
             asResponse: true
           });
@@ -453,6 +462,7 @@ export function createBraiServer({
         const text = await response.text();
         const payload = parseJson(text);
         let vaultPrepared = null;
+        let preliminaryLinked = false;
         if (response.ok && payload?.user?.id) {
           const finalized = await prepareSignedInAuthUser({
             store,
@@ -461,6 +471,7 @@ export function createBraiServer({
             route: url.pathname,
             operation: 'auth.otp_verify',
             payload,
+            preliminaryContext: authPreliminaryContext(body),
             ensureUserVault,
             now
           });
@@ -469,6 +480,7 @@ export function createBraiServer({
             return;
           }
           vaultPrepared = finalized.vaultPrepared;
+          preliminaryLinked = finalized.preliminaryLinked;
         }
         recordRuntimeLog(store, logger, {
           traceId,
@@ -483,7 +495,8 @@ export function createBraiServer({
             route: url.pathname,
             status_code: response.status,
             user_created_or_authenticated: Boolean(payload?.user?.id),
-            vault_prepared: vaultPrepared
+            vault_prepared: vaultPrepared,
+            preliminary_linked: preliminaryLinked
           }
         });
         relayAuthText(req, res, response, text, payload);
@@ -566,7 +579,12 @@ export function createBraiServer({
           return;
         }
 
-        const cookie = createSessionCookie(sessionSecret, now(), shouldUseSecureCookie(req));
+        const cookie = createSessionCookie(
+          sessionSecret,
+          now(),
+          shouldUseSecureCookie(req),
+          RELEASE_SESSION_COOKIE
+        );
         recordRuntimeLog(store, logger, {
           traceId,
           source: 'release',
@@ -580,7 +598,7 @@ export function createBraiServer({
       }
 
       if (url.pathname.startsWith('/releases')) {
-        if (!hasValidSession(req, sessionSecret, now())) {
+        if (!hasValidSession(req, sessionSecret, now(), RELEASE_SESSION_COOKIE)) {
           recordRuntimeLog(store, logger, {
             traceId,
             source: 'auth',
@@ -1248,7 +1266,7 @@ async function betterAuthSession(req, auth) {
   }
 }
 
-async function prepareSignedInAuthUser({ store, logger, traceId, route, operation, payload, ensureUserVault, now }) {
+async function prepareSignedInAuthUser({ store, logger, traceId, route, operation, payload, preliminaryContext = {}, ensureUserVault, now }) {
   let vaultPrepared = true;
   try {
     await ensureUserVault({ userId: payload.user.id, email: payload.user.email });
@@ -1270,8 +1288,32 @@ async function prepareSignedInAuthUser({ store, logger, traceId, route, operatio
       jsonData: { route, error_name: error instanceof Error ? error.name : 'Error' }
     });
   }
-  store.claimFirstUser(payload.user.id, now().toISOString());
-  return { ok: true, vaultPrepared };
+  const signedInAt = now().toISOString();
+  store.claimFirstUser(payload.user.id, signedInAt);
+  let preliminaryLinked = false;
+  try {
+    const preliminary = store.finalizeBraiCmdPreliminaryUser({
+      userId: payload.user.id,
+      preliminaryUserId: preliminaryContext.preliminaryUserId,
+      preliminaryClaimToken: preliminaryContext.preliminaryClaimToken,
+      deviceFingerprint: preliminaryContext.deviceFingerprint,
+      nowIso: signedInAt
+    });
+    preliminaryLinked = Boolean(preliminary.linked);
+  } catch (error) {
+    recordRuntimeLog(store, logger, {
+      traceId,
+      source: 'auth',
+      operation,
+      status: 'failed',
+      severityText: 'WARN',
+      userId: payload.user.id,
+      reason: 'preliminary_finalize_failed',
+      message: 'Auth sign-in preliminary finalization failed',
+      jsonData: { route, error_name: error instanceof Error ? error.name : 'Error' }
+    });
+  }
+  return { ok: true, vaultPrepared, preliminaryLinked };
 }
 
 function hasLegacyToken(req, token, parsedUrl = null) {
@@ -1340,6 +1382,14 @@ function cleanEmail(value) {
 
 function cleanName(value) {
   return typeof value === 'string' && value.trim() ? value.trim().slice(0, 120) : null;
+}
+
+function authPreliminaryContext(body) {
+  return {
+    preliminaryUserId: cleanName(body.preliminaryUserId),
+    preliminaryClaimToken: cleanName(body.preliminaryClaimToken),
+    deviceFingerprint: cleanName(body.deviceFingerprint)
+  };
 }
 
 function sendJson(req, res, status, body, extraHeaders = {}) {
@@ -1580,10 +1630,10 @@ async function readRequestBody(req, { limit = 4096 } = {}) {
   return raw;
 }
 
-function hasValidSession(req, sessionSecret, nowDate) {
+function hasValidSession(req, sessionSecret, nowDate, cookieName = SESSION_COOKIE) {
   if (!sessionSecret) return false;
   const cookies = parseCookies(req.headers.cookie ?? '');
-  const value = cookies[SESSION_COOKIE];
+  const value = cookies[cookieName];
   if (!value) return false;
 
   const parts = value.split('.');
@@ -1596,13 +1646,13 @@ function hasValidSession(req, sessionSecret, nowDate) {
   return timingSafeEqual(signature, expected);
 }
 
-function createSessionCookie(sessionSecret, nowDate, secure) {
+function createSessionCookie(sessionSecret, nowDate, secure, cookieName = SESSION_COOKIE) {
   if (!sessionSecret) throw new Error('session_secret_required');
   const expiresMs = nowDate.getTime() + SESSION_MAX_AGE_SECONDS * 1000;
   const signature = signSession(sessionSecret, expiresMs);
   const securePart = secure ? '; Secure' : '';
   const sameSite = secure ? 'None' : 'Lax';
-  return `${SESSION_COOKIE}=v1.${expiresMs}.${signature}; Path=/; HttpOnly; SameSite=${sameSite}; Max-Age=${SESSION_MAX_AGE_SECONDS}${securePart}`;
+  return `${cookieName}=v1.${expiresMs}.${signature}; Path=/; HttpOnly; SameSite=${sameSite}; Max-Age=${SESSION_MAX_AGE_SECONDS}${securePart}`;
 }
 
 function clearSessionCookie(secure) {

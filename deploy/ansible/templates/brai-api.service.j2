@@ -21,7 +21,7 @@ Group={{ brai_service_group }}
 {% else %}
 Group={{ brai_deploy_user }}
 {% endif %}
-SupplementaryGroups={{ brai_service_group }} {{ brai_deploy_user }}
+SupplementaryGroups={{ brai_service_group }} {{ brai_deploy_user }} {{ brai_source_group }}
 UMask=0002
 NoNewPrivileges=true
 PrivateTmp=true

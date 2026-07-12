@@ -236,6 +236,90 @@ const ssl = /supabase\.(?:co|com)|pooler\.supabase\.com/.test(databaseUrl) ? { r
 const pool = new Pool({ connectionString: databaseUrl, ssl });
 const now = new Date().toISOString();
 const client = await pool.connect();
+async function ensureOperationRole(activityId) {
+  const activity = await client.query(`
+    SELECT id, user_id, title, description_md, author, created_at_utc, updated_at_utc, deleted_at_utc, item_roles_id
+    FROM activities
+    WHERE id = $1
+      AND activity_type_id = 'operation'
+      AND author = 'Codex'
+      AND deleted_at_utc IS NULL
+    FOR UPDATE
+  `, [activityId]);
+  if (activity.rows.length !== 1) throw new Error(`Expected one active Codex operation activity for ${activityId}.`);
+  const row = activity.rows[0];
+  const roleType = await client.query(`
+    SELECT id
+    FROM item_role_types
+    WHERE title_system = 'activity'
+      AND deleted_at_utc IS NULL
+  `);
+  if (roleType.rows.length !== 1) throw new Error("Activity role type is missing.");
+  await client.query(`
+    INSERT INTO items (id, user_id, title, description, author, created_at_utc, updated_at_utc, deleted_at_utc)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+    ON CONFLICT(id) DO UPDATE SET
+      user_id = COALESCE(items.user_id, excluded.user_id),
+      title = excluded.title,
+      description = excluded.description,
+      author = excluded.author,
+      updated_at_utc = excluded.updated_at_utc,
+      deleted_at_utc = excluded.deleted_at_utc
+    WHERE items.user_id IS NOT DISTINCT FROM excluded.user_id
+      OR items.user_id IS NULL
+      OR excluded.user_id IS NULL
+  `, [
+    row.id,
+    row.user_id,
+    row.title,
+    row.description_md ?? "",
+    row.author ?? "",
+    row.created_at_utc,
+    row.updated_at_utc,
+    row.deleted_at_utc
+  ]);
+  let roleId = row.item_roles_id;
+  if (!roleId) {
+    const existingRole = await client.query(`
+      SELECT id
+      FROM item_roles
+      WHERE items_id = $1 AND item_role_types_id = $2
+      ORDER BY CASE status WHEN 'active' THEN 0 WHEN 'ended' THEN 1 ELSE 2 END, id ASC
+      LIMIT 1
+    `, [row.id, roleType.rows[0].id]);
+    roleId = existingRole.rows[0]?.id;
+  }
+  if (!roleId) {
+    const insertedRole = await client.query(`
+      INSERT INTO item_roles (items_id, item_role_types_id, active_from_utc, active_to_utc, status, metadata_json)
+      VALUES ($1, $2, $3, NULL, 'active', '{}')
+      RETURNING id
+    `, [row.id, roleType.rows[0].id, row.created_at_utc]);
+    roleId = insertedRole.rows[0].id;
+  }
+  await client.query(`
+    UPDATE item_roles
+    SET active_to_utc = $2,
+      status = CASE WHEN $2::text IS NULL THEN 'active' ELSE 'deleted' END
+    WHERE id = $1
+  `, [roleId, row.deleted_at_utc]);
+  const linked = await client.query(`
+    UPDATE activities
+    SET item_roles_id = $2
+    WHERE id = $1
+      AND (item_roles_id IS NULL OR item_roles_id = $2)
+  `, [row.id, roleId]);
+  if (linked.rowCount !== 1) throw new Error(`Activity ${row.id} already has a different role link.`);
+  await client.query(`
+    UPDATE events
+    SET items_id = $1, item_roles_id = $2
+    WHERE event_domain = 'activity'
+      AND subject_type = 'activity'
+      AND subject_id = $1
+      AND status = 'accepted'
+      AND (item_roles_id IS NULL OR item_roles_id = $2)
+  `, [row.id, roleId]);
+}
 try {
   await client.query("BEGIN");
   const existing = await client.query(`
@@ -291,7 +375,7 @@ try {
     if (typeCheck.rows.length !== 1) throw new Error(`Existing activity ${payload.id} is not an active Codex operation row.`);
   }
   const createdRow = await client.query(`
-    SELECT id, title, author, status, created_at_utc, updated_at_utc, completed_at_utc
+    SELECT id, title, author, status, created_at_utc, updated_at_utc, completed_at_utc, item_roles_id
     FROM activities
     WHERE id = $1
       AND activity_type_id = 'operation'
@@ -299,9 +383,18 @@ try {
       AND deleted_at_utc IS NULL
   `, [activityId]);
   if (createdRow.rows.length !== 1) throw new Error(`Expected one active Codex operation activity for ${activityId}.`);
+  await ensureOperationRole(activityId);
+  const linkedRow = await client.query(`
+    SELECT id, title, author, status, created_at_utc, updated_at_utc, completed_at_utc, item_roles_id
+    FROM activities
+    WHERE id = $1
+      AND activity_type_id = 'operation'
+      AND author = 'Codex'
+      AND deleted_at_utc IS NULL
+  `, [activityId]);
   await client.query("COMMIT");
   console.log(`created=${created}`);
-  console.table(createdRow.rows);
+  console.table(linkedRow.rows);
 } catch (error) {
   await client.query("ROLLBACK");
   throw error;

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createFixture, RELEASE_PASSWORD, request, SESSION_SECRET, textRequest } from '../test-support/api.js';
+import { createFixture, RELEASE_PASSWORD, request, SESSION_SECRET, textRequest, WEB_PASSWORD } from '../test-support/api.js';
 
 test('version endpoint returns build ledger, APK line, and release-index OTA target', async () => {
   const fixture = await createFixture(['2026-06-29T12:00:00.000Z'], {
@@ -128,6 +128,61 @@ test('version endpoint requires auth', async () => {
   }
 });
 
+test('release login uses short air password and ignores app sessions', async () => {
+  const fixture = await createFixture([
+    '2026-06-29T12:10:00.000Z',
+    '2026-06-29T12:10:01.000Z',
+    '2026-06-29T12:10:02.000Z',
+    '2026-06-29T12:10:03.000Z'
+  ], {
+    webPassword: WEB_PASSWORD,
+    releasePassword: 'air',
+    sessionSecret: SESSION_SECRET,
+    releaseFiles: { 'brai.apk': 'fake-apk' }
+  });
+
+  try {
+    const appLogin = await textRequest(fixture.url, '/auth/login', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ password: WEB_PASSWORD }),
+      redirect: 'manual'
+    });
+    const appCookie = appLogin.headers.get('set-cookie');
+    assert.match(appCookie, /brai_session=/);
+
+    const appSessionRelease = await fetch(`${fixture.url}/releases/brai.apk`, {
+      headers: { cookie: appCookie },
+      redirect: 'manual'
+    });
+    assert.equal(appSessionRelease.status, 303);
+
+    const wrongReleaseLogin = await textRequest(fixture.url, '/releases/login', {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: `password=${encodeURIComponent(WEB_PASSWORD)}`,
+      redirect: 'manual'
+    });
+    assert.equal(wrongReleaseLogin.status, 401);
+
+    const releaseLogin = await textRequest(fixture.url, '/releases/login', {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: 'password=air',
+      redirect: 'manual'
+    });
+    assert.equal(releaseLogin.status, 303);
+    const releaseCookie = releaseLogin.headers.get('set-cookie');
+    assert.match(releaseCookie, /brai_release_session=/);
+
+    const apk = await fetch(`${fixture.url}/releases/brai.apk`, { headers: { cookie: releaseCookie } });
+    assert.equal(apk.status, 200);
+    assert.equal(await apk.text(), 'fake-apk');
+  } finally {
+    await fixture.close();
+  }
+});
+
 test('release login and APK serving write compact runtime logs', async () => {
   const fixture = await createFixture([
     '2026-06-29T12:10:00.000Z',
@@ -151,7 +206,7 @@ test('release login and APK serving write compact runtime logs', async () => {
     });
     assert.equal(login.status, 303);
     const cookie = login.headers.get('set-cookie');
-    assert.match(cookie, /brai_session=/);
+    assert.match(cookie, /brai_release_session=/);
 
     const apk = await fetch(`${fixture.url}/releases/brai.apk`, { headers: { cookie } });
     assert.equal(apk.status, 200);
