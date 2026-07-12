@@ -2,6 +2,8 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { describe, expect, it, vi } from "vitest";
 import { braiCmdSettingsSnapshot, cmdPlugin, openEngineFromProfile, openProfileMenu, openProfileMenuItem, openSettingsFromProfile, otaPlugin, setupBraiAppTest, stubAndroidCapacitor, testVersionState } from "./app-test-support";
 import { BraiApp } from "@/features/app/BraiApp";
+import { ONBOARDING_STORAGE_KEY } from "@/features/onboarding/onboardingModel";
+import { getMeta } from "@/shared/storage/db";
 
 describe("BraiApp settings", () => {
   setupBraiAppTest();
@@ -262,6 +264,57 @@ describe("BraiApp settings", () => {
 
     await waitFor(() => expect(otaPlugin.checkForUpdates).toHaveBeenCalledTimes(1));
     expect(await screen.findByText("OTA-версия 0.0.11 загружена")).toBeInTheDocument();
+  });
+
+  it("restores preliminary profile and voice-only mode after Android logout", async () => {
+    stubAndroidCapacitor();
+    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      if (url.endsWith("/auth/session")) {
+        return new Response(JSON.stringify({ authenticated: true, user: { id: "test-user", email: "test@example.com", name: "Test" } }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.endsWith("/auth/logout")) {
+        return new Response(JSON.stringify({ ok: true }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.endsWith("/v1/version")) {
+        return new Response(JSON.stringify(testVersionState("0.0.10")), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return Promise.reject(new Error("offline"));
+    });
+    window.localStorage.setItem(ONBOARDING_STORAGE_KEY, JSON.stringify({
+      complete: true,
+      history: [],
+      name: "Test",
+      path: "new",
+      profileVersion: "cloud",
+      step: "login-check",
+      voiceMode: "cloud",
+    }));
+
+    render(<BraiApp />);
+
+    await screen.findByRole("heading", { name: "Действия" });
+    await openProfileMenuItem("Выйти");
+
+    expect(await screen.findByText("Нужен вход")).toBeInTheDocument();
+    await waitFor(() => expect(cmdPlugin.preparePreliminaryProfile).toHaveBeenCalledWith({ displayName: "Test" }));
+    await waitFor(() => expect(cmdPlugin.setOverlayEnabled).toHaveBeenCalledWith({ enabled: true }));
+    expect(cmdPlugin.setVoiceOnlyMode).toHaveBeenCalledWith({ enabled: true });
+    expect(cmdPlugin.setQueuePausedMode).toHaveBeenCalledWith({ enabled: false });
+    await waitFor(async () => expect(await getMeta("currentUserId")).toBe("preliminary:prelim-test-user"));
+    expect(JSON.parse(window.localStorage.getItem(ONBOARDING_STORAGE_KEY) ?? "{}")).toMatchObject({
+      preliminaryUserId: "prelim-test-user",
+      preliminaryClaimToken: "prelim-claim-token",
+    });
   });
 
   it("returns from Settings through the Android back bridge", async () => {

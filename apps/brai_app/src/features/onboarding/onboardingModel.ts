@@ -61,6 +61,9 @@ export type OnboardingState = {
   profileVersion: ProfileVersion;
   voiceMode: VoiceMode;
   name: string;
+  preliminaryUserId: string;
+  preliminaryClaimToken: string;
+  duplicatePreliminaryUserId: string;
 };
 
 export const initialOnboardingState: OnboardingState = {
@@ -71,6 +74,9 @@ export const initialOnboardingState: OnboardingState = {
   profileVersion: null,
   voiceMode: null,
   name: "",
+  preliminaryUserId: "",
+  preliminaryClaimToken: "",
+  duplicatePreliminaryUserId: "",
 };
 
 export function loadOnboardingState(): OnboardingState {
@@ -87,6 +93,9 @@ export function loadOnboardingState(): OnboardingState {
       profileVersion: parsed.profileVersion === "cloud" || parsed.profileVersion === "self-hosted" ? parsed.profileVersion : null,
       voiceMode: parsed.voiceMode === "provider" || parsed.voiceMode === "local" || parsed.voiceMode === "cloud" ? parsed.voiceMode : null,
       name: typeof parsed.name === "string" ? parsed.name : "",
+      preliminaryUserId: typeof parsed.preliminaryUserId === "string" ? parsed.preliminaryUserId : "",
+      preliminaryClaimToken: typeof parsed.preliminaryClaimToken === "string" ? parsed.preliminaryClaimToken : "",
+      duplicatePreliminaryUserId: typeof parsed.duplicatePreliminaryUserId === "string" ? parsed.duplicatePreliminaryUserId : "",
     };
   } catch {
     return initialOnboardingState;

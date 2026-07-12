@@ -40,7 +40,7 @@ import {
 } from "@/shared/platform/androidCapabilities";
 import { ensureBraiCmdAccess, listenBraiCmdOnboardingEvents, retryBraiCmdQueue, setBraiCmdAccessKey, setBraiCmdOverlayEnabled, setBraiCmdQueuePausedMode, setBraiCmdVoiceOnlyMode, vibrateBraiCmdPress } from "@/shared/platform/braiCmd";
 import { installAndroidBackHandler, isNativeShell, platformName } from "@/shared/platform/platform";
-import type { OtpSendResult } from "@/shared/api/braiApi";
+import type { AuthOnboardingContext, OtpSendResult } from "@/shared/api/braiApi";
 import { AnimatedShinyText } from "@/shared/ui/animated-shiny-text";
 import { AuthOtpEntry, type AuthOtpTimer } from "@/shared/ui/auth-otp-entry";
 import { Button } from "@/shared/ui/button";
@@ -65,11 +65,12 @@ type OnboardingFlowProps = {
   authRequired: boolean;
   busy: boolean;
   authMode: "email" | "otp";
-  onEmailLogin: (email: string) => Promise<void>;
+  onEmailLogin: (email: string, context?: AuthOnboardingContext) => Promise<void>;
   onRequestOtp: (email: string) => Promise<OtpSendResult>;
   onStartupScreenChange: (active: boolean) => void;
-  onVerifyOtp: (email: string, otp: string) => Promise<void>;
+  onVerifyOtp: (email: string, otp: string, context?: AuthOnboardingContext) => Promise<void>;
   onDone: () => void;
+  onOpenEngine: () => void;
   onOpenNativeCmdSettings: () => Promise<boolean>;
   startupIntroComplete: boolean;
 };
@@ -134,6 +135,7 @@ export function OnboardingFlow({
   busy,
   onDone,
   onEmailLogin,
+  onOpenEngine,
   onOpenNativeCmdSettings,
   onRequestOtp,
   onStartupScreenChange,
@@ -170,6 +172,7 @@ export function OnboardingFlow({
     const initialStep = stepRef.current;
     const loadTimer = window.setTimeout(() => {
       if (stepRef.current !== initialStep) return;
+      if (authRequired && (initialStep === "login" || initialStep === "cmd-settings")) return;
       const next = loadInitialOnboardingState(authRequired);
       stateRef.current = next;
       stepRef.current = next.step;
@@ -180,8 +183,8 @@ export function OnboardingFlow({
   }, [authRequired]);
 
   useEffect(() => {
-    if (state.complete && !authRequired) onDone();
-  }, [authRequired, onDone, state.complete]);
+    if (state.complete && !authRequired && state.step !== "locked" && state.step !== "login" && state.step !== "cmd-settings") onDone();
+  }, [authRequired, onDone, state.complete, state.step]);
 
   useEffect(() => () => {
     if (manualConfirmTimerRef.current != null) window.clearTimeout(manualConfirmTimerRef.current);
@@ -434,8 +437,22 @@ export function OnboardingFlow({
     if (voiceMode === "cloud") go("cloud-privacy", { voiceMode });
   }
 
+  function authOnboardingContext(): AuthOnboardingContext {
+    const current = stateRef.current;
+    return {
+      name: current.name.trim(),
+      preliminaryUserId: current.preliminaryUserId,
+      duplicatePreliminaryUserId: current.duplicatePreliminaryUserId,
+      preliminaryClaimToken: current.preliminaryClaimToken,
+    };
+  }
+
   async function submitCloudLogin(email: string) {
-    await onEmailLogin(email);
+    await onEmailLogin(email, authOnboardingContext());
+  }
+
+  async function submitCloudVerifyOtp(email: string, otp: string) {
+    await onVerifyOtp(email, otp, authOnboardingContext());
   }
 
   async function submitAccessKey(key: string) {
@@ -654,7 +671,7 @@ export function OnboardingFlow({
           onAuthenticated={() => go("setup-start")}
           onEmailLogin={submitCloudLogin}
           onRequestOtp={onRequestOtp}
-          onVerifyOtp={onVerifyOtp}
+          onVerifyOtp={submitCloudVerifyOtp}
         />
       );
     }
@@ -831,8 +848,8 @@ export function OnboardingFlow({
 
     if (state.step === "voice-ready") return <InfoScreen icon={CheckCircle2} title="Голосовое управление настроено" text="Brai CMD готов принимать голос, работать с очередью и вставлять результат в поле."><PrimaryButton onClick={completeSetup}>Готово</PrimaryButton></InfoScreen>;
     if (state.step === "login-check") return <InfoScreen icon={Lock} title="Проверяем вход" text="Если профиль уже открыт, вы попадете в кабинет. Если нет — доступ будет ограничен входом и настройками."><PrimaryButton onClick={() => authRequired ? go("locked") : onDone()}>Продолжить</PrimaryButton></InfoScreen>;
-    if (state.step === "locked") return <InfoScreen icon={Lock} title="Нужен вход" text="Пока вы не вошли, доступны только вход и настройки Brai CMD."><SecondaryButton onClick={openCmdSettings}>Настройки Brai CMD</SecondaryButton><PrimaryButton onClick={() => go("login")}>Войти</PrimaryButton></InfoScreen>;
-    if (state.step === "login") return <OnboardingAuthForm busy={busy} mode={authMode} onEmailLogin={onEmailLogin} onRequestOtp={onRequestOtp} onVerifyOtp={onVerifyOtp} />;
+    if (state.step === "locked") return <InfoScreen icon={Lock} title="Нужен вход" text="Пока вы не вошли, доступны вход, Engine и настройки Brai CMD."><SecondaryButton type="button" onClick={openCmdSettings}>Настройки Brai CMD</SecondaryButton><SecondaryButton type="button" onClick={onOpenEngine}>Engine</SecondaryButton><PrimaryButton type="button" onClick={() => go("login")}>Войти</PrimaryButton></InfoScreen>;
+    if (state.step === "login") return <OnboardingAuthForm busy={busy} mode={authMode} onAuthenticated={onDone} onEmailLogin={submitCloudLogin} onRequestOtp={onRequestOtp} onVerifyOtp={submitCloudVerifyOtp} />;
     if (state.step === "cmd-settings") {
       return (
         <InfoScreen

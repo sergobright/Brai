@@ -25,6 +25,14 @@ export type AuthSession = {
   user?: AuthUser | null;
 };
 
+export type AuthOnboardingContext = {
+  name?: string;
+  preliminaryUserId?: string;
+  duplicatePreliminaryUserId?: string;
+  preliminaryClaimToken?: string;
+  deviceFingerprint?: string;
+};
+
 export type OtpSendResult = {
   sent?: boolean;
   success?: boolean;
@@ -138,6 +146,17 @@ export type BraiApiError = Error & {
   status?: number;
 };
 
+function authPayload<T extends Record<string, unknown>>(base: T, context?: AuthOnboardingContext): T & Partial<AuthOnboardingContext> {
+  const preliminaryUserId = context?.preliminaryUserId || context?.duplicatePreliminaryUserId;
+  return {
+    ...base,
+    ...(context?.name ? { name: context.name } : {}),
+    ...(preliminaryUserId ? { preliminaryUserId } : {}),
+    ...(context?.preliminaryClaimToken ? { preliminaryClaimToken: context.preliminaryClaimToken } : {}),
+    ...(context?.deviceFingerprint ? { deviceFingerprint: context.deviceFingerprint } : {}),
+  };
+}
+
 /**
  * Wraps the Brai HTTP API with typed client methods.
  */
@@ -155,17 +174,17 @@ export class BraiApi {
     });
   }
 
-  async verifyOtp(email: string, otp: string): Promise<AuthSession> {
+  async verifyOtp(email: string, otp: string, context?: AuthOnboardingContext): Promise<AuthSession> {
     return this.request("/auth/otp/verify", {
       method: "POST",
-      json: { email, otp },
+      json: authPayload({ email, otp }, context),
     });
   }
 
-  async testEmailLogin(email: string): Promise<AuthSession> {
+  async testEmailLogin(email: string, context?: AuthOnboardingContext): Promise<AuthSession> {
     return this.request("/auth/test-email-login", {
       method: "POST",
-      json: { email },
+      json: authPayload({ email }, context),
     });
   }
 

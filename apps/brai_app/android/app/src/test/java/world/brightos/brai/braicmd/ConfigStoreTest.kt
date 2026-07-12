@@ -56,6 +56,17 @@ class ConfigStoreTest {
     }
 
     @Test
+    fun preliminaryProfileDataPersists() {
+        store.preliminaryUserId = "prelim-user"
+        store.preliminaryClaimToken = "claim-token"
+
+        val reloaded = ConfigStore(RuntimeEnvironment.getApplication())
+
+        assertEquals("prelim-user", reloaded.preliminaryUserId)
+        assertEquals("claim-token", reloaded.preliminaryClaimToken)
+    }
+
+    @Test
     fun settingsSnapshotIncludesOverlayEnabled() {
         store.overlayEnabled = true
 

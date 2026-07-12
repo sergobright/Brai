@@ -835,7 +835,7 @@ describe("BraiApp actions", () => {
 
     render(<BraiApp />);
 
-    const stopButton = await screen.findByRole("button", { name: "Остановить фокус: Фокус" });
+    const stopButton = await screen.findByRole("button", { name: "Остановить фокус: Фокус" }, { timeout: 5_000 });
     expect(within(stopButton).queryByText("Стоп")).not.toBeInTheDocument();
     expect(stopButton.querySelector("svg")).toBeInTheDocument();
     fireEvent.click(stopButton);

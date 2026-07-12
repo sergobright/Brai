@@ -13,6 +13,7 @@ type BraiCmdPlugin = {
   openPermission(options: { permission: BraiCmdPermissionKey }): Promise<BraiCmdSnapshot>;
   vibratePress(): Promise<BraiCmdState>;
   openSettings(): Promise<unknown>;
+  preparePreliminaryProfile?(options: { displayName: string }): Promise<BraiCmdPreliminaryProfile>;
   ensureAccess(options: { displayName: string }): Promise<BraiCmdState>;
   setAccessKey(options: { token: string; displayName: string }): Promise<BraiCmdState>;
   setOverlayEnabled(options: { enabled: boolean }): Promise<BraiCmdState>;
@@ -30,6 +31,14 @@ export type BraiCmdState = {
   voiceOnlyMode?: boolean;
   queuePausedMode?: boolean;
   overlayEnabled?: boolean;
+};
+
+export type BraiCmdPreliminaryProfile = BraiCmdState & {
+  preliminaryStatus?: "ready" | "duplicate";
+  preliminaryUserId?: string;
+  preliminaryClaimToken?: string;
+  duplicateDevice?: boolean;
+  deviceFingerprint?: string;
 };
 
 export type BraiCmdPermissionKey = "accessibility" | "overlay" | "microphone" | "notifications";
@@ -215,6 +224,15 @@ export async function ensureBraiCmdAccess(displayName: string): Promise<BraiCmdS
   if (!isNativeAndroid()) return null;
   try {
     return await BraiCmd.ensureAccess({ displayName });
+  } catch {
+    return null;
+  }
+}
+
+export async function prepareBraiCmdPreliminaryProfile(displayName: string): Promise<BraiCmdPreliminaryProfile | null> {
+  if (!isNativeAndroid() || !BraiCmd.preparePreliminaryProfile) return null;
+  try {
+    return await BraiCmd.preparePreliminaryProfile({ displayName });
   } catch {
     return null;
   }

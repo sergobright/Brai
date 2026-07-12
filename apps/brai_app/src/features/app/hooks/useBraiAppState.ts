@@ -1,8 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type SetStateAction } from "react";
-import { BraiApi, DEFAULT_APP_SETTINGS, type AppSettings, type OtpSendResult } from "@/shared/api/braiApi";
+import { BraiApi, DEFAULT_APP_SETTINGS, type AppSettings, type AuthOnboardingContext, type OtpSendResult } from "@/shared/api/braiApi";
 import { defaultApiBase, isProductionEnvironment } from "@/shared/config/runtime";
+import { prepareBraiCmdPreliminaryProfile, setBraiCmdOverlayEnabled, setBraiCmdQueuePausedMode, setBraiCmdVoiceOnlyMode } from "@/shared/platform/braiCmd";
 import {
   acknowledgeAndroidActionsWidgetStatusChanges,
   clearAndroidActionsWidgetData,
@@ -26,6 +27,7 @@ import type { InboxState } from "@/shared/types/inbox";
 import { emptyInboxState } from "@/shared/types/inbox";
 import type { GoalData, HistoryData, SyncStatus, TimerState } from "@/shared/types/timer";
 import { emptyGoal, emptyHistory, emptyTimerState } from "@/shared/types/timer";
+import { loadOnboardingState, saveOnboardingState } from "@/features/onboarding/onboardingModel";
 import type { FocusBackgroundMode, FocusContextPanel, MobileContextPanel, SectionId } from "../appModel";
 import { FOCUS_BACKGROUND_STORAGE_KEY, FOCUS_CONTEXT_PANEL_STORAGE_KEY, resolveAuthMode, sectionFromLocation, syncSectionUrl } from "../appModel";
 import { moscowTodayKey, normalizeHistory } from "../appUtils";
@@ -646,10 +648,31 @@ export function useBraiAppState(initialSection: SectionId) {
     }
   }
 
-  async function onVerifyOtp(email: string, otp: string) {
+  async function restorePreliminaryClientUser(displayName: string): Promise<string | null> {
+    const stored = loadOnboardingState();
+    let preliminaryUserId = stored.preliminaryUserId || stored.duplicatePreliminaryUserId;
+    if (!preliminaryUserId) {
+      const profile = await prepareBraiCmdPreliminaryProfile(displayName);
+      const nextPreliminaryUserId = profile?.preliminaryUserId ?? "";
+      if (nextPreliminaryUserId) {
+        const duplicate = Boolean(profile?.duplicateDevice) || profile?.preliminaryStatus === "duplicate";
+        preliminaryUserId = nextPreliminaryUserId;
+        saveOnboardingState({
+          ...stored,
+          name: stored.name || displayName,
+          preliminaryUserId: duplicate ? "" : nextPreliminaryUserId,
+          preliminaryClaimToken: duplicate ? "" : profile?.preliminaryClaimToken ?? "",
+          duplicatePreliminaryUserId: duplicate ? nextPreliminaryUserId : "",
+        });
+      }
+    }
+    return preliminaryUserId ? `preliminary:${preliminaryUserId}` : null;
+  }
+
+  async function onVerifyOtp(email: string, otp: string, context?: AuthOnboardingContext) {
     setBusy(true);
     try {
-      const result = await api.verifyOtp(email, otp);
+      const result = await api.verifyOtp(email, otp, context);
       if (result.authenticated) {
         authDisplayNameRef.current = result.user?.name ?? "";
         await ensureClientUser(result.user?.id ?? null);
@@ -665,10 +688,10 @@ export function useBraiAppState(initialSection: SectionId) {
     }
   }
 
-  async function onEmailLogin(email: string) {
+  async function onEmailLogin(email: string, context?: AuthOnboardingContext) {
     setBusy(true);
     try {
-      const result = await api.testEmailLogin(email);
+      const result = await api.testEmailLogin(email, context);
       if (result.authenticated) {
         authDisplayNameRef.current = result.user?.name ?? "";
         await ensureClientUser(result.user?.id ?? null);
@@ -685,12 +708,20 @@ export function useBraiAppState(initialSection: SectionId) {
   }
 
   async function onLogout() {
+    const onboarding = loadOnboardingState();
+    const preliminaryDisplayName = onboarding.name.trim() || authDisplayNameRef.current || "Brai";
     await api.logout();
+    const preliminaryClientUserId = await restorePreliminaryClientUser(preliminaryDisplayName);
     authDisplayNameRef.current = "";
-    await ensureClientUser(null);
+    await ensureClientUser(preliminaryClientUserId);
     resetUserSnapshots();
     setLocalSnapshotReady(true);
     setSyncStatus("auth_required");
+    void Promise.all([
+      setBraiCmdOverlayEnabled(true),
+      setBraiCmdVoiceOnlyMode(true),
+      setBraiCmdQueuePausedMode(false),
+    ]).catch(() => undefined);
   }
 
   async function refreshEngineOnce() {

@@ -18,6 +18,7 @@ const cmdPlugin = vi.hoisted(() => ({
   getState: vi.fn(),
   openPermission: vi.fn(),
   openSettings: vi.fn(),
+  preparePreliminaryProfile: vi.fn(),
   retryQueue: vi.fn(),
   saveProvider: vi.fn(),
   setAccessKey: vi.fn(),
@@ -126,6 +127,7 @@ export function setupBraiAppTest() {
     cmdPlugin.getSettings.mockReset();
     cmdPlugin.getState.mockReset();
     cmdPlugin.openPermission.mockReset();
+    cmdPlugin.preparePreliminaryProfile.mockReset();
     cmdPlugin.retryQueue.mockReset();
     cmdPlugin.saveProvider.mockReset();
     cmdPlugin.setAccessKey.mockReset();
@@ -149,6 +151,13 @@ export function setupBraiAppTest() {
     cmdPlugin.getSettings.mockResolvedValue(braiCmdSettingsSnapshot());
     cmdPlugin.getState.mockResolvedValue({ accessGranted: true });
     cmdPlugin.openPermission.mockResolvedValue(braiCmdSettingsSnapshot());
+    cmdPlugin.preparePreliminaryProfile.mockResolvedValue({
+      accessGranted: true,
+      preliminaryStatus: "ready",
+      preliminaryUserId: "prelim-test-user",
+      preliminaryClaimToken: "prelim-claim-token",
+      deviceFingerprint: "test-device",
+    });
     cmdPlugin.retryQueue.mockResolvedValue({ queuePausedMode: false });
     cmdPlugin.saveProvider.mockResolvedValue(braiCmdSettingsSnapshot());
     cmdPlugin.setAccessKey.mockResolvedValue({ accessGranted: true });

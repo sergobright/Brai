@@ -195,7 +195,7 @@ public final class BraiCmdPlugin extends Plugin {
             try {
                 String requestedName = config.getDisplayName().isBlank() ? "Brai" : config.getDisplayName();
                 NetworkClient client = new NetworkClient(getContext());
-                AccessResponse access = client.requestAccess(requestedName);
+                AccessResponse access = client.requestAccess(requestedName, deviceFingerprint());
                 if (access.getToken().isBlank()) throw new IllegalStateException("Сервер не вернул токен");
                 config.setAuthToken(access.getToken());
                 config.setDisplayName(access.getDisplayName().isBlank() ? requestedName : access.getDisplayName());
@@ -204,6 +204,39 @@ public final class BraiCmdPlugin extends Plugin {
                 config.setAuthToken("");
             }
             call.resolve(stateJson());
+        }).start();
+    }
+
+    @PluginMethod
+    public void preparePreliminaryProfile(PluginCall call) {
+        ConfigStore config = new ConfigStore(getContext());
+        String displayName = cleanDisplayName(call.getString("displayName", ""));
+        if (displayName.isBlank()) {
+            call.reject("Введите имя");
+            return;
+        }
+        String fingerprint = deviceFingerprint();
+        if (fingerprint.isBlank()) {
+            call.reject("Не удалось определить устройство");
+            return;
+        }
+        new Thread(() -> {
+            try {
+                NetworkClient client = new NetworkClient(getContext());
+                PreliminaryProfileResponse profile = client.requestPreliminaryProfile(displayName, fingerprint);
+                if (profile.getDuplicateDevice()) {
+                    config.setPreliminaryUserId(profile.getPreliminaryUserId());
+                    config.setPreliminaryClaimToken("");
+                    call.resolve(preliminaryStateJson(profile, fingerprint));
+                    return;
+                }
+                config.setDisplayName(profile.getDisplayName().isBlank() ? displayName : profile.getDisplayName());
+                config.setPreliminaryUserId(profile.getPreliminaryUserId());
+                config.setPreliminaryClaimToken(profile.getPreliminaryClaimToken());
+                call.resolve(preliminaryStateJson(profile, fingerprint));
+            } catch (Throwable error) {
+                call.reject(error.getMessage());
+            }
         }).start();
     }
 
@@ -349,6 +382,21 @@ public final class BraiCmdPlugin extends Plugin {
             }
         }
         return false;
+    }
+
+    private JSObject preliminaryStateJson(PreliminaryProfileResponse profile, String fingerprint) {
+        JSObject state = stateJson();
+        state.put("preliminaryStatus", profile.getStatus());
+        state.put("preliminaryUserId", profile.getPreliminaryUserId());
+        state.put("preliminaryClaimToken", profile.getPreliminaryClaimToken());
+        state.put("duplicateDevice", profile.getDuplicateDevice());
+        state.put("deviceFingerprint", fingerprint);
+        return state;
+    }
+
+    private String deviceFingerprint() {
+        String value = Settings.Secure.getString(getContext().getContentResolver(), Settings.Secure.ANDROID_ID);
+        return value == null ? "" : value.trim();
     }
 
     private String cleanDisplayName(String value) {

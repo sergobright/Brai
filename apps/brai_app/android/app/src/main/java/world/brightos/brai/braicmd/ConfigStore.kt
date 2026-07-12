@@ -45,6 +45,14 @@ class ConfigStore(context: Context) {
             return generated
         }
 
+    var preliminaryUserId: String
+        get() = prefs.getString(AppConstants.KEY_PRELIMINARY_USER_ID, "").orEmpty().trim()
+        set(value) = prefs.edit().putString(AppConstants.KEY_PRELIMINARY_USER_ID, value.trim()).apply()
+
+    var preliminaryClaimToken: String
+        get() = prefs.getString(AppConstants.KEY_PRELIMINARY_CLAIM_TOKEN, "").orEmpty().trim()
+        set(value) = prefs.edit().putString(AppConstants.KEY_PRELIMINARY_CLAIM_TOKEN, value.trim()).apply()
+
     var locale: String
         get() = prefs.getString(AppConstants.KEY_LOCALE, "").orEmpty()
         set(value) = prefs.edit().putString(AppConstants.KEY_LOCALE, value.trim()).apply()

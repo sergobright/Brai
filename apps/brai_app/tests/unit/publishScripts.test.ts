@@ -401,10 +401,12 @@ describe("mobile OTA publish scripts", () => {
   it("restores stale source permissions only after staged dependencies are complete", async () => {
     const script = await readFile(path.join(workspaceRoot, "deploy/scripts/ci-ssh-deploy.sh"), "utf8");
 
-    expect(script).toContain('find "$SOURCE_ROOT" -user "$(id -u)" -exec chmod u+rwX,g+rwX {} + || true');
+    expect(script).toContain('find "$REMOTE_UPLOAD" ! -type l -user "$(id -u)" -exec chmod u+rwX,g+rwX {} +');
+    const sourceChmod = 'find "$SOURCE_ROOT" ! -type l -user "$(id -u)" -exec chmod u+rwX,g+rwX {} + || true';
+    expect(script).toContain(sourceChmod);
     expect(script).toContain('mv "$SOURCE_ROOT" "$PREVIOUS_SOURCE"');
-    expect(script.indexOf('npm --prefix services/brai_api ci')).toBeLessThan(script.indexOf('find "$SOURCE_ROOT" -user "$(id -u)"'));
-    expect(script.indexOf('find "$SOURCE_ROOT" -user "$(id -u)"')).toBeLessThan(script.indexOf('mv "$SOURCE_ROOT" "$PREVIOUS_SOURCE"'));
+    expect(script.indexOf('npm --prefix services/brai_api ci')).toBeLessThan(script.indexOf(sourceChmod));
+    expect(script.indexOf(sourceChmod)).toBeLessThan(script.indexOf('mv "$SOURCE_ROOT" "$PREVIOUS_SOURCE"'));
   });
 
   it("keeps preview runtime Supabase env mandatory and artifacts writable by the deploy group", async () => {

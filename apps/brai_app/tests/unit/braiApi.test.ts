@@ -64,6 +64,34 @@ describe("BraiApi", () => {
     }));
   });
 
+  it("sends preliminary onboarding context with OTP verification", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ authenticated: true, user: null }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+
+    await new BraiApi("/api").verifyOtp("primary@example.com", "123456", {
+      name: "Test",
+      preliminaryUserId: "prelim-1",
+      preliminaryClaimToken: "claim-1",
+      deviceFingerprint: "device-1",
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith("/api/auth/otp/verify", expect.objectContaining({
+      method: "POST",
+      body: JSON.stringify({
+        email: "primary@example.com",
+        otp: "123456",
+        name: "Test",
+        preliminaryUserId: "prelim-1",
+        preliminaryClaimToken: "claim-1",
+        deviceFingerprint: "device-1",
+      }),
+    }));
+  });
+
   it("sends global stop metadata with synced timer events", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(

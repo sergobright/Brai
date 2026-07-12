@@ -31,11 +31,22 @@ data class AccessResponse(
     val displayName: String
 )
 
+data class PreliminaryProfileResponse(
+    val status: String,
+    val preliminaryUserId: String,
+    val preliminaryClaimToken: String,
+    val displayName: String,
+    val duplicateDevice: Boolean
+)
+
 class ServerResponseException(
     val statusCode: Int,
     val code: String,
+    val json: JSONObject?,
     message: String
-) : IllegalStateException(message)
+) : IllegalStateException(message) {
+    constructor(statusCode: Int, code: String, message: String) : this(statusCode, code, null, message)
+}
 
 class NetworkClient(context: Context) {
     private val appContext = context.applicationContext
@@ -51,7 +62,48 @@ class NetworkClient(context: Context) {
         return healthStatus(readJson(connection))
     }
 
-    fun requestAccess(displayName: String): AccessResponse {
+    fun requestPreliminaryProfile(displayName: String, deviceFingerprint: String): PreliminaryProfileResponse {
+        val connection = openPublicConnection("/v1/brai-cmd/preliminary-profile", "POST").apply {
+            doOutput = true
+            setRequestProperty("Content-Type", "application/json; charset=utf-8")
+        }
+        val body = JSONObject()
+            .put("displayName", displayName)
+            .put("deviceFingerprint", deviceFingerprint)
+            .put("deviceFingerprintKind", "android_id")
+            .put("deviceId", config.installId)
+            .put("preliminaryUserId", config.preliminaryUserId)
+            .put("preliminaryClaimToken", config.preliminaryClaimToken)
+            .put("clientVersion", BuildConfig.VERSION_NAME)
+            .put("appPackage", appContext.packageName)
+            .toString()
+            .toByteArray(Charsets.UTF_8)
+        connection.outputStream.use { it.write(body) }
+        return try {
+            val json = readJson(connection)
+            PreliminaryProfileResponse(
+                status = json.optString("status", "ready"),
+                preliminaryUserId = json.optString("preliminaryUserId"),
+                preliminaryClaimToken = json.optString("preliminaryClaimToken"),
+                displayName = json.optString("displayName", displayName),
+                duplicateDevice = false
+            )
+        } catch (error: ServerResponseException) {
+            if (error.statusCode == 409 && error.code == "duplicate_device") {
+                PreliminaryProfileResponse(
+                    status = "duplicate",
+                    preliminaryUserId = error.json?.optString("preliminaryUserId").orEmpty(),
+                    preliminaryClaimToken = "",
+                    displayName = displayName,
+                    duplicateDevice = true
+                )
+            } else {
+                throw error
+            }
+        }
+    }
+
+    fun requestAccess(displayName: String, deviceFingerprint: String = ""): AccessResponse {
         val connection = openPublicConnection("/v1/access/request", "POST").apply {
             doOutput = true
             setRequestProperty("Content-Type", "application/json; charset=utf-8")
@@ -59,6 +111,9 @@ class NetworkClient(context: Context) {
         val body = JSONObject()
             .put("displayName", displayName)
             .put("deviceId", config.installId)
+            .put("deviceFingerprint", deviceFingerprint)
+            .put("preliminaryUserId", config.preliminaryUserId)
+            .put("preliminaryClaimToken", config.preliminaryClaimToken)
             .put("clientVersion", BuildConfig.VERSION_NAME)
             .put("appPackage", appContext.packageName)
             .toString()
@@ -212,7 +267,7 @@ class NetworkClient(context: Context) {
             val json = runCatching { JSONObject(body) }.getOrNull()
             val message = json?.optString("error")?.takeUnless { it.isBlank() } ?: body
             val code = json?.optString("code")?.takeUnless { it.isBlank() } ?: "http_error"
-            throw ServerResponseException(status, code, "HTTP $status: $message")
+            throw ServerResponseException(status, code, json, "HTTP $status: $message")
         }
         return JSONObject(body)
     }
