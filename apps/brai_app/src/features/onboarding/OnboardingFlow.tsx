@@ -1,6 +1,6 @@
 "use client";
 
-import { Children, createContext, type FormEvent, type ReactNode, useContext, useEffect, useRef, useState } from "react";
+import { Children, createContext, type ReactNode, useContext, useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import {
   ArrowRight,
@@ -15,7 +15,6 @@ import {
   KeyRound,
   Lock,
   LoaderCircle,
-  Mail,
   Mic,
   MonitorUp,
   Radio,
@@ -42,15 +41,14 @@ import { ensureBraiCmdAccess, listenBraiCmdOnboardingEvents, prepareBraiCmdPreli
 import { installAndroidBackHandler, isNativeShell, platformName } from "@/shared/platform/platform";
 import type { AuthOnboardingContext, OtpSendResult } from "@/shared/api/braiApi";
 import { AnimatedShinyText } from "@/shared/ui/animated-shiny-text";
-import { AuthOtpEntry, type AuthOtpTimer } from "@/shared/ui/auth-otp-entry";
 import { Button } from "@/shared/ui/button";
 import { Card } from "@/shared/ui/card";
-import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/shared/ui/field";
 import { Input } from "@/shared/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/shared/ui/select";
 import { Textarea } from "@/shared/ui/textarea";
 import { Carousel, CarouselContent, CarouselItem, type CarouselApi } from "@/shared/ui/carousel";
 import { cx } from "../app/appUtils";
+import { AuthScreen } from "../app/AuthScreen";
 import {
   isValidOnboardingName,
   loadOnboardingState,
@@ -727,10 +725,7 @@ export function OnboardingFlow({
       return (
         <OnboardingAuthForm
           busy={busy}
-          intro={<InfoBlock icon={Mail} title="Вход в облачный профиль" text={authMode === "otp" ? "Введите email, получите код и подтвердите вход." : "Введите email, код в Dev/Preview не нужен."} />}
-          mode={authMode}
           onAuthenticated={() => go("setup-start")}
-          onEmailLogin={submitCloudLogin}
           onRequestOtp={onRequestOtp}
           onVerifyOtp={submitCloudVerifyOtp}
         />
@@ -1275,172 +1270,15 @@ function AccessKeyForm({ onSubmit }: { onSubmit: (key: string) => void }) {
   );
 }
 
-function OnboardingAuthForm({
-  busy,
-  intro,
-  mode,
-  onAuthenticated,
-  onEmailLogin,
-  onRequestOtp,
-  onVerifyOtp,
-}: {
+function OnboardingAuthForm(props: {
   busy: boolean;
-  intro?: ReactNode;
-  mode: "email" | "otp";
+  mode?: "email" | "otp";
   onAuthenticated?: () => void;
-  onEmailLogin: (email: string) => Promise<void>;
+  onEmailLogin?: (email: string) => Promise<void>;
   onRequestOtp: (email: string) => Promise<OtpSendResult>;
   onVerifyOtp: (email: string, otp: string) => Promise<void>;
 }) {
-  const [email, setEmail] = useState("");
-  const [otp, setOtp] = useState("");
-  const [otpSent, setOtpSent] = useState(false);
-  const [otpFocusKey, setOtpFocusKey] = useState(0);
-  const [otpTimer, setOtpTimer] = useState<AuthOtpTimer>(defaultOtpTimer);
-  const [error, setError] = useState("");
-
-  async function submitEmail(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setError("");
-    try {
-      await onEmailLogin(email);
-      onAuthenticated?.();
-    } catch {
-      setError("Email не подошёл.");
-    }
-  }
-
-  async function submitOtp(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setError("");
-    try {
-      if (!otpSent) {
-        await requestOtpCode();
-        return;
-      }
-      await onVerifyOtp(email, otp);
-      onAuthenticated?.();
-    } catch {
-      setError(otpSent ? "Код не подошел." : "Не удалось отправить код.");
-    }
-  }
-
-  async function requestOtpCode() {
-    setOtpSent(true);
-    setOtp("");
-    setOtpTimer((current) => ({ ...current, sentAtMs: null }));
-    setOtpFocusKey((current) => current + 1);
-    try {
-      applyOtpResult(await onRequestOtp(email));
-    } catch (error) {
-      setOtpSent(false);
-      throw error;
-    }
-  }
-
-  async function resendOtpCode() {
-    setError("");
-    setOtp("");
-    applyOtpResult(await onRequestOtp(email));
-  }
-
-  if (mode === "email") {
-    return (
-      <form className="flex min-h-0 flex-1 flex-col overflow-hidden" onSubmit={submitEmail}>
-        <div className="grid min-h-0 flex-1 content-center gap-4 overflow-hidden py-4">
-          {intro}
-          <FieldGroup>
-            <Field data-invalid={Boolean(error)}>
-              <FieldLabel htmlFor="onboarding-email">Email</FieldLabel>
-              <Input
-                id="onboarding-email"
-                value={email}
-                type="email"
-                autoComplete="email"
-                inputMode="email"
-                placeholder="email"
-                aria-label="Email"
-                aria-invalid={Boolean(error)}
-                disabled={busy}
-                onChange={(event) => setEmail(event.target.value)}
-              />
-              <FieldDescription>{error || "В Dev/Preview код не нужен."}</FieldDescription>
-            </Field>
-          </FieldGroup>
-        </div>
-        <StepActions>
-          <PrimaryButton disabled={busy || !email}>Войти</PrimaryButton>
-        </StepActions>
-      </form>
-    );
-  }
-
-  return (
-    <form className="flex min-h-0 flex-1 flex-col overflow-hidden" onSubmit={submitOtp}>
-      <div className="grid min-h-0 flex-1 content-center gap-4 overflow-hidden py-4">
-        {intro}
-        <FieldGroup>
-          <Field>
-            <FieldLabel htmlFor="onboarding-email">Email</FieldLabel>
-            <Input
-              id="onboarding-email"
-              value={email}
-              type="email"
-              autoComplete="email"
-              inputMode="email"
-              placeholder="email"
-              aria-label="Email"
-              disabled={busy || otpSent}
-              onChange={(event) => setEmail(event.target.value)}
-            />
-            <FieldDescription>{otpSent ? "Код уже отправлен. Введите его ниже." : "Отправим одноразовый код для входа."}</FieldDescription>
-          </Field>
-          {otpSent ? (
-            <Field data-invalid={Boolean(error)}>
-              <FieldLabel htmlFor="onboarding-otp">Код</FieldLabel>
-              <AuthOtpEntry
-                id="onboarding-otp"
-                value={otp}
-                timer={otpTimer}
-                autoFocusKey={otpFocusKey}
-                ariaInvalid={Boolean(error)}
-                disabled={busy && otpTimer.sentAtMs !== null}
-                onChange={setOtp}
-                onResend={resendOtpCode}
-              />
-              {error ? <FieldDescription className="text-destructive">{error}</FieldDescription> : null}
-            </Field>
-          ) : null}
-        </FieldGroup>
-      </div>
-      <StepActions>
-        <PrimaryButton disabled={busy || !email || (otpSent && !otp)}>{otpSent ? "Проверить код" : "Получить код"}</PrimaryButton>
-      </StepActions>
-    </form>
-  );
-
-  function applyOtpResult(result: OtpSendResult) {
-    const nowMs = Date.now();
-    const previousSentAtMs = otpTimer.sentAtMs;
-    const previousStillValid =
-      previousSentAtMs !== null && nowMs < previousSentAtMs + otpTimer.expiresInSeconds * 1000;
-    setOtpTimer({
-      sentAtMs: result.resend_strategy === "reuse" && previousStillValid ? previousSentAtMs : nowMs,
-      expiresInSeconds: positiveSeconds(result.expires_in_seconds, defaultOtpTimer.expiresInSeconds),
-      resendAfterSeconds: positiveSeconds(result.resend_after_seconds, defaultOtpTimer.resendAfterSeconds),
-    });
-    setOtpFocusKey((current) => current + 1);
-  }
-}
-
-const defaultOtpTimer: AuthOtpTimer = {
-  sentAtMs: null,
-  expiresInSeconds: 5 * 60,
-  resendAfterSeconds: 60,
-};
-
-function positiveSeconds(value: unknown, fallback: number): number {
-  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : fallback;
+  return <AuthScreen layout="embedded" {...props} />;
 }
 
 function TrainingDictate({ confirmed, onChange, onNext, value }: { confirmed: boolean; value: string; onChange: (value: string) => void; onNext: () => void }) {

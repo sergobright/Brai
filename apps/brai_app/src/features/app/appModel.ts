@@ -20,7 +20,8 @@ export const FOCUS_CONTEXT_PANEL_STORAGE_KEY = "brai_focus_context_panel";
 export const FOCUS_BACKGROUND_STORAGE_KEY = "brai_focus_background";
 
 export function resolveAuthMode(production: boolean): AuthMode {
-  return production ? "otp" : "email";
+  void production;
+  return "otp";
 }
 
 export function sectionTitle(section: SectionId): string {
