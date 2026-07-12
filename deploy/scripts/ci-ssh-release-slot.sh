@@ -36,20 +36,31 @@ fi
 
 RELEASE_ROOT=""
 REGISTRY="${BRAI_PREVIEW_REGISTRY:-$ENVS_ROOT/preview-slots.json}"
+SLOT=""
+SLOT_LOWER=""
+SUPABASE_PREVIEW_BRANCH=""
 if [[ -f "$REGISTRY" ]]; then
-  SLOT_SOURCE="$(node - "$REGISTRY" "$BRAI_BRANCH" <<'NODE' || true
+  mapfile -t BRANCH_SLOT_META < <(node - "$REGISTRY" "$BRAI_BRANCH" <<'NODE' || true
 const fs = require("node:fs");
 const [registryPath, branch] = process.argv.slice(2);
 const registry = JSON.parse(fs.readFileSync(registryPath, "utf8"));
 for (const [slot, entry] of Object.entries(registry)) {
   if (entry?.branch === branch) {
+    console.log(slot);
     console.log(`preview-${slot.toLowerCase()}/source`);
+    console.log(entry.supabase_branch_name || "");
     process.exit(0);
   }
 }
 process.exit(1);
 NODE
-)"
+)
+  SLOT="${BRANCH_SLOT_META[0]:-}"
+  SLOT_SOURCE="${BRANCH_SLOT_META[1]:-}"
+  SUPABASE_PREVIEW_BRANCH="${BRANCH_SLOT_META[2]:-}"
+  if [[ -n "$SLOT" ]]; then
+    SLOT_LOWER="$(printf '%s' "$SLOT" | tr '[:upper:]' '[:lower:]')"
+  fi
   if [[ -n "$SLOT_SOURCE" && -r "$ENVS_ROOT/$SLOT_SOURCE/deploy/scripts/preview-slots.mjs" ]]; then
     RELEASE_ROOT="$ENVS_ROOT/$SLOT_SOURCE"
   fi
@@ -126,22 +137,28 @@ NODE
     cd "$RELEASE_ROOT"
   fi
 fi
+stop_preview_unit_if_exists() {
+  local unit="$1"
+  command -v systemctl >/dev/null 2>&1 || return 0
+  if "${BRAI_SUDO:-sudo}" systemctl cat "$unit" >/dev/null 2>&1; then
+    "${BRAI_SUDO:-sudo}" systemctl stop "$unit" >&2
+  fi
+}
+cleanup_released_preview_slot_artifacts() {
+  [[ -n "$SLOT_LOWER" ]] || return 0
+  local slot_root="$ENVS_ROOT/preview-$SLOT_LOWER"
+  case "$slot_root" in
+    "$ENVS_ROOT"/preview-[a-e]) ;;
+    *)
+      echo "Refusing preview slot cleanup outside $ENVS_ROOT/preview-[a-e]: $slot_root" >&2
+      return 1
+      ;;
+  esac
+  shopt -s nullglob
+  rm -rf "$slot_root/source" "$slot_root"/source.previous-* "$slot_root/web" "$slot_root/mobile-update"
+  shopt -u nullglob
+}
 if [[ "$RELEASE_BRANCH" == codex/* ]]; then
-  SUPABASE_PREVIEW_BRANCH="$(bash deploy/scripts/preview-slots.sh status | node -e '
-let raw = "";
-process.stdin.on("data", (chunk) => raw += chunk);
-process.stdin.on("end", () => {
-  const branch = process.argv[1];
-  const registry = JSON.parse(raw).registry;
-  for (const slot of ["A", "B", "C", "D", "E"]) {
-    const entry = registry[slot];
-    if (entry.branch === branch) {
-      console.log(entry.supabase_branch_name || "");
-      return;
-    }
-  }
-});
-' "$RELEASE_BRANCH")"
   if [[ -n "$SUPABASE_PREVIEW_BRANCH" ]]; then
     node deploy/scripts/supabase-branch.mjs delete-preview --branch "$RELEASE_BRANCH" --name "$SUPABASE_PREVIEW_BRANCH" >&2
   else
@@ -149,7 +166,12 @@ process.stdin.on("end", () => {
   fi
   node deploy/scripts/cleanup-test-schemas.mjs --branch "$RELEASE_BRANCH" --legacy-before-hours 24 >&2
 fi
+if [[ -n "$SLOT_LOWER" ]]; then
+  stop_preview_unit_if_exists "brai-api-preview-$SLOT_LOWER.service"
+  stop_preview_unit_if_exists "brai-admin-preview-$SLOT_LOWER.service"
+fi
 RELEASE_JSON="$(bash deploy/scripts/preview-slots.sh release "$RELEASE_BRANCH")"
+cleanup_released_preview_slot_artifacts
 printf '%s\n' "$RELEASE_JSON"
 REMOTE
 )"

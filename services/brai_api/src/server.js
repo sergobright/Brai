@@ -32,6 +32,7 @@ const BASE_JSON_HEADERS = {
   'access-control-allow-credentials': 'true'
 };
 const SESSION_COOKIE = 'brai_session';
+const RELEASE_SESSION_COOKIE = 'brai_release_session';
 const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 30;
 const STATE_CHANGING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 const DRAW_SCENE_LIMIT_BYTES = 15 * 1024 * 1024;
@@ -41,7 +42,7 @@ export function createBraiServer({
   dataRoot = path.join(process.cwd(), 'data'),
   token,
   webPassword = null,
-  releasePassword = webPassword,
+  releasePassword = null,
   sessionSecret = null,
   releaseDir = null,
   inboxApiKey = null,
@@ -566,7 +567,12 @@ export function createBraiServer({
           return;
         }
 
-        const cookie = createSessionCookie(sessionSecret, now(), shouldUseSecureCookie(req));
+        const cookie = createSessionCookie(
+          sessionSecret,
+          now(),
+          shouldUseSecureCookie(req),
+          RELEASE_SESSION_COOKIE
+        );
         recordRuntimeLog(store, logger, {
           traceId,
           source: 'release',
@@ -580,7 +586,7 @@ export function createBraiServer({
       }
 
       if (url.pathname.startsWith('/releases')) {
-        if (!hasValidSession(req, sessionSecret, now())) {
+        if (!hasValidSession(req, sessionSecret, now(), RELEASE_SESSION_COOKIE)) {
           recordRuntimeLog(store, logger, {
             traceId,
             source: 'auth',
@@ -1580,10 +1586,10 @@ async function readRequestBody(req, { limit = 4096 } = {}) {
   return raw;
 }
 
-function hasValidSession(req, sessionSecret, nowDate) {
+function hasValidSession(req, sessionSecret, nowDate, cookieName = SESSION_COOKIE) {
   if (!sessionSecret) return false;
   const cookies = parseCookies(req.headers.cookie ?? '');
-  const value = cookies[SESSION_COOKIE];
+  const value = cookies[cookieName];
   if (!value) return false;
 
   const parts = value.split('.');
@@ -1596,13 +1602,13 @@ function hasValidSession(req, sessionSecret, nowDate) {
   return timingSafeEqual(signature, expected);
 }
 
-function createSessionCookie(sessionSecret, nowDate, secure) {
+function createSessionCookie(sessionSecret, nowDate, secure, cookieName = SESSION_COOKIE) {
   if (!sessionSecret) throw new Error('session_secret_required');
   const expiresMs = nowDate.getTime() + SESSION_MAX_AGE_SECONDS * 1000;
   const signature = signSession(sessionSecret, expiresMs);
   const securePart = secure ? '; Secure' : '';
   const sameSite = secure ? 'None' : 'Lax';
-  return `${SESSION_COOKIE}=v1.${expiresMs}.${signature}; Path=/; HttpOnly; SameSite=${sameSite}; Max-Age=${SESSION_MAX_AGE_SECONDS}${securePart}`;
+  return `${cookieName}=v1.${expiresMs}.${signature}; Path=/; HttpOnly; SameSite=${sameSite}; Max-Age=${SESSION_MAX_AGE_SECONDS}${securePart}`;
 }
 
 function clearSessionCookie(secure) {

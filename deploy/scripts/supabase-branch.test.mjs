@@ -6,9 +6,11 @@ import os from "node:os";
 import path from "node:path";
 import {
   inspectOwnedSequences,
+  isTransientPostgresConnectionError,
   migrationFileEntries,
   reseedOwnedSequences,
   sequenceAllocationStatus,
+  transientPostgresRetryDelayMs,
   unsafeOwnedSequenceAllocations
 } from "./supabase-branch.mjs";
 
@@ -80,6 +82,24 @@ test("production copy reseeds only copied tables before its transaction commits"
   assert.ok(copyFunction.indexOf(reseed) > copyFunction.indexOf("OVERRIDING SYSTEM VALUE"));
   assert.ok(copyFunction.indexOf(reseed) < copyFunction.indexOf('client.query("COMMIT")'));
   assert.doesNotMatch(copyFunction, /tables: truncatableTables/);
+});
+
+test("self-hosted Postgres retry is limited to pooler circuit breaker errors", () => {
+  assert.equal(isTransientPostgresConnectionError(new Error("(ECIRCUITBREAKER) too many authentication failures")), true);
+  assert.equal(isTransientPostgresConnectionError(new Error("ClientHandler: circuit breaker open for operation: auth_error")), true);
+  assert.equal(isTransientPostgresConnectionError(new Error("password authentication failed for user postgres")), false);
+
+  const originalNow = Date.now;
+  Date.now = () => 1_783_833_100_000;
+  try {
+    assert.equal(
+      transientPostgresRetryDelayMs(new Error("blocked until: 1783833196"), 1),
+      99_000
+    );
+  } finally {
+    Date.now = originalNow;
+  }
+  assert.equal(transientPostgresRetryDelayMs(new Error("temporary network glitch"), 2), 30_000);
 });
 
 test("Postgres smoke inspects owned sequences on one repeatable-read client under SHARE locks", () => {

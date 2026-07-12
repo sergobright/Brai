@@ -44,11 +44,61 @@ test('actions event sync is idempotent and returns canonical state', async () =>
     assert.equal(second.body.server_revision, 1);
     assert.equal(second.body.state.activities.length, 1);
     assert.equal(eventDomainCount(fixture, 'activity'), 1);
+    const role = fixture.store.db
+      .prepare('SELECT item_roles_id FROM activities WHERE id = ?')
+      .get('action-1');
+    assert.ok(Number.isInteger(role.item_roles_id));
+    assert.equal(
+      fixture.store.db
+        .prepare('SELECT COUNT(*) AS count FROM events WHERE subject_id = ? AND item_roles_id = ?')
+        .get('action-1', role.item_roles_id).count,
+      1
+    );
 
     const state = await request(fixture.url, '/v1/activities');
     assert.equal(state.status, 200);
     assert.equal(state.body.activities.length, 1);
     assert.equal(state.body.activities[0].id, 'action-1');
+  } finally {
+    await fixture.close();
+  }
+});
+
+test('operation activities use entity role links', async () => {
+  const fixture = await createFixture(['2026-06-16T10:00:00.000Z']);
+
+  try {
+    fixture.store.db.prepare(`
+      INSERT INTO activities (
+        id, activity_type_id, title, description_md, author, reason, status,
+        created_at_utc, updated_at_utc
+      ) VALUES (?, 'operation', ?, ?, 'Codex', ?, 'New', ?, ?)
+    `).run(
+      'operation:api-test',
+      'Operation API test',
+      'Operation helper role link',
+      'Regression coverage',
+      '2026-06-16T10:00:00.000Z',
+      '2026-06-16T10:00:00.000Z'
+    );
+
+    const link = fixture.store.ensureActivityRoleLink({
+      id: 'operation:api-test',
+      title: 'Operation API test',
+      description_md: 'Operation helper role link',
+      author: 'Codex',
+      created_at_utc: '2026-06-16T10:00:00.000Z',
+      updated_at_utc: '2026-06-16T10:00:00.000Z',
+      deleted_at_utc: null
+    });
+
+    assert.ok(Number.isInteger(link.item_roles_id));
+    assert.equal(
+      fixture.store.db
+        .prepare("SELECT COUNT(*) AS count FROM activities WHERE id = 'operation:api-test' AND item_roles_id IS NOT NULL")
+        .get().count,
+      1
+    );
   } finally {
     await fixture.close();
   }
