@@ -7,6 +7,7 @@ import {
   FUTURE_EVENT_TOLERANCE_MS,
   LEGACY_DEVICE_ID,
   formatActivity,
+  isPostgresInteger,
   normalizeActionPayload,
   normalizeMarkdownSource,
   normalizeOrderedIds,
@@ -217,7 +218,7 @@ export const activityEventMethods = {
     }
 
     const clientSequence = Number(rawEvent?.client_sequence);
-    if (!Number.isInteger(clientSequence)) {
+    if (!isPostgresInteger(clientSequence)) {
       this.insertIgnoredActivityEvent({
         eventId,
         deviceId,

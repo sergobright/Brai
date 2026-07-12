@@ -28,6 +28,12 @@ export const INBOX_EVENT_TYPES = new Set([
 ]);
 export const ACTIVITY_STATUSES = new Set(['New', 'Done']);
 export const ACTIVITY_TYPES = new Set(['action', 'operation']);
+export const POSTGRES_INTEGER_MIN = -2_147_483_648;
+export const POSTGRES_INTEGER_MAX = 2_147_483_647;
+
+export function isPostgresInteger(value) {
+  return Number.isInteger(value) && value >= POSTGRES_INTEGER_MIN && value <= POSTGRES_INTEGER_MAX;
+}
 
 export function formatSession(session, timeZone = DEFAULT_TIME_ZONE) {
   if (!session) return null;

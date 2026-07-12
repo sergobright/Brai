@@ -4,6 +4,7 @@ import {
   EVENT_PAYLOAD_VERSION,
   FUTURE_EVENT_TOLERANCE_MS,
   LEGACY_DEVICE_ID,
+  isPostgresInteger,
   normalizeMetadata,
   parseJsonObject,
   sanitizeText,
@@ -307,7 +308,7 @@ export const timerEventMethods = {
     }
 
     const clientSequence = Number(rawEvent?.client_sequence);
-    if (!Number.isInteger(clientSequence)) {
+    if (!isPostgresInteger(clientSequence)) {
       this.insertIgnoredEvent({
         eventId,
         deviceId,
