@@ -60,6 +60,10 @@ export function appPreviewSlot(): string {
   return runtimeValue("previewSlot", APP_PREVIEW_SLOT);
 }
 
+export function appCommit(): string {
+  return runtimeValue("commit", APP_COMMIT);
+}
+
 export function environmentBadgeLabel(): string {
   const environment = appEnvironment();
   const previewSlot = appPreviewSlot();
