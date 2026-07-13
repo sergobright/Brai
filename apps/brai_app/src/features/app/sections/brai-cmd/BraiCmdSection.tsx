@@ -444,6 +444,8 @@ function ProviderPage({ capability, snapshot, onBack, onSnapshot }: { capability
 
   async function disconnectProvider() {
     if (!window.confirm("Отключить поставщика? Использующие его функции переключатся на облако Brai.")) return;
+    providerRequestRef.current += 1;
+    setTesting(false);
     const next = await disconnectBraiCmdProvider(providerId);
     if (next) {
       onSnapshot(next);
@@ -510,7 +512,7 @@ function ProviderPage({ capability, snapshot, onBack, onSnapshot }: { capability
               ) : models.length > 0 ? (
                 <Field>
                   <FieldLabel htmlFor="brai-cmd-provider-model-select">Модель</FieldLabel>
-                  <Select value={model} onValueChange={setModel}>
+                  <Select value={model} onValueChange={(value) => { providerRequestRef.current += 1; setTesting(false); setModel(value); setResult(null); }}>
                     <SelectTrigger id="brai-cmd-provider-model-select" className="w-full"><SelectValue /></SelectTrigger>
                     <SelectContent>{models.map((item) => <SelectItem key={item} value={item}>{item}</SelectItem>)}</SelectContent>
                   </Select>
@@ -518,7 +520,7 @@ function ProviderPage({ capability, snapshot, onBack, onSnapshot }: { capability
               ) : manualModel ? (
                 <Field>
                   <FieldLabel htmlFor="brai-cmd-provider-model">Модель</FieldLabel>
-                  <Input id="brai-cmd-provider-model" placeholder="Введите идентификатор модели" value={model} onChange={(event) => setModel(event.target.value)} />
+                  <Input id="brai-cmd-provider-model" placeholder="Введите идентификатор модели" value={model} onChange={(event) => { providerRequestRef.current += 1; setTesting(false); setModel(event.target.value); setResult(null); }} />
                 </Field>
               ) : null}
               {verified ? <Button className="w-full sm:w-fit" disabled={testing || model.trim().length === 0} type="button" onClick={() => void connectProvider()}>{testing ? "Проверка модели" : "Подключить"}</Button> : null}

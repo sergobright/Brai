@@ -833,9 +833,17 @@ export function OnboardingFlow({
             resetCheck("provider-key");
           }} />
           {providerVerified && providerManualModel ? (
-            <Input value={providerModel} aria-label="Модель распознавания" placeholder="Введите идентификатор модели" onChange={(event) => setProviderModel(event.target.value)} />
+            <Input value={providerModel} aria-label="Модель распознавания" placeholder="Введите идентификатор модели" onChange={(event) => {
+              providerRequestRef.current += 1;
+              setCheckingStep(null);
+              setProviderModel(event.target.value);
+            }} />
           ) : providerVerified ? (
-            <Select value={providerModel} onValueChange={setProviderModel}>
+            <Select value={providerModel} onValueChange={(value) => {
+              providerRequestRef.current += 1;
+              setCheckingStep(null);
+              setProviderModel(value);
+            }}>
               <SelectTrigger className="w-full" aria-label="Модель распознавания">
                 <SelectValue placeholder="Выберите модель распознавания" />
               </SelectTrigger>
