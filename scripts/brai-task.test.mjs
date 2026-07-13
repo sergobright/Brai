@@ -2280,6 +2280,8 @@ test("accepted preview stale cleanup is required", () => {
   assert.match(promoteScript, /already promoted for/);
   assert.match(requiredLoop, /exit 1/);
   assert.match(requiredLoop, /BRAI_REQUIRE_PREVIEW_SLOT_RELEASE=true/);
+  assert.match(requiredLoop, /BRAI_TARGET_BRANCH="\$TARGET_BRANCH"/);
+  assert.match(requiredLoop, /BRAI_TARGET_COMMIT="\$TARGET_COMMIT"/);
   assert.match(requiredLoop, /slot_released/);
   assert.match(script, /filter_cleanup_branches_to_active_previews/);
   assert.match(script, /accepted preview cleanup cannot continue safely/);
@@ -2291,6 +2293,10 @@ test("accepted preview stale cleanup is required", () => {
   assert.match(releaseScript, /stop_preview_unit_if_exists "brai-api-preview-\$SLOT_LOWER\.service"/);
   assert.match(releaseScript, /stop_preview_unit_if_exists "brai-admin-preview-\$SLOT_LOWER\.service"/);
   assert.match(releaseScript, /cleanup_released_preview_slot_artifacts/);
+  assert.match(releaseScript, /accepted_build_recorded\(\)/);
+  assert.match(releaseScript, /FROM build_version_refs/);
+  assert.match(releaseScript, /source_branch = \$1 AND target_branch = \$2 AND target_commit = \$3/);
+  assert.match(releaseScript, /"alreadyReleased":true/);
   assert.match(releaseScript, /"\$ENVS_ROOT"\/preview-\[a-e\]/);
   assert.match(releaseScript, /rm -rf "\$slot_root\/source" "\$slot_root"\/source\.previous-\* "\$slot_root\/web" "\$slot_root\/mobile-update"/);
   assert.doesNotMatch(releaseScript, /rm -rf .*data/);
