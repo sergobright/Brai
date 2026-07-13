@@ -47,7 +47,7 @@ describe("BraiApp settings", () => {
     await openProfileMenuItem("Brai CMD");
 
     await waitFor(() => expect(screen.getByRole("heading", { name: "Brai CMD" })).toBeInTheDocument());
-    expect(screen.getByText("Настройки Brai CMD доступны в Android-приложении Brai.")).toBeInTheDocument();
+    expect(await screen.findByText("Настройки Brai CMD доступны в Android-приложении Brai.")).toBeInTheDocument();
     expect(cmdPlugin.openSettings).not.toHaveBeenCalled();
   });
 
