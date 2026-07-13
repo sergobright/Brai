@@ -294,11 +294,26 @@ class NetworkClient(context: Context) {
         val body = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
         if (status !in 200..299) {
             val json = runCatching { JSONObject(body) }.getOrNull()
-            val message = json?.optString("error")?.takeUnless { it.isBlank() } ?: body
             val code = json?.optString("code")?.takeUnless { it.isBlank() } ?: "http_error"
-            throw ServerResponseException(status, code, json, "HTTP $status: $message")
+            val providerMessage = json?.optJSONObject("error")?.optString("message")?.takeUnless { it.isBlank() }
+                ?: (json?.opt("error") as? String)?.takeUnless { it.isBlank() }
+                ?: body
+            throw ServerResponseException(status, code, json, serverErrorMessage(status, code, providerMessage))
         }
         return JSONObject(body)
+    }
+
+    private fun serverErrorMessage(status: Int, code: String, detail: String): String = when (code) {
+        "unauthorized" -> "Токен устройства недействителен. Переподключите Brai."
+        "missing_device_id" -> "Не удалось определить устройство. Перезапустите приложение."
+        "text_required" -> "Нет текста для обработки."
+        "prompt_required", "post_processing_prompt_required" -> "Заполните промпт постобработки."
+        "prompt_too_long", "post_processing_prompt_too_long" -> "Промпт постобработки слишком длинный."
+        "request_too_large", "audio_too_large" -> "Аудиозапись слишком большая."
+        "unsupported_media_type", "unsupported_audio" -> "Формат аудиозаписи не поддерживается."
+        "upstream_error" -> "AI-провайдер Brai временно недоступен. Попробуйте ещё раз."
+        "internal_error" -> "Сервер Brai временно не может обработать запрос."
+        else -> detail.trim().takeIf { it.isNotBlank() } ?: "Сервер Brai вернул ошибку $status."
     }
 
     private fun healthStatus(json: JSONObject): String =
