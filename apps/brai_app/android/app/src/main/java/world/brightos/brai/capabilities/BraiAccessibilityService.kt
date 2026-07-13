@@ -150,6 +150,7 @@ class BraiAccessibilityService : AccessibilityService() {
 
         if (autoInsertTranscriptFile == transcript.file.name) autoInsertTranscriptFile = null
         PendingTranscriptStore.delete(transcript)
+        BraiCmdPlugin.notifyStateChanged()
         BraiCmdPlugin.notifyOnboardingEvent("voiceTextInserted", text)
         val pendingRecordings = RecordingService.pendingRecordingsCount(this)
         val pendingTranscripts = PendingTranscriptStore.list(this).size

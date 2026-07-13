@@ -45,7 +45,7 @@ class BraiCmdQueueTest {
             InboxPayloadStore.saveAction(audio, action)
         }
         val screenshot = File(context.cacheDir, "snapshot-${System.nanoTime()}.png").apply { writeBytes(byteArrayOf(1)) }
-        requireNotNull(ScreenshotInboxStore.enqueue(context, screenshot))
+        val queuedScreenshot = requireNotNull(ScreenshotInboxStore.enqueue(context, screenshot))
         PendingTranscriptStore.add(context, "main", PendingTranscriptKind.MainDictation)
         PendingTranscriptStore.add(context, "reply", PendingTranscriptKind.ChatReply)
 
@@ -107,12 +107,12 @@ class BraiCmdQueueTest {
         assertEquals(2, afterEnqueue.failedTransport.total)
         assertEquals(0, afterEnqueue.failedTransport[ContextButtonAction.ChatContextInbox])
 
-        assertTrue(AudioQueueStore.complete(main))
-        assertTrue(AudioQueueStore.complete(idea))
+        assertTrue(AudioQueueStore.complete(context, main))
+        assertTrue(AudioQueueStore.complete(context, idea))
     }
 
     @Test
-    fun authBlockReportsTheExactItemsThatCouldNotBeSent() {
+    fun authBlockStopsAtTheFirstCloudBoundItemInsteadOfMarkingTheWholeQueue() {
         ConfigStore(context).authToken = ""
         recordings.mkdirs()
         val main = audio("blocked-main")
@@ -124,13 +124,11 @@ class BraiCmdQueueTest {
         val result = QueueTransportWorker(context).run(null)
 
         assertEquals(QueueTransportStatus.Blocked, result.status)
-        assertEquals(
-            setOf(
-                BraiCmdQueue.audioTransportId(main),
-                BraiCmdQueue.screenshotTransportId(queuedScreenshot)
-            ),
-            result.failedTransportIds
-        )
+        assertEquals(1, result.failedTransportIds.size)
+        assertTrue(result.failedTransportIds.single() in setOf(
+            BraiCmdQueue.audioTransportId(main),
+            BraiCmdQueue.screenshotTransportId(queuedScreenshot)
+        ))
     }
 
     @Test
@@ -140,7 +138,7 @@ class BraiCmdQueueTest {
         BraiCmdQueue.markTransportFailed(context, listOf(BraiCmdQueue.audioTransportId(first)))
         assertEquals(1, BraiCmdQueue.snapshot(context).failedTransport.main)
 
-        assertTrue(AudioQueueStore.complete(first))
+        assertTrue(AudioQueueStore.complete(context, first))
         assertEquals(0, BraiCmdQueue.snapshot(context).transport.total)
 
         audio("same-name")
@@ -223,7 +221,7 @@ class BraiCmdQueueTest {
         InboxPayloadStore.saveAction(audio, AudioQueueAction.ChatContextInbox)
         File("${audio.absolutePath}.context.json").writeText("{}", Charsets.UTF_8)
 
-        assertTrue(AudioQueueStore.complete(audio))
+        assertTrue(AudioQueueStore.complete(context, audio))
 
         assertFalse(audio.exists())
         assertFalse(File("${audio.absolutePath}.done").exists())

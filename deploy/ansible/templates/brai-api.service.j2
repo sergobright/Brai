@@ -8,10 +8,10 @@ Type=simple
 WorkingDirectory={{ brai_env_root }}/{{ item.value.path }}/source/services/brai_api
 {% if item.key == 'prod' %}
 EnvironmentFile={{ brai_api_env_source }}
-ExecStart=/usr/bin/env PORT={{ item.value.api_port }} BRAI_RELEASE_DIR={{ brai_repo }}/deploy/releases BRAI_INBOX_STORAGE_ROOT={{ brai_repo }}/data/inbox-attachments BRAI_CODEX_BIN=/srv/opt/codex-cli/bin/codex BRAI_CODEX_MODEL=gpt-5.4-mini BRAI_CODEX_FALLBACK_MODEL=gpt-5 BRAI_CODEX_TIMEOUT_MS=20000 CODEX_HOME=/srv/opt/codex-runtime/brai HOME=/srv/opt/codex-runtime/brai {{ brai_node_bin }} src/index.js
+ExecStart=/usr/bin/env PORT={{ item.value.api_port }} BRAI_RELEASE_DIR={{ brai_repo }}/deploy/releases BRAI_INBOX_STORAGE_ROOT={{ brai_repo }}/data/inbox-attachments BRAI_CODEX_BIN=/srv/opt/codex-cli/bin/codex BRAI_CODEX_MODEL=gpt-5.4-mini BRAI_CODEX_TIMEOUT_MS=20000 CODEX_HOME=/srv/opt/codex-runtime/brai HOME=/srv/opt/codex-runtime/brai {{ brai_node_bin }} src/index.js
 {% else %}
 EnvironmentFile={{ brai_env_root }}/{{ item.value.path }}/brai-api.env
-ExecStart=/usr/bin/env PORT={{ item.value.api_port }} BRAI_RELEASE_DIR={{ brai_repo }}/deploy/releases BRAI_INBOX_STORAGE_ROOT={{ brai_env_root }}/{{ item.value.path }}/data/inbox-attachments BRAI_CODEX_BIN=/srv/opt/codex-cli/bin/codex BRAI_CODEX_MODEL=gpt-5.4-mini BRAI_CODEX_FALLBACK_MODEL=gpt-5 BRAI_CODEX_TIMEOUT_MS=20000 CODEX_HOME=/srv/opt/codex-runtime/brai HOME=/srv/opt/codex-runtime/brai {{ brai_node_bin }} src/index.js
+ExecStart=/usr/bin/env PORT={{ item.value.api_port }} BRAI_RELEASE_DIR={{ brai_repo }}/deploy/releases BRAI_INBOX_STORAGE_ROOT={{ brai_env_root }}/{{ item.value.path }}/data/inbox-attachments BRAI_CODEX_BIN=/srv/opt/codex-cli/bin/codex BRAI_CODEX_MODEL=gpt-5.4-mini BRAI_CODEX_TIMEOUT_MS=20000 CODEX_HOME=/srv/opt/codex-runtime/brai HOME=/srv/opt/codex-runtime/brai {{ brai_node_bin }} src/index.js
 {% endif %}
 Restart=always
 RestartSec=3

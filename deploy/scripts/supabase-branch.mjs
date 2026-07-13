@@ -346,11 +346,11 @@ export async function copySchemaData(pool, { sourceSchema, targetSchema, postSee
       const columns = await commonColumns(client, sourceSchema, targetSchema, table);
       if (columns.length === 0) continue;
       const columnList = columns.map(quoteIdentifier).join(", ");
+      const sourceQuery = copySourceQuery({ sourceSchema, targetSchema, table, columns });
       await client.query(`
         INSERT INTO ${qualifiedTable(targetSchema, table)} (${columnList})
         OVERRIDING SYSTEM VALUE
-        SELECT ${columnList}
-        FROM ${qualifiedTable(sourceSchema, table)}
+        ${sourceQuery}
       `);
     }
     await reseedOwnedSequences(client, { schema: targetSchema, tables: copyTables });
@@ -363,6 +363,24 @@ export async function copySchemaData(pool, { sourceSchema, targetSchema, postSee
   } finally {
     client.release();
   }
+}
+
+export function copySourceQuery({ sourceSchema, targetSchema, table, columns }) {
+  if (table !== "ai_logs" || !columns.includes("agent_id")) {
+    return `
+        SELECT ${columns.map(quoteIdentifier).join(", ")}
+        FROM ${qualifiedTable(sourceSchema, table)}
+    `;
+  }
+  return `
+        SELECT ${columns.map((column) => `source_row.${quoteIdentifier(column)}`).join(", ")}
+        FROM ${qualifiedTable(sourceSchema, table)} AS source_row
+        WHERE EXISTS (
+          SELECT 1
+          FROM ${qualifiedTable(targetSchema, "agents")} AS target_agent
+          WHERE target_agent.id = source_row.agent_id
+        )
+  `;
 }
 
 export async function inspectOwnedSequences(queryable, { schema, tables = null, lockOwnedTables = false }) {

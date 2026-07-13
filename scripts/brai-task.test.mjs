@@ -190,6 +190,7 @@ test("hook analysis marks safe SocratiCode codebase tools as semantic use", () =
 test("SocratiCode requirement blocks implementation handoff without marker", () => {
   assert.deepEqual(validateSocraticodeRequirement({}, false), { ok: true, required: false });
   assert.match(validateSocraticodeRequirement({}, true).message, /must use SocratiCode/);
+  assert.match(validateSocraticodeRequirement({}, true).message, /narrow infra-fix/);
   assert.deepEqual(validateSocraticodeRequirement({ socraticodeUsedAt: "2026-07-09T00:00:00.000Z" }, true), {
     ok: true,
     required: true,
@@ -1027,6 +1028,42 @@ test("follow-up keeps the original task base after origin-main advances", () => 
   const marker = JSON.parse(fs.readFileSync(path.join(repo, ".brai-task", "task.json"), "utf8"));
   assert.equal(marker.mode, "follow-up");
   assert.equal(marker.base, base);
+});
+
+test("recover-follow-up transfers a lost-thread marker and keeps its frozen base", () => {
+  const repo = tempRoot("brai-task-recover-follow-up-");
+  const script = path.resolve(process.cwd(), "scripts/brai-task.mjs");
+  git(["init"], repo);
+  git(["config", "user.email", "test@example.invalid"], repo);
+  git(["config", "user.name", "Brai Test"], repo);
+  fs.writeFileSync(path.join(repo, ".gitignore"), ".brai-task/\n");
+  fs.writeFileSync(path.join(repo, "base.txt"), "base\n");
+  git(["add", ".gitignore", "base.txt"], repo);
+  git(["commit", "-m", "base"], repo);
+  const base = git(["rev-parse", "HEAD"], repo).stdout.trim();
+  git(["update-ref", "refs/remotes/origin/main", base], repo);
+  git(["checkout", "-b", "codex/foo"], repo);
+  fs.mkdirSync(path.join(repo, ".brai-task"));
+  fs.writeFileSync(path.join(repo, ".brai-task", "task.json"), `${JSON.stringify({
+    branch: "codex/foo",
+    mode: "new",
+    base,
+    createdAt: "2026-06-26T00:00:00.000Z",
+    threadId: "lost-thread",
+  })}\n`);
+
+  const result = spawnSync(process.execPath, [script, "recover-follow-up", "--from-thread", "lost-thread"], {
+    cwd: repo,
+    encoding: "utf8",
+    env: { ...process.env, CODEX_THREAD_ID: "replacement-thread" },
+  });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  const marker = JSON.parse(fs.readFileSync(path.join(repo, ".brai-task", "task.json"), "utf8"));
+  assert.equal(marker.mode, "follow-up");
+  assert.equal(marker.base, base);
+  assert.equal(marker.threadId, "replacement-thread");
+  assert.equal(marker.recoveredFromThreadId, "lost-thread");
+  assert.deepEqual(marker.delegations, []);
 });
 
 test("task state rejects a branch with another task marker", () => {
@@ -1983,9 +2020,27 @@ test("task state rejects same-thread writes after local acceptance marker", () =
         acceptedAt: "2026-06-26T00:00:00.000Z",
       })}\n`,
     );
+    fs.writeFileSync(
+      path.join(repo, ".brai-task", "preview-handoff.json"),
+      `${JSON.stringify({
+        branch: "codex/foo",
+        commit: head,
+        slot: "A",
+        url: "https://a.test.brai.one",
+        runId: 123,
+        releaseNotes: {
+          short_changes: "Исправлена остановка агента.",
+          detailed_changes: "Stop hook блокирует ответ до завершения принятия preview.",
+          reason: "Нельзя завершать задачу во время production delivery.",
+        },
+        verifiedAt: "2026-06-26T00:00:00.000Z",
+      })}\n`,
+    );
     process.chdir(repo);
 
     const state = deriveTaskState();
+    assert.equal(state.receiptValidation.ok, true);
+    assert.equal(state.ok, false);
     assert.equal(state.reuse.ok, false);
     assert.match(state.reuse.message, /acceptance already started/);
 

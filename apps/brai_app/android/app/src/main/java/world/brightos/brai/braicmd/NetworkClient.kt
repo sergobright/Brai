@@ -9,7 +9,11 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.BufferedOutputStream
 import java.io.File
+import java.io.IOException
+import java.net.ConnectException
 import java.net.HttpURLConnection
+import java.net.SocketTimeoutException
+import java.net.UnknownHostException
 import java.net.URL
 import java.util.UUID
 
@@ -18,7 +22,13 @@ data class DictationResponse(
     val provider: String,
     val model: String,
     val fallbackUsed: Boolean,
-    val notice: BraiCmdNotice?
+    val notice: BraiCmdNotice?,
+    val audioDurationMs: Long,
+    val postProcessed: Boolean,
+    val postProcessingProvider: String,
+    val postProcessingModel: String,
+    val postProcessingInputChars: Int,
+    val postProcessingOutputChars: Int
 )
 
 data class AccessResponse(
@@ -34,6 +44,13 @@ data class PreliminaryProfileResponse(
     val duplicateDevice: Boolean
 )
 
+data class CloudPostProcessingResponse(
+    val text: String,
+    val provider: String,
+    val model: String,
+    val inputChars: Int,
+    val outputChars: Int
+)
 class ServerResponseException(
     val statusCode: Int,
     val code: String,
@@ -41,6 +58,15 @@ class ServerResponseException(
     message: String
 ) : IllegalStateException(message) {
     constructor(statusCode: Int, code: String, message: String) : this(statusCode, code, null, message)
+}
+
+internal const val PRELIMINARY_TIMEOUT_MS = 15_000
+
+internal fun preliminaryFailureCode(error: Throwable): String = when (error) {
+    is SocketTimeoutException -> "preliminary_timeout"
+    is UnknownHostException, is ConnectException, is IOException -> "preliminary_network"
+    is ServerResponseException -> "preliminary_server"
+    else -> "preliminary_unknown"
 }
 
 class NetworkClient(context: Context) {
@@ -57,9 +83,25 @@ class NetworkClient(context: Context) {
         return healthStatus(readJson(connection))
     }
 
+    fun diagnostics(includeCloudTranscription: Boolean): JSONObject {
+        val connection = openAuthenticatedConnection("/v1/brai-cmd/diagnostics", "POST").apply {
+            doOutput = true
+            readTimeout = DEFAULT_READ_TIMEOUT_MS
+            setRequestProperty("Content-Type", "application/json; charset=utf-8")
+        }
+        val body = JSONObject()
+            .put("includeCloudTranscription", includeCloudTranscription)
+            .toString()
+            .toByteArray(Charsets.UTF_8)
+        connection.outputStream.use { it.write(body) }
+        return readJson(connection)
+    }
+
     fun requestPreliminaryProfile(displayName: String, deviceFingerprint: String): PreliminaryProfileResponse {
         val connection = openPublicConnection("/v1/brai-cmd/preliminary-profile", "POST").apply {
             doOutput = true
+            connectTimeout = PRELIMINARY_TIMEOUT_MS
+            readTimeout = PRELIMINARY_TIMEOUT_MS
             setRequestProperty("Content-Type", "application/json; charset=utf-8")
         }
         val body = JSONObject()
@@ -135,6 +177,8 @@ class NetworkClient(context: Context) {
             setRequestProperty("Content-Type", "multipart/form-data; boundary=$boundary")
         }
         val shouldPostProcess = config.postProcessingEnabled
+        val shouldPostProcessOnServer = shouldPostProcess && config.postProcessingProviderMode != "key"
+        val durationMs = audioDurationMs(file)
         val shouldSendHeaderContext = conversationContext?.isReliable() == true
         val shouldSendScreenshot = screenshotFile?.isFile == true && screenshotFile.length() > 0L
         BufferedOutputStream(connection.outputStream).use { out ->
@@ -143,7 +187,7 @@ class NetworkClient(context: Context) {
             writeField(out, boundary, "clientVersion", BuildConfig.VERSION_NAME)
             writeField(out, boundary, "appPackage", appContext.packageName)
             writeField(out, boundary, "braiCmdFunction", braiCmdFunction)
-            writeField(out, boundary, "audioDurationMs", audioDurationMs(file).toString())
+            writeField(out, boundary, "audioDurationMs", durationMs.toString())
             if (shouldSendHeaderContext) {
                 writeField(out, boundary, "headerContextEnabled", "true")
                 writeField(out, boundary, "screenTitle", conversationContext.recipientName)
@@ -156,7 +200,7 @@ class NetworkClient(context: Context) {
                 writeField(out, boundary, "screenshotContextEnabled", "true")
                 writeFile(out, boundary, "screenshot", screenshotFile.name, "image/jpeg", screenshotFile)
             }
-            if (shouldPostProcess) {
+            if (shouldPostProcessOnServer) {
                 writeField(out, boundary, "postProcessingEnabled", "true")
                 writeField(out, boundary, "postProcessingPrompt", postProcessingPrompt())
             }
@@ -164,12 +208,19 @@ class NetworkClient(context: Context) {
             out.write("--$boundary--\r\n".toByteArray())
         }
         val json = readJson(connection)
+        val serverText = json.optString("text")
         return DictationResponse(
-            text = json.optString("text"),
+            text = serverText,
             provider = json.optString("provider"),
             model = json.optString("model"),
             fallbackUsed = json.optBoolean("fallbackUsed", false),
-            notice = noticeFromJson(json.optJSONObject("notice"))
+            notice = noticeFromJson(json.optJSONObject("notice")),
+            audioDurationMs = durationMs,
+            postProcessed = json.optBoolean("postProcessed", false),
+            postProcessingProvider = if (json.optBoolean("postProcessed", false)) "brai-cloud" else "",
+            postProcessingModel = json.optString("postProcessingModel"),
+            postProcessingInputChars = json.optInt("postProcessingInputChars", 0),
+            postProcessingOutputChars = json.optInt("postProcessingOutputChars", 0)
         )
     }
 
@@ -225,6 +276,28 @@ class NetworkClient(context: Context) {
         )
     }
 
+    fun postProcessText(text: String, prompt: String): CloudPostProcessingResponse {
+        val connection = openAuthenticatedConnection("/v1/brai-cmd/post-process", "POST").apply {
+            doOutput = true
+            readTimeout = DEFAULT_READ_TIMEOUT_MS
+            setRequestProperty("Content-Type", "application/json; charset=utf-8")
+        }
+        val body = JSONObject()
+            .put("text", text.trim())
+            .put("prompt", prompt.trim())
+            .toString()
+            .toByteArray(Charsets.UTF_8)
+        connection.outputStream.use { it.write(body) }
+        val json = readJson(connection)
+        return CloudPostProcessingResponse(
+            text = json.optString("text").trim(),
+            provider = json.optString("provider", "brai-cloud"),
+            model = json.optString("model"),
+            inputChars = json.optInt("inputChars", text.length + prompt.length),
+            outputChars = json.optInt("outputChars", json.optString("text").length)
+        )
+    }
+
     private fun openPublicConnection(path: String, method: String): HttpURLConnection {
         val base = config.serverUrl.trim().trimEnd('/')
         require(base.startsWith("http://") || base.startsWith("https://")) { "Адрес сервера должен начинаться с http:// или https://" }
@@ -238,7 +311,7 @@ class NetworkClient(context: Context) {
 
     private fun openAuthenticatedConnection(path: String, method: String): HttpURLConnection {
         val token = config.authToken
-        require(token.isNotBlank()) { "Не указан токен доступа" }
+        if (token.isBlank()) throw QueueAuthBlockedException()
         return openPublicConnection(path, method).apply {
             setRequestProperty("Authorization", "Bearer $token")
             setRequestProperty("X-Brai-Cmd-Device-Id", config.installId)
@@ -252,11 +325,26 @@ class NetworkClient(context: Context) {
         val body = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
         if (status !in 200..299) {
             val json = runCatching { JSONObject(body) }.getOrNull()
-            val message = json?.optString("error")?.takeUnless { it.isBlank() } ?: body
             val code = json?.optString("code")?.takeUnless { it.isBlank() } ?: "http_error"
-            throw ServerResponseException(status, code, json, "HTTP $status: $message")
+            val providerMessage = json?.optJSONObject("error")?.optString("message")?.takeUnless { it.isBlank() }
+                ?: (json?.opt("error") as? String)?.takeUnless { it.isBlank() }
+                ?: body
+            throw ServerResponseException(status, code, json, serverErrorMessage(status, code, providerMessage))
         }
         return JSONObject(body)
+    }
+
+    private fun serverErrorMessage(status: Int, code: String, detail: String): String = when (code) {
+        "unauthorized" -> "Токен устройства недействителен. Переподключите Brai."
+        "missing_device_id" -> "Не удалось определить устройство. Перезапустите приложение."
+        "text_required" -> "Нет текста для обработки."
+        "prompt_required", "post_processing_prompt_required" -> "Заполните промпт постобработки."
+        "prompt_too_long", "post_processing_prompt_too_long" -> "Промпт постобработки слишком длинный."
+        "request_too_large", "audio_too_large" -> "Аудиозапись слишком большая."
+        "unsupported_media_type", "unsupported_audio" -> "Формат аудиозаписи не поддерживается."
+        "upstream_error" -> "AI-провайдер Brai временно недоступен. Попробуйте ещё раз."
+        "internal_error" -> "Сервер Brai временно не может обработать запрос."
+        else -> detail.trim().takeIf { it.isNotBlank() } ?: "Сервер Brai вернул ошибку $status."
     }
 
     private fun healthStatus(json: JSONObject): String =

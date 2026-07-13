@@ -420,13 +420,15 @@ describe("mobile OTA publish scripts", () => {
   it("restores stale source permissions only after staged dependencies are complete", async () => {
     const script = await readFile(path.join(workspaceRoot, "deploy/scripts/ci-ssh-deploy.sh"), "utf8");
 
-    expect(script).toContain('find "$SOURCE_ROOT" -user "$(id -u)" -exec chmod u+rwX,g+rwX {} + || true');
+    expect(script).toContain('find "$REMOTE_UPLOAD" ! -type l -user "$(id -u)" -exec chmod u+rwX,g+rwX {} +');
+    const sourceChmod = 'find "$SOURCE_ROOT" ! -type l -user "$(id -u)" -exec chmod u+rwX,g+rwX {} + || true';
+    expect(script).toContain(sourceChmod);
     expect(script).toContain('mv "$SOURCE_ROOT" "$PREVIOUS_SOURCE"');
+    expect(script.indexOf('npm --prefix services/brai_api ci')).toBeLessThan(script.indexOf(sourceChmod));
+    expect(script.indexOf(sourceChmod)).toBeLessThan(script.indexOf('mv "$SOURCE_ROOT" "$PREVIOUS_SOURCE"'));
     expect(script).toContain('check_deploy_headroom "$ENVS_ROOT"');
     expect(script).toContain('BRAI_DEPLOY_MIN_FREE_GB:-4');
     expect(script).toContain('cleanup_stale_preview_previous_sources "${PREVIOUS_SOURCE:-}"');
-    expect(script.indexOf('npm --prefix services/brai_api ci')).toBeLessThan(script.indexOf('find "$SOURCE_ROOT" -user "$(id -u)"'));
-    expect(script.indexOf('find "$SOURCE_ROOT" -user "$(id -u)"')).toBeLessThan(script.indexOf('mv "$SOURCE_ROOT" "$PREVIOUS_SOURCE"'));
     expect(script.indexOf('check_deploy_headroom "$ENVS_ROOT"')).toBeLessThan(script.indexOf('npm ci'));
     expect(script.indexOf('deploy/scripts/deploy-branch.sh')).toBeLessThan(script.indexOf('rm -rf "$PREVIOUS_SOURCE"', script.indexOf('deploy/scripts/deploy-branch.sh')));
     expect(script).toContain('"$ENVS_ROOT"/preview-[a-e]');
@@ -454,6 +456,9 @@ describe("mobile OTA publish scripts", () => {
     expect(adminService).toContain("BRAI_ADMIN_API_BASE=http://127.0.0.1:{{ item.value.api_port }}");
     expect(adminService).toContain("-p {{ item.value.admin_port }}");
     expect(sudoers).toContain("systemctl restart {{ env.admin_service }}");
+    expect(sudoers).toContain("systemctl stop {{ env.admin_service }}");
+    expect(sudoers).toContain("systemctl reset-failed {{ env.admin_service }}");
+    expect(sudoers).toContain("{% if name.startswith('preview-') %}");
     expect(playbook).toContain("Ensure non-production data directories keep deploy setgid");
     expect(playbook).toContain('group: "{{ brai_deploy_user }}"');
     expect(playbook).toContain('mode: "2775"');
@@ -483,6 +488,7 @@ describe("mobile OTA publish scripts", () => {
     expect(prodBlock.indexOf('deploy/scripts/build-android-env-apk.sh production')).toBeLessThan(prodBlock.indexOf('deploy/scripts/build-nonproduction-apks.sh'));
     expect(buildApk).toContain('"${BRAI_RECORD_APK_LEDGER:-true}" != "false"');
     expect(buildApk).toContain('--next-apk true --target-branch "$BRAI_BRANCH" --target-commit "$BRAI_COMMIT"');
+    expect(releaseSlot).toContain('systemctl reset-failed "$unit"');
     expect(buildApk).toContain('preview-slots.sh" next-apk-preview "$BRAI_BRANCH" "$BRAI_COMMIT" "$BRAI_APK_VERSION"');
     expect(buildApk.indexOf('if [[ "$ENVIRONMENT" == preview-*')).toBeLessThan(buildApk.indexOf('export BRAI_APK_VERSION='));
     expect(buildApk).toContain('BUILD_CLIENT="${BRAI_BUILD_CLIENT:-true}"');
@@ -1002,7 +1008,8 @@ describe("mobile OTA publish scripts", () => {
     expect(html).toContain("<h2>Brai</h2>");
     expect(html).toContain("<h2>Brai Dev</h2>");
     expect(html).toContain("Brai E");
-    expect(html).toContain('<p class="version">v1</p>');
+    expect(html).toContain('<div class="version-row"><p class="version">v1</p><span class="size">');
+    expect(html).toContain("0 МБ</span>");
     expect(html).toContain("23 июня 2026, 12:13 МСК");
     expect(html).toContain('<a class="download" href="./brai-v1.apk">Скачать</a>');
     expect(html).toContain('<span class="download" aria-disabled="true">Скачать</span>');
@@ -1050,7 +1057,7 @@ describe("mobile OTA publish scripts", () => {
 
     const html = await readFile(path.join(releaseDir, "index.html"), "utf8");
     expect(html).toContain("<h2>Brai</h2>");
-    expect(html).toContain('<p class="version">v7</p>');
+    expect(html).toContain('<div class="version-row"><p class="version">v7</p><span class="size">0 МБ</span></div>');
     expect(html).toContain('<a class="download" href="./brai-v7.apk">Скачать</a>');
   });
 

@@ -4,7 +4,6 @@ const GROQ_TRANSCRIPTIONS_URL = 'https://api.groq.com/openai/v1/audio/transcript
 const GROQ_CHAT_COMPLETIONS_URL = 'https://api.groq.com/openai/v1/chat/completions';
 const OPENAI_TRANSCRIPTIONS_URL = 'https://api.openai.com/v1/audio/transcriptions';
 const MAX_POST_PROCESSING_PROMPT_CHARS = 4000;
-const BRAI_CMD_AGENT_ID = 'brai-cmd.dictate.transcription';
 const BRAI_CMD_FUNCTION_DISABLED_MESSAGE_KEY = 'message.function.disabled.default';
 const BRAI_CMD_FUNCTION_DISABLED_CODE = 'function_disabled';
 
@@ -29,6 +28,7 @@ export function createBraiCmdRuntime(options = {}) {
     config,
     deps: {
       transcribeAudio: (file) => transcribeAudio(file, config),
+      probeTranscription: () => probeCloudTranscription(config),
       postProcessTranscript: (text, prompt) =>
         postProcessWithGroq(text, prompt, {
           apiKey: config.groqApiKey,
@@ -55,6 +55,8 @@ export function isBraiCmdPublicRoute(pathname) {
     '/v1/brai-cmd/preliminary-profile',
     '/v1/brai-cmd/access/request',
     '/v1/brai-cmd/dictate',
+    '/v1/brai-cmd/diagnostics',
+    '/v1/brai-cmd/post-process',
     '/v1/airwhisper/health',
     '/v1/airwhisper/preliminary-profile',
     '/v1/airwhisper/access/request',
@@ -96,6 +98,72 @@ export async function handleBraiCmdPublicRoute({ req, res, url, store, runtime, 
       url.pathname === '/v1/airwhisper/access/request'
     )) {
       await handleAccessRequest({ req, res, store, sendJson });
+      return;
+    }
+
+    if (req.method === 'POST' && url.pathname === '/v1/brai-cmd/diagnostics') {
+      const access = requireBraiCmdAccess(req, store);
+      const body = await readJsonBody(req, 16 * 1024);
+      let cloudTranscription = { status: 'skipped' };
+      if (body.includeCloudTranscription !== false) {
+        const probe = await runtime.deps.probeTranscription();
+        cloudTranscription = { status: 'ok', provider: probe.provider, model: probe.model };
+      }
+      safeRecordLog(store, {
+        source: 'brai-cmd',
+        operation: 'brai_cmd.diagnostics',
+        status: 'success',
+        severityText: 'INFO',
+        reason: null,
+        message: 'Brai Cmd diagnostics passed',
+        jsonData: { access_token_id: access.id, cloud_transcription: cloudTranscription.status }
+      });
+      sendJson(req, res, 200, {
+        ok: true,
+        stages: {
+          server: { status: 'ok' },
+          access: { status: 'ok' },
+          contextDelivery: { status: 'ok' },
+          cloudTranscription
+        }
+      });
+      return;
+    }
+
+    if (req.method === 'POST' && url.pathname === '/v1/brai-cmd/post-process') {
+      const access = requireBraiCmdAccess(req, store);
+      const body = await readJsonBody(req, 64 * 1024);
+      const text = stringField(body, 'text');
+      const prompt = stringField(body, 'prompt');
+      if (!text) throw new BraiCmdHttpError(400, 'Text is required', 'text_required');
+      if (!prompt) throw new BraiCmdHttpError(400, 'Prompt is required', 'prompt_required');
+      if (prompt.length > MAX_POST_PROCESSING_PROMPT_CHARS) {
+        throw new BraiCmdHttpError(400, 'Prompt is too long', 'prompt_too_long');
+      }
+      const started = Date.now();
+      const processed = await runtime.deps.postProcessTranscript(text, prompt);
+      safeRecordLog(store, {
+        source: 'brai-cmd',
+        operation: 'brai_cmd.post_process',
+        status: 'success',
+        severityText: 'INFO',
+        reason: null,
+        message: 'Brai Cmd text post-processing completed',
+        jsonData: {
+          access_token_id: access.id,
+          model: processed.model,
+          duration_ms: Date.now() - started,
+          input_chars: text.length + prompt.length,
+          output_chars: processed.text.length
+        }
+      });
+      sendJson(req, res, 200, {
+        text: processed.text,
+        provider: processed.provider ?? 'groq',
+        model: processed.model,
+        inputChars: text.length + prompt.length,
+        outputChars: processed.text.length
+      });
       return;
     }
 
@@ -292,7 +360,6 @@ async function handleDictate({ req, res, store, runtime, access, sendJson, route
   const started = Date.now();
   const requestId = randomUUID();
   const { config, deps } = runtime;
-  const agent = store.getAgent(BRAI_CMD_AGENT_ID);
   const clientVersion = headerValue(req, 'x-brai-cmd-client-version') || headerValue(req, 'x-airwhisper-client-version');
   let audioBytes = 0;
   let audioDurationMs = 0;
@@ -307,8 +374,9 @@ async function handleDictate({ req, res, store, runtime, access, sendJson, route
   let contextEnabled = false;
   let postProcessed = false;
   let postProcessingModel = '';
+  let postProcessingInputChars = 0;
+  let postProcessingOutputChars = 0;
   let text = '';
-  let aiLogWritten = false;
 
   try {
     const contentType = headerValue(req, 'content-type');
@@ -347,18 +415,22 @@ async function handleDictate({ req, res, store, runtime, access, sendJson, route
     contextEnabled = titleContextEnabled(multipart.fields);
     if (postProcessingPrompt && text.trim()) {
       const postProcessingStarted = Date.now();
+      postProcessingInputChars = text.trim().length + postProcessingPrompt.trim().length;
       const processed = await deps.postProcessTranscript(text, postProcessingPrompt);
       postProcessingMs = Date.now() - postProcessingStarted;
       postProcessed = true;
       postProcessingModel = processed.model;
       text = processed.text;
+      postProcessingOutputChars = text.length;
     } else if (contextEnabled && normalizedContextJson && text.trim()) {
       const contextReplyStarted = Date.now();
+      postProcessingInputChars = text.trim().length + normalizedContextJson.trim().length;
       const generated = await deps.generateContextReply(text, normalizedContextJson);
       postProcessingMs = Date.now() - contextReplyStarted;
       postProcessed = true;
       postProcessingModel = generated.model;
       text = generated.text;
+      postProcessingOutputChars = text.length;
     }
 
     const totalMs = Date.now() - started;
@@ -374,35 +446,14 @@ async function handleDictate({ req, res, store, runtime, access, sendJson, route
       postProcessingMs,
       totalMs,
       transcriptChars: text.length,
+      postProcessingInputChars,
+      postProcessingOutputChars,
       clientVersion,
       requestId,
       route,
       postProcessingRequested: Boolean(postProcessingPrompt),
       contextRequested: Boolean(contextEnabled)
     });
-    recordBraiCmdAiLog(store, {
-      agent,
-      status: 'done',
-      requestId,
-      accessTokenId: access.id,
-      clientVersion,
-      audio,
-      audioBytes,
-      audioDurationMs,
-      postProcessingPrompt,
-      normalizedContextJson,
-      contextEnabled,
-      text,
-      provider,
-      model,
-      fallbackUsed,
-      postProcessed,
-      postProcessingModel,
-      transcriptionMs,
-      postProcessingMs,
-      totalMs
-    });
-    aiLogWritten = true;
 
     sendJson(req, res, 200, {
       text,
@@ -417,9 +468,12 @@ async function handleDictate({ req, res, store, runtime, access, sendJson, route
       },
       postProcessed,
       postProcessingModel,
-      notice: store.braiCmdNotice('message.dictate.success.main')
+      notice: store.braiCmdNotice('message.dictate.success.main'),
+      postProcessingInputChars,
+      postProcessingOutputChars
     });
   } catch (error) {
+    const totalMs = Date.now() - started;
     store.recordBraiCmdUsage({
       accessTokenId: access.id,
       success: false,
@@ -431,89 +485,18 @@ async function handleDictate({ req, res, store, runtime, access, sendJson, route
       fallbackUsed,
       transcriptionMs,
       postProcessingMs,
-      totalMs: Date.now() - started,
+      totalMs,
       transcriptChars: 0,
+      postProcessingInputChars,
+      postProcessingOutputChars,
       clientVersion,
       requestId,
       route,
       postProcessingRequested: Boolean(postProcessingPrompt),
       contextRequested: Boolean(contextEnabled)
     });
-    if (!aiLogWritten) {
-      recordBraiCmdAiLog(store, {
-        agent,
-        status: 'failed',
-        requestId,
-        accessTokenId: access.id,
-        clientVersion,
-        audio,
-        audioBytes,
-        audioDurationMs,
-        postProcessingPrompt,
-        normalizedContextJson,
-        contextEnabled,
-        text,
-        provider,
-        model,
-        fallbackUsed,
-        postProcessed,
-        postProcessingModel,
-        transcriptionMs,
-        postProcessingMs,
-        totalMs: Date.now() - started,
-        error: errorCode(error),
-        errorMessage: errorText(error)
-      });
-    }
     throw error;
   }
-}
-
-function recordBraiCmdAiLog(store, input) {
-  store.recordAiLog({
-    agentId: BRAI_CMD_AGENT_ID,
-    agentVersion: input.agent?.version ?? '',
-    status: input.status,
-    aiTitle: input.status === 'done' ? 'Расшифровал Brai Cmd аудио' : 'Не расшифровал Brai Cmd аудио',
-    jsonData: {
-      schema: 'brai.ai_log.v1',
-      inputs: [
-        {
-          ref: 'request.file.audio',
-          value: {
-            field: input.audio?.fieldName ?? '',
-            filename: input.audio?.filename ?? '',
-            content_type: input.audio?.contentType ?? '',
-            bytes: input.audioBytes
-          }
-        },
-        { ref: 'request.field.audioDurationMs', value: input.audioDurationMs },
-        { ref: 'request.field.postProcessingPrompt', value: { present: Boolean(input.postProcessingPrompt), chars: input.postProcessingPrompt?.length ?? 0 } },
-        { ref: 'request.field.normalizedContextJson', value: { present: Boolean(input.normalizedContextJson), chars: input.normalizedContextJson?.length ?? 0 } },
-        { ref: 'request.field.headerContextEnabled', value: input.contextEnabled },
-        { ref: 'request.header.x-brai-cmd-client-version', value: input.clientVersion || '' }
-      ],
-      outputs: [
-        { ref: 'response.text', value: input.text || '' },
-        { ref: 'response.provider', value: input.provider || '' },
-        { ref: 'response.model', value: input.model || '' },
-        { ref: 'response.postProcessed', value: Boolean(input.postProcessed) },
-        { ref: 'response.postProcessingModel', value: input.postProcessingModel || '' }
-      ],
-      metadata: {
-        request_id: input.requestId,
-        access_token_id: input.accessTokenId,
-        fallback_used: Boolean(input.fallbackUsed),
-        timings_ms: {
-          total: input.totalMs,
-          transcription: input.transcriptionMs,
-          post_processing: input.postProcessingMs
-        },
-        error: input.error ?? null,
-        error_message: input.errorMessage ?? null
-      }
-    }
-  });
 }
 
 async function transcribeAudio(file, config) {
@@ -532,6 +515,53 @@ async function transcribeAudio(file, config) {
       timeoutMs: config.transcriptionTimeoutMs
     });
   }
+}
+
+async function probeCloudTranscription(config) {
+  const file = silentWavProbe();
+  if (config.groqApiKey) {
+    try {
+      await requestJson(GROQ_TRANSCRIPTIONS_URL, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${config.groqApiKey}` },
+        body: audioForm(file, config.transcriptionModel),
+        timeoutMs: Math.min(config.transcriptionTimeoutMs, 15_000),
+        timeoutMessage: 'Groq transcription probe timed out'
+      });
+      return { provider: 'groq', model: config.transcriptionModel };
+    } catch (error) {
+      if (!config.openaiApiKey) throw error;
+    }
+  }
+  if (config.openaiApiKey) {
+    await requestJson(OPENAI_TRANSCRIPTIONS_URL, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${config.openaiApiKey}` },
+      body: audioForm(file, config.openaiTranscriptionModel),
+      timeoutMs: Math.min(config.transcriptionTimeoutMs, 15_000),
+      timeoutMessage: 'OpenAI transcription probe timed out'
+    });
+    return { provider: 'openai', model: config.openaiTranscriptionModel };
+  }
+  throw new UpstreamError('Cloud transcription provider is not configured');
+}
+
+function silentWavProbe() {
+  const pcmBytes = 3_200;
+  const data = Buffer.alloc(44 + pcmBytes);
+  data.write('RIFF', 0);
+  data.writeUInt32LE(36 + pcmBytes, 4);
+  data.write('WAVEfmt ', 8);
+  data.writeUInt32LE(16, 16);
+  data.writeUInt16LE(1, 20);
+  data.writeUInt16LE(1, 22);
+  data.writeUInt32LE(16_000, 24);
+  data.writeUInt32LE(32_000, 28);
+  data.writeUInt16LE(2, 32);
+  data.writeUInt16LE(16, 34);
+  data.write('data', 36);
+  data.writeUInt32LE(pcmBytes, 40);
+  return { data, contentType: 'audio/wav', filename: 'brai-diagnostics.wav' };
 }
 
 async function transcribeWithGroq(file, options) {

@@ -60,6 +60,19 @@ describe("onboarding model", () => {
     });
   });
 
+  it("migrates legacy floating button demo steps", () => {
+    window.localStorage.setItem(ONBOARDING_STORAGE_KEY, JSON.stringify({
+      ...initialOnboardingState,
+      history: ["floating-buttons", "demo-dictation", "demo-save-screen", "demo-chat-reply"],
+      step: "demo-agent-command",
+    }));
+
+    expect(loadOnboardingState()).toMatchObject({
+      history: ["floating-buttons", "demo-main-dictation", "demo-screenshot-inbox", "demo-context-reply"],
+      step: "demo-screenshot-voice",
+    });
+  });
+
   it("accepts letters from any alphabet, numbers and spaces in names", () => {
     expect(isValidOnboardingName("Я1")).toBe(true);
     expect(isValidOnboardingName("李 明")).toBe(true);

@@ -190,11 +190,11 @@ npm ci
 npm --prefix apps/brai_app ci
 npm --prefix services/brai_api ci
 npm --prefix admin ci
-find "$REMOTE_UPLOAD" -user "$(id -u)" -exec chmod u+rwX,g+rwX {} +
+find "$REMOTE_UPLOAD" ! -type l -user "$(id -u)" -exec chmod u+rwX,g+rwX {} +
 find "$REMOTE_UPLOAD" -type d -user "$(id -u)" -exec chmod g+s {} +
 
 if [[ -d "$SOURCE_ROOT" ]]; then
-  find "$SOURCE_ROOT" -user "$(id -u)" -exec chmod u+rwX,g+rwX {} + || true
+  find "$SOURCE_ROOT" ! -type l -user "$(id -u)" -exec chmod u+rwX,g+rwX {} + || true
 fi
 PREVIOUS_SOURCE="${SOURCE_ROOT}.previous-$(date -u +%Y%m%d%H%M%S)-$$"
 SOURCE_SWAPPED="false"

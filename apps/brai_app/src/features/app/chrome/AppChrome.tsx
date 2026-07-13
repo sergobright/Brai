@@ -1,7 +1,7 @@
 "use client";
 
 import type { CSSProperties, FormEvent, ReactNode } from "react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { CheckCircle2, KeyRound, Loader2, Lock, Mail, TriangleAlert, WifiOff, X, type LucideIcon } from "lucide-react";
 import { useEnvironmentBadgeLabel } from "@/shared/config/runtime";
 import { installAndroidBackHandler } from "@/shared/platform/platform";
@@ -10,7 +10,8 @@ import type { SyncStatus } from "@/shared/types/timer";
 import { AnimatedThemeToggler } from "@/shared/ui/animated-theme-toggler";
 import { AuthOtpEntry, type AuthOtpTimer } from "@/shared/ui/auth-otp-entry";
 import { Button } from "@/shared/ui/button";
-import { Card } from "@/shared/ui/card";
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/shared/ui/card";
+import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "@/shared/ui/field";
 import { Input } from "@/shared/ui/input";
 import { ScrollArea } from "@/shared/ui/scroll-area";
 import { Separator } from "@/shared/ui/separator";
@@ -28,6 +29,26 @@ const syncStatusIconToneClasses: Record<Tone, string> = {
 } as const;
 
 export { syncStatusIconToneClasses };
+
+export const authDarkThemeStyle = {
+  "--background": "#050607",
+  "--foreground": "#f4f4f5",
+  "--card": "rgb(15 17 21 / 0.7)",
+  "--card-foreground": "#f4f4f5",
+  "--popover": "#0f1115",
+  "--popover-foreground": "#f4f4f5",
+  "--primary": "#f4f4f5",
+  "--primary-foreground": "#15171a",
+  "--secondary": "#1b2026",
+  "--secondary-foreground": "#f4f4f5",
+  "--muted": "#1b2026",
+  "--muted-foreground": "#a1a1aa",
+  "--accent": "#20252d",
+  "--accent-foreground": "#f4f4f5",
+  "--border": "#2a3038",
+  "--input": "#343a44",
+  "--ring": "#d4d4d8",
+} as CSSProperties;
 
 export function ScreenHeader({
   title,
@@ -302,17 +323,22 @@ function IconGlyph({ emoji, className = "" }: { emoji: string; className?: strin
 
 export function AuthPanel({
   busy,
-  mode,
+  className = "mt-[52px]",
+  mode = "otp",
+  onAuthenticated,
   onEmailLogin,
   onRequestOtp,
   onVerifyOtp,
 }: {
   busy: boolean;
-  mode: "email" | "otp";
-  onEmailLogin: (email: string) => Promise<void>;
+  className?: string;
+  mode?: "email" | "otp";
+  onAuthenticated?: () => void;
+  onEmailLogin?: (email: string) => Promise<void>;
   onRequestOtp: (email: string) => Promise<OtpSendResult>;
   onVerifyOtp: (email: string, otp: string) => Promise<void>;
 }) {
+  const inputId = useId();
   const [email, setEmail] = useState("");
   const [otp, setOtp] = useState("");
   const [otpSent, setOtpSent] = useState(false);
@@ -320,17 +346,24 @@ export function AuthPanel({
   const [otpTimer, setOtpTimer] = useState<AuthOtpTimer>(defaultOtpTimer);
   const [error, setError] = useState("");
 
-  async function submitOtp(event: FormEvent<HTMLFormElement>) {
+  async function submitAuth(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError("");
     try {
+      if (mode === "email") {
+        if (!onEmailLogin) throw new Error("email_login_unavailable");
+        await onEmailLogin(email);
+        onAuthenticated?.();
+        return;
+      }
       if (!otpSent) {
         await requestOtpCode();
         return;
       }
       await onVerifyOtp(email, otp);
+      onAuthenticated?.();
     } catch {
-      setError(otpSent ? "Код не подошел" : "Не удалось отправить код");
+      setError(mode === "email" ? "Email не подошёл" : otpSent ? "Код не подошел" : "Не удалось отправить код");
     }
   }
 
@@ -353,71 +386,71 @@ export function AuthPanel({
     applyOtpResult(await onRequestOtp(email));
   }
 
-  async function submitEmail(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setError("");
-    try {
-      await onEmailLogin(email);
-    } catch {
-      setError("Email не подошёл");
-    }
-  }
-
-  if (mode === "email") {
-    return (
-      <Card className="mt-[52px] grid w-[min(520px,100%)] justify-items-start gap-3 p-6" render={<form onSubmit={submitEmail} />}>
-        <Mail aria-hidden="true" className="size-5 text-muted-foreground" />
-        <h2 className="m-0 text-base leading-[1.2]">Вход</h2>
-        <Input
-          className="my-0.5 mb-1"
-          value={email}
-          type="email"
-          autoComplete="email"
-          inputMode="email"
-          placeholder="email"
-          aria-label="Email"
-          disabled={busy}
-          onChange={(event) => setEmail(event.target.value)}
-        />
-        {error ? <p className="m-0 text-sm text-destructive">{error}</p> : null}
-        <Button disabled={busy || !email}>
-          <Mail aria-hidden="true" />
-          Войти
-        </Button>
-      </Card>
-    );
-  }
+  const emailInputId = `${inputId}-email`;
+  const otpInputId = `${inputId}-otp`;
 
   return (
-    <Card className="mt-[52px] grid w-[min(520px,100%)] justify-items-start gap-3 p-6" render={<form onSubmit={submitOtp} />}>
-      <Mail aria-hidden="true" className="size-5 text-muted-foreground" />
-      <h2 className="m-0 text-base leading-[1.2]">Вход</h2>
-      <Input
-        className="my-0.5 mb-1"
-        value={email}
-        type="email"
-        autoComplete="email"
-        inputMode="email"
-        placeholder="email"
-        aria-label="Email"
-        disabled={busy || otpSent}
-        onChange={(event) => setEmail(event.target.value)}
-      />
-      {otpSent ? (
-        <AuthOtpEntry
-          value={otp}
-          timer={otpTimer}
-          autoFocusKey={otpFocusKey}
-          disabled={busy && otpTimer.sentAtMs !== null}
-          onChange={setOtp}
-          onResend={resendOtpCode}
-        />
-      ) : null}
-      {error ? <p className="m-0 text-sm text-destructive">{error}</p> : null}
-      <Button disabled={busy || !email || (otpSent && !otp)}>
-        {otpSent ? <KeyRound aria-hidden="true" /> : <Mail aria-hidden="true" />}
-        {otpSent ? "Войти" : "Получить код"}
-      </Button>
+    <Card
+      className={cx(className, "w-full backdrop-blur-md sm:max-w-md")}
+      style={authDarkThemeStyle}
+      render={<form onSubmit={submitAuth} />}
+    >
+      <CardHeader>
+        <CardTitle>Вход в Brai</CardTitle>
+        <CardDescription>
+          {mode === "email" ? "Введите почту для входа в тестовый аккаунт." : "Введите почту, чтобы получить код для входа или регистрации."}
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <FieldGroup className="gap-4">
+          <Field data-invalid={Boolean(error && (mode === "email" || !otpSent))}>
+            <FieldLabel htmlFor={emailInputId}>Почта</FieldLabel>
+            <Input
+              id={emailInputId}
+              value={email}
+              type="email"
+              autoComplete="email"
+              inputMode="email"
+              placeholder="Введите почту"
+              aria-label="Email"
+              aria-invalid={Boolean(error && (mode === "email" || !otpSent))}
+              disabled={busy || (mode === "otp" && otpSent)}
+              onChange={(event) => setEmail(event.target.value)}
+            />
+            <FieldDescription>
+              {mode === "email" ? "Код подтверждения в этом режиме не нужен." : "Мы отправим одноразовый код на эту почту."}
+            </FieldDescription>
+          </Field>
+          <div className="h-[140px]">
+            {mode === "otp" && otpSent ? (
+              <Field data-invalid={Boolean(error)}>
+                <FieldLabel htmlFor={otpInputId}>Код</FieldLabel>
+                <AuthOtpEntry
+                  id={otpInputId}
+                  value={otp}
+                  timer={otpTimer}
+                  autoFocusKey={otpFocusKey}
+                  ariaInvalid={Boolean(error)}
+                  disabled={busy && otpTimer.sentAtMs !== null}
+                  onChange={setOtp}
+                  onResend={resendOtpCode}
+                />
+              </Field>
+            ) : (
+              <div className="invisible h-full" aria-hidden="true" />
+            )}
+          </div>
+          <div className="min-h-5">
+            {error ? <FieldError>{error}</FieldError> : null}
+          </div>
+        </FieldGroup>
+      </CardContent>
+      <CardFooter>
+        <Button className="w-full" disabled={busy || !email || (mode === "otp" && otpSent && !otp)}>
+          {mode === "otp" && otpSent ? <KeyRound aria-hidden="true" /> : <Mail aria-hidden="true" />}
+          {mode === "email" || otpSent ? "Войти" : "Получить код"}
+        </Button>
+      </CardFooter>
     </Card>
   );
 

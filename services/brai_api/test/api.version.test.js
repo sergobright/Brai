@@ -138,7 +138,22 @@ test('release login uses short air password and ignores app sessions', async () 
     webPassword: WEB_PASSWORD,
     releasePassword: 'air',
     sessionSecret: SESSION_SECRET,
-    releaseFiles: { 'brai.apk': 'fake-apk' }
+    releaseFiles: {
+      'brai.apk': 'fake-apk',
+      'index.html': 'stale release page',
+      'releases.json': JSON.stringify({
+        sections: {
+          production: {
+            title: 'Brai',
+            file: 'brai.apk',
+            apkVersion: 7,
+            apkBuildKind: 'stable',
+            publishedAt: '2026-06-29T12:00:00.000Z',
+            sizeBytes: 10 * 1024 * 1024
+          }
+        }
+      })
+    }
   });
 
   try {
@@ -177,7 +192,12 @@ test('release login uses short air password and ignores app sessions', async () 
 
     const apk = await fetch(`${fixture.url}/releases/brai.apk`, { headers: { cookie: releaseCookie } });
     assert.equal(apk.status, 200);
+    assert.equal(apk.headers.get('content-length'), String(Buffer.byteLength('fake-apk')));
     assert.equal(await apk.text(), 'fake-apk');
+
+    const releasePage = await fetch(`${fixture.url}/releases/`, { headers: { cookie: releaseCookie } });
+    assert.equal(releasePage.status, 200);
+    assert.match(await releasePage.text(), /<p class="version">v7<\/p><span class="size">10 МБ<\/span>/);
   } finally {
     await fixture.close();
   }

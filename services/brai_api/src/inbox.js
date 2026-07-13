@@ -45,6 +45,7 @@ const CONTENT_TYPES_BY_EXTENSION = new Map(
 );
 const INBOX_IMAGE_AGENT_ID = 'inbox.image_describer';
 const INBOX_NORMALIZER_AGENT_ID = 'inbox.normalizer';
+const INBOX_OPERATION_CLASS = 'operation';
 const DEFAULT_IMAGE_PROMPT_TEMPLATE = [
   'Опиши изображение для Inbox на русском языке.',
   'Нужно детальное, фактическое описание: что видно, какой интерфейс/экран, важные тексты, объекты, состояния, числа и возможный пользовательский контекст.',
@@ -91,6 +92,11 @@ export function hasInboxApiKey(req, apiKey) {
     || req.headers.authorization === `Bearer ${apiKey}`;
 }
 
+export function inboxIngestIdempotencyHash(idempotencyKey) {
+  const key = optionalText(idempotencyKey);
+  return key ? fullHash(`${scopedUserId() ?? 'unclaimed'}\0${key}`) : null;
+}
+
 function inboxTarget(value) {
   if (value == null || value === '') return null;
   const target = optionalText(value);
@@ -131,16 +137,18 @@ async function receiveInboxInner({
   const attachments = decodeAttachments(body);
   const nowIso = nowDate.toISOString();
   const idempotencyKey = optionalText(body?.idempotency_key);
-  const ingestIdempotencyHash = idempotencyKey
-    ? fullHash(`${scopedUserId() ?? 'unclaimed'}\0${idempotencyKey}`)
-    : null;
+  const ingestIdempotencyHash = inboxIngestIdempotencyHash(idempotencyKey);
   const stableId = ingestIdempotencyHash?.slice(0, 32) ?? null;
   const inboxId = stableId ? `inbox:api:${stableId}` : `inbox:api:${crypto.randomUUID()}`;
   const eventId = stableId ? `inbox:api:${stableId}:create` : `inbox:api:${crypto.randomUUID()}:create`;
   const source = optionalText(body?.source) ?? 'inbox';
-  const sourceKey = optionalText(body?.source_key) ?? '';
   const responseRequired = optionalBoolean(body?.response_required, 'invalid_response_required');
   const recordTypeId = inboxRecordTypeId(body?.record_type_id ?? body?.record_type);
+  const preliminarySection = inboxPreliminarySection(body?.preliminary_section, recordTypeId);
+  if (preliminarySection === INBOX_OPERATION_CLASS && !idempotencyKey) {
+    throwStatus('operation_idempotency_key_required', 400);
+  }
+  const sourceKey = optionalText(body?.source_key) ?? (preliminarySection === INBOX_OPERATION_CLASS ? idempotencyKey : '');
   const ingestPayloadHash = fullHash(JSON.stringify({
     text,
     descriptionText,
@@ -148,6 +156,7 @@ async function receiveInboxInner({
     sourceKey,
     responseRequired,
     recordTypeId,
+    preliminarySection,
     attachments: attachments.map((attachment) => ({ mime: attachment.mime, sha256: fullHash(attachment.bytes) }))
   }));
   const existingInboxId = stableId ? store.inboxIdForEvent(eventId) : null;
@@ -163,6 +172,7 @@ async function receiveInboxInner({
       source,
       sourceKey,
       recordTypeId,
+      preliminarySection,
       responseRequired,
       idempotencyKey,
       logContext,
@@ -225,6 +235,7 @@ async function receiveInboxInner({
       responseRequired,
       relatedInboxId,
       recordTypeId,
+      preliminarySection,
       ingestIdempotencyHash,
       ingestPayloadHash,
       nowIso
@@ -242,6 +253,7 @@ async function receiveInboxInner({
         source,
         sourceKey,
         recordTypeId,
+        preliminarySection,
         responseRequired,
         idempotencyKey,
         logContext,
@@ -264,6 +276,7 @@ async function receiveInboxInner({
     source,
     sourceKey,
     recordTypeId,
+    preliminarySection,
     responseRequired,
     idempotencyKey,
     logContext,
@@ -285,6 +298,7 @@ function recordInboxIngestLog(store, {
   source,
   sourceKey,
   recordTypeId,
+  preliminarySection,
   responseRequired,
   idempotencyKey,
   logContext,
@@ -310,6 +324,8 @@ function recordInboxIngestLog(store, {
       description_present: Boolean(body?.description_text || body?.description || body?.content_text || body?.description_json || body?.content),
       response_required: responseRequired === true,
       record_type_id: recordTypeId,
+      preliminary_section: preliminarySection || null,
+      operation_inbox: preliminarySection === INBOX_OPERATION_CLASS,
       idempotency_key_present: Boolean(idempotencyKey),
       created,
       attachment_count: attachments.length,
@@ -424,7 +440,7 @@ export async function processInboxItem({
           return {
             ...applied,
             image_described: prepared.imageRequired,
-            class_key: result.normalized.classKey
+            class_key: applied.class_key ?? result.normalized.classKey
           };
         } catch (error) {
           store.failInboxWorkflow({
@@ -898,6 +914,16 @@ function inboxRecordTypeId(value) {
   throwStatus('invalid_record_type', 400);
 }
 
+function inboxPreliminarySection(value, recordTypeId) {
+  const raw = optionalText(value);
+  if (!raw) return '';
+  const key = cleanClassKey(raw);
+  if (key !== INBOX_OPERATION_CLASS || recordTypeId !== 2) {
+    throwStatus('invalid_preliminary_section', 400);
+  }
+  return key;
+}
+
 function referencesPreviousMessage(value) {
   const text = value.toLocaleLowerCase('ru');
   return /(предыдущ|прошл|previous|last)/.test(text) && /(прикреп|добав|attach|append)/.test(text);
@@ -941,6 +967,68 @@ async function describeImages({ agent, settings, codexBin, codexModel, codexTime
     return { text: clean, status: 'done', error: '', model: result.model, durationMs };
   } catch (error) {
     return { text: '', status: 'failed', error: errorText(error), model, durationMs: Date.now() - startedAt };
+  }
+}
+
+export async function normalizeJsonWithAgent({
+  agent,
+  settings,
+  codexBin,
+  codexModel,
+  codexTimeoutMs,
+  externalAi,
+  normalizer,
+  normalizerInput,
+  promptTemplate,
+  outputSchema,
+  strictOutputSchema,
+  cleanOutput,
+  defaultCodexModel = DEFAULT_INBOX_CODEX_MODEL,
+  externalTextModel = null,
+  schemaName = 'raw_normalization',
+  timeoutPrefix = 'raw'
+}) {
+  const startedAt = Date.now();
+  const external = settings?.model_provider_mode === 'external';
+  const model = external
+    ? cleanText(externalTextModel) || DEFAULT_INBOX_TEXT_MODEL
+    : codexModel ?? optionalText(agent?.llm_model) ?? defaultCodexModel;
+  let result;
+  try {
+    result = normalizer
+      ? { text: await normalizer(normalizerInput), model }
+      : external
+        ? { text: await groqText({
+            apiKey: externalAi?.groqApiKey,
+            fetchImpl: externalAi?.fetch,
+            model,
+            promptTemplate,
+            timeoutMs: Number.isFinite(codexTimeoutMs) ? codexTimeoutMs : agent?.llm_timeout_ms,
+            outputSchema: strictOutputSchema ? outputSchema : null,
+            schemaName,
+            timeoutMessage: `groq_${timeoutPrefix}_timeout`,
+            emptyResponseMessage: `groq_${timeoutPrefix}_empty_response`
+          }), model }
+        : { text: await codexText({
+          codexBin,
+          codexModel: model || null,
+          promptTemplate,
+          timeoutMs: Number.isFinite(codexTimeoutMs) ? codexTimeoutMs : agent?.llm_timeout_ms,
+          outputSchema: strictOutputSchema ? outputSchema : null,
+          normalizerMode: true,
+          timeoutMessage: `codex_${timeoutPrefix}_timeout`,
+          failureMessage: `codex_${timeoutPrefix}_failed`
+        }), model };
+  } catch (error) {
+    return failedJsonNormalization(errorText(error), model, Date.now() - startedAt, false);
+  }
+  try {
+    const parsed = typeof result.text === 'string' ? parseNormalizerJson(result.text) : result.text;
+    validateJsonSchema(parsed, outputSchema);
+    const normalized = cleanOutput(parsed);
+    return { ...normalized, status: 'done', error: '', model: result.model, durationMs: Date.now() - startedAt };
+  } catch (error) {
+    return failedJsonNormalization(errorText(error), result.model, Date.now() - startedAt, true, result.text);
   }
 }
 
@@ -1058,6 +1146,17 @@ function failedNormalization(error, model, durationMs, validationFailed) {
   };
 }
 
+function failedJsonNormalization(error, model, durationMs, validationFailed, output = null) {
+  return {
+    status: 'failed',
+    validationFailed,
+    error,
+    model,
+    durationMs,
+    output
+  };
+}
+
 function cleanNormalization(value) {
   const normalized = {
     title: cleanNormalizedTitle(value?.title),
@@ -1080,12 +1179,16 @@ function cleanNormalizedTitle(value) {
 }
 
 function renderNormalizerPrompt(template, item, classes, imageDescription, validationError = '') {
-  const prompt = template
+  const basePrompt = template
     .replaceAll('{{classes}}', JSON.stringify(classes, null, 2))
     .replaceAll('{{text}}', rawInboxText(item))
     .replaceAll('{{description}}', item.description_md || '')
     .replaceAll('{{image_description}}', imageDescription || '')
     .replaceAll('{{validation_error}}', validationError || '');
+  const preliminarySection = cleanClassKey(item?.preliminary_section);
+  const prompt = preliminarySection
+    ? `${basePrompt}\n\nПредварительный тип из ingest: ${preliminarySection}. Если он задан, верни его как class_key.`
+    : basePrompt;
   return validationError
     ? `${prompt}\n\nОшибка валидации предыдущего ответа:\n${validationError}\nИсправь JSON и верни только валидный объект.`
     : prompt;
@@ -1201,7 +1304,17 @@ function normalizeBlocks({ imageDescription, analysis }) {
   ].filter(Boolean).join('\n\n').trim();
 }
 
-async function groqText({ apiKey, fetchImpl = fetch, model, promptTemplate, timeoutMs = 3000, outputSchema = null }) {
+async function groqText({
+  apiKey,
+  fetchImpl = fetch,
+  model,
+  promptTemplate,
+  timeoutMs = 3000,
+  outputSchema = null,
+  schemaName = 'inbox_normalization',
+  timeoutMessage = 'groq_inbox_timeout',
+  emptyResponseMessage = 'groq_inbox_empty_response'
+}) {
   if (!apiKey) throw new Error('GROQ_API_KEY is not configured');
   const body = {
     model,
@@ -1215,7 +1328,7 @@ async function groqText({ apiKey, fetchImpl = fetch, model, promptTemplate, time
     body.response_format = {
       type: 'json_schema',
       json_schema: {
-        name: 'inbox_normalization',
+        name: schemaName,
         schema: outputSchema
       }
     };
@@ -1228,11 +1341,11 @@ async function groqText({ apiKey, fetchImpl = fetch, model, promptTemplate, time
     },
     body: JSON.stringify(body),
     timeoutMs,
-    timeoutMessage: 'groq_inbox_timeout',
+    timeoutMessage,
     fetchImpl
   });
   const text = extractChatText(payload);
-  if (!text) throw new Error('groq_inbox_empty_response');
+  if (!text) throw new Error(emptyResponseMessage);
   return text;
 }
 
@@ -1329,7 +1442,9 @@ function codexText({
   timeoutMs = 3000,
   images = [],
   outputSchema = null,
-  normalizerMode = false
+  normalizerMode = false,
+  timeoutMessage = 'codex_inbox_timeout',
+  failureMessage = 'codex_inbox_failed'
 } = {}) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'brai-inbox-ai-'));
   const outputPath = path.join(tmp, 'output.txt');
@@ -1406,7 +1521,7 @@ function codexText({
     }
     const timer = setTimeout(() => {
       killProcessGroup(child);
-      finish(reject, new Error('codex_inbox_timeout'));
+      finish(reject, new Error(timeoutMessage));
     }, timeout);
 
     child.stdin?.on('error', () => {});
@@ -1416,7 +1531,7 @@ function codexText({
     child.once('error', (error) => finish(reject, error));
     child.once('close', (code) => {
       if (code !== 0) {
-        finish(reject, new Error(cleanCodexError(stderr) || 'codex_inbox_failed'));
+        finish(reject, new Error(cleanCodexError(stderr) || failureMessage));
         return;
       }
       try {

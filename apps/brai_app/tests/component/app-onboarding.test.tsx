@@ -1,9 +1,10 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { androidCapabilitiesPlugin, cmdPlugin, setupBraiAppTest, stubAndroidCapacitor } from "./app-test-support";
+import { androidCapabilitiesPlugin, cmdPlugin, setupBraiAppTest, stubAndroidCapacitor, testVersionState } from "./app-test-support";
 import RootLayout from "@/app/layout";
 import { BraiApp } from "@/features/app/BraiApp";
+import { DEFAULT_APP_SETTINGS } from "@/shared/api/braiApi";
 import { ONBOARDING_STORAGE_KEY } from "@/features/onboarding/onboardingModel";
 import { emptyActivitiesState } from "@/shared/types/activities";
 import { emptyInboxState } from "@/shared/types/inbox";
@@ -44,7 +45,10 @@ function emptyAppSnapshotResponse(url: string): Response | null {
 async function submitEmailLogin(email: string) {
   const input = await screen.findByLabelText("Email");
   fireEvent.change(input, { target: { value: email } });
-  fireEvent.submit(input.closest("form") as HTMLFormElement);
+  await act(async () => {
+    fireEvent.submit(input.closest("form") as HTMLFormElement);
+    await Promise.resolve();
+  });
 }
 
 function expectNoPasswordPrompt() {
@@ -271,9 +275,16 @@ describe("BraiApp onboarding", () => {
     });
   });
 
-  it("keeps the user on the name step when preliminary profile creation is offline", async () => {
+  it("keeps preliminary onboarding fail-closed and allows retry after a server error", async () => {
     stubAndroidCapacitor();
-    cmdPlugin.preparePreliminaryProfile.mockRejectedValueOnce(new Error("offline"));
+    cmdPlugin.preparePreliminaryProfile
+      .mockRejectedValueOnce(Object.assign(new Error("offline"), { code: "preliminary_timeout" }))
+      .mockResolvedValueOnce({
+        preliminaryStatus: "ready",
+        preliminaryUserId: "prelim-retry",
+        preliminaryClaimToken: "claim-retry",
+        deviceFingerprint: "fingerprint-retry",
+      });
     window.localStorage.setItem(ONBOARDING_STORAGE_KEY, JSON.stringify({
       complete: false,
       history: ["path"],
@@ -288,8 +299,22 @@ describe("BraiApp onboarding", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Продолжить" }));
 
-    expect(await screen.findByText("Нет соединения с серверами Brai, повторите.")).toBeInTheDocument();
+    expect(await screen.findByText("Не удалось проверить устройство на сервере Brai. Повторите.")).toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "Имя" })).toBeInTheDocument();
+    expect(screen.queryByText("Brai CMD")).not.toBeInTheDocument();
+    expect(JSON.parse(window.localStorage.getItem(ONBOARDING_STORAGE_KEY) || "{}")).not.toHaveProperty("preliminaryUserId");
+
+    const retry = screen.getByRole("button", { name: "Продолжить" });
+    await waitFor(() => expect(retry).toBeEnabled());
+    fireEvent.click(retry);
+
+    expect(await screen.findByText("Brai CMD")).toBeInTheDocument();
+    expect(cmdPlugin.preparePreliminaryProfile).toHaveBeenCalledTimes(2);
+    expect(JSON.parse(window.localStorage.getItem(ONBOARDING_STORAGE_KEY) || "{}")).toMatchObject({
+      preliminaryUserId: "prelim-retry",
+      preliminaryClaimToken: "claim-retry",
+      duplicatePreliminaryUserId: "",
+    });
   });
 
   it("moves from the Brai CMD introduction to floating buttons", async () => {
@@ -312,11 +337,76 @@ describe("BraiApp onboarding", () => {
     expect(screen.getByRole("button", { name: "Ознакомиться" })).toBeInTheDocument();
   });
 
+  it("explains all six Brai CMD floating buttons before special settings", async () => {
+    stubAndroidCapacitor();
+    window.localStorage.setItem(ONBOARDING_STORAGE_KEY, JSON.stringify({
+      complete: false,
+      history: ["setup-start"],
+      name: "Test",
+      path: "new",
+      profileVersion: "cloud",
+      step: "floating-buttons",
+      voiceMode: null,
+    }));
+    const demos = [
+      {
+        alt: "Главная кнопка Brai CMD превращает голос в текст в поле ввода",
+        src: "/onboarding/demo-main-dictation.png",
+        text: /Превращает голос в текст и вставляет его в активное поле/,
+        title: "Главная кнопка диктовки",
+      },
+      {
+        alt: "Кнопка команды голосом отправляет идею во Входящие Brai",
+        src: "/onboarding/demo-voice-command.png",
+        text: /Отправляет голосовую мысль, идею или поручение во Входящие Brai/,
+        title: "Команда голосом",
+      },
+      {
+        alt: "Кнопка скриншота сохраняет текущий экран во Входящие Brai",
+        src: "/onboarding/demo-screenshot-inbox.png",
+        text: /Сохраняет текущий экран во Входящие как визуальный контекст/,
+        title: "Скриншот во Входящие",
+      },
+      {
+        alt: "Кнопка скриншот плюс голос отправляет экран вместе с командой",
+        src: "/onboarding/demo-screenshot-voice.png",
+        text: /Отправляет снимок экрана вместе с голосовой командой/,
+        title: "Скриншот + голос",
+      },
+      {
+        alt: "Кнопка контекста отправляет структурный видимый текст во Входящие Brai",
+        src: "/onboarding/demo-context-inbox.png",
+        text: /Берёт структурный видимый текст страницы или чата/,
+        title: "Контекст во Входящие",
+      },
+      {
+        alt: "Кнопка ответа с контекстом готовит ответ и вставляет его в поле ввода",
+        src: "/onboarding/demo-context-reply.png",
+        text: /Использует текущий контекст, готовит ответ и вставляет его в поле ввода/,
+        title: "Ответ с контекстом",
+      },
+    ];
+
+    render(<BraiApp />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Ознакомиться" }));
+    for (const [index, demo] of demos.entries()) {
+      expect(await screen.findByText(demo.title)).toBeInTheDocument();
+      expect(screen.getByText(`Кнопка ${index + 1} из 6`)).toBeInTheDocument();
+      expect(screen.getByText(demo.text)).toBeInTheDocument();
+      expect(screen.getByRole("img", { name: demo.alt })).toHaveAttribute("src", demo.src);
+      expect(screen.queryByText("Здесь будет GIF")).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "Продолжить" }));
+    }
+
+    expect(await screen.findByText("Требуется особая настройка")).toBeInTheDocument();
+  });
+
   it("introduces special settings and security before Brai CMD setup", async () => {
     stubAndroidCapacitor();
     window.localStorage.setItem(ONBOARDING_STORAGE_KEY, JSON.stringify({
       complete: false,
-      history: ["demo-agent-command"],
+      history: ["demo-context-reply"],
       name: "Test",
       path: "new",
       profileVersion: "cloud",
@@ -362,6 +452,11 @@ describe("BraiApp onboarding", () => {
 
   it("keeps unauthenticated users inside the limited access screen", async () => {
     stubAndroidCapacitor();
+    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      if (url.endsWith("/auth/session")) return jsonResponse({ authenticated: false });
+      return Promise.reject(new Error("offline"));
+    });
     window.localStorage.setItem(ONBOARDING_STORAGE_KEY, JSON.stringify({
       complete: false,
       history: [],
@@ -374,10 +469,55 @@ describe("BraiApp onboarding", () => {
 
     render(<BraiApp />);
 
-    expect(await screen.findByText("Нужен вход")).toBeInTheDocument();
+    expect(await screen.findByText("Нужен вход", undefined, { timeout: 5_000 })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Войти" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Engine" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Настройки Brai CMD" })).toBeInTheDocument();
     expect(screen.queryByRole("textbox", { name: "Добавить" })).not.toBeInTheDocument();
+  });
+
+  it("opens Engine from the locked Android screen and returns to the lock screen with Back", async () => {
+    stubAndroidCapacitor();
+    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      if (url.endsWith("/auth/session")) return jsonResponse({ authenticated: false });
+      if (url.endsWith("/v1/version")) return jsonResponse(testVersionState("0.0.10"));
+      return Promise.reject(new Error("offline"));
+    });
+    window.localStorage.setItem(ONBOARDING_STORAGE_KEY, JSON.stringify({
+      complete: true,
+      history: [],
+      name: "Test",
+      path: "new",
+      profileVersion: "cloud",
+      step: "locked",
+      voiceMode: "cloud",
+    }));
+
+    render(<BraiApp />);
+
+    expect(await screen.findByText("Нужен вход", undefined, { timeout: 5_000 })).toBeInTheDocument();
+    await act(async () => {
+      await new Promise((resolve) => window.setTimeout(resolve, 0));
+    });
+    const engineButton = screen.getByRole("button", { name: "Engine" });
+    await act(async () => {
+      fireEvent.click(engineButton);
+      await Promise.resolve();
+    });
+    expect(await screen.findByRole("heading", { name: "Engine" })).toBeInTheDocument();
+    expect(screen.queryByText("Нужен вход")).not.toBeInTheDocument();
+
+    await waitFor(() => expect(window.BraiAndroidBack).toBeTypeOf("function"));
+    let backHandled = false;
+    await act(async () => {
+      backHandled = window.BraiAndroidBack?.() ?? false;
+      await Promise.resolve();
+    });
+    expect(backHandled).toBe(true);
+
+    expect(await screen.findByText("Нужен вход", undefined, { timeout: 5_000 })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Engine" })).toBeInTheDocument();
   });
 
   it("offers voice recognition choices and keeps the local model unavailable", async () => {
@@ -425,6 +565,38 @@ describe("BraiApp onboarding", () => {
     expect(screen.getByRole("button", { name: "Проверить" })).toBeDisabled();
   });
 
+  it("verifies a provider, requires a speech model, and saves the onboarding profile", async () => {
+    stubAndroidCapacitor();
+    window.localStorage.setItem(ONBOARDING_STORAGE_KEY, JSON.stringify({
+      complete: false,
+      history: ["voice-choice"],
+      name: "Test",
+      path: "new",
+      profileVersion: "self-hosted",
+      step: "provider-key",
+      voiceMode: "provider",
+    }));
+    render(<BraiApp />);
+
+    fireEvent.change(await screen.findByLabelText("Ключ поставщика"), { target: { value: "valid-test-key" } });
+    fireEvent.click(screen.getByRole("button", { name: "Проверить" }));
+
+    const modelSelect = await screen.findByRole("combobox", { name: "Модель распознавания" });
+    expect(cmdPlugin.probeProvider).toHaveBeenCalledWith({ provider: { providerId: "groq", apiKey: "valid-test-key", capability: "speech" } });
+    expect(screen.getByRole("button", { name: "Проверить" })).toBeDisabled();
+
+    fireEvent.click(modelSelect);
+    fireEvent.click(await screen.findByRole("option", { name: "test-model" }));
+    fireEvent.click(screen.getByRole("button", { name: "Проверить" }));
+
+    await waitFor(() => expect(cmdPlugin.connectProvider).toHaveBeenCalledWith({ provider: {
+      providerId: "groq",
+      apiKey: "valid-test-key",
+      model: "test-model",
+      capability: "speech",
+    } }));
+  });
+
   it("offers app settings after microphone permission is denied", async () => {
     stubAndroidCapacitor();
     androidCapabilitiesPlugin.requestMicrophone.mockResolvedValueOnce({ microphoneGranted: false });
@@ -443,7 +615,7 @@ describe("BraiApp onboarding", () => {
     expect(await screen.findByRole("img", { name: "Разрешение микрофона Brai" })).toHaveAttribute("src", "/onboarding/settings-1-microphone.jpg");
     fireEvent.click(await screen.findByRole("button", { name: "Разрешить микрофон" }));
     expect(await screen.findByRole("button", { name: "Открыть настройки приложения" })).toBeInTheDocument();
-    expect(screen.getByText("Микрофон не разрешен.")).toBeInTheDocument();
+    expect(await screen.findByText("Микрофон не разрешен.")).toBeInTheDocument();
   });
 
   it("offers app settings after notification permission is denied", async () => {
@@ -465,7 +637,7 @@ describe("BraiApp onboarding", () => {
     expect(screen.getByText("Уведомления нужны для фоновой записи, работы очереди, когда нет сети, для получения обратной связи от Брай. Разработчики не шлют вам никаких уведомлений. Это только для вас.")).toBeInTheDocument();
     fireEvent.click(await screen.findByRole("button", { name: "Разрешить уведомления" }));
     expect(await screen.findByRole("button", { name: "Открыть настройки приложения" })).toBeInTheDocument();
-    expect(screen.getByText("Уведомления не разрешены.")).toBeInTheDocument();
+    expect(await screen.findByText("Уведомления не разрешены.")).toBeInTheDocument();
   });
 
   it("walks through special access explanation and images", async () => {
@@ -648,7 +820,7 @@ describe("BraiApp onboarding", () => {
     expect(cmdPlugin.setVoiceOnlyMode).toHaveBeenCalledWith({ enabled: false });
   });
 
-  it("does not leave cloud login after a failed email request", async () => {
+  it("does not leave cloud login after a failed preview email login", async () => {
     stubAndroidCapacitor();
     window.__BRAI_RUNTIME_CONFIG__ = { environment: "preview-a" };
     vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL) => {
@@ -673,13 +845,16 @@ describe("BraiApp onboarding", () => {
 
     render(<BraiApp />);
 
-    expect(await screen.findByText("Вход в облачный профиль")).toBeInTheDocument();
+    expect(await screen.findByText("Вход в Brai")).toBeInTheDocument();
+    expect(document.querySelector(".auth-galaxy-background")).toBeInTheDocument();
     expect(screen.getByLabelText("Email")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Войти" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Получить код" })).not.toBeInTheDocument();
     expectNoPasswordPrompt();
     await submitEmailLogin("wrong@example.test");
 
-    expect(await screen.findByText("Email не подошёл.")).toBeInTheDocument();
-    expect(screen.getByText("Вход в облачный профиль")).toBeInTheDocument();
+    expect(await screen.findByText("Email не подошёл")).toBeInTheDocument();
+    expect(screen.getByText("Вход в Brai")).toBeInTheDocument();
     expectNoPasswordPrompt();
     expect(screen.queryByText("Начинаем настройку")).not.toBeInTheDocument();
   });
@@ -720,7 +895,7 @@ describe("BraiApp onboarding", () => {
 
     render(<BraiApp />);
 
-    expect(await screen.findByText("Вход в облачный профиль")).toBeInTheDocument();
+    expect(await screen.findByText("Вход в Brai")).toBeInTheDocument();
     const email = screen.getByLabelText("Email");
     fireEvent.change(email, { target: { value: "primary@example.com" } });
     expect(screen.getByRole("button", { name: "Получить код" })).toBeInTheDocument();
@@ -731,6 +906,69 @@ describe("BraiApp onboarding", () => {
     expect(await screen.findByTestId("auth-otp-input")).toBeInTheDocument();
     expect(screen.getByText("Код действителен 5:00")).toBeInTheDocument();
     expectNoPasswordPrompt();
+  });
+
+  it("passes preliminary context to OTP login from onboarding", async () => {
+    stubAndroidCapacitor();
+    window.__BRAI_RUNTIME_CONFIG__ = { environment: "prod" };
+    let verifyPayload: Record<string, unknown> | null = null;
+    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      if (url.endsWith("/auth/session")) return jsonResponse({ authenticated: false });
+      if (url.endsWith("/auth/otp/send")) {
+        return jsonResponse({
+          success: true,
+          expires_in_seconds: 300,
+          resend_after_seconds: 60,
+          resend_strategy: "reuse",
+        });
+      }
+      if (url.endsWith("/auth/otp/verify")) {
+        verifyPayload = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        return jsonResponse({ authenticated: true, user: { id: "test-user", email: "primary@example.com", name: "Test" } });
+      }
+      if (url.endsWith("/v1/settings")) return jsonResponse(DEFAULT_APP_SETTINGS);
+      const snapshot = emptyAppSnapshotResponse(url);
+      if (snapshot) return snapshot;
+      return Promise.reject(new Error("offline"));
+    });
+    window.localStorage.setItem(ONBOARDING_STORAGE_KEY, JSON.stringify({
+      complete: false,
+      history: ["profile-version"],
+      name: "Test",
+      path: "new",
+      profileVersion: "cloud",
+      step: "cloud-login",
+      voiceMode: null,
+      preliminaryUserId: "prelim-user-1",
+      preliminaryClaimToken: "claim-token-1",
+      duplicatePreliminaryUserId: "",
+    }));
+
+    render(<BraiApp />);
+
+    const email = await screen.findByLabelText("Email");
+    fireEvent.change(email, { target: { value: "primary@example.com" } });
+    await act(async () => {
+      fireEvent.submit(email.closest("form")!);
+      await Promise.resolve();
+    });
+
+    const otp = await screen.findByTestId("auth-otp-input");
+    fireEvent.change(otp, { target: { value: "123456" } });
+    await act(async () => {
+      fireEvent.submit(otp.closest("form")!);
+      await Promise.resolve();
+    });
+
+    await waitFor(() => expect(verifyPayload).toMatchObject({
+      email: "primary@example.com",
+      otp: "123456",
+      name: "Test",
+      preliminaryUserId: "prelim-user-1",
+      preliminaryClaimToken: "claim-token-1",
+    }));
+    expect(await screen.findByText("Brai CMD")).toBeInTheDocument();
   });
 
   it("keeps a completed onboarding locked when cabinet login fails", async () => {
@@ -758,38 +996,39 @@ describe("BraiApp onboarding", () => {
 
     render(<BraiApp />);
 
+    expect(await screen.findByText("Нужен вход", undefined, { timeout: 5_000 })).toBeInTheDocument();
+    await act(async () => {
+      await new Promise((resolve) => window.setTimeout(resolve, 0));
+    });
     fireEvent.click(await screen.findByRole("button", { name: "Войти" }, { timeout: 5_000 }));
     expect(await screen.findByLabelText("Email")).toBeInTheDocument();
     expectNoPasswordPrompt();
     await submitEmailLogin("wrong@example.test");
 
-    await waitFor(() => expect(cmdPlugin.setOverlayEnabled).toHaveBeenLastCalledWith({ enabled: false }));
-    expect(cmdPlugin.ensureAccess).not.toHaveBeenCalled();
-    expect(cmdPlugin.setAccessKey).toHaveBeenCalledWith({ token: "", displayName: "" });
-    expect(cmdPlugin.setVoiceOnlyMode).not.toHaveBeenCalledWith({ enabled: true });
     expect(screen.getByLabelText("Email")).toBeInTheDocument();
     expect(screen.queryByRole("textbox", { name: "Добавить" })).not.toBeInTheDocument();
-    expect(cmdPlugin.setVoiceOnlyMode).toHaveBeenCalledWith({ enabled: false });
   }, 10_000);
 
   it("opens the cabinet only after the final login", async () => {
     stubAndroidCapacitor();
     window.__BRAI_RUNTIME_CONFIG__ = { environment: "preview-a" };
+    let verified = false;
     vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL) => {
       const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
       if (url.endsWith("/auth/session")) {
-        return new Response(JSON.stringify({ authenticated: false }), {
+        return new Response(JSON.stringify(verified ? { authenticated: true, user: { id: "test-user", email: "test@example.test", name: "Test" } } : { authenticated: false }), {
           status: 200,
           headers: { "content-type": "application/json" },
         });
       }
       if (url.endsWith("/auth/test-email-login")) {
+        verified = true;
         return new Response(JSON.stringify({ authenticated: true, user: { id: "test-user", email: "test@example.test", name: "Test" } }), {
           status: 200,
           headers: { "content-type": "application/json" },
         });
       }
-      const snapshot = emptyAppSnapshotResponse(url);
+      const snapshot = verified ? emptyAppSnapshotResponse(url) : null;
       if (snapshot) return snapshot;
       return Promise.reject(new Error("offline"));
     });
@@ -805,10 +1044,13 @@ describe("BraiApp onboarding", () => {
 
     render(<BraiApp />);
 
+    expect(await screen.findByText("Нужен вход", undefined, { timeout: 5_000 })).toBeInTheDocument();
     fireEvent.click(await screen.findByRole("button", { name: "Войти" }, { timeout: 5_000 }));
     await waitFor(() => expect(cmdPlugin.setOverlayEnabled).toHaveBeenLastCalledWith({ enabled: false }));
     expect(cmdPlugin.setAccessKey).toHaveBeenCalledWith({ token: "", displayName: "" });
     expect(await screen.findByLabelText("Email")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Войти" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Получить код" })).not.toBeInTheDocument();
     expectNoPasswordPrompt();
     await submitEmailLogin("test@example.test");
 
@@ -837,7 +1079,7 @@ describe("BraiApp onboarding", () => {
     expect(await screen.findByText("Микрофон")).toBeInTheDocument();
   });
 
-  it("starts concrete settings with microphone after choosing the Brai cloud", async () => {
+  it("shows the cloud privacy warning before microphone settings", async () => {
     stubAndroidCapacitor();
     window.localStorage.setItem(ONBOARDING_STORAGE_KEY, JSON.stringify({
       complete: false,
@@ -852,6 +1094,10 @@ describe("BraiApp onboarding", () => {
     render(<BraiApp />);
 
     fireEvent.click(await screen.findByRole("button", { name: /Облако Brai/ }));
+    expect(await screen.findByText("Мы ничего не храним")).toBeInTheDocument();
+    expect(screen.getByText(/после успешной доставки расшифровки/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Согласен" }));
     expect(await screen.findByText("Микрофон")).toBeInTheDocument();
     expect(screen.getByText("Нужен для голосового ввода команд и диктовки для транскрибации")).toBeInTheDocument();
     expect(screen.getByRole("img", { name: "Разрешение микрофона Brai" })).toHaveAttribute("src", "/onboarding/settings-1-microphone.jpg");

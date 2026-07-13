@@ -1,20 +1,23 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { BookOpen, Crown, Info, Settings } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { ArrowLeft, BookOpen, Crown, Info, Settings } from "lucide-react";
 import type { AuthOnboardingContext } from "@/shared/api/braiApi";
-import { getBraiCmdState, listenBraiCmdCredentialRefreshRequired, openBraiCmdSettings, retryBraiCmdQueue, setBraiCmdAccessKey, setBraiCmdOverlayEnabled, setBraiCmdQueuePausedMode, setBraiCmdVoiceOnlyMode } from "@/shared/platform/braiCmd";
+import { getBraiCmdState, listenBraiCmdCredentialRefreshRequired, retryBraiCmdQueue, setBraiCmdAccessKey, setBraiCmdOverlayEnabled, setBraiCmdQueuePausedMode, setBraiCmdVoiceOnlyMode } from "@/shared/platform/braiCmd";
 import { installAndroidBackHandler, isNativeShell, platformName } from "@/shared/platform/platform";
 import { getBraiLocalStorageItem, removeBraiLocalStorageItem, setBraiLocalStorageItem } from "@/shared/storage/localStorageKeys";
 import { ScrollArea } from "@/shared/ui/scroll-area";
 import { SidebarInset, SidebarProvider } from "@/shared/ui/sidebar";
 import { OnboardingFlow, shouldShowOnboarding } from "@/features/onboarding/OnboardingFlow";
+import { loadOnboardingState } from "@/features/onboarding/onboardingModel";
+import { AuthScreen } from "./AuthScreen";
 import { AppStartupSplash } from "./AppStartupSplash";
 import type { SectionId } from "./appModel";
 import { isPrimarySection, sectionIcon, sectionTitle } from "./appModel";
 import { braiCmdBootstrapRetryDelay } from "./braiCmdBootstrap.model";
 import { cx } from "./appUtils";
-import { AuthPanel, IconButton, MobileContextSheet, ScreenHeader, ThemeButton } from "./chrome/AppChrome";
+import { IconButton, MobileContextSheet, ScreenHeader, ThemeButton } from "./chrome/AppChrome";
 import { useBraiAppState } from "./hooks/useBraiAppState";
 import { DesktopRail, MainDock, MobileDockOverflowButton, MobileDockOverflowSheet, MobileMenuButton, MobileProfileDrawer } from "./navigation/AppNavigation";
 import { isMobileNavigationViewport, sectionSwipePageStyle, useLeftEdgeMenuSwipe } from "./navigation/useSectionSwipeNavigation";
@@ -41,45 +44,63 @@ const INBOX_MOBILE_CREATE_DRAFT_STORAGE_KEY = "brai_inbox_mobile_create_draft";
 export function BraiApp({ initialSection = "actions" }: { initialSection?: SectionId }) {
   const app = useBraiAppState(initialSection);
   const { authDisplayName, authUser, provisionBraiCmdDeviceToken } = app;
+  const router = useRouter();
   const nativeAndroid = useMountedNativeAndroid();
   const [mobileDockMenu, setMobileDockMenu] = useState<"left" | "right" | null>(null);
   const [startupIntroComplete, setStartupIntroComplete] = useState(false);
   const [onboardingStartupActive, setOnboardingStartupActive] = useState(true);
-  const [onboardingVisible, setOnboardingVisible] = useState(() => shouldShowOnboarding(false));
+  const [onboardingVisible, setOnboardingVisible] = useState(() => shouldShowOnboarding(false) || (isNativeAndroid() && shouldKeepStoredLockedOnboarding()));
+  const [unauthEngineOpen, setUnauthEngineOpen] = useState(false);
+  const [unauthBraiCmdOpen, setUnauthBraiCmdOpen] = useState(false);
   const startupReady = app.localSnapshotReady || app.displaySyncStatus === "auth_required" || app.displaySyncStatus === "offline" || app.displaySyncStatus === "sync_failed";
   const onboardingAuthRequired = startupReady && app.displaySyncStatus === "auth_required";
-  const onboardingActive = nativeAndroid && (onboardingVisible || onboardingAuthRequired);
+  const unauthEngineActive = nativeAndroid && unauthEngineOpen;
+  const unauthBraiCmdActive = nativeAndroid && unauthBraiCmdOpen;
+  const storedLockedOnboarding = nativeAndroid && app.displaySyncStatus === "connecting" && shouldKeepStoredLockedOnboarding();
+  const onboardingActive = nativeAndroid && (onboardingVisible || onboardingAuthRequired || storedLockedOnboarding) && !unauthEngineActive && !unauthBraiCmdActive;
+  const visibleSection = unauthEngineActive ? "engine" : app.section;
   const dockOverflowOpen = mobileDockMenu != null;
   const [actionsMobileCreateDraft, setActionsMobileCreateDraft] = useStoredMobileCreateDraft(ACTIONS_MOBILE_CREATE_DRAFT_STORAGE_KEY);
   const [inboxMobileCreateDraft, setInboxMobileCreateDraft] = useStoredMobileCreateDraft(INBOX_MOBILE_CREATE_DRAFT_STORAGE_KEY);
   const mobileViewport = useMountedMobileNavigationViewport();
   const [drawsFullScreen, setDrawsFullScreen] = useState(false);
-  const drawsFullscreenActive = app.section === "draws" && drawsFullScreen;
+  const drawsFullscreenActive = visibleSection === "draws" && drawsFullScreen;
   const handleDrawsFullscreenChange = useCallback((nextFullScreen: boolean) => {
     setDrawsFullScreen(nextFullScreen);
     if (nextFullScreen) setMobileDockMenu(null);
   }, []);
   const sectionRef = useRef(app.section);
   const selectSectionRef = useRef(app.selectSection);
-  const adjacentSection = app.swipeNavigation.visual?.to;
+  const unauthEngineActiveRef = useRef(false);
+  const unauthBraiCmdActiveRef = useRef(false);
+  const adjacentSection = unauthEngineActive ? null : app.swipeNavigation.visual?.to;
   const handleStartupIntroComplete = useCallback(() => setStartupIntroComplete(true), []);
   const mobileMenuSwipe = useLeftEdgeMenuSwipe(
     () => setMobileDockMenu("left"),
     !app.mobileMenuOpen && !mobileDockMenu && !app.mobileContextPanel && !app.actionOverlayOpen,
   );
+  const webAuthRequired = !nativeAndroid && app.displaySyncStatus === "auth_required";
 
   function openMobileMenu() {
     app.setMobileMenuOpen(true);
   }
 
   function openBraiCmd() {
-    void openBraiCmdSettings().then((opened) => {
-      if (!opened) app.selectSection("brai-cmd");
-    });
+    app.selectSection("brai-cmd");
   }
 
   async function openNativeBraiCmdSettings() {
-    return await openBraiCmdSettings();
+    setUnauthBraiCmdOpen(true);
+    return true;
+  }
+
+  function openUnauthEngine() {
+    setUnauthEngineOpen(true);
+  }
+
+  function closeUnauthSection() {
+    setUnauthEngineOpen(false);
+    setUnauthBraiCmdOpen(false);
   }
 
   async function onOnboardingEmailLogin(email: string, context?: AuthOnboardingContext) {
@@ -95,12 +116,24 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
   useEffect(() => {
     sectionRef.current = app.section;
     selectSectionRef.current = app.selectSection;
-  }, [app.section, app.selectSection]);
+    unauthEngineActiveRef.current = unauthEngineActive;
+    unauthBraiCmdActiveRef.current = unauthBraiCmdActive;
+  }, [app.section, app.selectSection, unauthBraiCmdActive, unauthEngineActive]);
+
+  useEffect(() => {
+    if (!unauthEngineOpen) return;
+    if (nativeAndroid && (!app.localSnapshotReady || onboardingVisible || onboardingAuthRequired)) return;
+    const timeout = window.setTimeout(() => setUnauthEngineOpen(false), 0);
+    return () => window.clearTimeout(timeout);
+  }, [app.localSnapshotReady, nativeAndroid, onboardingAuthRequired, onboardingVisible, unauthEngineOpen]);
 
   useEffect(() => {
     if (!nativeAndroid) return;
     const timeout = window.setTimeout(() => {
-      setOnboardingVisible(shouldShowOnboarding(startupReady && app.displaySyncStatus === "auth_required"));
+      const shouldBeVisible =
+        shouldShowOnboarding(startupReady && app.displaySyncStatus === "auth_required") ||
+        (app.displaySyncStatus === "connecting" && shouldKeepStoredLockedOnboarding());
+      setOnboardingVisible((current) => current && app.displaySyncStatus === "connecting" ? true : shouldBeVisible);
     }, 0);
     return () => window.clearTimeout(timeout);
   }, [app.displaySyncStatus, nativeAndroid, startupReady]);
@@ -108,6 +141,11 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
   useEffect(() => {
     document.documentElement.dataset.theme = onboardingActive ? "dark" : app.theme;
   }, [app.theme, onboardingActive]);
+
+  useEffect(() => {
+    if (!webAuthRequired || window.location.pathname === "/auth") return;
+    router.replace("/auth");
+  }, [router, webAuthRequired]);
 
   useEffect(() => {
     if (!nativeAndroid) return;
@@ -199,6 +237,12 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
 
   useEffect(() => installAndroidBackHandler(() => {
     if (window.history.state?.braiMobileMenu || window.history.state?.braiMobileDockMenu || window.history.state?.braiMobileSheet || window.history.state?.braiActivityEditor || window.history.state?.braiMobileActionCreate || window.history.state?.braiInboxEditor || window.history.state?.braiMobileInboxCreate || window.history.state?.braiFactoryLog) return false;
+    if (unauthEngineActiveRef.current || unauthBraiCmdActiveRef.current) {
+      setUnauthEngineOpen(false);
+      setUnauthBraiCmdOpen(false);
+      selectSectionRef.current("actions");
+      return true;
+    }
     if (sectionRef.current === "actions") return false;
     if (window.history.state?.braiSection === sectionRef.current) {
       window.history.back();
@@ -210,6 +254,7 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
 
   function renderSectionScreen(screenSection: SectionId, isActivePage: boolean) {
     const hideScreenHeader = screenSection === "draws" && drawsFullscreenActive;
+    const authBlocked = app.displaySyncStatus === "auth_required" && !(unauthEngineActive && screenSection === "engine");
 
     return (
       <>
@@ -238,9 +283,10 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
             }
           />
         ) : null}
-        {app.displaySyncStatus === "auth_required" ? (
-          <AuthPanel
+        {authBlocked ? (
+          <AuthScreen
             busy={app.busy}
+            layout="embedded"
             mode={app.authMode}
             onEmailLogin={app.onEmailLogin}
             onRequestOtp={app.onRequestOtp}
@@ -332,6 +378,10 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
     );
   }
 
+  if (webAuthRequired) {
+    return <main className="min-h-dvh bg-background" data-auth-redirect />;
+  }
+
   return (
     <>
       {onboardingActive ? (
@@ -341,12 +391,40 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
           busy={app.busy}
           onDone={() => setOnboardingVisible(false)}
           onEmailLogin={onOnboardingEmailLogin}
+          onOpenEngine={openUnauthEngine}
           onOpenNativeCmdSettings={openNativeBraiCmdSettings}
           onRequestOtp={app.onRequestOtp}
           onStartupScreenChange={setOnboardingStartupActive}
           onVerifyOtp={onOnboardingVerifyOtp}
           startupIntroComplete={startupIntroComplete}
         />
+      ) : unauthEngineActive || unauthBraiCmdActive ? (
+        <main className="grid h-dvh min-h-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden bg-background px-3.5 pb-[env(safe-area-inset-bottom)] pt-[env(safe-area-inset-top)]" data-standalone-section>
+          <ScreenHeader
+            title={unauthEngineActive ? "Engine" : "Brai CMD"}
+            icon={sectionIcon(unauthEngineActive ? "engine" : "brai-cmd")}
+            syncStatus={app.displaySyncStatus}
+            pendingCount={app.totalPendingCount}
+            leading={<IconButton icon={ArrowLeft} label="Назад" onClick={closeUnauthSection} />}
+          />
+          <ScrollArea scrollbar={false} className="min-h-0">
+            <div className="pb-6">
+              {unauthEngineActive ? (
+                <EngineSection
+                  appVersionState={app.versionState}
+                  bundlePublishedAt={app.bundlePublishedAt}
+                  otaCheckedAt={app.otaCheckedAt}
+                  otaRefreshing={app.otaRefreshing}
+                  otaState={app.otaState}
+                  versionCheckedAt={app.versionCheckedAt}
+                  versionError={app.versionError}
+                  versionRefreshing={app.versionRefreshing}
+                  onRefreshEngine={app.refreshEngineOnce}
+                />
+              ) : <BraiCmdSection />}
+            </div>
+          </ScrollArea>
+        </main>
       ) : (
         <SidebarProvider
       open={false}
@@ -360,7 +438,7 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
     >
       {!drawsFullscreenActive && !mobileViewport ? (
         <DesktopRail
-          section={app.section}
+          section={visibleSection}
           appVersionState={app.versionState}
           otaRefreshing={app.otaRefreshing}
           otaState={app.otaState}
@@ -378,15 +456,15 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
         />
       ) : null}
       <SidebarInset className={cx("main-view m-0 h-full min-h-0 w-full min-w-0 overflow-hidden max-[860px]:overscroll-contain max-[860px]:[touch-action:pan-y]", app.swipeNavigation.visual && "is-section-swiping")} {...mobileMenuSwipe.handlers}>
-        {app.section === "focus" ? <FocusBackground active={app.active} mode={app.focusBackground} /> : null}
+        {visibleSection === "focus" ? <FocusBackground active={app.active} mode={app.focusBackground} /> : null}
         <ScrollArea scrollbar={false} className="main-scroll relative z-[1] h-full [&>[data-slot=scroll-area-viewport]>div]:h-full max-[860px]:[&>[data-slot=scroll-area-viewport]]:overscroll-contain max-[860px]:[&>[data-slot=scroll-area-viewport]]:[touch-action:pan-y]">
           <div className="section-swipe-stage relative m-0 h-full min-h-0 w-full overflow-x-hidden overflow-y-visible">
             <section
               className={cx("section-page section-page-current relative z-[1] min-w-0 [backface-visibility:hidden]", drawsFullscreenActive ? FULLSCREEN_SECTION_PAGE_CLASS : SECTION_PAGE_INSET_CLASS, app.swipeNavigation.visual && "will-change-transform")}
-              data-section-page={app.section}
+              data-section-page={visibleSection}
               style={sectionSwipePageStyle(app.swipeNavigation.visual, "current")}
             >
-              {renderSectionScreen(app.section, true)}
+              {renderSectionScreen(visibleSection, true)}
             </section>
             {adjacentSection && adjacentSection !== app.section ? (
               <section
@@ -403,7 +481,7 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
       </SidebarInset>
       {!drawsFullscreenActive ? (
         <MainDock
-          section={app.section}
+          section={visibleSection}
           hidden={app.actionOverlayOpen || app.mobileContextPanel != null}
           mobileViewport={mobileViewport}
           onSection={app.selectSection}
@@ -434,7 +512,7 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
       {mobileDockMenu && !drawsFullscreenActive ? (
         <MobileDockOverflowSheet
           side={mobileDockMenu}
-          section={app.section}
+          section={visibleSection}
           authUser={app.authUser}
           onClose={() => setMobileDockMenu(null)}
           onProfile={() => app.selectSection("profile")}
@@ -446,20 +524,20 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
           onLogout={app.onLogout}
         />
       ) : null}
-      {app.mobileContextPanel === "actions-info" && app.section === "actions" ? (
+      {app.mobileContextPanel === "actions-info" && visibleSection === "actions" ? (
         <MobileContextSheet label="Информация о действиях" onClose={() => app.setMobileContextPanel(null)} onCloseStart={app.markMobileContextPanelClosing}>
           <ActionsInfoPanel mobile />
         </MobileContextSheet>
       ) : null}
-      {app.mobileContextPanel === "inbox-info" && app.section === "inbox" ? (
+      {app.mobileContextPanel === "inbox-info" && visibleSection === "inbox" ? (
         <MobileContextSheet label="Информация о входящих" onClose={() => app.setMobileContextPanel(null)} onCloseStart={app.markMobileContextPanelClosing}>
           <ActionsInfoPanel label="Информация о входящих" mobile />
         </MobileContextSheet>
       ) : null}
-      {app.mobileContextPanel === "focus-goal" && app.section === "focus" ? (
+      {app.mobileContextPanel === "focus-goal" && visibleSection === "focus" ? (
         <FocusContextPanelSheet panel="goal" history={app.history} goal={app.goal} todayKey={app.todayKey} onClose={() => app.setMobileContextPanel(null)} onCloseStart={app.markMobileContextPanelClosing} onDeleteSession={app.onDeleteFocusSession} onEditInterval={app.onEditFocusInterval} onEditSession={app.onEditFocusSession} />
       ) : null}
-      {app.mobileContextPanel === "focus-history" && app.section === "focus" ? (
+      {app.mobileContextPanel === "focus-history" && visibleSection === "focus" ? (
         <FocusContextPanelSheet panel="history" history={app.history} goal={app.goal} todayKey={app.todayKey} onClose={() => app.setMobileContextPanel(null)} onCloseStart={app.markMobileContextPanelClosing} onDeleteSession={app.onDeleteFocusSession} onEditInterval={app.onEditFocusInterval} onEditSession={app.onEditFocusSession} />
       ) : null}
         </SidebarProvider>
@@ -506,6 +584,11 @@ function subscribeNativeAndroid() {
 
 function isNativeAndroid(): boolean {
   return isNativeShell() && platformName() === "android";
+}
+
+function shouldKeepStoredLockedOnboarding(): boolean {
+  const state = loadOnboardingState();
+  return state.complete && state.step === "locked";
 }
 
 function subscribeMobileNavigationViewport(onStoreChange: () => void) {

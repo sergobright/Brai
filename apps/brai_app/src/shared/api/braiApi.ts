@@ -30,20 +30,20 @@ export type BraiCmdDeviceToken = {
   status: "active";
 };
 
-export type OtpSendResult = {
-  sent?: boolean;
-  success?: boolean;
-  expires_in_seconds?: number;
-  resend_after_seconds?: number;
-  resend_strategy?: "rotate" | "reuse";
-};
-
 export type AuthOnboardingContext = {
   name?: string;
   preliminaryUserId?: string;
   duplicatePreliminaryUserId?: string;
   preliminaryClaimToken?: string;
   deviceFingerprint?: string;
+};
+
+export type OtpSendResult = {
+  sent?: boolean;
+  success?: boolean;
+  expires_in_seconds?: number;
+  resend_after_seconds?: number;
+  resend_strategy?: "rotate" | "reuse";
 };
 
 export type AiLogIoRow = {
@@ -223,6 +223,10 @@ export class BraiApi {
 
   async inboxWorkflow(inboxId: string): Promise<InboxWorkflowDetails> {
     return this.request(`/v1/inbox/${encodeURIComponent(inboxId)}/workflow`);
+  }
+
+  async activityWorkflow(activityId: string): Promise<InboxWorkflowDetails> {
+    return this.request(`/v1/activities/${encodeURIComponent(activityId)}/workflow`);
   }
 
   async aiLogs(limit = 50): Promise<{ logs: AiLog[] }> {

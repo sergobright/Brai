@@ -27,11 +27,13 @@ export const badgeVariants = cva(
         destructive:
           "bg-destructive text-white [button&,a&]:hover:bg-destructive/90",
         error:
-          "bg-destructive/8 text-destructive-foreground dark:bg-destructive/16",
+          "bg-destructive/10 text-destructive dark:bg-destructive/16",
         outline:
           "border-input bg-background text-foreground dark:bg-input/32 [button&,a&]:hover:bg-accent/50 dark:[button&,a&]:hover:bg-input/48",
         secondary:
           "bg-secondary text-secondary-foreground [button&,a&]:hover:bg-secondary/90",
+        success:
+          "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
       },
     },
   },

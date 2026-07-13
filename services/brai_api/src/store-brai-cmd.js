@@ -472,14 +472,17 @@ export const braiCmdStoreMethods = {
       postProcessingMs: safeNumber(input.postProcessingMs),
       totalMs: safeNumber(input.totalMs),
       transcriptChars: safeNumber(input.transcriptChars),
+      postProcessingInputChars: safeNumber(input.postProcessingInputChars),
+      postProcessingOutputChars: safeNumber(input.postProcessingOutputChars),
       clientVersion: cleanMetadata(input.clientVersion)
     };
     this.db.prepare(`
       INSERT INTO brai_cmd_usage_events (
         id, access_token_id, created_at_utc, success, error_code,
         audio_bytes, audio_duration_ms, provider, model, fallback_used,
-        transcription_ms, post_processing_ms, total_ms, transcript_chars, client_version
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        transcription_ms, post_processing_ms, total_ms, transcript_chars,
+        post_processing_input_chars, post_processing_output_chars, client_version
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       row.id,
       row.accessTokenId,
@@ -495,6 +498,8 @@ export const braiCmdStoreMethods = {
       row.postProcessingMs,
       row.totalMs,
       row.transcriptChars,
+      row.postProcessingInputChars,
+      row.postProcessingOutputChars,
       row.clientVersion
     );
     this.recordLog?.({
@@ -518,6 +523,8 @@ export const braiCmdStoreMethods = {
         post_processing_ms: row.postProcessingMs,
         total_ms: row.totalMs,
         transcript_chars: row.transcriptChars,
+        post_processing_input_chars: row.postProcessingInputChars,
+        post_processing_output_chars: row.postProcessingOutputChars,
         client_version: row.clientVersion,
         post_processing_requested: Boolean(input.postProcessingRequested),
         context_requested: Boolean(input.contextRequested)
@@ -540,6 +547,8 @@ export const braiCmdStoreMethods = {
              COALESCE(SUM(u.audio_bytes), 0) AS audio_bytes,
              COALESCE(SUM(u.audio_duration_ms), 0) AS audio_duration_ms,
              COALESCE(SUM(u.transcript_chars), 0) AS transcript_chars,
+             COALESCE(SUM(u.post_processing_input_chars), 0) AS post_processing_input_chars,
+             COALESCE(SUM(u.post_processing_output_chars), 0) AS post_processing_output_chars,
              COALESCE(SUM(u.transcription_ms), 0) AS transcription_ms,
              COALESCE(SUM(u.post_processing_ms), 0) AS post_processing_ms,
              COALESCE(SUM(u.total_ms), 0) AS total_ms
@@ -605,7 +614,9 @@ export const braiCmdStoreMethods = {
         transcriptionMs: row.transcription_ms,
         postProcessingMs: row.post_processing_ms,
         totalMs: row.total_ms,
-        transcriptChars: row.transcript_chars
+        transcriptChars: row.transcript_chars,
+        postProcessingInputChars: row.post_processing_input_chars,
+        postProcessingOutputChars: row.post_processing_output_chars
       }))
     };
   }
@@ -781,6 +792,8 @@ function emptyUsage() {
     audioBytes: 0,
     audioDurationMs: 0,
     transcriptChars: 0,
+    postProcessingInputChars: 0,
+    postProcessingOutputChars: 0,
     transcriptionMs: 0,
     postProcessingMs: 0,
     totalMs: 0
@@ -794,6 +807,8 @@ function addUsage(left, right) {
   left.audioBytes += right.audioBytes;
   left.audioDurationMs += right.audioDurationMs;
   left.transcriptChars += right.transcriptChars;
+  left.postProcessingInputChars += right.postProcessingInputChars;
+  left.postProcessingOutputChars += right.postProcessingOutputChars;
   left.transcriptionMs += right.transcriptionMs;
   left.postProcessingMs += right.postProcessingMs;
   left.totalMs += right.totalMs;

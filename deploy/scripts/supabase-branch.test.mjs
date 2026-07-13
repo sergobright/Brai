@@ -5,6 +5,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import {
+  copySourceQuery,
   inspectOwnedSequences,
   isTransientPostgresConnectionError,
   migrationFileEntries,
@@ -58,7 +59,7 @@ test("production seed loads only explicitly marked idempotent migrations into th
   assert.doesNotMatch(script, /reapplyPostProductionSeedMigrations/);
 });
 
-test("production copy reseeds copied tables before and after post-seed migrations", () => {
+test("production copy reseeds copied tables before repair migrations and before commit", () => {
   const script = fs.readFileSync(path.join(repoRoot, "deploy/scripts/supabase-branch.mjs"), "utf8");
   const copyStart = script.indexOf("async function copySchemaData");
   const inspectStart = script.indexOf("export async function inspectOwnedSequences");
@@ -66,16 +67,16 @@ test("production copy reseeds copied tables before and after post-seed migration
   const begin = 'client.query("BEGIN ISOLATION LEVEL REPEATABLE READ")';
   const searchPath = "SET LOCAL search_path TO";
   const reapply = "for (const { sql } of postSeedMigrations) await client.query(sql)";
-  const reseed = "reseedOwnedSequences(client, { schema: targetSchema, tables: copyTables })";
+  const reseed = "await reseedOwnedSequences(client, { schema: targetSchema, tables: copyTables })";
   const firstReseed = copyFunction.indexOf(reseed);
-  const lastReseed = copyFunction.lastIndexOf(reseed);
+  const secondReseed = copyFunction.indexOf(reseed, firstReseed + reseed.length);
 
   assert.match(copyFunction, /const client = await pool\.connect\(\)/);
   assert.ok(copyFunction.indexOf(begin) > 0);
   assert.ok(copyFunction.indexOf(searchPath) > 0);
   assert.ok(copyFunction.indexOf(reapply) > 0);
   assert.ok(firstReseed > 0);
-  assert.ok(lastReseed > firstReseed);
+  assert.ok(secondReseed > firstReseed);
   assert.ok(copyFunction.indexOf(begin) < copyFunction.indexOf(searchPath));
   assert.match(copyFunction, /TRUNCATE TABLE .* CONTINUE IDENTITY CASCADE/);
   assert.doesNotMatch(copyFunction, /RESTART IDENTITY/);
@@ -83,9 +84,23 @@ test("production copy reseeds copied tables before and after post-seed migration
   assert.ok(copyFunction.indexOf(reapply) > copyFunction.indexOf("OVERRIDING SYSTEM VALUE"));
   assert.ok(firstReseed > copyFunction.indexOf("OVERRIDING SYSTEM VALUE"));
   assert.ok(firstReseed < copyFunction.indexOf(reapply));
-  assert.ok(lastReseed > copyFunction.indexOf(reapply));
-  assert.ok(lastReseed < copyFunction.indexOf('client.query("COMMIT")'));
+  assert.ok(secondReseed > copyFunction.indexOf(reapply));
+  assert.ok(secondReseed < copyFunction.indexOf('client.query("COMMIT")'));
   assert.doesNotMatch(copyFunction, /tables: truncatableTables/);
+});
+
+test("production copy keeps ai_logs only for agents present in the target schema", () => {
+  const query = copySourceQuery({
+    sourceSchema: "prod",
+    targetSchema: "preview",
+    table: "ai_logs",
+    columns: ["id", "agent_id", "json_data"]
+  }).replace(/\s+/g, " ").trim();
+
+  assert.equal(
+    query,
+    'SELECT source_row."id", source_row."agent_id", source_row."json_data" FROM "prod"."ai_logs" AS source_row WHERE EXISTS ( SELECT 1 FROM "preview"."agents" AS target_agent WHERE target_agent.id = source_row.agent_id )'
+  );
 });
 
 test("self-hosted Postgres retry is limited to pooler circuit breaker errors", () => {

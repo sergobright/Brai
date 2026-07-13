@@ -56,6 +56,45 @@ class ConfigStoreTest {
     }
 
     @Test
+    fun mainDictationToggleIsIndependentFromContextActions() {
+        store.mainDictationEnabled = false
+
+        assertFalse(ConfigStore(RuntimeEnvironment.getApplication()).mainDictationEnabled)
+        assertTrue(store.contextActionIdeaEnabled)
+        assertTrue(store.contextActionScreenshotEnabled)
+    }
+
+    @Test
+    fun onboardingQueuePauseNeverPersists() {
+        store.onboardingQueuePaused = true
+        assertTrue(store.onboardingQueuePaused)
+
+        BraiCmdRuntimeState.onboardingQueuePaused = false
+
+        assertFalse(ConfigStore(RuntimeEnvironment.getApplication()).onboardingQueuePaused)
+    }
+
+    @Test
+    fun preliminaryProfileDataPersists() {
+        store.preliminaryUserId = "prelim-user"
+        store.preliminaryClaimToken = "claim-token"
+
+        val reloaded = ConfigStore(RuntimeEnvironment.getApplication())
+
+        assertEquals("prelim-user", reloaded.preliminaryUserId)
+        assertEquals("claim-token", reloaded.preliminaryClaimToken)
+    }
+
+    @Test
+    fun settingsSnapshotIncludesOverlayEnabled() {
+        store.overlayEnabled = true
+
+        val snapshot = BraiCmdBridge.snapshot(RuntimeEnvironment.getApplication())
+
+        assertTrue(snapshot.optBoolean("overlayEnabled"))
+    }
+
+    @Test
     fun oldBraiApiDomainMigratesToCurrentBuildFlavor() {
         store.serverUrl = "https://e.test.brightos.world/api"
 

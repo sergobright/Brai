@@ -6,6 +6,7 @@ import type {
   ActivityEventType,
   ActivityItem,
   ActivityStatus,
+  ActivityType,
   PendingActivityEvent,
 } from "@/shared/types/activities";
 import { emptyActivitiesState } from "@/shared/types/activities";
@@ -168,11 +169,11 @@ export function projectActivitiesState(
       if (!title) continue;
       actions.set(event.actionId, {
         id: event.actionId,
-        activity_type_id: "action",
+        activity_type_id: isActivityType(event.payload.activity_type_id) ? event.payload.activity_type_id : "action",
         title,
         description_md: normalizeDescription(event.payload.description_md),
-        author: "",
-        reason: "",
+        author: typeof event.payload.author === "string" ? event.payload.author.trim() : "",
+        reason: normalizeDescription(event.payload.reason),
         status: "New",
         created_at_utc: occurredAtUtc,
         updated_at_utc: occurredAtUtc,
@@ -180,6 +181,17 @@ export function projectActivitiesState(
         sort_order: null,
         deleted_at_utc: null,
         restored_at_utc: null,
+        item_roles_id: null,
+        initial_event_id: null,
+        workflow_execution_id: null,
+        workflow_status: "queued",
+        workflow_step: "ingest",
+        workflow_attempt_count: 0,
+        workflow_last_error: null,
+        temporal_workflow_id: null,
+        temporal_run_id: null,
+        ai_processing_status: "running",
+        ai_processing_error: null,
         pending: true,
       });
     } else if (event.type === "update_title" && existing) {
@@ -335,8 +347,11 @@ export function loadActivityEditDrafts(): Array<{ actionId: string; title: strin
 
 function normalizedPayload(payload: ActivityEventPayload): ActivityEventPayload {
   return {
+    activity_type_id: isActivityType(payload.activity_type_id) ? payload.activity_type_id : undefined,
     title: payload.title == null ? undefined : cleanTitle(payload.title),
     description_md: payload.description_md == null ? undefined : normalizeDescription(payload.description_md),
+    author: typeof payload.author === "string" ? payload.author.trim() : undefined,
+    reason: payload.reason == null ? undefined : normalizeDescription(payload.reason),
     status: payload.status,
     ordered_ids: payload.ordered_ids == null ? undefined : normalizeOrderedIds(payload.ordered_ids),
   };
@@ -352,11 +367,26 @@ function normalizeActivityItem(action: ActivityItem): ActivityItem {
     sort_order: Number.isInteger(action.sort_order) ? action.sort_order : null,
     deleted_at_utc: action.deleted_at_utc ?? null,
     restored_at_utc: action.restored_at_utc ?? null,
+    item_roles_id: Number.isInteger(action.item_roles_id) ? action.item_roles_id : action.item_roles_id === null ? null : undefined,
+    initial_event_id: action.initial_event_id ?? null,
+    workflow_execution_id: Number.isInteger(action.workflow_execution_id) ? action.workflow_execution_id : action.workflow_execution_id === null ? null : undefined,
+    workflow_status: action.workflow_status ?? null,
+    workflow_step: action.workflow_step ?? null,
+    workflow_attempt_count: Number.isInteger(action.workflow_attempt_count) ? action.workflow_attempt_count : 0,
+    workflow_last_error: action.workflow_last_error ?? null,
+    temporal_workflow_id: action.temporal_workflow_id ?? null,
+    temporal_run_id: action.temporal_run_id ?? null,
+    ai_processing_status: action.ai_processing_status ?? null,
+    ai_processing_error: action.ai_processing_error ?? null,
   };
 }
 
 function isActivityStatus(value: unknown): value is ActivityStatus {
   return value === "New" || value === "Done";
+}
+
+function isActivityType(value: unknown): value is ActivityType {
+  return value === "action" || value === "operation";
 }
 
 function compareActivityEvents(left: PendingActivityEvent, right: PendingActivityEvent): number {

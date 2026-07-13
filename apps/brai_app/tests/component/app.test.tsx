@@ -2,9 +2,10 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { describe, expect, it, vi } from "vitest";
 import { cmdPlugin, openProfileMenuItem, setupBraiAppTest, stubAndroidCapacitor, testVersionState } from "./app-test-support";
 import { BraiApp } from "@/features/app/BraiApp";
-import { resolveAuthMode } from "@/features/app/appModel";
 import { AuthPanel } from "@/features/app/chrome/AppChrome";
 import { FocusSection } from "@/features/app/sections/focus/FocusSection";
+import { BraiApi } from "@/shared/api/braiApi";
+import { setMeta } from "@/shared/storage/db";
 import { pendingEvents, saveGoalCache, saveHistoryCache } from "@/shared/storage/syncStore";
 import { emptyGoal, emptyHistory } from "@/shared/types/timer";
 import { shouldSnapSlidingNumber } from "@/shared/ui/sliding-number";
@@ -52,7 +53,7 @@ describe("BraiApp shell", () => {
 
   it("does not tie cabinet overlays to the legacy native access-name request", async () => {
     stubAndroidCapacitor();
-    cmdPlugin.ensureAccess.mockResolvedValueOnce({ accessGranted: false });
+    cmdPlugin.ensureAccess.mockResolvedValue({ accessGranted: false });
 
     render(<BraiApp />);
 
@@ -181,21 +182,22 @@ describe("BraiApp shell", () => {
 
     await waitFor(() => expect(cmdPlugin.setAccessKey).toHaveBeenLastCalledWith({ token: "", displayName: "" }));
     expect(cmdPlugin.setOverlayEnabled).toHaveBeenLastCalledWith({ enabled: false });
+    expect(cmdPlugin.setQueuePausedMode).toHaveBeenCalledWith({ enabled: false });
   });
 
-  it("uses explicit email-only login on Preview web", async () => {
+  it("requests an OTP code from the shared auth form", async () => {
     const auth = authPanelProps();
-    auth.onEmailLogin.mockRejectedValue(new Error("invalid_email"));
-    render(<AuthPanel {...auth} mode={resolveAuthMode(false)} />);
+    auth.onRequestOtp.mockRejectedValue(new Error("invalid_email"));
+    render(<AuthPanel {...auth} />);
 
     const email = screen.getByRole("textbox", { name: "Email" });
     expect(screen.queryByLabelText("Код из письма")).not.toBeInTheDocument();
     fireEvent.change(email, { target: { value: "primary@example.com" } });
-    fireEvent.click(screen.getByRole("button", { name: "Войти" }));
+    fireEvent.click(screen.getByRole("button", { name: "Получить код" }));
 
-    await waitFor(() => expect(auth.onEmailLogin).toHaveBeenCalledWith("primary@example.com"));
-    expect(await screen.findByText("Email не подошёл")).toBeInTheDocument();
-    expect(auth.onRequestOtp).not.toHaveBeenCalled();
+    await waitFor(() => expect(auth.onRequestOtp).toHaveBeenCalledWith("primary@example.com"));
+    expect(await screen.findByText("Не удалось отправить код")).toBeInTheDocument();
+    expect(auth.onVerifyOtp).not.toHaveBeenCalled();
   });
 
   it("uses explicit email-only login on Preview Android", async () => {
@@ -218,13 +220,24 @@ describe("BraiApp shell", () => {
     render(<BraiApp />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Войти" }));
-    expect(await screen.findByRole("textbox", { name: "Email" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Войти" })).toBeInTheDocument();
-    expect(screen.queryByLabelText("Пароль")).not.toBeInTheDocument();
+    const email = await screen.findByRole("textbox", { name: "Email" });
+    fireEvent.change(email, { target: { value: "random@example.test" } });
+    fireEvent.click(screen.getByRole("button", { name: "Войти" }));
+
+    await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledWith(
+      "https://a.test.brai.one/api/auth/test-email-login",
+      expect.objectContaining({ method: "POST" }),
+    ));
+    expect(globalThis.fetch).not.toHaveBeenCalledWith(
+      "https://a.test.brai.one/api/auth/otp/send",
+      expect.anything(),
+    );
+    expect(await screen.findByText("Email не подошёл")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Получить код" })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Пароль")).not.toBeInTheDocument();
   });
 
-  it("keeps production Android on the OTP flow", async () => {
+  it("keeps Android on the OTP flow", async () => {
     stubAndroidCapacitor();
     window.__BRAI_RUNTIME_CONFIG__ = {
       environment: "prod",
@@ -250,12 +263,49 @@ describe("BraiApp shell", () => {
     expect(screen.queryByLabelText("Пароль")).not.toBeInTheDocument();
   });
 
-  it("keeps production Web on the OTP flow", async () => {
-    render(<AuthPanel {...authPanelProps()} mode={resolveAuthMode(true)} />);
+  it("uses the OTP flow on Web", async () => {
+    render(<AuthPanel {...authPanelProps()} />);
 
     expect(screen.getByRole("textbox", { name: "Email" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Получить код" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Войти" })).not.toBeInTheDocument();
+  });
+
+  it("redirects anonymous web users to the standalone auth page without rendering the cabinet shell", async () => {
+    await setMeta("currentUserId", null);
+    let resolveSession!: (session: { authenticated: false; user: null }) => void;
+    const sessionResult = new Promise<{ authenticated: false; user: null }>((resolve) => {
+      resolveSession = resolve;
+    });
+    const sessionSpy = vi.spyOn(BraiApi.prototype, "session").mockReturnValue(sessionResult);
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = requestUrl(input);
+      if (url.includes("/auth/session")) {
+        return new Response(JSON.stringify({ authenticated: false, user: null }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.endsWith("/v1/version")) {
+        return new Response(JSON.stringify(testVersionState("0.0.10")), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return Promise.reject(new Error("offline"));
+    }));
+
+    render(<BraiApp />);
+    await waitFor(() => expect(sessionSpy).toHaveBeenCalled());
+    await act(async () => {
+      resolveSession({ authenticated: false, user: null });
+      await sessionResult;
+    });
+    await waitFor(() => expect(window.location.pathname).toBe("/auth"));
+    expect(document.querySelector("[data-auth-redirect]")).toBeInTheDocument();
+    expect(document.querySelector("[data-app-shell]")).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Действия" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: "Email" })).not.toBeInTheDocument();
   });
 
   it("shows the production OTP countdown and enables resend after one minute", async () => {
@@ -263,7 +313,7 @@ describe("BraiApp shell", () => {
     vi.setSystemTime(new Date("2026-07-12T10:00:00.000Z"));
     try {
       const auth = authPanelProps();
-      render(<AuthPanel {...auth} mode={resolveAuthMode(true)} />);
+      render(<AuthPanel {...auth} />);
 
       fireEvent.change(screen.getByRole("textbox", { name: "Email" }), { target: { value: "primary@example.com" } });
       await act(async () => {

@@ -121,10 +121,10 @@ export function sandboxCheckMode(command, env = process.env) {
     };
   }
 
-  if (/\bdeploy\/scripts\/postgres-diagnostics\.mjs\b/.test(text)) {
+  if (/\bdeploy\/scripts\/(postgres-diagnostics\.mjs|supavisor-auth-diagnostics\.sh)\b/.test(text)) {
     return {
       mode: "require_escalated",
-      reason: "PostgreSQL diagnostics use the protected host runtime database boundary.",
+      reason: "PostgreSQL/Supavisor diagnostics use the protected host runtime boundary.",
     };
   }
 

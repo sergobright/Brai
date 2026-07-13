@@ -71,8 +71,8 @@ class ScreenshotButtonView(context: Context) : View(context) {
         invalidate()
     }
 
-    fun setQueueState(failedCount: Int, readyCount: Int = 0) {
-        queueBadge = resolveQueueBadgeState(failedCount, readyCount)
+    fun setQueueState(pendingCount: Int, readyCount: Int = 0) {
+        queueBadge = resolveQueueBadgeState(pendingCount, readyCount)
         invalidate()
     }
 

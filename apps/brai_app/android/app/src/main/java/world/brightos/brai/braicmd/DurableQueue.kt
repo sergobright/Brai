@@ -179,7 +179,8 @@ internal object AudioQueueStore {
         ".inbox.txt",
         ".receiver.txt",
         ".inbox-prefix.txt",
-        ".inbox-action.txt"
+        ".inbox-action.txt",
+        TranscriptionCheckpointStore.SUFFIX
     )
 
     fun list(context: Context): List<File> =
@@ -195,11 +196,18 @@ internal object AudioQueueStore {
     fun action(audioFile: File): AudioQueueAction =
         InboxPayloadStore.readAction(audioFile) ?: inferLegacyAction(audioFile)
 
-    fun complete(audioFile: File): Boolean {
+    fun complete(context: Context, audioFile: File): Boolean {
+        if (!audioFile.exists()) return true
+        if (RecordingArchiveStore.onAudioProcessed(context, audioFile)) {
+            sidecarSuffixes.forEach { suffix -> File("${audioFile.absolutePath}$suffix").delete() }
+            File("${audioFile.absolutePath}.metadata.json").delete()
+            return true
+        }
         val doneFile = File(audioFile.parentFile, "${audioFile.name}.done")
-        val excludedFromQueue = !audioFile.exists() || audioFile.renameTo(doneFile) || audioFile.delete()
+        val excludedFromQueue = audioFile.renameTo(doneFile) || audioFile.delete()
         if (!excludedFromQueue) return false
         sidecarSuffixes.forEach { suffix -> File("${audioFile.absolutePath}$suffix").delete() }
+        File("${audioFile.absolutePath}.metadata.json").delete()
         doneFile.delete()
         return true
     }
@@ -304,6 +312,11 @@ internal fun classifyQueueFailure(error: Throwable): QueueFailureDisposition =
     when (error) {
         is QueueCorruptItemException -> QueueFailureDisposition.Permanent
         is QueueAuthBlockedException -> QueueFailureDisposition.Blocked
+        is ProviderResponseException -> when {
+            error.statusCode in setOf(408, 425, 429) || error.statusCode >= 500 -> QueueFailureDisposition.Transient
+            error.statusCode in 400..499 -> QueueFailureDisposition.Blocked
+            else -> QueueFailureDisposition.Transient
+        }
         is QueueEmptyModelException,
         is UnknownHostException,
         is SocketTimeoutException -> QueueFailureDisposition.Transient

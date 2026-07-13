@@ -11,15 +11,26 @@ const otaPlugin = vi.hoisted(() => ({
 
 const cmdPlugin = vi.hoisted(() => ({
   addListener: vi.fn(),
+  deleteAudio: vi.fn(),
   ensureAccess: vi.fn(),
+  downloadAudio: vi.fn(),
+  getSettings: vi.fn(),
   getState: vi.fn(),
+  openPermission: vi.fn(),
   openSettings: vi.fn(),
   preparePreliminaryProfile: vi.fn(),
   retryQueue: vi.fn(),
+  probeProvider: vi.fn(),
+  connectProvider: vi.fn(),
+  disconnectProvider: vi.fn(),
+  saveProvider: vi.fn(),
   setAccessKey: vi.fn(),
   setOverlayEnabled: vi.fn(),
   setQueuePausedMode: vi.fn(),
   setVoiceOnlyMode: vi.fn(),
+  testConnection: vi.fn(),
+  testProvider: vi.fn(),
+  updateSettings: vi.fn(),
 }));
 
 const androidCapabilitiesPlugin = vi.hoisted(() => ({
@@ -58,8 +69,63 @@ function matchesMediaQuery(query: string): boolean {
   return false;
 }
 
+export function braiCmdSettingsSnapshot() {
+  return {
+    native: true,
+    overlayEnabled: true,
+    permissions: {
+      accessibility: false,
+      overlay: false,
+      microphone: true,
+      notifications: true,
+    },
+    settings: {
+      mainDictationEnabled: true,
+      transcriptionMode: "cloud",
+      transcriptionProviderId: "openai",
+      transcriptionModel: "",
+      transcriptionConfigured: true,
+      providerProfiles: [],
+      postProcessingEnabled: false,
+      postProcessingPrompt: "",
+      providerMode: "cloud",
+      providerId: "openai",
+      providerModel: "",
+      providerBaseUrl: "",
+      providerConfigured: true,
+      mainIconOpacityPercent: 85,
+      mainIconSizePercent: 100,
+      contextIconOpacityPercent: 85,
+      contextIconSizePercent: 100,
+      processedAudioRetentionEnabled: false,
+      processedAudioRetentionLimit: 25,
+      contextActions: {
+        voiceCommand: true,
+        screenshotInbox: true,
+        screenshotVoice: true,
+        contextInbox: true,
+        contextReply: true,
+      },
+    },
+    stats: {
+      requests: 0,
+      audioSeconds: 0,
+      audioMegabytes: 0,
+      transcriptChars: 0,
+      cloudRequests: 0,
+      cloudInputChars: 0,
+      cloudOutputChars: 0,
+    },
+    audio: [],
+  };
+}
+
 export function setupBraiAppTest() {
   beforeEach(async () => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+    cleanup();
+    Element.prototype.scrollIntoView = vi.fn();
     const db = clientDb();
     await Promise.all(db.tables.map((table) => table.clear()));
     await setMeta("currentUserId", "test-user");
@@ -68,14 +134,25 @@ export function setupBraiAppTest() {
     otaPlugin.markReady.mockReset();
     cmdPlugin.openSettings.mockReset();
     cmdPlugin.addListener.mockReset();
+    cmdPlugin.deleteAudio.mockReset();
     cmdPlugin.ensureAccess.mockReset();
+    cmdPlugin.downloadAudio.mockReset();
+    cmdPlugin.getSettings.mockReset();
     cmdPlugin.getState.mockReset();
+    cmdPlugin.openPermission.mockReset();
     cmdPlugin.preparePreliminaryProfile.mockReset();
     cmdPlugin.retryQueue.mockReset();
+    cmdPlugin.probeProvider.mockReset();
+    cmdPlugin.connectProvider.mockReset();
+    cmdPlugin.disconnectProvider.mockReset();
+    cmdPlugin.saveProvider.mockReset();
     cmdPlugin.setAccessKey.mockReset();
     cmdPlugin.setOverlayEnabled.mockReset();
     cmdPlugin.setQueuePausedMode.mockReset();
     cmdPlugin.setVoiceOnlyMode.mockReset();
+    cmdPlugin.testConnection.mockReset();
+    cmdPlugin.testProvider.mockReset();
+    cmdPlugin.updateSettings.mockReset();
     androidCapabilitiesPlugin.getState.mockReset();
     androidCapabilitiesPlugin.openAccessibilitySettings.mockReset();
     androidCapabilitiesPlugin.openAppSettings.mockReset();
@@ -84,24 +161,36 @@ export function setupBraiAppTest() {
     androidCapabilitiesPlugin.requestNotifications.mockReset();
     cmdPlugin.openSettings.mockResolvedValue({});
     cmdPlugin.addListener.mockResolvedValue({ remove: vi.fn(async () => undefined) });
+    cmdPlugin.deleteAudio.mockResolvedValue({ ok: true, state: braiCmdSettingsSnapshot() });
     cmdPlugin.ensureAccess.mockResolvedValue({ accessGranted: true });
+    cmdPlugin.downloadAudio.mockResolvedValue({ ok: true, path: "Downloads/Brai CMD/audio.m4a" });
+    cmdPlugin.getSettings.mockResolvedValue(braiCmdSettingsSnapshot());
     cmdPlugin.getState.mockResolvedValue({
       accessGranted: true,
       deviceId: "test-install",
       clientVersion: "60006",
       appPackage: "world.brightos.brai.preview.b.work",
     });
+    cmdPlugin.openPermission.mockResolvedValue(braiCmdSettingsSnapshot());
     cmdPlugin.preparePreliminaryProfile.mockResolvedValue({
+      accessGranted: true,
       preliminaryStatus: "ready",
-      preliminaryUserId: "prelim-test",
-      preliminaryClaimToken: "claim-test",
-      deviceFingerprint: "fingerprint-test",
+      preliminaryUserId: "prelim-test-user",
+      preliminaryClaimToken: "prelim-claim-token",
+      deviceFingerprint: "test-device",
     });
     cmdPlugin.retryQueue.mockResolvedValue({ queuePausedMode: false });
+    cmdPlugin.probeProvider.mockResolvedValue({ ok: true, message: "Выберите модель", models: ["test-model"] });
+    cmdPlugin.connectProvider.mockResolvedValue({ ok: true, message: "Подключено", model: "test-model", state: braiCmdSettingsSnapshot() });
+    cmdPlugin.disconnectProvider.mockResolvedValue(braiCmdSettingsSnapshot());
+    cmdPlugin.saveProvider.mockResolvedValue(braiCmdSettingsSnapshot());
     cmdPlugin.setAccessKey.mockResolvedValue({ accessGranted: true });
     cmdPlugin.setOverlayEnabled.mockImplementation(async ({ enabled }: { enabled: boolean }) => ({ overlayEnabled: enabled }));
     cmdPlugin.setQueuePausedMode.mockImplementation(async ({ enabled }: { enabled: boolean }) => ({ queuePausedMode: enabled }));
     cmdPlugin.setVoiceOnlyMode.mockImplementation(async ({ enabled }: { enabled: boolean }) => ({ voiceOnlyMode: enabled }));
+    cmdPlugin.testConnection.mockResolvedValue({ ok: true, message: "ok" });
+    cmdPlugin.testProvider.mockResolvedValue({ ok: true, message: "ok", models: ["test-model"], model: "test-model" });
+    cmdPlugin.updateSettings.mockResolvedValue(braiCmdSettingsSnapshot());
     androidCapabilitiesPlugin.getState.mockResolvedValue({});
     androidCapabilitiesPlugin.openAccessibilitySettings.mockResolvedValue({});
     androidCapabilitiesPlugin.openAppSettings.mockResolvedValue({});
@@ -205,8 +294,9 @@ export function setupBraiAppTest() {
     delete document.documentElement.dataset.sidebarState;
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     cleanup();
+    await new Promise<void>((resolve) => window.setTimeout(resolve, 20));
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
     delete window.Capacitor;
@@ -236,7 +326,10 @@ export async function openProfileMenu() {
 
 export async function openProfileMenuItem(name: string | RegExp) {
   const drawer = await openProfileMenu();
-  fireEvent.click(within(drawer).getByRole("button", { name }));
+  const accessibleName = typeof name === "string" && name.toLocaleLowerCase() === "brai cmd"
+    ? /^Brai CMD$/i
+    : name;
+  fireEvent.click(within(drawer).getByRole("button", { name: accessibleName }));
 }
 
 export async function openSettingsFromProfile() {

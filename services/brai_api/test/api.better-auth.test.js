@@ -49,7 +49,7 @@ test('email OTP message renders the reusable responsive card', () => {
   assert.match(message.text, /Brai · brai\.one/);
 });
 
-test('test email login creates or reuses a Better Auth user without sending OTP mail', async () => {
+test('test email login creates or reuses the primary Better Auth user without sending OTP mail', async () => {
   const sentOtps = [];
   const fixture = await createFixture([
     '2026-07-01T09:00:00.000Z',
@@ -226,26 +226,10 @@ test('test email login creates or reuses a Better Auth user without sending OTP 
       body: JSON.stringify({ email: 'second@example.com' })
     });
     assert.equal(second.status, 200);
-    assert.notEqual(second.body.user.id, first.body.user.id);
+    assert.equal(second.body.user.id, first.body.user.id);
+    assert.equal(second.body.user.email, first.body.user.email);
     assert.equal(fixture.store.primaryUserId(), first.body.user.id);
-    const secondUserSameDevice = await jsonRequest(fixture.url, '/v1/brai-cmd/device-token', {
-      method: 'POST',
-      headers: { cookie: second.headers.get('set-cookie'), origin: 'capacitor://localhost' },
-      body: JSON.stringify({ deviceId: 'authenticated-install-1' })
-    });
-    assert.equal(secondUserSameDevice.status, 201);
-    const sameDeviceOwners = fixture.store.db.prepare(`
-      SELECT user_id
-      FROM brai_cmd_access_tokens
-      WHERE status = 'active'
-        AND device_id_hash = (
-          SELECT device_id_hash
-          FROM brai_cmd_access_tokens
-          WHERE user_id = ? AND status = 'active'
-        )
-      ORDER BY user_id
-    `).all(second.body.user.id).map((row) => row.user_id);
-    assert.deepEqual(sameDeviceOwners, [first.body.user.id, second.body.user.id].sort());
+    assert.equal(sentOtps.length, 0);
   } finally {
     await fixture.close();
   }

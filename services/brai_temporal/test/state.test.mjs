@@ -348,11 +348,23 @@ test("explicit terminal preview outcomes close stale lifecycles", () => {
   assert.equal(abandoned.terminal, true);
   assert.equal(abandoned.tasks.slot_release.status, "passed");
 
+  const deleted = createPreviewState({ branch: "codex/deleted", sha: "d1" });
+  applyPreviewEvent(deleted, { type: "supabase_preview_release_started", sha: "d1" });
+  applyPreviewEvent(deleted, { type: "slot_release_started", sha: "d1" });
+  applyPreviewEvent(deleted, { type: "branch_deleted", sha: "d1", source: "release-preview-slot" });
+
+  assert.equal(deleted.status, "branch_deleted");
+  assert.equal(deleted.terminal, true);
+  assert.equal(deleted.tasks.slot_release.status, "passed");
+  assert.equal(deleted.tasks.supabase_preview_release.status, "not_applicable");
+
   const superseded = createPreviewState({ branch: "codex/old", sha: "s1" });
+  applyPreviewEvent(superseded, { type: "slot_release_started", sha: "s1" });
   applyPreviewEvent(superseded, { type: "superseded_closed", sha: "s1", source: "recovery" });
 
   assert.equal(superseded.status, "superseded_closed");
   assert.equal(superseded.terminal, true);
+  assert.equal(superseded.tasks.slot_release.status, "passed");
 });
 
 test("superseded promotion reaches terminal state", () => {

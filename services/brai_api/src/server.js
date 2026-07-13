@@ -7,11 +7,13 @@ import { WebSocketServer } from 'ws';
 import {
   INBOX_BODY_LIMIT_BYTES,
   hasInboxApiKey,
+  inboxIngestIdempotencyHash,
   inboxRequestTarget,
   processInboxItem,
   receiveInbox,
   serveInboxAttachment
 } from './inbox.js';
+import { processActivityItem } from './activity-normalization.js';
 import { createBraiAuth, OTP_EXPIRES_IN_SECONDS, OTP_RESEND_AFTER_SECONDS, OTP_RESEND_STRATEGY } from './auth.js';
 import {
   createBraiCmdRuntime,
@@ -69,6 +71,9 @@ export function createBraiServer({
   inboxNormalizer = null,
   inboxWorkflowStarter = null,
   inboxAutoProcess = true,
+  activityNormalizer = null,
+  activityWorkflowStarter = null,
+  activityAutoProcess = true,
   braiCmd = {},
   branch = process.env.BRAI_BRANCH || null,
   commit = process.env.BRAI_COMMIT || null,
@@ -205,6 +210,103 @@ export function createBraiServer({
       });
     }, 0);
   };
+  const processActivityLater = ({ ownerUserId, activityId }) => {
+    if (!activityAutoProcess || !activityId) return;
+    setTimeout(() => {
+      void withUserScope(ownerUserId, async () => {
+        const started = activityWorkflowStarter
+          ? await activityWorkflowStarter({ ownerUserId, activityId })
+          : await processActivityItem({
+              store,
+              activityId,
+              codexBin,
+              codexModel,
+              codexFallbackModel,
+              codexTimeoutMs,
+              externalAi: inboxExternalAi,
+              normalizer: activityNormalizer,
+              nowDate: now()
+            });
+        if (started?.completion) await started.completion;
+        const state = activitiesState(store, now());
+        broadcast(sockets, {
+          type: 'activities_synced',
+          activities_state: state,
+          actions_state: actionsCompatState(state)
+        }, ownerUserId);
+      }).catch((error) => {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        let queuedForRetry = false;
+        let terminalReconcilePending = false;
+        try {
+          withUserScope(ownerUserId, () => {
+            const execution = store.getActivityWorkflowExecution(activityId);
+            if (activityWorkflowStarter && execution?.status === 'queued') {
+              queuedForRetry = true;
+              recordRuntimeLog(store, logger, {
+                source: 'workflow',
+                operation: 'activity.workflow_dispatch',
+                status: 'failed',
+                severityText: 'ERROR',
+                reason: errorMessage,
+                message: 'Activity workflow dispatch failed; queued for retry',
+                jsonData: {
+                  activity_id: activityId,
+                  workflow_id: execution.workflow_id,
+                  workflow_status: execution.status,
+                  retry_scheduled: true
+                }
+              });
+              return;
+            }
+            if (activityWorkflowStarter && execution?.status === 'running') {
+              terminalReconcilePending = true;
+              recordRuntimeLog(store, logger, {
+                source: 'workflow',
+                operation: 'activity.workflow_completion_observer',
+                status: 'failed',
+                severityText: 'WARN',
+                reason: errorMessage,
+                message: 'Activity workflow completion observer failed; durable reconciliation remains active',
+                jsonData: {
+                  activity_id: activityId,
+                  workflow_id: execution.workflow_id,
+                  run_id: execution.run_id,
+                  workflow_status: execution.status,
+                  terminal_reconcile_pending: true
+                }
+              });
+              return;
+            }
+            if (execution) {
+              store.failActivityWorkflow({
+                activityId,
+                workflowId: execution.workflow_id,
+                runId: execution.run_id,
+                reason: errorMessage,
+                step: execution.current_step,
+                nowIso: now().toISOString()
+              });
+            }
+          });
+        } catch (statusError) {
+          logger.error?.('Activity workflow failure status update failed', {
+            error: statusError instanceof Error ? statusError.message : String(statusError),
+            activityId
+          });
+        }
+        const message = queuedForRetry
+          ? 'Activity workflow dispatch failed; queued for retry'
+          : terminalReconcilePending
+            ? 'Activity workflow completion observer failed; durable reconciliation remains active'
+            : 'Activity AI processing failed';
+        logger.error?.(message, {
+          error: errorMessage,
+          activityId
+        });
+      });
+    }, 0);
+  };
 
   const server = http.createServer(async (req, res) => {
     const requestStartedAt = Date.now();
@@ -294,12 +396,14 @@ export function createBraiServer({
           return;
         }
 
-        const existingUser = store.getAuthUserByEmail(email);
-        const signInName = existingUser?.name || cleanName(body.name) || email;
+        const primaryUser = store.primaryUser();
+        const existingUser = primaryUser ?? store.getAuthUserByEmail(email);
+        const signInEmail = existingUser?.email || email;
+        const signInName = existingUser?.name || cleanName(body.name) || signInEmail;
         let response;
         try {
           response = await betterAuthTestEmailLogin({
-            email,
+            email: signInEmail,
             name: signInName,
             headers: requestHeaders(req)
           });
@@ -685,6 +789,44 @@ export function createBraiServer({
         return;
       }
 
+      if (url.pathname === '/v1/inbox/status') {
+        if (req.method !== 'POST') {
+          sendJson(req, res, 405, { error: 'method_not_allowed' });
+          return;
+        }
+        if (!hasInboxApiKey(req, inboxApiKey)) {
+          recordRuntimeLog(store, logger, {
+            traceId,
+            source: 'auth',
+            operation: 'auth.denied',
+            status: 'failed',
+            severityText: 'WARN',
+            reason: 'invalid_inbox_api_key',
+            message: 'Inbox status API request unauthorized',
+            jsonData: {
+              method: req.method ?? 'POST',
+              path: url.pathname,
+              api_key_header_present: Boolean(req.headers['x-brai-api-key'] || req.headers['x-api-key']),
+              bearer_present: Boolean(req.headers.authorization)
+            }
+          });
+          sendJson(req, res, 401, { error: 'unauthorized' });
+          return;
+        }
+        const requestNow = now();
+        const body = await readJson(req, { limit: 4096 });
+        const ownerUserId = store.primaryUserId();
+        const result = await withUserScope(ownerUserId, () => store.setInboxApiStatus({
+          ingestIdempotencyHash: inboxIngestIdempotencyHash(body.idempotency_key),
+          status: body.status,
+          nowIso: requestNow.toISOString()
+        }));
+        const state = await withUserScope(ownerUserId, () => inboxState(store, requestNow));
+        broadcast(sockets, { type: 'inbox_synced', inbox_state: state }, ownerUserId);
+        sendJson(req, res, 200, { ok: true, target: 'inbox', ...result, state });
+        return;
+      }
+
       if (url.pathname === '/v1/brai-cmd/inbox') {
         if (req.method !== 'POST') {
           sendJson(req, res, 405, { error: 'method_not_allowed' });
@@ -896,6 +1038,16 @@ export function createBraiServer({
         return;
       }
 
+      const activityWorkflowMatch = req.method === 'GET'
+        ? url.pathname.match(/^\/v1\/(?:activities|actions)\/([^/]+)\/workflow$/)
+        : null;
+      if (activityWorkflowMatch) {
+        const activityId = decodeURIComponent(activityWorkflowMatch[1]);
+        const details = store.getActivityWorkflowDetails(activityId);
+        sendJson(req, res, details ? 200 : 404, details ?? { error: 'not_found' });
+        return;
+      }
+
       if (req.method === 'GET' && url.pathname === '/v1/events') {
         sendJson(req, res, 200, { events: store.listEvents({ limit: url.searchParams.get('limit') }) });
         return;
@@ -916,7 +1068,9 @@ export function createBraiServer({
         (url.pathname === '/v1/activities/events/sync' || url.pathname === '/v1/actions/events/sync')
       ) {
         const requestNow = now();
+        const ownerUserId = scopedUserId();
         const body = await readJson(req, { limit: 256 * 1024 });
+        const activityIdsToProcess = createdActivityIds(body.events);
         const result = store.syncActivityEvents({
           device: body.device,
           events: body.events,
@@ -932,8 +1086,9 @@ export function createBraiServer({
           type: 'activities_synced',
           activities_state: state,
           actions_state: actionsCompatState(state)
-        }, scopedUserId());
+        }, ownerUserId);
         sendJson(req, res, 200, responseBody);
+        for (const activityId of activityIdsToProcess) processActivityLater({ ownerUserId, activityId });
         return;
       }
 
@@ -1170,12 +1325,34 @@ export function settingsState(store, inboxExternalAi = {}) {
 }
 
 export function activitiesState(store, nowDate) {
+  const activities = store.listActivities();
+  const archivedActivities = store.listArchivedActivities();
   return {
     server_time_utc: nowDate.toISOString(),
     server_revision: store.getActivityServerRevision(),
-    activities: store.listActivities(),
-    archived_activities: store.listArchivedActivities()
+    activities: addActivityAiProcessingState(activities),
+    archived_activities: addActivityAiProcessingState(archivedActivities)
   };
+}
+
+function addActivityAiProcessingState(activities) {
+  return activities.map((item) => {
+    if (item.workflow_status === 'failed' || item.workflow_status === 'needs_review') {
+      return {
+        ...item,
+        ai_processing_status: item.workflow_status,
+        ai_processing_error: item.workflow_last_error || 'Ошибка AI-обработки'
+      };
+    }
+    if (item.workflow_status === 'queued' || item.workflow_status === 'running') {
+      return { ...item, ai_processing_status: 'running', ai_processing_error: null };
+    }
+    return {
+      ...item,
+      ai_processing_status: null,
+      ai_processing_error: null
+    };
+  });
 }
 
 export function versionState(store, nowDate, releaseDir = null) {
@@ -1664,6 +1841,20 @@ function createdInboxIds(events) {
   for (const event of Array.isArray(events) ? events : []) {
     if (event?.type !== 'create') continue;
     const id = typeof event.inbox_id === 'string' ? event.inbox_id.trim() : '';
+    if (id) ids.add(id);
+  }
+  return ids;
+}
+
+function createdActivityIds(events) {
+  const ids = new Set();
+  for (const event of Array.isArray(events) ? events : []) {
+    if ((event?.change_type ?? event?.type) !== 'create') continue;
+    const id = typeof event.activity_id === 'string'
+      ? event.activity_id.trim()
+      : typeof event.action_id === 'string'
+        ? event.action_id.trim()
+        : '';
     if (id) ids.add(id);
   }
   return ids;

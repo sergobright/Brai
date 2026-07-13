@@ -20,10 +20,12 @@ export type OnboardingStep =
   | "setup-start"
   | "features"
   | "floating-buttons"
-  | "demo-dictation"
-  | "demo-save-screen"
-  | "demo-chat-reply"
-  | "demo-agent-command"
+  | "demo-main-dictation"
+  | "demo-voice-command"
+  | "demo-screenshot-inbox"
+  | "demo-screenshot-voice"
+  | "demo-context-inbox"
+  | "demo-context-reply"
   | "special-settings"
   | "security"
   | "voice-intro"
@@ -125,6 +127,10 @@ function isOnboardingStep(value: unknown): value is OnboardingStep {
 function normalizeOnboardingStep(value: unknown): OnboardingStep | null {
   if (value === "cloud-password") return "cloud-login";
   if (value === "features") return "floating-buttons";
+  if (value === "demo-dictation") return "demo-main-dictation";
+  if (value === "demo-save-screen") return "demo-screenshot-inbox";
+  if (value === "demo-chat-reply") return "demo-context-reply";
+  if (value === "demo-agent-command") return "demo-screenshot-voice";
   return isOnboardingStep(value) ? value : null;
 }
 
@@ -147,10 +153,12 @@ const orderedSteps: OnboardingStep[] = [
   "self-hosted-key",
   "setup-start",
   "floating-buttons",
-  "demo-dictation",
-  "demo-save-screen",
-  "demo-chat-reply",
-  "demo-agent-command",
+  "demo-main-dictation",
+  "demo-voice-command",
+  "demo-screenshot-inbox",
+  "demo-screenshot-voice",
+  "demo-context-inbox",
+  "demo-context-reply",
   "special-settings",
   "security",
   "voice-intro",

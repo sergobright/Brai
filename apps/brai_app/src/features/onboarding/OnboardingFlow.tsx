@@ -1,6 +1,6 @@
 "use client";
 
-import { Children, createContext, type FormEvent, type ReactNode, useContext, useEffect, useRef, useState } from "react";
+import { Children, createContext, type ReactNode, useContext, useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import {
   ArrowRight,
@@ -12,19 +12,20 @@ import {
   CircleX,
   ExternalLink,
   FileAudio,
+  ImageIcon,
   KeyRound,
+  Lightbulb,
   Lock,
   LoaderCircle,
-  Mail,
+  MessageCircle,
   Mic,
   MonitorUp,
   Radio,
-  ScreenShare,
+  Save,
   Send,
   Server,
   ShieldCheck,
   Sparkles,
-  TextCursorInput,
   Trash2,
   UserRound,
   WifiOff,
@@ -38,19 +39,19 @@ import {
   requestAndroidMicrophone,
   requestAndroidNotifications,
 } from "@/shared/platform/androidCapabilities";
-import { ensureBraiCmdAccess, listenBraiCmdOnboardingEvents, prepareBraiCmdPreliminaryProfile, retryBraiCmdQueue, setBraiCmdAccessKey, setBraiCmdOverlayEnabled, setBraiCmdQueuePausedMode, setBraiCmdVoiceOnlyMode, vibrateBraiCmdPress } from "@/shared/platform/braiCmd";
+import { connectBraiCmdProvider, ensureBraiCmdAccess, listenBraiCmdOnboardingEvents, prepareBraiCmdPreliminaryProfile, probeBraiCmdProvider, retryBraiCmdQueue, setBraiCmdAccessKey, setBraiCmdOverlayEnabled, setBraiCmdQueuePausedMode, setBraiCmdVoiceOnlyMode, vibrateBraiCmdPress, type BraiCmdProviderId } from "@/shared/platform/braiCmd";
 import { installAndroidBackHandler, isNativeShell, platformName } from "@/shared/platform/platform";
 import type { AuthOnboardingContext, OtpSendResult } from "@/shared/api/braiApi";
 import { AnimatedShinyText } from "@/shared/ui/animated-shiny-text";
-import { AuthOtpEntry, type AuthOtpTimer } from "@/shared/ui/auth-otp-entry";
 import { Button } from "@/shared/ui/button";
 import { Card } from "@/shared/ui/card";
-import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/shared/ui/field";
 import { Input } from "@/shared/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/shared/ui/select";
 import { Textarea } from "@/shared/ui/textarea";
 import { Carousel, CarouselContent, CarouselItem, type CarouselApi } from "@/shared/ui/carousel";
 import { cx } from "../app/appUtils";
+import { AuthScreen } from "../app/AuthScreen";
+import type { AuthMode } from "../app/appModel";
 import {
   isValidOnboardingName,
   loadOnboardingState,
@@ -63,19 +64,21 @@ import {
 
 type OnboardingFlowProps = {
   authRequired: boolean;
+  authMode: AuthMode;
   busy: boolean;
-  authMode: "email" | "otp";
   onEmailLogin: (email: string, context?: AuthOnboardingContext) => Promise<void>;
   onRequestOtp: (email: string) => Promise<OtpSendResult>;
   onStartupScreenChange: (active: boolean) => void;
   onVerifyOtp: (email: string, otp: string, context?: AuthOnboardingContext) => Promise<void>;
   onDone: () => void;
+  onOpenEngine: () => void;
   onOpenNativeCmdSettings: () => Promise<boolean>;
   startupIntroComplete: boolean;
 };
 
 type CheckStatus = "idle" | "checking" | "ready" | "error";
 type ChromeStatusTone = "neutral" | "ok" | "bad";
+type FloatingButtonKind = "main" | "idea" | "image" | "imageMic" | "chat" | "save";
 
 const OnboardingChromeContext = createContext<{
   canBack: boolean;
@@ -94,9 +97,12 @@ const OnboardingChromeContext = createContext<{
 });
 
 const screenTransitionDelayMs = process.env.NODE_ENV === "test" ? 0 : 280;
-const providerOptions = ["Groq", "OpenAI", "Deepgram", "AssemblyAI"] as const;
+const providerOptions: Array<{ id: BraiCmdProviderId; label: string }> = [
+  { id: "groq", label: "Groq" },
+  { id: "openai", label: "OpenAI" },
+];
 const manualConfirmDelayMs = 3000;
-const nameSubmitMuteMs = 2000;
+const nameSubmitMuteMs = process.env.NODE_ENV === "test" ? 0 : 2000;
 const verificationMinVisibleMs = process.env.NODE_ENV === "test" ? 1 : 1000;
 const failedCheckVisibleMs = process.env.NODE_ENV === "test" ? 100 : 2000;
 const welcomeSlides = [
@@ -107,6 +113,77 @@ const welcomeSlides = [
   { step: "welcome-5", title: "Вся твоя жизнь — в одном разуме", text: "Брай помнит твои цели, идеи, проекты, решения и заботы. Он видит не отдельный вопрос, а всю картину — и понимает тебя всё лучше.", image: "/onboarding/welcome-5.webp" },
   { step: "welcome-6", title: "Твой исполнитель желаний уже здесь", text: "Не волшебством, а интеллектом, действиями и радикальной ясностью Брай помогает превращать желаемое в реальность.\n\nОн уже в твоих руках.", image: "/onboarding/welcome-6.webp" },
 ] as const satisfies ReadonlyArray<{ step: OnboardingStep; title: string; text: string; image: string }>;
+const floatingButtonDemos = [
+  {
+    step: "demo-main-dictation",
+    title: "Главная кнопка диктовки",
+    text: "Превращает голос в текст и вставляет его в активное поле. Если расшифровка уже готова, долгим нажатием можно вставить её из очереди.",
+    scenario: "Сценарий: откройте поле ввода, нажмите главную кнопку, продиктуйте мысль — Brai CMD вернёт готовый текст туда, где вы сейчас пишете.",
+    imageAlt: "Главная кнопка Brai CMD превращает голос в текст в поле ввода",
+    imageSrc: "/onboarding/demo-main-dictation.png",
+    icon: Mic,
+    button: "main",
+  },
+  {
+    step: "demo-voice-command",
+    title: "Команда голосом",
+    text: "Отправляет голосовую мысль, идею или поручение во Входящие Brai без привязки к текущему экрану.",
+    scenario: "Сценарий: идея пришла поверх любого приложения — нажмите кнопку с лампочкой, скажите её голосом, и Brai сохранит запись как входящую задачу.",
+    imageAlt: "Кнопка команды голосом отправляет идею во Входящие Brai",
+    imageSrc: "/onboarding/demo-voice-command.png",
+    icon: Lightbulb,
+    button: "idea",
+  },
+  {
+    step: "demo-screenshot-inbox",
+    title: "Скриншот во Входящие",
+    text: "Сохраняет текущий экран во Входящие как визуальный контекст без голосового комментария.",
+    scenario: "Сценарий: увидели важный экран, настройку или переписку — нажмите кнопку изображения, и Brai получит снимок для последующего разбора.",
+    imageAlt: "Кнопка скриншота сохраняет текущий экран во Входящие Brai",
+    imageSrc: "/onboarding/demo-screenshot-inbox.png",
+    icon: ImageIcon,
+    button: "image",
+  },
+  {
+    step: "demo-screenshot-voice",
+    title: "Скриншот + голос",
+    text: "Отправляет снимок экрана вместе с голосовой командой, чтобы Brai понял и что видно, и что нужно сделать.",
+    scenario: "Сценарий: на экране есть детали, которые долго объяснять. Нажмите кнопку изображение + микрофон и коротко скажите, какой результат нужен.",
+    imageAlt: "Кнопка скриншот плюс голос отправляет экран вместе с командой",
+    imageSrc: "/onboarding/demo-screenshot-voice.png",
+    icon: Mic,
+    button: "imageMic",
+  },
+  {
+    step: "demo-context-inbox",
+    title: "Контекст во Входящие",
+    text: "Берёт структурный видимый текст страницы или чата и отправляет во Входящие как контекст, а не просто картинку.",
+    scenario: "Сценарий: в чате или на странице важен текст и структура. Кнопка контекста сохраняет это в Brai так, чтобы с этим можно было работать дальше.",
+    imageAlt: "Кнопка контекста отправляет структурный видимый текст во Входящие Brai",
+    imageSrc: "/onboarding/demo-context-inbox.png",
+    icon: MessageCircle,
+    button: "chat",
+  },
+  {
+    step: "demo-context-reply",
+    title: "Ответ с контекстом",
+    text: "Использует текущий контекст, готовит ответ и вставляет его в поле ввода.",
+    scenario: "Сценарий: открыт диалог, нужно быстро ответить с учётом переписки. Brai готовит черновик, а вы проверяете и отправляете.",
+    imageAlt: "Кнопка ответа с контекстом готовит ответ и вставляет его в поле ввода",
+    imageSrc: "/onboarding/demo-context-reply.png",
+    icon: Save,
+    button: "save",
+  },
+] as const satisfies ReadonlyArray<{
+  button: FloatingButtonKind;
+  icon: LucideIcon;
+  imageAlt: string;
+  imageSrc: string;
+  scenario: string;
+  step: OnboardingStep;
+  text: string;
+  title: string;
+}>;
 const startButtonCss = `
 @keyframes brai-onboarding-start-button {
   0% { opacity: 0; }
@@ -135,6 +212,7 @@ export function OnboardingFlow({
   busy,
   onDone,
   onEmailLogin,
+  onOpenEngine,
   onOpenNativeCmdSettings,
   onRequestOtp,
   onStartupScreenChange,
@@ -144,8 +222,12 @@ export function OnboardingFlow({
   const [state, setState] = useState<OnboardingState>(() => loadInitialOnboardingState(authRequired));
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
-  const [provider, setProvider] = useState("Groq");
+  const [provider, setProvider] = useState<BraiCmdProviderId>("groq");
   const [providerKey, setProviderKey] = useState("");
+  const [providerModels, setProviderModels] = useState<string[]>([]);
+  const [providerModel, setProviderModel] = useState("");
+  const [providerVerified, setProviderVerified] = useState(false);
+  const [providerManualModel, setProviderManualModel] = useState(false);
   const [localUrl, setLocalUrl] = useState("");
   const [trainingText, setTrainingText] = useState("");
   const [offlineText, setOfflineText] = useState("");
@@ -168,13 +250,19 @@ export function OnboardingFlow({
   const transitionTimerRef = useRef<number | null>(null);
   const transitionFrameRef = useRef<number | null>(null);
   const failedCheckTimerRef = useRef<number | null>(null);
+  const providerRequestRef = useRef(0);
   const nameSubmitTimerRef = useRef<number | null>(null);
   const isAndroid = isNativeShell() && platformName() === "android";
+
+  useEffect(() => {
+    if (authRequired && state.complete && state.step === "locked") saveOnboardingState(state);
+  }, [authRequired, state]);
 
   useEffect(() => {
     const initialStep = stepRef.current;
     const loadTimer = window.setTimeout(() => {
       if (stepRef.current !== initialStep) return;
+      if (authRequired && (initialStep === "login" || initialStep === "cmd-settings")) return;
       const next = loadInitialOnboardingState(authRequired);
       stateRef.current = next;
       stepRef.current = next.step;
@@ -185,8 +273,8 @@ export function OnboardingFlow({
   }, [authRequired]);
 
   useEffect(() => {
-    if (state.complete && !authRequired) onDone();
-  }, [authRequired, onDone, state.complete]);
+    if (state.complete && !authRequired && state.step !== "locked" && state.step !== "login" && state.step !== "cmd-settings") onDone();
+  }, [authRequired, onDone, state.complete, state.step]);
 
   useEffect(() => () => {
     if (manualConfirmTimerRef.current != null) window.clearTimeout(manualConfirmTimerRef.current);
@@ -250,6 +338,10 @@ export function OnboardingFlow({
     }
     void setBraiCmdQueuePausedMode(false);
   }, [isAndroid, state.step]);
+
+  useEffect(() => () => {
+    if (isAndroid) void setBraiCmdQueuePausedMode(false);
+  }, [isAndroid]);
 
   useEffect(() => {
     if (!isAndroid) return;
@@ -316,6 +408,7 @@ export function OnboardingFlow({
   }
 
   function go(step: OnboardingStep, next?: Partial<OnboardingState>) {
+    providerRequestRef.current += 1;
     setError("");
     setMessage("");
     setCheckingStep(null);
@@ -332,6 +425,7 @@ export function OnboardingFlow({
   }
 
   function back() {
+    providerRequestRef.current += 1;
     const current = stateRef.current;
     const previous = previousOnboardingStep(current);
     if (!previous) return;
@@ -437,7 +531,7 @@ export function OnboardingFlow({
   function chooseVoiceMode(voiceMode: VoiceMode) {
     if (voiceMode === "provider") go("provider-key", { voiceMode });
     if (voiceMode === "local") go("local-server", { voiceMode });
-    if (voiceMode === "cloud") go("microphone", { voiceMode });
+    if (voiceMode === "cloud") go("cloud-privacy", { voiceMode });
   }
 
   async function submitName() {
@@ -454,7 +548,7 @@ export function OnboardingFlow({
       if (isAndroid) {
         const profile = await prepareBraiCmdPreliminaryProfile(displayName);
         if (!profile) {
-          setError("Нет соединения с серверами Brai, повторите.");
+          setError("Не удалось проверить устройство на сервере Brai. Повторите.");
           return;
         }
         setPreliminaryDeviceFingerprint(profile.deviceFingerprint ?? "");
@@ -480,11 +574,15 @@ export function OnboardingFlow({
       go("setup-start", { name: displayName });
     } finally {
       const remaining = Math.max(0, nameSubmitMuteMs - (Date.now() - startedAt));
-      if (nameSubmitTimerRef.current != null) window.clearTimeout(nameSubmitTimerRef.current);
-      nameSubmitTimerRef.current = window.setTimeout(() => {
+      if (remaining === 0) {
         setNameSubmitting(false);
-        nameSubmitTimerRef.current = null;
-      }, remaining);
+      } else {
+        if (nameSubmitTimerRef.current != null) window.clearTimeout(nameSubmitTimerRef.current);
+        nameSubmitTimerRef.current = window.setTimeout(() => {
+          setNameSubmitting(false);
+          nameSubmitTimerRef.current = null;
+        }, remaining);
+      }
     }
   }
 
@@ -499,12 +597,12 @@ export function OnboardingFlow({
     };
   }
 
-  async function submitCloudLogin(email: string) {
-    await onEmailLogin(email, authOnboardingContext());
-  }
-
   async function submitCloudVerifyOtp(email: string, otp: string) {
     await onVerifyOtp(email, otp, authOnboardingContext());
+  }
+
+  async function submitCloudEmailLogin(email: string) {
+    await onEmailLogin(email, authOnboardingContext());
   }
 
   async function submitAccessKey(key: string) {
@@ -517,15 +615,42 @@ export function OnboardingFlow({
   }
 
   async function testProviderKey() {
-    if (readyStep === "provider-key") {
-      go("microphone");
-      return;
-    }
     if (!provider.trim() || providerKey.trim().length < 8) {
       setError("Выберите поставщика и введите полный ключ.");
       return;
     }
-    await runVerification("provider-key", async () => true, "Ключ не сохранён. Проверьте поставщика и ключ.");
+    setError("");
+    setCheckingStep("provider-key");
+    const requestId = ++providerRequestRef.current;
+    if (!providerVerified) {
+      const result = await probeBraiCmdProvider({ providerId: provider, apiKey: providerKey, capability: "speech" });
+      if (requestId !== providerRequestRef.current) return;
+      setCheckingStep(null);
+      if (!result?.ok) {
+        setError(result?.message || "Не удалось проверить ключ поставщика.");
+        return;
+      }
+      setProviderModels(result.models ?? []);
+      setProviderModel("");
+      setProviderManualModel(Boolean(result.manualModel));
+      setProviderVerified(true);
+      setMessage("Подключение проверено. Выберите модель распознавания.");
+      return;
+    }
+    if (!providerModel) {
+      setCheckingStep(null);
+      setError("Выберите модель распознавания.");
+      return;
+    }
+    const result = await connectBraiCmdProvider({ providerId: provider, apiKey: providerKey, model: providerModel, capability: "speech" });
+    if (requestId !== providerRequestRef.current) return;
+    setCheckingStep(null);
+    if (!result?.ok) {
+      setError(result?.message || "Не удалось подключить модель.");
+      return;
+    }
+    setMessage("");
+    go("microphone");
   }
 
   async function testLocalServer() {
@@ -726,10 +851,9 @@ export function OnboardingFlow({
       return (
         <OnboardingAuthForm
           busy={busy}
-          intro={<InfoBlock icon={Mail} title="Вход в облачный профиль" text={authMode === "otp" ? "Введите email, получите код и подтвердите вход." : "Введите email, код в Dev/Preview не нужен."} />}
           mode={authMode}
           onAuthenticated={() => go("setup-start")}
-          onEmailLogin={submitCloudLogin}
+          onEmailLogin={submitCloudEmailLogin}
           onRequestOtp={onRequestOtp}
           onVerifyOtp={submitCloudVerifyOtp}
         />
@@ -743,24 +867,14 @@ export function OnboardingFlow({
     }
 
     if (state.step === "setup-start") return <InfoScreen icon={Command} title="Brai CMD" text="Превращает смартфон в командный центр, упрощая и ускоряя взаимодействие с Брай."><PrimaryButton onClick={() => go("floating-buttons")}>Далее</PrimaryButton></InfoScreen>;
-    if (state.step === "features") return <InfoScreen icon={Command} title="Плавающие кнопки" text="Brai CMD управляется кнопками поверх других приложений. Они слушают голос, берут контекст экрана, вставляют данные, добавляя магии в повседневные действия."><PrimaryButton onClick={() => go("demo-dictation")}>Ознакомиться</PrimaryButton></InfoScreen>;
-    if (state.step === "floating-buttons") return <InfoScreen icon={Command} title="Плавающие кнопки" text="Brai CMD управляется кнопками поверх других приложений. Они слушают голос, берут контекст экрана, вставляют данные, добавляя магии в повседневные действия."><PrimaryButton onClick={() => go("demo-dictation")}>Ознакомиться</PrimaryButton></InfoScreen>;
+    if (state.step === "features") return <InfoScreen icon={Command} title="Плавающие кнопки" text="Brai CMD управляется кнопками поверх других приложений. Они слушают голос, берут контекст экрана, вставляют данные, добавляя магии в повседневные действия."><PrimaryButton onClick={() => go("demo-main-dictation")}>Ознакомиться</PrimaryButton></InfoScreen>;
+    if (state.step === "floating-buttons") return <InfoScreen icon={Command} title="Плавающие кнопки" text="Brai CMD управляется кнопками поверх других приложений. Они слушают голос, берут контекст экрана, вставляют данные, добавляя магии в повседневные действия."><PrimaryButton onClick={() => go("demo-main-dictation")}>Ознакомиться</PrimaryButton></InfoScreen>;
 
     if (state.step.startsWith("demo-")) {
-      const demos = [
-        ["demo-dictation", "Голос в текст", "GIF покажет, как надиктованный голос превращается в текст.", Mic],
-        ["demo-save-screen", "Сохранение с экрана", "GIF покажет, как сохранить идею или информацию прямо с текущего экрана.", ScreenShare],
-        ["demo-chat-reply", "Ответ в чате", "GIF покажет подготовку ответа с учетом контекста контакта.", TextCursorInput],
-        ["demo-agent-command", "Команда агенту", "GIF покажет отправку команды агенту вместе с содержимым экрана.", Send],
-      ] as const;
-      const index = demos.findIndex(([step]) => step === state.step);
-      const [, title, text, Icon] = demos[index];
-      return (
-        <InfoScreen icon={Icon} eyebrow={`Демо ${index + 1} из 4`} title={title} text={text}>
-          <DemoPlaceholder label="Здесь будет GIF" />
-          <PrimaryButton onClick={() => go(index === demos.length - 1 ? "special-settings" : demos[index + 1][0])}>Продолжить</PrimaryButton>
-        </InfoScreen>
-      );
+      const index = floatingButtonDemos.findIndex((demo) => demo.step === state.step);
+      const demo = floatingButtonDemos[index] ?? floatingButtonDemos[0];
+      const nextStep = index === floatingButtonDemos.length - 1 ? "special-settings" : floatingButtonDemos[index + 1]?.step ?? "special-settings";
+      return <FloatingButtonDemoScreen demo={demo} index={index < 0 ? 0 : index} onNext={() => go(nextStep)} />;
     }
 
     if (state.step === "special-settings") {
@@ -820,10 +934,16 @@ export function OnboardingFlow({
 
     if (state.step === "provider-key") {
       return (
-        <StepScreen actions={<CheckActionButton disabled={!provider || providerKey.trim().length < 8} status={checkStatus("provider-key")} onClick={testProviderKey} />}>
+        <StepScreen actions={<CheckActionButton disabled={!provider || providerKey.trim().length < 8 || (providerVerified && !providerModel)} status={checkStatus("provider-key")} onClick={testProviderKey} />}>
           <InfoBlock icon={KeyRound} title="Ключ поставщика" text="Выберите поставщика, введите ключ и сохраните его для голосового модуля." />
           <Select value={provider} onValueChange={(value) => {
-            setProvider(value);
+            providerRequestRef.current += 1;
+            setCheckingStep(null);
+            setProvider(value as BraiCmdProviderId);
+            setProviderVerified(false);
+            setProviderManualModel(false);
+            setProviderModels([]);
+            setProviderModel("");
             resetCheck("provider-key");
           }}>
             <SelectTrigger className="w-full" aria-label="Поставщик">
@@ -831,14 +951,40 @@ export function OnboardingFlow({
             </SelectTrigger>
             <SelectContent>
               {providerOptions.map((option) => (
-                <SelectItem key={option} value={option}>{option}</SelectItem>
+                <SelectItem key={option.id} value={option.id}>{option.label}</SelectItem>
               ))}
             </SelectContent>
           </Select>
           <Input value={providerKey} type="password" aria-label="Ключ поставщика" placeholder="API-ключ" onChange={(event) => {
+            providerRequestRef.current += 1;
+            setCheckingStep(null);
             setProviderKey(event.target.value);
+            setProviderVerified(false);
+            setProviderManualModel(false);
+            setProviderModels([]);
+            setProviderModel("");
             resetCheck("provider-key");
           }} />
+          {providerVerified && providerManualModel ? (
+            <Input value={providerModel} aria-label="Модель распознавания" placeholder="Введите идентификатор модели" onChange={(event) => {
+              providerRequestRef.current += 1;
+              setCheckingStep(null);
+              setProviderModel(event.target.value);
+            }} />
+          ) : providerVerified ? (
+            <Select value={providerModel} onValueChange={(value) => {
+              providerRequestRef.current += 1;
+              setCheckingStep(null);
+              setProviderModel(value);
+            }}>
+              <SelectTrigger className="w-full" aria-label="Модель распознавания">
+                <SelectValue placeholder="Выберите модель распознавания" />
+              </SelectTrigger>
+              <SelectContent>
+                {providerModels.map((model) => <SelectItem key={model} value={model}>{model}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          ) : null}
         </StepScreen>
       );
     }
@@ -908,8 +1054,8 @@ export function OnboardingFlow({
 
     if (state.step === "voice-ready") return <InfoScreen icon={CheckCircle2} title="Голосовое управление настроено" text="Brai CMD готов принимать голос, работать с очередью и вставлять результат в поле."><PrimaryButton onClick={completeSetup}>Готово</PrimaryButton></InfoScreen>;
     if (state.step === "login-check") return <InfoScreen icon={Lock} title="Проверяем вход" text="Если профиль уже открыт, вы попадете в кабинет. Если нет — доступ будет ограничен входом и настройками."><PrimaryButton onClick={() => authRequired ? go("locked") : onDone()}>Продолжить</PrimaryButton></InfoScreen>;
-    if (state.step === "locked") return <InfoScreen icon={Lock} title="Нужен вход" text="Пока вы не вошли, доступны только вход и настройки Brai CMD."><SecondaryButton onClick={openCmdSettings}>Настройки Brai CMD</SecondaryButton><PrimaryButton onClick={() => go("login")}>Войти</PrimaryButton></InfoScreen>;
-    if (state.step === "login") return <OnboardingAuthForm busy={busy} mode={authMode} onEmailLogin={submitCloudLogin} onRequestOtp={onRequestOtp} onVerifyOtp={submitCloudVerifyOtp} />;
+    if (state.step === "locked") return <InfoScreen icon={Lock} title="Нужен вход" text="Пока вы не вошли, доступны вход, Engine и настройки Brai CMD."><SecondaryButton type="button" onClick={openCmdSettings}>Настройки Brai CMD</SecondaryButton><SecondaryButton type="button" onClick={onOpenEngine}>Engine</SecondaryButton><PrimaryButton type="button" onClick={() => go("login")}>Войти</PrimaryButton></InfoScreen>;
+    if (state.step === "login") return <OnboardingAuthForm busy={busy} mode={authMode} onEmailLogin={submitCloudEmailLogin} onRequestOtp={onRequestOtp} onVerifyOtp={submitCloudVerifyOtp} />;
     if (state.step === "cmd-settings") {
       return (
         <InfoScreen
@@ -1103,7 +1249,7 @@ function StepActions({ children, preserveBottomGap = false }: { children: ReactN
         : "[@media(max-height:700px)]:gap-2 [@media(max-height:700px)]:pb-[calc(env(safe-area-inset-bottom)+0.5rem)] [@media(max-height:700px)]:pt-2 [@media(max-height:800px)_and_(min-aspect-ratio:2/3)]:pb-[calc(env(safe-area-inset-bottom)+0.25rem)] [@media(max-height:800px)_and_(min-aspect-ratio:2/3)]:pt-1",
     )}>
       {statusText ? <StatusCard text={statusText} tone={statusTone} /> : null}
-      {extraActions.length ? <div className="grid gap-2">{extraActions}</div> : null}
+      {extraActions.length ? <div className="grid gap-3">{extraActions}</div> : null}
       <div className={cx("grid gap-3", canBack && mainAction ? "grid-cols-[3rem_minmax(0,1fr)]" : canBack ? "grid-cols-[3rem]" : "grid-cols-1")}>
         {canBack ? (
           <Button type="button" variant="outline" className="size-12 rounded-full border-primary/20 bg-transparent p-0 transition-all duration-200 hover:bg-primary/10 active:scale-[0.96] active:bg-primary/15 [@media(max-height:800px)_and_(min-aspect-ratio:2/3)]:size-10" aria-label="Назад" onClick={onBack}>
@@ -1250,11 +1396,96 @@ function SettingsImageScreen({ children, icon, imageAlt, imageHeight, imageSrc, 
   );
 }
 
-function DemoPlaceholder({ label }: { label: string }) {
+function FloatingButtonDemoScreen({ demo, index, onNext }: { demo: (typeof floatingButtonDemos)[number]; index: number; onNext: () => void }) {
   return (
-    <div className="grid aspect-video place-items-center rounded-lg border border-dashed border-primary/25 bg-primary/5 text-sm text-muted-foreground">
-      {label}
-    </div>
+    <StepScreen actions={<PrimaryButton onClick={onNext}>Продолжить</PrimaryButton>}>
+      <div className="grid gap-3 py-2 [@media(max-height:700px)]:gap-2 [@media(max-height:700px)]:py-1">
+        <p className="m-0 text-sm font-medium text-muted-foreground">Кнопка {index + 1} из {floatingButtonDemos.length}</p>
+        <InfoBlock compactOnShort icon={demo.icon} title={demo.title} text={demo.text} />
+        <Card className="relative mx-auto aspect-[4/3] w-full max-w-[min(100%,45dvh)] overflow-hidden rounded-2xl border-primary/15 bg-card/70 p-0 shadow-none [@media(max-height:700px)]:max-w-[min(100%,38dvh)] [@media(max-height:620px)]:max-w-[min(100%,31dvh)]">
+          <Image alt={demo.imageAlt} className="h-full w-full object-cover" height={960} src={demo.imageSrc} unoptimized width={1280} />
+          <FloatingButtonOverlay kind={demo.button} />
+        </Card>
+        <Card className="rounded-2xl border-primary/15 bg-card/60 px-4 py-3 shadow-none [@media(max-height:700px)]:px-3 [@media(max-height:700px)]:py-2">
+          <p className="m-0 text-sm leading-5 text-muted-foreground [@media(max-height:700px)]:text-xs [@media(max-height:700px)]:leading-4">{demo.scenario}</p>
+        </Card>
+      </div>
+    </StepScreen>
+  );
+}
+
+function FloatingButtonOverlay({ kind }: { kind: FloatingButtonKind }) {
+  if (kind === "main") {
+    return (
+      <span className="absolute bottom-[7%] right-[7%] grid size-[19%] place-items-center" aria-hidden="true">
+        <Image alt="" className="h-full w-full object-contain" height={512} src="/onboarding/brai-cmd-main-button.png" unoptimized width={512} />
+      </span>
+    );
+  }
+
+  return (
+    <span
+      className="absolute bottom-[9%] right-[9%] grid size-[14%] place-items-center rounded-full border-2 border-current bg-black"
+      aria-hidden="true"
+      style={{ color: "#ff2020", filter: "drop-shadow(0 0 18px rgba(255, 32, 32, 0.5))" }}
+    >
+      <ContextButtonGlyph kind={kind} />
+    </span>
+  );
+}
+
+function ContextButtonGlyph({ kind }: { kind: Exclude<FloatingButtonKind, "main"> }) {
+  if (kind === "idea") {
+    return (
+      <svg className="size-[58%]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2">
+        <path d="M15,14c0.2,-1 0.7,-1.7 1.5,-2.5 1,-0.9 1.5,-2.2 1.5,-3.5A6,6 0,0 0,6 8c0,1 0.2,2.2 1.5,3.5 0.7,0.7 1.3,1.5 1.5,2.5" />
+        <path d="M9,18H15" />
+        <path d="M10,22H14" />
+      </svg>
+    );
+  }
+
+  if (kind === "image") {
+    return (
+      <svg className="size-[58%]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2">
+        <path d="M5,3H19A2,2 0,0 1,21 5V19A2,2 0,0 1,19 21H5A2,2 0,0 1,3 19V5A2,2 0,0 1,5 3Z" />
+        <path d="M11,9A2,2 0,1 1,7 9A2,2 0,1 1,11 9Z" />
+        <path d="M21,15L17.914,11.914A2,2 0,0 0,15.086 11.914L6,21" />
+      </svg>
+    );
+  }
+
+  if (kind === "imageMic") {
+    return (
+      <svg className="size-[62%]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round">
+        <g transform="translate(0.4 1) scale(0.68)" strokeWidth="2.8">
+          <path d="M5,3H19A2,2 0,0 1,21 5V19A2,2 0,0 1,19 21H5A2,2 0,0 1,3 19V5A2,2 0,0 1,5 3Z" />
+          <path d="M11,9A2,2 0,1 1,7 9A2,2 0,1 1,11 9Z" />
+          <path d="M21,15L17.914,11.914A2,2 0,0 0,15.086 11.914L6,21" />
+        </g>
+        <g transform="translate(11 9.5) scale(0.52)" strokeWidth="3.65">
+          <path d="M12,19V22" />
+          <path d="M19,10V12A7,7 0,0 1,5 12V10" />
+          <path d="M12,2A3,3 0,0 1,15 5V12A3,3 0,0 1,9 12V5A3,3 0,0 1,12 2Z" />
+        </g>
+      </svg>
+    );
+  }
+
+  if (kind === "chat") {
+    return (
+      <svg className="size-[58%]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2">
+        <path d="M2.992,16.342A2,2 0,0 1,3.086 17.509L2.021,20.799A1,1 0,0 0,3.257 21.967L6.67,20.969A2,2 0,0 1,7.769 21.061A10,10 0,1 0,2.992 16.342Z" />
+      </svg>
+    );
+  }
+
+  return (
+    <svg className="size-[58%]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2">
+      <path d="M15.2,3A2,2 0,0 1,16.6 3.6L20.4,7.4A2,2 0,0 1,21 8.8V19A2,2 0,0 1,19 21H5A2,2 0,0 1,3 19V5A2,2 0,0 1,5 3Z" />
+      <path d="M17,21V14A1,1 0,0 0,16 13H8A1,1 0,0 0,7 14V21" />
+      <path d="M7,3V7A1,1 0,0 0,8 8H15" />
+    </svg>
   );
 }
 
@@ -1274,172 +1505,15 @@ function AccessKeyForm({ onSubmit }: { onSubmit: (key: string) => void }) {
   );
 }
 
-function OnboardingAuthForm({
-  busy,
-  intro,
-  mode,
-  onAuthenticated,
-  onEmailLogin,
-  onRequestOtp,
-  onVerifyOtp,
-}: {
+function OnboardingAuthForm(props: {
   busy: boolean;
-  intro?: ReactNode;
-  mode: "email" | "otp";
+  mode?: AuthMode;
+  onEmailLogin?: (email: string) => Promise<void>;
   onAuthenticated?: () => void;
-  onEmailLogin: (email: string) => Promise<void>;
   onRequestOtp: (email: string) => Promise<OtpSendResult>;
   onVerifyOtp: (email: string, otp: string) => Promise<void>;
 }) {
-  const [email, setEmail] = useState("");
-  const [otp, setOtp] = useState("");
-  const [otpSent, setOtpSent] = useState(false);
-  const [otpFocusKey, setOtpFocusKey] = useState(0);
-  const [otpTimer, setOtpTimer] = useState<AuthOtpTimer>(defaultOtpTimer);
-  const [error, setError] = useState("");
-
-  async function submitEmail(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setError("");
-    try {
-      await onEmailLogin(email);
-      onAuthenticated?.();
-    } catch {
-      setError("Email не подошёл.");
-    }
-  }
-
-  async function submitOtp(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setError("");
-    try {
-      if (!otpSent) {
-        await requestOtpCode();
-        return;
-      }
-      await onVerifyOtp(email, otp);
-      onAuthenticated?.();
-    } catch {
-      setError(otpSent ? "Код не подошел." : "Не удалось отправить код.");
-    }
-  }
-
-  async function requestOtpCode() {
-    setOtpSent(true);
-    setOtp("");
-    setOtpTimer((current) => ({ ...current, sentAtMs: null }));
-    setOtpFocusKey((current) => current + 1);
-    try {
-      applyOtpResult(await onRequestOtp(email));
-    } catch (error) {
-      setOtpSent(false);
-      throw error;
-    }
-  }
-
-  async function resendOtpCode() {
-    setError("");
-    setOtp("");
-    applyOtpResult(await onRequestOtp(email));
-  }
-
-  if (mode === "email") {
-    return (
-      <form className="flex min-h-0 flex-1 flex-col overflow-hidden" onSubmit={submitEmail}>
-        <div className="grid min-h-0 flex-1 content-center gap-4 overflow-hidden py-4">
-          {intro}
-          <FieldGroup>
-            <Field data-invalid={Boolean(error)}>
-              <FieldLabel htmlFor="onboarding-email">Email</FieldLabel>
-              <Input
-                id="onboarding-email"
-                value={email}
-                type="email"
-                autoComplete="email"
-                inputMode="email"
-                placeholder="email"
-                aria-label="Email"
-                aria-invalid={Boolean(error)}
-                disabled={busy}
-                onChange={(event) => setEmail(event.target.value)}
-              />
-              <FieldDescription>{error || "В Dev/Preview код не нужен."}</FieldDescription>
-            </Field>
-          </FieldGroup>
-        </div>
-        <StepActions>
-          <PrimaryButton disabled={busy || !email}>Войти</PrimaryButton>
-        </StepActions>
-      </form>
-    );
-  }
-
-  return (
-    <form className="flex min-h-0 flex-1 flex-col overflow-hidden" onSubmit={submitOtp}>
-      <div className="grid min-h-0 flex-1 content-center gap-4 overflow-hidden py-4">
-        {intro}
-        <FieldGroup>
-          <Field>
-            <FieldLabel htmlFor="onboarding-email">Email</FieldLabel>
-            <Input
-              id="onboarding-email"
-              value={email}
-              type="email"
-              autoComplete="email"
-              inputMode="email"
-              placeholder="email"
-              aria-label="Email"
-              disabled={busy || otpSent}
-              onChange={(event) => setEmail(event.target.value)}
-            />
-            <FieldDescription>{otpSent ? "Код уже отправлен. Введите его ниже." : "Отправим одноразовый код для входа."}</FieldDescription>
-          </Field>
-          {otpSent ? (
-            <Field data-invalid={Boolean(error)}>
-              <FieldLabel htmlFor="onboarding-otp">Код</FieldLabel>
-              <AuthOtpEntry
-                id="onboarding-otp"
-                value={otp}
-                timer={otpTimer}
-                autoFocusKey={otpFocusKey}
-                ariaInvalid={Boolean(error)}
-                disabled={busy && otpTimer.sentAtMs !== null}
-                onChange={setOtp}
-                onResend={resendOtpCode}
-              />
-              {error ? <FieldDescription className="text-destructive">{error}</FieldDescription> : null}
-            </Field>
-          ) : null}
-        </FieldGroup>
-      </div>
-      <StepActions>
-        <PrimaryButton disabled={busy || !email || (otpSent && !otp)}>{otpSent ? "Проверить код" : "Получить код"}</PrimaryButton>
-      </StepActions>
-    </form>
-  );
-
-  function applyOtpResult(result: OtpSendResult) {
-    const nowMs = Date.now();
-    const previousSentAtMs = otpTimer.sentAtMs;
-    const previousStillValid =
-      previousSentAtMs !== null && nowMs < previousSentAtMs + otpTimer.expiresInSeconds * 1000;
-    setOtpTimer({
-      sentAtMs: result.resend_strategy === "reuse" && previousStillValid ? previousSentAtMs : nowMs,
-      expiresInSeconds: positiveSeconds(result.expires_in_seconds, defaultOtpTimer.expiresInSeconds),
-      resendAfterSeconds: positiveSeconds(result.resend_after_seconds, defaultOtpTimer.resendAfterSeconds),
-    });
-    setOtpFocusKey((current) => current + 1);
-  }
-}
-
-const defaultOtpTimer: AuthOtpTimer = {
-  sentAtMs: null,
-  expiresInSeconds: 5 * 60,
-  resendAfterSeconds: 60,
-};
-
-function positiveSeconds(value: unknown, fallback: number): number {
-  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : fallback;
+  return <AuthScreen layout="embedded" {...props} />;
 }
 
 function TrainingDictate({ confirmed, onChange, onNext, value }: { confirmed: boolean; value: string; onChange: (value: string) => void; onNext: () => void }) {

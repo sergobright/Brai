@@ -230,6 +230,8 @@ CREATE TABLE IF NOT EXISTS inbox (
   explanation_text text NOT NULL DEFAULT '',
   normalization_text text NOT NULL DEFAULT '',
   is_normalized integer NOT NULL DEFAULT 0 CHECK (is_normalized IN (0, 1)),
+  status text NOT NULL DEFAULT 'New' CHECK (status IN ('New', 'Done')),
+  completed_at_utc text,
   created_at_utc text NOT NULL,
   updated_at_utc text NOT NULL,
   deleted_at_utc text,
@@ -466,6 +468,8 @@ CREATE TABLE IF NOT EXISTS brai_cmd_usage_events (
   post_processing_ms integer NOT NULL DEFAULT 0,
   total_ms integer NOT NULL DEFAULT 0,
   transcript_chars integer NOT NULL DEFAULT 0,
+  post_processing_input_chars integer NOT NULL DEFAULT 0,
+  post_processing_output_chars integer NOT NULL DEFAULT 0,
   client_version text NOT NULL DEFAULT ''
 );
 
@@ -589,76 +593,13 @@ INSERT INTO inbox_classes (key, title, description, status, created_by_agent_id,
   ('wish', 'Желание', 'Пользователь выразил желание, намерение или будущую покупку.', 'active', NULL, now()::text, now()::text),
   ('library', 'Сохранить в библиотеку', 'Материал, ссылку, изображение или фрагмент нужно сохранить для дальнейшего чтения.', 'active', NULL, now()::text, now()::text),
   ('task', 'Задача', 'Нужно выполнить действие, проверить, подготовить или кому-то ответить.', 'active', NULL, now()::text, now()::text),
+  ('operation', 'Операция агента', 'Служебная операция, созданная агентом и обрабатываемая через Inbox.', 'active', NULL, now()::text, now()::text),
   ('note', 'Заметка', 'Наблюдение, факт или короткая запись без явного действия.', 'active', NULL, now()::text, now()::text),
   ('other', 'Другое', 'Входящее не подходит под остальные классы.', 'active', NULL, now()::text, now()::text)
 ON CONFLICT (key) DO UPDATE SET
   title = excluded.title,
   description = excluded.description,
   status = excluded.status,
-  updated_at_utc = excluded.updated_at_utc;
-
-INSERT INTO agents (
-  id,
-  version,
-  target,
-  kind,
-  status,
-  title,
-  summary,
-  trigger_description,
-  conditions_description,
-  input_description,
-  output_description,
-  interactions_description,
-  side_effects_description,
-  llm_provider,
-  llm_model,
-  llm_prompt_template,
-  llm_timeout_ms,
-  fallback_description,
-  source_module,
-  updated_at_utc
-) VALUES (
-  'brai-cmd.dictate.transcription',
-  '1',
-  'brai-cmd',
-  'runtime',
-  'active',
-  'Brai Cmd диктовка',
-  'Принимает аудио Brai Cmd, сохраняет usage metrics и пишет ai_logs без хранения исходного аудио.',
-  'Срабатывает при POST /v1/dictate с валидным Brai Cmd access token.',
-  'Пропускается при невалидном токене, неподдержанном media type или ошибке валидации.',
-  'Multipart audio, device id, client metadata и optional post-processing/context fields.',
-  'Текстовая расшифровка или ошибка с usage/ai_logs audit trail.',
-  'Использует runtime deps braiCmd для transcription, post-processing и context reply.',
-  'Пишет brai_cmd_usage_events и ai_logs; не сохраняет аудио или raw transcript в runtime таблицах.',
-  '',
-  '',
-  '',
-  NULL,
-  'Возвращает structured API error и пишет failed ai_log/usage row при runtime failure.',
-  'services/brai_api/src/brai-cmd-routes.js',
-  now()::text
-)
-ON CONFLICT (id) DO UPDATE SET
-  version = excluded.version,
-  target = excluded.target,
-  kind = excluded.kind,
-  status = excluded.status,
-  title = excluded.title,
-  summary = excluded.summary,
-  trigger_description = excluded.trigger_description,
-  conditions_description = excluded.conditions_description,
-  input_description = excluded.input_description,
-  output_description = excluded.output_description,
-  interactions_description = excluded.interactions_description,
-  side_effects_description = excluded.side_effects_description,
-  llm_provider = excluded.llm_provider,
-  llm_model = excluded.llm_model,
-  llm_prompt_template = excluded.llm_prompt_template,
-  llm_timeout_ms = excluded.llm_timeout_ms,
-  fallback_description = excluded.fallback_description,
-  source_module = excluded.source_module,
   updated_at_utc = excluded.updated_at_utc;
 
 INSERT INTO agents (
@@ -848,6 +789,13 @@ INSERT INTO table_descriptions (table_name, title, short_description, long_descr
     'Brai Cmd usage events',
     'Метрики выполнения Brai Cmd диктовки.',
     'Фиксирует counts, timings, provider/model metadata и ошибки без хранения исходного аудио или текста расшифровки.',
+    now()::text
+  ),
+  (
+    'inbox',
+    'Inbox',
+    'Role table входящих записей с immutable raw input, normalized состоянием и служебным статусом.',
+    'explanation_text сохраняет исходный пользовательский ввод и не перезаписывается нормализацией; source/source_key фиксируют provenance. Workflow создаёт entity/role только после schema-valid local Codex CLI результата. status хранит служебное New/Done состояние для agent operation-записей без UI controls.',
     now()::text
   ),
   (

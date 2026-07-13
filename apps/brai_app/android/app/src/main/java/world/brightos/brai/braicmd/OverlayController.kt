@@ -847,7 +847,7 @@ class OverlayController(private val service: BraiAccessibilityService) {
     private fun updateQueueIndicators(snapshot: BraiCmdQueueSnapshot = BraiCmdQueue.snapshot(service)) {
         val mainReady = snapshot.readyToInsert.mainDictation
         button?.setQueueState(
-            failedCount = snapshot.failedTransport.main + snapshot.failedTransport.unknown,
+            pendingCount = snapshot.transport.main + snapshot.transport.unknown,
             readyCount = mainReady
         )
         button?.setUpdateAvailable(shouldShowUpdateDot(updateAvailable, apkUpdateRequired))
@@ -858,7 +858,7 @@ class OverlayController(private val service: BraiAccessibilityService) {
                 0
             }
             view.setQueueState(
-                failedCount = snapshot.failedTransport[menuAction.action],
+                pendingCount = snapshot.transport[menuAction.action],
                 readyCount = chatReady
             )
         }
@@ -1073,7 +1073,7 @@ class OverlayController(private val service: BraiAccessibilityService) {
         screenshotIconAlpha() + (CONTEXT_MENU_HUB_ALPHA - screenshotIconAlpha()) * contextMenuProgress
 
     private fun mainButtonShouldBeVisible(): Boolean =
-        contextMenuState == ContextMenuState.Closed && !hiddenForScreenshot
+        config.mainDictationEnabled && contextMenuState == ContextMenuState.Closed && !hiddenForScreenshot
 
     fun onExternalInteraction(packageName: String?) {
         if (packageName == service.packageName) return
@@ -1148,6 +1148,7 @@ class OverlayController(private val service: BraiAccessibilityService) {
             AppConstants.KEY_SCREENSHOT_ICON_SIZE_PERCENT,
             AppConstants.KEY_AUTH_TOKEN,
             AppConstants.KEY_OVERLAY_ENABLED,
+            AppConstants.KEY_MAIN_DICTATION_ENABLED,
             AppConstants.KEY_ONBOARDING_VOICE_ONLY
         ) + contextActionSettingKeys
     }

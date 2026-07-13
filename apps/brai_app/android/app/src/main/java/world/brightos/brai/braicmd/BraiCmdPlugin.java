@@ -37,12 +37,14 @@ import world.brightos.brai.capabilities.BraiAccessibilityService;
 public final class BraiCmdPlugin extends Plugin {
     private static final String EVENT_ONBOARDING = "onboardingEvent";
     private static final String EVENT_CREDENTIAL_REFRESH = "credentialRefreshRequired";
+    private static final String EVENT_STATE_CHANGED = "stateChanged";
     private static final Handler MAIN_HANDLER = new Handler(Looper.getMainLooper());
     private static volatile BraiCmdPlugin activePlugin;
 
     @Override
     public void load() {
         activePlugin = this;
+        new ConfigStore(getContext()).setOnboardingQueuePaused(false);
     }
 
     @Override
@@ -64,14 +66,177 @@ public final class BraiCmdPlugin extends Plugin {
 
     @PluginMethod
     public void openSettings(PluginCall call) {
-        Intent intent = new Intent(getContext(), BraiCmdSettingsActivity.class)
-            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-        if (getActivity() != null) {
-            getActivity().startActivity(intent);
-        } else {
-            getContext().startActivity(intent);
+        call.resolve(BraiCmdBridge.INSTANCE.snapshot(getContext()));
+    }
+
+    @PluginMethod
+    public void getSettings(PluginCall call) {
+        call.resolve(BraiCmdBridge.INSTANCE.snapshot(getContext()));
+    }
+
+    @PluginMethod
+    public void updateSettings(PluginCall call) {
+        JSObject patch = call.getObject("patch", new JSObject());
+        BraiCmdBridge.INSTANCE.updateSettings(getContext(), patch == null ? new JSObject() : patch);
+        JSObject snapshot = BraiCmdBridge.INSTANCE.snapshot(getContext());
+        notifyStateChangedNow(snapshot);
+        call.resolve(snapshot);
+    }
+
+    @PluginMethod
+    public void saveProvider(PluginCall call) {
+        JSObject input = call.getObject("provider", new JSObject());
+        BraiCmdBridge.INSTANCE.saveProvider(getContext(), input == null ? new JSObject() : input);
+        RecordingService.Companion.retryPending(getContext());
+        JSObject snapshot = BraiCmdBridge.INSTANCE.snapshot(getContext());
+        notifyStateChangedNow(snapshot);
+        call.resolve(snapshot);
+    }
+
+    @PluginMethod
+    public void testConnection(PluginCall call) {
+        new Thread(() -> {
+            JSObject result = new JSObject();
+            try {
+                ConfigStore config = new ConfigStore(getContext());
+                org.json.JSONObject diagnostics = new NetworkClient(getContext()).diagnostics("cloud".equals(config.getTranscriptionProviderMode()));
+                result = new JSObject(diagnostics.toString());
+                result.put("message", "Подключение к Brai работает");
+            } catch (Throwable error) {
+                result.put("ok", false);
+                result.put("message", providerMessage(error, "Не удалось подключиться к серверам Brai"));
+            }
+            JSObject finalResult = result;
+            MAIN_HANDLER.post(() -> call.resolve(finalResult));
+        }).start();
+    }
+
+    @PluginMethod
+    public void testProvider(PluginCall call) {
+        JSObject input = call.getObject("provider", new JSObject());
+        JSObject provider = input == null ? new JSObject() : input;
+        new Thread(() -> {
+            try {
+                JSObject result = new LlmProviderClient(getContext()).test(
+                    provider.optString("providerId", ""),
+                    provider.optString("apiKey", ""),
+                    provider.optString("model", ""),
+                    provider.optString("baseUrl", "")
+                );
+                MAIN_HANDLER.post(() -> call.resolve(result));
+            } catch (Throwable error) {
+                JSObject result = new JSObject();
+                result.put("ok", false);
+                result.put("message", error.getMessage() == null || error.getMessage().isBlank() ? "Не удалось подключить поставщика" : error.getMessage());
+                MAIN_HANDLER.post(() -> call.resolve(result));
+            }
+        }).start();
+    }
+
+    @PluginMethod
+    public void probeProvider(PluginCall call) {
+        JSObject input = call.getObject("provider", new JSObject());
+        JSObject provider = input == null ? new JSObject() : input;
+        new Thread(() -> {
+            JSObject result;
+            try {
+                result = new LlmProviderClient(getContext()).probe(
+                    provider.optString("providerId", ""),
+                    provider.optString("apiKey", ""),
+                    provider.optString("baseUrl", ""),
+                    provider.optString("capability", "text")
+                );
+            } catch (Throwable error) {
+                result = new JSObject();
+                result.put("ok", false);
+                result.put("message", providerMessage(error, "Не удалось проверить поставщика"));
+            }
+            JSObject finalResult = result;
+            MAIN_HANDLER.post(() -> call.resolve(finalResult));
+        }).start();
+    }
+
+    @PluginMethod
+    public void connectProvider(PluginCall call) {
+        JSObject input = call.getObject("provider", new JSObject());
+        JSObject provider = input == null ? new JSObject() : input;
+        new Thread(() -> {
+            JSObject result;
+            try {
+                result = new LlmProviderClient(getContext()).connect(
+                    provider.optString("providerId", ""),
+                    provider.optString("apiKey", ""),
+                    provider.optString("model", ""),
+                    provider.optString("baseUrl", ""),
+                    provider.optString("capability", "text")
+                );
+                BraiCmdBridge.INSTANCE.saveProvider(getContext(), provider);
+                result.put("state", BraiCmdBridge.INSTANCE.snapshot(getContext()));
+                RecordingService.Companion.retryPending(getContext());
+            } catch (Throwable error) {
+                result = new JSObject();
+                result.put("ok", false);
+                result.put("message", providerMessage(error, "Не удалось подключить поставщика"));
+            }
+            JSObject finalResult = result;
+            MAIN_HANDLER.post(() -> {
+                if (finalResult.optBoolean("ok")) notifyStateChanged();
+                call.resolve(finalResult);
+            });
+        }).start();
+    }
+
+    @PluginMethod
+    public void disconnectProvider(PluginCall call) {
+        String providerId = call.getString("providerId", "");
+        JSObject snapshot = BraiCmdBridge.INSTANCE.disconnectProvider(getContext(), providerId == null ? "" : providerId);
+        notifyStateChangedNow(snapshot);
+        call.resolve(snapshot);
+    }
+
+    @PluginMethod
+    public void deleteAudio(PluginCall call) {
+        String id = call.getString("id", "");
+        JSObject result = new JSObject();
+        result.put("ok", RecordingArchiveStore.INSTANCE.delete(getContext(), id == null ? "" : id));
+        result.put("state", BraiCmdBridge.INSTANCE.snapshot(getContext()));
+        notifyStateChanged();
+        call.resolve(result);
+    }
+
+    @PluginMethod
+    public void downloadAudio(PluginCall call) {
+        String id = call.getString("id", "");
+        new Thread(() -> {
+            JSObject result = new JSObject();
+            try {
+                String path = RecordingArchiveStore.INSTANCE.download(getContext(), id == null ? "" : id);
+                result.put("ok", true);
+                result.put("path", path);
+            } catch (Throwable error) {
+                result.put("ok", false);
+                result.put("message", "Не удалось сохранить аудиозапись");
+            }
+            MAIN_HANDLER.post(() -> call.resolve(result));
+        }).start();
+    }
+
+    @PluginMethod
+    public void openPermission(PluginCall call) {
+        String permission = call.getString("permission", "");
+        if ("accessibility".equals(permission)) {
+            startSettingsActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS));
+        } else if ("overlay".equals(permission)) {
+            openOverlaySettings(call);
+            return;
+        } else if ("microphone".equals(permission)) {
+            requestMicrophone(call);
+            return;
+        } else if ("notifications".equals(permission)) {
+            requestNotifications(call);
+            return;
         }
-        call.resolve(stateJson());
+        call.resolve(BraiCmdBridge.INSTANCE.snapshot(getContext()));
     }
 
     @PluginMethod
@@ -143,7 +308,8 @@ public final class BraiCmdPlugin extends Plugin {
                 config.setPreliminaryClaimToken(profile.getPreliminaryClaimToken());
                 call.resolve(preliminaryStateJson(profile, fingerprint));
             } catch (Throwable error) {
-                call.reject(error.getMessage());
+                Exception exception = error instanceof Exception ? (Exception) error : new Exception(error);
+                call.reject("Не удалось проверить устройство", NetworkClientKt.preliminaryFailureCode(error), exception);
             }
         }).start();
     }
@@ -339,5 +505,27 @@ public final class BraiCmdPlugin extends Plugin {
         event.put("type", type);
         if (text != null) event.put("text", text);
         notifyListeners(EVENT_ONBOARDING, event);
+    }
+
+    public static void notifyStateChanged() {
+        BraiCmdPlugin plugin = activePlugin;
+        if (plugin == null) return;
+        MAIN_HANDLER.post(() -> plugin.notifyStateChangedNow(BraiCmdBridge.INSTANCE.snapshot(plugin.getContext())));
+    }
+
+    private void notifyStateChangedNow(JSObject snapshot) {
+        if (snapshot != null) notifyListeners(EVENT_STATE_CHANGED, snapshot);
+    }
+
+    private static String providerMessage(Throwable error, String fallback) {
+        String message = error.getMessage();
+        if (message == null || message.isBlank()) return fallback;
+        return switch (message) {
+            case "api_key_required" -> "Введите API-ключ";
+            case "model_required" -> "Выберите модель";
+            case "base_url_required" -> "Введите корректный Base URL";
+            case "unsupported_provider" -> "Этот поставщик не поддерживается";
+            default -> message;
+        };
     }
 }

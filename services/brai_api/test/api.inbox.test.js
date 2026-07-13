@@ -122,6 +122,33 @@ test('inbox sync rejects client normalization outside the workflow', async () =>
   }
 });
 
+test('inbox sync rejects client status changes', async () => {
+  const fixture = await createFixture(['2026-06-26T12:00:00.000Z']);
+  try {
+    const response = await request(fixture.url, '/v1/inbox/events/sync', {
+      method: 'POST',
+      body: JSON.stringify({
+        device: { device_id: 'web-device', platform: 'web' },
+        events: [
+          inboxEvent('status-raw-create', 1, 'create', 'status-inbox', '2026-06-26T11:00:00.000Z', {
+            title: 'Raw item'
+          }),
+          inboxEvent('forged-status', 2, 'set_status', 'status-inbox', '2026-06-26T11:01:00.000Z', {
+            status: 'Done'
+          })
+        ]
+      })
+    });
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(response.body.ignored_events, [{ event_id: 'forged-status', reason: 'invalid_type' }]);
+    assert.equal(response.body.state.inbox[0].status, 'New');
+    assert.equal(response.body.state.inbox[0].completed_at_utc, null);
+  } finally {
+    await fixture.close();
+  }
+});
+
 test('inbox create cannot claim another user\'s raw record id', async () => {
   const fixture = await createFixture(['2026-06-26T12:00:00.000Z']);
   try {

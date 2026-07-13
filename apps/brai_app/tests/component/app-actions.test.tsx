@@ -253,6 +253,13 @@ describe("BraiApp actions", () => {
   });
 
   it("creates a mobile action with a description from the composer", async () => {
+    const defaultFetch = vi.mocked(fetch).getMockImplementation();
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      if (url.endsWith("/v1/activities/sync")) throw new Error("offline");
+      if (!defaultFetch) throw new Error("missing_default_fetch");
+      return await defaultFetch(input, init);
+    });
     render(<BraiApp />);
 
     fireEvent.click(document.querySelector(".actions-fab") as HTMLElement);
@@ -550,6 +557,8 @@ describe("BraiApp actions", () => {
     expect(screen.getByRole("tab", { name: "История" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Детали" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "БД" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "AI" }));
+    expect(await screen.findByText("Для этого действия AI workflow ещё не запускался.")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("tab", { name: "Детали" }));
     expect(screen.getByText("status")).toBeInTheDocument();
     expect(screen.getByText("New")).toBeInTheDocument();
@@ -597,6 +606,138 @@ describe("BraiApp actions", () => {
         ]),
       );
     });
+  }, 10_000);
+
+  it("shows Action AI badges and workflow details", async () => {
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn(() => ({
+        matches: false,
+        media: "(max-width: 860px)",
+        onchange: null,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+      })),
+    );
+    Object.defineProperty(window, "innerWidth", { configurable: true, writable: true, value: 1200 });
+    await saveActivitiesState({
+      server_time_utc: "2026-07-12T12:00:00.000Z",
+      server_revision: 17,
+      actions: [
+        {
+          id: "action-ai-running",
+          title: "Действие на AI",
+          description_md: "",
+          status: "New",
+          created_at_utc: "2026-07-12T10:00:00.000Z",
+          updated_at_utc: "2026-07-12T10:00:00.000Z",
+          completed_at_utc: null,
+          sort_order: null,
+          deleted_at_utc: null,
+          restored_at_utc: null,
+          item_roles_id: null,
+          initial_event_id: "activity:create-running",
+          workflow_execution_id: 21,
+          workflow_status: "running",
+          workflow_step: "raw_normalizer",
+          workflow_attempt_count: 1,
+          workflow_last_error: null,
+          temporal_workflow_id: "brai:activity:action-ai-running",
+          temporal_run_id: "run-activity-21",
+          ai_processing_status: "running",
+          ai_processing_error: null,
+        },
+        {
+          id: "action-ai-done",
+          title: "Нормализованное действие",
+          description_md: "",
+          status: "New",
+          created_at_utc: "2026-07-12T09:00:00.000Z",
+          updated_at_utc: "2026-07-12T09:00:00.000Z",
+          completed_at_utc: null,
+          sort_order: null,
+          deleted_at_utc: null,
+          restored_at_utc: null,
+          item_roles_id: null,
+          initial_event_id: "activity:create-done",
+          workflow_execution_id: 22,
+          workflow_status: "completed",
+          workflow_step: "apply_normalized_raw",
+          workflow_attempt_count: 1,
+          workflow_last_error: null,
+          temporal_workflow_id: "brai:activity:action-ai-done",
+          temporal_run_id: "run-activity-22",
+          ai_processing_status: "running",
+          ai_processing_error: null,
+        },
+      ],
+      archived_actions: [],
+    });
+
+    const baseFetch = globalThis.fetch;
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      if (url.endsWith("/v1/activities/action-ai-running/workflow")) {
+        return new Response(JSON.stringify({
+          definition: {
+            id: "activity.raw-normalization",
+            version: 1,
+            title: "Activity raw normalization",
+            task_queue: "brai-inbox-normalization",
+            steps: ["ingest", "dispatch", "prepare_raw", "image_describer", "raw_normalizer", "apply_normalized_raw"],
+            input_schema_version: "brai.activity.raw.v1",
+            output_schema_version: "brai.activity.normalized.v1",
+          },
+          execution: {
+            workflow_id: "brai:activity:action-ai-running",
+            run_id: "run-activity-21",
+            status: "running",
+            current_step: "raw_normalizer",
+            attempt_count: 1,
+            last_error: null,
+          },
+          step_states: [
+            { id: "ingest", state: "completed", reason: null },
+            { id: "dispatch", state: "completed", reason: null },
+            { id: "prepare_raw", state: "completed", reason: null },
+            { id: "image_describer", state: "skipped", reason: "not_required" },
+            { id: "raw_normalizer", state: "running", reason: null },
+            { id: "apply_normalized_raw", state: "pending", reason: null },
+          ],
+          attempts: [{
+            id: 77,
+            agent_id: "activity.normalizer",
+            status: "done",
+            ai_title: "Разобрал Activity-запись",
+            attempt_number: 1,
+            json_data: { metadata: {} },
+          }],
+        }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      return baseFetch(input, init);
+    }));
+
+    render(<BraiApp />);
+
+    const runningTitle = await screen.findByRole("textbox", { name: "Название действия: Действие на AI" });
+    const runningRow = runningTitle.closest(".action-row") as HTMLElement;
+    expect(within(runningRow).getByText("AI-working")).toBeInTheDocument();
+    const normalizedTitle = screen.getByRole("textbox", { name: "Название действия: Нормализованное действие" });
+    const normalizedRow = normalizedTitle.closest(".action-row") as HTMLElement;
+    expect(within(normalizedRow).getByText("AI")).toBeInTheDocument();
+    expect(within(normalizedRow).queryByText("AI-working")).not.toBeInTheDocument();
+
+    fireEvent.click(runningTitle);
+    fireEvent.click(screen.getByRole("tab", { name: "AI" }));
+    expect((await screen.findByText(/image_describer/)).closest("[data-workflow-step-state]"))
+      .toHaveAttribute("data-workflow-step-state", "skipped");
+    expect((await screen.findByText("raw_normalizer")).closest("[data-workflow-step-state]"))
+      .toHaveAttribute("data-workflow-step-state", "running");
+    expect(screen.getByText("activity.normalizer")).toBeInTheDocument();
+    expect(screen.getByText("brai:activity:action-ai-running")).toBeInTheDocument();
   });
 
   it("keeps autosaved action description when sync ack returns stale equal-revision state", async () => {
@@ -841,7 +982,7 @@ describe("BraiApp actions", () => {
 
     render(<BraiApp />);
 
-    const stopButton = await screen.findByRole("button", { name: "Остановить фокус: Фокус" });
+    const stopButton = await screen.findByRole("button", { name: "Остановить фокус: Фокус" }, { timeout: 5_000 });
     expect(within(stopButton).queryByText("Стоп")).not.toBeInTheDocument();
     expect(stopButton.querySelector("svg")).toBeInTheDocument();
     fireEvent.click(stopButton);
