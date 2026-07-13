@@ -56,6 +56,20 @@ public class BraiOtaManagerTest {
     }
 
     @Test
+    public void buildsInstalledChannelDownloadUrlAndFileName() {
+        assertEquals("https://api.b.test.brai.one/releases/download/b", BraiOtaManager.apkDownloadUrl("https://api.b.test.brai.one/", "b"));
+        assertEquals("brai-b-update-60004.apk", BraiOtaManager.apkDownloadFileName("b", "60004"));
+    }
+
+    @Test
+    public void preventsDuplicateApkDownloadsForTheSameTarget() {
+        assertFalse(BraiOtaManager.shouldStartApkDownload("downloading", "60004", "60005"));
+        assertFalse(BraiOtaManager.shouldStartApkDownload("downloaded", "60004", "60004"));
+        assertTrue(BraiOtaManager.shouldStartApkDownload("downloaded", "60004", "60005"));
+        assertTrue(BraiOtaManager.shouldStartApkDownload("failed", "60004", "60004"));
+    }
+
+    @Test
     public void classifiesUpdateFailuresWithoutLeakingRawMessages() {
         assertEquals("network_connection_lost", BraiOtaManager.updateErrorCode(new SocketException("Software caused connection abort")));
         assertEquals("local_archive_missing", BraiOtaManager.updateErrorCode(new FileNotFoundException("open failed: ENOENT")));

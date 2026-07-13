@@ -16,6 +16,8 @@ import {
 } from "motion/react";
 
 import { useRef, useState } from "react";
+import type { ReactNode } from "react";
+import { NavigationIndicator, type NavigationIndicatorPosition } from "@/shared/ui/navigation-indicator";
 
 type FloatingDockItem = {
   title: string;
@@ -24,6 +26,8 @@ type FloatingDockItem = {
   active?: boolean;
   fillIcon?: boolean;
   onClick?: () => void;
+  indicator?: ReactNode;
+  indicatorPosition?: NavigationIndicatorPosition;
 };
 
 export const FloatingDock = ({
@@ -65,7 +69,7 @@ const FloatingDockMobile = ({
             item.onClick();
           }}
           className={cn(
-            "nav-button flex h-11 w-11 items-center justify-center rounded-full text-neutral-500 dark:text-neutral-300",
+            "nav-button relative flex h-11 w-11 items-center justify-center rounded-full text-neutral-500 dark:text-neutral-300",
             item.active
               ? "bg-accent text-accent-foreground"
               : "bg-transparent",
@@ -73,6 +77,7 @@ const FloatingDockMobile = ({
         >
           <div className={cn(item.fillIcon ? "h-full w-full" : "h-5 w-5")}>{item.icon}</div>
           <span className="nav-label hidden">{item.title}</span>
+          {item.indicator ? <NavigationIndicator position={item.indicatorPosition}>{item.indicator}</NavigationIndicator> : null}
         </a>
       ))}
     </div>
@@ -111,6 +116,8 @@ function IconContainer({
   active,
   fillIcon,
   onClick,
+  indicator,
+  indicatorPosition,
 }: FloatingDockItem & {
   mouseX: MotionValue;
 }) {
@@ -202,6 +209,7 @@ function IconContainer({
             {icon}
           </motion.div>
         )}
+        {indicator ? <NavigationIndicator position={indicatorPosition}>{indicator}</NavigationIndicator> : null}
       </motion.div>
     </a>
   );

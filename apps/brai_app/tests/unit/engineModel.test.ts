@@ -18,6 +18,7 @@ describe("engineSectionView", () => {
 
     expect(view.isChecking).toBe(false);
     expect(view.updateStatus.label).toBe("актуально");
+    expect(view.updateAction).toBe("check");
   });
 
   it("detects newer ledger versions", () => {
@@ -137,6 +138,7 @@ describe("engineSectionView", () => {
         nativeApkVersion: "1",
         nativeApkReleaseKey: "production",
         nativeApkBuildKind: "stable",
+        targetApkReleaseUrl: "https://app.brai.one/releases/",
         lastCheckStatus: "up_to_date",
       },
       versionError: false,
@@ -146,6 +148,8 @@ describe("engineSectionView", () => {
     expect(view.hasUpdate).toBe(true);
     expect(view.apkUpdateAvailable).toBe(true);
     expect(view.requiredApkLabel).toBe("v2");
+    expect(view.apkReleaseUrl).toBe("/releases/download/production");
+    expect(view.updateAction).toBe("download-apk");
   });
 
   it("keeps legacy stable APK state compatible without native release key metadata", () => {
@@ -206,5 +210,43 @@ describe("engineSectionView", () => {
 
     expect(view.apkUpdateAvailable).toBe(true);
     expect(view.requiredApkLabel).toBe("v2-preview6");
+  });
+
+  it("maps discovery, web download, and APK download to separate actions", () => {
+    const base = {
+      appBuild: "0.0.10",
+      appVersionState: null,
+      otaRefreshing: false,
+      versionError: false,
+      versionRefreshing: false,
+    };
+    expect(engineSectionView({
+      ...base,
+      otaState: { activeBundleVersion: "0.0.10", availableBundleVersion: "0.0.11", updateAvailable: true, lastCheckStatus: "update_available" },
+    }).updateAction).toBe("download-web");
+    expect(engineSectionView({
+      ...base,
+      otaState: { activeBundleVersion: "0.0.10", availableBundleVersion: "0.0.11", activeOperation: "web_download", lastCheckStatus: "downloading" },
+    }).updateAction).toBe("downloading-web");
+    expect(engineSectionView({
+      ...base,
+      otaState: { activeBundleVersion: "0.0.10", nativeApkVersion: "1", targetApkVersion: "2", lastCheckStatus: "apk_required", apkDownloadStatus: "downloading" },
+    }).updateAction).toBe("downloading-apk");
+    expect(engineSectionView({
+      ...base,
+      otaState: { activeBundleVersion: "0.0.10", nativeApkVersion: "1", targetApkVersion: "2", lastCheckStatus: "apk_required", apkDownloadStatus: "downloaded" },
+    }).updateAction).toBe("apk-downloaded");
+  });
+
+  it("keeps user-facing Engine text free from the technical update acronym", () => {
+    const view = engineSectionView({
+      appBuild: "0.0.10",
+      appVersionState: null,
+      otaRefreshing: false,
+      otaState: { activeBundleVersion: "0.0.10", availableBundleVersion: "0.0.11", lastCheckStatus: "update_available" },
+      versionError: false,
+      versionRefreshing: false,
+    });
+    expect(view.updateStatus.body).not.toContain("OTA");
   });
 });

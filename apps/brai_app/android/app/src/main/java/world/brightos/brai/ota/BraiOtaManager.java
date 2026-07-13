@@ -1,8 +1,12 @@
 package world.brightos.brai.ota;
 
+import android.app.DownloadManager;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.content.pm.PackageInfo;
+import android.database.Cursor;
+import android.net.Uri;
+import android.os.Environment;
 import android.os.Handler;
 import android.os.Looper;
 
@@ -53,6 +57,10 @@ public final class BraiOtaManager {
     private static final String KEY_LAST_TARGET_APK_BUILD_KIND = "lastTargetApkBuildKind";
     private static final String KEY_LAST_TARGET_APK_PREVIEW_ITERATION = "lastTargetApkPreviewIteration";
     private static final String KEY_LAST_TARGET_APK_VERSION_CODE = "lastTargetApkVersionCode";
+    private static final String KEY_APK_DOWNLOAD_ID = "apkDownloadId";
+    private static final String KEY_APK_DOWNLOAD_STATUS = "apkDownloadStatus";
+    private static final String KEY_APK_DOWNLOAD_ERROR = "apkDownloadError";
+    private static final String KEY_APK_DOWNLOAD_TARGET = "apkDownloadTarget";
     private static final int NETWORK_TIMEOUT_MS = 7000;
     private static final int READY_TIMEOUT_MS = 15000;
 
@@ -63,6 +71,7 @@ public final class BraiOtaManager {
     private String activeBundleVersion;
     private Runnable readinessTimeout;
     private boolean checkInProgress;
+    private boolean webDownloadInProgress;
     private String downloadProgressVersion;
     private long downloadProgressBytes;
     private long downloadProgressTotalBytes;
@@ -120,7 +129,7 @@ public final class BraiOtaManager {
     }
 
     public synchronized boolean checkForUpdatesAsync() {
-        if (checkInProgress) return false;
+        if (checkInProgress || webDownloadInProgress) return false;
         checkInProgress = true;
         recordStatus("checking", null);
         Thread worker = new Thread(() -> {
@@ -139,7 +148,55 @@ public final class BraiOtaManager {
         return true;
     }
 
+    public synchronized boolean downloadUpdateAsync() {
+        if (checkInProgress || webDownloadInProgress) return false;
+        webDownloadInProgress = true;
+        Thread worker = new Thread(() -> {
+            try {
+                BraiOtaManifest manifest = discoverUpdate();
+                if (manifest != null) stageUpdate(manifest);
+            } catch (Exception error) {
+                recordStatus("download_failed", updateErrorCode(error));
+            } finally {
+                synchronized (BraiOtaManager.this) {
+                    webDownloadInProgress = false;
+                }
+            }
+        }, "BraiOtaUpdateDownload");
+        worker.setDaemon(true);
+        worker.start();
+        return true;
+    }
+
+    public synchronized boolean downloadApk() {
+        reconcileApkDownload();
+        String status = prefs.getString(KEY_APK_DOWNLOAD_STATUS, "idle");
+        String target = prefs.getString(KEY_LAST_TARGET_APK_VERSION_CODE, "unknown");
+        if (!shouldStartApkDownload(status, prefs.getString(KEY_APK_DOWNLOAD_TARGET, null), target)) return false;
+        DownloadManager manager = (DownloadManager) context.getSystemService(Context.DOWNLOAD_SERVICE);
+        if (manager == null) {
+            recordApkDownload("failed", "download_manager_unavailable", -1, target);
+            return false;
+        }
+        String releaseKey = BuildConfig.BRAI_APK_RELEASE_KEY;
+        DownloadManager.Request request = new DownloadManager.Request(Uri.parse(apkDownloadUrl(BuildConfig.BRAI_ANDROID_API, releaseKey)))
+            .setTitle("Brai — обновление приложения")
+            .setDescription("Скачивается APK " + BuildConfig.BRAI_APP_LABEL)
+            .setMimeType("application/vnd.android.package-archive")
+            .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+            .setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, apkDownloadFileName(releaseKey, target));
+        try {
+            long downloadId = manager.enqueue(request);
+            recordApkDownload("downloading", null, downloadId, target);
+            return true;
+        } catch (RuntimeException error) {
+            recordApkDownload("failed", updateErrorCode(error), -1, target);
+            return false;
+        }
+    }
+
     public synchronized JSObject stateJson() {
+        reconcileApkDownload();
         JSObject state = new JSObject();
         state.put("fallbackBundleVersion", fallbackBundleVersion());
         state.put("activeBundleVersion", activeBundleVersion);
@@ -178,9 +235,13 @@ public final class BraiOtaManager {
         state.put("targetApkBuildKind", prefs.getString(KEY_LAST_TARGET_APK_BUILD_KIND, null));
         state.put("targetApkPreviewIteration", prefs.getString(KEY_LAST_TARGET_APK_PREVIEW_ITERATION, null));
         state.put("targetApkVersionCode", prefs.getString(KEY_LAST_TARGET_APK_VERSION_CODE, null));
-        state.put("targetApkReleaseUrl", apkReleaseUrl());
+        state.put("targetApkReleaseUrl", apkDownloadUrl(BuildConfig.BRAI_ANDROID_API, BuildConfig.BRAI_APK_RELEASE_KEY));
         state.put("failedBundleVersions", prefs.getString(KEY_FAILED_VERSIONS, ""));
         state.put("checkInProgress", checkInProgress);
+        String apkDownloadStatus = currentApkDownloadStatus();
+        state.put("activeOperation", checkInProgress ? "checking" : webDownloadInProgress ? "web_download" : "downloading".equals(apkDownloadStatus) ? "apk_download" : null);
+        state.put("apkDownloadStatus", apkDownloadStatus);
+        state.put("apkDownloadError", prefs.getString(KEY_APK_DOWNLOAD_ERROR, null));
         state.put("downloadProgressVersion", downloadProgressVersion);
         state.put("downloadProgressBytes", downloadProgressBytes);
         state.put("downloadProgressTotalBytes", downloadProgressTotalBytes);
@@ -248,6 +309,11 @@ public final class BraiOtaManager {
     }
 
     private void checkForUpdates() throws Exception {
+        BraiOtaManifest manifest = discoverUpdate();
+        if (manifest != null) recordStatus("update_available", null);
+    }
+
+    private BraiOtaManifest discoverUpdate() throws Exception {
         recordStatus("checking", null);
         URL manifestUrl = new URL(BuildConfig.BRAI_OTA_MANIFEST_URL);
         BraiOtaManifest manifest = BraiOtaManifest.parse(readText(manifestUrl));
@@ -264,7 +330,7 @@ public final class BraiOtaManager {
             if ("apk_required".equals(error.getMessage())) {
                 recordAvailableUpdate(manifest, true);
                 recordStatus("apk_required", error.getMessage());
-                return;
+                return null;
             }
             throw error;
         }
@@ -273,19 +339,23 @@ public final class BraiOtaManager {
             if (!manifest.isNewerThan(activeBundleVersion)) {
                 clearAvailableUpdate();
                 recordStatus("up_to_date", null);
-                return;
+                return null;
             }
             recordAvailableUpdate(manifest, false);
             if (failedVersions().contains(manifest.otaVersion)) {
                 recordStatus("skipped_failed_bundle", manifest.otaVersion);
-                return;
+                return null;
             }
             if (manifest.otaVersion.equals(prefs.getString(KEY_CANDIDATE_VERSION, null))) {
                 recordStatus("candidate_already_pending", manifest.otaVersion);
-                return;
+                return null;
             }
         }
 
+        return manifest;
+    }
+
+    private void stageUpdate(BraiOtaManifest manifest) throws Exception {
         File archive = null;
         try {
             recordStatus("downloading", null);
@@ -315,6 +385,43 @@ public final class BraiOtaManager {
             }
             throw error;
         }
+    }
+
+    private synchronized void reconcileApkDownload() {
+        long downloadId = prefs.getLong(KEY_APK_DOWNLOAD_ID, -1);
+        if (downloadId < 0 || !"downloading".equals(prefs.getString(KEY_APK_DOWNLOAD_STATUS, "idle"))) return;
+        DownloadManager manager = (DownloadManager) context.getSystemService(Context.DOWNLOAD_SERVICE);
+        if (manager == null) return;
+        try (Cursor cursor = manager.query(new DownloadManager.Query().setFilterById(downloadId))) {
+            if (cursor == null || !cursor.moveToFirst()) {
+                recordApkDownload("failed", "download_not_found", -1, null);
+                return;
+            }
+            int status = cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS));
+            if (status == DownloadManager.STATUS_SUCCESSFUL) {
+                recordApkDownload("downloaded", null, downloadId, null);
+            } else if (status == DownloadManager.STATUS_FAILED) {
+                int reason = cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_REASON));
+                recordApkDownload("failed", "download_manager_" + reason, downloadId, null);
+            }
+        } catch (RuntimeException error) {
+            recordApkDownload("failed", updateErrorCode(error), downloadId, null);
+        }
+    }
+
+    private String currentApkDownloadStatus() {
+        String status = prefs.getString(KEY_APK_DOWNLOAD_STATUS, "idle");
+        if ("downloading".equals(status)) return status;
+        String currentTarget = prefs.getString(KEY_LAST_TARGET_APK_VERSION_CODE, "unknown");
+        return currentTarget.equals(prefs.getString(KEY_APK_DOWNLOAD_TARGET, null)) ? status : "idle";
+    }
+
+    private void recordApkDownload(String status, String error, long downloadId, String target) {
+        SharedPreferences.Editor editor = prefs.edit().putString(KEY_APK_DOWNLOAD_STATUS, status);
+        if (downloadId < 0) editor.remove(KEY_APK_DOWNLOAD_ID); else editor.putLong(KEY_APK_DOWNLOAD_ID, downloadId);
+        if (error == null) editor.remove(KEY_APK_DOWNLOAD_ERROR); else editor.putString(KEY_APK_DOWNLOAD_ERROR, error);
+        if (target != null) editor.putString(KEY_APK_DOWNLOAD_TARGET, target);
+        editor.apply();
     }
 
     private synchronized void scheduleReadinessTimeout(String version) {
@@ -565,11 +672,17 @@ public final class BraiOtaManager {
         throw new BraiOtaException("invalid_native_apk_version");
     }
 
-    private static String apkReleaseUrl() {
-        String channel = BuildConfig.BRAI_OTA_CHANNEL;
-        int slash = channel.indexOf('/');
-        String host = slash >= 0 ? channel.substring(0, slash) : channel;
-        return host.isEmpty() ? "/releases/" : "https://" + host + "/releases/";
+    static String apkDownloadUrl(String apiBase, String releaseKey) {
+        String base = apiBase == null ? "" : apiBase.trim().replaceAll("/+$", "");
+        return base + "/releases/download/" + releaseKey;
+    }
+
+    static String apkDownloadFileName(String releaseKey, String targetVersionCode) {
+        return "brai-" + releaseKey + "-update-" + targetVersionCode + ".apk";
+    }
+
+    static boolean shouldStartApkDownload(String status, String storedTarget, String target) {
+        return !"downloading".equals(status) && !("downloaded".equals(status) && target.equals(storedTarget));
     }
 
     static boolean wasCandidateLoading(String candidateVersion, String lastStatus) {

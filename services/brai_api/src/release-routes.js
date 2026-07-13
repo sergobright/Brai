@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import net from 'node:net';
 import path from 'node:path';
 import { renderReleasePage } from '../../../deploy/scripts/release-page.mjs';
 
@@ -101,7 +102,7 @@ export function sendReleaseLoginPage(res, { status = 200, error = null } = {}) {
       <h1>Релизы Brai</h1>
       <p>Введите пароль релиза, чтобы скачать приватную Android-сборку.</p>
       ${errorMarkup}
-      <form method="post" action="/releases/login">
+      <form method="post" action="/dev-releases/login">
         <label for="password">Пароль</label>
         <input id="password" name="password" type="password" autocomplete="current-password" autofocus required>
         <button type="submit">Открыть релизы</button>
@@ -130,19 +131,93 @@ function escapeHtml(value) {
     .replaceAll("'", '&#39;');
 }
 
-export function serveRelease(req, res, url, releaseDir, sendJson, store = null) {
+export function serveReleasePage(req, res, releaseDir, sendJson, { publicOnly = false, store = null } = {}) {
   if (!releaseDir) {
     recordReleaseFileLog(store, {
       status: 'failed',
       reason: 'releases_not_configured',
-      requested: url.pathname
+      requested: req.url
     });
     sendJson(req, res, 404, { error: 'releases_not_configured' });
     return;
   }
 
-  const relative = decodeURIComponent(url.pathname.replace(/^\/releases\/?/, ''));
-  const requested = relative === '' ? 'index.html' : relative;
+  const releaseIndex = readReleaseIndex(releaseDir);
+  if (!releaseIndex) {
+    sendJson(req, res, 404, { error: 'not_found' });
+    return;
+  }
+  const data = publicOnly
+    ? { ...releaseIndex, sections: { production: releaseIndex.sections?.production } }
+    : releaseIndex;
+  const body = Buffer.from(renderReleasePage(data, {
+    downloadBase: publicOnly ? '/releases/download' : '/dev-releases'
+  }));
+  res.writeHead(200, {
+    'content-type': 'text/html; charset=utf-8',
+    'content-length': body.length,
+    'cache-control': 'no-store'
+  });
+  res.end(body);
+}
+
+export async function serveReleaseDownload(req, res, releaseKey, releaseDir, sendJson, {
+  limiter,
+  store = null
+} = {}) {
+  const section = releaseSection(releaseDir, releaseKey);
+  if (!section?.file) {
+    recordReleaseFileLog(store, { status: 'failed', reason: 'not_found', requested: releaseKey });
+    sendJson(req, res, 404, { error: 'not_found' });
+    return;
+  }
+  const clientIp = releaseClientIp(req);
+  if (!await consumeDownloadPoint(req, res, sendJson, limiter, store, releaseKey, clientIp)) return;
+  serveApk(req, res, releaseDir, section.file, sendJson, store, { releaseKey, clientIp });
+}
+
+export async function serveDeveloperReleaseFile(req, res, fileName, releaseDir, sendJson, { limiter, store = null } = {}) {
+  const releaseIndex = readReleaseIndex(releaseDir);
+  const allowed = Object.values(releaseIndex?.sections ?? {}).some((section) => section?.file === fileName);
+  if (!allowed) {
+    recordReleaseFileLog(store, { status: 'failed', reason: 'not_found', requested: fileName });
+    sendJson(req, res, 404, { error: 'not_found' });
+    return;
+  }
+  const clientIp = releaseClientIp(req);
+  if (!await consumeDownloadPoint(req, res, sendJson, limiter, store, fileName, clientIp)) return;
+  serveApk(req, res, releaseDir, fileName, sendJson, store, { clientIp });
+}
+
+export async function serveLegacyProductionFile(req, res, fileName, releaseDir, sendJson, { limiter, store = null } = {}) {
+  const production = releaseSection(releaseDir, 'production');
+  if (!production?.file || production.file !== fileName) {
+    recordReleaseFileLog(store, { status: 'failed', reason: 'not_found', requested: fileName });
+    sendJson(req, res, 404, { error: 'not_found' });
+    return;
+  }
+  const clientIp = releaseClientIp(req);
+  if (!await consumeDownloadPoint(req, res, sendJson, limiter, store, fileName, clientIp)) return;
+  serveApk(req, res, releaseDir, fileName, sendJson, store, { releaseKey: 'production', clientIp });
+}
+
+async function consumeDownloadPoint(req, res, sendJson, limiter, store, requested, clientIp) {
+  try {
+    await limiter?.consume(clientIp);
+    return true;
+  } catch (rateLimit) {
+    const retryAfter = Math.max(1, Math.ceil(Number(rateLimit?.msBeforeNext ?? 1000) / 1000));
+    recordReleaseFileLog(store, { status: 'rate_limited', reason: 'download_limit', requested, clientIp });
+    sendJson(req, res, 429, { error: 'rate_limited' }, { 'retry-after': String(retryAfter) });
+    return false;
+  }
+}
+
+function serveApk(req, res, releaseDir, requested, sendJson, store, { releaseKey = null, clientIp = null } = {}) {
+  if (!releaseDir) {
+    sendJson(req, res, 404, { error: 'releases_not_configured' });
+    return;
+  }
   const root = path.resolve(releaseDir);
   const filePath = path.resolve(root, requested);
   if (!filePath.startsWith(root + path.sep) && filePath !== root) {
@@ -174,44 +249,81 @@ export function serveRelease(req, res, url, releaseDir, sendJson, store = null) 
     return;
   }
 
-  const contentType = filePath.endsWith('.html')
-    ? 'text/html; charset=utf-8'
-    : filePath.endsWith('.apk')
-      ? 'application/vnd.android.package-archive'
-      : 'application/octet-stream';
-  if (requested === 'index.html') {
-    const indexPath = path.join(root, 'releases.json');
-    if (fs.existsSync(indexPath)) {
-      const body = Buffer.from(renderReleasePage(JSON.parse(fs.readFileSync(indexPath, 'utf8'))));
-      res.writeHead(200, { 'content-type': contentType, 'content-length': body.length });
-      res.end(body);
-      return;
-    }
+  if (!filePath.endsWith('.apk')) {
+    sendJson(req, res, 404, { error: 'not_found' });
+    return;
   }
-  if (filePath.endsWith('.apk')) {
-    res.once('finish', () => recordReleaseFileLog(store, {
-      status: 'done',
-      requested,
-      bytes: stat.size
-    }));
-  }
-  res.writeHead(200, { 'content-type': contentType, 'content-length': stat.size });
+  res.once('finish', () => recordReleaseFileLog(store, {
+    status: 'done',
+    requested,
+    bytes: stat.size,
+    releaseKey,
+    clientIp
+  }));
+  res.writeHead(200, {
+    'content-type': 'application/vnd.android.package-archive',
+    'content-length': stat.size,
+    'content-disposition': `attachment; filename="${path.basename(requested)}"`
+  });
   fs.createReadStream(filePath).pipe(res);
 }
 
-function recordReleaseFileLog(store, { status, reason = null, requested, bytes = null }) {
+export function releaseClientIp(req) {
+  const peer = normalizeIp(req.socket?.remoteAddress);
+  if (isLoopback(peer)) {
+    const forwarded = String(req.headers?.['x-forwarded-for'] ?? '').split(',')[0].trim();
+    if (net.isIP(forwarded)) return forwarded;
+  }
+  return peer || 'unknown';
+}
+
+function normalizeIp(value) {
+  const ip = String(value ?? '');
+  return ip.startsWith('::ffff:') ? ip.slice(7) : ip;
+}
+
+function isLoopback(value) {
+  return value === '127.0.0.1' || value === '::1';
+}
+
+function readReleaseIndex(releaseDir) {
+  if (!releaseDir) return null;
+  try {
+    return JSON.parse(fs.readFileSync(path.join(releaseDir, 'releases.json'), 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+function releaseSection(releaseDir, releaseKey) {
+  if (!['production', 'dev', 'a', 'b', 'c', 'd', 'e'].includes(releaseKey)) return null;
+  return readReleaseIndex(releaseDir)?.sections?.[releaseKey] ?? null;
+}
+
+function recordReleaseFileLog(store, {
+  status,
+  reason = null,
+  requested,
+  bytes = null,
+  releaseKey = null,
+  clientIp = null
+}) {
   try {
     store?.recordLog?.({
       source: 'release',
       operation: 'release.file_served',
-      status,
-      severityText: status === 'failed' ? 'WARN' : 'INFO',
-      reason,
-      message: status === 'failed' ? 'Release file request failed' : 'Release APK served',
+      status: status === 'rate_limited' ? 'failed' : status,
+      severityText: status === 'done' ? 'INFO' : 'WARN',
+      reason: status === 'rate_limited' ? 'rate_limited' : reason,
+      message: status === 'done' ? 'Release APK served' : status === 'rate_limited' ? 'Release APK rate limited' : 'Release file request failed',
       jsonData: {
         requested: safeReleaseRequestName(requested),
         extension: path.extname(requested || '').slice(1) || null,
-        bytes
+        bytes,
+        release_key: releaseKey,
+        client_ip: clientIp,
+        outcome: status,
+        detail: reason
       }
     });
   } catch {

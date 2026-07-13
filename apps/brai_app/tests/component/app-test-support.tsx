@@ -6,6 +6,8 @@ import { clientDb, setMeta } from "@/shared/storage/db";
 const otaPlugin = vi.hoisted(() => ({
   getState: vi.fn(),
   checkForUpdates: vi.fn(),
+  downloadApk: vi.fn(),
+  downloadUpdate: vi.fn(),
   markReady: vi.fn(),
 }));
 
@@ -131,6 +133,8 @@ export function setupBraiAppTest() {
     await setMeta("currentUserId", "test-user");
     otaPlugin.getState.mockReset();
     otaPlugin.checkForUpdates.mockReset();
+    otaPlugin.downloadApk.mockReset();
+    otaPlugin.downloadUpdate.mockReset();
     otaPlugin.markReady.mockReset();
     cmdPlugin.openSettings.mockReset();
     cmdPlugin.addListener.mockReset();
@@ -223,8 +227,22 @@ export function setupBraiAppTest() {
       activeBundleVersion: "0.0.10",
       nativeApkVersion: "1",
       nativeVersionName: "1",
+      availableBundleVersion: "0.0.11",
+      updateAvailable: true,
+      lastCheckStatus: "update_available",
+    });
+    otaPlugin.downloadUpdate.mockResolvedValue({
+      activeBundleVersion: "0.0.10",
+      nativeApkVersion: "1",
+      nativeVersionName: "1",
       candidateBundleVersion: "0.0.11",
       lastCheckStatus: "candidate_ready_for_next_start",
+    });
+    otaPlugin.downloadApk.mockResolvedValue({
+      activeBundleVersion: "0.0.10",
+      apkDownloadStatus: "downloading",
+      activeOperation: "apk_download",
+      lastCheckStatus: "apk_required",
     });
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
@@ -316,7 +334,7 @@ export function stubAndroidCapacitor() {
 }
 
 export async function openProfileMenu() {
-  fireEvent.click(screen.getByRole("button", { name: "Открыть левое меню" }));
+  fireEvent.click(screen.getByRole("button", { name: /^Открыть левое меню/ }));
   return await waitFor(() => {
     const current = document.querySelector(".mobile-dock-overflow-sheet");
     expect(current).toBeInstanceOf(HTMLElement);
@@ -338,7 +356,7 @@ export async function openSettingsFromProfile() {
 }
 
 export async function openEngineFromProfile() {
-  await openProfileMenuItem(/^Engine(?: v.+)?$/);
+  await openProfileMenuItem(/^Engine(?:, доступно обновление| v.+)?$/);
   await waitFor(() => expect(screen.getByRole("heading", { name: "Engine" })).toBeInTheDocument());
 }
 

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "
 import { useRouter } from "next/navigation";
 import { ArrowLeft, BookOpen, Crown, Info, Settings } from "lucide-react";
 import type { AuthOnboardingContext } from "@/shared/api/braiApi";
+import { useAppVersion } from "@/shared/config/runtime";
 import { getBraiCmdState, listenBraiCmdCredentialRefreshRequired, retryBraiCmdQueue, setBraiCmdAccessKey, setBraiCmdOverlayEnabled, setBraiCmdQueuePausedMode, setBraiCmdVoiceOnlyMode } from "@/shared/platform/braiCmd";
 import { installAndroidBackHandler, isNativeShell, platformName } from "@/shared/platform/platform";
 import { getBraiLocalStorageItem, removeBraiLocalStorageItem, setBraiLocalStorageItem } from "@/shared/storage/localStorageKeys";
@@ -28,6 +29,7 @@ import { BraiCmdSection } from "./sections/brai-cmd/BraiCmdSection";
 import { DrawsSection } from "./sections/draws/DrawsSection";
 import { EvilEyeSection } from "./sections/EvilEyeSection";
 import { EngineSection } from "./sections/engine/EngineSection";
+import { engineSectionView } from "./sections/engine/engineModel";
 import { FactorySection } from "./sections/factory/FactorySection";
 import { FocusBackground, FocusContextPanelSheet, FocusSection } from "./sections/focus/FocusSection";
 import { InboxSection } from "./sections/inbox/InboxSection";
@@ -43,6 +45,16 @@ const INBOX_MOBILE_CREATE_DRAFT_STORAGE_KEY = "brai_inbox_mobile_create_draft";
 
 export function BraiApp({ initialSection = "actions" }: { initialSection?: SectionId }) {
   const app = useBraiAppState(initialSection);
+  const appBuild = useAppVersion();
+  const engineView = engineSectionView({
+    appBuild,
+    appVersionState: app.versionState,
+    otaRefreshing: app.otaRefreshing,
+    otaState: app.otaState,
+    versionError: app.versionError,
+    versionRefreshing: app.versionRefreshing,
+  });
+  const engineDownloading = engineView.updateAction === "downloading-web" || engineView.updateAction === "downloading-apk";
   const { authDisplayName, authUser, provisionBraiCmdDeviceToken } = app;
   const router = useRouter();
   const nativeAndroid = useMountedNativeAndroid();
@@ -363,6 +375,8 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
             versionCheckedAt={app.versionCheckedAt}
             versionError={app.versionError}
             versionRefreshing={app.versionRefreshing}
+            onDownloadApk={app.downloadApkOnce}
+            onDownloadWebUpdate={app.downloadWebUpdateOnce}
             onRefreshEngine={app.refreshEngineOnce}
           />
         ) : screenSection === "settings" ? (
@@ -419,6 +433,8 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
                   versionCheckedAt={app.versionCheckedAt}
                   versionError={app.versionError}
                   versionRefreshing={app.versionRefreshing}
+                  onDownloadApk={app.downloadApkOnce}
+                  onDownloadWebUpdate={app.downloadWebUpdateOnce}
                   onRefreshEngine={app.refreshEngineOnce}
                 />
               ) : <BraiCmdSection />}
@@ -493,6 +509,7 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
         <>
           <MobileDockOverflowButton
             side="left"
+            hasUpdate={engineView.hasUpdate}
             hidden={app.mobileMenuOpen || mobileDockMenu === "left" || app.actionOverlayOpen}
             onClick={() => setMobileDockMenu("left")}
           />
@@ -514,6 +531,8 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
           side={mobileDockMenu}
           section={visibleSection}
           authUser={app.authUser}
+          engineDownloading={engineDownloading}
+          engineHasUpdate={engineView.hasUpdate}
           onClose={() => setMobileDockMenu(null)}
           onProfile={() => app.selectSection("profile")}
           onSettings={app.openSettingsPage}

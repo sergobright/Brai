@@ -3,7 +3,7 @@ import type { BraiOtaState } from "@/shared/platform/ota";
 import type { Tone } from "../../appModel";
 
 const updateErrorMessages: Record<string, string> = {
-  apk_required: "Для этой OTA-версии нужно установить новый APK.",
+  apk_required: "Для этого обновления нужно установить новый APK.",
   archive_checksum_mismatch: "Файл обновления скачался поврежденным. Запусти проверку еще раз.",
   archive_download_size_exceeded: "Файл обновления оказался больше ожидаемого. Установка остановлена.",
   archive_invalid_zip: "Архив обновления поврежден. Запусти проверку еще раз.",
@@ -17,13 +17,13 @@ const updateErrorMessages: Record<string, string> = {
   archive_url_not_https: "Адрес обновления небезопасный. Установка остановлена.",
   archive_url_untrusted_host: "Архив обновления находится не на сервере Brai. Установка остановлена.",
   archive_url_untrusted_path: "Архив обновления находится в неверном разделе сервера.",
-  bundle_incompatible: "Для этой OTA-версии нужно установить новый APK.",
+  bundle_incompatible: "Для этого обновления нужно установить новый APK.",
   candidate_missing_entrypoint: "В обновлении нет стартового файла приложения. Нужна новая сборка.",
-  candidate_not_ready_before_restart: "Новая OTA-версия не подтвердила запуск. Оставлена стабильная версия.",
+  candidate_not_ready_before_restart: "Новая версия не подтвердила запуск. Оставлена стабильная версия.",
   duplicate_archive_entry: "Архив обновления содержит дубли файлов. Установка остановлена.",
   invalid_bundle_version: "Версия обновления записана неверно.",
   invalid_native_apk_version: "Версия установленного APK записана неверно. Нужен новый APK.",
-  invalid_ota_version: "OTA-версия записана неверно.",
+  invalid_ota_version: "Версия обновления записана неверно.",
   invalid_entrypoint: "Стартовый файл обновления указан неверно.",
   invalid_sha256: "Контрольная сумма обновления указана неверно.",
   invalid_size: "Размер обновления указан неверно.",
@@ -36,8 +36,8 @@ const updateErrorMessages: Record<string, string> = {
   network_timeout: "Сервер обновлений не ответил вовремя. Попробуй еще раз.",
   network_tls_failed: "Не удалось установить защищенное соединение с сервером обновлений.",
   network_unavailable: "Телефон не видит сервер обновлений. Проверь интернет и попробуй еще раз.",
-  readiness_timeout: "Новая OTA-версия не успела запуститься. Оставлена стабильная версия.",
-  readiness_version_mismatch: "Запустилась не та OTA-версия. Оставлена стабильная версия.",
+  readiness_timeout: "Новая версия не успела запуститься. Оставлена стабильная версия.",
+  readiness_version_mismatch: "Запустилась не та версия. Оставлена стабильная версия.",
   unsafe_archive_entry: "Архив обновления выглядит небезопасно. Установка остановлена.",
   unsupported_channel: "Телефон не поддерживает канал этого обновления.",
   unsupported_manifest_schema: "Телефон не понимает формат этого обновления. Нужен новый APK.",
@@ -84,6 +84,7 @@ export type EngineSectionView = {
   apkReleaseUrl: string;
   latestVersion: string;
   updateStatus: UpdateStatusView;
+  updateAction: "check" | "checking" | "download-web" | "downloading-web" | "web-ready" | "download-apk" | "downloading-apk" | "apk-downloaded";
 };
 
 /**
@@ -110,6 +111,7 @@ export function engineSectionView({
   const latestVersion = latestKnownVersion(
     comparableInstalledVersion,
     appVersionState?.ota_version ?? appVersionState?.version,
+    otaState?.availableBundleVersion,
     otaState?.candidateBundleVersion,
     otaState?.downloadProgressVersion,
   );
@@ -123,7 +125,7 @@ export function engineSectionView({
   const isChecking = otaRefreshing || versionRefreshing || Boolean(otaState?.checkInProgress);
   const visibleState =
     !isChecking && otaState?.lastCheckStatus === "checking" ? { ...otaState, lastCheckStatus: "unknown" } : otaState;
-  const hasUpdate = apkUpdateAvailable || compareBraiVersions(latestVersion, comparableInstalledVersion) > 0 || hasReadyOtaUpdate(visibleState);
+  const hasUpdate = apkUpdateAvailable || Boolean(visibleState?.updateAvailable) || compareBraiVersions(latestVersion, comparableInstalledVersion) > 0 || hasReadyOtaUpdate(visibleState);
   const androidUpdateStage = androidStage(visibleState, hasUpdate);
   const apkReleaseUrl = targetApk.releaseUrl;
   const updateStatus = engineStatusView({
@@ -135,6 +137,7 @@ export function engineSectionView({
     versionError,
     versionKnown: Boolean(appVersionState),
   });
+  const updateAction = engineUpdateAction({ apkUpdateAvailable, hasUpdate, isChecking, otaState: visibleState });
 
   return {
     activeWebVersion,
@@ -151,6 +154,7 @@ export function engineSectionView({
     isChecking,
     latestVersion,
     updateStatus,
+    updateAction,
   };
 }
 
@@ -174,7 +178,7 @@ function targetApkIdentity(state: BraiOtaState | null, appVersionState: AppVersi
     buildKind,
     previewIteration,
     label: formatApkTargetLabel(version, buildKind, previewIteration),
-    releaseUrl: state?.targetApkReleaseUrl || apiTarget?.release_url || releaseUrlFromChannel(state?.nativeOtaChannel) || "/releases/",
+    releaseUrl: directReleaseUrl(state?.nativeApkReleaseKey) || apiTarget?.download_url || directReleaseUrl(apiTarget?.release_key) || state?.targetApkReleaseUrl || apiTarget?.release_url || "/releases/download/production",
   };
 }
 
@@ -265,31 +269,51 @@ function engineStatusView({
     case "candidate_ready_for_next_start":
     case "ready_candidate_pending":
     case "candidate_already_pending":
-      return { label: "готово", body: `OTA-версия ${latestVersion} загружена.`, tone: "warn" };
+      return { label: "готово", body: `Обновление ${latestVersion} скачано. Закройте и снова откройте приложение, чтобы применить его.`, tone: "warn" };
     case "downloading":
-      return { label: "загрузка", body: `Загружается OTA-версия ${latestVersion}.`, tone: "warn" };
+      return { label: "загрузка", body: `Скачивается обновление ${latestVersion}.`, tone: "warn" };
     case "candidate_loading":
-      return { label: "загрузка", body: "Запускается новая OTA-версия.", tone: "warn" };
+      return { label: "загрузка", body: "Запускается новая версия.", tone: "warn" };
     case "candidate_failed":
     case "check_failed":
       return { label: "ошибка", body: `Обновление не установилось. ${humanUpdateError(otaState.lastUpdateError)}`, tone: "bad" };
     case "skipped_failed_bundle":
       return {
         label: "пропущено",
-        body: "Эта OTA-версия уже не запустилась на телефоне. Дождись следующей версии или установи новый APK.",
+        body: "Эта версия уже не запустилась на телефоне. Дождитесь следующей версии или установите новый APK.",
         tone: "bad",
       };
     case "apk_required":
     case "incompatible":
-      return { label: "нужен APK", body: "Нужен новый APK для этой OTA-версии.", tone: "bad" };
+      return { label: "нужен APK", body: "Доступна новая версия приложения. Для обновления нужен APK.", tone: "bad" };
     default:
       break;
   }
 
-  if (apkUpdateAvailable) return { label: "нужен APK", body: "Нужен новый APK для этой OTA-версии.", tone: "warn" };
-  if (hasUpdate) return { label: "доступно", body: `Доступна OTA-версия ${latestVersion}.`, tone: "warn" };
+  if (apkUpdateAvailable) return { label: "нужен APK", body: "Доступна новая версия приложения. Для обновления нужен APK.", tone: "warn" };
+  if (hasUpdate) return { label: "доступно", body: `Доступна новая версия ${latestVersion}.`, tone: "warn" };
   if (versionError && !versionKnown) return { label: "нет связи", body: "Не удалось проверить последнюю версию.", tone: "muted" };
-  return { label: "актуально", body: "Установлена текущая OTA-версия Brai.", tone: "ok" };
+  return { label: "актуально", body: "У вас установлена актуальная версия Brai.", tone: "ok" };
+}
+
+function engineUpdateAction({
+  apkUpdateAvailable,
+  hasUpdate,
+  isChecking,
+  otaState,
+}: {
+  apkUpdateAvailable: boolean;
+  hasUpdate: boolean;
+  isChecking: boolean;
+  otaState: BraiOtaState | null;
+}): EngineSectionView["updateAction"] {
+  if (isChecking) return "checking";
+  if (otaState?.apkDownloadStatus === "downloading") return "downloading-apk";
+  if (otaState?.apkDownloadStatus === "downloaded") return "apk-downloaded";
+  if (apkUpdateAvailable) return "download-apk";
+  if (otaState?.lastCheckStatus && readyStatuses.has(otaState.lastCheckStatus)) return "web-ready";
+  if (otaState?.activeOperation === "web_download" || otaState?.lastCheckStatus === "downloading") return "downloading-web";
+  return hasUpdate ? "download-web" : "check";
 }
 
 function hasReadyOtaUpdate(state: BraiOtaState | null): boolean {
@@ -354,7 +378,7 @@ function textValue(value: string | null | undefined): string | null {
   return text ? text : null;
 }
 
-function releaseUrlFromChannel(channel: string | null | undefined): string | null {
-  const host = channel?.split("/")[0]?.trim();
-  return host ? `https://${host}/releases/` : null;
+function directReleaseUrl(releaseKey: string | null | undefined): string | null {
+  const key = releaseKey?.trim();
+  return key ? `/releases/download/${key}` : null;
 }

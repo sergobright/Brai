@@ -20,7 +20,7 @@ Build and publish a release APK only when native Android code, Capacitor config,
 
 ## Release Page
 
-`/releases/` shows only APK artifacts:
+`/releases/` is public and shows only the current Production APK. `/dev-releases/` uses the existing release password/session and shows all APK artifacts:
 
 - Production: `Brai`, `brai-vN.apk`
 - Dev: `Brai Dev`, `brai-dev-vN.apk`
@@ -30,6 +30,8 @@ Build and publish a release APK only when native Android code, Capacitor config,
 The Dev APK belongs to the persistent protected Dev environment on `dev.brai.one`. Dev deploys use the long-lived Supabase `brai-dev` branch and must keep APK, OTA/web, API, and version ledger in sync.
 
 The production API renders `/releases/` from the shared `releases.json` with the renderer shipped in the production source. APK publishers still refresh the static `index.html` compatibility artifact, but a preview branch's older renderer must not determine the page served to users.
+
+Installed apps download their exact channel from public `GET /releases/download/:releaseKey`, where the key is `production`, `dev`, or `a` through `e`. The current Production filename remains public under `/releases/<filename>` for legacy clients; other filename requests there return `404`. APK streams are limited to 10 starts per derived IP per 3600 seconds in one API process. The API trusts Caddy `X-Forwarded-For` only for a loopback socket peer; otherwise it uses the peer address.
 
 ## OTA Manifest
 
@@ -48,7 +50,9 @@ The mobile OTA manifest uses schema version 2:
 - `entrypoint`
 - `mandatory`
 
-`minApkVersionCode` and `maxApkVersionCode` are retired. Old manifests use numeric `targetApkVersion`; new manifests compare release key, build kind, stable `N`, and preview `M`. Incompatible APKs report `apk_required` and the UI links to `/releases/`.
+`minApkVersionCode` and `maxApkVersionCode` are retired. Old manifests use numeric `targetApkVersion`; new manifests compare release key, build kind, stable `N`, and preview `M`. Incompatible APKs report `apk_required` and the UI downloads the installed release key from the public direct endpoint. Clients without the native APK download method open that endpoint in the external browser.
+
+Automatic Android checks at startup, on the periodic timer, and from Brai CMD only discover and validate manifest availability. They never download the archive. A user action calls `downloadUpdate()` for a compatible web bundle or `downloadApk()` for a native-boundary release; APK downloads use Android DownloadManager and appear in the system Downloads UI.
 
 ## Shipped APK Ledger Order
 

@@ -1,8 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   checkAndroidOtaUpdates,
+  downloadAndroidApk,
+  downloadAndroidOtaUpdate,
   getAndroidOtaState,
   notifyAndroidOtaReady,
   type BraiOtaState,
@@ -21,13 +23,13 @@ export function useBraiOta() {
   const [otaCheckedAt, setOtaCheckedAt] = useState<string | null>(null);
   const [otaRefreshing, setOtaRefreshing] = useState(false);
   const [bundlePublishedAt, setBundlePublishedAt] = useState<string | null>(null);
+  const successfulCheckRef = useRef<string | null>(null);
 
   const refreshOtaStateOnce = useCallback(async () => {
     setOtaRefreshing(true);
     try {
       const state = (await checkAndroidOtaUpdates()) ?? (await getAndroidOtaState());
       setOtaState(state);
-      if (state) setOtaCheckedAt(new Date().toISOString());
     } finally {
       setOtaRefreshing(false);
     }
@@ -43,7 +45,13 @@ export function useBraiOta() {
       const state = await getAndroidOtaState();
       if (cancelled) return;
       setOtaState(state);
-      if (state) setOtaCheckedAt(new Date().toISOString());
+      if (state && !state.checkInProgress && !["checking", "check_failed"].includes(state.lastCheckStatus ?? "")) {
+        const checkIdentity = `${state.lastCheckStatus}:${state.availableBundleVersion ?? ""}:${state.targetApkVersionCode ?? ""}`;
+        if (successfulCheckRef.current !== checkIdentity) {
+          successfulCheckRef.current = checkIdentity;
+          setOtaCheckedAt(new Date().toISOString());
+        }
+      }
     }
 
     void refreshOtaState();
@@ -55,13 +63,13 @@ export function useBraiOta() {
 
     const interval = window.setInterval(
       () => void refreshOtaState(),
-      otaState?.checkInProgress ? OTA_ACTIVE_POLL_MS : OTA_STATE_POLL_MS,
+      otaState?.activeOperation || otaState?.checkInProgress ? OTA_ACTIVE_POLL_MS : OTA_STATE_POLL_MS,
     );
     return () => {
       cancelled = true;
       window.clearInterval(interval);
     };
-  }, [otaState?.checkInProgress]);
+  }, [otaState?.activeOperation, otaState?.checkInProgress]);
 
   useEffect(() => {
     if (platformName() !== "android") return;
@@ -88,5 +96,17 @@ export function useBraiOta() {
     };
   }, []);
 
-  return { bundlePublishedAt, otaCheckedAt, otaRefreshing, otaState, refreshOtaStateOnce };
+  const downloadWebUpdateOnce = useCallback(async () => {
+    const state = await downloadAndroidOtaUpdate();
+    if (state) setOtaState(state);
+    return state;
+  }, []);
+
+  const downloadApkOnce = useCallback(async () => {
+    const state = await downloadAndroidApk();
+    if (state) setOtaState(state);
+    return state;
+  }, []);
+
+  return { bundlePublishedAt, downloadApkOnce, downloadWebUpdateOnce, otaCheckedAt, otaRefreshing, otaState, refreshOtaStateOnce };
 }

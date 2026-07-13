@@ -29,8 +29,8 @@ describe("BraiApp settings", () => {
     await openEngineFromProfile();
 
     expect(screen.getByRole("heading", { name: "Engine" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Текущая OTA-версия unknown" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Проверить обновления" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Текущая версия unknown" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Скачать обновление" })).toBeInTheDocument();
   });
 
   it("keeps Engine available in the mobile profile drawer outside Actions", async () => {
@@ -207,12 +207,35 @@ describe("BraiApp settings", () => {
     render(<BraiApp />);
 
     await waitFor(() => {
-      const engineButton = screen.getByRole("button", { name: "Engine" });
+      const engineButton = screen.getByRole("button", { name: "Engine, доступно обновление" });
       expect(engineButton.querySelector(".lucide-download")).toBeInTheDocument();
     });
   });
 
-  it("shows when an Android OTA update is ready for restart", async () => {
+  it("adds the mobile aggregate dot below the three dots without changing button geometry", async () => {
+    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      if (url.endsWith("/v1/version")) {
+        return new Response(JSON.stringify(testVersionState("0.0.11")), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      return Promise.reject(new Error("offline"));
+    });
+
+    render(<BraiApp />);
+
+    const overflow = await screen.findByRole("button", { name: "Открыть левое меню" });
+    await waitFor(() => expect(overflow.querySelector(".bg-amber-400")).toBeInTheDocument());
+    expect(overflow).toHaveClass("h-11", "w-11", "max-[860px]:grid");
+    expect(overflow.querySelector(".bg-amber-400")?.parentElement).toHaveClass("bottom-0.5", "left-1/2", "-translate-x-1/2", "absolute");
+    expect(overflow.querySelector(".lucide-ellipsis")).toHaveClass("h-5", "w-5");
+
+    const drawer = await openProfileMenu();
+    const engine = within(drawer).getByRole("button", { name: "Engine" });
+    expect(engine.querySelector(".lucide-download")).toBeInTheDocument();
+    expect(engine.querySelector(".bg-amber-400")?.parentElement).toHaveClass("bottom-0.5", "right-0.5");
+  });
+
+  it("shows when an Android update is ready for restart", async () => {
     stubAndroidCapacitor();
     otaPlugin.getState.mockResolvedValue({
       activeBundleVersion: "0.0.10",
@@ -225,24 +248,24 @@ describe("BraiApp settings", () => {
     render(<BraiApp />);
     await openEngineFromProfile();
 
-    await waitFor(() => expect(screen.getByText("OTA-версия 0.0.11 загружена")).toBeInTheDocument());
-    expect(screen.getAllByText("Закройте приложение, чтобы новая версия применилась.").length).toBeGreaterThan(0);
+    await waitFor(() => expect(screen.getAllByText(/Обновление 0\.0\.11 скачано/).length).toBeGreaterThan(0));
+    expect(screen.getByRole("button", { name: "Скачано" })).toBeDisabled();
   });
 
-  it("shows Android OTA download progress", async () => {
+  it("shows Android update download progress", async () => {
     stubAndroidCapacitor();
     otaPlugin.getState.mockResolvedValue({
       activeBundleVersion: "0.0.10",
       downloadProgressPercent: 66,
       downloadProgressVersion: "0.0.11",
-      checkInProgress: true,
+      activeOperation: "web_download",
       lastCheckStatus: "downloading",
     });
 
     render(<BraiApp />);
     await openEngineFromProfile();
 
-    await waitFor(() => expect(screen.getByText("Загрузка OTA-версии 0.0.11")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("Скачивается обновление 0.0.11")).toBeInTheDocument());
     expect(screen.getByText("66%")).toBeInTheDocument();
     expect(screen.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "66");
   });
@@ -253,7 +276,7 @@ describe("BraiApp settings", () => {
       "/data/user/0/world.brightos.brai/cache/brai-ota-downloads/0.0.11.zip: open failed: ENOENT (No such file or directory)",
       "Обновление не установилось. Скачанный файл обновления пропал из памяти телефона. Запусти проверку еще раз.",
     ],
-  ])("shows a readable Android OTA error for %s", async (lastUpdateError, message) => {
+  ])("shows a readable Android update error for %s", async (lastUpdateError, message) => {
     stubAndroidCapacitor();
     otaPlugin.getState.mockResolvedValue({
       activeBundleVersion: "0.0.10",
@@ -289,9 +312,8 @@ describe("BraiApp settings", () => {
 
     await openEngineFromProfile();
 
-    expect(screen.getByText("Нужен новый APK")).toBeInTheDocument();
-    expect(screen.getByText(/Требуется APK v2/)).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Открыть APK-релизы" })).toHaveAttribute("href", "https://a.test.brai.one/releases/");
+    expect(screen.getByText(/Доступна новая версия приложения\. Для обновления нужен APK v2/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Скачать APK" })).toBeInTheDocument();
   });
 
   it("shows production APK requirements only inside Engine", async () => {
@@ -311,11 +333,10 @@ describe("BraiApp settings", () => {
 
     await openEngineFromProfile();
 
-    expect(screen.getByText("Нужен новый APK")).toBeInTheDocument();
-    expect(screen.getByText(/Требуется APK v2/)).toBeInTheDocument();
+    expect(screen.getByText(/Доступна новая версия приложения\. Для обновления нужен APK v2/)).toBeInTheDocument();
   });
 
-  it("starts an Android OTA check from Engine", async () => {
+  it("discovers before explicitly downloading an Android update", async () => {
     stubAndroidCapacitor();
 
     render(<BraiApp />);
@@ -323,7 +344,10 @@ describe("BraiApp settings", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Проверить обновления" }));
 
     await waitFor(() => expect(otaPlugin.checkForUpdates).toHaveBeenCalledTimes(1));
-    expect(await screen.findByText("OTA-версия 0.0.11 загружена")).toBeInTheDocument();
+    expect(otaPlugin.downloadUpdate).not.toHaveBeenCalled();
+    fireEvent.click(await screen.findByRole("button", { name: "Скачать обновление" }));
+    await waitFor(() => expect(otaPlugin.downloadUpdate).toHaveBeenCalledTimes(1));
+    expect((await screen.findAllByText(/Обновление 0\.0\.11 скачано/)).length).toBeGreaterThan(0);
   });
 
   it("restores preliminary profile and voice-only mode after Android logout", async () => {
