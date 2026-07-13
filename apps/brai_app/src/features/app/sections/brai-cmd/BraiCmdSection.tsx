@@ -85,14 +85,32 @@ export function BraiCmdSection() {
     typeof window !== "undefined" && getBraiLocalStorageItem(PROVIDER_RECONNECT_NOTICE_KEY) === "true");
 
   useEffect(() => {
-    void getBraiCmdSettings().then((next) => { if (next) setSnapshot(next); setLoading(false); });
+    let active = true;
+    let receivedEvent = false;
     let remove: (() => void) | undefined;
-    void listenBraiCmdStateChanges(setSnapshot).then((handle) => { remove = () => void handle?.remove(); });
+    void listenBraiCmdStateChanges((next) => {
+      if (!active) return;
+      receivedEvent = true;
+      setSnapshot(next);
+      setLoading(false);
+    }).then((handle) => {
+      if (!active) {
+        void handle?.remove();
+        return;
+      }
+      remove = () => void handle?.remove();
+      void getBraiCmdSettings().then((next) => {
+        if (!active) return;
+        if (next && !receivedEvent) setSnapshot(next);
+        setLoading(false);
+      });
+    });
     const onVisibility = () => {
       if (document.visibilityState === "visible") void getBraiCmdSettings().then((next) => { if (next) setSnapshot(next); });
     };
     document.addEventListener("visibilitychange", onVisibility);
     return () => {
+      active = false;
       remove?.();
       document.removeEventListener("visibilitychange", onVisibility);
     };
