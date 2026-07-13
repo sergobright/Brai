@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { cmdPlugin, openProfileMenuItem, setupBraiAppTest, stubAndroidCapacitor, testVersionState } from "./app-test-support";
 import { BraiApp } from "@/features/app/BraiApp";
@@ -14,8 +15,9 @@ const drawsCanvasSpy = vi.hoisted(() => vi.fn());
 
 vi.mock("@/features/app/sections/draws/DrawsCanvas", () => ({
   DrawsCanvas: (props: Record<string, unknown>) => {
+    const [initialData] = useState(props.initialData as { elements?: unknown[] });
     drawsCanvasSpy(props);
-    return <div data-testid="draws-canvas" />;
+    return <div data-element-count={initialData.elements?.length ?? 0} data-testid="draws-canvas" />;
   },
 }));
 
@@ -469,6 +471,21 @@ describe("BraiApp shell", () => {
     await waitFor(() => expect(drawsCanvasSpy).toHaveBeenCalled());
     const initialData = drawsCanvasSpy.mock.calls.at(-1)?.[0].initialData as Record<string, unknown>;
     expect(initialData.appState).toEqual({ viewBackgroundColor: "#ffffff" });
+  });
+
+  it("mounts Draws canvas with persisted elements after resolving the saved file name", async () => {
+    stubDrawsFetch({
+      type: "excalidraw",
+      version: 2,
+      source: "test",
+      elements: [{ id: "saved-ellipse", type: "ellipse" }],
+      appState: { viewBackgroundColor: "#ffffff" },
+      files: {},
+    });
+
+    render(<BraiApp initialSection="draws" />);
+
+    await waitFor(() => expect(screen.getByTestId("draws-canvas")).toHaveAttribute("data-element-count", "1"));
   });
 
   it("keeps contextual actions before the rightmost sync status", async () => {
@@ -1366,15 +1383,15 @@ function stubDrawsFetch(scene: Record<string, unknown> = {
     if (url.endsWith("/auth/session")) return authSessionResponse();
     if (url.endsWith("/v1/version")) return jsonResponse(testVersionState("0.0.10"));
     if (url.endsWith("/v1/draws")) {
-      return jsonResponse({
-        draws: [{
-          name: "Рисунок.excalidraw",
-          title: "Рисунок",
-          updated_at_utc: "2026-07-11T12:00:00.000Z",
-          size_bytes: 0,
-        }],
-      });
+      await new Promise((resolve) => window.setTimeout(resolve, 0));
+      return jsonResponse({ draws: [{
+        name: "Рисунок.excalidraw",
+        title: "Рисунок",
+        updated_at_utc: "2026-07-11T12:00:00.000Z",
+        size_bytes: 0,
+      }] });
     }
+    if (url.includes(encodeURIComponent("Новый рисунок.excalidraw"))) return jsonResponse({ error: "not_found" }, 404);
     if (url.includes("/v1/draws/")) {
       return jsonResponse({
         name: "Рисунок.excalidraw",
