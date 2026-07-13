@@ -322,6 +322,7 @@ test("local main sync preserves runtime dirs and hard resets to origin main", ()
   assert.match(script, /cp -a openspec\/changes\/\. "\$PRESERVED_OPENSPEC_CHANGES\/"/);
   assert.match(script, /restore_openspec_changes/);
   assert.match(script, /-e data\//);
+  assert.match(script, /-e vault\//);
   assert.match(script, /-e deploy\/web\//);
   assert.match(script, /-e deploy\/releases\//);
   assert.match(script, /brai-rescue/);
@@ -341,6 +342,7 @@ test("local main sync preserves runtime dirs and hard resets to origin main", ()
   assert.match(ciScript, /INSTALL_DEPENDENCIES.*== "true"/);
   assert.match(script, /apps\/brai_app\/node_modules/);
   assert.ok(script.match(/-type l -prune -o/g)?.length >= 4);
+  assert.ok(script.match(/-path "\$REPO\/vault" -prune -o/g)?.length >= 4);
   assert.match(script, /chmod u=rwx,g=rx,o=x deploy\/scripts/);
   assert.match(script, /chgrp brai-deploy "\$deploy_tool"/);
   assert.match(script, /chmod u=rwx,g=rx,o=rx "\$deploy_tool"/);
