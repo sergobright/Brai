@@ -1,9 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
 import { Pool } from 'pg';
 import { copySchemaData } from '../../../deploy/scripts/supabase-branch.mjs';
 
 const databaseUrl = process.env.BRAI_TEST_DATABASE_URL?.trim();
+const authenticatedTokenCompatSql = fs.readFileSync(path.resolve(
+  import.meta.dirname,
+  '../../../supabase/migrations/0026_authenticated_brai_cmd_tokens_compat.sql'
+), 'utf8');
 
 test('preview production copy rolls back partial data and blocks concurrent writers', {
   skip: databaseUrl ? false : 'BRAI_TEST_DATABASE_URL is required'
@@ -79,6 +85,123 @@ test('preview production copy rolls back partial data and blocks concurrent writ
       VALUES ('after-copy')
       RETURNING id, value
     `)).rows[0], { id: 8, value: 'after-copy' });
+  } finally {
+    await pool.query(`DROP SCHEMA IF EXISTS ${quote(targetSchema)} CASCADE`).catch(() => {});
+    await pool.query(`DROP SCHEMA IF EXISTS ${quote(sourceSchema)} CASCADE`).catch(() => {});
+    await pool.end();
+  }
+});
+
+test('preview production copy preserves authenticated Brai Cmd token ownership', {
+  skip: databaseUrl ? false : 'BRAI_TEST_DATABASE_URL is required'
+}, async () => {
+  const suffix = `${process.pid}_${Date.now()}_${Math.random().toString(16).slice(2)}`.replace(/[^a-zA-Z0-9_]/g, '_');
+  const sourceSchema = `brai_token_source_${suffix}`;
+  const targetSchema = `brai_token_target_${suffix}`;
+  const pool = new Pool({ connectionString: databaseUrl, max: 4 });
+  try {
+    await pool.query(`CREATE SCHEMA ${quote(sourceSchema)}`);
+    await pool.query(`CREATE SCHEMA ${quote(targetSchema)}`);
+    for (const schema of [sourceSchema, targetSchema]) {
+      await pool.query(`CREATE TABLE ${qualified(schema, 'user')} (id text PRIMARY KEY)`);
+    }
+    await pool.query(`
+      CREATE TABLE ${qualified(sourceSchema, 'brai_cmd_access_tokens')} (
+        id text PRIMARY KEY,
+        display_name text NOT NULL,
+        token_hash text NOT NULL UNIQUE,
+        device_id_hash text,
+        status text NOT NULL CHECK (status IN ('active', 'revoked')),
+        source text NOT NULL CHECK (source IN ('self_service', 'authenticated', 'admin')),
+        created_at_utc text NOT NULL,
+        activated_at_utc text,
+        last_used_at_utc text,
+        client_version text NOT NULL DEFAULT '',
+        app_package text NOT NULL DEFAULT '',
+        preliminary_users_id text,
+        user_id text REFERENCES ${qualified(sourceSchema, 'user')}(id) ON DELETE CASCADE
+      )
+    `);
+    await pool.query(`
+      CREATE TABLE ${qualified(targetSchema, 'brai_cmd_access_tokens')} (
+        id text PRIMARY KEY,
+        display_name text NOT NULL,
+        token_hash text NOT NULL UNIQUE,
+        device_id_hash text,
+        status text NOT NULL CHECK (status IN ('active', 'revoked')),
+        source text NOT NULL CHECK (source IN ('self_service', 'admin')),
+        created_at_utc text NOT NULL,
+        activated_at_utc text,
+        last_used_at_utc text,
+        client_version text NOT NULL DEFAULT '',
+        app_package text NOT NULL DEFAULT '',
+        preliminary_users_id text
+      )
+    `);
+    await pool.query(`
+      CREATE TABLE ${qualified(targetSchema, 'schema_migrations')} (
+        version integer PRIMARY KEY,
+        applied_at_utc text NOT NULL,
+        description text NOT NULL
+      )
+    `);
+    await pool.query(`
+      CREATE TABLE ${qualified(targetSchema, 'table_descriptions')} (
+        table_name text PRIMARY KEY,
+        title text NOT NULL,
+        short_description text NOT NULL,
+        long_description text NOT NULL,
+        updated_at_utc text NOT NULL
+      )
+    `);
+
+    const migrationClient = await pool.connect();
+    try {
+      await migrationClient.query(`SET search_path TO ${quote(targetSchema)}, public`);
+      await migrationClient.query(authenticatedTokenCompatSql);
+      await migrationClient.query(authenticatedTokenCompatSql);
+    } finally {
+      migrationClient.release();
+    }
+
+    await pool.query(`INSERT INTO ${qualified(sourceSchema, 'user')} (id) VALUES ('owner-1')`);
+    await pool.query(`
+      INSERT INTO ${qualified(sourceSchema, 'brai_cmd_access_tokens')} (
+        id, display_name, token_hash, device_id_hash, status, source,
+        created_at_utc, client_version, app_package, user_id
+      ) VALUES (
+        'authenticated-token', 'Authenticated user', 'token-hash-1', 'device-hash-1',
+        'active', 'authenticated', '2026-07-13T00:00:00.000Z', '8',
+        'world.brightos.brai', 'owner-1'
+      )
+    `);
+
+    await copySchemaData(pool, { sourceSchema, targetSchema });
+
+    assert.deepEqual((await pool.query(`
+      SELECT id, source, user_id
+      FROM ${qualified(targetSchema, 'brai_cmd_access_tokens')}
+    `)).rows, [{ id: 'authenticated-token', source: 'authenticated', user_id: 'owner-1' }]);
+    assert.equal((await pool.query(`
+      SELECT count(*)::int AS count
+      FROM ${qualified(targetSchema, 'schema_migrations')}
+      WHERE version = 65
+    `)).rows[0].count, 1);
+    assert.match((await pool.query(`
+      SELECT long_description
+      FROM ${qualified(targetSchema, 'table_descriptions')}
+      WHERE table_name = 'brai_cmd_access_tokens'
+    `)).rows[0].long_description, /authenticated tokens.*user_id/);
+
+    await assert.rejects(pool.query(`
+      INSERT INTO ${qualified(targetSchema, 'brai_cmd_access_tokens')} (
+        id, display_name, token_hash, device_id_hash, status, source,
+        created_at_utc, user_id
+      ) VALUES (
+        'duplicate-device', 'Authenticated user', 'token-hash-2', 'device-hash-1',
+        'active', 'authenticated', '2026-07-13T00:01:00.000Z', 'owner-1'
+      )
+    `), (error) => error?.code === '23505');
   } finally {
     await pool.query(`DROP SCHEMA IF EXISTS ${quote(targetSchema)} CASCADE`).catch(() => {});
     await pool.query(`DROP SCHEMA IF EXISTS ${quote(sourceSchema)} CASCADE`).catch(() => {});
