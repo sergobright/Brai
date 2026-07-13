@@ -42,6 +42,7 @@ describe("BraiApp settings", () => {
   });
 
   it("opens the Brai CMD web description outside Android", async () => {
+    delete window.Capacitor;
     render(<BraiApp />);
 
     await openProfileMenuItem("Brai CMD");
