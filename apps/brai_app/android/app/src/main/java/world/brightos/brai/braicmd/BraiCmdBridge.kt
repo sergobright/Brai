@@ -71,6 +71,18 @@ internal object BraiCmdBridge {
         if (apiKey.isNotBlank()) SecureStringStore(context).writeProviderKey(providerId, apiKey)
     }
 
+    fun disconnectProvider(context: Context, providerId: String): JSObject {
+        val config = ConfigStore(context)
+        val cleanProviderId = providerId.trim()
+        SecureStringStore(context).clearProviderKey(cleanProviderId)
+        val transcriptionAffected = cleanProviderId == config.transcriptionProviderId
+        val postProcessingAffected = cleanProviderId == config.llmProviderId
+        if (transcriptionAffected) config.transcriptionProviderMode = "cloud"
+        if (postProcessingAffected) config.postProcessingProviderMode = "cloud"
+        if (transcriptionAffected || postProcessingAffected) RecordingService.retryPending(context)
+        return snapshot(context)
+    }
+
     private fun settingsJson(context: Context): JSObject {
         val config = ConfigStore(context)
         val secure = SecureStringStore(context)

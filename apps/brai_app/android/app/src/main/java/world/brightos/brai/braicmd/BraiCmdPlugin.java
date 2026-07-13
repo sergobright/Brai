@@ -187,13 +187,7 @@ public final class BraiCmdPlugin extends Plugin {
     @PluginMethod
     public void disconnectProvider(PluginCall call) {
         String providerId = call.getString("providerId", "");
-        ConfigStore config = new ConfigStore(getContext());
-        String cleanProviderId = providerId == null ? "" : providerId.trim();
-        SecureStringStore secure = new SecureStringStore(getContext());
-        secure.clearProviderKey(cleanProviderId);
-        if (cleanProviderId.equals(config.getTranscriptionProviderId())) config.setTranscriptionProviderMode("cloud");
-        if (cleanProviderId.equals(config.getLlmProviderId())) config.setPostProcessingProviderMode("cloud");
-        JSObject snapshot = BraiCmdBridge.INSTANCE.snapshot(getContext());
+        JSObject snapshot = BraiCmdBridge.INSTANCE.disconnectProvider(getContext(), providerId == null ? "" : providerId);
         notifyStateChangedNow(snapshot);
         call.resolve(snapshot);
     }
