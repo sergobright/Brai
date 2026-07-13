@@ -59,38 +59,44 @@ export function DesktopRail({
     >
       <SidebarContent className="min-h-0" />
       <SidebarFooter className="items-center gap-3">
-        <DesktopRailStatus syncStatus={syncStatus} pendingCount={pendingCount} />
-        <EngineRailButton
-          active={section === "engine"}
-          appVersionState={appVersionState}
-          otaRefreshing={otaRefreshing}
-          otaState={otaState}
-          versionError={versionError}
-          versionRefreshing={versionRefreshing}
-          onClick={onEngine}
-        />
-        <BraiUserDropdownMenu
-          activeSection={section}
-          align="end"
-          showEngine={false}
-          side="right"
-          trigger={
-            <button
-              type="button"
-              className="rail-profile flex size-10 items-center justify-center rounded-full border-0 bg-transparent p-0 outline-none transition-colors hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring/50"
-              aria-label="Открыть меню профиля"
-            >
-              <BraiUserAvatar user={authUser} className="size-8" />
-            </button>
-          }
-          user={authUser}
-          onArchive={onArchive}
-          onBraiCmd={onBraiCmd}
-          onEngine={onEngine}
-          onLogout={onLogout}
-          onProfile={onProfile}
-          onSettings={onSettings}
-        />
+        <div className="desktop-rail-slot grid size-10 place-items-center">
+          <DesktopRailStatus syncStatus={syncStatus} pendingCount={pendingCount} />
+        </div>
+        <div className="desktop-rail-slot grid size-10 place-items-center">
+          <EngineRailButton
+            active={section === "engine"}
+            appVersionState={appVersionState}
+            otaRefreshing={otaRefreshing}
+            otaState={otaState}
+            versionError={versionError}
+            versionRefreshing={versionRefreshing}
+            onClick={onEngine}
+          />
+        </div>
+        <div className="desktop-rail-slot grid size-10 place-items-center">
+          <BraiUserDropdownMenu
+            activeSection={section}
+            align="end"
+            showEngine={false}
+            side="right"
+            trigger={
+              <button
+                type="button"
+                className="rail-profile flex size-10 items-center justify-center rounded-full border-0 bg-transparent p-0 outline-none transition-colors hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                aria-label="Открыть меню профиля"
+              >
+                <BraiUserAvatar user={authUser} className="size-8" />
+              </button>
+            }
+            user={authUser}
+            onArchive={onArchive}
+            onBraiCmd={onBraiCmd}
+            onEngine={onEngine}
+            onLogout={onLogout}
+            onProfile={onProfile}
+            onSettings={onSettings}
+          />
+        </div>
       </SidebarFooter>
     </Sidebar>
   );
@@ -98,8 +104,8 @@ export function DesktopRail({
 
 function DesktopRailStatus({ syncStatus, pendingCount }: { syncStatus: SyncStatus; pendingCount: number }) {
   return (
-    <div className="desktop-rail-status flex h-10 items-center justify-center">
-      <StatusPill status={syncStatus} pendingCount={pendingCount} />
+    <div className="desktop-rail-status grid size-10 place-items-center">
+      <StatusPill className="size-10" status={syncStatus} pendingCount={pendingCount} />
     </div>
   );
 }
@@ -314,7 +320,7 @@ export function MobileDockOverflowSheet({
         className={cx(
           "mobile-dock-overflow-sheet pointer-events-auto relative z-[1] grid min-w-0 overflow-hidden shadow-xl animate-[mobile-detail-sheet-in_180ms_ease-out] will-change-transform",
           side === "left"
-            ? "max-h-[60dvh] w-full grid-rows-[auto_minmax(0,1fr)] rounded-t-2xl border-t border-border bg-card pb-[env(safe-area-inset-bottom)] pt-2"
+            ? "h-[min(24rem,58dvh)] w-full grid-rows-[auto_minmax(0,1fr)] rounded-t-2xl border-t border-border bg-card pb-[env(safe-area-inset-bottom)] pt-2"
             : "h-16 w-full items-center justify-center border-y border-border/40 bg-background/95 px-8 py-1 shadow-none backdrop-blur-[14px] dark:bg-background/95",
         )}
         style={sheetStyle}
@@ -332,7 +338,7 @@ export function MobileDockOverflowSheet({
                 <span className="mobile-dock-overflow-grabber h-1 w-11 rounded-full bg-muted-foreground/30" aria-hidden="true" />
               </div>
             </header>
-            <div className="min-h-0 px-3 pb-4">
+            <div className="min-h-0 overflow-y-auto px-3 pb-4">
               <BraiUserMenuPanel
                 activeSection={section}
                 user={authUser}

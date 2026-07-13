@@ -5,6 +5,7 @@ export function playCompletionSound(): void {
   if (typeof Audio === "undefined") return;
   const audio = new Audio(COMPLETION_SOUND_URL);
   audio.preload = "auto";
+  audio.volume = 0.5;
   try {
     const playback = audio.play();
     void playback?.catch?.(() => undefined);

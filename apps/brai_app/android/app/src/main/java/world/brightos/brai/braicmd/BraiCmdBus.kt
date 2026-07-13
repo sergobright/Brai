@@ -33,8 +33,8 @@ internal fun serverNoticeTone(raw: String): BraiCmdNoticeTone =
 internal fun shouldShowUpdateNoticeAfter(notice: BraiCmdNotice?): Boolean =
     notice?.tone == BraiCmdNoticeTone.ServerSuccess && notice.text.isNotBlank()
 
-internal fun shouldShowUpdateDot(updateAvailable: Boolean, apkUpdateRequired: Boolean): Boolean =
-    updateAvailable || apkUpdateRequired
+internal fun shouldShowUpdateDot(updateAvailable: Boolean, apkUpdateRequired: Boolean, checkInProgress: Boolean = false): Boolean =
+    !checkInProgress && (updateAvailable || apkUpdateRequired)
 
 internal fun contextButtonAvailable(overlayEnabled: Boolean, voiceOnly: Boolean, enabledActions: Int): Boolean =
     overlayEnabled && !voiceOnly && enabledActions > 0

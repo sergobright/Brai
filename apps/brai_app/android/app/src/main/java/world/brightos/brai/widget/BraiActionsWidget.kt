@@ -70,6 +70,7 @@ class ToggleBraiActionCallback : ActionCallback {
 private fun playCompletionSound(context: Context) {
     runCatching {
         MediaPlayer.create(context, R.raw.brai_sound_done)?.apply {
+            setVolume(0.5f, 0.5f)
             setOnCompletionListener { player -> player.release() }
             setOnErrorListener { player, _, _ ->
                 player.release()

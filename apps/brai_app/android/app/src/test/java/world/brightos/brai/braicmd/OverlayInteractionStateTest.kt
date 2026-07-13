@@ -92,6 +92,31 @@ class OverlayInteractionStateTest {
         assertFalse(shouldShowUpdateDot(updateAvailable = false, apkUpdateRequired = false))
         assertTrue(shouldShowUpdateDot(updateAvailable = true, apkUpdateRequired = false))
         assertTrue(shouldShowUpdateDot(updateAvailable = false, apkUpdateRequired = true))
+        assertFalse(shouldShowUpdateDot(updateAvailable = true, apkUpdateRequired = true, checkInProgress = true))
+    }
+
+    @Test
+    fun queueIndicatorCountsOnlyFailedAudio() {
+        val snapshot = BraiCmdQueueSnapshot(
+            transport = QueueTransportCounts(
+                main = 1,
+                contextActions = mapOf(ContextButtonAction.ChatContextInbox to 1),
+                unknown = 1
+            ),
+            failedTransport = QueueTransportCounts(
+                main = 0,
+                contextActions = mapOf(
+                    ContextButtonAction.ChatContextInbox to 1,
+                    ContextButtonAction.ScreenshotInbox to 1
+                ),
+                unknown = 1
+            ),
+            readyToInsert = QueueReadyToInsertCounts(mainDictation = 3, chatReply = 2)
+        )
+
+        assertEquals(1, failedAudioCount(snapshot))
+        assertEquals(1, failedAudioCount(snapshot, ContextButtonAction.ChatContextInbox))
+        assertEquals(0, failedAudioCount(snapshot, ContextButtonAction.ScreenshotInbox))
     }
 
     @Test

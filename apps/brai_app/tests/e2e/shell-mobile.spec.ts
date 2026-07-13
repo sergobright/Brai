@@ -25,6 +25,12 @@ test("keeps the burger drawer empty and opens the left overflow from the aligned
   await expect(page.locator(".mobile-dock-overflow-sheet")).not.toContainText("Time");
   await expect(page.locator(".mobile-dock-overflow-sheet").getByRole("button", { name: /Engine/ })).toBeVisible();
 
+  await page.waitForTimeout(220);
+  const settledTop = (await page.locator(".mobile-dock-overflow-sheet").boundingBox())?.y;
+  await page.waitForTimeout(300);
+  const stableTop = (await page.locator(".mobile-dock-overflow-sheet").boundingBox())?.y;
+  expect(Math.abs((settledTop ?? 0) - (stableTop ?? 0))).toBeLessThanOrEqual(1);
+
   const sheet = await page.locator(".mobile-dock-overflow-sheet").boundingBox();
   const viewport = page.viewportSize();
   expect(sheet?.width ?? 0).toBeGreaterThanOrEqual((viewport?.width ?? 0) - 1);

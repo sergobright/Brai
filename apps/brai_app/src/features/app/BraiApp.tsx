@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, BookOpen, Crown, Info, PanelLeftClose, PanelLeftOpen, Settings } from "lucide-react";
+import { ArrowLeft, BookOpen, Crown, Info, PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import type { AuthOnboardingContext } from "@/shared/api/braiApi";
 import { getBraiCmdState, listenBraiCmdCredentialRefreshRequired, retryBraiCmdQueue, setBraiCmdAccessKey, setBraiCmdOverlayEnabled, setBraiCmdQueuePausedMode, setBraiCmdVoiceOnlyMode } from "@/shared/platform/braiCmd";
 import { installAndroidBackHandler, isNativeShell, platformName } from "@/shared/platform/platform";
@@ -298,8 +298,6 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
                   <IconButton icon={Crown} label="Цели фокусировки" active={app.focusGoalActive} onClick={() => app.toggleFocusContextPanel("goal")} />
                   <IconButton icon={BookOpen} label="История фокуса" active={app.focusHistoryActive} className="min-[861px]:mr-5 max-[860px]:mr-1.5" onClick={() => app.toggleFocusContextPanel("history")} />
                 </>
-              ) : screenSection === "archive" ? (
-                <IconButton icon={Settings} label="Назад к настройкам" onClick={app.openSettingsPage} />
               ) : screenSection === "settings" ? (
                 <ThemeButton theme={app.theme} onTheme={app.setTheme} />
               ) : null
@@ -581,11 +579,13 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
       ) : null}
         </SidebarProvider>
       )}
-      <AppStartupSplash
-        ready={startupReady}
-        persist={onboardingActive && onboardingStartupActive}
-        onIntroComplete={handleStartupIntroComplete}
-      />
+      {onboardingActive ? (
+        <AppStartupSplash
+          ready={startupReady}
+          persist={onboardingStartupActive}
+          onIntroComplete={handleStartupIntroComplete}
+        />
+      ) : null}
     </>
   );
 }

@@ -24,6 +24,7 @@ describe("BraiApp shell", () => {
 
   it("renders the actions-first shell", async () => {
     render(<BraiApp />);
+    expect(document.querySelector("[data-startup-splash]")).not.toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Действия" })).toBeInTheDocument();
     expect(screen.getAllByLabelText("Действия").length).toBeGreaterThan(0);
     ["Действия", "Входящие", "Фокус"].forEach((title) => {
@@ -48,6 +49,7 @@ describe("BraiApp shell", () => {
     await waitFor(() => expect(cmdPlugin.setVoiceOnlyMode).toHaveBeenCalledWith({ enabled: false }));
     expect(cmdPlugin.setQueuePausedMode).toHaveBeenCalledWith({ enabled: false });
     await waitFor(() => expect(cmdPlugin.setAccessKey).toHaveBeenCalledWith({ token: "authenticated-device-token", displayName: "Test" }));
+    expect(document.querySelector("[data-startup-splash]")).not.toBeInTheDocument();
     expect(cmdPlugin.ensureAccess).not.toHaveBeenCalled();
   });
 
@@ -1150,6 +1152,7 @@ describe("BraiApp shell", () => {
     await waitFor(() => expect(screen.getByText("Live действие")).toBeInTheDocument());
     await openProfileMenuItem("Архив");
     await waitFor(() => expect(screen.getByRole("heading", { name: "Архив" })).toBeInTheDocument());
+    expect(screen.queryByRole("button", { name: "Назад к настройкам" })).not.toBeInTheDocument();
     await waitFor(() => expect(screen.getByText("Live архив")).toBeInTheDocument());
   });
 
