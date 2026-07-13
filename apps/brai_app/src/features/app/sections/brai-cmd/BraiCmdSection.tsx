@@ -19,6 +19,7 @@ import {
   type BraiCmdProviderId,
   type BraiCmdProviderCapability,
   type BraiCmdProviderMode,
+  type BraiCmdProviderConnectResult,
   type BraiCmdProviderTestResult,
   type BraiCmdSettingsPatch,
   type BraiCmdSnapshot,
@@ -391,7 +392,7 @@ function ProviderPage({ capability, snapshot, onBack, onSnapshot }: { capability
   const [verified, setVerified] = useState(false);
   const [manualModel, setManualModel] = useState(false);
   const [testing, setTesting] = useState(false);
-  const [result, setResult] = useState<BraiCmdProviderTestResult | null>(null);
+  const [result, setResult] = useState<BraiCmdProviderConnectResult | null>(null);
   const providerRequestRef = useRef(0);
   const providers = speech ? SPEECH_PROVIDERS : PROVIDERS;
   const hasProfile = snapshot.settings.providerProfiles.some((profile) => profile.providerId === providerId && profile.configured);
@@ -525,7 +526,7 @@ function ProviderPage({ capability, snapshot, onBack, onSnapshot }: { capability
               ) : null}
               {verified ? <Button className="w-full sm:w-fit" disabled={testing || model.trim().length === 0} type="button" onClick={() => void connectProvider()}>{testing ? "Проверка модели" : "Подключить"}</Button> : null}
               {hasProfile ? <Button className="w-full sm:w-fit" type="button" variant="destructive" onClick={() => void disconnectProvider()}>Отключить поставщика</Button> : null}
-              {result ? <ProviderResultAlert result={result} /> : null}
+              {result ? <ProviderResultAlert result={result} successTitle={result.state ? "Подключено" : "Проверка пройдена"} /> : null}
             </FieldGroup>
           </CardContent>
         </Card>
@@ -729,11 +730,11 @@ function stageLabel(status: "ok" | "error" | "skipped") {
   return status === "ok" ? "работает" : status === "skipped" ? "не используется" : "ошибка";
 }
 
-function ProviderResultAlert({ result }: { result: BraiCmdProviderTestResult }) {
+function ProviderResultAlert({ result, successTitle = "Подключено" }: { result: BraiCmdProviderTestResult; successTitle?: string }) {
   return (
     <Alert variant={result.ok ? "success" : "destructive"}>
       {result.ok ? <CheckCircle2 /> : <XCircle />}
-      <AlertTitle>{result.ok ? "Подключено" : "Не удалось подключить"}</AlertTitle>
+      <AlertTitle>{result.ok ? successTitle : "Не удалось подключить"}</AlertTitle>
       <AlertDescription>{result.message}</AlertDescription>
     </Alert>
   );
