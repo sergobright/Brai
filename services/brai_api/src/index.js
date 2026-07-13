@@ -98,6 +98,7 @@ const runtime = createBraiServer({
   codexTimeoutMs,
   inboxExternalAi,
   inboxWorkflowStarter: inboxWorkflow.start,
+  activityWorkflowStarter: inboxWorkflow.startActivity,
   testEmailLogin,
   braiCmd: {
     config: braiCmdConfigFromEnv(process.env)

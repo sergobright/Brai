@@ -36,6 +36,18 @@ Brai SHALL support `POST /v1/` for the default Inbox connector and SHALL persist
 - **AND** repeated requests with the same `idempotency_key` and different payload fail explicitly
 - **AND** Inbox API accepts record type `1` for human API Inbox writes and `2` for agent API Inbox writes
 
+#### Scenario: Agent operation payload is received
+- **WHEN** an external app sends `record_type_id = 2`, `preliminary_section = operation`, and an `idempotency_key`
+- **THEN** the raw Inbox record stores `preliminary_section = operation`
+- **AND** missing `source_key` defaults to the idempotency key
+- **AND** missing `idempotency_key`, non-agent record type, or another preliminary section fails explicitly
+
+#### Scenario: Agent operation status is updated
+- **WHEN** an external app sends `POST /v1/inbox/status` with the Inbox API key, operation idempotency key, and status `New` or `Done`
+- **THEN** Brai updates only the matching operation Inbox row
+- **AND** `Done` records a completion timestamp while `New` clears it
+- **AND** repeated requests for the current status do not create duplicate status events
+
 #### Scenario: Inbox payload asks to attach to the previous message
 - **WHEN** an external app sends text that asks to attach the data to the previous message
 - **THEN** the API still creates a new raw Inbox record

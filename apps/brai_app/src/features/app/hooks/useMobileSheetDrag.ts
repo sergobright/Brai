@@ -197,12 +197,12 @@ export function useMobileSheetDrag({
   }, [axis, finishClose, scheduleOffset]);
 
   const onPointerDown = useCallback((event: PointerEvent<HTMLElement>) => {
-    if (event.pointerType === "touch") return;
+    if (event.pointerType === "touch" || (excludeControls && isControl(event.target))) return;
     const started = start(event.pointerId, event.clientX, event.clientY, event.target);
     if (started && typeof event.currentTarget.setPointerCapture === "function") {
       event.currentTarget.setPointerCapture(event.pointerId);
     }
-  }, [start]);
+  }, [excludeControls, start]);
 
   const onPointerMove = useCallback((event: PointerEvent<HTMLElement>) => {
     if (event.pointerType === "touch") return;

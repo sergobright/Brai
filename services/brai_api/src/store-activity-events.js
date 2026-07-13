@@ -2,10 +2,12 @@ import {
   ACTIVITY_EVENT_PAYLOAD_VERSION,
   ACTIVITY_EVENT_TYPES,
   ACTIVITY_STATUSES,
+  ACTIVITY_TYPES,
   EVENT_PAYLOAD_VERSION,
   FUTURE_EVENT_TOLERANCE_MS,
   LEGACY_DEVICE_ID,
   formatActivity,
+  isPostgresInteger,
   normalizeActionPayload,
   normalizeMarkdownSource,
   normalizeOrderedIds,
@@ -16,22 +18,30 @@ import { scopeSql, scopedUserId } from './user-scope.js';
 
 export const activityEventMethods = {
   listActivities() {
-    const scope = scopeSql();
+    const scope = scopeSql('a');
     return this.db
       .prepare(
         `
-          SELECT * FROM activities
-          WHERE activity_type_id = 'action'
-            AND deleted_at_utc IS NULL
+          SELECT a.*,
+            w.status AS workflow_status,
+            w.current_step AS workflow_step,
+            w.attempt_count AS workflow_attempt_count,
+            w.last_error AS workflow_last_error,
+            w.workflow_id AS temporal_workflow_id,
+            w.run_id AS temporal_run_id
+          FROM activities a
+          LEFT JOIN workflow_executions w ON w.id = a.workflow_execution_id
+          WHERE a.activity_type_id IN ('action', 'operation')
+            AND a.deleted_at_utc IS NULL
             ${scope.clause}
           ORDER BY
-            CASE status WHEN 'New' THEN 0 ELSE 1 END ASC,
-            CASE status WHEN 'New' THEN CASE WHEN sort_order IS NULL THEN 0 ELSE 1 END END ASC,
-            CASE WHEN status = 'New' AND sort_order IS NULL THEN COALESCE(restored_at_utc, created_at_utc) END DESC,
-            CASE status WHEN 'New' THEN sort_order END ASC,
-            CASE status WHEN 'Done' THEN completed_at_utc END DESC,
-            updated_at_utc DESC,
-            id ASC
+            CASE a.status WHEN 'New' THEN 0 ELSE 1 END ASC,
+            CASE a.status WHEN 'New' THEN CASE WHEN a.sort_order IS NULL THEN 0 ELSE 1 END END ASC,
+            CASE WHEN a.status = 'New' AND a.sort_order IS NULL THEN COALESCE(a.restored_at_utc, a.created_at_utc) END DESC,
+            CASE a.status WHEN 'New' THEN a.sort_order END ASC,
+            CASE a.status WHEN 'Done' THEN a.completed_at_utc END DESC,
+            a.updated_at_utc DESC,
+            a.id ASC
         `
       )
       .all(...scope.params)
@@ -40,19 +50,48 @@ export const activityEventMethods = {
 ,
 
   listArchivedActivities() {
-    const scope = scopeSql();
+    const scope = scopeSql('a');
     return this.db
       .prepare(
         `
-          SELECT * FROM activities
-          WHERE activity_type_id = 'action'
-            AND deleted_at_utc IS NOT NULL
+          SELECT a.*,
+            w.status AS workflow_status,
+            w.current_step AS workflow_step,
+            w.attempt_count AS workflow_attempt_count,
+            w.last_error AS workflow_last_error,
+            w.workflow_id AS temporal_workflow_id,
+            w.run_id AS temporal_run_id
+          FROM activities a
+          LEFT JOIN workflow_executions w ON w.id = a.workflow_execution_id
+          WHERE a.activity_type_id IN ('action', 'operation')
+            AND a.deleted_at_utc IS NOT NULL
             ${scope.clause}
-          ORDER BY deleted_at_utc DESC, updated_at_utc DESC, id ASC
+          ORDER BY a.deleted_at_utc DESC, a.updated_at_utc DESC, a.id ASC
         `
       )
       .all(...scope.params)
       .map(formatActivity);
+  }
+,
+
+  getActivityItem(activityId) {
+    const id = sanitizeText(activityId);
+    if (!id) return null;
+    const scope = scopeSql('a');
+    return formatActivity(this.db
+      .prepare(`
+        SELECT a.*,
+          w.status AS workflow_status,
+          w.current_step AS workflow_step,
+          w.attempt_count AS workflow_attempt_count,
+          w.last_error AS workflow_last_error,
+          w.workflow_id AS temporal_workflow_id,
+          w.run_id AS temporal_run_id
+        FROM activities a
+        LEFT JOIN workflow_executions w ON w.id = a.workflow_execution_id
+        WHERE a.id = ? ${scope.clause}
+      `)
+      .get(id, ...scope.params));
   }
 ,
 
@@ -179,7 +218,7 @@ export const activityEventMethods = {
     }
 
     const clientSequence = Number(rawEvent?.client_sequence);
-    if (!Number.isInteger(clientSequence)) {
+    if (!isPostgresInteger(clientSequence)) {
       this.insertIgnoredActivityEvent({
         eventId,
         deviceId,
@@ -231,6 +270,10 @@ export const activityEventMethods = {
       status = 'ignored';
       ignoreReason = 'title_required';
       occurredAt = new Date(occurredMs).toISOString();
+    } else if (rawType === 'create' && payload.activity_type_id !== undefined && !ACTIVITY_TYPES.has(payload.activity_type_id)) {
+      status = 'ignored';
+      ignoreReason = 'invalid_activity_type';
+      occurredAt = new Date(occurredMs).toISOString();
     } else if (rawType === 'update_description' && typeof payload.description_md !== 'string') {
       status = 'ignored';
       ignoreReason = 'description_required';
@@ -249,6 +292,11 @@ export const activityEventMethods = {
       if (typeof payload.description_md === 'string') {
         payload.description_md = normalizeMarkdownSource(payload.description_md);
       }
+      if (payload.activity_type_id !== undefined) {
+        payload.activity_type_id = ACTIVITY_TYPES.has(payload.activity_type_id) ? payload.activity_type_id : 'action';
+      }
+      if (typeof payload.author === 'string') payload.author = sanitizeText(payload.author) ?? '';
+      if (typeof payload.reason === 'string') payload.reason = normalizeMarkdownSource(payload.reason);
       if (Array.isArray(payload.ordered_ids)) {
         payload.ordered_ids = normalizeOrderedIds(payload.ordered_ids);
       }
@@ -315,13 +363,15 @@ export const activityEventMethods = {
         rawEvent: parseJsonObject(event.payload_json).raw_event ?? event
       });
     }
+    const linked = event.activity_id ? this.getActivityItem(event.activity_id) : null;
     return this.insertEventRecord({
       eventId: event.event_id,
       eventDomain: 'activity',
       eventType: event.change_type,
       eventAction: `activity.${event.change_type}`,
       title: `Activity ${event.change_type}`,
-      itemsId: event.change_type === 'reorder' ? null : event.activity_id,
+      itemsId: event.change_type === 'reorder' || !linked?.item_roles_id ? null : event.activity_id,
+      itemRolesId: event.change_type === 'reorder' ? null : linked?.item_roles_id ?? null,
       subjectType: event.change_type === 'reorder' ? 'activity_list' : 'activity',
       subjectId: event.change_type === 'reorder' ? null : event.activity_id,
       actorType: 'user',
@@ -380,7 +430,7 @@ export const activityEventMethods = {
     const events = this.db
       .prepare(
         `
-          SELECT event_id, subject_id AS activity_id, event_type AS change_type,
+          SELECT id, event_id, subject_id AS activity_id, event_type AS change_type,
             occurred_at_utc, received_at_utc, domain_sequence AS server_sequence, payload_json, user_id
           FROM events
           WHERE event_domain = 'activity'
@@ -406,8 +456,11 @@ export const activityEventMethods = {
         if (!activity) sortResetEvent = event;
         activity = {
           id: activityId,
+          activity_type_id: normalizeActivityType(payload.activity_type_id, activity?.activity_type_id ?? 'action'),
           title,
           description_md: normalizeMarkdownSource(payload.description_md ?? activity?.description_md ?? ''),
+          author: typeof payload.author === 'string' ? sanitizeText(payload.author) ?? '' : activity?.author ?? '',
+          reason: typeof payload.reason === 'string' ? normalizeMarkdownSource(payload.reason) : activity?.reason ?? '',
           status: activity?.status ?? 'New',
           created_at_utc: activity?.created_at_utc ?? event.occurred_at_utc,
           updated_at_utc: event.occurred_at_utc,
@@ -415,6 +468,8 @@ export const activityEventMethods = {
           sort_order: activity?.sort_order ?? null,
           deleted_at_utc: null,
           restored_at_utc: activity?.restored_at_utc ?? null,
+          normalized: activity?.normalized === true,
+          initial_event_id: activity?.initial_event_id ?? event.id,
           last_event_id: event.event_id
         };
         lastOwnEvent = event;
@@ -427,6 +482,19 @@ export const activityEventMethods = {
         lastOwnEvent = event;
       } else if (event.change_type === 'update_description' && activity) {
         activity.description_md = normalizeMarkdownSource(payload.description_md ?? '');
+        activity.updated_at_utc = event.occurred_at_utc;
+        activity.last_event_id = event.event_id;
+        lastOwnEvent = event;
+      } else if (event.change_type === 'normalized' && activity) {
+        const title = sanitizeText(payload.title);
+        if (title) activity.title = title;
+        if (typeof payload.description_md === 'string') {
+          activity.description_md = normalizeMarkdownSource(payload.description_md);
+        }
+        if (typeof payload.reason === 'string') {
+          activity.reason = normalizeMarkdownSource(payload.reason);
+        }
+        activity.normalized = true;
         activity.updated_at_utc = event.occurred_at_utc;
         activity.last_event_id = event.event_id;
         lastOwnEvent = event;
@@ -460,7 +528,7 @@ export const activityEventMethods = {
 
     if (!activity) {
       this.db
-        .prepare(`DELETE FROM activities WHERE id = ? AND activity_type_id = 'action'${scope.clause}`)
+        .prepare(`DELETE FROM activities WHERE id = ? AND activity_type_id IN ('action', 'operation')${scope.clause}`)
         .run(activityId, ...scope.params);
       return;
     }
@@ -483,14 +551,15 @@ export const activityEventMethods = {
         `
           INSERT INTO activities (
             id, title, description_md, status, created_at_utc, updated_at_utc, completed_at_utc,
-            sort_order, deleted_at_utc, restored_at_utc, last_event_id, activity_type_id, author, reason, user_id
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'action', '', '', ?)
+            sort_order, deleted_at_utc, restored_at_utc, last_event_id, activity_type_id, author, reason,
+            initial_event_id, user_id
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT(id) DO UPDATE SET
-            activity_type_id = 'action',
+            activity_type_id = excluded.activity_type_id,
             title = excluded.title,
             description_md = excluded.description_md,
-            author = '',
-            reason = '',
+            author = excluded.author,
+            reason = excluded.reason,
             status = excluded.status,
             created_at_utc = excluded.created_at_utc,
             updated_at_utc = excluded.updated_at_utc,
@@ -498,7 +567,8 @@ export const activityEventMethods = {
             sort_order = excluded.sort_order,
             deleted_at_utc = excluded.deleted_at_utc,
             restored_at_utc = excluded.restored_at_utc,
-            last_event_id = excluded.last_event_id
+            last_event_id = excluded.last_event_id,
+            initial_event_id = COALESCE(activities.initial_event_id, excluded.initial_event_id)
           WHERE activities.user_id IS NOT DISTINCT FROM excluded.user_id
             OR activities.user_id IS NULL
             OR excluded.user_id IS NULL
@@ -516,8 +586,18 @@ export const activityEventMethods = {
         activity.deleted_at_utc ?? null,
         activity.restored_at_utc ?? null,
         activity.last_event_id ?? null,
+        normalizeActivityType(activity.activity_type_id),
+        activity.author ?? '',
+        activity.reason ?? '',
+        activity.initial_event_id ?? null,
         scopedUserId()
       );
+    const stored = this.getActivityItem(activity.id);
+    if (stored?.item_roles_id) {
+      this.ensureActivityRoleLink(stored);
+    } else if (stored) {
+      this.ensureActivityWorkflowExecution({ activityId: activity.id, nowIso });
+    }
   }
 ,
 
@@ -526,7 +606,7 @@ export const activityEventMethods = {
     return this.db
       .prepare(
         `
-          SELECT event_id, subject_id AS activity_id, event_type AS change_type,
+          SELECT id, event_id, subject_id AS activity_id, event_type AS change_type,
             occurred_at_utc, received_at_utc, domain_sequence AS server_sequence, payload_json, user_id
           FROM events
           WHERE event_domain = 'activity' AND event_type = 'reorder' AND status = 'accepted'
@@ -544,7 +624,7 @@ export const activityEventMethods = {
     return this.db
       .prepare(
         `
-          SELECT event_id, subject_id AS activity_id, event_type AS change_type,
+          SELECT id, event_id, subject_id AS activity_id, event_type AS change_type,
             occurred_at_utc, received_at_utc, domain_sequence AS server_sequence, payload_json, user_id
           FROM events
           WHERE event_domain = 'activity'
@@ -591,7 +671,7 @@ export const activityEventMethods = {
     const events = this.db
       .prepare(
         `
-          SELECT event_id, subject_id AS activity_id, event_type AS change_type,
+          SELECT id, event_id, subject_id AS activity_id, event_type AS change_type,
             occurred_at_utc, received_at_utc, domain_sequence AS server_sequence, payload_json, user_id
           FROM events
           WHERE event_domain = 'activity'
@@ -614,8 +694,11 @@ export const activityEventMethods = {
         if (!title) continue;
         activities.set(activityId, {
           id: activityId,
+          activity_type_id: normalizeActivityType(payload.activity_type_id, existing?.activity_type_id ?? 'action'),
           title,
           description_md: normalizeMarkdownSource(payload.description_md ?? existing?.description_md ?? ''),
+          author: typeof payload.author === 'string' ? sanitizeText(payload.author) ?? '' : existing?.author ?? '',
+          reason: typeof payload.reason === 'string' ? normalizeMarkdownSource(payload.reason) : existing?.reason ?? '',
           status: existing?.status ?? 'New',
           created_at_utc: existing?.created_at_utc ?? event.occurred_at_utc,
           updated_at_utc: event.occurred_at_utc,
@@ -623,6 +706,8 @@ export const activityEventMethods = {
           sort_order: existing?.sort_order ?? null,
           deleted_at_utc: null,
           restored_at_utc: existing?.restored_at_utc ?? null,
+          normalized: existing?.normalized === true,
+          initial_event_id: existing?.initial_event_id ?? event.id,
           last_event_id: event.event_id
         });
       } else if (event.change_type === 'update_title' && existing) {
@@ -633,6 +718,18 @@ export const activityEventMethods = {
         existing.last_event_id = event.event_id;
       } else if (event.change_type === 'update_description' && existing) {
         existing.description_md = normalizeMarkdownSource(payload.description_md ?? '');
+        existing.updated_at_utc = event.occurred_at_utc;
+        existing.last_event_id = event.event_id;
+      } else if (event.change_type === 'normalized' && existing) {
+        const title = sanitizeText(payload.title);
+        if (title) existing.title = title;
+        if (typeof payload.description_md === 'string') {
+          existing.description_md = normalizeMarkdownSource(payload.description_md);
+        }
+        if (typeof payload.reason === 'string') {
+          existing.reason = normalizeMarkdownSource(payload.reason);
+        }
+        existing.normalized = true;
         existing.updated_at_utc = event.occurred_at_utc;
         existing.last_event_id = event.event_id;
       } else if (event.change_type === 'set_status' && existing && ACTIVITY_STATUSES.has(payload.status)) {
@@ -672,13 +769,14 @@ export const activityEventMethods = {
     }
 
     this.db
-      .prepare(`DELETE FROM activities WHERE activity_type_id = 'action'${scope.clause}`)
+      .prepare(`DELETE FROM activities WHERE activity_type_id IN ('action', 'operation')${scope.clause}`)
       .run(...scope.params);
     const insertActivity = this.db.prepare(`
       INSERT INTO activities (
         id, title, description_md, status, created_at_utc, updated_at_utc, completed_at_utc,
-        sort_order, deleted_at_utc, restored_at_utc, last_event_id, activity_type_id, author, reason, user_id
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'action', '', '', ?)
+        sort_order, deleted_at_utc, restored_at_utc, last_event_id, activity_type_id, author, reason,
+        initial_event_id, user_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     for (const activity of activities.values()) {
@@ -694,8 +792,18 @@ export const activityEventMethods = {
         activity.deleted_at_utc ?? null,
         activity.restored_at_utc ?? null,
         activity.last_event_id ?? null,
+        normalizeActivityType(activity.activity_type_id),
+        activity.author ?? '',
+        activity.reason ?? '',
+        activity.initial_event_id ?? null,
         scopedUserId()
       );
+      const stored = this.getActivityItem(activity.id);
+      if (stored && activity.normalized) {
+        this.ensureActivityRoleLink(stored);
+      } else if (stored) {
+        this.ensureActivityWorkflowExecution({ activityId: activity.id, nowIso });
+      }
     }
   }
 
@@ -707,4 +815,9 @@ function isEventAfter(left, right) {
     left.occurred_at_utc > right.occurred_at_utc ||
     (left.occurred_at_utc === right.occurred_at_utc && left.server_sequence > right.server_sequence)
   );
+}
+
+function normalizeActivityType(value, fallback = 'action') {
+  const type = sanitizeText(value);
+  return ACTIVITY_TYPES.has(type) ? type : fallback;
 }

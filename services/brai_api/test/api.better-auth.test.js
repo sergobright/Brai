@@ -49,7 +49,7 @@ test('email OTP message renders the reusable responsive card', () => {
   assert.match(message.text, /Brai · brai\.one/);
 });
 
-test('test email login creates or reuses a Better Auth user without sending OTP mail', async () => {
+test('test email login creates or reuses the primary Better Auth user without sending OTP mail', async () => {
   const sentOtps = [];
   const fixture = await createFixture([
     '2026-07-01T09:00:00.000Z',
@@ -119,8 +119,126 @@ test('test email login creates or reuses a Better Auth user without sending OTP 
       body: JSON.stringify({ email: 'second@example.com' })
     });
     assert.equal(second.status, 200);
-    assert.notEqual(second.body.user.id, first.body.user.id);
+    assert.equal(second.body.user.id, first.body.user.id);
+    assert.equal(second.body.user.email, first.body.user.email);
     assert.equal(fixture.store.primaryUserId(), first.body.user.id);
+    assert.equal(sentOtps.length, 0);
+  } finally {
+    await fixture.close();
+  }
+});
+
+test('email login finalizes preliminary Brai Cmd users without renaming existing accounts', async () => {
+  const fixture = await createFixture([
+    '2026-07-01T09:30:00.000Z',
+    '2026-07-01T09:30:01.000Z',
+    '2026-07-01T09:30:02.000Z',
+    '2026-07-01T09:30:03.000Z',
+    '2026-07-01T09:30:04.000Z',
+    '2026-07-01T09:30:05.000Z'
+  ], {
+    sessionSecret: SESSION_SECRET,
+    testEmailLogin: true
+  });
+  try {
+    const existing = await jsonRequest(fixture.url, '/auth/test-email-login', {
+      method: 'POST',
+      headers: { origin: 'capacitor://localhost' },
+      body: JSON.stringify({ email: 'existing@example.com', name: 'Existing Account' })
+    });
+    assert.equal(existing.status, 200);
+    assert.equal(existing.body.user.name, 'Existing Account');
+
+    const preliminary = await jsonRequest(fixture.url, '/v1/brai-cmd/preliminary-profile', {
+      method: 'POST',
+      body: JSON.stringify({
+        displayName: 'Preliminary Name',
+        deviceFingerprint: 'auth-fingerprint-1',
+        deviceId: 'install-1'
+      })
+    });
+    assert.equal(preliminary.status, 201);
+
+    const reused = await jsonRequest(fixture.url, '/auth/test-email-login', {
+      method: 'POST',
+      headers: { origin: 'capacitor://localhost' },
+      body: JSON.stringify({
+        email: 'existing@example.com',
+        name: 'Typed Later',
+        preliminaryUserId: preliminary.body.preliminaryUserId,
+        preliminaryClaimToken: preliminary.body.preliminaryClaimToken,
+        deviceFingerprint: 'auth-fingerprint-1'
+      })
+    });
+    assert.equal(reused.status, 200);
+    assert.equal(reused.body.user.id, existing.body.user.id);
+    assert.equal(reused.body.user.name, 'Existing Account');
+
+    const row = fixture.store.db.prepare('SELECT display_name, status, user_id FROM preliminary_users WHERE id = ?').get(preliminary.body.preliminaryUserId);
+    assert.deepEqual(row, {
+      display_name: 'Preliminary Name',
+      status: 'converted',
+      user_id: existing.body.user.id
+    });
+    assert.equal(
+      fixture.store.db.prepare('SELECT name FROM "user" WHERE id = ?').get(existing.body.user.id).name,
+      'Existing Account'
+    );
+  } finally {
+    await fixture.close();
+  }
+});
+
+test('email login can claim an unlinked duplicate preliminary device by fingerprint', async () => {
+  const fixture = await createFixture([
+    '2026-07-01T09:40:00.000Z',
+    '2026-07-01T09:40:01.000Z',
+    '2026-07-01T09:40:02.000Z',
+    '2026-07-01T09:40:03.000Z'
+  ], {
+    sessionSecret: SESSION_SECRET,
+    testEmailLogin: true
+  });
+  try {
+    const preliminary = await jsonRequest(fixture.url, '/v1/brai-cmd/preliminary-profile', {
+      method: 'POST',
+      body: JSON.stringify({
+        displayName: 'Old Fingerprint',
+        deviceFingerprint: 'duplicate-fingerprint',
+        deviceId: 'install-old'
+      })
+    });
+    assert.equal(preliminary.status, 201);
+
+    const duplicate = await jsonRequest(fixture.url, '/v1/brai-cmd/preliminary-profile', {
+      method: 'POST',
+      body: JSON.stringify({
+        displayName: 'Fresh Attempt',
+        deviceFingerprint: 'duplicate-fingerprint',
+        deviceId: 'install-new'
+      })
+    });
+    assert.equal(duplicate.status, 409);
+    assert.equal(duplicate.body.preliminaryUserId, preliminary.body.preliminaryUserId);
+
+    const login = await jsonRequest(fixture.url, '/auth/test-email-login', {
+      method: 'POST',
+      headers: { origin: 'capacitor://localhost' },
+      body: JSON.stringify({
+        email: 'fresh@example.com',
+        name: 'Fresh Attempt',
+        preliminaryUserId: duplicate.body.preliminaryUserId,
+        deviceFingerprint: 'duplicate-fingerprint'
+      })
+    });
+    assert.equal(login.status, 200);
+
+    const row = fixture.store.db.prepare('SELECT display_name, status, user_id FROM preliminary_users WHERE id = ?').get(preliminary.body.preliminaryUserId);
+    assert.deepEqual(row, {
+      display_name: 'Old Fingerprint',
+      status: 'converted',
+      user_id: login.body.user.id
+    });
   } finally {
     await fixture.close();
   }

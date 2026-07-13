@@ -17,6 +17,8 @@ export interface InboxItem {
   explanation_text: string;
   normalization_text: string;
   is_normalized: boolean;
+  status: "New" | "Done";
+  completed_at_utc: string | null;
   item_roles_id?: number | null;
   initial_event_id?: string | null;
   workflow_execution_id?: number | null;

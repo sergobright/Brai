@@ -30,7 +30,7 @@
 - Не выводи состояние preview/prod из кода, миграций, скриншота или слов Сергея. Если не проверил живую базу, так и скажи.
 - Для live Postgres проверок используй server-side credentials только из защищённых env-файлов или CI secrets; не вставляй DSN, пароли, tokens или connection strings в docs, logs и commit.
 - SQLite не является runtime fallback. Не добавляй `BRAI_DB`, `BRAI_DATA_STORE`, локальные SQLite paths или backup/import scripts в новые API/deploy paths.
-- Codex operation-задачи закрывай через deploy-owned helper для текущего runtime API/DB; не обходи API/runtime ownership прямыми клиентскими credentials.
+- Codex operation-задачи создавай и закрывай через внешний Inbox API текущего runtime: create payload `record_type_id=2`, `preliminary_section=operation`, stable `idempotency_key=operation:...`; закрытие через `POST /v1/inbox/status` с тем же key и `status=Done`. Не обходи API/runtime ownership прямыми клиентскими credentials.
 - В невизуальном handoff укажи проверенные environment, DSN source без секрета, SQL/команду и ключевые строки результата.
 
 ## Main entities

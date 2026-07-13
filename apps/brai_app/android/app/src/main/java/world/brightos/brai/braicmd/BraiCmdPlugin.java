@@ -306,7 +306,8 @@ public final class BraiCmdPlugin extends Plugin {
                 config.setPreliminaryClaimToken(profile.getPreliminaryClaimToken());
                 call.resolve(preliminaryStateJson(profile, fingerprint));
             } catch (Throwable error) {
-                call.reject(error.getMessage());
+                Exception exception = error instanceof Exception ? (Exception) error : new Exception(error);
+                call.reject("Не удалось проверить устройство", NetworkClientKt.preliminaryFailureCode(error), exception);
             }
         }).start();
     }

@@ -87,9 +87,50 @@ env_database_url() {
     printf '%s' "${BRAI_DATABASE_URL:-}"
   )
 }
+check_deploy_headroom() {
+  local root="$1"
+  local min_gb="${BRAI_DEPLOY_MIN_FREE_GB:-4}"
+  if ! [[ "$min_gb" =~ ^[0-9]+$ ]]; then
+    echo "BRAI_DEPLOY_MIN_FREE_GB must be a non-negative integer, got: $min_gb" >&2
+    exit 1
+  fi
+  mkdir -p "$root"
+  local available_kb
+  available_kb="$(df -Pk "$root" | awk 'NR == 2 { print $4 }')"
+  local required_kb=$((min_gb * 1024 * 1024))
+  if (( available_kb < required_kb )); then
+    echo "Not enough free disk space under $root: need at least ${min_gb}GB before deploy, have $((available_kb / 1024 / 1024))GB." >&2
+    exit 1
+  fi
+}
+cleanup_stale_preview_previous_sources() {
+  local keep="${1:-}"
+  [[ "${ENVIRONMENT:-}" == preview-* ]] || return 0
+  local slot_root="$ENVS_ROOT/$ENV_PATH"
+  case "$slot_root" in
+    "$ENVS_ROOT"/preview-[a-e]) ;;
+    *)
+      echo "Refusing stale source.previous cleanup outside preview slots: $slot_root" >&2
+      return 1
+      ;;
+  esac
+  shopt -s nullglob
+  local previous
+  for previous in "$slot_root"/source.previous-*; do
+    [[ -n "$keep" && "$previous" == "$keep" ]] && continue
+    rm -rf "$previous"
+  done
+  shopt -u nullglob
+}
 mark_preview_failed() {
   if [[ "$BRAI_BRANCH" == codex/* && -n "${BRAI_PREVIEW_SLOT:-}" ]]; then
     deploy/scripts/preview-slots.sh failed "$BRAI_BRANCH" "$BRAI_COMMIT" >/dev/null || true
+  fi
+}
+deploy_failed() {
+  mark_preview_failed
+  if [[ "${SOURCE_SWAPPED:-false}" == "true" ]]; then
+    cleanup_stale_preview_previous_sources "${PREVIOUS_SOURCE:-}" || true
   fi
 }
 cleanup_preview_queue() {
@@ -122,7 +163,7 @@ if [[ "$BRAI_BRANCH" == codex/* ]]; then
   BRAI_PREVIEW_ALLOCATED_NEW="$(printf '%s' "$ALLOCATION_JSON" | allocation_field allocatedNew)"
   export BRAI_PREVIEW_SLOT BRAI_PREVIEW_ALLOCATED_NEW
   printf 'BRAI_PREVIEW_SLOT_OUTPUT=%s\n' "$BRAI_PREVIEW_SLOT"
-  trap mark_preview_failed ERR
+  trap deploy_failed ERR
 fi
 
 mapfile -t DEPLOY_META < <(node deploy/scripts/resolve-deploy-env.mjs "$BRAI_BRANCH")
@@ -136,6 +177,7 @@ case "$SOURCE_ROOT" in
     exit 1
     ;;
 esac
+check_deploy_headroom "$ENVS_ROOT"
 
 if [[ "$ENVIRONMENT" == "prod" ]]; then
   export BRAI_WEB_TARGET="$DEPLOY_REPO/deploy/web"
@@ -154,14 +196,14 @@ find "$REMOTE_UPLOAD" -type d -user "$(id -u)" -exec chmod g+s {} +
 if [[ -d "$SOURCE_ROOT" ]]; then
   find "$SOURCE_ROOT" ! -type l -user "$(id -u)" -exec chmod u+rwX,g+rwX {} + || true
 fi
-PREVIOUS_SOURCE="${SOURCE_ROOT}.previous-$$"
-rm -rf "$PREVIOUS_SOURCE"
+PREVIOUS_SOURCE="${SOURCE_ROOT}.previous-$(date -u +%Y%m%d%H%M%S)-$$"
+SOURCE_SWAPPED="false"
 mkdir -p "$(dirname "$SOURCE_ROOT")"
 if [[ -d "$SOURCE_ROOT" ]]; then
   mv "$SOURCE_ROOT" "$PREVIOUS_SOURCE"
 fi
 mv "$REMOTE_UPLOAD" "$SOURCE_ROOT"
-rm -rf "$PREVIOUS_SOURCE"
+SOURCE_SWAPPED="true"
 
 cd "$SOURCE_ROOT"
 export BRAI_BRANCH BRAI_COMMIT
@@ -227,6 +269,8 @@ if [[ "$BRAI_NATIVE_APK_CHANGE" == "true" ]]; then
   fi
 fi
 deploy/scripts/deploy-branch.sh
+rm -rf "$PREVIOUS_SOURCE"
+cleanup_stale_preview_previous_sources
 REMOTE
 )"; then
   printf '%s\n' "$DEPLOY_OUTPUT"

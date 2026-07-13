@@ -220,6 +220,10 @@ export class BraiApi {
     return this.request(`/v1/inbox/${encodeURIComponent(inboxId)}/workflow`);
   }
 
+  async activityWorkflow(activityId: string): Promise<InboxWorkflowDetails> {
+    return this.request(`/v1/activities/${encodeURIComponent(activityId)}/workflow`);
+  }
+
   async aiLogs(limit = 50): Promise<{ logs: AiLog[] }> {
     return this.request(`/v1/ai-logs?limit=${encodeURIComponent(String(limit))}`);
   }

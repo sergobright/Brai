@@ -1,5 +1,6 @@
 import { PostgresSyncDatabase, isPostgresUrl } from './postgres-sync-db.js';
 import { activityEventMethods } from './store-activity-events.js';
+import { activityWorkflowStoreMethods } from './store-activity-workflows.js';
 import { appSettingsMethods } from './store-app-settings.js';
 import { authUserMethods } from './store-auth-users.js';
 import { braiCmdStoreMethods } from './store-brai-cmd.js';
@@ -8,6 +9,7 @@ import { inboxEventMethods } from './store-inbox-events.js';
 import { deploymentMethods } from './store-deployments.js';
 import { eventsLogsMethods } from './store-events-logs.js';
 import { readModelMethods } from './store-read-models.js';
+import { roleLinkMethods } from './store-role-links.js';
 import { timerEventMethods } from './store-timer-events.js';
 import { workflowStoreMethods } from './store-workflows.js';
 export { formatActivity, formatFocusInterval, formatSession, groupSessionsByDateHour } from './store-helpers.js';
@@ -29,8 +31,10 @@ Object.assign(
   aiLogMethods,
   deploymentMethods,
   eventsLogsMethods,
+  roleLinkMethods,
   timerEventMethods,
   activityEventMethods,
+  activityWorkflowStoreMethods,
   inboxEventMethods,
   workflowStoreMethods,
   readModelMethods

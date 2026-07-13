@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useRouter } from "next/navigation";
 import { ArrowLeft, BookOpen, Crown, Info, Settings } from "lucide-react";
 import { ensureBraiCmdAccess, setBraiCmdOverlayEnabled, setBraiCmdQueuePausedMode, setBraiCmdVoiceOnlyMode } from "@/shared/platform/braiCmd";
 import { installAndroidBackHandler, isNativeShell, platformName } from "@/shared/platform/platform";
@@ -9,11 +10,12 @@ import { ScrollArea } from "@/shared/ui/scroll-area";
 import { SidebarInset, SidebarProvider } from "@/shared/ui/sidebar";
 import { OnboardingFlow, shouldShowOnboarding } from "@/features/onboarding/OnboardingFlow";
 import { loadOnboardingState } from "@/features/onboarding/onboardingModel";
+import { AuthScreen } from "./AuthScreen";
 import { AppStartupSplash } from "./AppStartupSplash";
 import type { SectionId } from "./appModel";
 import { isPrimarySection, sectionIcon, sectionTitle } from "./appModel";
 import { cx } from "./appUtils";
-import { AuthPanel, IconButton, MobileContextSheet, ScreenHeader, ThemeButton } from "./chrome/AppChrome";
+import { IconButton, MobileContextSheet, ScreenHeader, ThemeButton } from "./chrome/AppChrome";
 import { useBraiAppState } from "./hooks/useBraiAppState";
 import { DesktopRail, MainDock, MobileDockOverflowButton, MobileDockOverflowSheet, MobileMenuButton, MobileProfileDrawer } from "./navigation/AppNavigation";
 import { isMobileNavigationViewport, sectionSwipePageStyle, useLeftEdgeMenuSwipe } from "./navigation/useSectionSwipeNavigation";
@@ -27,6 +29,7 @@ import { EngineSection } from "./sections/engine/EngineSection";
 import { FactorySection } from "./sections/factory/FactorySection";
 import { FocusBackground, FocusContextPanelSheet, FocusSection } from "./sections/focus/FocusSection";
 import { InboxSection } from "./sections/inbox/InboxSection";
+import { ProfileSection } from "./sections/profile/ProfileSection";
 import { SettingsSection } from "./sections/settings/SettingsSection";
 import type { MobileCreateDraft } from "./sections/MobileCreateComposer";
 
@@ -38,6 +41,7 @@ const INBOX_MOBILE_CREATE_DRAFT_STORAGE_KEY = "brai_inbox_mobile_create_draft";
 
 export function BraiApp({ initialSection = "actions" }: { initialSection?: SectionId }) {
   const app = useBraiAppState(initialSection);
+  const router = useRouter();
   const nativeAndroid = useMountedNativeAndroid();
   const [mobileDockMenu, setMobileDockMenu] = useState<"left" | "right" | null>(null);
   const [startupIntroComplete, setStartupIntroComplete] = useState(false);
@@ -72,6 +76,7 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
     () => setMobileDockMenu("left"),
     !app.mobileMenuOpen && !mobileDockMenu && !app.mobileContextPanel && !app.actionOverlayOpen,
   );
+  const webAuthRequired = !nativeAndroid && app.displaySyncStatus === "auth_required";
 
   function openMobileMenu() {
     app.setMobileMenuOpen(true);
@@ -123,6 +128,11 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
   useEffect(() => {
     document.documentElement.dataset.theme = onboardingActive ? "dark" : app.theme;
   }, [app.theme, onboardingActive]);
+
+  useEffect(() => {
+    if (!webAuthRequired || window.location.pathname === "/auth") return;
+    router.replace("/auth");
+  }, [router, webAuthRequired]);
 
   useEffect(() => {
     if (!nativeAndroid) return;
@@ -192,8 +202,9 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
           />
         ) : null}
         {authBlocked ? (
-          <AuthPanel
+          <AuthScreen
             busy={app.busy}
+            layout="embedded"
             mode={app.authMode}
             onEmailLogin={app.onEmailLogin}
             onRequestOtp={app.onRequestOtp}
@@ -235,6 +246,8 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
           />
         ) : screenSection === "archive" ? (
           <ArchiveSection state={app.actions} localSnapshotReady={app.localSnapshotReady} onRestore={app.onRestoreAction} />
+        ) : screenSection === "profile" ? (
+          <ProfileSection />
         ) : screenSection === "factory" ? (
           <FactorySection onMobileOverlayChange={app.setActionOverlayOpen} />
         ) : screenSection === "focus" ? (
@@ -281,6 +294,10 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
         ) : null}
       </>
     );
+  }
+
+  if (webAuthRequired) {
+    return <main className="min-h-dvh bg-background" data-auth-redirect />;
   }
 
   return (
@@ -337,7 +354,7 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
       )}
       data-app-shell
     >
-      {!drawsFullscreenActive ? (
+      {!drawsFullscreenActive && !mobileViewport ? (
         <DesktopRail
           section={visibleSection}
           appVersionState={app.versionState}
@@ -347,6 +364,8 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
           versionError={app.versionError}
           versionRefreshing={app.versionRefreshing}
           syncStatus={app.displaySyncStatus}
+          authUser={app.authUser}
+          onProfile={() => app.selectSection("profile")}
           onSettings={app.openSettingsPage}
           onBraiCmd={openBraiCmd}
           onEngine={() => app.selectSection("engine")}
@@ -412,12 +431,9 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
         <MobileDockOverflowSheet
           side={mobileDockMenu}
           section={visibleSection}
-          appVersionState={app.versionState}
-          otaRefreshing={app.otaRefreshing}
-          otaState={app.otaState}
-          versionError={app.versionError}
-          versionRefreshing={app.versionRefreshing}
+          authUser={app.authUser}
           onClose={() => setMobileDockMenu(null)}
+          onProfile={() => app.selectSection("profile")}
           onSettings={app.openSettingsPage}
           onBraiCmd={openBraiCmd}
           onDraws={() => app.selectSection("draws")}

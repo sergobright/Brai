@@ -44,6 +44,9 @@ describe("action store", () => {
       description_md: "",
       status: "Done",
       sort_order: null,
+      item_roles_id: null,
+      workflow_status: "queued",
+      ai_processing_status: "running",
       pending: true,
     });
   });

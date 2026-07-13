@@ -17,13 +17,17 @@ const PNG_BYTES = Buffer.from([
 test('Brai Cmd access tokens, health, admin summary, and migrations work in Brai API', async () => {
   const fixture = await createFixture(['2026-07-03T12:00:00.000Z']);
   try {
-    for (const table of ['brai_cmd_settings', 'brai_cmd_access_tokens', 'brai_cmd_usage_events']) {
+    for (const table of ['brai_cmd_settings', 'preliminary_users', 'brai_cmd_access_tokens', 'brai_cmd_usage_events']) {
       assert.ok(fixture.store.db.prepare('SELECT to_regclass(?) AS table_name').get(table).table_name);
       assert.ok(fixture.store.db.prepare('SELECT title FROM table_descriptions WHERE table_name = ?').get(table));
     }
     assert.equal(
       fixture.store.db.prepare('SELECT description FROM schema_migrations WHERE version = 47').get().description,
       'add Brai Cmd dictation runtime'
+    );
+    assert.equal(
+      fixture.store.db.prepare('SELECT description FROM schema_migrations WHERE version = 59').get().description,
+      'add preliminary Brai Cmd users'
     );
     assert.equal(fixture.store.db.prepare("SELECT 1 FROM agents WHERE id = 'brai-cmd.dictate.transcription'").get(), undefined);
 
@@ -36,23 +40,73 @@ test('Brai Cmd access tokens, health, admin summary, and migrations work in Brai
     });
     assert.equal(invalidAccess.status, 400);
 
-    const access = await jsonRequest(fixture.url, '/v1/access/request', {
+    const preliminary = await jsonRequest(fixture.url, '/v1/brai-cmd/preliminary-profile', {
       method: 'POST',
       body: JSON.stringify({
         displayName: ' Demo  User ',
+        deviceFingerprint: 'android-fingerprint-1',
         deviceId: 'device-1',
+        clientVersion: '9',
+        appPackage: 'world.brightos.brai'
+      })
+    });
+    assert.equal(preliminary.status, 201);
+    assert.equal(preliminary.body.status, 'ready');
+    assert.equal(preliminary.body.displayName, 'Demo User');
+    assert.match(preliminary.body.preliminaryClaimToken, /^pc_/);
+
+    const renamed = await jsonRequest(fixture.url, '/v1/brai-cmd/preliminary-profile', {
+      method: 'POST',
+      body: JSON.stringify({
+        displayName: 'Demo Renamed',
+        deviceFingerprint: 'android-fingerprint-1',
+        deviceId: 'device-1',
+        preliminaryUserId: preliminary.body.preliminaryUserId,
+        preliminaryClaimToken: preliminary.body.preliminaryClaimToken
+      })
+    });
+    assert.equal(renamed.status, 201);
+    assert.equal(renamed.body.displayName, 'Demo Renamed');
+
+    const duplicate = await jsonRequest(fixture.url, '/v1/brai-cmd/preliminary-profile', {
+      method: 'POST',
+      body: JSON.stringify({
+        displayName: 'Another User',
+        deviceFingerprint: 'android-fingerprint-1',
+        deviceId: 'device-reinstall'
+      })
+    });
+    assert.equal(duplicate.status, 409);
+    assert.equal(duplicate.body.code, 'duplicate_device');
+    assert.equal(duplicate.body.preliminaryUserId, preliminary.body.preliminaryUserId);
+
+    const access = await jsonRequest(fixture.url, '/v1/access/request', {
+      method: 'POST',
+      body: JSON.stringify({
+        displayName: 'Demo Renamed',
+        deviceId: 'device-1',
+        deviceFingerprint: 'android-fingerprint-1',
+        preliminaryUserId: preliminary.body.preliminaryUserId,
+        preliminaryClaimToken: preliminary.body.preliminaryClaimToken,
         clientVersion: '9',
         appPackage: 'world.brightos.brai'
       })
     });
     assert.equal(access.status, 201);
     assert.match(access.body.token, /^aw_/);
-    assert.equal(access.body.displayName, 'Demo User');
+    assert.equal(access.body.displayName, 'Demo Renamed');
 
     const tokenRows = fixture.store.db.prepare('SELECT * FROM brai_cmd_access_tokens').all();
     assert.equal(tokenRows.length, 1);
     assert.equal(JSON.stringify(tokenRows).includes(access.body.token), false);
     assert.equal(JSON.stringify(tokenRows).includes('device-1'), false);
+    assert.equal(JSON.stringify(tokenRows).includes('android-fingerprint-1'), false);
+    assert.equal(tokenRows[0].preliminary_users_id, preliminary.body.preliminaryUserId);
+    const preliminaryRows = fixture.store.db.prepare('SELECT * FROM preliminary_users').all();
+    assert.equal(preliminaryRows.length, 1);
+    assert.equal(preliminaryRows[0].display_name, 'Demo Renamed');
+    assert.equal(JSON.stringify(preliminaryRows).includes('android-fingerprint-1'), false);
+    assert.equal(JSON.stringify(preliminaryRows).includes(preliminary.body.preliminaryClaimToken), false);
 
     const health = await fetch(`${fixture.url}/v1/health`, {
       headers: {

@@ -50,11 +50,13 @@ export function isBraiCmdPublicRoute(pathname) {
     '/v1/access/request',
     '/v1/dictate',
     '/v1/brai-cmd/health',
+    '/v1/brai-cmd/preliminary-profile',
     '/v1/brai-cmd/access/request',
     '/v1/brai-cmd/dictate',
     '/v1/brai-cmd/diagnostics',
     '/v1/brai-cmd/post-process',
     '/v1/airwhisper/health',
+    '/v1/airwhisper/preliminary-profile',
     '/v1/airwhisper/access/request',
     '/v1/airwhisper/dictate'
   ].includes(pathname);
@@ -77,6 +79,14 @@ export async function handleBraiCmdPublicRoute({ req, res, url, store, runtime, 
     )) {
       requireBraiCmdAccess(req, store);
       sendJson(req, res, 200, { status: 'ok' });
+      return;
+    }
+
+    if (req.method === 'POST' && (
+      url.pathname === '/v1/brai-cmd/preliminary-profile' ||
+      url.pathname === '/v1/airwhisper/preliminary-profile'
+    )) {
+      await handlePreliminaryProfile({ req, res, store, sendJson });
       return;
     }
 
@@ -225,6 +235,53 @@ export function requireBraiCmdAccess(req, store) {
   return access;
 }
 
+async function handlePreliminaryProfile({ req, res, store, sendJson }) {
+  let body;
+  try {
+    body = await readJsonBody(req, 64 * 1024);
+  } catch (error) {
+    recordBraiCmdAccessRequestFailure(store, req, errorCode(error), Number.isInteger(error?.status) ? error.status : 400, {});
+    throw error;
+  }
+
+  const displayName = stringField(body, 'displayName');
+  const deviceFingerprint = stringField(body, 'deviceFingerprint');
+  if (!displayName) {
+    recordBraiCmdAccessRequestFailure(store, req, 'display_name_required', 400, {
+      displayNamePresent: false,
+      deviceIdPresent: Boolean(stringField(body, 'deviceId'))
+    });
+    throw new BraiCmdHttpError(400, 'Введите имя', 'display_name_required');
+  }
+  if (!deviceFingerprint) {
+    recordBraiCmdAccessRequestFailure(store, req, 'device_fingerprint_required', 400, {
+      displayNamePresent: true,
+      deviceIdPresent: Boolean(stringField(body, 'deviceId'))
+    });
+    throw new BraiCmdHttpError(400, 'Missing device fingerprint', 'device_fingerprint_required');
+  }
+
+  const preliminary = store.prepareBraiCmdPreliminaryProfile({
+    displayName,
+    deviceFingerprint,
+    deviceFingerprintKind: stringField(body, 'deviceFingerprintKind') || 'android_id',
+    deviceId: stringField(body, 'deviceId'),
+    preliminaryUserId: stringField(body, 'preliminaryUserId'),
+    preliminaryClaimToken: stringField(body, 'preliminaryClaimToken'),
+    clientVersion: stringField(body, 'clientVersion'),
+    appPackage: stringField(body, 'appPackage')
+  });
+  if (preliminary.status === 'duplicate') {
+    sendJson(req, res, 409, {
+      error: 'Повторная регистрация невозможна. Войдите в профиль по email.',
+      code: 'duplicate_device',
+      preliminaryUserId: preliminary.preliminaryUserId
+    });
+    return;
+  }
+  sendJson(req, res, 201, preliminary);
+}
+
 async function handleAccessRequest({ req, res, store, sendJson }) {
   if (!store.braiCmdSettings().registrationEnabled) {
     safeRecordLog(store, {
@@ -263,12 +320,28 @@ async function handleAccessRequest({ req, res, store, sendJson }) {
     throw new BraiCmdHttpError(400, 'Missing device id', 'missing_device_id');
   }
 
+  const preliminary = store.resolveBraiCmdPreliminaryForAccess({
+    deviceFingerprint: stringField(body, 'deviceFingerprint'),
+    preliminaryUserId: stringField(body, 'preliminaryUserId'),
+    preliminaryClaimToken: stringField(body, 'preliminaryClaimToken'),
+    clientVersion: stringField(body, 'clientVersion'),
+    appPackage: stringField(body, 'appPackage')
+  });
+  if (!preliminary.ok) {
+    recordBraiCmdAccessRequestFailure(store, req, preliminary.code, preliminary.status, {
+      displayNamePresent: true,
+      deviceIdPresent: true
+    });
+    throw new BraiCmdHttpError(preliminary.status, preliminary.message, preliminary.code);
+  }
+
   const issued = store.issueBraiCmdAccess({
     displayName,
     deviceId,
     clientVersion: stringField(body, 'clientVersion'),
     appPackage: stringField(body, 'appPackage'),
-    source: 'self_service'
+    source: 'self_service',
+    preliminaryUsersId: preliminary.preliminaryUsersId
   });
   sendJson(req, res, 201, {
     token: issued.token,

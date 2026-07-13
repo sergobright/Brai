@@ -44,11 +44,196 @@ test('actions event sync is idempotent and returns canonical state', async () =>
     assert.equal(second.body.server_revision, 1);
     assert.equal(second.body.state.activities.length, 1);
     assert.equal(eventDomainCount(fixture, 'activity'), 1);
+    const role = fixture.store.db
+      .prepare('SELECT item_roles_id, initial_event_id, workflow_execution_id FROM activities WHERE id = ?')
+      .get('action-1');
+    assert.equal(role.item_roles_id, null);
+    assert.ok(role.initial_event_id);
+    assert.ok(Number.isInteger(role.workflow_execution_id));
+    assert.equal(
+      fixture.store.db
+        .prepare('SELECT COUNT(*) AS count FROM events WHERE subject_id = ? AND item_roles_id IS NULL')
+        .get('action-1').count,
+      1
+    );
+    assert.deepEqual(fixture.store.listQueuedActivityWorkflowStarts().map((entry) => entry.activity_id), ['action-1']);
 
     const state = await request(fixture.url, '/v1/activities');
     assert.equal(state.status, 200);
     assert.equal(state.body.activities.length, 1);
     assert.equal(state.body.activities[0].id, 'action-1');
+    assert.equal(state.body.activities[0].item_roles_id, null);
+    assert.equal(state.body.activities[0].ai_processing_status, 'running');
+  } finally {
+    await fixture.close();
+  }
+});
+
+test('action created through sync is normalized into an Activity role', async () => {
+  const fixture = await createFixture([
+    '2026-06-16T10:00:00.000Z',
+    '2026-06-16T10:00:01.000Z',
+    '2026-06-16T10:00:02.000Z',
+    '2026-06-16T10:00:03.000Z'
+  ], {
+    activityAutoProcess: true,
+    activityNormalizer: async ({ item, imageDescription }) => {
+      assert.equal(imageDescription, '');
+      return {
+        title: `${item.title} нормализовано`,
+        description: 'Нормализованное описание',
+        reason: 'Нормализованная причина',
+        normalization: 'Activity parsed as action'
+      };
+    }
+  });
+
+  try {
+    const response = await request(fixture.url, '/v1/activities/events/sync', {
+      method: 'POST',
+      body: JSON.stringify({
+        device: { device_id: 'web-device', platform: 'web' },
+        events: [actionEvent('action-create', 1, 'create', 'action-ai', '2026-06-16T09:00:00.000Z', {
+          title: 'Фокус',
+          description_md: 'Сырые детали',
+          reason: 'Пользователь создал действие'
+        })]
+      })
+    });
+    assert.equal(response.status, 200);
+
+    await waitFor(() => fixture.store.getActivityItem('action-ai')?.item_roles_id != null);
+    const activity = fixture.store.getActivityItem('action-ai');
+    assert.equal(activity.title, 'Фокус нормализовано');
+    assert.equal(activity.description_md, 'Нормализованное описание');
+    assert.equal(activity.reason, 'Нормализованная причина');
+    assert.equal(activity.activity_type_id, 'action');
+    assert.equal(activity.status, 'New');
+    assert.ok(Number.isInteger(activity.item_roles_id));
+
+    const execution = fixture.store.getActivityWorkflowExecution('action-ai');
+    assert.equal(execution.status, 'completed');
+    assert.equal(execution.current_step, 'apply_normalized_raw');
+    assert.equal(fixture.store.listQueuedActivityWorkflowStarts().length, 0);
+    assert.equal(
+      fixture.store.db.prepare("SELECT COUNT(*) AS count FROM events WHERE subject_id = 'action-ai' AND event_type = 'normalized'").get().count,
+      1
+    );
+    assert.equal(
+      fixture.store.db.prepare("SELECT COUNT(*) AS count FROM ai_logs WHERE agent_id = 'activity.normalizer' AND flow_id = 'action-ai'").get().count,
+      1
+    );
+
+    const details = await request(fixture.url, '/v1/activities/action-ai/workflow');
+    assert.equal(details.status, 200);
+    assert.equal(details.body.execution.status, 'completed');
+    assert.deepEqual(details.body.definition.steps, [
+      'ingest',
+      'dispatch',
+      'prepare_raw',
+      'image_describer',
+      'raw_normalizer',
+      'apply_normalized_raw',
+      'terminal_reconcile'
+    ]);
+    assert.deepEqual(details.body.step_states.find((step) => step.id === 'image_describer'), {
+      id: 'image_describer',
+      state: 'skipped',
+      reason: 'not_required'
+    });
+    assert.equal(details.body.attempts[0].agent_id, 'activity.normalizer');
+  } finally {
+    await fixture.close();
+  }
+});
+
+test('future UI-created operation uses the Activity normalization workflow', async () => {
+  const fixture = await createFixture([
+    '2026-06-16T10:00:00.000Z',
+    '2026-06-16T10:00:01.000Z',
+    '2026-06-16T10:00:02.000Z'
+  ], {
+    activityAutoProcess: true,
+    activityNormalizer: async ({ item }) => ({
+      title: `${item.title} normalized`,
+      description: `${item.description_md} normalized`,
+      reason: item.reason ? `${item.reason} normalized` : '',
+      normalization: `Activity subtype: ${item.activity_type_id}`
+    })
+  });
+
+  try {
+    await request(fixture.url, '/v1/activities/events/sync', {
+      method: 'POST',
+      body: JSON.stringify({
+        device: { device_id: 'web-device', platform: 'web' },
+        events: [actionEvent('operation-create', 1, 'create', 'operation-1', '2026-06-16T09:00:00.000Z', {
+          activity_type_id: 'operation',
+          title: 'UI operation',
+          description_md: 'Raw operation',
+          author: 'User',
+          reason: 'Future UI source'
+        })]
+      })
+    });
+
+    await waitFor(() => fixture.store.getActivityItem('operation-1')?.item_roles_id != null);
+    const operation = fixture.store.getActivityItem('operation-1');
+    assert.equal(operation.activity_type_id, 'operation');
+    assert.equal(operation.author, 'User');
+    assert.equal(operation.title, 'UI operation normalized');
+    assert.equal(operation.description_md, 'Raw operation normalized');
+    assert.equal(operation.reason, 'Future UI source normalized');
+    assert.ok(Number.isInteger(operation.item_roles_id));
+  } finally {
+    await fixture.close();
+  }
+});
+
+test('activity normalization preserves user status and deletion changes before apply', async () => {
+  const fixture = await createFixture([
+    '2026-06-16T10:00:00.000Z',
+    '2026-06-16T10:00:01.000Z',
+    '2026-06-16T10:00:02.000Z',
+    '2026-06-16T10:00:03.000Z'
+  ], {
+    activityAutoProcess: true,
+    activityNormalizer: async ({ item }) => ({
+      title: `${item.title} AI`,
+      description: 'AI description',
+      reason: 'AI reason',
+      normalization: 'Preserve lifecycle fields'
+    })
+  });
+
+  try {
+    await request(fixture.url, '/v1/activities/events/sync', {
+      method: 'POST',
+      body: JSON.stringify({
+        device: { device_id: 'web-device', platform: 'web' },
+        events: [
+          actionEvent('create-before-ai', 1, 'create', 'action-before-ai', '2026-06-16T09:00:00.000Z', {
+            title: 'До AI'
+          }),
+          actionEvent('done-before-ai', 2, 'set_status', 'action-before-ai', '2026-06-16T09:05:00.000Z', {
+            status: 'Done'
+          }),
+          actionEvent('delete-before-ai', 3, 'delete', 'action-before-ai', '2026-06-16T09:10:00.000Z')
+        ]
+      })
+    });
+
+    await waitFor(() => fixture.store.getActivityItem('action-before-ai')?.item_roles_id != null);
+    const activity = fixture.store.getActivityItem('action-before-ai');
+    assert.equal(activity.title, 'До AI AI');
+    assert.equal(activity.status, 'Done');
+    assert.equal(activity.completed_at_utc, '2026-06-16T09:05:00.000Z');
+    assert.equal(activity.deleted_at_utc, '2026-06-16T09:10:00.000Z');
+    assert.equal(activity.sort_order, null);
+    assert.equal(
+      fixture.store.db.prepare('SELECT status FROM item_roles WHERE id = ?').get(activity.item_roles_id).status,
+      'deleted'
+    );
   } finally {
     await fixture.close();
   }

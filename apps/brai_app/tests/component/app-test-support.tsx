@@ -122,6 +122,9 @@ export function braiCmdSettingsSnapshot() {
 
 export function setupBraiAppTest() {
   beforeEach(async () => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+    cleanup();
     Element.prototype.scrollIntoView = vi.fn();
     const db = clientDb();
     await Promise.all(db.tables.map((table) => table.clear()));
@@ -280,8 +283,9 @@ export function setupBraiAppTest() {
     delete document.documentElement.dataset.sidebarState;
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     cleanup();
+    await new Promise<void>((resolve) => window.setTimeout(resolve, 20));
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
     delete window.Capacitor;
@@ -311,7 +315,10 @@ export async function openProfileMenu() {
 
 export async function openProfileMenuItem(name: string | RegExp) {
   const drawer = await openProfileMenu();
-  fireEvent.click(within(drawer).getByRole("button", { name }));
+  const accessibleName = typeof name === "string" && name.toLocaleLowerCase() === "brai cmd"
+    ? /^Brai CMD$/i
+    : name;
+  fireEvent.click(within(drawer).getByRole("button", { name: accessibleName }));
 }
 
 export async function openSettingsFromProfile() {

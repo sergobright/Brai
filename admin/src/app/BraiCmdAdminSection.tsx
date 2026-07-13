@@ -1,4 +1,4 @@
-import { AudioLines, Command, ShieldCheck, TriangleAlert } from "lucide-react";
+import { AudioLines, Command, ShieldCheck, TriangleAlert, UserRound } from "lucide-react";
 import { Badge } from "@/shared/ui/badge";
 import { Card, CardDescription, CardFrame, CardHeader, CardTitle } from "@/shared/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/shared/ui/table";
@@ -18,6 +18,12 @@ export function BraiCmdAdminSection({ summary }: { summary: BraiCmdAdminSummary 
       value: summary.totals.requests.toLocaleString("ru-RU"),
       detail: `${summary.totals.successes.toLocaleString("ru-RU")} успешных`,
       icon: Command,
+    },
+    {
+      label: "Пользователи",
+      value: summary.totals.registeredTokens.toLocaleString("ru-RU"),
+      detail: `${summary.totals.preliminaryTokens.toLocaleString("ru-RU")} предварительных · ${summary.totals.legacyTokens.toLocaleString("ru-RU")} legacy`,
+      icon: UserRound,
     },
     {
       label: "Аудио",
@@ -60,7 +66,7 @@ export function BraiCmdAdminSection({ summary }: { summary: BraiCmdAdminSummary 
         </CardHeader>
       </Card>
 
-      <section className="grid gap-3.5 sm:grid-cols-2 xl:grid-cols-5">
+      <section className="grid gap-3.5 sm:grid-cols-2 xl:grid-cols-6">
         {metrics.map((metric) => (
           <Card key={metric.label} className="min-w-0">
             <CardHeader className="gap-2 p-4">
@@ -86,7 +92,7 @@ export function BraiCmdAdminSection({ summary }: { summary: BraiCmdAdminSummary 
           <Table variant="card">
             <TableHeader>
               <TableRow>
-                {["Имя", "Статус", "Запросы", "Аудио", "Символы", "Ошибки", "Последнее"].map((column) => (
+                {["Имя", "Тип", "Статус", "Запросы", "Аудио", "Символы", "Ошибки", "Последнее"].map((column) => (
                   <TableHead key={column}>{column}</TableHead>
                 ))}
               </TableRow>
@@ -101,6 +107,10 @@ export function BraiCmdAdminSection({ summary }: { summary: BraiCmdAdminSummary 
                         {[token.clientVersion, token.source, token.appPackage].filter(Boolean).join(" · ") || "—"}
                       </div>
                     </div>
+                  </TableCell>
+                  <TableCell className="!whitespace-normal !align-top">
+                    <Badge variant={token.owner.type === "registered" ? "default" : "secondary"}>{ownerTypeLabel(token.owner.type)}</Badge>
+                    <div className="mt-1 text-xs text-muted-foreground">{token.owner.label}</div>
                   </TableCell>
                   <TableCell>
                     <Badge variant={token.status === "active" ? "default" : "secondary"}>{token.status}</Badge>
@@ -149,7 +159,10 @@ export function BraiCmdAdminSection({ summary }: { summary: BraiCmdAdminSummary 
               {summary.recentUsage.map((event) => (
                 <TableRow key={event.id}>
                   <TableCell>{formatUtc(event.createdAt)}</TableCell>
-                  <TableCell className="!whitespace-normal !align-top">{event.displayName}</TableCell>
+                  <TableCell className="!whitespace-normal !align-top">
+                    <div>{event.displayName}</div>
+                    <div className="text-xs text-muted-foreground">{ownerTypeLabel(event.owner.type)} · {event.owner.label}</div>
+                  </TableCell>
                   <TableCell>
                     <Badge variant={event.success ? "default" : "secondary"}>
                       {event.success ? "ok" : event.errorCode || "error"}
@@ -196,4 +209,10 @@ function formatPercent(value: number) {
     style: "percent",
     maximumFractionDigits: 1,
   }).format(value);
+}
+
+function ownerTypeLabel(type: "legacy" | "preliminary" | "registered") {
+  if (type === "registered") return "Зарегистрирован";
+  if (type === "preliminary") return "Предварительный";
+  return "Legacy";
 }

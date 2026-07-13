@@ -14,7 +14,6 @@ EnvironmentFile=/etc/brai/brai-api.env
 Environment=BRAI_INBOX_STORAGE_ROOT=/srv/projects/brai/data/inbox-attachments
 Environment=BRAI_CODEX_BIN=/srv/opt/codex-cli/bin/codex
 Environment=BRAI_CODEX_MODEL=gpt-5.4-mini
-Environment=BRAI_CODEX_FALLBACK_MODEL=gpt-5
 Environment=BRAI_CODEX_TIMEOUT_MS=20000
 Environment=CODEX_HOME=/srv/opt/codex-runtime/brai
 Environment=HOME=/srv/opt/codex-runtime/brai

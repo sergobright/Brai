@@ -16,4 +16,10 @@
 {% for name, env in brai_envs.items() %}
 {{ brai_deploy_user }} ALL=(root) NOPASSWD: /bin/systemctl restart {{ env.service }}
 {{ brai_deploy_user }} ALL=(root) NOPASSWD: /bin/systemctl restart {{ env.admin_service }}
+{% if name.startswith('preview-') %}
+{{ brai_deploy_user }} ALL=(root) NOPASSWD: /bin/systemctl stop {{ env.service }}
+{{ brai_deploy_user }} ALL=(root) NOPASSWD: /bin/systemctl stop {{ env.admin_service }}
+{{ brai_deploy_user }} ALL=(root) NOPASSWD: /bin/systemctl reset-failed {{ env.service }}
+{{ brai_deploy_user }} ALL=(root) NOPASSWD: /bin/systemctl reset-failed {{ env.admin_service }}
+{% endif %}
 {% endfor %}

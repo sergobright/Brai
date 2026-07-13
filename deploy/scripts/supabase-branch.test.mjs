@@ -7,9 +7,11 @@ import path from "node:path";
 import {
   copySourceQuery,
   inspectOwnedSequences,
+  isTransientPostgresConnectionError,
   migrationFileEntries,
   reseedOwnedSequences,
   sequenceAllocationStatus,
+  transientPostgresRetryDelayMs,
   unsafeOwnedSequenceAllocations
 } from "./supabase-branch.mjs";
 
@@ -57,7 +59,7 @@ test("production seed loads only explicitly marked idempotent migrations into th
   assert.doesNotMatch(script, /reapplyPostProductionSeedMigrations/);
 });
 
-test("production copy reseeds only copied tables before its transaction commits", () => {
+test("production copy reseeds copied tables before repair migrations and before commit", () => {
   const script = fs.readFileSync(path.join(repoRoot, "deploy/scripts/supabase-branch.mjs"), "utf8");
   const copyStart = script.indexOf("async function copySchemaData");
   const inspectStart = script.indexOf("export async function inspectOwnedSequences");
@@ -65,21 +67,25 @@ test("production copy reseeds only copied tables before its transaction commits"
   const begin = 'client.query("BEGIN ISOLATION LEVEL REPEATABLE READ")';
   const searchPath = "SET LOCAL search_path TO";
   const reapply = "for (const { sql } of postSeedMigrations) await client.query(sql)";
-  const reseed = "reseedOwnedSequences(client, { schema: targetSchema, tables: copyTables })";
+  const reseed = "await reseedOwnedSequences(client, { schema: targetSchema, tables: copyTables })";
+  const firstReseed = copyFunction.indexOf(reseed);
+  const secondReseed = copyFunction.indexOf(reseed, firstReseed + reseed.length);
 
   assert.match(copyFunction, /const client = await pool\.connect\(\)/);
   assert.ok(copyFunction.indexOf(begin) > 0);
   assert.ok(copyFunction.indexOf(searchPath) > 0);
   assert.ok(copyFunction.indexOf(reapply) > 0);
-  assert.ok(copyFunction.indexOf(reseed) > 0);
+  assert.ok(firstReseed > 0);
+  assert.ok(secondReseed > firstReseed);
   assert.ok(copyFunction.indexOf(begin) < copyFunction.indexOf(searchPath));
   assert.match(copyFunction, /TRUNCATE TABLE .* CONTINUE IDENTITY CASCADE/);
   assert.doesNotMatch(copyFunction, /RESTART IDENTITY/);
   assert.ok(copyFunction.indexOf(searchPath) < copyFunction.indexOf("TRUNCATE TABLE"));
   assert.ok(copyFunction.indexOf(reapply) > copyFunction.indexOf("OVERRIDING SYSTEM VALUE"));
-  assert.ok(copyFunction.indexOf(reapply) < copyFunction.indexOf(reseed));
-  assert.ok(copyFunction.indexOf(reseed) > copyFunction.indexOf("OVERRIDING SYSTEM VALUE"));
-  assert.ok(copyFunction.indexOf(reseed) < copyFunction.indexOf('client.query("COMMIT")'));
+  assert.ok(firstReseed > copyFunction.indexOf("OVERRIDING SYSTEM VALUE"));
+  assert.ok(firstReseed < copyFunction.indexOf(reapply));
+  assert.ok(secondReseed > copyFunction.indexOf(reapply));
+  assert.ok(secondReseed < copyFunction.indexOf('client.query("COMMIT")'));
   assert.doesNotMatch(copyFunction, /tables: truncatableTables/);
 });
 
@@ -95,6 +101,24 @@ test("production copy keeps ai_logs only for agents present in the target schema
     query,
     'SELECT source_row."id", source_row."agent_id", source_row."json_data" FROM "prod"."ai_logs" AS source_row WHERE EXISTS ( SELECT 1 FROM "preview"."agents" AS target_agent WHERE target_agent.id = source_row.agent_id )'
   );
+});
+
+test("self-hosted Postgres retry is limited to pooler circuit breaker errors", () => {
+  assert.equal(isTransientPostgresConnectionError(new Error("(ECIRCUITBREAKER) too many authentication failures")), true);
+  assert.equal(isTransientPostgresConnectionError(new Error("ClientHandler: circuit breaker open for operation: auth_error")), true);
+  assert.equal(isTransientPostgresConnectionError(new Error("password authentication failed for user postgres")), false);
+
+  const originalNow = Date.now;
+  Date.now = () => 1_783_833_100_000;
+  try {
+    assert.equal(
+      transientPostgresRetryDelayMs(new Error("blocked until: 1783833196"), 1),
+      99_000
+    );
+  } finally {
+    Date.now = originalNow;
+  }
+  assert.equal(transientPostgresRetryDelayMs(new Error("temporary network glitch"), 2), 30_000);
 });
 
 test("Postgres smoke inspects owned sequences on one repeatable-read client under SHARE locks", () => {

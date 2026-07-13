@@ -7,7 +7,19 @@ import type {
 } from "@/shared/types/timer";
 import type { ActivityItem, PendingActivityEvent } from "@/shared/types/activities";
 import type { InboxItem, PendingInboxEvent } from "@/shared/types/inbox";
+import { appCommit, appEnvironment } from "@/shared/config/runtime";
 import { platformName } from "@/shared/platform/platform";
+
+const SERVER_STATE_META_KEYS = [
+  "lastServerRevision",
+  "lastSuccessfulSyncAtUtc",
+  "lastActionServerRevision",
+  "lastActionServerTimeUtc",
+  "lastSuccessfulActionsSyncAtUtc",
+  "lastInboxServerRevision",
+  "lastInboxServerTimeUtc",
+  "lastSuccessfulInboxSyncAtUtc",
+];
 
 export interface MetaRow {
   key: string;
@@ -144,6 +156,8 @@ export async function ensureClientMeta(): Promise<{
  */
 export async function ensureClientUser(userId: string | null): Promise<void> {
   const db = clientDb();
+  const environment = appEnvironment();
+  const runtimeScope = environment === "prod" ? null : `${environment}:${appCommit() || "unknown"}`;
   await db.transaction(
     "rw",
     [
@@ -159,25 +173,37 @@ export async function ensureClientUser(userId: string | null): Promise<void> {
       db.ignored_events,
     ],
     async () => {
-      const existing = await db.meta.get("currentUserId");
-      const currentUserId = (existing?.value as string | null | undefined) ?? null;
-      if (!existing || currentUserId === userId) {
+      const [existingUser, existingRuntimeScope] = await Promise.all([
+        db.meta.get("currentUserId"),
+        db.meta.get("runtimeScope"),
+      ]);
+      const currentUserId = (existingUser?.value as string | null | undefined) ?? null;
+      const userChanged = Boolean(existingUser) && currentUserId !== userId;
+      const runtimeChanged = runtimeScope !== null && existingRuntimeScope?.value !== runtimeScope;
+      if (!userChanged && !runtimeChanged) {
         await setMeta("currentUserId", userId);
         return;
       }
 
-      await Promise.all([
-        db.outbox_events.clear(),
-        db.action_outbox_events.clear(),
-        db.inbox_outbox_events.clear(),
+      const clearing = [
         db.canonical_state.clear(),
         db.sessions_cache.clear(),
         db.actions_cache.clear(),
         db.inbox_cache.clear(),
         db.goal_cache.clear(),
         db.ignored_events.clear(),
-      ]);
+        db.meta.bulkDelete(SERVER_STATE_META_KEYS),
+      ];
+      if (userChanged) {
+        clearing.push(
+          db.outbox_events.clear(),
+          db.action_outbox_events.clear(),
+          db.inbox_outbox_events.clear(),
+        );
+      }
+      await Promise.all(clearing);
       await setMeta("currentUserId", userId);
+      if (runtimeScope !== null) await setMeta("runtimeScope", runtimeScope);
     },
   );
 }

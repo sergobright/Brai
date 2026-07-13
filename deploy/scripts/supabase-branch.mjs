@@ -33,6 +33,7 @@ const TEST_DATA_COPY_EXCLUDED_TABLES = new Set([
   "session",
   "verification"
 ]);
+const POSTGRES_RETRY_ATTEMPTS = Number(process.env.BRAI_POSTGRES_CONNECT_RETRY_ATTEMPTS || 5);
 
 if (fileURLToPath(import.meta.url) === path.resolve(process.argv[1] || "")) {
   await main();
@@ -126,24 +127,28 @@ async function ensureSelfHostedSchema(name) {
   if (process.env.BRAI_SUPABASE_DRY_RUN === "true") {
     return { databaseUrl, details: { id: name, status: "ready" } };
   }
-  const pool = new Pool({ connectionString: adminUrl, ssl: postgresSsl(adminUrl) });
-  try {
-    await pool.query(`CREATE SCHEMA IF NOT EXISTS ${quoteIdentifier(name)}`);
-  } finally {
-    await pool.end();
-  }
+  await withTransientPostgresRetry("ensure self-hosted schema", async () => {
+    const pool = new Pool({ connectionString: adminUrl, ssl: postgresSsl(adminUrl) });
+    try {
+      await pool.query(`CREATE SCHEMA IF NOT EXISTS ${quoteIdentifier(name)}`);
+    } finally {
+      await pool.end();
+    }
+  });
   return { databaseUrl, details: { id: name, status: "ready" } };
 }
 
 async function dropSelfHostedSchema(name) {
   const adminUrl = selfHostedDatabaseUrl();
   if (process.env.BRAI_SUPABASE_DRY_RUN === "true") return true;
-  const pool = new Pool({ connectionString: adminUrl, ssl: postgresSsl(adminUrl) });
-  try {
-    await pool.query(`DROP SCHEMA IF EXISTS ${quoteIdentifier(name)} CASCADE`);
-  } finally {
-    await pool.end();
-  }
+  await withTransientPostgresRetry("drop self-hosted schema", async () => {
+    const pool = new Pool({ connectionString: adminUrl, ssl: postgresSsl(adminUrl) });
+    try {
+      await pool.query(`DROP SCHEMA IF EXISTS ${quoteIdentifier(name)} CASCADE`);
+    } finally {
+      await pool.end();
+    }
+  });
   return true;
 }
 
@@ -202,27 +207,29 @@ async function applyMigrations(databaseUrl) {
   if (process.env.BRAI_SUPABASE_DRY_RUN === "true") return;
   const migrationsDir = path.join(root, "supabase/migrations");
   const migrations = migrationFileEntries(migrationsDir);
-  const pool = new Pool({ connectionString: databaseUrl, ssl: postgresSsl(databaseUrl) });
-  try {
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS supabase_migration_files (
-        version text PRIMARY KEY,
-        name text NOT NULL,
-        applied_at_utc timestamptz NOT NULL DEFAULT now()
-      )
-    `);
-    for (const { name: entry, version } of migrations) {
-      const existing = await pool.query("SELECT 1 FROM supabase_migration_files WHERE version = $1", [version]);
-      if (existing.rows.length > 0) continue;
-      await pool.query(fs.readFileSync(path.join(migrationsDir, entry), "utf8"));
-      await pool.query(
-        "INSERT INTO supabase_migration_files (version, name, applied_at_utc) VALUES ($1, $2, now()) ON CONFLICT DO NOTHING",
-        [version, entry]
-      );
+  await withTransientPostgresRetry("apply migrations", async () => {
+    const pool = new Pool({ connectionString: databaseUrl, ssl: postgresSsl(databaseUrl) });
+    try {
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS supabase_migration_files (
+          version text PRIMARY KEY,
+          name text NOT NULL,
+          applied_at_utc timestamptz NOT NULL DEFAULT now()
+        )
+      `);
+      for (const { name: entry, version } of migrations) {
+        const existing = await pool.query("SELECT 1 FROM supabase_migration_files WHERE version = $1", [version]);
+        if (existing.rows.length > 0) continue;
+        await pool.query(fs.readFileSync(path.join(migrationsDir, entry), "utf8"));
+        await pool.query(
+          "INSERT INTO supabase_migration_files (version, name, applied_at_utc) VALUES ($1, $2, now()) ON CONFLICT DO NOTHING",
+          [version, entry]
+        );
+      }
+    } finally {
+      await pool.end();
     }
-  } finally {
-    await pool.end();
-  }
+  });
 }
 
 export function migrationFileEntries(migrationsDir) {
@@ -246,12 +253,14 @@ async function applyPreviewSeed(databaseUrl) {
   if (process.env.BRAI_SUPABASE_DRY_RUN === "true") return;
   const seedPath = path.join(root, "supabase/preview_seed.sql");
   if (!fs.existsSync(seedPath)) return;
-  const pool = new Pool({ connectionString: databaseUrl, ssl: postgresSsl(databaseUrl) });
-  try {
-    await pool.query(fs.readFileSync(seedPath, "utf8"));
-  } finally {
-    await pool.end();
-  }
+  await withTransientPostgresRetry("apply preview seed", async () => {
+    const pool = new Pool({ connectionString: databaseUrl, ssl: postgresSsl(databaseUrl) });
+    try {
+      await pool.query(fs.readFileSync(seedPath, "utf8"));
+    } finally {
+      await pool.end();
+    }
+  });
 }
 
 async function seedTestDataFromProduction(targetDatabaseUrl) {
@@ -269,13 +278,43 @@ async function seedTestDataFromProduction(targetDatabaseUrl) {
 
   const adminUrl = selfHostedDatabaseUrl();
   const postSeedMigrations = postProductionSeedMigrations();
-  const pool = new Pool({ connectionString: adminUrl, ssl: postgresSsl(adminUrl) });
-  try {
-    await copySchemaData(pool, { sourceSchema, targetSchema, postSeedMigrations });
-  } finally {
-    await pool.end();
-  }
+  await withTransientPostgresRetry("seed test data from production", async () => {
+    const pool = new Pool({ connectionString: adminUrl, ssl: postgresSsl(adminUrl) });
+    try {
+      await copySchemaData(pool, { sourceSchema, targetSchema, postSeedMigrations });
+    } finally {
+      await pool.end();
+    }
+  });
   return true;
+}
+
+async function withTransientPostgresRetry(operation, callback) {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      return await callback();
+    } catch (error) {
+      if (attempt >= POSTGRES_RETRY_ATTEMPTS || !isTransientPostgresConnectionError(error)) throw error;
+      const delayMs = transientPostgresRetryDelayMs(error, attempt);
+      console.warn(`${operation} hit transient Postgres connection blocker; retrying in ${Math.ceil(delayMs / 1000)}s`);
+      await sleep(delayMs);
+    }
+  }
+}
+
+export function isTransientPostgresConnectionError(error) {
+  const text = `${error?.code ?? ""} ${error?.message ?? ""}`;
+  return /ECIRCUITBREAKER|circuit breaker open|too many authentication failures/i.test(text);
+}
+
+export function transientPostgresRetryDelayMs(error, attempt = 1) {
+  const blockedUntil = String(error?.message ?? "").match(/blocked until:\s*(\d+)/i)?.[1];
+  if (blockedUntil) return Math.max(1000, Number(blockedUntil) * 1000 - Date.now() + 3000);
+  return Math.min(120000, 15000 * attempt);
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function postProductionSeedMigrations() {
@@ -314,6 +353,7 @@ export async function copySchemaData(pool, { sourceSchema, targetSchema, postSee
         ${sourceQuery}
       `);
     }
+    await reseedOwnedSequences(client, { schema: targetSchema, tables: copyTables });
     for (const { sql } of postSeedMigrations) await client.query(sql);
     await reseedOwnedSequences(client, { schema: targetSchema, tables: copyTables });
     await client.query("COMMIT");

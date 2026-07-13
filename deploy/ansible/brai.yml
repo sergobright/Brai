@@ -657,10 +657,6 @@
               - "http://{{ brai_temporal_ui_legacy_domains[0] }}"
               - "--site"
               - "{{ brai_temporal_ui_legacy_domains[0] }}"
-              - "--site"
-              - "http://admin.brightos.world"
-              - "--site"
-              - "admin.brightos.world"
           changed_when: false
 
         - name: Validate generated Brai managed Caddy block
@@ -724,10 +720,6 @@
           - "http://{{ brai_temporal_ui_legacy_domains[0] }}"
           - "--site"
           - "{{ brai_temporal_ui_legacy_domains[0] }}"
-          - "--site"
-          - "http://admin.brightos.world"
-          - "--site"
-          - "admin.brightos.world"
           - "--check"
       register: brai_caddy_prune_check
       changed_when: (brai_caddy_prune_check.stdout | from_json).changed
@@ -779,10 +771,6 @@
           - "http://{{ brai_temporal_ui_legacy_domains[0] }}"
           - "--site"
           - "{{ brai_temporal_ui_legacy_domains[0] }}"
-          - "--site"
-          - "http://admin.brightos.world"
-          - "--site"
-          - "admin.brightos.world"
       register: brai_caddy_prune
       changed_when: (brai_caddy_prune.stdout | from_json).changed
       check_mode: false

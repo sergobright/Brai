@@ -12,7 +12,11 @@ const { Pool } = requireFromApi("pg");
 const databaseUrl = process.env.BRAI_DATABASE_URL ?? process.env.DATABASE_URL ?? process.argv[2];
 if (!databaseUrl) throw new Error("BRAI_DATABASE_URL, DATABASE_URL, or argv[2] is required");
 
-const pool = new Pool({ connectionString: databaseUrl, ssl: postgresSsl(databaseUrl) });
+const pool = new Pool({
+  connectionString: databaseUrl,
+  ssl: postgresSsl(databaseUrl),
+  max: Number(process.env.BRAI_POSTGRES_SMOKE_POOL_MAX || 1)
+});
 try {
   const runtimeSchema = await scalar("SELECT current_schema()");
   const schemaParam = [runtimeSchema];

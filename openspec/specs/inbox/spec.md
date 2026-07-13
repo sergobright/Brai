@@ -11,6 +11,7 @@ Brai SHALL store incoming material in the server Supabase Postgres `inbox` table
 - **WHEN** the server database schema is initialized or migrated
 - **THEN** the `inbox` table exists
 - **AND** each inbox row can store title, description, source, date, author, preliminary section, urgency, attachment links, explanation, normalization text, AI/workflow state, and whether compatibility clients should treat the row as normalized
+- **AND** each inbox row can store service status `New` or `Done` and completion timestamp
 - **AND** each inbox row can store `item_roles_id` for the normalized role link
 - **AND** each inbox row can store `initial_event_id` for the raw ingest event
 - **AND** technical id, creation, and update timestamps are stored
@@ -65,3 +66,27 @@ Brai SHALL expose an `Inbox` main navigation item between Actions and Focus and 
 #### Scenario: Inbox AI workflow details are available
 - **WHEN** workflow and AI processing state exists for an Inbox row
 - **THEN** the Inbox AI tab can show actual workflow steps, AI attempts, last error, Temporal workflow id, and Temporal run id
+
+### Requirement: Inbox stores agent operations
+Brai SHALL store new agent-created operation records in Inbox instead of Activities.
+
+#### Scenario: Agent operation is created
+- **WHEN** an external agent submits an Inbox API payload with `record_type_id = 2`, `preliminary_section = operation`, and a stable `idempotency_key`
+- **THEN** Brai stores a raw Inbox row with `preliminary_section = operation`
+- **AND** the row starts with service `status = New`
+- **AND** the idempotency key can be reused to find the same operation row
+
+#### Scenario: Agent operation is normalized
+- **WHEN** the Inbox normalizer returns a class other than `operation` for a raw operation row
+- **THEN** Brai keeps `preliminary_section = operation` in the applied Inbox row and normalized event
+
+#### Scenario: Agent operation status is changed
+- **WHEN** an authorized Inbox API status request sets an operation row to `Done`
+- **THEN** Brai records an accepted Inbox status event
+- **AND** the Inbox row stores `status = Done` and a completion timestamp
+- **AND** the product UI does not expose status controls for Inbox rows
+
+#### Scenario: Client sync tries to change operation status
+- **WHEN** a client sync request includes `set_status`
+- **THEN** Brai rejects that event as invalid
+- **AND** the service status is unchanged

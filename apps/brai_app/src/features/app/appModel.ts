@@ -1,6 +1,6 @@
-import { Archive, Command, Cpu, Eye, Factory, Inbox as InboxIcon, Pencil, Settings, SquareTerminal, Timer, type LucideIcon } from "lucide-react";
+import { Archive, CircleUserRound, Command, Cpu, Eye, Factory, Inbox as InboxIcon, Pencil, Settings, SquareTerminal, Timer, type LucideIcon } from "lucide-react";
 
-export type SectionId = "actions" | "inbox" | "focus" | "factory" | "draws" | "archive" | "settings" | "brai-cmd" | "engine" | "evil-eye";
+export type SectionId = "actions" | "inbox" | "focus" | "factory" | "draws" | "archive" | "settings" | "brai-cmd" | "engine" | "evil-eye" | "profile";
 export type PrimarySectionId = "actions" | "inbox" | "focus" | "factory" | "draws";
 export type FocusContextPanel = "none" | "goal" | "history";
 export type FocusBackgroundMode = "galaxy" | "evil-eye";
@@ -29,6 +29,7 @@ export function sectionTitle(section: SectionId): string {
   if (section === "brai-cmd") return "Brai CMD";
   if (section === "engine") return "Engine";
   if (section === "evil-eye") return "Evil Eye";
+  if (section === "profile") return "Профиль";
   if (section === "inbox") return "Входящие";
   if (section === "factory") return "Factory";
   if (section === "draws") return "Draws";
@@ -41,6 +42,7 @@ export function sectionIcon(section: SectionId): LucideIcon {
   if (section === "brai-cmd") return Command;
   if (section === "engine") return Cpu;
   if (section === "evil-eye") return Eye;
+  if (section === "profile") return CircleUserRound;
   return navItems.find((item) => item.id === section)?.icon ?? Timer;
 }
 
@@ -55,12 +57,13 @@ export function sectionFromLocation(): SectionId {
   if (path === "/brai-cmd") return "brai-cmd";
   if (path === "/engine") return "engine";
   if (path === "/evil-eye") return "evil-eye";
+  if (path === "/profile") return "profile";
   return "actions";
 }
 
 export function syncSectionUrl(section: SectionId): void {
   if (typeof window === "undefined") return;
-  const nextPath = section === "inbox" ? "/inbox" : section === "focus" ? "/focus" : section === "factory" ? "/factory" : section === "draws" ? "/draws" : section === "brai-cmd" ? "/brai-cmd" : section === "engine" ? "/engine" : section === "evil-eye" ? "/evil-eye" : "/";
+  const nextPath = section === "inbox" ? "/inbox" : section === "focus" ? "/focus" : section === "factory" ? "/factory" : section === "draws" ? "/draws" : section === "brai-cmd" ? "/brai-cmd" : section === "engine" ? "/engine" : section === "evil-eye" ? "/evil-eye" : section === "profile" ? "/profile" : "/";
   if (window.location.pathname === nextPath && sectionFromLocation() === section) return;
   window.history.pushState({ braiSection: section }, "", nextPath);
 }
@@ -77,5 +80,5 @@ export function navHref(section: PrimarySectionId): string {
 }
 
 function isSectionId(value: unknown): value is SectionId {
-  return value === "actions" || value === "inbox" || value === "focus" || value === "factory" || value === "draws" || value === "archive" || value === "settings" || value === "brai-cmd" || value === "engine" || value === "evil-eye";
+  return value === "actions" || value === "inbox" || value === "focus" || value === "factory" || value === "draws" || value === "archive" || value === "settings" || value === "brai-cmd" || value === "engine" || value === "evil-eye" || value === "profile";
 }

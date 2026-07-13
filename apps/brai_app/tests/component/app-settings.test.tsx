@@ -41,21 +41,21 @@ describe("BraiApp settings", () => {
     expect(screen.getByRole("heading", { name: "Engine" })).toBeInTheDocument();
   });
 
-  it("opens the Brai Cmd section outside Android", async () => {
+  it("opens the Brai CMD web description outside Android", async () => {
     render(<BraiApp />);
 
-    await openProfileMenuItem("Brai Cmd");
+    await openProfileMenuItem("Brai CMD");
 
     await waitFor(() => expect(screen.getByRole("heading", { name: "Brai CMD" })).toBeInTheDocument());
     expect(screen.getByText("Настройки Brai CMD доступны в Android-приложении Brai.")).toBeInTheDocument();
     expect(cmdPlugin.openSettings).not.toHaveBeenCalled();
   });
 
-  it("opens the Brai Cmd WebView settings inside Android", async () => {
+  it("opens the Brai CMD WebView settings inside Android", async () => {
     stubAndroidCapacitor();
     render(<BraiApp />);
 
-    await openProfileMenuItem("Brai Cmd");
+    await openProfileMenuItem("Brai CMD");
 
     await waitFor(() => expect(screen.getByRole("heading", { name: "Brai CMD" })).toBeInTheDocument());
     expect(screen.getAllByRole("heading", { name: "Brai CMD" })).toHaveLength(1);
@@ -179,13 +179,14 @@ describe("BraiApp settings", () => {
     await waitFor(() => expect(cmdPlugin.updateSettings).toHaveBeenCalledWith({ patch: { processedAudioRetentionLimit: 1 } }));
   });
 
-  it("uses larger rows in the mobile menu that contains Brai Cmd", async () => {
+  it("uses the shadcn-space mobile menu with Brai CMD and Engine", async () => {
     render(<BraiApp />);
 
     const drawer = await openProfileMenu();
 
-    for (const name of ["Настройки", "Архив", "Выйти", "Brai Cmd", "Engine"]) {
-      expect(within(drawer).getByRole("button", { name })).toHaveClass("h-12", "text-base");
+    expect(drawer).not.toHaveTextContent("Больше");
+    for (const name of ["Профиль", "Архив", "Brai CMD", "Engine", "Настройки", "Выход"]) {
+      expect(within(drawer).getByRole("button", { name })).toHaveClass("p-2", "text-sm");
     }
   });
 
@@ -361,7 +362,7 @@ describe("BraiApp settings", () => {
     render(<BraiApp />);
 
     await screen.findByRole("heading", { name: "Действия" });
-    await openProfileMenuItem("Выйти");
+    await openProfileMenuItem("Выход");
 
     expect(await screen.findByText("Нужен вход")).toBeInTheDocument();
     await waitFor(() => expect(cmdPlugin.preparePreliminaryProfile).toHaveBeenCalledWith({ displayName: "Test" }));

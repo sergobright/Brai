@@ -27,6 +27,14 @@ export const INBOX_EVENT_TYPES = new Set([
   'delete'
 ]);
 export const ACTIVITY_STATUSES = new Set(['New', 'Done']);
+export const ACTIVITY_TYPES = new Set(['action', 'operation']);
+export const POSTGRES_INTEGER_MIN = -2_147_483_648;
+export const POSTGRES_INTEGER_MAX = 2_147_483_647;
+export const INBOX_STATUSES = new Set(['New', 'Done']);
+
+export function isPostgresInteger(value) {
+  return Number.isInteger(value) && value >= POSTGRES_INTEGER_MIN && value <= POSTGRES_INTEGER_MAX;
+}
 
 export function formatSession(session, timeZone = DEFAULT_TIME_ZONE) {
   if (!session) return null;
@@ -97,7 +105,16 @@ export function formatActivity(activity) {
     completed_at_utc: activity.completed_at_utc,
     sort_order: Number.isInteger(activity.sort_order) ? activity.sort_order : null,
     deleted_at_utc: activity.deleted_at_utc ?? null,
-    restored_at_utc: activity.restored_at_utc ?? null
+    restored_at_utc: activity.restored_at_utc ?? null,
+    item_roles_id: Number.isInteger(activity.item_roles_id) ? activity.item_roles_id : null,
+    initial_event_id: activity.initial_event_id ?? null,
+    workflow_execution_id: Number.isInteger(activity.workflow_execution_id) ? activity.workflow_execution_id : null,
+    workflow_status: activity.workflow_status ?? null,
+    workflow_step: activity.workflow_step ?? null,
+    workflow_attempt_count: Number.isInteger(activity.workflow_attempt_count) ? activity.workflow_attempt_count : 0,
+    workflow_last_error: activity.workflow_last_error ?? null,
+    temporal_workflow_id: activity.temporal_workflow_id ?? null,
+    temporal_run_id: activity.temporal_run_id ?? null
   };
 }
 
@@ -120,6 +137,8 @@ export function formatInboxItem(item) {
     explanation_text: item.explanation_text ?? '',
     normalization_text: item.normalization_text ?? '',
     is_normalized: item.is_normalized === 1,
+    status: INBOX_STATUSES.has(item.status) ? item.status : 'New',
+    completed_at_utc: item.completed_at_utc ?? null,
     item_roles_id: Number.isInteger(item.item_roles_id) ? item.item_roles_id : null,
     initial_event_id: item.initial_event_id ?? null,
     workflow_execution_id: Number.isInteger(item.workflow_execution_id) ? item.workflow_execution_id : null,

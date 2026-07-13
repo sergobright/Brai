@@ -194,13 +194,15 @@ test('workflow observability migration adds process json and telemetry tables id
     assert.deepEqual((await pool.query(`
       SELECT column_name
       FROM information_schema.columns
-      WHERE table_name = 'workflow_executions'
+      WHERE table_schema = current_schema()
+        AND table_name = 'workflow_executions'
         AND column_name = 'trace_status'
     `)).rows, [{ column_name: 'trace_status' }]);
     assert.equal((await pool.query(`
       SELECT COUNT(*)::int AS count
       FROM information_schema.tables
-      WHERE table_name IN ('workflow_execution_steps', 'workflow_worker_heartbeats')
+      WHERE table_schema = current_schema()
+        AND table_name IN ('workflow_execution_steps', 'workflow_worker_heartbeats')
     `)).rows[0].count, 2);
     assert.equal((await pool.query("SELECT COUNT(*)::int AS count FROM schema_migrations WHERE version = 57")).rows[0].count, 1);
   } finally {

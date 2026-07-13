@@ -15,71 +15,73 @@ export const BETTER_AUTH_SECRET = 'test-better-auth-secret-with-enough-entropy-3
 
 export async function createFixture(times, options = {}) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'brai-api-'));
-  const database = await createTestDatabase();
-  const releaseDir = path.join(tmp, 'releases');
-  if (options.releaseFiles) {
-    fs.mkdirSync(releaseDir);
-    for (const [fileName, content] of Object.entries(options.releaseFiles)) {
-      fs.writeFileSync(path.join(releaseDir, fileName), content);
+  let database;
+  let runtime;
+  let closed = false;
+  try {
+    database = await createTestDatabase();
+    const releaseDir = path.join(tmp, 'releases');
+    if (options.releaseFiles) {
+      fs.mkdirSync(releaseDir);
+      for (const [fileName, content] of Object.entries(options.releaseFiles)) {
+        fs.writeFileSync(path.join(releaseDir, fileName), content);
+      }
     }
-  }
-  if (options.mobileFiles) {
-    const mobileDir = path.join(tmp, 'mobile-update');
-    fs.mkdirSync(mobileDir);
-    for (const [fileName, content] of Object.entries(options.mobileFiles)) {
-      fs.writeFileSync(path.join(mobileDir, fileName), content);
+    if (options.mobileFiles) {
+      const mobileDir = path.join(tmp, 'mobile-update');
+      fs.mkdirSync(mobileDir);
+      for (const [fileName, content] of Object.entries(options.mobileFiles)) {
+        fs.writeFileSync(path.join(mobileDir, fileName), content);
+      }
     }
-  }
-  let index = 0;
-  const runtime = createBraiServer({
-    databaseUrl: database.url,
-    dataRoot: tmp,
-    token: TOKEN,
-    webPassword: options.webPassword,
-    releasePassword: options.releasePassword,
-    sessionSecret: options.sessionSecret,
-    betterAuthSecret: options.betterAuthSecret ?? BETTER_AUTH_SECRET,
-    betterAuthUrl: options.betterAuthUrl,
-    resendApiKey: options.resendApiKey,
-    authFromEmail: options.authFromEmail,
-    sendOtp: options.sendOtp,
-    releaseDir: options.releaseFiles || options.mobileFiles ? releaseDir : null,
-    inboxApiKey: options.inboxApiKey ?? INBOX_API_KEY,
-    inboxStorageRoot: options.inboxStorageRoot ?? path.join(tmp, 'inbox-attachments'),
-    vaultRoot: options.vaultRoot,
-    syncthingGuiAddress: options.syncthingGuiAddress,
-    syncthingApiKey: options.syncthingApiKey,
-    syncthingFolderIdPrefix: options.syncthingFolderIdPrefix,
-    prepareUserVault: options.prepareUserVault,
-    codexBin: options.codexBin,
-    codexModel: options.codexModel,
-    codexFallbackModel: options.codexFallbackModel,
-    codexTimeoutMs: options.codexTimeoutMs,
-    inboxExternalAi: options.inboxExternalAi,
-    inboxImageDescriber: options.inboxImageDescriber,
-    inboxNormalizer: options.inboxNormalizer,
-    inboxWorkflowStarter: options.inboxWorkflowStarter,
-    inboxAutoProcess: options.inboxAutoProcess ?? false,
-    braiCmd: options.braiCmd,
-    branch: options.branch,
-    commit: options.commit,
-    databaseBranch: options.databaseBranch,
-    testEmailLogin: options.testEmailLogin,
-    shutdownGraceMs: options.shutdownGraceMs,
-    now: () => new Date(times[Math.min(index++, times.length - 1)]),
-    logger: options.logger ?? { error: () => {} }
-  });
+    let index = 0;
+    runtime = createBraiServer({
+      databaseUrl: database.url,
+      dataRoot: tmp,
+      token: TOKEN,
+      webPassword: options.webPassword,
+      releasePassword: options.releasePassword,
+      sessionSecret: options.sessionSecret,
+      betterAuthSecret: options.betterAuthSecret ?? BETTER_AUTH_SECRET,
+      betterAuthUrl: options.betterAuthUrl,
+      resendApiKey: options.resendApiKey,
+      authFromEmail: options.authFromEmail,
+      sendOtp: options.sendOtp,
+      releaseDir: options.releaseFiles || options.mobileFiles ? releaseDir : null,
+      inboxApiKey: options.inboxApiKey ?? INBOX_API_KEY,
+      inboxStorageRoot: options.inboxStorageRoot ?? path.join(tmp, 'inbox-attachments'),
+      vaultRoot: options.vaultRoot,
+      syncthingGuiAddress: options.syncthingGuiAddress,
+      syncthingApiKey: options.syncthingApiKey,
+      syncthingFolderIdPrefix: options.syncthingFolderIdPrefix,
+      prepareUserVault: options.prepareUserVault,
+      codexBin: options.codexBin,
+      codexModel: options.codexModel,
+      codexFallbackModel: options.codexFallbackModel,
+      codexTimeoutMs: options.codexTimeoutMs,
+      inboxExternalAi: options.inboxExternalAi,
+      inboxImageDescriber: options.inboxImageDescriber,
+      inboxNormalizer: options.inboxNormalizer,
+      inboxWorkflowStarter: options.inboxWorkflowStarter,
+      inboxAutoProcess: options.inboxAutoProcess ?? false,
+      activityNormalizer: options.activityNormalizer,
+      activityWorkflowStarter: options.activityWorkflowStarter,
+      activityAutoProcess: options.activityAutoProcess ?? false,
+      braiCmd: options.braiCmd,
+      branch: options.branch,
+      commit: options.commit,
+      databaseBranch: options.databaseBranch,
+      testEmailLogin: options.testEmailLogin,
+      shutdownGraceMs: options.shutdownGraceMs,
+      now: () => new Date(times[Math.min(index++, times.length - 1)]),
+      logger: options.logger ?? { error: () => {} }
+    });
 
-  await new Promise((resolve) => runtime.server.listen(0, '127.0.0.1', resolve));
-  const address = runtime.server.address();
-  return {
-    url: `http://127.0.0.1:${address.port}`,
-    wsUrl: `ws://127.0.0.1:${address.port}`,
-    runtime,
-    store: runtime.store,
-    close: async () => {
+    const close = async () => {
+      if (closed) return;
+      closed = true;
       try {
-        await runtime.close();
+        if (runtime) await runtime.close();
       } finally {
         try {
           await database.drop();
@@ -87,8 +89,27 @@ export async function createFixture(times, options = {}) {
           fs.rmSync(tmp, { recursive: true, force: true });
         }
       }
+    };
+
+    await new Promise((resolve) => runtime.server.listen(0, '127.0.0.1', resolve));
+    const address = runtime.server.address();
+    return {
+      url: `http://127.0.0.1:${address.port}`,
+      wsUrl: `ws://127.0.0.1:${address.port}`,
+      runtime,
+      store: runtime.store,
+      close
+    };
+  } catch (error) {
+    if (runtime) {
+      await runtime.close().catch(() => {});
     }
-  };
+    if (database) {
+      await database.drop().catch(() => {});
+    }
+    fs.rmSync(tmp, { recursive: true, force: true });
+    throw error;
+  }
 }
 
 export async function request(baseUrl, pathName, options = {}, authorized = true) {
@@ -212,7 +233,12 @@ export async function createTestDatabase(migrations = [
   '0013_drop_legacy_event_tables.sql',
   '0015_runtime_settings_timezone_ai_provider.sql',
   '0016_admin_role_workflow_observability.sql',
-  '0017_repair_workflow_observability_history.sql'
+  '0017_repair_workflow_observability_history.sql',
+  '0018_entity_role_data_repair.sql',
+  '0019_preliminary_brai_cmd_users.sql',
+  '0020_inbox_operation_status.sql',
+  '0021_activity_raw_normalization_workflows.sql',
+  '0022_activity_image_describer_workflow_step.sql'
 ]) {
   const baseUrl = process.env.BRAI_TEST_DATABASE_URL?.trim();
   if (!baseUrl) throw new Error('BRAI_TEST_DATABASE_URL is required for API tests');

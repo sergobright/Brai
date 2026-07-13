@@ -1,16 +1,35 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmod, copyFile, mkdir, mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
+import { chmod, copyFile, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import fs from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import vm from "node:vm";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
 const execFileAsync = promisify(execFile);
 const workspaceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
 const appStaticRoutes = ["brai-cmd", "draws", "engine", "evil-eye", "factory", "focus", "inbox"];
+const fixtureRoots: string[] = [];
+
+afterEach(async () => {
+  await Promise.all(fixtureRoots.splice(0).map(async (root) => {
+    makeWritable(root);
+    await rm(root, { recursive: true, force: true });
+  }));
+});
+
+function makeWritable(root: string) {
+  if (!fs.existsSync(root)) return;
+  fs.chmodSync(root, 0o700);
+  for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+    const child = path.join(root, entry.name);
+    if (entry.isDirectory()) makeWritable(child);
+    else fs.chmodSync(child, 0o600);
+  }
+}
 
 describe("mobile OTA publish scripts", () => {
   it("publishes browser web and Android OTA from one web-layer command", async () => {
@@ -407,6 +426,12 @@ describe("mobile OTA publish scripts", () => {
     expect(script).toContain('mv "$SOURCE_ROOT" "$PREVIOUS_SOURCE"');
     expect(script.indexOf('npm --prefix services/brai_api ci')).toBeLessThan(script.indexOf(sourceChmod));
     expect(script.indexOf(sourceChmod)).toBeLessThan(script.indexOf('mv "$SOURCE_ROOT" "$PREVIOUS_SOURCE"'));
+    expect(script).toContain('check_deploy_headroom "$ENVS_ROOT"');
+    expect(script).toContain('BRAI_DEPLOY_MIN_FREE_GB:-4');
+    expect(script).toContain('cleanup_stale_preview_previous_sources "${PREVIOUS_SOURCE:-}"');
+    expect(script.indexOf('check_deploy_headroom "$ENVS_ROOT"')).toBeLessThan(script.indexOf('npm ci'));
+    expect(script.indexOf('deploy/scripts/deploy-branch.sh')).toBeLessThan(script.indexOf('rm -rf "$PREVIOUS_SOURCE"', script.indexOf('deploy/scripts/deploy-branch.sh')));
+    expect(script).toContain('"$ENVS_ROOT"/preview-[a-e]');
   });
 
   it("keeps preview runtime Supabase env mandatory and artifacts writable by the deploy group", async () => {
@@ -431,6 +456,9 @@ describe("mobile OTA publish scripts", () => {
     expect(adminService).toContain("BRAI_ADMIN_API_BASE=http://127.0.0.1:{{ item.value.api_port }}");
     expect(adminService).toContain("-p {{ item.value.admin_port }}");
     expect(sudoers).toContain("systemctl restart {{ env.admin_service }}");
+    expect(sudoers).toContain("systemctl stop {{ env.admin_service }}");
+    expect(sudoers).toContain("systemctl reset-failed {{ env.admin_service }}");
+    expect(sudoers).toContain("{% if name.startswith('preview-') %}");
     expect(playbook).toContain("Ensure non-production data directories keep deploy setgid");
     expect(playbook).toContain('group: "{{ brai_deploy_user }}"');
     expect(playbook).toContain('mode: "2775"');
@@ -460,6 +488,7 @@ describe("mobile OTA publish scripts", () => {
     expect(prodBlock.indexOf('deploy/scripts/build-android-env-apk.sh production')).toBeLessThan(prodBlock.indexOf('deploy/scripts/build-nonproduction-apks.sh'));
     expect(buildApk).toContain('"${BRAI_RECORD_APK_LEDGER:-true}" != "false"');
     expect(buildApk).toContain('--next-apk true --target-branch "$BRAI_BRANCH" --target-commit "$BRAI_COMMIT"');
+    expect(releaseSlot).toContain('systemctl reset-failed "$unit"');
     expect(buildApk).toContain('preview-slots.sh" next-apk-preview "$BRAI_BRANCH" "$BRAI_COMMIT" "$BRAI_APK_VERSION"');
     expect(buildApk.indexOf('if [[ "$ENVIRONMENT" == preview-*')).toBeLessThan(buildApk.indexOf('export BRAI_APK_VERSION='));
     expect(buildApk).toContain('BUILD_CLIENT="${BRAI_BUILD_CLIENT:-true}"');
@@ -470,6 +499,12 @@ describe("mobile OTA publish scripts", () => {
     expect(buildNonproduction).toContain('BRAI_BUILD_CLIENT=false "$SCRIPT_DIR/build-android-env-apk.sh" "$flavor"');
     expect(releaseSlot).toContain('section?.apkBuildKind === "stable"');
     expect(releaseSlot).toContain('Stable Preview ${SLOT_META[0]} APK baseline already exists; skipping rebuild.');
+    expect(releaseSlot).toContain('stop_preview_unit_if_exists "brai-api-preview-$SLOT_LOWER.service"');
+    expect(releaseSlot).toContain('stop_preview_unit_if_exists "brai-admin-preview-$SLOT_LOWER.service"');
+    expect(releaseSlot).toContain('cleanup_released_preview_slot_artifacts');
+    expect(releaseSlot).toContain('rm -rf "$slot_root/source" "$slot_root"/source.previous-* "$slot_root/web" "$slot_root/mobile-update"');
+    expect(releaseSlot).not.toContain('rm -rf "$slot_root/data"');
+    expect(releaseSlot).not.toContain('rm -rf "$slot_root/vault"');
     expect(releaseSlot).toContain('deploy/scripts/build-android-env-apk.sh "preview${SLOT_META[0]}" >&2');
   });
 
@@ -973,7 +1008,8 @@ describe("mobile OTA publish scripts", () => {
     expect(html).toContain("<h2>Brai</h2>");
     expect(html).toContain("<h2>Brai Dev</h2>");
     expect(html).toContain("Brai E");
-    expect(html).toContain('<p class="version">v1</p>');
+    expect(html).toContain('<div class="version-row"><p class="version">v1</p><span class="size">');
+    expect(html).toContain("0 МБ</span>");
     expect(html).toContain("23 июня 2026, 12:13 МСК");
     expect(html).toContain('<a class="download" href="./brai-v1.apk">Скачать</a>');
     expect(html).toContain('<span class="download" aria-disabled="true">Скачать</span>');
@@ -1021,7 +1057,7 @@ describe("mobile OTA publish scripts", () => {
 
     const html = await readFile(path.join(releaseDir, "index.html"), "utf8");
     expect(html).toContain("<h2>Brai</h2>");
-    expect(html).toContain('<p class="version">v7</p>');
+    expect(html).toContain('<div class="version-row"><p class="version">v7</p><span class="size">0 МБ</span></div>');
     expect(html).toContain('<a class="download" href="./brai-v7.apk">Скачать</a>');
   });
 
@@ -1066,7 +1102,9 @@ describe("mobile OTA publish scripts", () => {
 });
 
 async function fixtureRoot(prefix: string) {
-  return await mkdtemp(path.join(tmpdir(), prefix));
+  const root = await mkdtemp(path.join(tmpdir(), prefix));
+  fixtureRoots.push(root);
+  return root;
 }
 
 async function writeStaticExport(root: string, marker: string) {

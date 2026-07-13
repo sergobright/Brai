@@ -230,6 +230,8 @@ CREATE TABLE IF NOT EXISTS inbox (
   explanation_text text NOT NULL DEFAULT '',
   normalization_text text NOT NULL DEFAULT '',
   is_normalized integer NOT NULL DEFAULT 0 CHECK (is_normalized IN (0, 1)),
+  status text NOT NULL DEFAULT 'New' CHECK (status IN ('New', 'Done')),
+  completed_at_utc text,
   created_at_utc text NOT NULL,
   updated_at_utc text NOT NULL,
   deleted_at_utc text,
@@ -591,6 +593,7 @@ INSERT INTO inbox_classes (key, title, description, status, created_by_agent_id,
   ('wish', 'Желание', 'Пользователь выразил желание, намерение или будущую покупку.', 'active', NULL, now()::text, now()::text),
   ('library', 'Сохранить в библиотеку', 'Материал, ссылку, изображение или фрагмент нужно сохранить для дальнейшего чтения.', 'active', NULL, now()::text, now()::text),
   ('task', 'Задача', 'Нужно выполнить действие, проверить, подготовить или кому-то ответить.', 'active', NULL, now()::text, now()::text),
+  ('operation', 'Операция агента', 'Служебная операция, созданная агентом и обрабатываемая через Inbox.', 'active', NULL, now()::text, now()::text),
   ('note', 'Заметка', 'Наблюдение, факт или короткая запись без явного действия.', 'active', NULL, now()::text, now()::text),
   ('other', 'Другое', 'Входящее не подходит под остальные классы.', 'active', NULL, now()::text, now()::text)
 ON CONFLICT (key) DO UPDATE SET
@@ -786,6 +789,13 @@ INSERT INTO table_descriptions (table_name, title, short_description, long_descr
     'Brai Cmd usage events',
     'Метрики выполнения Brai Cmd диктовки.',
     'Фиксирует counts, timings, provider/model metadata и ошибки без хранения исходного аудио или текста расшифровки.',
+    now()::text
+  ),
+  (
+    'inbox',
+    'Inbox',
+    'Role table входящих записей с immutable raw input, normalized состоянием и служебным статусом.',
+    'explanation_text сохраняет исходный пользовательский ввод и не перезаписывается нормализацией; source/source_key фиксируют provenance. Workflow создаёт entity/role только после schema-valid local Codex CLI результата. status хранит служебное New/Done состояние для agent operation-записей без UI controls.',
     now()::text
   ),
   (

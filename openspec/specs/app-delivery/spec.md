@@ -238,5 +238,5 @@ environment domain instead of a standalone admin subdomain.
 
 #### Scenario: Old admin subdomain is removed
 - **WHEN** Brai managed Caddy routes are installed
-- **THEN** `admin.brightos.world` and `http://admin.brightos.world` are removed from unmanaged Brai site blocks
+- **THEN** retired standalone admin hostnames are removed from unmanaged Brai site blocks
 - **AND** no standalone admin Caddy site remains required

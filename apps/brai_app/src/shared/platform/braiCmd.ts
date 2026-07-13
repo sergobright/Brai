@@ -149,7 +149,6 @@ export type BraiCmdProviderTestResult = BraiCmdTestResult & {
 };
 
 export type BraiCmdProviderConnectResult = BraiCmdProviderTestResult & { state?: BraiCmdSnapshot };
-
 export type BraiCmdOnboardingEvent = {
   type?: "voiceTextInserted" | "queueSaved";
   text?: string;
@@ -292,7 +291,11 @@ export async function prepareBraiCmdPreliminaryProfile(displayName: string): Pro
   if (!isNativeAndroid() || !BraiCmd.preparePreliminaryProfile) return null;
   try {
     return await BraiCmd.preparePreliminaryProfile({ displayName });
-  } catch {
+  } catch (error) {
+    const code = typeof error === "object" && error !== null && "code" in error && typeof error.code === "string"
+      ? error.code
+      : "preliminary_unknown";
+    console.warn("Brai CMD preliminary profile failed", { code });
     return null;
   }
 }

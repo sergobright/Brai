@@ -51,6 +51,7 @@ describe("Brai CMD bridge", () => {
     await expect(vibrateBraiCmdPress()).resolves.toBeUndefined();
     expect(plugin.getState).not.toHaveBeenCalled();
     expect(plugin.addListener).not.toHaveBeenCalled();
+    expect(plugin.preparePreliminaryProfile).not.toHaveBeenCalled();
     expect(plugin.setVoiceOnlyMode).not.toHaveBeenCalled();
     expect(plugin.vibratePress).not.toHaveBeenCalled();
   });
@@ -99,6 +100,7 @@ describe("Brai CMD bridge", () => {
       getPlatform: () => "android",
     });
     plugin.ensureAccess.mockResolvedValue({ accessGranted: true });
+    plugin.preparePreliminaryProfile.mockResolvedValue({ preliminaryStatus: "ready", preliminaryUserId: "prelim-1" });
     plugin.setAccessKey.mockResolvedValue({ accessGranted: true });
     plugin.setOverlayEnabled.mockResolvedValue({ overlayEnabled: true });
     plugin.setQueuePausedMode.mockResolvedValue({ queuePausedMode: true });
@@ -118,6 +120,19 @@ describe("Brai CMD bridge", () => {
     expect(plugin.setOverlayEnabled).toHaveBeenCalledWith({ enabled: true });
     expect(plugin.setQueuePausedMode).toHaveBeenCalledWith({ enabled: true });
     expect(plugin.retryQueue).toHaveBeenCalledWith();
+  });
+
+  it("logs only the safe preliminary failure category", async () => {
+    vi.stubGlobal("Capacitor", {
+      isNativePlatform: () => true,
+      getPlatform: () => "android",
+    });
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    plugin.preparePreliminaryProfile.mockRejectedValue(Object.assign(new Error("private network detail"), { code: "preliminary_timeout" }));
+    const { prepareBraiCmdPreliminaryProfile } = await import("@/shared/platform/braiCmd");
+
+    await expect(prepareBraiCmdPreliminaryProfile("Fixture User")).resolves.toBeNull();
+    expect(warning).toHaveBeenCalledWith("Brai CMD preliminary profile failed", { code: "preliminary_timeout" });
   });
 
   it("listens to onboarding events on Android native bridge", async () => {
