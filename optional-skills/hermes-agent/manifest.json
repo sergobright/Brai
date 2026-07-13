@@ -4,16 +4,36 @@
     "repo_url": "https://github.com/NousResearch/hermes-agent",
     "commit": "f7c9feb395caa27ec79386b1ed3ae7b4675486a1"
   },
-  "synced_at_utc": "2026-07-10T21:08:46.900Z",
+  "synced_at_utc": "2026-07-13T13:56:54.876Z",
   "destination_root": "optional-skills/hermes-agent",
+  "excluded_skill_paths": [
+    "skills/apple",
+    "skills/autonomous-ai-agents/hermes-agent",
+    "skills/dogfood",
+    "skills/productivity/petdex",
+    "skills/software-development/hermes-agent-skill-authoring",
+    "skills/software-development/plan",
+    "skills/software-development/simplify-code",
+    "skills/software-development/test-driven-development",
+    "skills/yuanbao",
+    "optional-skills/devops/hermes-s6-container-supervision",
+    "optional-skills/devops/pinggy-tunnel",
+    "optional-skills/gaming",
+    "optional-skills/migration/openclaw-migration",
+    "optional-skills/research/gitnexus-explorer",
+    "optional-skills/security/godmode",
+    "optional-skills/security/unbroker",
+    "optional-skills/software-development/subagent-driven-development",
+    "optional-skills/web-development/cloudflare-temporary-deploy"
+  ],
   "trees": [
     {
       "kind": "bundled",
       "source_dir": "skills",
       "destination_dir": "optional-skills/hermes-agent/skills",
-      "skill_count": 72,
-      "file_count": 451,
-      "byte_count": 5940246,
+      "skill_count": 60,
+      "file_count": 434,
+      "byte_count": 5797084,
       "sanitized_file_count": 1,
       "sanitized_replacement_count": 4
     },
@@ -21,9 +41,9 @@
       "kind": "official_optional",
       "source_dir": "optional-skills",
       "destination_dir": "optional-skills/hermes-agent/optional-skills",
-      "skill_count": 102,
-      "file_count": 500,
-      "byte_count": 6687496,
+      "skill_count": 92,
+      "file_count": 421,
+      "byte_count": 5660268,
       "sanitized_file_count": 0,
       "sanitized_replacement_count": 0
     }

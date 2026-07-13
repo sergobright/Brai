@@ -10,6 +10,7 @@
     "openspec:guard": "scripts/use-node22.sh node scripts/check-open-openspec-changes.mjs",
     "openspec:validate": "scripts/use-node22.sh node scripts/check-open-openspec-changes.mjs && scripts/use-node22.sh node scripts/run-openspec.mjs validate --all --strict",
     "skills:sync:hermes": "scripts/use-node22.sh node scripts/sync-hermes-skills.mjs",
+    "skills:install:brai": "scripts/use-node22.sh node scripts/install-brai-agent-skills.mjs",
     "public:guard": "scripts/use-node22.sh node scripts/check-public-branch.mjs",
     "email:images:check": "scripts/use-node22.sh node scripts/check-email-image-urls.mjs",
     "socraticode:ensure": "scripts/use-node22.sh node scripts/brai-socraticode-preflight.mjs --ensure",

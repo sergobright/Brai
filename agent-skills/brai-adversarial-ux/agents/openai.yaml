@@ -1,0 +1,4 @@
+interface:
+  display_name: "Brai Adversarial UX"
+  short_description: "Adversarial UX-проверка опубликованного Preview"
+  default_prompt: "Проведи adversarial UX-проверку опубликованного Brai Preview."

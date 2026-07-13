@@ -1,0 +1,4 @@
+interface:
+  display_name: "Brai Debugging"
+  short_description: "Диагностика Brai от симптома до исправления"
+  default_prompt: "Диагностируй проблему Brai, найди первопричину и подготовь минимальное проверяемое исправление."

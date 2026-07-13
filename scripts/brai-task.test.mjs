@@ -484,6 +484,11 @@ test("delivery classifier separates infra-docs from runtime preview", () => {
   assert.equal(deliveryClassForFile(".socraticodecontextartifacts.json"), "infra");
   assert.equal(deliveryClassForFile("deploy/scripts/publish-adr-site.sh"), "infra");
   assert.equal(deliveryClassForFile("scripts/run-log4brains.sh"), "infra");
+  assert.equal(deliveryClassForFile("scripts/install-brai-agent-skills.mjs"), "infra");
+  assert.equal(deliveryClassForFile("scripts/sync-hermes-skills.test.mjs"), "infra");
+  assert.equal(deliveryClassForFile("agent-skills/brai-debugging/SKILL.md"), "docs");
+  assert.equal(deliveryClassForFile("agent-skills/brai-debugging/agents/openai.yaml"), "infra");
+  assert.equal(deliveryClassForFile("optional-skills/hermes-agent/manifest.json"), "infra");
   assert.equal(deliveryClassForFile("tools/log4brains/package.json"), "infra");
   assert.equal(deliveryClassForFile("tools/log4brains/package-lock.json"), "infra");
   assert.equal(deliveryClassForFile("package.json"), "unknown");
@@ -510,6 +515,14 @@ test("delivery classifier separates infra-docs from runtime preview", () => {
           '+    "publish:apk": "deploy/scripts/publish-capacitor-apk.sh",',
           '+    "publish:adr": "deploy/scripts/publish-adr-site.sh"',
         ].join("\n"),
+      },
+    }).deliveryClass,
+    "infra-docs",
+  );
+  assert.equal(
+    classifyDelivery(["package.json"], {
+      diffs: {
+        "package.json": '+    "skills:install:brai": "scripts/use-node22.sh node scripts/install-brai-agent-skills.mjs",',
       },
     }).deliveryClass,
     "infra-docs",

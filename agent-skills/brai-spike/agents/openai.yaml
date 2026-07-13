@@ -1,0 +1,4 @@
+interface:
+  display_name: "Brai Spike"
+  short_description: "Проверка технических гипотез до разработки"
+  default_prompt: "Проведи минимальный Brai spike и дай подтверждённый вердикт."

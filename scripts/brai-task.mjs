@@ -1906,8 +1906,14 @@ function deliveryClassForFile(file) {
     file === "deploy/environments.json" ||
     file === "apps/brai_app/tests/unit/publishScripts.test.ts" ||
     file === "scripts/run-log4brains.sh" ||
+    file === "scripts/install-brai-agent-skills.mjs" ||
+    file === "scripts/install-brai-agent-skills.test.mjs" ||
+    file === "scripts/sync-hermes-skills.mjs" ||
+    file === "scripts/sync-hermes-skills.test.mjs" ||
     file === "tools/log4brains/package.json" ||
     file === "tools/log4brains/package-lock.json" ||
+    file.startsWith("agent-skills/") ||
+    file.startsWith("optional-skills/") ||
     file.startsWith("admin/deploy/") ||
     file.startsWith("deploy/ansible/") ||
     file.startsWith("deploy/systemd/") ||
@@ -2007,7 +2013,7 @@ function isTechnicalRuntimeChange(file, context) {
 }
 
 function isInfraDocsConfigChange(file, context) {
-  if (file === "package.json") return isRootAdrPackageJsonDiff(diffForFile(file, context));
+  if (file === "package.json") return isRootInfraPackageJsonDiff(diffForFile(file, context));
   return false;
 }
 
@@ -2043,13 +2049,14 @@ function isClientPackageTestScriptDiff(diff) {
   return keys.length > 0 && keys.every((key) => key === "test" || key === "test:watch");
 }
 
-function isRootAdrPackageJsonDiff(diff) {
+function isRootInfraPackageJsonDiff(diff) {
   const lines = changedDiffLines(diff).map((line) => line.trim()).filter(Boolean);
   const allowed = [
     /^[+]\s*"adr:list":\s*"scripts\/run-log4brains\.sh adr list",?$/,
     /^[+]\s*"adr:preview":\s*"scripts\/run-log4brains\.sh preview",?$/,
     /^[+]\s*"adr:build":\s*"scripts\/run-log4brains\.sh build",?$/,
     /^[+]\s*"publish:adr":\s*"deploy\/scripts\/publish-adr-site\.sh",?$/,
+    /^[+]\s*"skills:install:brai":\s*"scripts\/use-node22\.sh node scripts\/install-brai-agent-skills\.mjs",?$/,
     /^[+-]\s*"publish:apk":\s*"deploy\/scripts\/publish-capacitor-apk\.sh",?$/,
     /^[+-]\s*"@fission-ai\/openspec":\s*"1\.4\.1",?$/,
   ];

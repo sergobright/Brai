@@ -4,7 +4,7 @@ import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { normalizeRepoUrl, syncHermesSkills } from "./sync-hermes-skills.mjs";
+import { EXCLUDED_SKILL_PATHS, normalizeRepoUrl, syncHermesSkills } from "./sync-hermes-skills.mjs";
 
 test("normalizeRepoUrl converts GitHub SSH remotes to https", () => {
   assert.equal(
@@ -25,11 +25,17 @@ test("syncHermesSkills mirrors both Hermes skill trees and writes manifest", asy
   const llmKeyExample = `sk-${"x".repeat(20)}`;
 
   await mkdir(join(source, "skills", "github", "github-auth"), { recursive: true });
+  await mkdir(join(source, "skills", "apple", "apple-notes"), { recursive: true });
   await mkdir(join(source, "optional-skills", "security", "1password"), { recursive: true });
   await mkdir(join(source, "skills", "github", "github-auth", "references"), { recursive: true });
   await writeFile(
     join(source, "skills", "github", "github-auth", "SKILL.md"),
     "---\nname: github-auth\ndescription: Auth.\n---\n",
+    "utf8"
+  );
+  await writeFile(
+    join(source, "skills", "apple", "apple-notes", "SKILL.md"),
+    "---\nname: apple-notes\ndescription: Apple Notes.\n---\n",
     "utf8"
   );
   await writeFile(
@@ -54,6 +60,8 @@ test("syncHermesSkills mirrors both Hermes skill trees and writes manifest", asy
   assert.equal(manifest.trees[0].skill_count, 1);
   assert.equal(manifest.trees[1].skill_count, 1);
   assert.equal(manifest.trees[0].sanitized_replacement_count, 2);
+  assert.deepEqual(manifest.excluded_skill_paths, ["skills/apple"]);
+  assert.ok(EXCLUDED_SKILL_PATHS.includes("skills/apple"));
 
   const bundledSkill = await readFile(join(destination, "skills", "github", "github-auth", "SKILL.md"), "utf8");
   const bundledReference = await readFile(

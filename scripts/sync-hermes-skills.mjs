@@ -12,6 +12,26 @@ const TREE_CONFIG = [
   { key: "bundled", sourceDir: "skills", destinationDir: "skills" },
   { key: "official_optional", sourceDir: "optional-skills", destinationDir: "optional-skills" }
 ];
+export const EXCLUDED_SKILL_PATHS = [
+  "skills/apple",
+  "skills/autonomous-ai-agents/hermes-agent",
+  "skills/dogfood",
+  "skills/productivity/petdex",
+  "skills/software-development/hermes-agent-skill-authoring",
+  "skills/software-development/plan",
+  "skills/software-development/simplify-code",
+  "skills/software-development/test-driven-development",
+  "skills/yuanbao",
+  "optional-skills/devops/hermes-s6-container-supervision",
+  "optional-skills/devops/pinggy-tunnel",
+  "optional-skills/gaming",
+  "optional-skills/migration/openclaw-migration",
+  "optional-skills/research/gitnexus-explorer",
+  "optional-skills/security/godmode",
+  "optional-skills/security/unbroker",
+  "optional-skills/software-development/subagent-driven-development",
+  "optional-skills/web-development/cloudflare-temporary-deploy"
+];
 const BINARY_EXTENSIONS = new Set([".pdf", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".ico", ".bmp"]);
 const SECRET_EXAMPLE_REPLACEMENTS = [
   { pattern: /\bghp_[A-Za-z0-9_]{20,}\b/g, replacement: "<github-pat>" },
@@ -231,7 +251,18 @@ function resolveGitMetadata(sourceDir, fallbackRepoUrl) {
   }
 }
 
-function buildManifest({ sourceDir, destinationRoot, gitMetadata, summary, syncedAtUtc }) {
+async function pruneExcludedSkills(destinationRoot) {
+  const removed = [];
+  for (const relativePath of EXCLUDED_SKILL_PATHS) {
+    const target = join(destinationRoot, relativePath);
+    if (!existsSync(target)) continue;
+    await rm(target, { recursive: true, force: true });
+    removed.push(relativePath);
+  }
+  return removed;
+}
+
+function buildManifest({ destinationRoot, gitMetadata, summary, syncedAtUtc, exclusions }) {
   return {
     mirror: "hermes-agent-skills",
     source: {
@@ -240,6 +271,7 @@ function buildManifest({ sourceDir, destinationRoot, gitMetadata, summary, synce
     },
     synced_at_utc: syncedAtUtc,
     destination_root: relative(repoRoot, destinationRoot) || ".",
+    excluded_skill_paths: exclusions,
     trees: summary.map((entry) => ({
       kind: entry.kind,
       source_dir: entry.sourceDir,
@@ -257,10 +289,11 @@ async function writeReadme(destinationRoot) {
   const readmePath = join(destinationRoot, "README.md");
   const text = `# Hermes Agent skill mirror
 
-This directory vendors the official skill trees from [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent).
+This directory vendors a Brai-curated subset of the official skill trees from [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent).
 
-- \`skills/\` mirrors Hermes bundled skills.
-- \`optional-skills/\` mirrors Hermes official optional skills.
+- \`skills/\` starts from Hermes bundled skills.
+- \`optional-skills/\` starts from Hermes official optional skills.
+- Brai-incompatible skills are removed on every sync by \`EXCLUDED_SKILL_PATHS\` in \`scripts/sync-hermes-skills.mjs\`.
 - \`manifest.json\` records the upstream repo URL, commit, sync timestamp, and per-tree counts.
 - Credential-like example strings are sanitized locally so the mirror can pass Brai public branch guard.
 
@@ -315,12 +348,17 @@ export async function syncHermesSkills({
       });
     }
 
+    const exclusions = await pruneExcludedSkills(destination);
+    for (const entry of summary) {
+      entry.counts = await countFiles(entry.destinationDir);
+    }
+
     const manifest = buildManifest({
-      sourceDir: workingSource,
       destinationRoot: destination,
       gitMetadata,
       summary,
-      syncedAtUtc
+      syncedAtUtc,
+      exclusions
     });
     await writeReadme(destination);
     await writeFile(join(destination, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`, "utf8");

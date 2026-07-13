@@ -9,6 +9,8 @@
 - Use `npm run adr:list`, `npm run adr:preview`, and `npm run adr:build` for Log4brains ADR workflows.
 - Run `npm run openspec:validate` after changing specs or rules.
 - Use current library documentation tooling when a task depends on third-party API behavior.
+- Brai's curated Codex skills are installed with `npm run skills:install:brai`; custom sources live in `agent-skills/`, while selected pinned upstream sources live in `optional-skills/`.
+- Treat installed skills as on-demand procedures, not proof that a binary, credential, MCP server, or runtime capability is configured. Verify prerequisites at use time.
 - Do not copy secrets, credentials, private messages, or server-only values into docs or specs.
 - Use SocratiCode as the default path for semantic codebase exploration.
 - Keep `.socraticode.json` committed with a stable `projectId` so the main checkout and `codex/*` worktrees share one SocratiCode index.
