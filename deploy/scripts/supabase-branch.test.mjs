@@ -5,6 +5,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import {
+  copyTargetColumns,
   copySourceQuery,
   inspectOwnedSequences,
   isTransientPostgresConnectionError,
@@ -167,12 +168,35 @@ test("production copy keeps ai_logs only for agents present in the target schema
   );
 });
 
-test("production copy backfills legacy access token expiry before a not-null preview insert", () => {
+test("production copy derives target-only access token expiry before a not-null preview insert", () => {
+  const sourceColumns = ["id", "created_at_utc"];
+  const columns = copyTargetColumns({
+    table: "brai_cmd_access_tokens",
+    sourceColumns,
+    targetColumns: ["id", "created_at_utc", "expires_at_utc"]
+  });
   const query = copySourceQuery({
     sourceSchema: "prod",
     targetSchema: "preview",
     table: "brai_cmd_access_tokens",
-    columns: ["id", "expires_at_utc", "created_at_utc"]
+    columns,
+    sourceColumns
+  }).replace(/\s+/g, " ").trim();
+
+  assert.deepEqual(columns, ["id", "created_at_utc", "expires_at_utc"]);
+  assert.equal(
+    query,
+    'SELECT source_row."id", source_row."created_at_utc", (source_row."created_at_utc"::timestamptz + interval \'30 days\')::text AS "expires_at_utc" FROM "prod"."brai_cmd_access_tokens" AS source_row'
+  );
+});
+
+test("production copy preserves an existing access token expiry with a null-safe fallback", () => {
+  const columns = ["id", "expires_at_utc", "created_at_utc"];
+  const query = copySourceQuery({
+    sourceSchema: "prod",
+    targetSchema: "preview",
+    table: "brai_cmd_access_tokens",
+    columns
   }).replace(/\s+/g, " ").trim();
 
   assert.equal(

@@ -394,10 +394,14 @@ export async function copySchemaData(pool, { sourceSchema, targetSchema, postSee
     await client.query(`SET LOCAL search_path TO ${quoteIdentifier(targetSchema)}, public`);
     await client.query(`TRUNCATE TABLE ${truncatableTables.map((table) => qualifiedTable(targetSchema, table)).join(", ")} CONTINUE IDENTITY CASCADE`);
     for (const table of copyTables) {
-      const columns = await commonColumns(client, sourceSchema, targetSchema, table);
+      const sourceColumns = await commonColumns(client, sourceSchema, targetSchema, table);
+      const targetColumns = table === "brai_cmd_access_tokens"
+        ? await schemaColumns(client, targetSchema, table)
+        : sourceColumns;
+      const columns = copyTargetColumns({ table, sourceColumns, targetColumns });
       if (columns.length === 0) continue;
       const columnList = columns.map(quoteIdentifier).join(", ");
-      const sourceQuery = copySourceQuery({ sourceSchema, targetSchema, table, columns });
+      const sourceQuery = copySourceQuery({ sourceSchema, targetSchema, table, columns, sourceColumns });
       await client.query(`
         INSERT INTO ${qualifiedTable(targetSchema, table)} (${columnList})
         OVERRIDING SYSTEM VALUE
@@ -416,13 +420,21 @@ export async function copySchemaData(pool, { sourceSchema, targetSchema, postSee
   }
 }
 
-export function copySourceQuery({ sourceSchema, targetSchema, table, columns }) {
+export function copyTargetColumns({ table, sourceColumns, targetColumns }) {
+  if (table !== "brai_cmd_access_tokens"
+    || sourceColumns.includes("expires_at_utc")
+    || !sourceColumns.includes("created_at_utc")
+    || !targetColumns.includes("expires_at_utc")) return sourceColumns;
+  return [...sourceColumns, "expires_at_utc"];
+}
+
+export function copySourceQuery({ sourceSchema, targetSchema, table, columns, sourceColumns = columns }) {
   if (table === "brai_cmd_access_tokens"
     && columns.includes("expires_at_utc")
-    && columns.includes("created_at_utc")) {
+    && sourceColumns.includes("created_at_utc")) {
     return `
         SELECT ${columns.map((column) => column === "expires_at_utc"
-          ? `COALESCE(source_row.${quoteIdentifier(column)}, (source_row.${quoteIdentifier("created_at_utc")}::timestamptz + interval '30 days')::text) AS ${quoteIdentifier(column)}`
+          ? `${sourceColumns.includes(column) ? `COALESCE(source_row.${quoteIdentifier(column)}, ` : ""}(source_row.${quoteIdentifier("created_at_utc")}::timestamptz + interval '30 days')::text${sourceColumns.includes(column) ? ")" : ""} AS ${quoteIdentifier(column)}`
           : `source_row.${quoteIdentifier(column)}`).join(", ")}
         FROM ${qualifiedTable(sourceSchema, table)} AS source_row
     `;
@@ -577,6 +589,17 @@ async function schemaTables(pool, schema) {
     ORDER BY table_name
   `, [schema]);
   return result.rows.map((row) => row.table_name);
+}
+
+async function schemaColumns(pool, schema, table) {
+  const result = await pool.query(`
+    SELECT column_name
+    FROM information_schema.columns
+    WHERE table_schema = $1
+      AND table_name = $2
+    ORDER BY ordinal_position
+  `, [schema, table]);
+  return result.rows.map((row) => row.column_name);
 }
 
 async function commonColumns(pool, sourceSchema, targetSchema, table) {
