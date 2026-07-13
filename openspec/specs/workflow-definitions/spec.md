@@ -36,8 +36,8 @@ Brai SHALL use Temporal to orchestrate product agent/data workflows.
 ### Requirement: Workflow status is visible
 Brai SHALL expose compact workflow status for product UI and richer details for Admin.
 
-#### Scenario: A user views an Inbox record
-- **WHEN** the record has a running or completed normalization workflow
+#### Scenario: A user views a normalizable product record
+- **WHEN** an Inbox or Activity record has a running or completed normalization workflow
 - **THEN** the product UI can read compact status from a database read model
 - **AND** the product UI does not depend on expensive per-row Temporal history polling
 
@@ -66,7 +66,7 @@ Brai SHALL treat every committed queued workflow execution as a durable request
 to start the corresponding Temporal workflow.
 
 #### Scenario: Immediate start callback is lost
-- **WHEN** Inbox ingest commits a queued execution but the in-process start callback fails or is not reached
+- **WHEN** Inbox ingest or Activity sync commits a queued execution but the in-process start callback fails or is not reached
 - **THEN** a non-overlapping periodic reconciler discovers the queued execution
 - **AND** it starts or reuses the Temporal workflow by stable workflow ID
 - **AND** it stores the resulting run ID
@@ -78,11 +78,11 @@ to start the corresponding Temporal workflow.
 - **AND** queued records created after startup remain recoverable without another service restart
 
 ### Requirement: Persisted running executions are durably terminalized
-Brai SHALL reconcile the compact Inbox workflow read model from durable Temporal
+Brai SHALL reconcile compact normalization workflow read models from durable Temporal
 closure and persisted domain truth across API process restarts.
 
 #### Scenario: Process restarts while a workflow is running
-- **WHEN** the database contains a `running` Inbox execution after API startup
+- **WHEN** the database contains a `running` Inbox or Activity execution after API startup
 - **THEN** the reconciler observes the exact Temporal workflow ID and run ID
 - **AND** repeated 500 ms passes keep at most one active observer per workflow/run pair
 - **AND** terminal persistence failure is retried on a later pass
@@ -95,24 +95,24 @@ closure and persisted domain truth across API process restarts.
 
 #### Scenario: Temporal execution closes
 - **WHEN** the observed Temporal execution resolves or reaches failed, cancelled, terminated, timed-out, or missing state
-- **THEN** Brai compares that closure with the persisted normalized Inbox domain result
+- **THEN** Brai compares that closure with the persisted normalized domain result
 - **AND** only a completed Temporal execution with a linked normalized role becomes local `completed`
 - **AND** every other closed state becomes local `failed` with a bounded reason
 - **AND** a late Activity cannot revive an already terminal failed execution
 
 ### Requirement: Operational log mirrors do not own domain success
-Brai SHALL keep ordinary technical log persistence outside committed Inbox domain
+Brai SHALL keep ordinary technical log persistence outside committed normalized domain
 success and outside the atomic normalization apply transaction.
 
 #### Scenario: Ingest log mirror fails
-- **WHEN** raw Inbox data, its event, and queued execution have committed successfully
+- **WHEN** raw Inbox or Activity data, its event, and queued execution have committed successfully
 - **AND** the following ordinary `logs` insert fails
 - **THEN** the accepted ingest result remains successful
 - **AND** durable workflow dispatch still proceeds
 - **AND** the service reports the logging failure through its process logger
 
 #### Scenario: Apply log mirror fails
-- **WHEN** normalized entity, role, Inbox link, domain event, and execution status commit successfully
+- **WHEN** normalized entity, role, source-record link, domain event, and execution status commit successfully
 - **AND** the following ordinary `logs` insert fails
 - **THEN** the committed domain result is not rolled back or repeated
 - **AND** the service reports the logging failure separately

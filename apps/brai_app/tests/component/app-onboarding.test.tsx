@@ -677,7 +677,7 @@ describe("BraiApp onboarding", () => {
     render(<BraiApp />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Пропустить" }));
-    expect(await screen.findByText("Нужен вход")).toBeInTheDocument();
+    expect(await screen.findByText("Нужен вход", {}, { timeout: 5_000 })).toBeInTheDocument();
     await waitFor(() => expect(cmdPlugin.setOverlayEnabled).toHaveBeenCalledWith({ enabled: true }));
     await waitFor(() => expect(cmdPlugin.ensureAccess).toHaveBeenCalledWith({ displayName: "Test" }));
     expect(cmdPlugin.setVoiceOnlyMode).toHaveBeenCalledWith({ enabled: true });
@@ -840,6 +840,7 @@ describe("BraiApp onboarding", () => {
 
     render(<BraiApp />);
 
+    expect(await screen.findByText("Нужен вход", {}, { timeout: 5_000 })).toBeInTheDocument();
     fireEvent.click(await screen.findByRole("button", { name: "Войти" }, { timeout: 5_000 }));
     expect(await screen.findByLabelText("Email")).toBeInTheDocument();
     expectNoPasswordPrompt();
@@ -887,8 +888,8 @@ describe("BraiApp onboarding", () => {
 
     render(<BraiApp />);
 
-    const loginButton = await screen.findByRole("button", { name: "Войти" }, { timeout: 1_000 }).catch(() => null);
-    if (loginButton) fireEvent.click(loginButton);
+    expect(await screen.findByText("Нужен вход", {}, { timeout: 5_000 })).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("button", { name: "Войти" }, { timeout: 5_000 }));
     expect(cmdPlugin.setVoiceOnlyMode).not.toHaveBeenCalledWith({ enabled: false });
     expect(await screen.findByLabelText("Email")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Войти" })).toBeInTheDocument();

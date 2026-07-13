@@ -2,7 +2,7 @@
 
 import type { CSSProperties, HTMLAttributes, KeyboardEvent, MouseEvent, PointerEvent, ReactNode } from "react";
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
-import { Square, Timer, Trash2, Undo2 } from "lucide-react";
+import { LoaderCircle, Square, Timer, Trash2, Undo2 } from "lucide-react";
 import { useSwipeable } from "react-swipeable";
 import { cleanTitle, limitTitle, visibleDescriptionPreview } from "@/shared/activities/text";
 import type { ActivityItem, ActivityStatus } from "@/shared/types/activities";
@@ -71,6 +71,7 @@ export function ActionRow({
   const preview = visibleDescriptionPreview(action.description_md);
   const restoreControl = control === "restore";
   const focusControlAvailable = !restoreControl && (activeFocus || Boolean(onStartFocus) || Boolean(onStopFocus));
+  const meta = actionRowMeta(action);
   const checkboxId = useId();
   const [dragX, setDragX] = useState(0);
   const [dragging, setDragging] = useState(false);
@@ -240,6 +241,16 @@ export function ActionRow({
             >
               {preview}
             </p>
+          ) : null}
+          {meta.length > 0 ? (
+            <div className="flex min-w-0 flex-wrap items-center gap-1.5 text-[11px] leading-4 text-muted-foreground/70">
+              {meta.map((label) => (
+                <span key={label} className="rounded border border-border bg-muted/35 px-1.5">
+                  {label === "AI-working" ? <LoaderCircle className="mr-1 inline size-3 animate-spin" aria-hidden="true" /> : null}
+                  {label}
+                </span>
+              ))}
+            </div>
           ) : null}
         </div>
       </div>
@@ -416,4 +427,23 @@ function ActionTitleEditor({
       onKeyDown={onKeyDown}
     />
   );
+}
+
+function actionRowMeta(action: ActivityItem) {
+  const meta: string[] = [];
+  if (action.ai_processing_status === "failed") {
+    meta.push(`Ошибка AI: ${action.ai_processing_error || "обработка не выполнена"}`);
+  } else if (action.ai_processing_status === "needs_review") {
+    meta.push(`needs_review: ${action.ai_processing_error || "требуется проверка"}`);
+  } else if (action.workflow_status === "completed" || Number.isInteger(action.item_roles_id)) {
+    meta.push("AI");
+  } else if (
+    action.ai_processing_status === "running" ||
+    action.item_roles_id === null ||
+    action.workflow_status === "queued" ||
+    action.workflow_status === "running"
+  ) {
+    meta.push("AI-working");
+  }
+  return meta;
 }

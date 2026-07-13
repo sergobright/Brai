@@ -1,5 +1,6 @@
 import { PostgresSyncDatabase, isPostgresUrl } from './postgres-sync-db.js';
 import { activityEventMethods } from './store-activity-events.js';
+import { activityWorkflowStoreMethods } from './store-activity-workflows.js';
 import { appSettingsMethods } from './store-app-settings.js';
 import { authUserMethods } from './store-auth-users.js';
 import { braiCmdStoreMethods } from './store-brai-cmd.js';
@@ -33,6 +34,7 @@ Object.assign(
   roleLinkMethods,
   timerEventMethods,
   activityEventMethods,
+  activityWorkflowStoreMethods,
   inboxEventMethods,
   workflowStoreMethods,
   readModelMethods

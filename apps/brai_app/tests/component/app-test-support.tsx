@@ -60,6 +60,9 @@ function matchesMediaQuery(query: string): boolean {
 
 export function setupBraiAppTest() {
   beforeEach(async () => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+    cleanup();
     const db = clientDb();
     await Promise.all(db.tables.map((table) => table.clear()));
     await setMeta("currentUserId", "test-user");
@@ -194,8 +197,9 @@ export function setupBraiAppTest() {
     delete document.documentElement.dataset.sidebarState;
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     cleanup();
+    await new Promise<void>((resolve) => window.setTimeout(resolve, 20));
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
     delete window.Capacitor;

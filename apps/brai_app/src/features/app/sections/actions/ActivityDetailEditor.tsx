@@ -28,6 +28,7 @@ import {
   DetailPanelTabBar,
   type DetailPanelTab,
 } from "../DetailPanelTabs";
+import { WorkflowAiProcessPanel } from "../WorkflowAiProcessPanel";
 import { activityDraftValues, scheduleActivityDraftEdit, useActivityDraftAutosave } from "./activityDetailModel";
 import { loadActivityMarkdownPreviewMode, saveActivityMarkdownPreviewMode } from "./constants";
 
@@ -240,7 +241,13 @@ export function ActivityDetailEditor({
     </div>
   );
   const detailContent =
-    activeTab === "history" ? (
+    activeTab === "ai" ? (
+      <WorkflowAiProcessPanel
+        item={action}
+        emptyText="Для этого действия AI workflow ещё не запускался."
+        loadDetails={(api, id) => api.activityWorkflow(id)}
+      />
+    ) : activeTab === "history" ? (
       <DetailHistory kind="actions" item={action} />
     ) : activeTab === "details" ? (
       <DetailFields kind="actions" item={action} />

@@ -970,6 +970,68 @@ async function describeImages({ agent, settings, codexBin, codexModel, codexTime
   }
 }
 
+export async function normalizeJsonWithAgent({
+  agent,
+  settings,
+  codexBin,
+  codexModel,
+  codexTimeoutMs,
+  externalAi,
+  normalizer,
+  normalizerInput,
+  promptTemplate,
+  outputSchema,
+  strictOutputSchema,
+  cleanOutput,
+  defaultCodexModel = DEFAULT_INBOX_CODEX_MODEL,
+  externalTextModel = null,
+  schemaName = 'raw_normalization',
+  timeoutPrefix = 'raw'
+}) {
+  const startedAt = Date.now();
+  const external = settings?.model_provider_mode === 'external';
+  const model = external
+    ? cleanText(externalTextModel) || DEFAULT_INBOX_TEXT_MODEL
+    : codexModel ?? optionalText(agent?.llm_model) ?? defaultCodexModel;
+  let result;
+  try {
+    result = normalizer
+      ? { text: await normalizer(normalizerInput), model }
+      : external
+        ? { text: await groqText({
+            apiKey: externalAi?.groqApiKey,
+            fetchImpl: externalAi?.fetch,
+            model,
+            promptTemplate,
+            timeoutMs: Number.isFinite(codexTimeoutMs) ? codexTimeoutMs : agent?.llm_timeout_ms,
+            outputSchema: strictOutputSchema ? outputSchema : null,
+            schemaName,
+            timeoutMessage: `groq_${timeoutPrefix}_timeout`,
+            emptyResponseMessage: `groq_${timeoutPrefix}_empty_response`
+          }), model }
+        : { text: await codexText({
+          codexBin,
+          codexModel: model || null,
+          promptTemplate,
+          timeoutMs: Number.isFinite(codexTimeoutMs) ? codexTimeoutMs : agent?.llm_timeout_ms,
+          outputSchema: strictOutputSchema ? outputSchema : null,
+          normalizerMode: true,
+          timeoutMessage: `codex_${timeoutPrefix}_timeout`,
+          failureMessage: `codex_${timeoutPrefix}_failed`
+        }), model };
+  } catch (error) {
+    return failedJsonNormalization(errorText(error), model, Date.now() - startedAt, false);
+  }
+  try {
+    const parsed = typeof result.text === 'string' ? parseNormalizerJson(result.text) : result.text;
+    validateJsonSchema(parsed, outputSchema);
+    const normalized = cleanOutput(parsed);
+    return { ...normalized, status: 'done', error: '', model: result.model, durationMs: Date.now() - startedAt };
+  } catch (error) {
+    return failedJsonNormalization(errorText(error), result.model, Date.now() - startedAt, true, result.text);
+  }
+}
+
 async function normalizeInbox({
   agent,
   settings,
@@ -1081,6 +1143,17 @@ function failedNormalization(error, model, durationMs, validationFailed) {
     model,
     durationMs,
     output: { title: '', description: '', classKey: '', normalization: '' }
+  };
+}
+
+function failedJsonNormalization(error, model, durationMs, validationFailed, output = null) {
+  return {
+    status: 'failed',
+    validationFailed,
+    error,
+    model,
+    durationMs,
+    output
   };
 }
 
@@ -1231,7 +1304,17 @@ function normalizeBlocks({ imageDescription, analysis }) {
   ].filter(Boolean).join('\n\n').trim();
 }
 
-async function groqText({ apiKey, fetchImpl = fetch, model, promptTemplate, timeoutMs = 3000, outputSchema = null }) {
+async function groqText({
+  apiKey,
+  fetchImpl = fetch,
+  model,
+  promptTemplate,
+  timeoutMs = 3000,
+  outputSchema = null,
+  schemaName = 'inbox_normalization',
+  timeoutMessage = 'groq_inbox_timeout',
+  emptyResponseMessage = 'groq_inbox_empty_response'
+}) {
   if (!apiKey) throw new Error('GROQ_API_KEY is not configured');
   const body = {
     model,
@@ -1245,7 +1328,7 @@ async function groqText({ apiKey, fetchImpl = fetch, model, promptTemplate, time
     body.response_format = {
       type: 'json_schema',
       json_schema: {
-        name: 'inbox_normalization',
+        name: schemaName,
         schema: outputSchema
       }
     };
@@ -1258,11 +1341,11 @@ async function groqText({ apiKey, fetchImpl = fetch, model, promptTemplate, time
     },
     body: JSON.stringify(body),
     timeoutMs,
-    timeoutMessage: 'groq_inbox_timeout',
+    timeoutMessage,
     fetchImpl
   });
   const text = extractChatText(payload);
-  if (!text) throw new Error('groq_inbox_empty_response');
+  if (!text) throw new Error(emptyResponseMessage);
   return text;
 }
 
@@ -1359,7 +1442,9 @@ function codexText({
   timeoutMs = 3000,
   images = [],
   outputSchema = null,
-  normalizerMode = false
+  normalizerMode = false,
+  timeoutMessage = 'codex_inbox_timeout',
+  failureMessage = 'codex_inbox_failed'
 } = {}) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'brai-inbox-ai-'));
   const outputPath = path.join(tmp, 'output.txt');
@@ -1436,7 +1521,7 @@ function codexText({
     }
     const timer = setTimeout(() => {
       killProcessGroup(child);
-      finish(reject, new Error('codex_inbox_timeout'));
+      finish(reject, new Error(timeoutMessage));
     }, timeout);
 
     child.stdin?.on('error', () => {});
@@ -1446,7 +1531,7 @@ function codexText({
     child.once('error', (error) => finish(reject, error));
     child.once('close', (code) => {
       if (code !== 0) {
-        finish(reject, new Error(cleanCodexError(stderr) || 'codex_inbox_failed'));
+        finish(reject, new Error(cleanCodexError(stderr) || failureMessage));
         return;
       }
       try {

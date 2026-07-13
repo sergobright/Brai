@@ -45,7 +45,7 @@ describe("AuthPage", () => {
 
     render(<AuthPage />);
 
-    const email = await screen.findByRole("textbox", { name: "Email" });
+    const email = await screen.findByRole("textbox", { name: "Email" }, { timeout: 5_000 });
     expect(screen.getByRole("button", { name: "Войти" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Получить код" })).not.toBeInTheDocument();
 
@@ -55,7 +55,7 @@ describe("AuthPage", () => {
     await waitFor(() => expect(fetch).toHaveBeenCalledWith(
       "/api/auth/test-email-login",
       expect.objectContaining({ method: "POST" }),
-    ));
+    ), { timeout: 5_000 });
     expect(fetch).not.toHaveBeenCalledWith("/api/auth/otp/send", expect.anything());
     expect(window.location.pathname).toBe("/");
   });

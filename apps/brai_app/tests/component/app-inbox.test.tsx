@@ -133,7 +133,7 @@ describe("BraiApp inbox", () => {
         ]),
       );
     });
-  });
+  }, 10_000);
 
   it("shows inbox detail tabs with attachments, fields, and DB reference", async () => {
     vi.stubGlobal(

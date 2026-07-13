@@ -5,6 +5,7 @@ import { BraiApp } from "@/features/app/BraiApp";
 import { AuthPanel } from "@/features/app/chrome/AppChrome";
 import { FocusSection } from "@/features/app/sections/focus/FocusSection";
 import { BraiApi } from "@/shared/api/braiApi";
+import { setMeta } from "@/shared/storage/db";
 import { pendingEvents, saveGoalCache, saveHistoryCache } from "@/shared/storage/syncStore";
 import { emptyGoal, emptyHistory } from "@/shared/types/timer";
 import { shouldSnapSlidingNumber } from "@/shared/ui/sliding-number";
@@ -51,12 +52,13 @@ describe("BraiApp shell", () => {
 
   it("does not tie cabinet overlays to the legacy native access-name request", async () => {
     stubAndroidCapacitor();
-    cmdPlugin.ensureAccess.mockResolvedValueOnce({ accessGranted: false });
+    cmdPlugin.ensureAccess.mockResolvedValue({ accessGranted: false });
 
     render(<BraiApp />);
 
     await waitFor(() => expect(cmdPlugin.setOverlayEnabled).toHaveBeenCalledWith({ enabled: true }));
-    expect(cmdPlugin.setVoiceOnlyMode).toHaveBeenCalledWith({ enabled: false });
+    await waitFor(() => expect(cmdPlugin.setVoiceOnlyMode).toHaveBeenCalledWith({ enabled: false }));
+    expect(cmdPlugin.setQueuePausedMode).toHaveBeenCalledWith({ enabled: false });
     expect(cmdPlugin.ensureAccess).toHaveBeenCalledWith({ displayName: "Test" });
   });
 
@@ -147,7 +149,12 @@ describe("BraiApp shell", () => {
   });
 
   it("redirects anonymous web users to the standalone auth page without rendering the cabinet shell", async () => {
-    vi.spyOn(BraiApi.prototype, "session").mockResolvedValue({ authenticated: false, user: null });
+    await setMeta("currentUserId", null);
+    let resolveSession!: (session: { authenticated: false; user: null }) => void;
+    const sessionResult = new Promise<{ authenticated: false; user: null }>((resolve) => {
+      resolveSession = resolve;
+    });
+    const sessionSpy = vi.spyOn(BraiApi.prototype, "session").mockReturnValue(sessionResult);
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       const url = requestUrl(input);
       if (url.includes("/auth/session")) {
@@ -166,13 +173,17 @@ describe("BraiApp shell", () => {
     }));
 
     render(<BraiApp />);
-
-    await waitFor(() => expect(window.location.pathname).toBe("/auth"), { timeout: 9_000 });
+    await waitFor(() => expect(sessionSpy).toHaveBeenCalled());
+    await act(async () => {
+      resolveSession({ authenticated: false, user: null });
+      await sessionResult;
+    });
+    await waitFor(() => expect(window.location.pathname).toBe("/auth"));
     expect(document.querySelector("[data-auth-redirect]")).toBeInTheDocument();
     expect(document.querySelector("[data-app-shell]")).not.toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Действия" })).not.toBeInTheDocument();
     expect(screen.queryByRole("textbox", { name: "Email" })).not.toBeInTheDocument();
-  }, 12_000);
+  });
 
   it("shows the production OTP countdown and enables resend after one minute", async () => {
     vi.useFakeTimers();

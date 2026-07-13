@@ -4,6 +4,7 @@ import {
   INBOX_EVENT_TYPES,
   INBOX_STATUSES,
   formatInboxItem,
+  isPostgresInteger,
   normalizeMarkdownSource,
   parseJsonArray,
   parseJsonObject,
@@ -409,7 +410,7 @@ export const inboxEventMethods = {
     }
 
     const clientSequence = Number(rawEvent?.client_sequence);
-    if (!Number.isInteger(clientSequence)) {
+    if (!isPostgresInteger(clientSequence)) {
       this.insertIgnoredInboxEvent({
         eventId,
         deviceId,
