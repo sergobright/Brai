@@ -167,6 +167,20 @@ test("production copy keeps ai_logs only for agents present in the target schema
   );
 });
 
+test("production copy backfills legacy access token expiry before a not-null preview insert", () => {
+  const query = copySourceQuery({
+    sourceSchema: "prod",
+    targetSchema: "preview",
+    table: "brai_cmd_access_tokens",
+    columns: ["id", "expires_at_utc", "created_at_utc"]
+  }).replace(/\s+/g, " ").trim();
+
+  assert.equal(
+    query,
+    'SELECT source_row."id", COALESCE(source_row."expires_at_utc", (source_row."created_at_utc"::timestamptz + interval \'30 days\')::text) AS "expires_at_utc", source_row."created_at_utc" FROM "prod"."brai_cmd_access_tokens" AS source_row'
+  );
+});
+
 test("self-hosted Postgres retry is limited to pooler circuit breaker errors", () => {
   assert.equal(isTransientPostgresConnectionError(new Error("(ECIRCUITBREAKER) too many authentication failures")), true);
   assert.equal(isTransientPostgresConnectionError(new Error("ClientHandler: circuit breaker open for operation: auth_error")), true);

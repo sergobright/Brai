@@ -417,6 +417,16 @@ export async function copySchemaData(pool, { sourceSchema, targetSchema, postSee
 }
 
 export function copySourceQuery({ sourceSchema, targetSchema, table, columns }) {
+  if (table === "brai_cmd_access_tokens"
+    && columns.includes("expires_at_utc")
+    && columns.includes("created_at_utc")) {
+    return `
+        SELECT ${columns.map((column) => column === "expires_at_utc"
+          ? `COALESCE(source_row.${quoteIdentifier(column)}, (source_row.${quoteIdentifier("created_at_utc")}::timestamptz + interval '30 days')::text) AS ${quoteIdentifier(column)}`
+          : `source_row.${quoteIdentifier(column)}`).join(", ")}
+        FROM ${qualifiedTable(sourceSchema, table)} AS source_row
+    `;
+  }
   if (table !== "ai_logs" || !columns.includes("agent_id")) {
     return `
         SELECT ${columns.map(quoteIdentifier).join(", ")}
