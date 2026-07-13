@@ -401,8 +401,18 @@ function MainPage({
 
 function ProviderPage({ capability, snapshot, onBack, onSnapshot }: { capability: BraiCmdProviderCapability; snapshot: BraiCmdSnapshot; onBack: () => void; onSnapshot: (snapshot: BraiCmdSnapshot) => void }) {
   const speech = capability === "speech";
+  const accountCredentialsActive = snapshot.accountCredentialsActive === true;
+  const availableProviders = speech ? SPEECH_PROVIDERS : PROVIDERS;
+  const accountProviderIds = new Set(snapshot.settings.providerProfiles
+    .filter((profile) => profile.configured)
+    .map((profile) => profile.providerId));
+  const providers = accountCredentialsActive
+    ? availableProviders.filter((provider) => accountProviderIds.has(provider.id))
+    : availableProviders;
+  const storedProviderId = speech ? snapshot.settings.transcriptionProviderId : snapshot.settings.providerId;
   const [mode, setMode] = useState<BraiCmdProviderMode>(speech ? snapshot.settings.transcriptionMode : snapshot.settings.providerMode);
-  const [providerId, setProviderId] = useState<BraiCmdProviderId>(speech ? snapshot.settings.transcriptionProviderId : snapshot.settings.providerId);
+  const [providerId, setProviderId] = useState<BraiCmdProviderId>(() =>
+    providers.some((provider) => provider.id === storedProviderId) ? storedProviderId : providers[0]?.id ?? storedProviderId);
   const [baseUrl, setBaseUrl] = useState(snapshot.settings.providerBaseUrl);
   const [apiKey, setApiKey] = useState("");
   const [model, setModel] = useState(speech ? snapshot.settings.transcriptionModel : snapshot.settings.providerModel);
@@ -412,7 +422,6 @@ function ProviderPage({ capability, snapshot, onBack, onSnapshot }: { capability
   const [testing, setTesting] = useState(false);
   const [result, setResult] = useState<BraiCmdProviderConnectResult | null>(null);
   const providerRequestRef = useRef(0);
-  const providers = speech ? SPEECH_PROVIDERS : PROVIDERS;
   const hasProfile = snapshot.settings.providerProfiles.some((profile) => profile.providerId === providerId && profile.configured);
 
   async function saveCloud() {
@@ -484,7 +493,12 @@ function ProviderPage({ capability, snapshot, onBack, onSnapshot }: { capability
         <CardContent>
           <ChoiceRadioGroup value={mode} onValueChange={chooseMode}>
             <ChoiceRadio id="brai-cmd-provider-cloud" text={speech ? "Распознавание на серверах Brai." : "Постобработка на серверах Brai."} title="Облако Brai" value="cloud" />
-            <ChoiceRadio id="brai-cmd-provider-key" text="Ваш ключ и выбранная модель." title="Свой API-ключ" value="key" />
+            <ChoiceRadio
+              id="brai-cmd-provider-key"
+              text={accountCredentialsActive ? "Ключ аккаунта и локально выбранная модель." : "Ваш ключ и выбранная модель."}
+              title={accountCredentialsActive ? "Ключ аккаунта" : "Свой API-ключ"}
+              value="key"
+            />
           </ChoiceRadioGroup>
         </CardContent>
       </Card>
@@ -503,10 +517,18 @@ function ProviderPage({ capability, snapshot, onBack, onSnapshot }: { capability
       ) : (
         <Card>
           <CardHeader>
-            <CardTitle>Ключ поставщика</CardTitle>
+            <CardTitle>{accountCredentialsActive ? "Ключ поставщика в аккаунте" : "Ключ поставщика"}</CardTitle>
           </CardHeader>
           <CardContent>
             <FieldGroup className="gap-4">
+              {accountCredentialsActive ? (
+                <p className="m-0 text-sm text-muted-foreground">
+                  Ключи добавляются, заменяются и удаляются в Общих настройках → Модели. Здесь сохраняется только модель для этого устройства.
+                </p>
+              ) : null}
+              {accountCredentialsActive && providers.length === 0 ? (
+                <p className="m-0 text-sm text-destructive">Сначала подключите подходящий ключ в Общих настройках → Модели.</p>
+              ) : null}
               <Field>
                 <FieldLabel htmlFor="brai-cmd-provider-id">Поставщик</FieldLabel>
                 <Select value={providerId} onValueChange={(value) => { providerRequestRef.current += 1; setTesting(false); setProviderId(value as BraiCmdProviderId); setVerified(false); setResult(null); setModel(""); }}>
@@ -514,18 +536,20 @@ function ProviderPage({ capability, snapshot, onBack, onSnapshot }: { capability
                   <SelectContent>{providers.map((provider) => <SelectItem key={provider.id} value={provider.id}>{provider.label}</SelectItem>)}</SelectContent>
                 </Select>
               </Field>
-              {providerId === "custom-openai" ? (
+              {!accountCredentialsActive && providerId === "custom-openai" ? (
                 <Field>
                   <FieldLabel htmlFor="brai-cmd-provider-base-url">Base URL</FieldLabel>
                   <Input id="brai-cmd-provider-base-url" placeholder="https://example.com/v1" value={baseUrl} onChange={(event) => { providerRequestRef.current += 1; setTesting(false); setBaseUrl(event.target.value); setVerified(false); setResult(null); }} />
                 </Field>
               ) : null}
-              <Field>
-                <FieldLabel htmlFor="brai-cmd-provider-key">API ключ</FieldLabel>
-                <Input id="brai-cmd-provider-key" autoComplete="off" placeholder={hasProfile ? "Ключ сохранён; оставьте пустым, чтобы использовать его" : "API-ключ"} type="password" value={apiKey} onChange={(event) => { providerRequestRef.current += 1; setTesting(false); setApiKey(event.target.value); setVerified(false); setResult(null); }} />
-              </Field>
+              {!accountCredentialsActive ? (
+                <Field>
+                  <FieldLabel htmlFor="brai-cmd-provider-key">API ключ</FieldLabel>
+                  <Input id="brai-cmd-provider-key" autoComplete="off" placeholder={hasProfile ? "Ключ сохранён; оставьте пустым, чтобы использовать его" : "API-ключ"} type="password" value={apiKey} onChange={(event) => { providerRequestRef.current += 1; setTesting(false); setApiKey(event.target.value); setVerified(false); setResult(null); }} />
+                </Field>
+              ) : null}
               {!verified ? (
-                <Button className="w-full sm:w-fit" disabled={testing} type="button" onClick={() => void probeProvider()}>
+                <Button className="w-full sm:w-fit" disabled={testing || providers.length === 0} type="button" onClick={() => void probeProvider()}>
                   {testing ? "Проверка" : "Проверить подключение"}
                 </Button>
               ) : models.length > 0 ? (
@@ -543,7 +567,7 @@ function ProviderPage({ capability, snapshot, onBack, onSnapshot }: { capability
                 </Field>
               ) : null}
               {verified ? <Button className="w-full sm:w-fit" disabled={testing || model.trim().length === 0} type="button" onClick={() => void connectProvider()}>{testing ? "Проверка модели" : "Подключить"}</Button> : null}
-              {hasProfile ? <Button className="w-full sm:w-fit" type="button" variant="destructive" onClick={() => void disconnectProvider()}>Отключить поставщика</Button> : null}
+              {!accountCredentialsActive && hasProfile ? <Button className="w-full sm:w-fit" type="button" variant="destructive" onClick={() => void disconnectProvider()}>Отключить поставщика</Button> : null}
               {result ? <ProviderResultAlert result={result} successTitle={result.state ? "Подключено" : "Проверка пройдена"} /> : null}
             </FieldGroup>
           </CardContent>

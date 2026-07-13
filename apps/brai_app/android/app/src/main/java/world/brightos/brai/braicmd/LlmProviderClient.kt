@@ -80,17 +80,34 @@ internal class LlmProviderClient @JvmOverloads constructor(
         val secure = SecureStringStore(appContext)
         secure.migrateLegacyProviderKey(config.llmProviderId)
         val apiKey = secure.providerKey(config.llmProviderId)
-        val providerId = cleanProvider(config.llmProviderId)
-        val model = config.llmProviderModel
+        return postProcess(
+            sourceText,
+            prompt,
+            config.llmProviderId,
+            apiKey,
+            config.llmProviderModel,
+            config.llmProviderBaseUrl
+        )
+    }
+
+    fun postProcess(
+        sourceText: String,
+        prompt: String,
+        providerId: String,
+        apiKey: String,
+        model: String,
+        baseUrl: String
+    ): LlmProviderResult {
+        val cleanProviderId = cleanProvider(providerId)
         if (apiKey.isBlank() || model.isBlank()) throw IllegalStateException("llm_provider_not_configured")
         val cleanPrompt = prompt.trim()
         val cleanText = sourceText.trim()
-        if (cleanText.isBlank()) return LlmProviderResult("", providerId, model, 0, 0)
+        if (cleanText.isBlank()) return LlmProviderResult("", cleanProviderId, model, 0, 0)
         val result = complete(
-            providerId = providerId,
+            providerId = cleanProviderId,
             apiKey = apiKey,
             model = model,
-            baseUrl = config.llmProviderBaseUrl,
+            baseUrl = baseUrl,
             system = "You post-process speech transcripts. Follow the user's editing instruction, preserve the original meaning and language unless explicitly asked otherwise, and return only the final text.",
             user = "Instruction:\n$cleanPrompt\n\nTranscript:\n$cleanText",
             maxTokens = 4096
@@ -103,7 +120,7 @@ internal class LlmProviderClient @JvmOverloads constructor(
             "openai" -> "${endpoint("openai", "https://api.openai.com/v1")}/models"
             "groq" -> "${endpoint("groq", "https://api.groq.com/openai/v1")}/models"
             "openrouter" -> "${endpoint("openrouter", "https://openrouter.ai/api/v1")}/models"
-            "gemini" -> "https://generativelanguage.googleapis.com/v1beta/models?key=${urlEncode(apiKey)}"
+            "gemini" -> "${endpoint("gemini", "https://generativelanguage.googleapis.com/v1beta")}/models"
             "custom-openai" -> "${openAiBaseUrl(baseUrl)}/models"
             else -> error("unsupported_provider")
         }
@@ -112,7 +129,8 @@ internal class LlmProviderClient @JvmOverloads constructor(
             connectTimeout = 15_000
             readTimeout = 45_000
             setRequestProperty("Accept", "application/json")
-            if (providerId != "gemini") setRequestProperty("Authorization", "Bearer $apiKey")
+            if (providerId == "gemini") setRequestProperty("X-Goog-Api-Key", apiKey)
+            else setRequestProperty("Authorization", "Bearer $apiKey")
         }
         val json = readJson(connection)
         return if (providerId == "gemini") {
@@ -143,7 +161,7 @@ internal class LlmProviderClient @JvmOverloads constructor(
         maxTokens: Int
     ): LlmProviderResult {
         if (providerId == "gemini") {
-            val url = "https://generativelanguage.googleapis.com/v1beta/models/${urlEncode(model)}:generateContent?key=${urlEncode(apiKey)}"
+            val url = "${endpoint("gemini", "https://generativelanguage.googleapis.com/v1beta")}/models/${urlEncode(model)}:generateContent"
             val body = JSONObject()
                 .put("contents", JSONArray().put(JSONObject()
                     .put("role", "user")
@@ -151,7 +169,7 @@ internal class LlmProviderClient @JvmOverloads constructor(
                 .put("generationConfig", JSONObject()
                     .put("temperature", 0)
                     .put("maxOutputTokens", maxTokens.coerceIn(16, 8192)))
-            val json = postJson(url, body, null)
+            val json = postJson(url, body, apiKey, googleApiKey = true)
             val text = json.optJSONArray("candidates")
                 ?.optJSONObject(0)
                 ?.optJSONObject("content")
@@ -187,7 +205,7 @@ internal class LlmProviderClient @JvmOverloads constructor(
         return LlmProviderResult(text, providerId, model, 0, text.length)
     }
 
-    private fun postJson(url: String, body: JSONObject, apiKey: String?): JSONObject {
+    private fun postJson(url: String, body: JSONObject, apiKey: String?, googleApiKey: Boolean = false): JSONObject {
         val connection = (URL(url).openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
             doOutput = true
@@ -195,7 +213,10 @@ internal class LlmProviderClient @JvmOverloads constructor(
             readTimeout = 60_000
             setRequestProperty("Content-Type", "application/json; charset=utf-8")
             setRequestProperty("Accept", "application/json")
-            if (!apiKey.isNullOrBlank()) setRequestProperty("Authorization", "Bearer $apiKey")
+            if (!apiKey.isNullOrBlank()) {
+                if (googleApiKey) setRequestProperty("X-Goog-Api-Key", apiKey)
+                else setRequestProperty("Authorization", "Bearer $apiKey")
+            }
         }
         BufferedOutputStream(connection.outputStream).use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
         return readJson(connection)

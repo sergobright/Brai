@@ -10,9 +10,12 @@ import type { InboxState, InboxSyncResponse, InboxWorkflowDetails, PendingInboxE
 
 interface RequestOptions extends RequestInit {
   json?: unknown;
+  timeoutMs?: number;
 }
 
 const REQUEST_TIMEOUT_MS = 8_000;
+const PROVIDER_READ_TIMEOUT_MS = 20_000;
+const PROVIDER_MUTATION_TIMEOUT_MS = 55_000;
 
 export type AuthUser = {
   id: string;
@@ -27,7 +30,7 @@ export type AuthSession = {
 
 export type BraiCmdDeviceToken = {
   token: string;
-  status: "active";
+  status: "pending";
 };
 
 export type AuthOnboardingContext = {
@@ -110,30 +113,41 @@ export type TechnicalLog = {
 
 export type ModelProviderMode = "internal" | "external";
 
+export type AiProviderId = "openai" | "groq" | "openrouter" | "gemini";
+
+export type AiCapability = "text" | "vision";
+
+export type AiProfile = {
+  provider_id: AiProviderId;
+  model: string;
+};
+
+export type AiSettings = {
+  model_provider_mode: ModelProviderMode;
+  text: AiProfile | null;
+  vision: AiProfile | null;
+};
+
+export type AiProviderCredential = {
+  provider_id: AiProviderId;
+  key_hint: string;
+  verified_at_utc: string;
+  updated_at_utc: string;
+  in_use_by: string[];
+};
+
+export type AiModel = {
+  id: string;
+  name?: string;
+  capabilities: string[];
+};
+
 export type AppSettings = {
   display_timezone: string;
-  model_provider_mode: ModelProviderMode;
-  inbox_text_provider: "groq";
-  inbox_text_model: string;
-  inbox_image_provider: "openai";
-  inbox_image_model: string;
-  external_ai: {
-    groq_configured: boolean;
-    openai_configured: boolean;
-  };
 };
 
 export const DEFAULT_APP_SETTINGS: AppSettings = {
   display_timezone: "Europe/Moscow",
-  model_provider_mode: "internal",
-  inbox_text_provider: "groq",
-  inbox_text_model: "openai/gpt-oss-120b",
-  inbox_image_provider: "openai",
-  inbox_image_model: "gpt-4.1-mini",
-  external_ai: {
-    groq_configured: false,
-    openai_configured: false,
-  },
 };
 
 export type DrawSceneSummary = {
@@ -148,6 +162,7 @@ export type DrawScene = DrawSceneSummary & {
 };
 
 export type BraiApiError = Error & {
+  code?: string;
   status?: number;
 };
 
@@ -249,6 +264,41 @@ export class BraiApi {
     return this.request("/v1/settings");
   }
 
+  async aiProviders(): Promise<{ providers: AiProviderCredential[] }> {
+    return this.request("/v1/ai/providers");
+  }
+
+  async saveAiProvider(providerId: AiProviderId, apiKey: string): Promise<void> {
+    await this.request(`/v1/ai/providers/${encodeURIComponent(providerId)}`, {
+      method: "PUT",
+      json: { api_key: apiKey },
+      timeoutMs: PROVIDER_MUTATION_TIMEOUT_MS,
+    });
+  }
+
+  async deleteAiProvider(providerId: AiProviderId): Promise<void> {
+    await this.request(`/v1/ai/providers/${encodeURIComponent(providerId)}`, { method: "DELETE" });
+  }
+
+  async aiModels(providerId: AiProviderId, capability: AiCapability): Promise<{ models: AiModel[] }> {
+    return this.request(
+      `/v1/ai/providers/${encodeURIComponent(providerId)}/models?capability=${encodeURIComponent(capability)}`,
+      { timeoutMs: PROVIDER_READ_TIMEOUT_MS },
+    );
+  }
+
+  async aiSettings(): Promise<AiSettings> {
+    return this.request("/v1/ai/settings");
+  }
+
+  async updateAiSettings(settings: AiSettings): Promise<AiSettings> {
+    return this.request("/v1/ai/settings", {
+      method: "PATCH",
+      json: settings,
+      timeoutMs: PROVIDER_MUTATION_TIMEOUT_MS,
+    });
+  }
+
   async braiCmdDeviceToken(device: { deviceId: string; clientVersion?: string; appPackage?: string }): Promise<BraiCmdDeviceToken> {
     return this.request("/v1/brai-cmd/device-token", {
       method: "POST",
@@ -256,7 +306,7 @@ export class BraiApi {
     });
   }
 
-  async updateSettings(patch: Partial<Pick<AppSettings, "display_timezone" | "model_provider_mode" | "inbox_text_model" | "inbox_image_model">>): Promise<AppSettings> {
+  async updateSettings(patch: Partial<Pick<AppSettings, "display_timezone">>): Promise<AppSettings> {
     return this.request("/v1/settings", {
       method: "PATCH",
       json: patch,
@@ -389,34 +439,43 @@ export class BraiApi {
   }
 
   private async request<T>(path: string, options: RequestOptions = {}): Promise<T> {
-    const headers = new Headers(options.headers);
-    if (options.json !== undefined) headers.set("content-type", "application/json");
+    const { json, timeoutMs = REQUEST_TIMEOUT_MS, ...requestOptions } = options;
+    const headers = new Headers(requestOptions.headers);
+    if (json !== undefined) headers.set("content-type", "application/json");
     const controller = new AbortController();
     const abortRequest = () => controller.abort();
-    if (options.signal?.aborted) abortRequest();
-    options.signal?.addEventListener("abort", abortRequest, { once: true });
-    const timeoutId = setTimeout(abortRequest, REQUEST_TIMEOUT_MS);
+    if (requestOptions.signal?.aborted) abortRequest();
+    requestOptions.signal?.addEventListener("abort", abortRequest, { once: true });
+    const timeoutId = setTimeout(abortRequest, timeoutMs);
     let response: Response;
 
     try {
       response = await fetch(resolvePath(this.baseUrl, path), {
-        ...options,
+        ...requestOptions,
         headers,
         credentials: "include",
         signal: controller.signal,
-        body: options.json === undefined ? options.body : JSON.stringify(options.json),
+        body: json === undefined ? requestOptions.body : JSON.stringify(json),
       });
     } finally {
       clearTimeout(timeoutId);
-      options.signal?.removeEventListener("abort", abortRequest);
+      requestOptions.signal?.removeEventListener("abort", abortRequest);
     }
 
     if (!response.ok) {
       const error = new Error(`brai_api_${response.status}`) as BraiApiError;
+      try {
+        const payload = await response.json() as { error?: unknown };
+        if (typeof payload.error === "string") error.code = payload.error;
+      } catch {
+        // The status remains enough when an upstream proxy returns a non-JSON error page.
+      }
       error.name = response.status === 401 ? "UnauthorizedError" : "BraiApiError";
       error.status = response.status;
       throw error;
     }
+
+    if (response.status === 204) return undefined as T;
 
     return (await response.json()) as T;
   }

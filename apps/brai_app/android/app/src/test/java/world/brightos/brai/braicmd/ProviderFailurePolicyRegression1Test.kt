@@ -24,6 +24,7 @@ class ProviderFailurePolicyRegression1Test {
     fun resetState() {
         listOf("pending-recordings", "failed-recordings").forEach { File(context.filesDir, it).deleteRecursively() }
         context.getSharedPreferences(AppConstants.PREFS, 0).edit().clear().commit()
+        context.getSharedPreferences("brai_cmd_secure", 0).edit().clear().commit()
         ConfigStore(context).transcriptionProviderMode = "key"
     }
 
@@ -59,5 +60,6 @@ class ProviderFailurePolicyRegression1Test {
     private fun queuedAudio(name: String): File = recordings.resolve("$name.m4a").apply {
         parentFile?.mkdirs()
         writeBytes(ByteArray(1_024) { 1 })
+        QueueOwnerStore.claim(this, QueueOwnerStore.current(context))
     }
 }

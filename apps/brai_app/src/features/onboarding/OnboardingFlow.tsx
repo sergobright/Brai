@@ -453,7 +453,7 @@ export function OnboardingFlow({
     await setBraiCmdQueuePausedMode(false);
     if (authRequired) {
       await Promise.all([
-        setBraiCmdAccessKey("", ""),
+        setBraiCmdAccessKey("", "", ""),
         setBraiCmdOverlayEnabled(false),
         setBraiCmdVoiceOnlyMode(false),
       ]);
@@ -610,7 +610,7 @@ export function OnboardingFlow({
       setError("Введите полный ключ доступа.");
       return;
     }
-    await setBraiCmdAccessKey(key.trim(), state.name.trim());
+    await setBraiCmdAccessKey(key.trim(), state.name.trim(), "");
     go("setup-start");
   }
 

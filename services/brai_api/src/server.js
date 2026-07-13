@@ -26,10 +26,16 @@ import {
 import { sendReleaseLoginPage, serveRelease } from './release-routes.js';
 import { BraiStore, formatFocusInterval, formatSession } from './store.js';
 import { scopedUserId, withUserScope } from './user-scope.js';
+import {
+  handleNativeProviderSync,
+  handleUserAiRoute,
+  isNativeProviderSyncRoute,
+  isUserAiRoute
+} from './user-ai-routes.js';
 
 const BASE_JSON_HEADERS = {
   'content-type': 'application/json; charset=utf-8',
-  'access-control-allow-methods': 'GET,POST,OPTIONS',
+  'access-control-allow-methods': 'GET,POST,PUT,PATCH,DELETE,OPTIONS',
   'access-control-allow-headers': 'authorization,content-type,x-api-key,x-brai-api-key,x-brai-target,x-brai-destination,x-brai-cmd-device-id,x-brai-cmd-client-version,x-airwhisper-device-id,x-airwhisper-client-version',
   'access-control-allow-credentials': 'true'
 };
@@ -41,6 +47,8 @@ const DRAW_SCENE_LIMIT_BYTES = 15 * 1024 * 1024;
 const BRAI_CMD_FUNCTION_DISABLED_CODE = 'function_disabled';
 const BRAI_CMD_FUNCTION_DISABLED_MESSAGE_KEY = 'message.function.disabled.default';
 const BRAI_CMD_CHAT_PREFIX = 'Добавить в контекст контакта';
+const BRAI_CMD_ACCOUNT_ACTIVATE_PATH = '/v1/brai-cmd/account-access/activate';
+const BRAI_CMD_ACCESS_REVOKE_PATH = '/v1/brai-cmd/access/revoke-self';
 
 export function createBraiServer({
   databaseUrl,
@@ -66,6 +74,8 @@ export function createBraiServer({
   codexModel = null,
   codexFallbackModel = null,
   codexTimeoutMs = null,
+  userAiEncryptionKey = null,
+  userAiFetch = fetch,
   inboxExternalAi = {},
   inboxImageDescriber = null,
   inboxNormalizer = null,
@@ -86,6 +96,7 @@ export function createBraiServer({
   fs.mkdirSync(dataRoot, { recursive: true });
   const store = new BraiStore(databaseUrl);
   store.logger = logger;
+  store.configureUserAiEncryptionKey(userAiEncryptionKey);
   const braiCmdRuntime = createBraiCmdRuntime(braiCmd);
   const resolvedVaultRoot =
     typeof vaultRoot === 'string' && vaultRoot.trim()
@@ -129,7 +140,7 @@ export function createBraiServer({
               codexModel,
               codexFallbackModel,
               codexTimeoutMs,
-              externalAi: inboxExternalAi,
+              externalAi: { fetch: userAiFetch },
               imageDescriber: inboxImageDescriber,
               normalizer: inboxNormalizer,
               nowDate: now()
@@ -223,7 +234,7 @@ export function createBraiServer({
               codexModel,
               codexFallbackModel,
               codexTimeoutMs,
-              externalAi: inboxExternalAi,
+              externalAi: { fetch: userAiFetch },
               normalizer: activityNormalizer,
               nowDate: now()
             });
@@ -839,7 +850,7 @@ export function createBraiServer({
           sendBraiCmdFunctionDisabled(req, res, store, sendJson);
           return;
         }
-        const ownerUserId = store.primaryUserId();
+        const ownerUserId = access.userId ?? store.primaryUserId();
         const inboxBody = {
           ...body,
           target: 'inbox',
@@ -856,6 +867,64 @@ export function createBraiServer({
         );
         sendJson(req, res, result.created ? 201 : 200, { ok: true, target: 'inbox', ...result, state, notice });
         if (result.created) processInboxLater({ ownerUserId, inboxId: result.inbox_id });
+        return;
+      }
+
+      if (url.pathname === BRAI_CMD_ACCOUNT_ACTIVATE_PATH) {
+        assertNativeBraiCmdTransport(req);
+        if (req.method !== 'POST') {
+          sendJson(req, res, 405, { error: 'method_not_allowed' });
+          return;
+        }
+        const currentAccess = requireBraiCmdAccess(req, store);
+        const body = await readJson(req, { limit: 4096 });
+        const linkToken = firstTextField(body, ['link_token', 'linkToken']);
+        if (!linkToken) {
+          sendJson(req, res, 400, { error: 'link_token_required' });
+          return;
+        }
+        const issued = store.activateBraiCmdAccountLink({
+          linkToken,
+          currentAccess,
+          nowIso: now().toISOString()
+        });
+        requestUserId = issued.record.userId;
+        sendJson(req, res, 201, {
+          token: issued.token,
+          status: issued.record.status,
+          expires_at_utc: issued.record.expiresAt,
+          account_user_id: issued.record.userId
+        });
+        return;
+      }
+
+      if (url.pathname === BRAI_CMD_ACCESS_REVOKE_PATH) {
+        assertNativeBraiCmdTransport(req);
+        if (req.method !== 'POST') {
+          sendJson(req, res, 405, { error: 'method_not_allowed' });
+          return;
+        }
+        const access = requireBraiCmdAccess(req, store);
+        requestUserId = access.userId;
+        store.revokeBraiCmdToken(access.id);
+        sendJson(req, res, 200, { ok: true, status: 'revoked' });
+        return;
+      }
+
+      if (isNativeProviderSyncRoute(url.pathname)) {
+        assertNativeBraiCmdTransport(req);
+        const access = requireBraiCmdAccess(req, store);
+        requestUserId = access.userId;
+        await withUserScope(access.userId, () => handleNativeProviderSync({
+          req,
+          res,
+          access,
+          store,
+          sendJson,
+          readJson,
+          fetchImpl: userAiFetch,
+          now
+        }));
         return;
       }
 
@@ -912,6 +981,20 @@ export function createBraiServer({
       }
 
       await withUserScope(authContext.userId, async () => {
+      if (isUserAiRoute(url.pathname)) {
+        await handleUserAiRoute({
+          req,
+          res,
+          url,
+          store,
+          sendJson,
+          readJson,
+          fetchImpl: userAiFetch,
+          now
+        });
+        return;
+      }
+
       if (req.method === 'POST' && url.pathname === '/v1/brai-cmd/device-token') {
         const body = await readJson(req, { limit: 16 * 1024 });
         const deviceId = firstTextField(body, ['deviceId', 'device_id']);
@@ -923,15 +1006,19 @@ export function createBraiServer({
           sendJson(req, res, 400, { error: 'invalid_device_id' });
           return;
         }
-        const issued = store.issueBraiCmdAccess({
+        const issued = store.issueBraiCmdAccountLink({
           displayName: authContext.user?.name || authContext.user?.email || 'Brai',
           deviceId,
           userId: authContext.userId,
           clientVersion: firstTextField(body, ['clientVersion', 'client_version']),
           appPackage: firstTextField(body, ['appPackage', 'app_package']),
-          source: 'authenticated'
+          nowIso: now().toISOString()
         });
-        sendJson(req, res, 201, { token: issued.token, status: issued.record.status });
+        sendJson(req, res, 201, {
+          token: issued.token,
+          status: 'pending',
+          expires_at_utc: issued.record.expiresAt
+        });
         return;
       }
 
@@ -1314,9 +1401,8 @@ export function timerState(store, nowDate) {
 }
 
 export function settingsState(store, inboxExternalAi = {}) {
-  const settings = store.appSettings();
   return {
-    ...settings,
+    ...store.appSettings(),
     external_ai: {
       groq_configured: Boolean(inboxExternalAi.groqApiKey),
       openai_configured: Boolean(inboxExternalAi.openaiApiKey)
@@ -1660,6 +1746,18 @@ function requiresTrustedOrigin(req, authContext) {
   return authContext.sessionBased && STATE_CHANGING_METHODS.has(req.method ?? '');
 }
 
+function assertNativeBraiCmdTransport(req) {
+  // Node's native fetch adds Sec-Fetch-Mode alone; browsers also send Site/Dest (and POST Origin).
+  const browserMetadataPresent = Boolean(
+    req.headers?.['sec-fetch-site'] || req.headers?.['sec-fetch-dest'] || req.headers?.['sec-fetch-user']
+  );
+  if (req.headers?.origin || browserMetadataPresent) {
+    const error = new Error('native_transport_required');
+    error.status = 403;
+    throw error;
+  }
+}
+
 function redirect(res, location, extraHeaders = {}) {
   res.writeHead(303, { location, ...extraHeaders });
   res.end();
@@ -1862,7 +1960,7 @@ function createdActivityIds(events) {
 
 async function readJson(req, { limit = 4096 } = {}) {
   const raw = await readRequestBody(req, { limit });
-  return raw ? JSON.parse(raw) : {};
+  return raw ? parseJsonBody(raw) : {};
 }
 
 async function readPassword(req) {
@@ -1872,9 +1970,19 @@ async function readPassword(req) {
     return new URLSearchParams(raw).get('password') ?? '';
   }
   if (contentType.includes('application/json')) {
-    return raw ? JSON.parse(raw).password ?? '' : '';
+    return raw ? parseJsonBody(raw).password ?? '' : '';
   }
   return raw;
+}
+
+function parseJsonBody(raw) {
+  try {
+    return JSON.parse(raw);
+  } catch {
+    const error = new Error('invalid_json');
+    error.status = 400;
+    throw error;
+  }
 }
 
 async function readRequestBody(req, { limit = 4096 } = {}) {

@@ -1,6 +1,7 @@
 package world.brightos.brai.braicmd
 
 import java.io.File
+import javax.crypto.spec.SecretKeySpec
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -25,8 +26,12 @@ class BraiCmdQueueTest {
             "pending-screenshot-inbox",
             "pending-transcripts",
             "failed-recordings",
-            "failed-screenshot-inbox"
+            "failed-screenshot-inbox",
+            "failed-transcripts"
         ).forEach { File(context.filesDir, it).deleteRecursively() }
+        context.getSharedPreferences(AppConstants.PREFS, 0).edit().clear().commit()
+        context.getSharedPreferences("brai_cmd_secure", 0).edit().clear().commit()
+        BraiCmdRuntimeState.onboardingQueuePaused = false
     }
 
     @Test
@@ -42,6 +47,7 @@ class BraiCmdQueueTest {
         recordings.mkdirs()
         actions.forEachIndexed { index, action ->
             val audio = recordings.resolve("audio-$index.m4a").apply { writeBytes(byteArrayOf(1)) }
+            QueueOwnerStore.claim(audio, QueueOwnerStore.current(context))
             InboxPayloadStore.saveAction(audio, action)
         }
         val screenshot = File(context.cacheDir, "snapshot-${System.nanoTime()}.png").apply { writeBytes(byteArrayOf(1)) }
@@ -233,6 +239,175 @@ class BraiCmdQueueTest {
         ).forEach { assertFalse(File("${audio.absolutePath}$it").exists()) }
     }
 
+    @Test
+    fun accountSwitchProcessesOnlyCurrentOwnerAndKeepsOtherItemsForTheirAccount() {
+        val config = ConfigStore(context).apply {
+            beginAccountCredentialMode("account-a")
+            transcriptionProviderMode = "key"
+        }
+        val accountA = audio("account-a")
+        config.beginAccountCredentialMode("account-b")
+        val accountB = audio("account-b")
+        val calls = mutableListOf<String>()
+        val transcriber: (File) -> SpeechProviderResult = { file ->
+            calls += file.name
+            SpeechProviderResult("text-${file.name}", "openai", "speech-model")
+        }
+
+        val underB = QueueTransportWorker(context, transcriber).run(null)
+
+        assertEquals(QueueTransportStatus.Drained, underB.status)
+        assertEquals(listOf(accountB.name), calls)
+        assertTrue(accountA.isFile)
+        assertFalse(accountB.exists())
+        assertEquals(0, BraiCmdQueue.snapshot(context).transport.total)
+        assertEquals(listOf("text-${accountB.name}"), PendingTranscriptStore.list(context).map { it.text })
+
+        config.beginAccountCredentialMode("account-a")
+        assertEquals(1, BraiCmdQueue.snapshot(context).transport.total)
+        assertTrue(PendingTranscriptStore.list(context).isEmpty())
+        val underA = QueueTransportWorker(context, transcriber).run(null)
+
+        assertEquals(QueueTransportStatus.Drained, underA.status)
+        assertEquals(listOf(accountB.name, accountA.name), calls)
+        assertFalse(accountA.exists())
+        assertEquals(listOf("text-${accountA.name}"), PendingTranscriptStore.list(context).map { it.text })
+
+        config.beginAccountCredentialMode("account-b")
+        assertEquals(listOf("text-${accountB.name}"), PendingTranscriptStore.list(context).map { it.text })
+    }
+
+    @Test
+    fun legacyUnownedAudioIsQuarantinedWithoutCallingAnyProvider() {
+        ConfigStore(context).transcriptionProviderMode = "key"
+        recordings.mkdirs()
+        val legacy = recordings.resolve("legacy.m4a").apply { writeBytes(ByteArray(1_024) { 1 }) }
+        var calls = 0
+
+        val result = QueueTransportWorker(context, {
+            calls += 1
+            SpeechProviderResult("unexpected", "openai", "speech-model")
+        }).run(null)
+
+        assertEquals(QueueTransportStatus.Drained, result.status)
+        assertEquals(0, calls)
+        assertFalse(legacy.exists())
+        assertTrue(File(context.filesDir, "failed-recordings/legacy.m4a").isFile)
+        assertTrue(result.permanentFailureMessage.orEmpty().contains("владелец"))
+    }
+
+    @Test
+    fun legacyUnownedScreenshotIsQuarantinedWithoutTransport() {
+        val queue = File(context.filesDir, "pending-screenshot-inbox").apply { mkdirs() }
+        val legacy = queue.resolve("legacy.png").apply { writeBytes(byteArrayOf(1, 2, 3)) }
+
+        val result = QueueTransportWorker(context).run(null)
+
+        assertEquals(QueueTransportStatus.Drained, result.status)
+        assertFalse(legacy.exists())
+        assertTrue(File(context.filesDir, "failed-screenshot-inbox/legacy.png").isFile)
+    }
+
+    @Test
+    fun anonymousItemWaitsAcrossLoginAndResumesOnlyAfterReturningToAnonymousScope() {
+        val config = ConfigStore(context).apply { transcriptionProviderMode = "key" }
+        val anonymous = audio("anonymous")
+        config.beginAccountCredentialMode("account-a")
+        var calls = 0
+        val transcriber: (File) -> SpeechProviderResult = {
+            calls += 1
+            SpeechProviderResult("anonymous-text", "openai", "speech-model")
+        }
+
+        assertEquals(QueueTransportStatus.Drained, QueueTransportWorker(context, transcriber).run(null).status)
+        assertEquals(0, calls)
+        assertTrue(anonymous.isFile)
+
+        config.updateAccess("", "")
+        assertEquals(QueueTransportStatus.Drained, QueueTransportWorker(context, transcriber).run(null).status)
+        assertEquals(1, calls)
+        assertFalse(anonymous.exists())
+        assertEquals(listOf("anonymous-text"), PendingTranscriptStore.list(context).map { it.text })
+    }
+
+    @Test
+    fun accountSwitchDuringProviderCallLeavesAudioAndOwnerScopedResultPending() {
+        val config = ConfigStore(context).apply {
+            beginAccountCredentialMode("account-a")
+            transcriptionProviderMode = "key"
+        }
+        val audio = audio("switch-during-call")
+
+        val result = QueueTransportWorker(context, {
+            config.beginAccountCredentialMode("account-b")
+            SpeechProviderResult("paid-result", "openai", "speech-model")
+        }).run(null)
+
+        assertEquals(QueueTransportStatus.Superseded, result.status)
+        assertTrue(audio.isFile)
+        assertTrue(PendingTranscriptStore.list(context).isEmpty())
+        config.beginAccountCredentialMode("account-a")
+        assertTrue(PendingTranscriptStore.list(context).isEmpty())
+    }
+
+    @Test
+    fun serviceSupersedesACompletedFailureWhenAccountChangedDuringProviderCall() {
+        val accountA = QueueOwnerScope.create("account-a", "install")
+        val accountB = QueueOwnerScope.create("account-b", "install")
+        val failed = QueueTransportResult(
+            status = QueueTransportStatus.Blocked,
+            ownerId = accountA.ownerId,
+            failure = ProviderResponseException(401, "provider"),
+            failedTransportIds = setOf("audio:a.m4a")
+        )
+
+        val effective = effectiveTransportForCurrentOwner(failed, accountB.ownerId)
+
+        assertEquals(QueueTransportStatus.Superseded, effective.status)
+        assertTrue(effective.failure is QueueOwnerBlockedException)
+        assertTrue(effective.failedTransportIds.isEmpty())
+    }
+
+    @Test
+    fun pendingRecordingCountIsScopedToCurrentAccount() {
+        val config = ConfigStore(context)
+        config.beginAccountCredentialMode("account-a")
+        audio("account-a-pending")
+
+        config.beginAccountCredentialMode("account-b")
+        assertFalse(RecordingService.hasPendingRecordings(context))
+        assertEquals(0, RecordingService.pendingRecordingsCount(context))
+        audio("account-b-pending")
+        assertTrue(RecordingService.hasPendingRecordings(context))
+        assertEquals(1, RecordingService.pendingRecordingsCount(context))
+    }
+
+    @Test
+    fun executionSnapshotKeepsOriginalAccountTokenAndProviderKeys() {
+        val secure = SecureStringStore(context, SecretKeySpec(ByteArray(32) { (it + 19).toByte() }, "AES"))
+        val config = ConfigStore(context, secure).apply {
+            transcriptionProviderMode = "key"
+            transcriptionProviderId = "openai"
+            postProcessingProviderMode = "key"
+            llmProviderId = "openai"
+            updateAccess("token-a", "account-a")
+        }
+        secure.writeAccountProviderKey("account-a", "openai", "key-a")
+
+        val snapshot = captureQueueExecutionContext(context, config, secure)
+        config.updateAccess("token-b", "account-b")
+        secure.writeAccountProviderKey("account-b", "openai", "key-b")
+
+        assertEquals("account-a", snapshot.owner.accountUserId)
+        assertEquals("token-a", snapshot.accessToken)
+        assertEquals("key-a", snapshot.transcriptionApiKey)
+        assertEquals("key-a", snapshot.postProcessingApiKey)
+    }
+
     private fun audio(name: String): File =
-        recordings.resolve("$name.m4a").apply { writeBytes(byteArrayOf(1)) }
+        recordings.resolve("$name.m4a").apply {
+            parentFile?.mkdirs()
+            writeBytes(ByteArray(1_024) { 1 })
+            QueueOwnerStore.claim(this, QueueOwnerStore.current(context))
+        }
 }

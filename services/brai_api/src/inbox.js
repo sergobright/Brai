@@ -4,19 +4,15 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { TextDecoder } from 'node:util';
-import {
-  DEFAULT_INBOX_IMAGE_MODEL,
-  DEFAULT_INBOX_TEXT_MODEL
-} from './store-app-settings.js';
 import { INBOX_WORKFLOW_DEFINITION_VERSION } from './store-workflows.js';
 import { scopedUserId } from './user-scope.js';
+import { completeStructuredText, describeImage } from './user-ai-providers.js';
+import { resolveUserAiExecution } from './user-ai-runtime.js';
 
 export const INBOX_BODY_LIMIT_BYTES = 16 * 1024 * 1024;
 export const DEFAULT_INBOX_CODEX_BIN = '/srv/opt/codex-cli/bin/codex';
 export const DEFAULT_INBOX_CODEX_MODEL = 'gpt-5.4-mini';
 
-const GROQ_CHAT_COMPLETIONS_URL = 'https://api.groq.com/openai/v1/chat/completions';
-const OPENAI_RESPONSES_URL = 'https://api.openai.com/v1/responses';
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 const PDF_SIGNATURE = Buffer.from('%PDF-');
 const MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024;
@@ -77,6 +73,25 @@ const DEFAULT_NORMALIZER_CODEX_INSTRUCTIONS = [
   "Follow the user's task exactly and return one JSON object matching the provided output schema.",
   'Do not use tools, browse, inspect files, or add commentary.'
 ].join(' ');
+const DEFAULT_IMAGE_CODEX_INSTRUCTIONS = [
+  'You are a deterministic image describer.',
+  'Use only the supplied images and user prompt.',
+  'Do not use tools, browse, inspect files, or add commentary.'
+].join(' ');
+const CODEX_CHILD_ENV_KEYS = [
+  'CODEX_HOME',
+  'HOME',
+  'LANG',
+  'LC_ALL',
+  'LC_CTYPE',
+  'NO_COLOR',
+  'PATH',
+  'SSL_CERT_DIR',
+  'SSL_CERT_FILE',
+  'TERM',
+  'TMPDIR',
+  'TZ'
+];
 
 export function inboxRequestTarget(req, body = {}) {
   const target = inboxTarget(body?.target ?? body?.destination)
@@ -559,12 +574,12 @@ export async function describeInboxImagesForWorkflow({
   if (!active) return { ok: false, error: 'workflow_not_active' };
   const agent = store.getAgent(INBOX_IMAGE_AGENT_ID);
   const result = await describeImages({
+    store,
     agent,
-    settings: store.appSettings?.(),
     codexBin,
     codexModel,
     codexTimeoutMs,
-    externalAi,
+    providerFetch: externalAi?.fetch,
     imageDescriber,
     imagePaths
   });
@@ -577,6 +592,8 @@ export async function describeInboxImagesForWorkflow({
     imageDescription: result.text,
     error: result.error,
     model: result.model,
+    mode: result.mode,
+    provider: result.provider,
     durationMs: result.durationMs,
     workflowId,
     runId,
@@ -592,7 +609,12 @@ export async function describeInboxImagesForWorkflow({
     errorCode: result.error || null,
     errorSummary: result.error || null,
     nowIso: nowDate.toISOString(),
-    metadataJson: { model: result.model, duration_ms: result.durationMs }
+    metadataJson: {
+      mode: result.mode,
+      provider: result.provider,
+      model: result.model,
+      duration_ms: result.durationMs
+    }
   });
   return result.status === 'done'
     ? { ok: true, imageDescription: result.text }
@@ -636,12 +658,12 @@ export async function normalizeInboxRawForWorkflow({
   }
   const agent = store.getAgent(INBOX_NORMALIZER_AGENT_ID);
   const result = await normalizeInbox({
+    store,
     agent,
-    settings: store.appSettings?.(),
     codexBin,
     codexModel,
     codexTimeoutMs,
-    externalAi,
+    providerFetch: externalAi?.fetch,
     normalizer,
     item,
     classes,
@@ -661,6 +683,8 @@ export async function normalizeInboxRawForWorkflow({
     output: result.status === 'done' ? result : result.output,
     error: result.error,
     model: result.model,
+    mode: result.mode,
+    provider: result.provider,
     durationMs: result.durationMs,
     workflowId,
     runId,
@@ -679,6 +703,8 @@ export async function normalizeInboxRawForWorkflow({
     nowIso: nowDate.toISOString(),
     metadataJson: {
       model: result.model,
+      mode: result.mode,
+      provider: result.provider,
       duration_ms: result.durationMs,
       validation_failed: result.validationFailed === true
     }
@@ -935,24 +961,27 @@ function throwStatus(message, status) {
   throw error;
 }
 
-async function describeImages({ agent, settings, codexBin, codexModel, codexTimeoutMs, externalAi, imageDescriber, imagePaths }) {
+async function describeImages({ store, agent, codexBin, codexModel, codexTimeoutMs, providerFetch, imageDescriber, imagePaths }) {
   const startedAt = Date.now();
-  const external = settings?.model_provider_mode === 'external';
-  const model = external
-    ? cleanText(settings?.inbox_image_model) || DEFAULT_INBOX_IMAGE_MODEL
-    : codexModel ?? optionalText(agent?.llm_model) ?? '';
+  let execution = { mode: 'test', provider: 'test', model: codexModel ?? optionalText(agent?.llm_model) ?? '' };
   try {
+    if (!imageDescriber) execution = resolveUserAiExecution(store, 'vision', providerFetch);
+    const model = execution.mode === 'external'
+      ? execution.model
+      : codexModel ?? optionalText(agent?.llm_model) ?? '';
+    execution = { ...execution, model };
     const result = imageDescriber
       ? { text: await imageDescriber({ imagePaths }), model }
-      : external
-        ? { text: await openAiImageText({
-            apiKey: externalAi?.openaiApiKey,
-            fetchImpl: externalAi?.fetch,
+      : execution.mode === 'external'
+        ? await describeImage({
+            provider: execution.provider,
+            apiKey: execution.apiKey,
+            fetchImpl: execution.fetchImpl,
             model,
-            promptTemplate: optionalBodyText(agent?.llm_prompt_template) ?? DEFAULT_IMAGE_PROMPT_TEMPLATE,
+            prompt: optionalBodyText(agent?.llm_prompt_template) ?? DEFAULT_IMAGE_PROMPT_TEMPLATE,
             timeoutMs: Number.isFinite(codexTimeoutMs) ? codexTimeoutMs : agent?.llm_timeout_ms,
-            imagePaths
-          }), model }
+            imageDataUrls: imagePaths.map(imageDataUrl)
+          })
       : { text: await codexText({
         codexBin,
         codexModel: model || null,
@@ -962,21 +991,30 @@ async function describeImages({ agent, settings, codexBin, codexModel, codexTime
       }), model };
     const clean = cleanText(result.text);
     const durationMs = Date.now() - startedAt;
-    if (!clean) return { text: '', status: 'failed', error: 'empty_image_description', model: result.model, durationMs };
-    if (imageDescriptionRefused(clean)) return { text: '', status: 'failed', error: 'image_description_refused', model: result.model, durationMs };
-    return { text: clean, status: 'done', error: '', model: result.model, durationMs };
+    if (!clean) return { text: '', status: 'failed', error: 'empty_image_description', model: result.model, mode: execution.mode, provider: execution.provider, durationMs };
+    if (imageDescriptionRefused(clean)) return { text: '', status: 'failed', error: 'image_description_refused', model: result.model, mode: execution.mode, provider: execution.provider, durationMs };
+    return { text: clean, status: 'done', error: '', model: result.model, mode: execution.mode, provider: execution.provider, durationMs };
   } catch (error) {
-    return { text: '', status: 'failed', error: errorText(error), model, durationMs: Date.now() - startedAt };
+    const failedExecution = executionFromError(error, execution);
+    return {
+      text: '',
+      status: 'failed',
+      error: errorText(error),
+      model: failedExecution.model,
+      mode: failedExecution.mode,
+      provider: failedExecution.provider,
+      durationMs: Date.now() - startedAt
+    };
   }
 }
 
 export async function normalizeJsonWithAgent({
+  store,
   agent,
-  settings,
   codexBin,
   codexModel,
   codexTimeoutMs,
-  externalAi,
+  providerFetch,
   normalizer,
   normalizerInput,
   promptTemplate,
@@ -984,31 +1022,32 @@ export async function normalizeJsonWithAgent({
   strictOutputSchema,
   cleanOutput,
   defaultCodexModel = DEFAULT_INBOX_CODEX_MODEL,
-  externalTextModel = null,
   schemaName = 'raw_normalization',
   timeoutPrefix = 'raw'
 }) {
   const startedAt = Date.now();
-  const external = settings?.model_provider_mode === 'external';
-  const model = external
-    ? cleanText(externalTextModel) || DEFAULT_INBOX_TEXT_MODEL
-    : codexModel ?? optionalText(agent?.llm_model) ?? defaultCodexModel;
+  let execution = { mode: 'test', provider: 'test', model: codexModel ?? optionalText(agent?.llm_model) ?? defaultCodexModel };
   let result;
   try {
+    if (!normalizer) execution = resolveUserAiExecution(store, 'text', providerFetch);
+    const model = execution.mode === 'external'
+      ? execution.model
+      : codexModel ?? optionalText(agent?.llm_model) ?? defaultCodexModel;
+    execution = { ...execution, model };
     result = normalizer
       ? { text: await normalizer(normalizerInput), model }
-      : external
-        ? { text: await groqText({
-            apiKey: externalAi?.groqApiKey,
-            fetchImpl: externalAi?.fetch,
+      : execution.mode === 'external'
+        ? await completeStructuredText({
+            provider: execution.provider,
+            apiKey: execution.apiKey,
+            fetchImpl: execution.fetchImpl,
             model,
-            promptTemplate,
+            instructions: DEFAULT_NORMALIZER_CODEX_INSTRUCTIONS,
+            prompt: promptTemplate,
             timeoutMs: Number.isFinite(codexTimeoutMs) ? codexTimeoutMs : agent?.llm_timeout_ms,
-            outputSchema: strictOutputSchema ? outputSchema : null,
-            schemaName,
-            timeoutMessage: `groq_${timeoutPrefix}_timeout`,
-            emptyResponseMessage: `groq_${timeoutPrefix}_empty_response`
-          }), model }
+            jsonSchema: outputSchema,
+            schemaName
+          })
         : { text: await codexText({
           codexBin,
           codexModel: model || null,
@@ -1020,25 +1059,26 @@ export async function normalizeJsonWithAgent({
           failureMessage: `codex_${timeoutPrefix}_failed`
         }), model };
   } catch (error) {
-    return failedJsonNormalization(errorText(error), model, Date.now() - startedAt, false);
+    const failedExecution = executionFromError(error, execution);
+    return failedJsonNormalization(errorText(error), failedExecution.model, Date.now() - startedAt, false, null, failedExecution);
   }
   try {
     const parsed = typeof result.text === 'string' ? parseNormalizerJson(result.text) : result.text;
     validateJsonSchema(parsed, outputSchema);
     const normalized = cleanOutput(parsed);
-    return { ...normalized, status: 'done', error: '', model: result.model, durationMs: Date.now() - startedAt };
+    return { ...normalized, status: 'done', error: '', model: result.model, mode: execution.mode, provider: execution.provider, durationMs: Date.now() - startedAt };
   } catch (error) {
-    return failedJsonNormalization(errorText(error), result.model, Date.now() - startedAt, true, result.text);
+    return failedJsonNormalization(errorText(error), result.model, Date.now() - startedAt, true, result.text, execution);
   }
 }
 
 async function normalizeInbox({
+  store,
   agent,
-  settings,
   codexBin,
   codexModel,
   codexTimeoutMs,
-  externalAi,
+  providerFetch,
   normalizer,
   item,
   classes,
@@ -1048,20 +1088,24 @@ async function normalizeInbox({
   strictOutputSchema
 }) {
   const startedAt = Date.now();
-  const external = settings?.model_provider_mode === 'external';
-  const model = external
-    ? cleanText(settings?.inbox_text_model) || DEFAULT_INBOX_TEXT_MODEL
-    : codexModel ?? optionalText(agent?.llm_model) ?? DEFAULT_INBOX_CODEX_MODEL;
+  let execution = { mode: 'test', provider: 'test', model: codexModel ?? optionalText(agent?.llm_model) ?? DEFAULT_INBOX_CODEX_MODEL };
   let result;
   try {
+    if (!normalizer) execution = resolveUserAiExecution(store, 'text', providerFetch);
+    const model = execution.mode === 'external'
+      ? execution.model
+      : codexModel ?? optionalText(agent?.llm_model) ?? DEFAULT_INBOX_CODEX_MODEL;
+    execution = { ...execution, model };
     result = normalizer
       ? { text: await normalizer({ item, classes, imageDescription, validationError }), model }
-      : external
-        ? { text: await groqText({
-            apiKey: externalAi?.groqApiKey,
-            fetchImpl: externalAi?.fetch,
+      : execution.mode === 'external'
+        ? await completeStructuredText({
+            provider: execution.provider,
+            apiKey: execution.apiKey,
+            fetchImpl: execution.fetchImpl,
             model,
-            promptTemplate: renderNormalizerPrompt(
+            instructions: DEFAULT_NORMALIZER_CODEX_INSTRUCTIONS,
+            prompt: renderNormalizerPrompt(
               optionalBodyText(agent?.llm_prompt_template) ?? DEFAULT_NORMALIZER_PROMPT_TEMPLATE,
               item,
               classes,
@@ -1069,8 +1113,9 @@ async function normalizeInbox({
               validationError
             ),
             timeoutMs: Number.isFinite(codexTimeoutMs) ? codexTimeoutMs : agent?.llm_timeout_ms,
-            outputSchema: strictOutputSchema ? outputSchema : null
-          }), model }
+            jsonSchema: outputSchema,
+            schemaName: 'inbox_normalization'
+          })
       : { text: await codexText({
         codexBin,
         codexModel: model || null,
@@ -1086,15 +1131,16 @@ async function normalizeInbox({
         normalizerMode: true
       }), model };
   } catch (error) {
-    return failedNormalization(errorText(error), model, Date.now() - startedAt, false);
+    const failedExecution = executionFromError(error, execution);
+    return failedNormalization(errorText(error), failedExecution.model, Date.now() - startedAt, false, failedExecution);
   }
   try {
     const parsed = typeof result.text === 'string' ? parseNormalizerJson(result.text) : result.text;
     validateJsonSchema(parsed, outputSchema);
     const normalized = cleanNormalization(parsed);
-    return { ...normalized, status: 'done', error: '', model: result.model, durationMs: Date.now() - startedAt };
+    return { ...normalized, status: 'done', error: '', model: result.model, mode: execution.mode, provider: execution.provider, durationMs: Date.now() - startedAt };
   } catch (error) {
-    return failedNormalization(errorText(error), result.model, Date.now() - startedAt, true);
+    return failedNormalization(errorText(error), result.model, Date.now() - startedAt, true, execution);
   }
 }
 
@@ -1135,26 +1181,35 @@ function validateJsonSchema(value, schema) {
   if (errors.length > 0) throw new Error(`schema_validation_failed:${JSON.stringify(errors.slice(0, 10))}`);
 }
 
-function failedNormalization(error, model, durationMs, validationFailed) {
+function failedNormalization(error, model, durationMs, validationFailed, execution = {}) {
   return {
     status: 'failed',
     validationFailed,
     error,
     model,
+    mode: execution.mode,
+    provider: execution.provider,
     durationMs,
     output: { title: '', description: '', classKey: '', normalization: '' }
   };
 }
 
-function failedJsonNormalization(error, model, durationMs, validationFailed, output = null) {
+function failedJsonNormalization(error, model, durationMs, validationFailed, output = null, execution = {}) {
   return {
     status: 'failed',
     validationFailed,
     error,
     model,
+    mode: execution.mode,
+    provider: execution.provider,
     durationMs,
     output
   };
+}
+
+function executionFromError(error, fallback) {
+  const execution = error && typeof error === 'object' ? error.userAiExecution : null;
+  return execution && typeof execution === 'object' ? execution : fallback;
 }
 
 function cleanNormalization(value) {
@@ -1205,7 +1260,7 @@ function parseNormalizerJson(value) {
 
 function recordInboxImageAiLog(store, {
   agent, dt, status, inboxId, imagePaths, imageDescription, error, model, durationMs,
-  workflowId, runId, attemptNumber
+  mode, provider, workflowId, runId, attemptNumber
 }) {
   return store.recordAiLog({
     agentId: INBOX_IMAGE_AGENT_ID,
@@ -1229,14 +1284,14 @@ function recordInboxImageAiLog(store, {
       ],
       usage: usageBlock(model),
       timings_ms: timingsBlock(durationMs),
-      metadata: { error: error || null }
+      metadata: { mode, provider, error: error || null }
     }
   });
 }
 
 function recordInboxNormalizerAiLog(store, {
   agent, dt, status, inboxId, item, classes, imageDescription, output, error, model, durationMs,
-  workflowId, runId, attemptNumber
+  mode, provider, workflowId, runId, attemptNumber
 }) {
   return store.recordAiLog({
     agentId: INBOX_NORMALIZER_AGENT_ID,
@@ -1267,6 +1322,8 @@ function recordInboxNormalizerAiLog(store, {
       usage: usageBlock(model),
       timings_ms: timingsBlock(durationMs),
       metadata: {
+        mode,
+        provider,
         error: error || null
       }
     }
@@ -1304,135 +1361,10 @@ function normalizeBlocks({ imageDescription, analysis }) {
   ].filter(Boolean).join('\n\n').trim();
 }
 
-async function groqText({
-  apiKey,
-  fetchImpl = fetch,
-  model,
-  promptTemplate,
-  timeoutMs = 3000,
-  outputSchema = null,
-  schemaName = 'inbox_normalization',
-  timeoutMessage = 'groq_inbox_timeout',
-  emptyResponseMessage = 'groq_inbox_empty_response'
-}) {
-  if (!apiKey) throw new Error('GROQ_API_KEY is not configured');
-  const body = {
-    model,
-    messages: [
-      { role: 'system', content: DEFAULT_NORMALIZER_CODEX_INSTRUCTIONS },
-      { role: 'user', content: promptTemplate }
-    ],
-    temperature: 0
-  };
-  if (outputSchema) {
-    body.response_format = {
-      type: 'json_schema',
-      json_schema: {
-        name: schemaName,
-        schema: outputSchema
-      }
-    };
-  }
-  const payload = await requestJson(GROQ_CHAT_COMPLETIONS_URL, {
-    method: 'POST',
-    headers: {
-      authorization: `Bearer ${apiKey}`,
-      'content-type': 'application/json'
-    },
-    body: JSON.stringify(body),
-    timeoutMs,
-    timeoutMessage,
-    fetchImpl
-  });
-  const text = extractChatText(payload);
-  if (!text) throw new Error(emptyResponseMessage);
-  return text;
-}
-
-async function openAiImageText({ apiKey, fetchImpl = fetch, model, promptTemplate, timeoutMs = 3000, imagePaths }) {
-  if (!apiKey) throw new Error('OPENAI_API_KEY is not configured');
-  const payload = await requestJson(OPENAI_RESPONSES_URL, {
-    method: 'POST',
-    headers: {
-      authorization: `Bearer ${apiKey}`,
-      'content-type': 'application/json'
-    },
-    body: JSON.stringify({
-      model,
-      input: [
-        {
-          role: 'user',
-          content: [
-            { type: 'input_text', text: promptTemplate },
-            ...imagePaths.map((imagePath) => ({
-              type: 'input_image',
-              image_url: imageDataUrl(imagePath),
-              detail: 'auto'
-            }))
-          ]
-        }
-      ]
-    }),
-    timeoutMs,
-    timeoutMessage: 'openai_image_inbox_timeout',
-    fetchImpl
-  });
-  const text = extractResponseText(payload);
-  if (!text) throw new Error('openai_image_empty_response');
-  return text;
-}
-
-async function requestJson(url, { method, headers, body, timeoutMs, timeoutMessage, fetchImpl }) {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
-  let response;
-  try {
-    response = await fetchImpl(url, { method, headers, body, signal: controller.signal });
-  } catch (error) {
-    if (error instanceof Error && error.name === 'AbortError') throw new Error(timeoutMessage);
-    throw error;
-  } finally {
-    clearTimeout(timeout);
-  }
-  const text = await response.text();
-  const payload = text ? parseJson(text) ?? { raw: text } : {};
-  if (!response.ok) throw new Error(providerError(payload) || `provider_http_${response.status}`);
-  return payload;
-}
-
-function extractChatText(payload) {
-  return cleanText(payload?.choices?.[0]?.message?.content);
-}
-
-function extractResponseText(payload) {
-  const direct = cleanText(payload?.output_text);
-  if (direct) return direct;
-  const chunks = [];
-  for (const item of Array.isArray(payload?.output) ? payload.output : []) {
-    for (const content of Array.isArray(item?.content) ? item.content : []) {
-      const text = cleanText(content?.text);
-      if (text) chunks.push(text);
-    }
-  }
-  return chunks.join('\n').trim();
-}
-
 function imageDataUrl(imagePath) {
   const extension = path.extname(imagePath).slice(1).toLowerCase();
   const mime = CONTENT_TYPES_BY_EXTENSION.get(extension) ?? 'image/png';
   return `data:${mime};base64,${fs.readFileSync(imagePath).toString('base64')}`;
-}
-
-function providerError(payload) {
-  return cleanText(payload?.error?.message) || cleanText(payload?.message) || cleanText(payload?.raw);
-}
-
-function parseJson(value) {
-  try {
-    return JSON.parse(value);
-  } catch {
-    return null;
-  }
 }
 
 function codexText({
@@ -1449,57 +1381,47 @@ function codexText({
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'brai-inbox-ai-'));
   const outputPath = path.join(tmp, 'output.txt');
   const schemaPath = outputSchema ? path.join(tmp, 'output-schema.json') : null;
-  const isolatedNormalizer = normalizerMode || Boolean(outputSchema);
-  const instructionsPath = isolatedNormalizer ? path.join(tmp, 'model-instructions.txt') : null;
+  const instructionsPath = path.join(tmp, 'model-instructions.txt');
+  const instructions = normalizerMode || outputSchema
+    ? DEFAULT_NORMALIZER_CODEX_INSTRUCTIONS
+    : DEFAULT_IMAGE_CODEX_INSTRUCTIONS;
   const timeout = Number.isFinite(timeoutMs) ? timeoutMs : 3000;
   const executable = !codexBin || codexBin === 'codex' ? DEFAULT_INBOX_CODEX_BIN : codexBin;
 
-  if (isolatedNormalizer) {
-    try {
-      if (schemaPath) fs.writeFileSync(schemaPath, JSON.stringify(outputSchema), { mode: 0o600 });
-      fs.writeFileSync(instructionsPath, DEFAULT_NORMALIZER_CODEX_INSTRUCTIONS, { mode: 0o600 });
-    } catch (error) {
-      fs.rmSync(tmp, { recursive: true, force: true });
-      throw error;
-    }
+  try {
+    if (schemaPath) fs.writeFileSync(schemaPath, JSON.stringify(outputSchema), { mode: 0o600 });
+    fs.writeFileSync(instructionsPath, instructions, { mode: 0o600 });
+  } catch (error) {
+    fs.rmSync(tmp, { recursive: true, force: true });
+    throw error;
   }
 
   return new Promise((resolve, reject) => {
     let settled = false;
     let stderr = '';
-    const args = [];
-    if (isolatedNormalizer) {
-      args.push(
-        '-c', 'model_reasoning_effort="low"',
-        '-c', 'model_verbosity="low"',
-        '-c', `model_instructions_file=${JSON.stringify(instructionsPath)}`,
-        '-c', 'features.apps=false',
-        '-c', 'features.image_generation=false',
-        '-c', 'features.shell_tool=false',
-        '-c', 'features.unified_exec=false',
-        '-c', 'features.multi_agent=false',
-        '-c', 'web_search="disabled"',
-        '-c', 'tools_view_image=false'
-      );
-    }
+    const args = [
+      '-c', 'model_reasoning_effort="low"',
+      '-c', 'model_verbosity="low"',
+      '-c', `model_instructions_file=${JSON.stringify(instructionsPath)}`,
+      '-c', 'features.apps=false',
+      '-c', 'features.image_generation=false',
+      '-c', 'features.shell_tool=false',
+      '-c', 'features.unified_exec=false',
+      '-c', 'features.multi_agent=false',
+      '-c', 'web_search="disabled"',
+      '-c', 'tools_view_image=false'
+    ];
     args.push('--sandbox', 'read-only', '--ask-for-approval', 'never');
     if (codexModel) args.push('--model', codexModel);
     args.push(
       'exec',
-      '--ephemeral'
+      '--ephemeral',
+      '--ignore-user-config',
+      '--skip-git-repo-check',
+      '--cd', tmp
     );
-    if (isolatedNormalizer) {
-      args.push(
-        '--ignore-user-config',
-        '--skip-git-repo-check',
-        '--cd', tmp
-      );
-      if (schemaPath) args.push('--output-schema', schemaPath);
-    } else {
-      args.push('--skip-git-repo-check');
-    }
+    if (schemaPath) args.push('--output-schema', schemaPath);
     if (!schemaPath && images.length > 0) {
-      args.push('--cd', os.tmpdir());
       for (const imagePath of images) args.push('--image', imagePath);
     }
     args.push(
@@ -1510,8 +1432,9 @@ function codexText({
     let child;
     try {
       child = spawn(executable, args, {
-        cwd: isolatedNormalizer ? tmp : undefined,
+        cwd: tmp,
         detached: true,
+        env: codexChildEnv(),
         stdio: ['pipe', 'ignore', 'pipe']
       });
     } catch (error) {
@@ -1550,6 +1473,14 @@ function codexText({
       callback(value);
     }
   });
+}
+
+function codexChildEnv(env = process.env) {
+  const childEnv = {};
+  for (const key of CODEX_CHILD_ENV_KEYS) {
+    if (typeof env[key] === 'string' && env[key]) childEnv[key] = env[key];
+  }
+  return childEnv;
 }
 
 function killProcessGroup(child) {

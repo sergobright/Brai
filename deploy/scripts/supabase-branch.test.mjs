@@ -9,6 +9,7 @@ import {
   inspectOwnedSequences,
   isTransientPostgresConnectionError,
   migrationFileEntries,
+  resetClonedAccountAiData,
   reseedOwnedSequences,
   sequenceAllocationStatus,
   transientPostgresRetryDelayMs,
@@ -57,6 +58,69 @@ test("production seed loads only explicitly marked idempotent migrations into th
   assert.match(seedFunction, /const postSeedMigrations = postProductionSeedMigrations\(\)/);
   assert.match(seedFunction, /copySchemaData\(pool, \{ sourceSchema, targetSchema, postSeedMigrations \}\)/);
   assert.doesNotMatch(script, /reapplyPostProductionSeedMigrations/);
+});
+
+test("production seed never copies account AI credentials, routing, or device links", () => {
+  const script = fs.readFileSync(path.join(repoRoot, "deploy/scripts/supabase-branch.mjs"), "utf8");
+  const exclusionStart = script.indexOf("const TEST_DATA_COPY_EXCLUDED_TABLES");
+  const exclusionEnd = script.indexOf("]);", exclusionStart);
+  const exclusions = script.slice(exclusionStart, exclusionEnd);
+
+  assert.match(exclusions, /"user_provider_credentials"/);
+  assert.match(exclusions, /"user_ai_settings"/);
+  assert.match(exclusions, /"brai_cmd_account_link_tokens"/);
+});
+
+test("preview and dev sanitize cloned account AI data after all seeding", () => {
+  const script = fs.readFileSync(path.join(repoRoot, "deploy/scripts/supabase-branch.mjs"), "utf8");
+  const previewStart = script.indexOf('if (command === "preview-env")');
+  const devStart = script.indexOf('} else if (command === "dev-env")');
+  const deleteStart = script.indexOf('} else if (command === "delete-preview")');
+  const preview = script.slice(previewStart, devStart);
+  const dev = script.slice(devStart, deleteStart);
+
+  assert.ok(preview.indexOf("await sanitizeClonedAccountAiData(databaseUrl)") > preview.indexOf("await applyPreviewSeed(databaseUrl)"));
+  assert.ok(dev.indexOf("await sanitizeClonedAccountAiData(databaseUrl)") > dev.indexOf("await seedTestDataFromProduction(databaseUrl)"));
+});
+
+test("cloned account AI reset removes sensitive rows and recreates internal settings atomically", async () => {
+  const queries = [];
+  const queryable = {
+    async query(sql) {
+      queries.push(String(sql).replace(/\s+/g, " ").trim());
+      return { rows: [] };
+    }
+  };
+
+  await resetClonedAccountAiData(queryable);
+
+  assert.deepEqual(queries, [
+    "BEGIN",
+    "DELETE FROM brai_cmd_access_tokens WHERE user_id IS NOT NULL",
+    "TRUNCATE TABLE user_ai_settings, user_provider_credentials, brai_cmd_account_link_tokens CONTINUE IDENTITY",
+    "INSERT INTO user_ai_settings ( user_id, model_provider_mode, text_provider_id, text_model, vision_provider_id, vision_model, created_at_utc, updated_at_utc ) SELECT id, 'internal', NULL, NULL, NULL, NULL, now()::text, now()::text FROM \"user\"",
+    "COMMIT"
+  ]);
+});
+
+test("cloned account AI reset rolls back on sanitization failure", async () => {
+  const queries = [];
+  const queryable = {
+    async query(sql) {
+      const normalized = String(sql).replace(/\s+/g, " ").trim();
+      queries.push(normalized);
+      if (normalized.startsWith("TRUNCATE TABLE")) throw new Error("sanitize failed");
+      return { rows: [] };
+    }
+  };
+
+  await assert.rejects(resetClonedAccountAiData(queryable), /sanitize failed/);
+  assert.deepEqual(queries, [
+    "BEGIN",
+    "DELETE FROM brai_cmd_access_tokens WHERE user_id IS NOT NULL",
+    "TRUNCATE TABLE user_ai_settings, user_provider_credentials, brai_cmd_account_link_tokens CONTINUE IDENTITY",
+    "ROLLBACK"
+  ]);
 });
 
 test("production copy reseeds copied tables before repair migrations and before commit", () => {
@@ -400,7 +464,9 @@ test("preview env setup rewrites existing shell-unsafe values safely", () => {
   assert.match(contents, /^BRAI_TEST_EMAIL_LOGIN='true'$/m);
   assert.doesNotMatch(contents, /BRAI_TEST_AUTO_LOGIN/);
   assert.match(contents, /^BRAI_SESSION_SECRET='[^']{32,}'$/m);
+  assert.match(contents, /^BRAI_USER_PROVIDER_ENCRYPTION_KEY='[A-Za-z0-9_-]{43}'$/m);
   assert.doesNotMatch(contents, /old-auto-login-secret/);
+  assert.equal(fs.statSync(envFile).mode & 0o777, 0o660);
 });
 
 test("dev env setup enables explicit test email login", () => {
@@ -426,7 +492,52 @@ test("dev env setup enables explicit test email login", () => {
   const contents = fs.readFileSync(envFile, "utf8");
   assert.match(contents, /^BRAI_SUPABASE_BRANCH='brai_dev'$/m);
   assert.match(contents, /^BRAI_TEST_EMAIL_LOGIN='true'$/m);
+  assert.match(contents, /^BRAI_USER_PROVIDER_ENCRYPTION_KEY='[A-Za-z0-9_-]{43}'$/m);
   assert.doesNotMatch(contents, /BRAI_TEST_AUTO_LOGIN/);
+  assert.equal(fs.statSync(envFile).mode & 0o777, 0o660);
+});
+
+test("preview environment preserves its user-provider encryption key", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "brai-supabase-key-env-"));
+  const envFile = path.join(dir, "brai-api.env");
+  const env = {
+    ...process.env,
+    BRAI_SUPABASE_DRY_RUN: "true",
+    BRAI_ENVS_ROOT: dir,
+    BRAI_PREVIEW_REGISTRY: path.join(dir, "preview-slots.json"),
+    BRAI_PREVIEW_LOCK: path.join(dir, "preview-slots.lock"),
+    NODE_BIN: process.execPath,
+    SUPABASE_SELF_HOSTED: "true",
+    SUPABASE_SELF_HOSTED_DATABASE_URL: "postgres://brai:brai@127.0.0.1:5432/brai"
+  };
+  const args = [
+    path.join(repoRoot, "deploy/scripts/supabase-branch.mjs"),
+    "preview-env",
+    "--branch",
+    "codex/provider-key-persistence",
+    "--runtime-env",
+    envFile
+  ];
+
+  const allocation = spawnSync("bash", [
+    path.join(repoRoot, "deploy/scripts/preview-slots.sh"),
+    "allocate",
+    "codex/provider-key-persistence",
+    "test-commit"
+  ], { cwd: repoRoot, encoding: "utf8", env });
+  assert.equal(allocation.status, 0, allocation.stderr || allocation.stdout);
+
+  const first = spawnSync("node", args, { cwd: repoRoot, encoding: "utf8", env });
+  assert.equal(first.status, 0, first.stderr || first.stdout);
+  const firstKey = fs.readFileSync(envFile, "utf8").match(/^BRAI_USER_PROVIDER_ENCRYPTION_KEY='([^']+)'$/m)?.[1];
+
+  const second = spawnSync("node", args, { cwd: repoRoot, encoding: "utf8", env });
+  assert.equal(second.status, 0, second.stderr || second.stdout);
+  const secondKey = fs.readFileSync(envFile, "utf8").match(/^BRAI_USER_PROVIDER_ENCRYPTION_KEY='([^']+)'$/m)?.[1];
+
+  assert.match(firstKey ?? "", /^[A-Za-z0-9_-]{43}$/);
+  assert.equal(secondKey, firstKey);
+  assert.equal(fs.statSync(envFile).mode & 0o777, 0o660);
 });
 
 test("branch database URL override requires explicit preview marker", () => {

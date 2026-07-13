@@ -1,9 +1,15 @@
 package world.brightos.brai.braicmd
 
 import java.io.File
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
+import kotlin.concurrent.thread
 import org.junit.After
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -37,5 +43,45 @@ class BlockedQueueRetryRegression1Test {
         assertFalse(RecordingService.retryPending(context, QueueRetryTrigger.Scheduled))
         assertFalse(RecordingService.retryPending(context, QueueRetryTrigger.Network))
         assertNull(shadowOf(context).nextStartedService)
+    }
+}
+
+class QueueUploadHandoffTest {
+    @Test
+    fun cleanupFinishesBeforeTheDeferredOwnerCanStart() {
+        val handoff = QueueUploadHandoff()
+        assertTrue(handoff.tryBegin())
+        assertFalse(handoff.tryBegin())
+        assertTrue(handoff.deferIfActive("account-b", QueueRetryTrigger.Manual))
+
+        val cleanupStarted = CountDownLatch(1)
+        val releaseCleanup = CountDownLatch(1)
+        val deferredOwner = AtomicReference<String?>()
+        val finisher = thread {
+            handoff.finish { ownerId ->
+                deferredOwner.set(ownerId)
+                cleanupStarted.countDown()
+                assertTrue(releaseCleanup.await(2, TimeUnit.SECONDS))
+            }
+        }
+        assertTrue(cleanupStarted.await(2, TimeUnit.SECONDS))
+
+        val startAttempted = CountDownLatch(1)
+        val startFinished = CountDownLatch(1)
+        val startResult = AtomicReference<Boolean>()
+        val starter = thread {
+            startAttempted.countDown()
+            startResult.set(handoff.tryBegin())
+            startFinished.countDown()
+        }
+        assertTrue(startAttempted.await(2, TimeUnit.SECONDS))
+        assertFalse(startFinished.await(100, TimeUnit.MILLISECONDS))
+
+        releaseCleanup.countDown()
+        finisher.join(2_000)
+        starter.join(2_000)
+        assertEquals("account-b", deferredOwner.get())
+        assertEquals(true, startResult.get())
+        handoff.finish { }
     }
 }

@@ -30,7 +30,10 @@ const TEST_DATA_RESET_PRESERVED_TABLES = new Set([
 ]);
 const TEST_DATA_COPY_EXCLUDED_TABLES = new Set([
   "account",
+  "brai_cmd_account_link_tokens",
   "session",
+  "user_ai_settings",
+  "user_provider_credentials",
   "verification"
 ]);
 const POSTGRES_RETRY_ATTEMPTS = Number(process.env.BRAI_POSTGRES_CONNECT_RETRY_ATTEMPTS || 5);
@@ -54,11 +57,13 @@ async function main() {
       BRAI_DATABASE_URL: databaseUrl,
       BRAI_SUPABASE_BRANCH: name,
       BRAI_TEST_EMAIL_LOGIN: "true",
+      BRAI_USER_PROVIDER_ENCRYPTION_KEY: userProviderEncryptionKey(envFile),
       ...rotatedSessionSecret(envFile)
     });
     await applyMigrations(databaseUrl);
     const seededFromProduction = await seedTestDataFromProduction(databaseUrl);
     if (!seededFromProduction) await applyPreviewSeed(databaseUrl);
+    await sanitizeClonedAccountAiData(databaseUrl);
     updatePreviewRegistry(branch, name, details);
     console.log(JSON.stringify({ ok: true, branch: name, id: branchId(details), status: branchStatus(details), envFile, seededFromProduction }, null, 2));
   } else if (command === "dev-env") {
@@ -72,10 +77,12 @@ async function main() {
       BRAI_DATABASE_URL: databaseUrl,
       BRAI_SUPABASE_BRANCH: name,
       BRAI_TEST_EMAIL_LOGIN: "true",
+      BRAI_USER_PROVIDER_ENCRYPTION_KEY: userProviderEncryptionKey(envFile),
       ...rotatedSessionSecret(envFile)
     });
     await applyMigrations(databaseUrl);
     const seededFromProduction = await seedTestDataFromProduction(databaseUrl);
+    await sanitizeClonedAccountAiData(databaseUrl);
     console.log(JSON.stringify({ ok: true, branch: name, envFile, seededFromProduction }, null, 2));
   } else if (command === "delete-preview") {
     const branch = required(args, "branch");
@@ -287,6 +294,50 @@ async function seedTestDataFromProduction(targetDatabaseUrl) {
     }
   });
   return true;
+}
+
+async function sanitizeClonedAccountAiData(databaseUrl) {
+  if (process.env.BRAI_SUPABASE_DRY_RUN === "true") return;
+  await withTransientPostgresRetry("sanitize cloned account AI data", async () => {
+    const pool = new Pool({ connectionString: databaseUrl, ssl: postgresSsl(databaseUrl) });
+    let client;
+    try {
+      client = await pool.connect();
+      await resetClonedAccountAiData(client);
+    } finally {
+      client?.release();
+      await pool.end();
+    }
+  });
+}
+
+export async function resetClonedAccountAiData(queryable) {
+  await queryable.query("BEGIN");
+  try {
+    await queryable.query(`
+      DELETE FROM brai_cmd_access_tokens
+      WHERE user_id IS NOT NULL
+    `);
+    await queryable.query(`
+      TRUNCATE TABLE
+        user_ai_settings,
+        user_provider_credentials,
+        brai_cmd_account_link_tokens
+      CONTINUE IDENTITY
+    `);
+    await queryable.query(`
+      INSERT INTO user_ai_settings (
+        user_id, model_provider_mode, text_provider_id, text_model,
+        vision_provider_id, vision_model, created_at_utc, updated_at_utc
+      )
+      SELECT id, 'internal', NULL, NULL, NULL, NULL, now()::text, now()::text
+      FROM "user"
+    `);
+    await queryable.query("COMMIT");
+  } catch (error) {
+    await queryable.query("ROLLBACK");
+    throw error;
+  }
 }
 
 async function withTransientPostgresRetry(operation, callback) {
@@ -682,7 +733,12 @@ function upsertEnvFile(filePath, values) {
   const keys = new Set(Object.keys(values));
   const kept = existing.map((line) => normalizeEnvLine(line, keys)).filter(Boolean);
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  fs.writeFileSync(filePath, `${[...kept, ...Object.entries(values).map(([key, value]) => `${key}=${shellQuote(value)}`)].join("\n")}\n`);
+  fs.writeFileSync(
+    filePath,
+    `${[...kept, ...Object.entries(values).map(([key, value]) => `${key}=${shellQuote(value)}`)].join("\n")}\n`,
+    { mode: 0o660 }
+  );
+  fs.chmodSync(filePath, 0o660);
 }
 
 function normalizeEnvLine(line, replacedKeys) {
@@ -702,6 +758,20 @@ function rotatedSessionSecret(filePath) {
     return match && /^(1|true|yes)$/i.test(parseEnvValue(match[1]));
   });
   return legacyAutoLogin ? { BRAI_SESSION_SECRET: crypto.randomBytes(32).toString("base64url") } : {};
+}
+
+function userProviderEncryptionKey(filePath) {
+  const existing = fs.existsSync(filePath)
+    ? fs.readFileSync(filePath, "utf8").split(/\r?\n/).map((line) => {
+        const match = line.match(/^\s*(?:export\s+)?BRAI_USER_PROVIDER_ENCRYPTION_KEY=(.*)$/);
+        return match ? parseEnvValue(match[1]) : "";
+      }).find(Boolean)
+    : "";
+  if (!existing) return crypto.randomBytes(32).toString("base64url");
+  if (!/^[A-Za-z0-9_-]{43}$/.test(existing) || Buffer.from(existing, "base64url").length !== 32) {
+    throw new Error("BRAI_USER_PROVIDER_ENCRYPTION_KEY must be a 32-byte base64url key");
+  }
+  return existing;
 }
 
 function parseEnvValue(value) {

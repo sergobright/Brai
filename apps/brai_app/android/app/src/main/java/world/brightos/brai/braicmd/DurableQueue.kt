@@ -5,9 +5,81 @@ import java.io.File
 import java.io.IOException
 import java.net.SocketTimeoutException
 import java.net.UnknownHostException
+import java.security.MessageDigest
 import java.util.UUID
 
 internal const val BRAI_CMD_FUNCTION_SCREENSHOT_INBOX = "screenshot_inbox"
+
+internal data class QueueOwnerScope(
+    val ownerId: String,
+    val accountUserId: String?
+) {
+    companion object {
+        fun create(accountUserId: String, installId: String): QueueOwnerScope {
+            val cleanUserId = accountUserId.trim()
+            val source = if (cleanUserId.isBlank()) "anonymous\u0000${installId.trim()}" else "account\u0000$cleanUserId"
+            val ownerId = MessageDigest.getInstance("SHA-256")
+                .digest(source.toByteArray(Charsets.UTF_8))
+                .joinToString("") { "%02x".format(it) }
+            return QueueOwnerScope(ownerId, cleanUserId.takeIf(String::isNotBlank))
+        }
+    }
+}
+
+/** Persists an opaque immutable owner beside every durable native queue item. */
+internal object QueueOwnerStore {
+    const val SUFFIX = ".owner"
+    private const val VERSION_PREFIX = "v1:"
+    private val OWNER_ID = Regex("^[0-9a-f]{64}$")
+    private val boundaryLock = Any()
+
+    fun <T> withinBoundary(block: () -> T): T = synchronized(boundaryLock) { block() }
+
+    fun current(context: Context): QueueOwnerScope = ConfigStore(context).queueOwnerScope()
+
+    fun claim(file: File, owner: QueueOwnerScope) = claim(file, owner.ownerId)
+
+    fun claim(file: File, ownerId: String) {
+        require(OWNER_ID.matches(ownerId)) { "invalid_queue_owner" }
+        val existing = readOwnerId(file)
+        if (existing != null) {
+            check(existing == ownerId) { "queue_owner_conflict" }
+            return
+        }
+        val sidecar = sidecar(file)
+        check(!sidecar.exists()) { "invalid_queue_owner" }
+        sidecar.parentFile?.mkdirs()
+        val temporary = File("${sidecar.absolutePath}.${UUID.randomUUID()}.pending")
+        try {
+            temporary.writeText("$VERSION_PREFIX$ownerId", Charsets.UTF_8)
+            if (!temporary.renameTo(sidecar)) {
+                check(readOwnerId(file) == ownerId) { "queue_owner_store_failed" }
+            }
+        } finally {
+            temporary.delete()
+        }
+    }
+
+    fun readOwnerId(file: File): String? {
+        val sidecar = sidecar(file)
+        if (!sidecar.isFile || sidecar.length() !in 67L..80L) return null
+        val value = runCatching { sidecar.readText(Charsets.UTF_8).trim() }.getOrNull() ?: return null
+        if (!value.startsWith(VERSION_PREFIX)) return null
+        return value.removePrefix(VERSION_PREFIX).takeIf(OWNER_ID::matches)
+    }
+
+    fun copyOwner(from: File, to: File): Boolean {
+        val ownerId = readOwnerId(from) ?: return false
+        claim(to, ownerId)
+        return true
+    }
+
+    fun delete(file: File) {
+        sidecar(file).delete()
+    }
+
+    fun sidecar(file: File): File = File("${file.absolutePath}$SUFFIX")
+}
 
 internal enum class AudioQueueAction(val persistedValue: String, val functionKey: String) {
     MainDictation("main", "main_dictation"),
@@ -88,7 +160,8 @@ internal object BraiCmdQueue {
         val contextCounts = ContextButtonAction.entries.associateWith { 0 }.toMutableMap()
         val failedContextCounts = ContextButtonAction.entries.associateWith { 0 }.toMutableMap()
         val failedItems = FailedTransportStore.read(context)
-        val audioFiles = AudioQueueStore.list(context)
+        val currentOwnerId = QueueOwnerStore.current(context).ownerId
+        val audioFiles = AudioQueueStore.list(context).filter { QueueOwnerStore.readOwnerId(it) == currentOwnerId }
         for (file in audioFiles) {
             val action = AudioQueueStore.action(file)
             val failed = FailedTransportStore.audioId(file) in failedItems
@@ -107,7 +180,7 @@ internal object BraiCmdQueue {
                 }
             }
         }
-        val screenshots = ScreenshotInboxStore.list(context)
+        val screenshots = ScreenshotInboxStore.list(context).filter { QueueOwnerStore.readOwnerId(it) == currentOwnerId }
         contextCounts[ContextButtonAction.ScreenshotInbox] = screenshots.size
         failedContextCounts[ContextButtonAction.ScreenshotInbox] = screenshots.count {
             FailedTransportStore.screenshotId(it) in failedItems
@@ -180,7 +253,8 @@ internal object AudioQueueStore {
         ".receiver.txt",
         ".inbox-prefix.txt",
         ".inbox-action.txt",
-        TranscriptionCheckpointStore.SUFFIX
+        TranscriptionCheckpointStore.SUFFIX,
+        QueueOwnerStore.SUFFIX
     )
 
     fun list(context: Context): List<File> =
@@ -255,20 +329,42 @@ internal object ScreenshotInboxStore {
     private const val QUEUE_DIR = "pending-screenshot-inbox"
     private const val QUARANTINE_DIR = "failed-screenshot-inbox"
 
-    fun enqueue(context: Context, screenshotFile: File): File? {
+    fun enqueue(
+        context: Context,
+        screenshotFile: File,
+        owner: QueueOwnerScope = current(context)
+    ): File? {
         if (!screenshotFile.isFile || screenshotFile.length() <= 0L) return null
         val directory = File(context.filesDir, QUEUE_DIR).apply { mkdirs() }
-        if (screenshotFile.parentFile?.absolutePath == directory.absolutePath) return screenshotFile
+        if (screenshotFile.parentFile?.absolutePath == directory.absolutePath) {
+            if (QueueOwnerStore.readOwnerId(screenshotFile) != null) return screenshotFile
+            quarantine(context, screenshotFile)
+            return null
+        }
         val target = File(directory, "brai-cmd-${System.currentTimeMillis()}-${UUID.randomUUID()}.png")
-        if (screenshotFile.renameTo(target)) return target
-        val temporary = File(directory, "${target.name}.pending")
+        return try {
+            QueueOwnerStore.claim(target, owner)
+            if (screenshotFile.renameTo(target)) return target
+            QueueOwnerStore.delete(target)
+            copyIntoQueue(screenshotFile, target, owner)
+        } catch (_: Throwable) {
+            QueueOwnerStore.delete(target)
+            target.delete()
+            null
+        }
+    }
+
+    private fun copyIntoQueue(source: File, target: File, owner: QueueOwnerScope): File? {
+        val temporary = File(target.parentFile, "${target.name}.pending")
         return runCatching {
-            screenshotFile.copyTo(temporary, overwrite = false)
+            source.copyTo(temporary, overwrite = false)
+            QueueOwnerStore.claim(target, owner)
             check(temporary.renameTo(target)) { "Не удалось зафиксировать скриншот в очереди" }
-            screenshotFile.delete()
+            source.delete()
             target
         }.getOrElse {
             temporary.delete()
+            QueueOwnerStore.delete(target)
             target.delete()
             null
         }
@@ -280,16 +376,31 @@ internal object ScreenshotInboxStore {
             ?.sortedBy { it.lastModified() }
             .orEmpty()
 
-    fun delete(file: File): Boolean = file.delete() || !file.exists()
+    fun delete(file: File): Boolean {
+        val deleted = file.delete() || !file.exists()
+        if (deleted) QueueOwnerStore.delete(file)
+        return deleted
+    }
 
     fun quarantine(context: Context, file: File): Boolean {
         val directory = File(context.filesDir, QUARANTINE_DIR).apply { mkdirs() }
         val target = File(directory, file.name).let { if (it.exists()) File(directory, "${UUID.randomUUID()}-${file.name}") else it }
-        return runCatching {
-            file.copyTo(target, overwrite = false)
-            file.delete() || !file.exists()
-        }.getOrDefault(false)
+        val sources = listOf(file, QueueOwnerStore.sidecar(file)).filter(File::exists)
+        val targets = sources.map { source ->
+            if (source == file) target else QueueOwnerStore.sidecar(target)
+        }
+        val copied = runCatching {
+            sources.zip(targets).forEach { (source, destination) -> source.copyTo(destination, overwrite = false) }
+        }.isSuccess
+        if (!copied) {
+            targets.forEach(File::delete)
+            return false
+        }
+        sources.forEach(File::delete)
+        return !file.exists()
     }
+
+    private fun current(context: Context): QueueOwnerScope = QueueOwnerStore.current(context)
 }
 
 internal fun inboxDeliveryText(action: AudioQueueAction, prefix: String, transcript: String): String {
@@ -305,13 +416,17 @@ internal enum class QueueFailureDisposition {
 }
 
 internal class QueueCorruptItemException(message: String) : IOException(message)
+internal class QueueLegacyOwnerException : IOException("Элемент старой очереди не имеет подтверждённого владельца")
+internal class QueueOwnerBlockedException : IOException("Элемент очереди принадлежит другому профилю")
 internal class QueueEmptyModelException : IOException("Модель вернула пустой текст")
 internal class QueueAuthBlockedException : IOException("Транспортный credential ещё не готов")
 
 internal fun classifyQueueFailure(error: Throwable): QueueFailureDisposition =
     when (error) {
-        is QueueCorruptItemException -> QueueFailureDisposition.Permanent
-        is QueueAuthBlockedException -> QueueFailureDisposition.Blocked
+        is QueueCorruptItemException,
+        is QueueLegacyOwnerException -> QueueFailureDisposition.Permanent
+        is QueueAuthBlockedException,
+        is QueueOwnerBlockedException -> QueueFailureDisposition.Blocked
         is ProviderResponseException -> when {
             error.statusCode in setOf(408, 425, 429) || error.statusCode >= 500 -> QueueFailureDisposition.Transient
             error.statusCode in 400..499 -> QueueFailureDisposition.Blocked

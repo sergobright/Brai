@@ -7,6 +7,7 @@ object AppConstants {
     const val LEGACY_PREFS = "airwhisper"
     const val KEY_SERVER_URL = "server_url"
     const val KEY_AUTH_TOKEN = "auth_token"
+    const val KEY_ACCOUNT_USER_ID = "account_user_id"
     const val KEY_DISPLAY_NAME = "display_name"
     const val KEY_INSTALL_ID = "install_id"
     const val KEY_PRELIMINARY_USER_ID = "preliminary_user_id"

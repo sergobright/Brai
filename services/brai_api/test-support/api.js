@@ -12,6 +12,7 @@ export const WEB_PASSWORD = 'test-password';
 export const RELEASE_PASSWORD = 'release-password';
 export const SESSION_SECRET = 'test-session-secret';
 export const BETTER_AUTH_SECRET = 'test-better-auth-secret-with-enough-entropy-32';
+export const USER_AI_ENCRYPTION_KEY = crypto.createHash('sha256').update('brai-test-user-ai-key').digest('base64url');
 
 export async function createFixture(times, options = {}) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'brai-api-'));
@@ -59,6 +60,8 @@ export async function createFixture(times, options = {}) {
       codexModel: options.codexModel,
       codexFallbackModel: options.codexFallbackModel,
       codexTimeoutMs: options.codexTimeoutMs,
+      userAiEncryptionKey: options.userAiEncryptionKey ?? USER_AI_ENCRYPTION_KEY,
+      userAiFetch: options.userAiFetch,
       inboxExternalAi: options.inboxExternalAi,
       inboxImageDescriber: options.inboxImageDescriber,
       inboxNormalizer: options.inboxNormalizer,
@@ -167,9 +170,9 @@ export function onceOpen(ws) {
   });
 }
 
-export async function waitFor(predicate) {
+export async function waitFor(predicate, timeoutMs = 3000) {
   const started = Date.now();
-  while (Date.now() - started < 3000) {
+  while (Date.now() - started < timeoutMs) {
     if (predicate()) return;
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
@@ -239,7 +242,8 @@ export async function createTestDatabase(migrations = [
   '0024_authenticated_brai_cmd_tokens.sql',
   '0020_inbox_operation_status.sql',
   '0021_activity_raw_normalization_workflows.sql',
-  '0022_activity_image_describer_workflow_step.sql'
+  '0022_activity_image_describer_workflow_step.sql',
+  '0025_user_ai_provider_credentials.sql'
 ]) {
   const baseUrl = process.env.BRAI_TEST_DATABASE_URL?.trim();
   if (!baseUrl) throw new Error('BRAI_TEST_DATABASE_URL is required for API tests');

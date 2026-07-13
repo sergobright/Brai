@@ -24,10 +24,11 @@ class TranscriptionCheckpointRegression1Test {
     @Before
     @After
     fun resetState() {
-        listOf("pending-recordings", "pending-transcripts", "processed-recordings").forEach {
+        listOf("pending-recordings", "pending-transcripts", "failed-transcripts", "processed-recordings").forEach {
             File(context.filesDir, it).deleteRecursively()
         }
         context.getSharedPreferences(AppConstants.PREFS, 0).edit().clear().commit()
+        context.getSharedPreferences("brai_cmd_secure", 0).edit().clear().commit()
         context.getSharedPreferences("brai_cmd_stats", 0).edit().clear().commit()
     }
 
@@ -42,6 +43,7 @@ class TranscriptionCheckpointRegression1Test {
         val audio = recordings.resolve("paid-once.m4a").apply {
             parentFile?.mkdirs()
             writeBytes(ByteArray(1_024) { 1 })
+            QueueOwnerStore.claim(this, QueueOwnerStore.current(context))
         }
         var transcriptionCalls = 0
         var postProcessingCalls = 0
@@ -73,7 +75,11 @@ class TranscriptionCheckpointRegression1Test {
 
     @Test
     fun readyTranscriptIsIdempotentForTheSameQueuedAudio() {
-        val audio = recordings.resolve("same-audio.m4a")
+        val audio = recordings.resolve("same-audio.m4a").apply {
+            parentFile?.mkdirs()
+            writeBytes(ByteArray(1_024) { 1 })
+            QueueOwnerStore.claim(this, QueueOwnerStore.current(context))
+        }
 
         PendingTranscriptStore.addForAudio(context, audio, "первый", PendingTranscriptKind.MainDictation)
         PendingTranscriptStore.addForAudio(context, audio, "окончательный", PendingTranscriptKind.MainDictation)

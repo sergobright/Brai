@@ -1,10 +1,13 @@
+import { scopedUserId } from './user-scope.js';
+
 export const aiLogMethods = {
   recordAiLog(input) {
+    const userId = input.userId ?? scopedUserId() ?? null;
     const info = this.db.prepare(`
       INSERT INTO ai_logs (
         agent_id, agent_version, dt, status, json_data, ai_title, flow_id, flow_command, trace_id,
-        workflow_id, run_id, attempt_number
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        workflow_id, run_id, attempt_number, user_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       input.agentId,
       input.agentVersion,
@@ -17,7 +20,8 @@ export const aiLogMethods = {
       input.traceId ?? null,
       input.workflowId ?? null,
       input.runId ?? null,
-      Number.isInteger(input.attemptNumber) ? input.attemptNumber : null
+      Number.isInteger(input.attemptNumber) ? input.attemptNumber : null,
+      userId
     );
     this.recordLog?.({
       dt: input.dt ?? new Date().toISOString(),
@@ -43,17 +47,19 @@ export const aiLogMethods = {
 
   listAiLogs({ limit = 50 } = {}) {
     const rowLimit = Math.max(1, Math.min(Number(limit) || 50, 200));
+    const userId = scopedUserId();
     return this.db
       .prepare(
         `
           SELECT id, agent_id, agent_version, dt, status, json_data, ai_title, flow_id, flow_command, trace_id,
             workflow_id, run_id, attempt_number
           FROM ai_logs
+          ${userId ? 'WHERE user_id = ?' : ''}
           ORDER BY dt DESC, id DESC
           LIMIT ?
         `
       )
-      .all(rowLimit)
+      .all(...(userId ? [userId, rowLimit] : [rowLimit]))
       .map((row) => ({
         ...row,
         json_data: parseJsonObject(row.json_data)

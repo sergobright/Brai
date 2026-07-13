@@ -6,7 +6,7 @@ import type { PendingTimerEvent } from "@/shared/types/timer";
 
 describe("BraiApi", () => {
   it("provisions an authenticated Brai CMD device token", async () => {
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ token: "device-token", status: "active" }), {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ token: "device-token", status: "pending" }), {
       status: 201,
       headers: { "content-type": "application/json" },
     }));
@@ -16,7 +16,7 @@ describe("BraiApi", () => {
       deviceId: "install-1",
       clientVersion: "60006",
       appPackage: "world.brightos.brai",
-    })).resolves.toEqual({ token: "device-token", status: "active" });
+    })).resolves.toEqual({ token: "device-token", status: "pending" });
     expect(fetchMock).toHaveBeenCalledWith(
       "https://api.example.test/v1/brai-cmd/device-token",
       expect.objectContaining({
@@ -24,6 +24,48 @@ describe("BraiApi", () => {
         credentials: "include",
         body: JSON.stringify({ deviceId: "install-1", clientVersion: "60006", appPackage: "world.brightos.brai" }),
       }),
+    );
+  });
+
+  it("uses the account AI provider and routing endpoints", async () => {
+    const aiSettings = {
+      model_provider_mode: "internal" as const,
+      text: null,
+      vision: null,
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (init?.method === "DELETE") return new Response(null, { status: 204 });
+      if (url.endsWith("/v1/ai/providers")) return Response.json({ providers: [] });
+      if (url.includes("/models?capability=text")) return Response.json({ models: [{ id: "gpt-test", capabilities: ["text"] }] });
+      if (url.endsWith("/v1/ai/settings")) return Response.json(aiSettings);
+      return Response.json({});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const api = new BraiApi("https://api.example.test");
+
+    await expect(api.aiProviders()).resolves.toEqual({ providers: [] });
+    await expect(api.aiSettings()).resolves.toEqual(aiSettings);
+    await expect(api.aiModels("openai", "text")).resolves.toEqual({ models: [{ id: "gpt-test", capabilities: ["text"] }] });
+    await api.saveAiProvider("openai", "sk-user-secret");
+    await api.updateAiSettings(aiSettings);
+    await api.deleteAiProvider("openai");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.example.test/v1/ai/providers/openai",
+      expect.objectContaining({ method: "PUT", body: JSON.stringify({ api_key: "sk-user-secret" }) }),
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.example.test/v1/ai/providers/openai/models?capability=text",
+      expect.objectContaining({ credentials: "include" }),
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.example.test/v1/ai/settings",
+      expect.objectContaining({ method: "PATCH", body: JSON.stringify(aiSettings) }),
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.example.test/v1/ai/providers/openai",
+      expect.objectContaining({ method: "DELETE" }),
     );
   });
 

@@ -24,22 +24,26 @@ internal class SpeechProviderClient(
         val providerId = config.transcriptionProviderId
         val model = config.transcriptionProviderModel
         val apiKey = SecureStringStore(appContext).providerKey(providerId)
+        return transcribe(file, providerId, apiKey, model)
+    }
+
+    fun transcribe(file: File, providerId: String, apiKey: String, model: String): SpeechProviderResult {
         if (apiKey.isBlank()) throw IllegalStateException("Ключ поставщика не настроен")
         if (model.isBlank()) throw IllegalStateException("Модель распознавания не выбрана")
-        return transcribe(file, providerId, apiKey, model, requireText = true)
+        return requestTranscription(file, providerId, apiKey, model, requireText = true)
     }
 
     fun test(providerId: String, apiKey: String, model: String): SpeechProviderResult {
         val probe = File.createTempFile("brai-provider-probe-", ".wav", appContext.cacheDir)
         return try {
             probe.writeBytes(silentWav())
-            transcribe(probe, providerId, apiKey, model, requireText = false)
+            requestTranscription(probe, providerId, apiKey, model, requireText = false)
         } finally {
             probe.delete()
         }
     }
 
-    private fun transcribe(
+    private fun requestTranscription(
         file: File,
         providerId: String,
         apiKey: String,

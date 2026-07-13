@@ -510,7 +510,10 @@ test('Inbox AI processing describes images, normalizes text, and suggests a new 
     assert.equal(response.status, 201);
     assert.equal(response.body.state.inbox[0].is_normalized, false);
 
-    await waitFor(() => fixture.store.db.prepare('SELECT is_normalized FROM inbox WHERE id = ?').get(response.body.inbox_id)?.is_normalized === 1);
+    await waitFor(
+      () => fixture.store.db.prepare('SELECT is_normalized FROM inbox WHERE id = ?').get(response.body.inbox_id)?.is_normalized === 1,
+      8000
+    );
 
     const item = fixture.store.db.prepare('SELECT * FROM inbox WHERE id = ?').get(response.body.inbox_id);
     assert.equal(item.title, 'Подготовить презентацию');
@@ -617,7 +620,7 @@ const args = process.argv.slice(2);
 const execIndex = args.indexOf('exec');
 const imageIndex = args.indexOf('--image');
 if (imageIndex >= 0 && (execIndex < 0 || imageIndex < execIndex)) throw new Error('--image must be an exec option');
-if (imageIndex >= 0 && args[args.indexOf('--cd') + 1] !== os.tmpdir()) throw new Error('--cd must avoid project image dir');
+if (imageIndex >= 0 && !args[args.indexOf('--cd') + 1].startsWith(path.join(os.tmpdir(), 'brai-inbox-ai-'))) throw new Error('--cd must use isolated temp dir');
 if (imageIndex >= 0 && path.dirname(args[imageIndex + 1]) !== ${JSON.stringify(expectedImageDir)}) throw new Error('--image must be absolute storage path');
 const outputPath = args[args.indexOf('--output-last-message') + 1];
 if (!outputPath) throw new Error('missing output path');

@@ -39,7 +39,7 @@ describe("BraiApp shell", () => {
     expect(screen.getByRole("button", { name: "Открыть правое меню" })).toBeInTheDocument();
   });
 
-  it("enables dictation and context after the signed-in cabinet opens", async () => {
+  it("enables dictation and context after account credentials are synchronized", async () => {
     stubAndroidCapacitor();
 
     render(<BraiApp />);
@@ -47,20 +47,43 @@ describe("BraiApp shell", () => {
     await waitFor(() => expect(cmdPlugin.setOverlayEnabled).toHaveBeenCalledWith({ enabled: true }));
     await waitFor(() => expect(cmdPlugin.setVoiceOnlyMode).toHaveBeenCalledWith({ enabled: false }));
     expect(cmdPlugin.setQueuePausedMode).toHaveBeenCalledWith({ enabled: false });
-    await waitFor(() => expect(cmdPlugin.setAccessKey).toHaveBeenCalledWith({ token: "authenticated-device-token", displayName: "Test" }));
-    expect(cmdPlugin.ensureAccess).not.toHaveBeenCalled();
+    await waitFor(() => expect(cmdPlugin.setAccessKey).toHaveBeenCalledWith({ token: "authenticated-device-token", displayName: "Test", userId: "test-user" }));
+    expect(cmdPlugin.ensureAccess).toHaveBeenCalledWith({ displayName: "Test" });
+    expect(cmdPlugin.syncProviderCredentials.mock.invocationCallOrder[0]).toBeLessThan(
+      cmdPlugin.setOverlayEnabled.mock.invocationCallOrder.find((order) => order > cmdPlugin.syncProviderCredentials.mock.invocationCallOrder[0]) ?? 0,
+    );
   });
 
-  it("does not tie cabinet overlays to the legacy native access-name request", async () => {
+  it("keeps account overlays blocked while waiting for device access", async () => {
     stubAndroidCapacitor();
     cmdPlugin.ensureAccess.mockResolvedValue({ accessGranted: false });
 
     render(<BraiApp />);
 
+    await waitFor(() => expect(cmdPlugin.ensureAccess).toHaveBeenCalledWith({ displayName: "Test" }));
+    expect(cmdPlugin.setOverlayEnabled).toHaveBeenCalledWith({ enabled: false });
+    expect(cmdPlugin.setOverlayEnabled).not.toHaveBeenCalledWith({ enabled: true });
+    expect(cmdPlugin.setQueuePausedMode).toHaveBeenCalledWith({ enabled: true });
+    expect(cmdPlugin.setAccessKey).not.toHaveBeenCalled();
+  });
+
+  it("does not enable authenticated capture before canonical provider sync completes", async () => {
+    stubAndroidCapacitor();
+    let finishSync: ((result: { ok: true }) => void) | undefined;
+    cmdPlugin.syncProviderCredentials.mockImplementation(() => new Promise((resolve) => {
+      finishSync = resolve;
+    }));
+
+    render(<BraiApp />);
+
+    await waitFor(() => expect(cmdPlugin.setAccessKey).toHaveBeenCalledTimes(1));
+    expect(cmdPlugin.setOverlayEnabled).not.toHaveBeenCalledWith({ enabled: true });
+    expect(cmdPlugin.setQueuePausedMode).not.toHaveBeenCalledWith({ enabled: false });
+
+    act(() => finishSync?.({ ok: true }));
+
     await waitFor(() => expect(cmdPlugin.setOverlayEnabled).toHaveBeenCalledWith({ enabled: true }));
-    expect(cmdPlugin.setVoiceOnlyMode).toHaveBeenCalledWith({ enabled: false });
-    await waitFor(() => expect(cmdPlugin.setAccessKey).toHaveBeenCalledWith({ token: "authenticated-device-token", displayName: "Test" }));
-    expect(cmdPlugin.ensureAccess).not.toHaveBeenCalled();
+    expect(cmdPlugin.setQueuePausedMode).toHaveBeenCalledWith({ enabled: false });
   });
 
   it("does not rotate a healthy device token on ordinary network recovery", async () => {
@@ -96,7 +119,7 @@ describe("BraiApp shell", () => {
     expect(deviceTokenRequestCount()).toBe(2);
   });
 
-  it("keeps full mode active and retries a failed device-token bootstrap", async () => {
+  it("keeps account mode blocked and retries a failed device-token bootstrap", async () => {
     stubAndroidCapacitor();
     const defaultFetch = vi.mocked(fetch).getMockImplementation();
     let tokenAttempts = 0;
@@ -111,12 +134,14 @@ describe("BraiApp shell", () => {
     render(<BraiApp />);
 
     await waitFor(() => expect(deviceTokenRequestCount()).toBe(1));
-    expect(cmdPlugin.setOverlayEnabled).toHaveBeenCalledWith({ enabled: true });
-    expect(cmdPlugin.setVoiceOnlyMode).toHaveBeenCalledWith({ enabled: false });
+    expect(cmdPlugin.setOverlayEnabled).toHaveBeenCalledWith({ enabled: false });
+    expect(cmdPlugin.setOverlayEnabled).not.toHaveBeenCalledWith({ enabled: true });
+    expect(cmdPlugin.setQueuePausedMode).toHaveBeenCalledWith({ enabled: true });
     expect(cmdPlugin.setAccessKey).not.toHaveBeenCalled();
 
     await waitFor(() => expect(cmdPlugin.setAccessKey).toHaveBeenCalledTimes(1), { timeout: 2_500 });
     expect(deviceTokenRequestCount()).toBe(2);
+    expect(cmdPlugin.setOverlayEnabled).toHaveBeenCalledWith({ enabled: true });
     expect(cmdPlugin.retryQueue).toHaveBeenCalled();
   });
 
@@ -157,19 +182,16 @@ describe("BraiApp shell", () => {
     render(<BraiApp />);
 
     await waitFor(() => expect(deviceTokenRequestCount()).toBe(1));
-    await waitFor(() => expect(cmdPlugin.setAccessKey).toHaveBeenLastCalledWith({ token: "", displayName: "" }));
+    await waitFor(() => expect(cmdPlugin.setAccessKey).toHaveBeenLastCalledWith({ token: "", displayName: "", userId: "" }));
     expect(cmdPlugin.setOverlayEnabled).toHaveBeenLastCalledWith({ enabled: false });
   });
 
-  it("clears the technical credential and overlays after logout", async () => {
+  it("clears the technical credential and overlays even when server logout is offline", async () => {
     stubAndroidCapacitor();
     const defaultFetch = vi.mocked(fetch).getMockImplementation();
     vi.mocked(fetch).mockImplementation(async (input, init) => {
       if (requestUrl(input).endsWith("/auth/logout")) {
-        return new Response(JSON.stringify({ success: true }), {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        });
+        throw new Error("offline");
       }
       if (!defaultFetch) throw new Error("missing_default_fetch");
       return await defaultFetch(input, init);
@@ -177,11 +199,11 @@ describe("BraiApp shell", () => {
 
     render(<BraiApp />);
 
-    await waitFor(() => expect(cmdPlugin.setAccessKey).toHaveBeenCalledWith({ token: "authenticated-device-token", displayName: "Test" }));
+    await waitFor(() => expect(cmdPlugin.setAccessKey).toHaveBeenCalledWith({ token: "authenticated-device-token", displayName: "Test", userId: "test-user" }));
     await openProfileMenuItem("Выход");
 
-    await waitFor(() => expect(cmdPlugin.setAccessKey).toHaveBeenLastCalledWith({ token: "", displayName: "" }));
-    expect(cmdPlugin.setOverlayEnabled).toHaveBeenLastCalledWith({ enabled: false });
+    await waitFor(() => expect(cmdPlugin.setAccessKey).toHaveBeenLastCalledWith({ token: "", displayName: "", userId: "" }));
+    await waitFor(() => expect(cmdPlugin.setOverlayEnabled).toHaveBeenLastCalledWith({ enabled: false }));
     expect(cmdPlugin.setQueuePausedMode).toHaveBeenCalledWith({ enabled: false });
   });
 

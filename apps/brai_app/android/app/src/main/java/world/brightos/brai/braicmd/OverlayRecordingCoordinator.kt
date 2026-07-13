@@ -109,6 +109,14 @@ internal class OverlayRecordingCoordinator(
         RecordingService.cancel(service)
     }
 
+    fun cancelForOverlayDisabled() {
+        when {
+            activeButton == RecordingButton.Context && startingRecording -> cancelActiveContextAction()
+            startingRecording || BraiCmdBus.latest is RecorderState.Recording -> cancelActiveRecording()
+            else -> cancelLongPress()
+        }
+    }
+
     fun cancelActiveContextAction() {
         cancelLongPress()
         if (activeButton != RecordingButton.Context) return
@@ -183,8 +191,9 @@ internal class OverlayRecordingCoordinator(
         }
         activeButton = if (useScreenshot) RecordingButton.Context else RecordingButton.Main
         activeContextAction = if (useScreenshot) ContextButtonAction.ScreenshotVoiceInbox else null
+        val owner = QueueOwnerStore.current(service)
         if (!useScreenshot) {
-            beginRecording(null, null, deliverToInbox = false)
+            beginRecording(owner, null, null, deliverToInbox = false)
             return
         }
         when (config.contextDeliveryMode) {
@@ -196,15 +205,16 @@ internal class OverlayRecordingCoordinator(
                     BraiCmdBus.post(RecorderState.Error("JSON страницы недоступен"))
                     return
                 }
-                beginRecording(conversationContext, null, deliverToInbox = true, inboxTextPrefix = "")
+                beginRecording(owner, conversationContext, null, deliverToInbox = true, inboxTextPrefix = "")
             }
-            ContextDeliveryMode.Screenshot -> startRecordingWithScreenshot()
+            ContextDeliveryMode.Screenshot -> startRecordingWithScreenshot(owner)
         }
     }
 
     private fun startContextAction(action: ContextButtonAction) {
+        val owner = QueueOwnerStore.current(service)
         if (action == ContextButtonAction.ScreenshotInbox) {
-            startScreenshotOnlyInbox()
+            startScreenshotOnlyInbox(owner)
             return
         }
         if (!canRecord()) return
@@ -212,13 +222,13 @@ internal class OverlayRecordingCoordinator(
         activeContextAction = action
         when (action) {
             ContextButtonAction.IdeaVoiceInbox ->
-                beginRecording(null, null, deliverToInbox = true, inboxTextPrefix = "")
+                beginRecording(owner, null, null, deliverToInbox = true, inboxTextPrefix = "")
             ContextButtonAction.ScreenshotVoiceInbox ->
-                startRecordingWithScreenshot(inboxTextPrefix = "")
+                startRecordingWithScreenshot(owner, inboxTextPrefix = "")
             ContextButtonAction.ChatContextInbox ->
-                startRecordingWithJson(inboxTextPrefix = "Добавить в контекст контакта")
+                startRecordingWithJson(owner, inboxTextPrefix = "Добавить в контекст контакта")
             ContextButtonAction.SaveContextInbox ->
-                startRecordingWithJson(inboxTextPrefix = "")
+                startRecordingWithJson(owner, inboxTextPrefix = "")
             ContextButtonAction.ScreenshotInbox -> Unit
         }
     }
@@ -239,7 +249,7 @@ internal class OverlayRecordingCoordinator(
         return true
     }
 
-    private fun startRecordingWithJson(inboxTextPrefix: String) {
+    private fun startRecordingWithJson(owner: QueueOwnerScope, inboxTextPrefix: String) {
         val conversationContext = service.captureVisibleConversationContext()
         if (conversationContext == null) {
             activeButton = null
@@ -247,10 +257,10 @@ internal class OverlayRecordingCoordinator(
             BraiCmdBus.post(RecorderState.Error("JSON страницы недоступен"))
             return
         }
-        beginRecording(conversationContext, null, deliverToInbox = true, inboxTextPrefix = inboxTextPrefix)
+        beginRecording(owner, conversationContext, null, deliverToInbox = true, inboxTextPrefix = inboxTextPrefix)
     }
 
-    private fun startScreenshotOnlyInbox() {
+    private fun startScreenshotOnlyInbox(owner: QueueOwnerScope) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
             BraiCmdBus.post(RecorderState.Error("Скриншот недоступен"))
             return
@@ -267,18 +277,25 @@ internal class OverlayRecordingCoordinator(
                 return@capture
             }
             startingRecording = false
+            if (QueueOwnerStore.current(service).ownerId != owner.ownerId) {
+                screenshotFile?.delete()
+                activeButton = null
+                activeContextAction = null
+                BraiCmdBus.post(RecorderState.Error("Профиль изменился до сохранения скриншота"))
+                return@capture
+            }
             if (screenshotFile == null) {
                 BraiCmdBus.post(RecorderState.Error("Скриншот недоступен"))
                 return@capture
             }
-            if (!RecordingService.enqueueScreenshot(service, screenshotFile)) {
+            if (!RecordingService.enqueueScreenshot(service, screenshotFile, owner)) {
                 screenshotFile.delete()
                 BraiCmdBus.post(RecorderState.Error("Скриншот не сохранён"))
             }
         }
     }
 
-    private fun startRecordingWithScreenshot(inboxTextPrefix: String = "") {
+    private fun startRecordingWithScreenshot(owner: QueueOwnerScope, inboxTextPrefix: String = "") {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
             activeButton = null
             activeContextAction = null
@@ -302,7 +319,15 @@ internal class OverlayRecordingCoordinator(
                 BraiCmdBus.post(RecorderState.Error("Скриншот недоступен"))
                 return@capture
             }
-            beginRecording(null, screenshotFile, deliverToInbox = true, inboxTextPrefix = inboxTextPrefix)
+            if (QueueOwnerStore.current(service).ownerId != owner.ownerId) {
+                screenshotFile.delete()
+                startingRecording = false
+                activeButton = null
+                activeContextAction = null
+                BraiCmdBus.post(RecorderState.Error("Профиль изменился до начала записи"))
+                return@capture
+            }
+            beginRecording(owner, null, screenshotFile, deliverToInbox = true, inboxTextPrefix = inboxTextPrefix)
         }
     }
 
@@ -323,6 +348,7 @@ internal class OverlayRecordingCoordinator(
     }
 
     private fun beginRecording(
+        owner: QueueOwnerScope,
         conversationContext: VisibleConversationContext?,
         screenshotFile: File?,
         deliverToInbox: Boolean,
@@ -337,7 +363,8 @@ internal class OverlayRecordingCoordinator(
             screenshotFile,
             deliverToInbox = deliverToInbox,
             inboxTextPrefix = inboxTextPrefix,
-            contextAction = activeContextAction
+            contextAction = activeContextAction,
+            owner = owner
         )
     }
 

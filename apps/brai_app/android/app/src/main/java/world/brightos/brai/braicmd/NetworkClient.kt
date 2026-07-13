@@ -16,6 +16,7 @@ import java.net.SocketTimeoutException
 import java.net.UnknownHostException
 import java.net.URL
 import java.util.UUID
+import java.util.function.BooleanSupplier
 
 data class DictationResponse(
     val text: String,
@@ -36,6 +37,11 @@ data class AccessResponse(
     val displayName: String
 )
 
+data class AccountAccessResponse(
+    val token: String,
+    val accountUserId: String
+)
+
 data class PreliminaryProfileResponse(
     val status: String,
     val preliminaryUserId: String,
@@ -51,6 +57,56 @@ data class CloudPostProcessingResponse(
     val inputChars: Int,
     val outputChars: Int
 )
+
+internal data class ProviderCredentialSyncFailure(
+    val providerId: String,
+    val code: String
+)
+
+internal data class ProviderCredentialSyncResult(
+    val accountUserId: String,
+    val accountKeys: Map<String, String>,
+    val importedProviderIds: List<String>,
+    val ignoredProviderIds: List<String>,
+    val failures: List<ProviderCredentialSyncFailure>
+)
+
+internal fun parseProviderCredentialSync(json: JSONObject): ProviderCredentialSyncResult {
+    val providers = json.optJSONArray("providers") ?: JSONArray()
+    val accountKeys = (0 until providers.length())
+        .mapNotNull { providers.optJSONObject(it) }
+        .mapNotNull { item ->
+            val providerId = item.optString("provider_id").trim()
+            val apiKey = item.optString("api_key").trim()
+            if (providerId !in ConfigStore.ACCOUNT_PROVIDER_IDS || apiKey.isBlank() || apiKey.length > 16_384) null
+            else providerId to apiKey
+        }
+        .toMap()
+    val failuresJson = json.optJSONArray("failed") ?: JSONArray()
+    val failures = (0 until failuresJson.length())
+        .mapNotNull { failuresJson.optJSONObject(it) }
+        .mapNotNull { item ->
+            val providerId = item.optString("provider_id").trim()
+            if (providerId !in ConfigStore.ACCOUNT_PROVIDER_IDS) null
+            else ProviderCredentialSyncFailure(providerId, item.optString("code", "sync_failed").trim().ifBlank { "sync_failed" })
+        }
+    return ProviderCredentialSyncResult(
+        accountUserId = json.optString("account_user_id").trim(),
+        accountKeys = accountKeys,
+        importedProviderIds = json.optJSONArray("imported_provider_ids").providerIds(),
+        ignoredProviderIds = json.optJSONArray("ignored_provider_ids").providerIds(),
+        failures = failures
+    )
+}
+
+private fun JSONArray?.providerIds(): List<String> {
+    if (this == null) return emptyList()
+    return (0 until length())
+        .map { optString(it).trim() }
+        .filter { it in ConfigStore.ACCOUNT_PROVIDER_IDS }
+        .distinct()
+}
+
 class ServerResponseException(
     val statusCode: Int,
     val code: String,
@@ -69,9 +125,13 @@ internal fun preliminaryFailureCode(error: Throwable): String = when (error) {
     else -> "preliminary_unknown"
 }
 
-class NetworkClient(context: Context) {
+class NetworkClient internal constructor(
+    context: Context,
+    private val config: ConfigStore
+) {
+    constructor(context: Context) : this(context, ConfigStore(context))
+
     private val appContext = context.applicationContext
-    private val config = ConfigStore(appContext)
 
     fun publicHealthCheck(): String {
         val connection = openPublicConnection("/health", "GET")
@@ -81,6 +141,37 @@ class NetworkClient(context: Context) {
     fun healthCheck(): String {
         val connection = openAuthenticatedConnection("/v1/health", "GET")
         return healthStatus(readJson(connection))
+    }
+
+    fun ensureDeviceAccess(displayName: String, deviceFingerprint: String) =
+        ensureDeviceAccess(displayName, deviceFingerprint, BooleanSupplier { true })
+
+    fun ensureDeviceAccess(
+        displayName: String,
+        deviceFingerprint: String,
+        canApply: BooleanSupplier
+    ) {
+        check(canApply.asBoolean) { "credential_operation_superseded" }
+        if (config.authToken.isNotBlank()) {
+            try {
+                healthCheck()
+                check(canApply.asBoolean) { "credential_operation_superseded" }
+                return
+            } catch (error: ServerResponseException) {
+                if (error.statusCode != 401 && error.statusCode != 403) return
+                check(canApply.asBoolean) { "credential_operation_superseded" }
+                config.authToken = ""
+            } catch (_: Throwable) {
+                return
+            }
+        }
+        val access = requestAccess(displayName, deviceFingerprint)
+        check(access.token.isNotBlank()) { "missing_access_token" }
+        check(canApply.asBoolean) { "credential_operation_superseded" }
+        config.authToken = access.token
+        config.displayName = access.displayName.ifBlank { displayName }
+        healthCheck()
+        check(canApply.asBoolean) { "credential_operation_superseded" }
     }
 
     fun diagnostics(includeCloudTranscription: Boolean): JSONObject {
@@ -95,6 +186,72 @@ class NetworkClient(context: Context) {
             .toByteArray(Charsets.UTF_8)
         connection.outputStream.use { it.write(body) }
         return readJson(connection)
+    }
+
+    internal fun syncProviderCredentials(localProviders: Map<String, String>): ProviderCredentialSyncResult {
+        val connection = openAuthenticatedConnection("/v1/brai-cmd/provider-credentials/sync", "POST").apply {
+            doOutput = true
+            setRequestProperty("Content-Type", "application/json; charset=utf-8")
+        }
+        val providers = JSONArray()
+        val candidates = localProviders.entries
+            .filter { it.key in ConfigStore.ACCOUNT_PROVIDER_IDS }
+        val invalidProviderIds = candidates
+            .filter { (_, apiKey) -> apiKey.length !in 8..2_048 || apiKey.contains('\r') || apiKey.contains('\n') }
+            .map { it.key }
+        candidates
+            .filterNot { it.key in invalidProviderIds }
+            .sortedBy { it.key }
+            .take(ConfigStore.ACCOUNT_PROVIDER_IDS.size)
+            .forEach { (providerId, apiKey) ->
+                providers.put(JSONObject().put("provider_id", providerId).put("api_key", apiKey))
+            }
+        val body = JSONObject().put("providers", providers).toString().toByteArray(Charsets.UTF_8)
+        connection.outputStream.use { it.write(body) }
+        val result = parseProviderCredentialSync(readJson(connection))
+        val ignoredInvalid = invalidProviderIds.filter { it in result.accountKeys }
+        val failedInvalid = invalidProviderIds.filterNot { it in result.accountKeys }
+        return result.copy(
+            ignoredProviderIds = (result.ignoredProviderIds + ignoredInvalid).distinct(),
+            failures = result.failures + failedInvalid.map { ProviderCredentialSyncFailure(it, "invalid_key") }
+        )
+    }
+
+    fun activateAccountAccess(linkToken: String): AccountAccessResponse {
+        val cleanToken = linkToken.trim()
+        require(cleanToken.length in 8..4_096 && !cleanToken.contains('\r') && !cleanToken.contains('\n')) {
+            "invalid_link_token"
+        }
+        val connection = openAuthenticatedConnection("/v1/brai-cmd/account-access/activate", "POST").apply {
+            doOutput = true
+            connectTimeout = ACCOUNT_ACCESS_TIMEOUT_MS
+            readTimeout = ACCOUNT_ACCESS_TIMEOUT_MS
+            setRequestProperty("Content-Type", "application/json; charset=utf-8")
+        }
+        val body = JSONObject().put("link_token", cleanToken).toString().toByteArray(Charsets.UTF_8)
+        connection.outputStream.use { it.write(body) }
+        val json = readJson(connection)
+        val token = json.optString("token").trim()
+        val userId = json.optString("account_user_id").trim()
+        check(token.length in 8..4_096 && !token.contains('\r') && !token.contains('\n') && userId.isNotBlank()) {
+            "invalid_account_access_response"
+        }
+        return AccountAccessResponse(token, userId)
+    }
+
+    fun revokeCurrentAccess() {
+        revokeAccess(config.authToken)
+    }
+
+    fun revokeAccess(token: String) {
+        val connection = openAuthenticatedConnection("/v1/brai-cmd/access/revoke-self", "POST", token).apply {
+            doOutput = true
+            connectTimeout = ACCOUNT_ACCESS_TIMEOUT_MS
+            readTimeout = ACCOUNT_ACCESS_TIMEOUT_MS
+            setRequestProperty("Content-Type", "application/json; charset=utf-8")
+        }
+        connection.outputStream.use { it.write("{}".toByteArray(Charsets.UTF_8)) }
+        readJson(connection)
     }
 
     fun requestPreliminaryProfile(displayName: String, deviceFingerprint: String): PreliminaryProfileResponse {
@@ -167,17 +324,18 @@ class NetworkClient(context: Context) {
         file: File,
         conversationContext: VisibleConversationContext? = null,
         screenshotFile: File? = null,
-        braiCmdFunction: String = AudioQueueAction.MainDictation.functionKey
+        braiCmdFunction: String = AudioQueueAction.MainDictation.functionKey,
+        cloudPostProcessingEnabled: Boolean = config.postProcessingEnabled && config.postProcessingProviderMode != "key",
+        cloudPostProcessingPrompt: String = postProcessingPrompt(),
+        accessToken: String = config.authToken
     ): DictationResponse {
         val boundary = "BraiCmd-${UUID.randomUUID()}"
-        val connection = openAuthenticatedConnection("/v1/dictate", "POST").apply {
+        val connection = openAuthenticatedConnection("/v1/dictate", "POST", accessToken).apply {
             doOutput = true
             readTimeout = DICTATE_READ_TIMEOUT_MS
             setChunkedStreamingMode(64 * 1024)
             setRequestProperty("Content-Type", "multipart/form-data; boundary=$boundary")
         }
-        val shouldPostProcess = config.postProcessingEnabled
-        val shouldPostProcessOnServer = shouldPostProcess && config.postProcessingProviderMode != "key"
         val durationMs = audioDurationMs(file)
         val shouldSendHeaderContext = conversationContext?.isReliable() == true
         val shouldSendScreenshot = screenshotFile?.isFile == true && screenshotFile.length() > 0L
@@ -200,9 +358,9 @@ class NetworkClient(context: Context) {
                 writeField(out, boundary, "screenshotContextEnabled", "true")
                 writeFile(out, boundary, "screenshot", screenshotFile.name, "image/jpeg", screenshotFile)
             }
-            if (shouldPostProcessOnServer) {
+            if (cloudPostProcessingEnabled) {
                 writeField(out, boundary, "postProcessingEnabled", "true")
-                writeField(out, boundary, "postProcessingPrompt", postProcessingPrompt())
+                writeField(out, boundary, "postProcessingPrompt", cloudPostProcessingPrompt)
             }
             writeFile(out, boundary, "audio", file.name, "audio/mp4", file)
             out.write("--$boundary--\r\n".toByteArray())
@@ -229,9 +387,10 @@ class NetworkClient(context: Context) {
         conversationContext: VisibleConversationContext?,
         screenshotFile: File?,
         idempotencyKey: String,
-        braiCmdFunction: String = AudioQueueAction.IdeaVoiceInbox.functionKey
+        braiCmdFunction: String = AudioQueueAction.IdeaVoiceInbox.functionKey,
+        accessToken: String = config.authToken
     ): BraiCmdNotice? {
-        val connection = openAuthenticatedConnection("/v1/brai-cmd/inbox", "POST").apply {
+        val connection = openAuthenticatedConnection("/v1/brai-cmd/inbox", "POST", accessToken).apply {
             doOutput = true
             readTimeout = DEFAULT_READ_TIMEOUT_MS
             setRequestProperty("Content-Type", "application/json; charset=utf-8")
@@ -276,8 +435,12 @@ class NetworkClient(context: Context) {
         )
     }
 
-    fun postProcessText(text: String, prompt: String): CloudPostProcessingResponse {
-        val connection = openAuthenticatedConnection("/v1/brai-cmd/post-process", "POST").apply {
+    fun postProcessText(
+        text: String,
+        prompt: String,
+        accessToken: String = config.authToken
+    ): CloudPostProcessingResponse {
+        val connection = openAuthenticatedConnection("/v1/brai-cmd/post-process", "POST", accessToken).apply {
             doOutput = true
             readTimeout = DEFAULT_READ_TIMEOUT_MS
             setRequestProperty("Content-Type", "application/json; charset=utf-8")
@@ -310,7 +473,11 @@ class NetworkClient(context: Context) {
     }
 
     private fun openAuthenticatedConnection(path: String, method: String): HttpURLConnection {
-        val token = config.authToken
+        return openAuthenticatedConnection(path, method, config.authToken)
+    }
+
+    private fun openAuthenticatedConnection(path: String, method: String, accessToken: String): HttpURLConnection {
+        val token = accessToken.trim()
         if (token.isBlank()) throw QueueAuthBlockedException()
         return openPublicConnection(path, method).apply {
             setRequestProperty("Authorization", "Bearer $token")
@@ -325,7 +492,9 @@ class NetworkClient(context: Context) {
         val body = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
         if (status !in 200..299) {
             val json = runCatching { JSONObject(body) }.getOrNull()
-            val code = json?.optString("code")?.takeUnless { it.isBlank() } ?: "http_error"
+            val code = json?.optString("code")?.takeUnless { it.isBlank() }
+                ?: (json?.opt("error") as? String)?.takeUnless { it.isBlank() }
+                ?: "http_error"
             val providerMessage = json?.optJSONObject("error")?.optString("message")?.takeUnless { it.isBlank() }
                 ?: (json?.opt("error") as? String)?.takeUnless { it.isBlank() }
                 ?: body
@@ -385,5 +554,6 @@ class NetworkClient(context: Context) {
         private const val MAX_POST_PROCESSING_PROMPT_CHARS = 4000
         private const val DEFAULT_READ_TIMEOUT_MS = 70_000
         private const val DICTATE_READ_TIMEOUT_MS = 240_000
+        private const val ACCOUNT_ACCESS_TIMEOUT_MS = 10_000
     }
 }

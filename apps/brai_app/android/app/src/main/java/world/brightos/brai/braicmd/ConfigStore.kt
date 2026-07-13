@@ -15,7 +15,29 @@ internal object BraiCmdRuntimeState {
     var onboardingQueuePaused: Boolean = false
 }
 
-class ConfigStore(context: Context) {
+internal data class QueueAccessSnapshot(
+    val owner: QueueOwnerScope,
+    val accessToken: String
+)
+
+internal data class QueueProviderSettingsSnapshot(
+    val transcriptionMode: String,
+    val transcriptionProviderId: String,
+    val transcriptionModel: String,
+    val postProcessingEnabled: Boolean,
+    val postProcessingMode: String,
+    val postProcessingProviderId: String,
+    val postProcessingModel: String,
+    val postProcessingBaseUrl: String,
+    val postProcessingPrompt: String
+)
+
+class ConfigStore internal constructor(
+    context: Context,
+    private val secureStrings: SecureStringStore
+) {
+    constructor(context: Context) : this(context, SecureStringStore(context))
+
     private val appContext = context.applicationContext
     private val prefs = appContext.getSharedPreferences(AppConstants.PREFS, Context.MODE_PRIVATE)
 
@@ -34,11 +56,63 @@ class ConfigStore(context: Context) {
         set(value) = prefs.edit().putString(AppConstants.KEY_SERVER_URL, value.trim()).apply()
 
     var authToken: String
-        get() {
-            val saved = prefs.getString(AppConstants.KEY_AUTH_TOKEN, "").orEmpty().trim()
-            return if (saved == LEGACY_AUTH_TOKEN_PLACEHOLDER) "" else saved
+        get() = synchronized(ACCESS_LOCK) { migrateLegacyAccessToken() }
+        set(value) = synchronized(ACCESS_LOCK) { storeAccessToken(value) }
+
+    val accountUserId: String
+        get() = synchronized(ACCESS_LOCK) { accountUserIdUnlocked() }
+
+    fun beginAccountCredentialMode(userId: String) {
+        synchronized(ACCESS_LOCK) {
+            check(prefs.edit().putString(AppConstants.KEY_ACCOUNT_USER_ID, userId.trim()).commit()) {
+                "account_mode_store_failed"
+            }
         }
-        set(value) = prefs.edit().putString(AppConstants.KEY_AUTH_TOKEN, value.trim()).apply()
+    }
+
+    fun updateAccess(token: String, userId: String) {
+        synchronized(ACCESS_LOCK) {
+            val previousToken = migrateLegacyAccessToken()
+            secureStrings.writeDeviceAccessToken(token)
+            val editor = prefs.edit().putString(AppConstants.KEY_ACCOUNT_USER_ID, userId.trim())
+            if (token.isBlank()) editor.remove(AppConstants.KEY_AUTH_TOKEN)
+            else editor.putString(AppConstants.KEY_AUTH_TOKEN, SECURE_AUTH_TOKEN_MARKER)
+            if (!editor.commit()) {
+                secureStrings.writeDeviceAccessToken(previousToken)
+                error("access_store_failed")
+            }
+        }
+    }
+
+    /** Captures the owner and token as one credential-boundary snapshot for durable queue work. */
+    internal fun queueAccessSnapshot(): QueueAccessSnapshot = synchronized(ACCESS_LOCK) {
+        QueueAccessSnapshot(queueOwnerScopeUnlocked(), migrateLegacyAccessToken())
+    }
+
+    internal fun queueOwnerScope(): QueueOwnerScope = synchronized(ACCESS_LOCK) {
+        queueOwnerScopeUnlocked()
+    }
+
+    internal fun queueProviderSettingsSnapshot(): QueueProviderSettingsSnapshot = synchronized(QUEUE_SETTINGS_LOCK) {
+        QueueProviderSettingsSnapshot(
+            transcriptionMode = transcriptionProviderMode,
+            transcriptionProviderId = transcriptionProviderId,
+            transcriptionModel = transcriptionProviderModel,
+            postProcessingEnabled = postProcessingEnabled,
+            postProcessingMode = postProcessingProviderMode,
+            postProcessingProviderId = llmProviderId,
+            postProcessingModel = llmProviderModel,
+            postProcessingBaseUrl = llmProviderBaseUrl,
+            postProcessingPrompt = postProcessingPrompt
+        )
+    }
+
+    /** Clears a rejected token only when a later account transition has not replaced it. */
+    internal fun clearAuthTokenIfMatches(expectedToken: String): Boolean = synchronized(ACCESS_LOCK) {
+        if (expectedToken.isBlank() || migrateLegacyAccessToken() != expectedToken) return@synchronized false
+        storeAccessToken("")
+        true
+    }
 
     var displayName: String
         get() = prefs.getString(AppConstants.KEY_DISPLAY_NAME, "").orEmpty()
@@ -268,15 +342,59 @@ class ConfigStore(context: Context) {
         editor.apply()
     }
 
+    private fun migrateLegacyAccessToken(): String {
+        val encrypted = secureStrings.deviceAccessToken()
+        val saved = prefs.getString(AppConstants.KEY_AUTH_TOKEN, "").orEmpty().trim()
+        if (encrypted.isNotBlank()) {
+            if (saved != SECURE_AUTH_TOKEN_MARKER) {
+                check(prefs.edit().putString(AppConstants.KEY_AUTH_TOKEN, SECURE_AUTH_TOKEN_MARKER).commit()) {
+                    "access_store_failed"
+                }
+            }
+            return encrypted
+        }
+        if (saved.isBlank() || saved == LEGACY_AUTH_TOKEN_PLACEHOLDER || saved == SECURE_AUTH_TOKEN_MARKER) {
+            if (saved.isNotBlank()) {
+                check(prefs.edit().remove(AppConstants.KEY_AUTH_TOKEN).commit()) { "access_store_failed" }
+            }
+            return ""
+        }
+        secureStrings.writeDeviceAccessToken(saved)
+        check(prefs.edit().putString(AppConstants.KEY_AUTH_TOKEN, SECURE_AUTH_TOKEN_MARKER).commit()) {
+            "access_store_failed"
+        }
+        return saved
+    }
+
+    private fun storeAccessToken(value: String) {
+        secureStrings.writeDeviceAccessToken(value)
+        val editor = prefs.edit()
+        if (value.isBlank()) editor.remove(AppConstants.KEY_AUTH_TOKEN)
+        else editor.putString(AppConstants.KEY_AUTH_TOKEN, SECURE_AUTH_TOKEN_MARKER)
+        check(editor.commit()) { "access_store_failed" }
+    }
+
+    private fun accountUserIdUnlocked(): String =
+        prefs.getString(AppConstants.KEY_ACCOUNT_USER_ID, "").orEmpty().trim()
+
+    private fun queueOwnerScopeUnlocked(): QueueOwnerScope =
+        QueueOwnerScope.create(accountUserIdUnlocked(), installId)
+
     companion object {
+        private val ACCESS_LOCK = Any()
+        private val QUEUE_SETTINGS_LOCK = Any()
         private const val LEGACY_AUTH_TOKEN_PLACEHOLDER = "replace-with-local-token"
+        private const val SECURE_AUTH_TOKEN_MARKER = "android-keystore"
         val SUPPORTED_LLM_PROVIDERS = setOf("openai", "groq", "openrouter", "gemini", "custom-openai")
+        val ACCOUNT_PROVIDER_IDS = setOf("openai", "groq", "openrouter", "gemini")
         val SUPPORTED_TRANSCRIPTION_PROVIDERS = setOf("openai", "groq")
 
         private val LEGACY_SERVER_URLS = setOf(
             "https://your-server.example.com",
             "http://192.168.1.9:8787"
         )
+
+        internal fun <T> mutateQueueSettings(block: () -> T): T = synchronized(QUEUE_SETTINGS_LOCK) { block() }
 
         private fun isLegacyBraiServerUrl(value: String): Boolean {
             if (value in LEGACY_SERVER_URLS) return true

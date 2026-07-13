@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type SetStateAction } from "react";
 import { BraiApi, DEFAULT_APP_SETTINGS, type AppSettings, type AuthOnboardingContext, type AuthUser, type OtpSendResult } from "@/shared/api/braiApi";
 import { defaultApiBase, isProductionEnvironment } from "@/shared/config/runtime";
-import { prepareBraiCmdPreliminaryProfile, setBraiCmdOverlayEnabled, setBraiCmdQueuePausedMode, setBraiCmdVoiceOnlyMode } from "@/shared/platform/braiCmd";
+import { beginBraiCmdAccountCredentialMode, prepareBraiCmdPreliminaryProfile, setBraiCmdAccessKey, setBraiCmdOverlayEnabled, setBraiCmdQueuePausedMode, setBraiCmdVoiceOnlyMode } from "@/shared/platform/braiCmd";
 import {
   acknowledgeAndroidActionsWidgetStatusChanges,
   clearAndroidActionsWidgetData,
@@ -42,6 +42,15 @@ import { useBraiVersion } from "./useBraiVersion";
 const ANDROID_ACTIONS_WIDGET_STATUS_POLL_MS = 250;
 const ANDROID_ACTIONS_WIDGET_SNAPSHOT_DEBOUNCE_MS = 75;
 const APP_SETTINGS_STORAGE_KEY = "brai_app_settings";
+
+async function beginNativeAccountCredentialBoundary(userId: string): Promise<void> {
+  if (!isNativeShell() || platformName() !== "android") return;
+  await Promise.all([
+    setBraiCmdOverlayEnabled(false),
+    setBraiCmdQueuePausedMode(true),
+  ]);
+  await beginBraiCmdAccountCredentialMode(userId);
+}
 
 /**
  * Owns the Brai client state machine, local cache loading, and sync flow.
@@ -695,6 +704,8 @@ export function useBraiAppState(initialSection: SectionId) {
       const result = await api.verifyOtp(email, otp, context);
       if (!result.authenticated || !result.user) throw new Error("authentication_failed");
       if (authTransitionRef.current !== authTransition) throw new Error("authentication_superseded");
+      await beginNativeAccountCredentialBoundary(result.user.id);
+      if (authTransitionRef.current !== authTransition) throw new Error("authentication_superseded");
       setAuthUser(result.user);
       await ensureClientUser(result.user.id);
       resetUserSnapshots();
@@ -715,6 +726,8 @@ export function useBraiAppState(initialSection: SectionId) {
       const result = await api.testEmailLogin(email, context);
       if (!result.authenticated || !result.user) throw new Error("authentication_failed");
       if (authTransitionRef.current !== authTransition) throw new Error("authentication_superseded");
+      await beginNativeAccountCredentialBoundary(result.user.id);
+      if (authTransitionRef.current !== authTransition) throw new Error("authentication_superseded");
       setAuthUser(result.user);
       await ensureClientUser(result.user.id);
       resetUserSnapshots();
@@ -734,18 +747,23 @@ export function useBraiAppState(initialSection: SectionId) {
     await bootPromiseRef.current;
     const onboarding = loadOnboardingState();
     const preliminaryDisplayName = onboarding.name.trim() || authUser?.name || "Brai";
-    await api.logout();
+    await setBraiCmdAccessKey("", "", "");
+    try {
+      await api.logout();
+    } catch {
+      // Native account credentials and the local session boundary still clear while offline.
+    }
     const preliminaryClientUserId = await restorePreliminaryClientUser(preliminaryDisplayName);
+    await Promise.all([
+      setBraiCmdOverlayEnabled(true),
+      setBraiCmdVoiceOnlyMode(true),
+      setBraiCmdQueuePausedMode(false),
+    ]);
     setAuthUser(null);
     await ensureClientUser(preliminaryClientUserId);
     resetUserSnapshots();
     setLocalSnapshotReady(true);
     setSyncStatus("auth_required");
-    void Promise.all([
-      setBraiCmdOverlayEnabled(true),
-      setBraiCmdVoiceOnlyMode(true),
-      setBraiCmdQueuePausedMode(false),
-    ]).catch(() => undefined);
   }
 
   async function refreshEngineOnce() {
@@ -831,8 +849,18 @@ export function useBraiAppState(initialSection: SectionId) {
         return;
       }
 
-      setAuthUser(session.user ?? null);
-      await ensureClientUser(session.user?.id ?? null);
+      const sessionUser = session.user;
+      if (!sessionUser) {
+        setAuthUser(null);
+        resetUserSnapshots();
+        setLocalSnapshotReady(true);
+        setSyncStatus("auth_required");
+        return;
+      }
+      await beginNativeAccountCredentialBoundary(sessionUser.id);
+      if (cancelled || authTransitionRef.current !== bootAuthTransition) return;
+      setAuthUser(sessionUser);
+      await ensureClientUser(sessionUser.id);
       const [cachedState, cachedHistory, cachedGoal, cachedActions, cachedInbox, queued, queuedActions, queuedInbox] = await Promise.all([
         loadCanonicalState(),
         loadHistoryCache(),
@@ -1096,14 +1124,16 @@ export function useBraiAppState(initialSection: SectionId) {
     setSyncStatus,
   });
 
-  return { actionOverlayOpen, actions, actionsInfoActive, active, appSettings, authDisplayName: authUser?.name ?? "", authMode, authUser, bundlePublishedAt, busy, displaySyncStatus, focusBackground, focusContextPanel, focusGoalActive, focusHistoryActive, goal, history, inbox, inboxInfoActive, localSnapshotReady, markMobileContextPanelClosing, mobileContextPanel, mobileMenuOpen, ...actionCommands, ...inboxCommands, onDeleteFocusSession, onEditFocusInterval, onEditFocusSession, onEmailLogin, onLogout, onRequestOtp, onStart, onStartActionFocus, onStop, onStopActionFocus, onSwitchActionFocus, onUpdateAppSettings: updateAppSettings, onVerifyOtp, openSettingsPage, otaCheckedAt, otaRefreshing, otaState, provisionBraiCmdDeviceToken, refreshEngineOnce, refreshOtaStateOnce, section, selectSection, setActionOverlayOpen, setFocusBackground, setMobileContextPanel: setMobileContextPanelState, setMobileMenuOpen, setTheme, swipeNavigation, theme, timer, timerBusy, todayKey, toggleActionsInfoPanel, toggleFocusContextPanel, toggleInboxInfoPanel, totalPendingCount, versionCheckedAt, versionError, versionRefreshing, versionState };
+  return { actionOverlayOpen, actions, actionsInfoActive, active, api, appSettings, authDisplayName: authUser?.name ?? "", authMode, authUser, bundlePublishedAt, busy, displaySyncStatus, focusBackground, focusContextPanel, focusGoalActive, focusHistoryActive, goal, history, inbox, inboxInfoActive, localSnapshotReady, markMobileContextPanelClosing, mobileContextPanel, mobileMenuOpen, ...actionCommands, ...inboxCommands, onDeleteFocusSession, onEditFocusInterval, onEditFocusSession, onEmailLogin, onLogout, onRequestOtp, onStart, onStartActionFocus, onStop, onStopActionFocus, onSwitchActionFocus, onUpdateAppSettings: updateAppSettings, onVerifyOtp, openSettingsPage, otaCheckedAt, otaRefreshing, otaState, provisionBraiCmdDeviceToken, refreshEngineOnce, refreshOtaStateOnce, section, selectSection, setActionOverlayOpen, setFocusBackground, setMobileContextPanel: setMobileContextPanelState, setMobileMenuOpen, setTheme, swipeNavigation, theme, timer, timerBusy, todayKey, toggleActionsInfoPanel, toggleFocusContextPanel, toggleInboxInfoPanel, totalPendingCount, versionCheckedAt, versionError, versionRefreshing, versionState };
 }
 
 function loadAppSettingsPreference(): AppSettings {
   if (typeof window === "undefined") return DEFAULT_APP_SETTINGS;
   try {
     const parsed = JSON.parse(getBraiLocalStorageItem(APP_SETTINGS_STORAGE_KEY) ?? "null") as Partial<AppSettings> | null;
-    const settings = { ...DEFAULT_APP_SETTINGS, ...(parsed ?? {}) };
+    const settings = {
+      display_timezone: parsed?.display_timezone ?? DEFAULT_APP_SETTINGS.display_timezone,
+    };
     setDisplayTimeZone(settings.display_timezone);
     return settings;
   } catch {
@@ -1114,7 +1144,7 @@ function loadAppSettingsPreference(): AppSettings {
 
 function saveAppSettingsPreference(settings: AppSettings) {
   if (typeof window === "undefined") return;
-  setBraiLocalStorageItem(APP_SETTINGS_STORAGE_KEY, JSON.stringify(settings));
+  setBraiLocalStorageItem(APP_SETTINGS_STORAGE_KEY, JSON.stringify({ display_timezone: settings.display_timezone }));
 }
 
 function loadFocusContextPanelPreference(): FocusContextPanel {

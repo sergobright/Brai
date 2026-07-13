@@ -2,6 +2,7 @@ package world.brightos.brai.braicmd
 
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -27,7 +28,7 @@ class ProviderClientContractTest {
         val endpoint = "http://127.0.0.1:${server.port}"
         client = LlmProviderClient(
             RuntimeEnvironment.getApplication(),
-            mapOf("openai" to endpoint, "groq" to endpoint)
+            mapOf("openai" to endpoint, "groq" to endpoint, "gemini" to endpoint)
         )
     }
 
@@ -94,6 +95,26 @@ class ProviderClientContractTest {
         }
 
         assertEquals("Выбранная модель не поддерживает распознавание речи", error.message)
+    }
+
+    @Test
+    fun geminiKeyUsesHeaderAndNeverAppearsInRequestUrl() {
+        response = { request ->
+            assertFalse(request.path.contains("private-gemini-key"))
+            assertEquals("private-gemini-key", request.headers["x-goog-api-key"])
+            if (request.path == "/models") {
+                200 to """{"models":[{"name":"models/gemini-2.0-flash","supportedGenerationMethods":["generateContent"]}]}"""
+            } else {
+                assertEquals("/models/gemini-2.0-flash:generateContent", request.path)
+                200 to """{"candidates":[{"content":{"parts":[{"text":"ok"}]}}]}"""
+            }
+        }
+
+        val probe = client.probe("gemini", "private-gemini-key", "", "text")
+        val connected = client.connect("gemini", "private-gemini-key", "gemini-2.0-flash", "", "text")
+
+        assertTrue(probe.optBoolean("ok"))
+        assertTrue(connected.optBoolean("ok"))
     }
 }
 

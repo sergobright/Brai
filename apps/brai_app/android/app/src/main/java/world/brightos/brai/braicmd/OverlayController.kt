@@ -60,6 +60,7 @@ class OverlayController(private val service: BraiAccessibilityService) {
         if (key in overlaySettingKeys) {
             if (key in contextActionSettingKeys) closeContextMenu(animated = false)
             if (key == AppConstants.KEY_OVERLAY_ENABLED && !config.overlayEnabled) {
+                recording.cancelForOverlayDisabled()
                 hideInputButtonView()
                 hideScreenshotButton()
                 return@OnSharedPreferenceChangeListener

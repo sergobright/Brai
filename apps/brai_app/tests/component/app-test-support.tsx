@@ -11,20 +11,25 @@ const otaPlugin = vi.hoisted(() => ({
 
 const cmdPlugin = vi.hoisted(() => ({
   addListener: vi.fn(),
+  beginAccountCredentialMode: vi.fn(),
   deleteAudio: vi.fn(),
   ensureAccess: vi.fn(),
   downloadAudio: vi.fn(),
   getSettings: vi.fn(),
   getState: vi.fn(),
+  invalidateProviderCredentials: vi.fn(),
   openPermission: vi.fn(),
   openSettings: vi.fn(),
   preparePreliminaryProfile: vi.fn(),
+  retryPendingAccountRevocation: vi.fn(),
   retryQueue: vi.fn(),
   probeProvider: vi.fn(),
   connectProvider: vi.fn(),
   disconnectProvider: vi.fn(),
   saveProvider: vi.fn(),
   setAccessKey: vi.fn(),
+  setAuthenticatedMode: vi.fn(),
+  syncProviderCredentials: vi.fn(),
   setOverlayEnabled: vi.fn(),
   setQueuePausedMode: vi.fn(),
   setVoiceOnlyMode: vi.fn(),
@@ -41,6 +46,8 @@ const androidCapabilitiesPlugin = vi.hoisted(() => ({
   requestMicrophone: vi.fn(),
   requestNotifications: vi.fn(),
 }));
+
+let cmdAccountUserId = "";
 
 const actionsWidgetPlugin = vi.hoisted(() => ({
   acknowledgeStatusChanges: vi.fn(),
@@ -134,19 +141,24 @@ export function setupBraiAppTest() {
     otaPlugin.markReady.mockReset();
     cmdPlugin.openSettings.mockReset();
     cmdPlugin.addListener.mockReset();
+    cmdPlugin.beginAccountCredentialMode.mockReset();
     cmdPlugin.deleteAudio.mockReset();
     cmdPlugin.ensureAccess.mockReset();
     cmdPlugin.downloadAudio.mockReset();
     cmdPlugin.getSettings.mockReset();
     cmdPlugin.getState.mockReset();
+    cmdPlugin.invalidateProviderCredentials.mockReset();
     cmdPlugin.openPermission.mockReset();
     cmdPlugin.preparePreliminaryProfile.mockReset();
+    cmdPlugin.retryPendingAccountRevocation.mockReset();
     cmdPlugin.retryQueue.mockReset();
     cmdPlugin.probeProvider.mockReset();
     cmdPlugin.connectProvider.mockReset();
     cmdPlugin.disconnectProvider.mockReset();
     cmdPlugin.saveProvider.mockReset();
     cmdPlugin.setAccessKey.mockReset();
+    cmdPlugin.setAuthenticatedMode.mockReset();
+    cmdPlugin.syncProviderCredentials.mockReset();
     cmdPlugin.setOverlayEnabled.mockReset();
     cmdPlugin.setQueuePausedMode.mockReset();
     cmdPlugin.setVoiceOnlyMode.mockReset();
@@ -161,6 +173,11 @@ export function setupBraiAppTest() {
     androidCapabilitiesPlugin.requestNotifications.mockReset();
     cmdPlugin.openSettings.mockResolvedValue({});
     cmdPlugin.addListener.mockResolvedValue({ remove: vi.fn(async () => undefined) });
+    cmdAccountUserId = "";
+    cmdPlugin.beginAccountCredentialMode.mockImplementation(async ({ userId }: { userId: string }) => {
+      cmdAccountUserId = userId;
+      return { accountCredentialsActive: true, overlayEnabled: false, queuePausedMode: true };
+    });
     cmdPlugin.deleteAudio.mockResolvedValue({ ok: true, state: braiCmdSettingsSnapshot() });
     cmdPlugin.ensureAccess.mockResolvedValue({ accessGranted: true });
     cmdPlugin.downloadAudio.mockResolvedValue({ ok: true, path: "Downloads/Brai CMD/audio.m4a" });
@@ -171,6 +188,7 @@ export function setupBraiAppTest() {
       clientVersion: "60006",
       appPackage: "world.brightos.brai.preview.b.work",
     });
+    cmdPlugin.invalidateProviderCredentials.mockResolvedValue({ ok: true });
     cmdPlugin.openPermission.mockResolvedValue(braiCmdSettingsSnapshot());
     cmdPlugin.preparePreliminaryProfile.mockResolvedValue({
       accessGranted: true,
@@ -179,15 +197,29 @@ export function setupBraiAppTest() {
       preliminaryClaimToken: "prelim-claim-token",
       deviceFingerprint: "test-device",
     });
+    cmdPlugin.retryPendingAccountRevocation.mockResolvedValue({ ok: true });
     cmdPlugin.retryQueue.mockResolvedValue({ queuePausedMode: false });
     cmdPlugin.probeProvider.mockResolvedValue({ ok: true, message: "Выберите модель", models: ["test-model"] });
     cmdPlugin.connectProvider.mockResolvedValue({ ok: true, message: "Подключено", model: "test-model", state: braiCmdSettingsSnapshot() });
     cmdPlugin.disconnectProvider.mockResolvedValue(braiCmdSettingsSnapshot());
     cmdPlugin.saveProvider.mockResolvedValue(braiCmdSettingsSnapshot());
-    cmdPlugin.setAccessKey.mockResolvedValue({ accessGranted: true });
+    cmdPlugin.setAccessKey.mockImplementation(async ({ token, userId }: { token: string; userId: string }) => {
+      cmdAccountUserId = token ? userId : "";
+      return { accessGranted: Boolean(token) };
+    });
+    cmdPlugin.syncProviderCredentials.mockResolvedValue({ ok: true, counts: { configured: 0, imported: 0, ignored: 0, failed: 0 } });
     cmdPlugin.setOverlayEnabled.mockImplementation(async ({ enabled }: { enabled: boolean }) => ({ overlayEnabled: enabled }));
     cmdPlugin.setQueuePausedMode.mockImplementation(async ({ enabled }: { enabled: boolean }) => ({ queuePausedMode: enabled }));
     cmdPlugin.setVoiceOnlyMode.mockImplementation(async ({ enabled }: { enabled: boolean }) => ({ voiceOnlyMode: enabled }));
+    cmdPlugin.setAuthenticatedMode.mockImplementation(async ({ userId, enabled }: { userId: string; enabled: boolean }) => {
+      if (cmdAccountUserId !== userId) throw Object.assign(new Error("account_changed"), { code: "account_changed" });
+      await Promise.all([
+        cmdPlugin.setOverlayEnabled({ enabled }),
+        cmdPlugin.setVoiceOnlyMode({ enabled: !enabled }),
+        cmdPlugin.setQueuePausedMode({ enabled: !enabled }),
+      ]);
+      return { overlayEnabled: enabled, voiceOnlyMode: !enabled, queuePausedMode: !enabled };
+    });
     cmdPlugin.testConnection.mockResolvedValue({ ok: true, message: "ok" });
     cmdPlugin.testProvider.mockResolvedValue({ ok: true, message: "ok", models: ["test-model"], model: "test-model" });
     cmdPlugin.updateSettings.mockResolvedValue(braiCmdSettingsSnapshot());
@@ -241,13 +273,25 @@ export function setupBraiAppTest() {
         });
       }
       if (url.endsWith("/v1/brai-cmd/device-token")) {
-        return new Response(JSON.stringify({ token: "authenticated-device-token", status: "active" }), {
+        return new Response(JSON.stringify({ token: "authenticated-device-token", status: "pending" }), {
           status: 201,
           headers: { "content-type": "application/json" },
         });
       }
       if (url.endsWith("/v1/settings")) {
         return new Response(JSON.stringify(DEFAULT_APP_SETTINGS), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.endsWith("/v1/ai/settings")) {
+        return new Response(JSON.stringify({ model_provider_mode: "internal", text: null, vision: null }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.endsWith("/v1/ai/providers")) {
+        return new Response(JSON.stringify({ providers: [] }), {
           status: 200,
           headers: { "content-type": "application/json" },
         });

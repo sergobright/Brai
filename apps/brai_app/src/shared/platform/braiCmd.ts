@@ -18,7 +18,12 @@ type BraiCmdPlugin = {
   openSettings(): Promise<unknown>;
   preparePreliminaryProfile?(options: { displayName: string }): Promise<BraiCmdPreliminaryProfile>;
   ensureAccess(options: { displayName: string }): Promise<BraiCmdState>;
-  setAccessKey(options: { token: string; displayName: string }): Promise<BraiCmdState>;
+  beginAccountCredentialMode?(options: { userId: string }): Promise<BraiCmdState>;
+  setAccessKey(options: { token: string; displayName: string; userId: string }): Promise<BraiCmdState>;
+  syncProviderCredentials?(): Promise<BraiCmdProviderCredentialSyncResult>;
+  invalidateProviderCredentials?(): Promise<{ ok: boolean }>;
+  retryPendingAccountRevocation?(): Promise<{ ok: boolean }>;
+  setAuthenticatedMode?(options: { userId: string; enabled: boolean }): Promise<BraiCmdState>;
   setOverlayEnabled(options: { enabled: boolean }): Promise<BraiCmdState>;
   setVoiceOnlyMode(options: { enabled: boolean }): Promise<BraiCmdState>;
   setQueuePausedMode(options: { enabled: boolean }): Promise<BraiCmdState>;
@@ -32,6 +37,7 @@ const BraiCmd = registerPlugin<BraiCmdPlugin>("BraiCmd");
 
 export type BraiCmdState = {
   native?: boolean;
+  accountCredentialsActive?: boolean;
   accessGranted?: boolean;
   voiceOnlyMode?: boolean;
   queuePausedMode?: boolean;
@@ -153,6 +159,16 @@ export type BraiCmdProviderTestResult = BraiCmdTestResult & {
 };
 
 export type BraiCmdProviderConnectResult = BraiCmdProviderTestResult & { state?: BraiCmdSnapshot };
+export type BraiCmdProviderCredentialSyncResult = {
+  ok: boolean;
+  code?: string;
+  message?: string;
+  configuredProviderIds?: string[];
+  importedProviderIds?: string[];
+  ignoredProviderIds?: string[];
+  failed?: Array<{ providerId: string; code: string }>;
+  counts?: { configured: number; imported: number; ignored: number; failed: number };
+};
 export type BraiCmdOnboardingEvent = {
   type?: "voiceTextInserted" | "queueSaved";
   text?: string;
@@ -304,12 +320,54 @@ export async function prepareBraiCmdPreliminaryProfile(displayName: string): Pro
   }
 }
 
-export async function setBraiCmdAccessKey(token: string, displayName: string): Promise<BraiCmdState | null> {
-  if (!isNativeAndroid()) return null;
+/** Blocks local credentials while an authenticated account is being activated and synchronized. */
+export async function beginBraiCmdAccountCredentialMode(userId: string): Promise<BraiCmdState | null> {
+  if (!isNativeAndroid() || !BraiCmd.beginAccountCredentialMode) return null;
   try {
-    return await BraiCmd.setAccessKey({ token, displayName });
+    return await BraiCmd.beginAccountCredentialMode({ userId });
   } catch {
     return null;
+  }
+}
+
+export async function setBraiCmdAccessKey(token: string, displayName: string, userId: string): Promise<BraiCmdState | null> {
+  if (!isNativeAndroid()) return null;
+  try {
+    return await BraiCmd.setAccessKey({ token, displayName, userId });
+  } catch {
+    return null;
+  }
+}
+
+/** Retries a logout revocation with the isolated encrypted token reserved for that request. */
+export async function retryBraiCmdPendingAccountRevocation(): Promise<boolean> {
+  if (!isNativeAndroid() || !BraiCmd.retryPendingAccountRevocation) return false;
+  try {
+    return (await BraiCmd.retryPendingAccountRevocation()).ok;
+  } catch {
+    return false;
+  }
+}
+
+export async function syncBraiCmdProviderCredentials(): Promise<BraiCmdProviderCredentialSyncResult | null> {
+  if (!isNativeAndroid()) return null;
+  if (!BraiCmd.syncProviderCredentials) {
+    return { ok: false, code: "native_update_required", message: "Обновите Android-приложение Brai." };
+  }
+  try {
+    return await BraiCmd.syncProviderCredentials();
+  } catch {
+    return null;
+  }
+}
+
+/** Removes account credential copies after a failed native sync so stale keys cannot be used. */
+export async function invalidateBraiCmdProviderCredentials(): Promise<boolean> {
+  if (!isNativeAndroid() || !BraiCmd.invalidateProviderCredentials) return false;
+  try {
+    return (await BraiCmd.invalidateProviderCredentials()).ok;
+  } catch {
+    return false;
   }
 }
 
@@ -350,6 +408,28 @@ export async function setBraiCmdQueuePausedMode(enabled: boolean): Promise<BraiC
   } catch {
     return null;
   }
+}
+
+/** Applies the authenticated native mode only while the same account still owns the credential boundary. */
+export async function setBraiCmdAuthenticatedMode(userId: string, enabled: boolean): Promise<BraiCmdState | null> {
+  if (!isNativeAndroid()) return null;
+  if (BraiCmd.setAuthenticatedMode) {
+    try {
+      return await BraiCmd.setAuthenticatedMode({ userId, enabled });
+    } catch {
+      return null;
+    }
+  }
+  const [overlayState, voiceState, queueState] = await Promise.all([
+    setBraiCmdOverlayEnabled(enabled),
+    setBraiCmdVoiceOnlyMode(!enabled),
+    setBraiCmdQueuePausedMode(!enabled),
+  ]);
+  return {
+    ...overlayState,
+    ...voiceState,
+    ...queueState,
+  };
 }
 
 export async function retryBraiCmdQueue(): Promise<BraiCmdState | null> {

@@ -8,11 +8,13 @@ import java.io.IOException
 internal enum class QueueTransportStatus {
     Drained,
     TransientFailure,
-    Blocked
+    Blocked,
+    Superseded
 }
 
 internal data class QueueTransportResult(
     val status: QueueTransportStatus,
+    val ownerId: String,
     val failure: Throwable? = null,
     val failedTransportIds: Set<String> = emptySet(),
     val autoInsertTranscriptFile: String? = null,
@@ -23,6 +25,50 @@ internal data class QueueTransportResult(
     val serverNotice: BraiCmdNotice? = null,
     val permanentFailureMessage: String? = null
 )
+
+internal data class QueueExecutionContext(
+    val owner: QueueOwnerScope,
+    val accessToken: String,
+    val transcriptionMode: String,
+    val transcriptionProviderId: String,
+    val transcriptionModel: String,
+    val transcriptionApiKey: String,
+    val postProcessingEnabled: Boolean,
+    val postProcessingMode: String,
+    val postProcessingProviderId: String,
+    val postProcessingModel: String,
+    val postProcessingBaseUrl: String,
+    val postProcessingApiKey: String,
+    val postProcessingPrompt: String
+)
+
+internal fun captureQueueExecutionContext(
+    context: Context,
+    config: ConfigStore = ConfigStore(context.applicationContext),
+    secure: SecureStringStore = SecureStringStore(context.applicationContext)
+): QueueExecutionContext {
+    val access = config.queueAccessSnapshot()
+    val settings = config.queueProviderSettingsSnapshot()
+    if (access.owner.accountUserId == null) secure.migrateLegacyProviderKey(settings.postProcessingProviderId)
+    fun ownerKey(providerId: String): String = access.owner.accountUserId?.let { userId ->
+        if (providerId in ConfigStore.ACCOUNT_PROVIDER_IDS) secure.accountProviderKey(userId, providerId) else ""
+    } ?: secure.localProviderKey(providerId)
+    return QueueExecutionContext(
+        owner = access.owner,
+        accessToken = access.accessToken,
+        transcriptionMode = settings.transcriptionMode,
+        transcriptionProviderId = settings.transcriptionProviderId,
+        transcriptionModel = settings.transcriptionModel,
+        transcriptionApiKey = ownerKey(settings.transcriptionProviderId),
+        postProcessingEnabled = settings.postProcessingEnabled,
+        postProcessingMode = settings.postProcessingMode,
+        postProcessingProviderId = settings.postProcessingProviderId,
+        postProcessingModel = settings.postProcessingModel,
+        postProcessingBaseUrl = settings.postProcessingBaseUrl,
+        postProcessingApiKey = ownerKey(settings.postProcessingProviderId),
+        postProcessingPrompt = settings.postProcessingPrompt
+    )
+}
 
 internal class QueueTransportWorker(
     context: Context,
@@ -39,8 +85,10 @@ internal class QueueTransportWorker(
     private var inboxDelivered = false
     private var serverNotice: BraiCmdNotice? = null
     private var permanentFailureMessage: String? = null
+    private lateinit var execution: QueueExecutionContext
 
     fun run(autoInsertAudioFileName: String?): QueueTransportResult {
+        execution = captureQueueExecutionContext(appContext)
         val items = (
             AudioQueueStore.list(appContext).map { PendingItem.Audio(it) } +
                 ScreenshotInboxStore.list(appContext).map { PendingItem.Screenshot(it) }
@@ -49,13 +97,22 @@ internal class QueueTransportWorker(
         for (item in items) {
             if (!item.file.exists()) continue
             try {
+                val ownerId = QueueOwnerStore.readOwnerId(item.file) ?: throw QueueLegacyOwnerException()
+                if (ownerId != execution.owner.ownerId) {
+                    continue
+                }
+                ensureExecutionOwnerCurrent()
                 when (item) {
                     is PendingItem.Audio -> processAudio(item.file, autoInsertAudioFileName)
                     is PendingItem.Screenshot -> processScreenshot(item.file)
                 }
             } catch (error: Throwable) {
-                if (error is ServerResponseException && error.statusCode == 401) {
-                    ConfigStore(appContext).authToken = ""
+                if (error is QueueOwnerBlockedException) {
+                    return result(QueueTransportStatus.Superseded, error)
+                }
+                if (error is ServerResponseException && error.statusCode == 401 &&
+                    ConfigStore(appContext).clearAuthTokenIfMatches(execution.accessToken)
+                ) {
                     BraiCmdPlugin.notifyCredentialRefreshRequired()
                 }
                 when (classifyQueueFailure(error)) {
@@ -107,6 +164,7 @@ internal class QueueTransportWorker(
             ScreenshotContextStore.read(file),
             AudioQueueAction.MainDictation.functionKey
         )
+        ensureExecutionOwnerCurrent()
         val text = response.text.trim()
         if (text.isBlank()) throw QueueEmptyModelException()
         val transcriptFile = PendingTranscriptStore.addForAudio(
@@ -135,12 +193,14 @@ internal class QueueTransportWorker(
             // Persist before Inbox delivery so retries never retranscribe a completed upload.
             InboxPayloadStore.saveTranscript(file, transcript)
         }
+        ensureExecutionOwnerCurrent()
         serverNotice = client.uploadInboxCommand(
             transcript = inboxDeliveryText(action, InboxPayloadStore.readTextPrefix(file), transcript),
             conversationContext = ConversationContextStore.read(file),
             screenshotFile = ScreenshotContextStore.read(file),
             idempotencyKey = file.name,
-            braiCmdFunction = action.functionKey
+            braiCmdFunction = action.functionKey,
+            accessToken = execution.accessToken
         )
         completeAudio(file)
         inboxDelivered = true
@@ -148,12 +208,14 @@ internal class QueueTransportWorker(
 
     private fun processScreenshot(file: File) {
         if (file.length() <= 0L) throw QueueCorruptItemException("Данные повреждены")
+        ensureExecutionOwnerCurrent()
         serverNotice = client.uploadInboxCommand(
             transcript = SCREENSHOT_INBOX_TEXT,
             conversationContext = null,
             screenshotFile = file,
             idempotencyKey = file.name,
-            braiCmdFunction = BRAI_CMD_FUNCTION_SCREENSHOT_INBOX
+            braiCmdFunction = BRAI_CMD_FUNCTION_SCREENSHOT_INBOX,
+            accessToken = execution.accessToken
         )
         if (!ScreenshotInboxStore.delete(file)) throw IOException("Не удалось удалить отправленный скриншот")
         inboxDelivered = true
@@ -171,10 +233,15 @@ internal class QueueTransportWorker(
         screenshotFile: File?,
         braiCmdFunction: String
     ): DictationResponse {
-        val config = ConfigStore(appContext)
         val checkpoint = TranscriptionCheckpointStore.read(file)
-        val raw = checkpoint?.response ?: if (config.transcriptionProviderMode == "key") {
-            val speech = directTranscriber?.invoke(file) ?: SpeechProviderClient(appContext).transcribe(file)
+        val raw = checkpoint?.response ?: if (execution.transcriptionMode == "key") {
+            ensureExecutionOwnerCurrent()
+            val speech = directTranscriber?.invoke(file) ?: SpeechProviderClient(appContext).transcribe(
+                file,
+                execution.transcriptionProviderId,
+                execution.transcriptionApiKey,
+                execution.transcriptionModel
+            )
             DictationResponse(
                 text = speech.text,
                 provider = speech.provider,
@@ -189,14 +256,31 @@ internal class QueueTransportWorker(
                 postProcessingOutputChars = 0
             )
         } else {
-            client.uploadAudio(file, conversationContext, screenshotFile, braiCmdFunction)
+            ensureExecutionOwnerCurrent()
+            client.uploadAudio(
+                file,
+                conversationContext,
+                screenshotFile,
+                braiCmdFunction,
+                cloudPostProcessingEnabled = execution.postProcessingEnabled && execution.postProcessingMode != "key",
+                cloudPostProcessingPrompt = execution.postProcessingPrompt,
+                accessToken = execution.accessToken
+            )
         }
         if (checkpoint == null && raw.text.isNotBlank()) TranscriptionCheckpointStore.save(file, raw)
-        if (!config.postProcessingEnabled || raw.postProcessed || raw.text.isBlank()) return raw
+        if (!execution.postProcessingEnabled || raw.postProcessed || raw.text.isBlank()) return raw
 
-        return if (config.postProcessingProviderMode == "key") {
-            val result = directPostProcessor?.invoke(raw.text, config.postProcessingPrompt)
-                ?: LlmProviderClient(appContext).postProcess(raw.text, config.postProcessingPrompt)
+        ensureExecutionOwnerCurrent()
+        return if (execution.postProcessingMode == "key") {
+            val result = directPostProcessor?.invoke(raw.text, execution.postProcessingPrompt)
+                ?: LlmProviderClient(appContext).postProcess(
+                    raw.text,
+                    execution.postProcessingPrompt,
+                    execution.postProcessingProviderId,
+                    execution.postProcessingApiKey,
+                    execution.postProcessingModel,
+                    execution.postProcessingBaseUrl
+                )
             raw.copy(
                 text = result.text,
                 postProcessed = true,
@@ -206,8 +290,8 @@ internal class QueueTransportWorker(
                 postProcessingOutputChars = result.outputChars
             )
         } else {
-            val result = cloudPostProcessor?.invoke(raw.text, config.postProcessingPrompt)
-                ?: client.postProcessText(raw.text, config.postProcessingPrompt)
+            val result = cloudPostProcessor?.invoke(raw.text, execution.postProcessingPrompt)
+                ?: client.postProcessText(raw.text, execution.postProcessingPrompt, execution.accessToken)
             raw.copy(
                 text = result.text,
                 postProcessed = true,
@@ -242,6 +326,12 @@ internal class QueueTransportWorker(
         )
     }
 
+    private fun ensureExecutionOwnerCurrent() {
+        if (QueueOwnerStore.current(appContext).ownerId != execution.owner.ownerId) {
+            throw QueueOwnerBlockedException()
+        }
+    }
+
     private fun recordStatsOnce(file: File, response: DictationResponse) {
         if (TranscriptionCheckpointStore.read(file)?.statsRecorded == true) return
         recordStats(file, response)
@@ -255,6 +345,7 @@ internal class QueueTransportWorker(
     ) =
         QueueTransportResult(
             status = status,
+            ownerId = execution.owner.ownerId,
             failure = failure,
             failedTransportIds = failedTransportIds,
             autoInsertTranscriptFile = autoInsertTranscriptFile,
@@ -269,6 +360,7 @@ internal class QueueTransportWorker(
     private fun permanentFailureMessage(error: Throwable): String =
         when (error) {
             is QueueCorruptItemException -> error.message.orEmpty()
+            is QueueLegacyOwnerException -> "Старая запись изолирована: владелец не подтверждён"
             is ServerResponseException -> when (error.statusCode) {
                 413 -> "Файл слишком большой"
                 415 -> "Формат не поддержан"

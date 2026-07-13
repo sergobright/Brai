@@ -17,6 +17,7 @@ import java.util.UUID
 internal object RecordingArchiveStore {
     private const val QUEUE_DIR = "pending-recordings"
     private const val PROCESSED_DIR = "processed-recordings"
+    private const val QUARANTINE_DIR = "failed-processed-recordings"
     private const val METADATA_SUFFIX = ".metadata.json"
     private val sidecarSuffixes = listOf(
         ".context.json",
@@ -26,7 +27,8 @@ internal object RecordingArchiveStore {
         ".receiver.txt",
         ".inbox-prefix.txt",
         ".inbox-action.txt",
-        METADATA_SUFFIX
+        METADATA_SUFFIX,
+        QueueOwnerStore.SUFFIX
     )
     private val titleFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
 
@@ -59,6 +61,7 @@ internal object RecordingArchiveStore {
         if (!config.processedAudioRetentionEnabled) {
             return deleteAudioWithSidecars(audioFile)
         }
+        val ownerId = QueueOwnerStore.readOwnerId(audioFile) ?: return false
         val archiveDir = File(context.filesDir, PROCESSED_DIR).apply { mkdirs() }
         val target = uniqueTarget(archiveDir, audioFile.name)
         val sources = listOf(audioFile) + existingSidecars(audioFile)
@@ -74,24 +77,30 @@ internal object RecordingArchiveStore {
             targets.forEach(File::delete)
             return false
         }
+        if (QueueOwnerStore.readOwnerId(target) != ownerId) {
+            targets.forEach(File::delete)
+            return false
+        }
         sources.forEach(File::delete)
-        pruneProcessed(context, config.processedAudioRetentionLimit)
+        pruneProcessed(context, ownerId, config.processedAudioRetentionLimit)
         return !audioFile.exists()
     }
 
     fun reconcileProcessedRetention(context: Context) {
         val config = ConfigStore(context)
+        val ownerId = QueueOwnerStore.current(context).ownerId
         if (!config.processedAudioRetentionEnabled) {
-            processedAudioFiles(context).forEach(::deleteAudioWithSidecars)
+            processedAudioFiles(context, ownerId).forEach(::deleteAudioWithSidecars)
             return
         }
-        pruneProcessed(context, config.processedAudioRetentionLimit)
+        pruneProcessed(context, ownerId, config.processedAudioRetentionLimit)
     }
 
     fun listJson(context: Context): JSArray {
         val array = JSArray()
-        queuedAudioFiles(context).forEach { file -> array.put(itemJson("queued", file)) }
-        processedAudioFiles(context).forEach { file -> array.put(itemJson("processed", file)) }
+        val ownerId = QueueOwnerStore.current(context).ownerId
+        queuedAudioFiles(context, ownerId).forEach { file -> array.put(itemJson("queued", file)) }
+        processedAudioFiles(context, ownerId).forEach { file -> array.put(itemJson("processed", file)) }
         return array
     }
 
@@ -138,20 +147,29 @@ internal object RecordingArchiveStore {
             .put("megabytes", file.length() / 1_000_000.0)
     }
 
-    private fun queuedAudioFiles(context: Context): List<File> =
+    private fun queuedAudioFiles(context: Context, ownerId: String): List<File> =
         File(context.filesDir, QUEUE_DIR)
             .listFiles { file -> file.isFile && file.name.endsWith(".m4a", ignoreCase = true) && !file.name.contains(".recording.") }
+            ?.filter { QueueOwnerStore.readOwnerId(it) == ownerId }
             ?.sortedBy { readMetadata(it).optLong("createdAtEpochMs", it.lastModified()) }
             .orEmpty()
 
-    private fun processedAudioFiles(context: Context): List<File> =
+    private fun allProcessedAudioFiles(context: Context): List<File> =
         File(context.filesDir, PROCESSED_DIR)
             .listFiles { file -> file.isFile && file.name.endsWith(".m4a", ignoreCase = true) }
-            ?.sortedByDescending { readMetadata(it).optLong("createdAtEpochMs", it.lastModified()) }
             .orEmpty()
+            .toList()
 
-    private fun pruneProcessed(context: Context, limit: Int) {
-        val files = processedAudioFiles(context).sortedBy { readMetadata(it).optLong("createdAtEpochMs", it.lastModified()) }
+    private fun processedAudioFiles(context: Context, ownerId: String): List<File> {
+        quarantineUnownedProcessed(context)
+        return allProcessedAudioFiles(context)
+            .filter { QueueOwnerStore.readOwnerId(it) == ownerId }
+            .sortedByDescending { readMetadata(it).optLong("createdAtEpochMs", it.lastModified()) }
+    }
+
+    private fun pruneProcessed(context: Context, ownerId: String, limit: Int) {
+        val files = processedAudioFiles(context, ownerId)
+            .sortedBy { readMetadata(it).optLong("createdAtEpochMs", it.lastModified()) }
         val overflow = files.size - limit.coerceAtLeast(1)
         if (overflow <= 0) return
         files.take(overflow).forEach(::deleteAudioWithSidecars)
@@ -167,7 +185,9 @@ internal object RecordingArchiveStore {
         }
         val name = parts[1]
         if (name.contains('/') || name.contains('\\')) return null
-        return File(directory, name).takeIf { it.isFile }
+        return File(directory, name).takeIf {
+            it.isFile && QueueOwnerStore.readOwnerId(it) == QueueOwnerStore.current(context).ownerId
+        }
     }
 
     private fun readMetadata(audioFile: File): JSONObject =
@@ -178,9 +198,29 @@ internal object RecordingArchiveStore {
     private fun existingSidecars(audioFile: File): List<File> =
         sidecarSuffixes.map { File("${audioFile.absolutePath}$it") }.filter(File::exists)
 
-    private fun deleteAudioWithSidecars(audioFile: File): Boolean {
+    internal fun deleteAudioWithSidecars(audioFile: File): Boolean {
         existingSidecars(audioFile).forEach(File::delete)
         return audioFile.delete() || !audioFile.exists()
+    }
+
+    private fun quarantineUnownedProcessed(context: Context) {
+        val directory = File(context.filesDir, QUARANTINE_DIR).apply { mkdirs() }
+        allProcessedAudioFiles(context)
+            .filter { QueueOwnerStore.readOwnerId(it) == null }
+            .forEach { audioFile ->
+                val target = uniqueTarget(directory, audioFile.name)
+                val sources = listOf(audioFile) + existingSidecars(audioFile)
+                val targets = sources.map { source ->
+                    if (source == audioFile) target
+                    else File("${target.absolutePath}${source.name.removePrefix(audioFile.name)}")
+                }
+                val copied = runCatching {
+                    sources.zip(targets).forEach { (source, destination) ->
+                        source.copyTo(destination, overwrite = false)
+                    }
+                }.isSuccess
+                if (copied) sources.forEach(File::delete) else targets.forEach(File::delete)
+            }
     }
 
     private fun uniqueTarget(directory: File, name: String): File {
