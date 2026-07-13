@@ -248,7 +248,9 @@ describe("BraiApp settings", () => {
     render(<BraiApp />);
     await openEngineFromProfile();
 
-    await waitFor(() => expect(screen.getAllByText(/Обновление 0\.0\.11 скачано/).length).toBeGreaterThan(0));
+    const restartInstruction = "Чтобы применить обновление полностью закройте приложение, смахнув его из диспетчера открытых приложений, иначе обновление не применится";
+    await waitFor(() => expect(screen.getAllByText(restartInstruction)).toHaveLength(1));
+    expect(screen.queryByText(/Обновление 0\.0\.11 скачано/)).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Скачано" })).toBeDisabled();
   });
 
@@ -347,7 +349,7 @@ describe("BraiApp settings", () => {
     expect(otaPlugin.downloadUpdate).not.toHaveBeenCalled();
     fireEvent.click(await screen.findByRole("button", { name: "Скачать обновление" }));
     await waitFor(() => expect(otaPlugin.downloadUpdate).toHaveBeenCalledTimes(1));
-    expect((await screen.findAllByText(/Обновление 0\.0\.11 скачано/)).length).toBeGreaterThan(0);
+    expect(await screen.findByText("Чтобы применить обновление полностью закройте приложение, смахнув его из диспетчера открытых приложений, иначе обновление не применится")).toBeInTheDocument();
   });
 
   it("restores preliminary profile and voice-only mode after Android logout", async () => {

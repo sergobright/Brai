@@ -289,7 +289,11 @@ function engineStatusView({
     case "candidate_ready_for_next_start":
     case "ready_candidate_pending":
     case "candidate_already_pending":
-      return { label: "готово", body: `Обновление ${latestVersion} скачано. Закройте и снова откройте приложение, чтобы применить его.`, tone: "warn" };
+      return {
+        label: "готово",
+        body: "Чтобы применить обновление полностью закройте приложение, смахнув его из диспетчера открытых приложений, иначе обновление не применится",
+        tone: "warn",
+      };
     case "downloading":
       return { label: "загрузка", body: `Скачивается обновление ${latestVersion}.`, tone: "warn" };
     case "candidate_loading":

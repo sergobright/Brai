@@ -71,7 +71,7 @@ export function EngineSection({
           <p className="m-0 text-sm leading-5 text-muted-foreground">{view.updateStatus.body}</p>
         </div>
 
-        {view.hasUpdate || ["web-ready", "downloading-web", "downloading-apk", "install-apk"].includes(view.updateAction)
+        {(view.hasUpdate && view.updateAction !== "web-ready") || ["downloading-web", "downloading-apk", "install-apk"].includes(view.updateAction)
           ? <UpdateNotice view={view} />
           : null}
 
@@ -105,9 +105,6 @@ function UpdateNotice({ view }: { view: EngineSectionView }) {
   }
   if (view.updateAction === "install-apk") {
     return <Notice text={view.apkInstallPermissionRequired ? "APK скачан. Разрешите Brai устанавливать обновления, затем нажмите «Установить»." : "APK скачан и проверен. Если установщик был закрыт, нажмите «Установить»."} />;
-  }
-  if (view.updateAction === "web-ready") {
-    return <Notice text={`Обновление ${view.latestVersion} скачано. Закройте и снова откройте приложение, чтобы применить его.`} />;
   }
   if (view.updateAction === "downloading-web") {
     const progress = view.downloadProgressPercent ?? 0;
