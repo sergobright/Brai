@@ -216,7 +216,8 @@ internal class LlmProviderClient @JvmOverloads constructor(
     }
 
     private fun cleanProvider(value: String): String =
-        value.trim().takeIf { it in ConfigStore.SUPPORTED_LLM_PROVIDERS } ?: AppConstants.DEFAULT_LLM_PROVIDER_ID
+        value.trim().takeIf { it in ConfigStore.SUPPORTED_LLM_PROVIDERS }
+            ?: throw IllegalArgumentException("unsupported_provider")
 
     private fun defaultModel(providerId: String, models: List<String>): String =
         models.firstOrNull { model ->
