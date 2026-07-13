@@ -258,7 +258,7 @@ test('release downloads are keyed, filtered, attachment responses with one hourl
       'releases.json': JSON.stringify({
         sections: {
           production: { title: 'Brai', file: 'brai.apk', releaseKey: 'production', apkVersion: 7 },
-          b: { title: 'Brai B', file: 'brai-b.apk', releaseKey: 'b', apkVersion: 7 }
+          b: { title: 'Brai B', file: 'brai-b.apk', releaseKey: 'b', apkVersion: 7, sha256: 'b'.repeat(64) }
         }
       })
     }
@@ -285,6 +285,7 @@ test('release downloads are keyed, filtered, attachment responses with one hourl
     assert.equal(apk.headers.get('content-type'), 'application/vnd.android.package-archive');
     assert.equal(apk.headers.get('content-length'), String(Buffer.byteLength('fake-preview-b')));
     assert.equal(apk.headers.get('content-disposition'), 'attachment; filename="brai-b.apk"');
+    assert.equal(apk.headers.get('x-brai-apk-sha256'), 'b'.repeat(64));
     assert.equal(await apk.text(), 'fake-preview-b');
 
     const legacyProduction = await fetch(`${fixture.url}/releases/brai.apk`);

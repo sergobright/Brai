@@ -58,6 +58,19 @@ public final class BraiOtaPlugin extends Plugin {
     }
 
     @PluginMethod
+    public void installApk(PluginCall call) {
+        BraiOtaManager manager = BraiOtaRegistry.getManager();
+        if (manager == null) {
+            call.reject("ota_manager_unavailable");
+            return;
+        }
+        boolean opened = manager.installApk();
+        JSObject response = manager.stateJson();
+        response.put("opened", opened);
+        call.resolve(response);
+    }
+
+    @PluginMethod
     public void markReady(PluginCall call) {
         BraiOtaManager manager = BraiOtaRegistry.getManager();
         if (manager == null) {

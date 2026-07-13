@@ -173,20 +173,20 @@ export async function serveReleaseDownload(req, res, releaseKey, releaseDir, sen
   }
   const clientIp = releaseClientIp(req);
   if (!await consumeDownloadPoint(req, res, sendJson, limiter, store, releaseKey, clientIp)) return;
-  serveApk(req, res, releaseDir, section.file, sendJson, store, { releaseKey, clientIp });
+  serveApk(req, res, releaseDir, section.file, sendJson, store, { releaseKey, clientIp, sha256: section.sha256 });
 }
 
 export async function serveDeveloperReleaseFile(req, res, fileName, releaseDir, sendJson, { limiter, store = null } = {}) {
   const releaseIndex = readReleaseIndex(releaseDir);
-  const allowed = Object.values(releaseIndex?.sections ?? {}).some((section) => section?.file === fileName);
-  if (!allowed) {
+  const section = Object.values(releaseIndex?.sections ?? {}).find((candidate) => candidate?.file === fileName);
+  if (!section) {
     recordReleaseFileLog(store, { status: 'failed', reason: 'not_found', requested: fileName });
     sendJson(req, res, 404, { error: 'not_found' });
     return;
   }
   const clientIp = releaseClientIp(req);
   if (!await consumeDownloadPoint(req, res, sendJson, limiter, store, fileName, clientIp)) return;
-  serveApk(req, res, releaseDir, fileName, sendJson, store, { clientIp });
+  serveApk(req, res, releaseDir, fileName, sendJson, store, { clientIp, sha256: section.sha256 });
 }
 
 export async function serveLegacyProductionFile(req, res, fileName, releaseDir, sendJson, { limiter, store = null } = {}) {
@@ -198,7 +198,7 @@ export async function serveLegacyProductionFile(req, res, fileName, releaseDir, 
   }
   const clientIp = releaseClientIp(req);
   if (!await consumeDownloadPoint(req, res, sendJson, limiter, store, fileName, clientIp)) return;
-  serveApk(req, res, releaseDir, fileName, sendJson, store, { releaseKey: 'production', clientIp });
+  serveApk(req, res, releaseDir, fileName, sendJson, store, { releaseKey: 'production', clientIp, sha256: production.sha256 });
 }
 
 async function consumeDownloadPoint(req, res, sendJson, limiter, store, requested, clientIp) {
@@ -213,7 +213,7 @@ async function consumeDownloadPoint(req, res, sendJson, limiter, store, requeste
   }
 }
 
-function serveApk(req, res, releaseDir, requested, sendJson, store, { releaseKey = null, clientIp = null } = {}) {
+function serveApk(req, res, releaseDir, requested, sendJson, store, { releaseKey = null, clientIp = null, sha256 = null } = {}) {
   if (!releaseDir) {
     sendJson(req, res, 404, { error: 'releases_not_configured' });
     return;
@@ -263,7 +263,8 @@ function serveApk(req, res, releaseDir, requested, sendJson, store, { releaseKey
   res.writeHead(200, {
     'content-type': 'application/vnd.android.package-archive',
     'content-length': stat.size,
-    'content-disposition': `attachment; filename="${path.basename(requested)}"`
+    'content-disposition': `attachment; filename="${path.basename(requested)}"`,
+    ...(typeof sha256 === 'string' && /^[0-9a-f]{64}$/i.test(sha256) ? { 'x-brai-apk-sha256': sha256.toLowerCase() } : {})
   });
   fs.createReadStream(filePath).pipe(res);
 }

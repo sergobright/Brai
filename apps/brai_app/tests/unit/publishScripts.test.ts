@@ -311,6 +311,7 @@ describe("mobile OTA publish scripts", () => {
     expect(productionAdminBlock).toContain("brai_envs.prod.admin_port");
     expect(productionAdminBlock).not.toContain("brai_basic_auth_directive");
     expect(productionTemplate).toContain("@admin path /admin /admin/*");
+    expect(productionTemplate).toContain("handle /dev-releases*");
     expect(productionTemplate.indexOf("handle @admin")).toBeLessThan(productionTemplate.indexOf("handle {"));
     expect(productionShellBlock).not.toContain("brai_basic_auth_directive");
     expect(nonProductionTemplate).not.toMatch(/\{\{ env\.domain \}\} \{\n\s+\{\{ brai_basic_auth_directive \}\}/);
@@ -319,6 +320,7 @@ describe("mobile OTA publish scripts", () => {
     expect(adminBlock).toContain("brai_basic_auth_directive");
     expect(adminBlock).toContain("env.admin_port");
     expect(nonProductionTemplate).toContain("@admin path /admin /admin/*");
+    expect(nonProductionTemplate).toContain("handle /dev-releases*");
     expect(mobileIndex).toBeGreaterThan(nonProductionTemplate.indexOf("handle /releases*"));
     expect(mobileIndex).toBeLessThan(nonProductionTemplate.indexOf("handle {"));
     expect(mobileBlock).toContain('header /manifest.json Cache-Control "no-store"');

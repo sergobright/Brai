@@ -23,6 +23,7 @@ export function EngineSection({
   versionError,
   versionRefreshing,
   onDownloadApk,
+  onInstallApk,
   onDownloadWebUpdate,
   onRefreshEngine,
 }: {
@@ -35,6 +36,7 @@ export function EngineSection({
   versionError: boolean;
   versionRefreshing: boolean;
   onDownloadApk: () => Promise<BraiOtaState | null>;
+  onInstallApk: () => Promise<BraiOtaState | null>;
   onDownloadWebUpdate: () => Promise<BraiOtaState | null>;
   onRefreshEngine: () => Promise<void>;
 }) {
@@ -53,10 +55,12 @@ export function EngineSection({
     } else if (view.updateAction === "download-apk") {
       const state = await onDownloadApk();
       if (!state) window.open(view.apkReleaseUrl, "_blank", "noopener,noreferrer");
+    } else if (view.updateAction === "install-apk") {
+      await onInstallApk();
     }
   }
 
-  const button = updateButton(view.updateAction);
+  const button = updateButton(view.updateAction, view.apkInstallPermissionRequired);
   const ButtonIcon = button.icon;
 
   return (
@@ -67,7 +71,7 @@ export function EngineSection({
           <p className="m-0 text-sm leading-5 text-muted-foreground">{view.updateStatus.body}</p>
         </div>
 
-        {view.hasUpdate || ["web-ready", "downloading-web", "downloading-apk", "apk-downloaded"].includes(view.updateAction)
+        {view.hasUpdate || ["web-ready", "downloading-web", "downloading-apk", "install-apk"].includes(view.updateAction)
           ? <UpdateNotice view={view} />
           : null}
 
@@ -87,8 +91,21 @@ function UpdateNotice({ view }: { view: EngineSectionView }) {
   if (view.updateAction === "download-apk") {
     return <Notice text={`Доступна новая версия приложения. Для обновления нужен APK${view.requiredApkLabel ? ` ${view.requiredApkLabel}` : ""}.`} />;
   }
-  if (view.updateAction === "downloading-apk") return <Notice text="APK скачивается. Следите за системным уведомлением." />;
-  if (view.updateAction === "apk-downloaded") return <Notice text="APK скачан. Откройте уведомление или папку «Загрузки», чтобы установить его." />;
+  if (view.updateAction === "downloading-apk") {
+    const progress = view.downloadProgressPercent ?? 0;
+    return (
+      <Field className="gap-2 rounded-md border border-border bg-muted/50 px-3 py-2.5">
+        <FieldLabel htmlFor="engine-apk-progress" className="flex w-full items-center gap-2 text-sm">
+          <span className="min-w-0 truncate">Скачивается APK{view.requiredApkLabel ? ` ${view.requiredApkLabel}` : ""}</span>
+          <span className="ml-auto tabular-nums">{progress}%</span>
+        </FieldLabel>
+        <Progress value={progress} id="engine-apk-progress" className="h-1.5" />
+      </Field>
+    );
+  }
+  if (view.updateAction === "install-apk") {
+    return <Notice text={view.apkInstallPermissionRequired ? "APK скачан. Разрешите Brai устанавливать обновления, затем нажмите «Установить»." : "APK скачан и проверен. Если установщик был закрыт, нажмите «Установить»."} />;
+  }
   if (view.updateAction === "web-ready") {
     return <Notice text={`Обновление ${view.latestVersion} скачано. Закройте и снова откройте приложение, чтобы применить его.`} />;
   }
@@ -112,7 +129,7 @@ function Notice({ text }: { text: string }) {
   return <div className="rounded-md border border-border bg-muted/50 px-3 py-2.5"><p className="m-0 text-sm font-medium">{text}</p></div>;
 }
 
-function updateButton(action: EngineSectionView["updateAction"]) {
+function updateButton(action: EngineSectionView["updateAction"], permissionRequired = false) {
   switch (action) {
     case "checking": return { text: "Проверяем...", icon: RefreshCw, disabled: true, animated: false };
     case "download-web": return { text: "Скачать обновление", icon: Download, disabled: false, animated: false };
@@ -120,7 +137,7 @@ function updateButton(action: EngineSectionView["updateAction"]) {
     case "downloading-apk": return { text: "Скачивается", icon: Download, disabled: true, animated: true };
     case "web-ready": return { text: "Скачано", icon: Download, disabled: true, animated: false };
     case "download-apk": return { text: "Скачать APK", icon: Download, disabled: false, animated: false };
-    case "apk-downloaded": return { text: "APK скачан", icon: Download, disabled: true, animated: false };
+    case "install-apk": return { text: permissionRequired ? "Разрешить установку" : "Установить", icon: Download, disabled: false, animated: false };
     default: return { text: "Проверить обновления", icon: RefreshCw, disabled: false, animated: false };
   }
 }

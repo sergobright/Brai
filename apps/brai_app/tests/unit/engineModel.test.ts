@@ -235,7 +235,45 @@ describe("engineSectionView", () => {
     expect(engineSectionView({
       ...base,
       otaState: { activeBundleVersion: "0.0.10", nativeApkVersion: "1", targetApkVersion: "2", lastCheckStatus: "apk_required", apkDownloadStatus: "downloaded" },
-    }).updateAction).toBe("apk-downloaded");
+    }).updateAction).toBe("install-apk");
+  });
+
+  it("shows real APK progress and install permission state", () => {
+    const base = {
+      appBuild: "0.0.10",
+      appVersionState: null,
+      otaRefreshing: false,
+      versionError: false,
+      versionRefreshing: false,
+    };
+    const downloading = engineSectionView({
+      ...base,
+      otaState: {
+        activeBundleVersion: "0.0.10",
+        nativeApkVersion: "1",
+        targetApkVersion: "2",
+        lastCheckStatus: "apk_required",
+        apkDownloadStatus: "downloading",
+        apkDownloadBytes: 25,
+        apkDownloadTotalBytes: 100,
+      },
+    });
+    expect(downloading.updateAction).toBe("downloading-apk");
+    expect(downloading.downloadProgressPercent).toBe(25);
+
+    const ready = engineSectionView({
+      ...base,
+      otaState: {
+        activeBundleVersion: "0.0.10",
+        nativeApkVersion: "1",
+        targetApkVersion: "2",
+        lastCheckStatus: "apk_required",
+        apkDownloadStatus: "downloaded",
+        apkInstallPermissionRequired: true,
+      },
+    });
+    expect(ready.updateAction).toBe("install-apk");
+    expect(ready.apkInstallPermissionRequired).toBe(true);
   });
 
   it("keeps user-facing Engine text free from the technical update acronym", () => {

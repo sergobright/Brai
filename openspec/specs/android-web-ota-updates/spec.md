@@ -169,19 +169,31 @@ Brai Android SHALL separate update discovery from user-initiated download operat
 
 ### Requirement: Android can download its channel APK
 
-Brai Android SHALL queue the installed channel APK through the system DownloadManager.
+Brai Android SHALL download, verify, retain, install, and clean up the installed channel APK under application control.
 
-#### Scenario: Preview B requests an APK
-- **WHEN** an installed Preview B app calls `downloadApk()`
-- **THEN** it downloads from the public endpoint for release key `b`
-- **AND** saves the APK in system Downloads with a visible system notification
+#### Scenario: User downloads an APK
+- **WHEN** the user calls `downloadApk()` for an available native update
+- **THEN** Brai downloads the installed release key into application-private storage
+- **AND** bridge state exposes actual downloaded bytes, total bytes, and failure details
+- **AND** duplicate requests for the same active or ready target are not started
 
-#### Scenario: APK download is already active
-- **WHEN** `downloadApk()` is called while the tracked APK request is active
-- **THEN** Android does not enqueue a duplicate
-- **AND** bridge state remains `downloading`
+#### Scenario: APK download completes
+- **WHEN** content length and release SHA-256 match
+- **THEN** Brai retains one verified APK candidate
+- **AND** immediately opens the system package installer when Android permits it
+- **AND** exposes an `Install` action that reopens the same installer if the user dismisses it
 
-#### Scenario: APK download finishes
-- **WHEN** DownloadManager reports the tracked request completed or failed
-- **THEN** bridge state reports `downloaded` or `failed`
-- **AND** retains only non-secret diagnostic error information
+#### Scenario: install-source permission is missing
+- **WHEN** Android does not permit Brai to request package installation
+- **THEN** Brai opens the system settings page for this app
+- **AND** keeps the verified APK ready without downloading it again
+
+#### Scenario: updated app starts
+- **WHEN** the installed version code satisfies the retained APK target
+- **THEN** Brai deletes the retained APK and partial download files
+- **AND** clears the install-ready state
+
+#### Scenario: APK download is invalid or interrupted
+- **WHEN** length or SHA-256 verification fails, storage fails, or the process did not finish the download
+- **THEN** Brai does not expose the file to the installer
+- **AND** removes the partial file and reports a retryable failure

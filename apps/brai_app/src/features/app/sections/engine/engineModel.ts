@@ -4,6 +4,15 @@ import type { Tone } from "../../appModel";
 
 const updateErrorMessages: Record<string, string> = {
   apk_required: "Для этого обновления нужно установить новый APK.",
+  apk_checksum_mismatch: "APK скачался повреждённым. Попробуй ещё раз.",
+  apk_checksum_missing: "Сервер не передал контрольную сумму APK. Загрузка остановлена.",
+  apk_download_interrupted: "Скачивание APK было прервано. Попробуй ещё раз.",
+  apk_download_size_exceeded: "APK оказался больше заявленного. Загрузка остановлена.",
+  apk_download_size_invalid: "Сервер указал неверный размер APK.",
+  apk_download_size_mismatch: "APK скачался не полностью. Попробуй ещё раз.",
+  apk_file_missing: "Скачанный APK больше не найден. Скачай его ещё раз.",
+  apk_installer_unavailable: "Android не смог открыть установщик. Попробуй ещё раз.",
+  apk_target_missing: "Не удалось определить версию APK для загрузки.",
   archive_checksum_mismatch: "Файл обновления скачался поврежденным. Запусти проверку еще раз.",
   archive_download_size_exceeded: "Файл обновления оказался больше ожидаемого. Установка остановлена.",
   archive_invalid_zip: "Архив обновления поврежден. Запусти проверку еще раз.",
@@ -79,12 +88,13 @@ export type EngineSectionView = {
   installedVersion: string;
   isChecking: boolean;
   apkUpdateAvailable: boolean;
+  apkInstallPermissionRequired: boolean;
   requiredApkVersion: number | null;
   requiredApkLabel: string | null;
   apkReleaseUrl: string;
   latestVersion: string;
   updateStatus: UpdateStatusView;
-  updateAction: "check" | "checking" | "download-web" | "downloading-web" | "web-ready" | "download-apk" | "downloading-apk" | "apk-downloaded";
+  updateAction: "check" | "checking" | "download-web" | "downloading-web" | "web-ready" | "download-apk" | "downloading-apk" | "install-apk";
 };
 
 /**
@@ -144,6 +154,7 @@ export function engineSectionView({
     androidUpdateStage,
     appBuild,
     apkUpdateAvailable,
+    apkInstallPermissionRequired: Boolean(visibleState?.apkInstallPermissionRequired),
     requiredApkVersion,
     requiredApkLabel: targetApk.label,
     apkReleaseUrl,
@@ -221,11 +232,10 @@ export function compareBraiVersions(left: string, right: string): number {
 export function humanUpdateError(raw: string | null | undefined): string {
   const value = raw?.trim();
   if (!value) return "Попробуй проверить обновление еще раз.";
-  const http = value.match(/^(manifest_http|archive_download_http)_(\d+)$/);
+  const http = value.match(/^(manifest_http|archive_download_http|apk_download_http)_(\d+)$/);
   if (http) {
-    return http[1] === "manifest_http"
-      ? `Сервер не отдал описание обновления (HTTP ${http[2]}).`
-      : `Сервер не отдал файл обновления (HTTP ${http[2]}).`;
+    if (http[1] === "manifest_http") return `Сервер не отдал описание обновления (HTTP ${http[2]}).`;
+    return `Сервер не отдал файл обновления (HTTP ${http[2]}).`;
   }
   if (value.startsWith("manifest_missing_") || value.startsWith("manifest_invalid_")) {
     return "Описание обновления на сервере заполнено неверно.";
@@ -264,6 +274,16 @@ function engineStatusView({
   versionKnown: boolean;
 }): UpdateStatusView {
   if (isChecking) return { label: "проверка", body: "Проверяем версии Brai.", tone: "muted" };
+
+  if (otaState?.apkDownloadStatus === "failed") {
+    return { label: "ошибка", body: `Не удалось скачать APK. ${humanUpdateError(otaState.apkDownloadError)}`, tone: "bad" };
+  }
+  if (otaState?.apkDownloadStatus === "downloading") {
+    return { label: "загрузка", body: "Brai скачивает и проверяет APK.", tone: "warn" };
+  }
+  if (otaState?.apkDownloadStatus === "downloaded") {
+    return { label: "готово", body: "APK скачан и готов к установке.", tone: "warn" };
+  }
 
   switch (otaState?.lastCheckStatus) {
     case "candidate_ready_for_next_start":
@@ -309,7 +329,7 @@ function engineUpdateAction({
 }): EngineSectionView["updateAction"] {
   if (isChecking) return "checking";
   if (otaState?.apkDownloadStatus === "downloading") return "downloading-apk";
-  if (otaState?.apkDownloadStatus === "downloaded") return "apk-downloaded";
+  if (otaState?.apkDownloadStatus === "downloaded") return "install-apk";
   if (apkUpdateAvailable) return "download-apk";
   if (otaState?.lastCheckStatus && readyStatuses.has(otaState.lastCheckStatus)) return "web-ready";
   if (otaState?.activeOperation === "web_download" || otaState?.lastCheckStatus === "downloading") return "downloading-web";
@@ -328,6 +348,15 @@ function androidStage(state: BraiOtaState | null, hasUpdate: boolean): EngineSec
 }
 
 function progressPercent(state: BraiOtaState | null): number | null {
+  if (state?.apkDownloadStatus === "downloading") {
+    const explicitApk = state.apkDownloadPercent;
+    if (typeof explicitApk === "number" && Number.isFinite(explicitApk)) return clampProgress(explicitApk);
+    const apkBytes = state.apkDownloadBytes;
+    const apkTotal = state.apkDownloadTotalBytes;
+    if (typeof apkBytes === "number" && typeof apkTotal === "number" && apkTotal > 0) {
+      return clampProgress((apkBytes / apkTotal) * 100);
+    }
+  }
   const explicit = state?.downloadProgressPercent;
   if (typeof explicit === "number" && Number.isFinite(explicit)) return clampProgress(explicit);
   const bytes = state?.downloadProgressBytes;

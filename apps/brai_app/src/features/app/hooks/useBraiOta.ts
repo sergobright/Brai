@@ -6,6 +6,7 @@ import {
   downloadAndroidApk,
   downloadAndroidOtaUpdate,
   getAndroidOtaState,
+  installAndroidApk,
   notifyAndroidOtaReady,
   type BraiOtaState,
 } from "@/shared/platform/ota";
@@ -108,5 +109,11 @@ export function useBraiOta() {
     return state;
   }, []);
 
-  return { bundlePublishedAt, downloadApkOnce, downloadWebUpdateOnce, otaCheckedAt, otaRefreshing, otaState, refreshOtaStateOnce };
+  const installApkOnce = useCallback(async () => {
+    const state = await installAndroidApk();
+    if (state) setOtaState(state);
+    return state;
+  }, []);
+
+  return { bundlePublishedAt, downloadApkOnce, downloadWebUpdateOnce, installApkOnce, otaCheckedAt, otaRefreshing, otaState, refreshOtaStateOnce };
 }

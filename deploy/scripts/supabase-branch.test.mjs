@@ -354,12 +354,14 @@ test("preview env setup rewrites existing shell-unsafe values safely", () => {
     "BRAI_LEGACY_SQLITE_PATH=/srv/projects/brai/data/brai.sqlite",
     "BRAI_TEST_AUTO_LOGIN=true",
     "BRAI_SESSION_SECRET=old-auto-login-secret",
+    "BRAI_RELEASE_PASSWORD=stale-preview-password",
     "BROKEN NON ASSIGNMENT",
     ""
   ].join("\n"));
   const env = {
     ...process.env,
     BRAI_SUPABASE_DRY_RUN: "true",
+    BRAI_RELEASE_PASSWORD: "shared-release-password",
     BRAI_ENVS_ROOT: dir,
     BRAI_PREVIEW_REGISTRY: path.join(dir, "preview-slots.json"),
     BRAI_PREVIEW_LOCK: path.join(dir, "preview-slots.lock"),
@@ -398,6 +400,8 @@ test("preview env setup rewrites existing shell-unsafe values safely", () => {
   assert.match(contents, /^BRAI_DATABASE_URL='postgres:\/\/brai:brai@127\.0\.0\.1:5432\/brai\?options=-c\+search_path%3Dbrai_preview_supabase_only_runtime_e3117d5f%2Cpublic'$/m);
   assert.match(contents, /^BRAI_SUPABASE_BRANCH='brai_preview_supabase_only_runtime_e3117d5f'$/m);
   assert.match(contents, /^BRAI_TEST_EMAIL_LOGIN='true'$/m);
+  assert.match(contents, /^BRAI_RELEASE_PASSWORD='shared-release-password'$/m);
+  assert.doesNotMatch(contents, /stale-preview-password/);
   assert.doesNotMatch(contents, /BRAI_TEST_AUTO_LOGIN/);
   assert.match(contents, /^BRAI_SESSION_SECRET='[^']{32,}'$/m);
   assert.doesNotMatch(contents, /old-auto-login-secret/);
@@ -417,6 +421,7 @@ test("dev env setup enables explicit test email login", () => {
     env: {
       ...process.env,
       BRAI_SUPABASE_DRY_RUN: "true",
+      BRAI_RELEASE_PASSWORD: "shared-release-password",
       SUPABASE_SELF_HOSTED: "true",
       SUPABASE_SELF_HOSTED_DATABASE_URL: "postgres://brai:brai@127.0.0.1:5432/brai"
     }
@@ -426,6 +431,7 @@ test("dev env setup enables explicit test email login", () => {
   const contents = fs.readFileSync(envFile, "utf8");
   assert.match(contents, /^BRAI_SUPABASE_BRANCH='brai_dev'$/m);
   assert.match(contents, /^BRAI_TEST_EMAIL_LOGIN='true'$/m);
+  assert.match(contents, /^BRAI_RELEASE_PASSWORD='shared-release-password'$/m);
   assert.doesNotMatch(contents, /BRAI_TEST_AUTO_LOGIN/);
 });
 
@@ -435,6 +441,7 @@ test("branch database URL override requires explicit preview marker", () => {
   const baseEnv = {
     ...process.env,
     BRAI_SUPABASE_DRY_RUN: "true",
+    BRAI_RELEASE_PASSWORD: "shared-release-password",
     BRAI_ENVS_ROOT: dir,
     BRAI_PREVIEW_REGISTRY: path.join(dir, "preview-slots.json"),
     BRAI_PREVIEW_LOCK: path.join(dir, "preview-slots.lock"),

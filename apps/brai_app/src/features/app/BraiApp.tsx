@@ -376,6 +376,7 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
             versionError={app.versionError}
             versionRefreshing={app.versionRefreshing}
             onDownloadApk={app.downloadApkOnce}
+            onInstallApk={app.installApkOnce}
             onDownloadWebUpdate={app.downloadWebUpdateOnce}
             onRefreshEngine={app.refreshEngineOnce}
           />
@@ -434,6 +435,7 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
                   versionError={app.versionError}
                   versionRefreshing={app.versionRefreshing}
                   onDownloadApk={app.downloadApkOnce}
+                  onInstallApk={app.installApkOnce}
                   onDownloadWebUpdate={app.downloadWebUpdateOnce}
                   onRefreshEngine={app.refreshEngineOnce}
                 />
