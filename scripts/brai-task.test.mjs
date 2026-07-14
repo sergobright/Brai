@@ -121,6 +121,18 @@ test("server access contract checks deploy ownership instead of agent write acce
   assert.match(protectedEnvCheck, /forbiddenModeBits: 0o006/);
   assert.doesNotMatch(protectedEnvCheck, /requiredModeBits: 0o750/);
   assert.doesNotMatch(protectedEnvCheck, /forbiddenModeBits: 0o007/);
+  assert.match(script, /treeOwnershipCheck\("production publish artifacts"/);
+  assert.match(script, /path\.join\(deployRepo, "deploy\/mobile-update"\)/);
+});
+
+test("main sync gives production publish artifacts to the deploy user", () => {
+  const sync = fs.readFileSync(new URL("../deploy/scripts/sync-local-main-checkout.sh", import.meta.url), "utf8");
+  const playbook = fs.readFileSync(new URL("../deploy/ansible/brai.yml", import.meta.url), "utf8");
+  assert.match(sync, /for runtime_path in deploy\/site deploy\/web deploy\/mobile-update deploy\/releases/);
+  assert.match(sync, /chown -R brai-deploy:brai-deploy "\$runtime_path"/);
+  assert.match(playbook, /Ensure deploy user owns production web and OTA assets/);
+  assert.match(playbook, /owner: "\{\{ brai_deploy_user \}\}"/);
+  assert.match(playbook, /recurse: true/);
 });
 
 test("server access contract checks operation helper sudo boundary", () => {

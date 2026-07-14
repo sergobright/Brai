@@ -845,6 +845,11 @@ function serverAccessContract(root = process.env.BRAI_ROOT ?? "/srv/projects/bra
       checkName: "operation list helper remote ssh",
       root,
     }),
+    treeOwnershipCheck("production publish artifacts", [
+      path.join(deployRepo, "deploy/web"),
+      path.join(deployRepo, "deploy/mobile-update"),
+      path.join(deployRepo, "deploy/releases"),
+    ], { owner: deployOwner, group: deployGroup }),
     pathCheck("deploy artifacts", path.join(deployRepo, "deploy"), { requireRead: true, expectDirectory: true }),
     pathCheck("main sync script", mainSyncScript, { requireRead: true }),
     commandCheck("node", ["node", "--version"], { cwd: root }),
@@ -972,6 +977,35 @@ function contractPathCheck(name, target, { owner, group, requiredModeBits = 0, f
     }
   }
   return check;
+}
+
+function treeOwnershipCheck(name, targets, { owner, group }) {
+  const user = resolveUserId(owner);
+  const resolvedGroup = resolveGroupId(group);
+  if (!user.ok || !resolvedGroup.ok) {
+    return { name, ok: false, reason: user.reason ?? resolvedGroup.reason };
+  }
+  const result = spawnSync("find", [
+    ...targets,
+    "-xdev",
+    "(",
+    "!", "-uid", String(user.id),
+    "-o",
+    "!", "-gid", String(resolvedGroup.id),
+    ")",
+    "-print",
+    "-quit",
+  ], { encoding: "utf8" });
+  const mismatch = String(result.stdout ?? "").trim();
+  return {
+    name,
+    ok: result.status === 0 && mismatch === "",
+    paths: targets,
+    expectedOwner: owner,
+    expectedGroup: group,
+    mismatch: mismatch || undefined,
+    stderr: String(result.stderr ?? "").trim(),
+  };
 }
 
 function resolveUserId(name) {

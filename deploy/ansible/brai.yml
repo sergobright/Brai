@@ -696,12 +696,14 @@
         group: "{{ brai_deploy_user }}"
         mode: "2775"
 
-    - name: Allow deploy user to publish production web and OTA assets
+    - name: Ensure deploy user owns production web and OTA assets
       ansible.builtin.file:
         path: "{{ item }}"
         state: directory
+        owner: "{{ brai_deploy_user }}"
         group: "{{ brai_deploy_user }}"
         mode: "2775"
+        recurse: true
       loop:
         - "{{ brai_repo }}/deploy/web"
         - "{{ brai_repo }}/deploy/mobile-update"
