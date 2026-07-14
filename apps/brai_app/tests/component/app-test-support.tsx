@@ -380,6 +380,8 @@ export function setupBraiAppTest() {
     delete window.BraiAndroidBack;
     delete window.__BRAI_RUNTIME_CONFIG__;
     delete document.documentElement.dataset.sidebarState;
+    delete document.documentElement.dataset.nativeAndroid;
+    delete document.documentElement.dataset.braiStartupMounted;
   });
 }
 

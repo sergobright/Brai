@@ -71,6 +71,7 @@ describe("BraiApp onboarding", () => {
     runAppInitScript();
 
     expect(document.documentElement.dataset.theme).toBe("dark");
+    expect(document.documentElement.dataset.nativeAndroid).toBe("true");
 
     render(<BraiApp />);
 

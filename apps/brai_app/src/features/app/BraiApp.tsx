@@ -688,10 +688,10 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
       ) : null}
         </SidebarProvider>
       )}
-      {onboardingActive ? (
+      {nativeAndroid === true ? (
         <AppStartupSplash
           ready={startupReady}
-          persist={onboardingStartupActive}
+          persist={onboardingActive && onboardingStartupActive}
           onIntroComplete={handleStartupIntroComplete}
         />
       ) : null}

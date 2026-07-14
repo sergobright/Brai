@@ -55,7 +55,7 @@ describe("BraiApp shell", () => {
     expect(cmdPlugin.syncProviderCredentials.mock.invocationCallOrder[0]).toBeLessThan(
       cmdPlugin.setOverlayEnabled.mock.invocationCallOrder.find((order) => order > cmdPlugin.syncProviderCredentials.mock.invocationCallOrder[0]) ?? 0,
     );
-    expect(document.querySelector("[data-startup-splash]")).not.toBeInTheDocument();
+    expect(document.querySelector("[data-startup-splash]")).toBeInTheDocument();
   });
 
   it("keeps dictation and context available with the legacy native bridge", async () => {
