@@ -168,6 +168,21 @@ test("production copy keeps ai_logs only for agents present in the target schema
   );
 });
 
+test("production copy skips rows that violate target not-null columns", () => {
+  const query = copySourceQuery({
+    sourceSchema: "prod",
+    targetSchema: "preview",
+    table: "workflow_executions",
+    columns: ["id", "role_contract_id", "status"],
+    requiredColumns: ["id", "role_contract_id"]
+  }).replace(/\s+/g, " ").trim();
+
+  assert.equal(
+    query,
+    'SELECT source_row."id", source_row."role_contract_id", source_row."status" FROM "prod"."workflow_executions" AS source_row WHERE source_row."id" IS NOT NULL AND source_row."role_contract_id" IS NOT NULL'
+  );
+});
+
 test("production copy derives target-only access token expiry before a not-null preview insert", () => {
   const sourceColumns = ["id", "created_at_utc"];
   const columns = copyTargetColumns({
