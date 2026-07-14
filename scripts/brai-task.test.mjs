@@ -40,7 +40,7 @@ import {
 } from "./brai-task.mjs";
 import { acceptedPreviewBranches } from "../deploy/scripts/accepted-preview-branches.mjs";
 import { classifyDeployDelivery } from "../deploy/scripts/classify-delivery.mjs";
-import { diffRange, requiresNativeApkChange } from "../deploy/scripts/detect-native-apk-change.mjs";
+import { diffRange, diffRanges, requiresNativeApkChange } from "../deploy/scripts/detect-native-apk-change.mjs";
 
 const tempRoots = new Set();
 
@@ -896,6 +896,10 @@ test("native APK detector keeps the full codex branch diff across follow-up push
   assert.equal(
     diffRange("codex/native-change", "incremental-follow-up-sha", () => true),
     "origin/main...HEAD",
+  );
+  assert.deepEqual(
+    diffRanges("codex/native-change", "incremental-follow-up-sha", () => true),
+    ["origin/main...HEAD", "incremental-follow-up-sha..HEAD"],
   );
 });
 
