@@ -356,9 +356,14 @@ if [ "${BRAI_MAIN_SYNC_LOCK_CHECKOUT:-1}" = "1" ]; then
   fi
 
   if getent group brai-deploy >/dev/null 2>&1; then
-    for runtime_path in data deploy/site deploy/web deploy/mobile-update deploy/releases; do
+    if [ -d data ]; then
+      chgrp -R brai-deploy data
+      chmod -R u=rwX,g=rwX,o=rX data
+      find data -type d -exec chmod g+s {} +
+    fi
+    for runtime_path in deploy/site deploy/web deploy/mobile-update deploy/releases; do
       if [ -d "$runtime_path" ]; then
-        chgrp -R brai-deploy "$runtime_path"
+        chown -R brai-deploy:brai-deploy "$runtime_path"
         chmod -R u=rwX,g=rwX,o=rX "$runtime_path"
         find "$runtime_path" -type d -exec chmod g+s {} +
       fi

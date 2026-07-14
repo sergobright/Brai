@@ -48,7 +48,7 @@ Use one permission contract instead of ad hoc `chmod`/`chown` fixes:
 - registered task worktrees under `.codex-worktrees/*` are agent workspaces and main sync does not change their ownership in normal flow;
 - deploy-owned env roots under `/srv/projects/brai-envs/*` are `brai-deploy:brai-deploy`, group-writable, and setgid;
 - production, Dev, and preview runtime DB access uses server-side Supabase Postgres credentials from protected env files;
-- public web, OTA, and release artifacts are group-writable and public-readable;
+- public web, OTA, and release artifacts are owned by `brai-deploy`, group-writable, and public-readable so the publisher can normalize their modes;
 - accepted-preview promotion, OTA sync, preview slot release, and baseline APK rebuilds run from deploy-owned source roots under `/srv/projects/brai-envs/*/source`, not from the locked live checkout.
 - checkout-local CI/agent entrypoints for those operations must self-route into the deploy-owned source before reading runtime dependencies.
 
