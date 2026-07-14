@@ -886,6 +886,7 @@ test("remote deploy installs dependencies before replacing the active source tre
   const stageIndex = deploy.indexOf('cd "$REMOTE_UPLOAD"');
   const headroomIndex = deploy.indexOf('check_deploy_headroom "$ENVS_ROOT"');
   const installIndex = deploy.indexOf("npm --prefix services/brai_api ci", stageIndex);
+  const sourceLockIndex = deploy.indexOf('flock 8', installIndex);
   const previousIndex = deploy.indexOf('mv "$SOURCE_ROOT" "$PREVIOUS_SOURCE"', installIndex);
   const publishIndex = deploy.indexOf('mv "$REMOTE_UPLOAD" "$SOURCE_ROOT"', previousIndex);
   const deployBranchIndex = deploy.indexOf("deploy/scripts/deploy-branch.sh", publishIndex);
@@ -894,6 +895,8 @@ test("remote deploy installs dependencies before replacing the active source tre
   assert.ok(headroomIndex > 0);
   assert.ok(stageIndex < installIndex);
   assert.ok(headroomIndex < installIndex);
+  assert.ok(installIndex < sourceLockIndex);
+  assert.ok(sourceLockIndex < previousIndex);
   assert.ok(installIndex < previousIndex);
   assert.ok(previousIndex < publishIndex);
   assert.ok(publishIndex < deployBranchIndex);
@@ -901,6 +904,16 @@ test("remote deploy installs dependencies before replacing the active source tre
   assert.match(deploy, /BRAI_DEPLOY_MIN_FREE_GB:-4/);
   assert.match(deploy, /cleanup_stale_preview_previous_sources "\$\{PREVIOUS_SOURCE:-\}"/);
   assert.match(deploy, /"\$ENVS_ROOT"\/preview-\[a-e\]/);
+});
+
+test("direct Android builds share the deploy source-operation lock", () => {
+  const deploy = fs.readFileSync(new URL("../deploy/scripts/ci-ssh-deploy.sh", import.meta.url), "utf8");
+  const androidBuild = fs.readFileSync(new URL("../deploy/scripts/build-android-env-apk.sh", import.meta.url), "utf8");
+  assert.match(deploy, /\.source-operation\.lock/);
+  assert.match(deploy, /BRAI_SOURCE_OPERATION_LOCK_HELD=true/);
+  assert.match(androidBuild, /\.source-operation\.lock/);
+  assert.match(androidBuild, /BRAI_SOURCE_OPERATION_LOCK_HELD:-false/);
+  assert.match(androidBuild, /flock 8/);
 });
 
 test("preview deploy requires Postgres and preserves artifact setgid", () => {

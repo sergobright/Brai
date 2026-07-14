@@ -203,6 +203,10 @@ npm --prefix admin ci
 find "$REMOTE_UPLOAD" ! -type l -user "$(id -u)" -exec chmod u+rwX,g+rwX {} +
 find "$REMOTE_UPLOAD" -type d -user "$(id -u)" -exec chmod g+s {} +
 
+SOURCE_OPERATION_LOCK="$(dirname "$SOURCE_ROOT")/.source-operation.lock"
+exec 8>"$SOURCE_OPERATION_LOCK"
+flock 8
+export BRAI_SOURCE_OPERATION_LOCK_HELD=true
 if [[ -d "$SOURCE_ROOT" ]]; then
   find "$SOURCE_ROOT" ! -type l -user "$(id -u)" -exec chmod u+rwX,g+rwX {} + || true
 fi
