@@ -284,8 +284,13 @@ ansible-playbook -i deploy/ansible/inventory.example.ini deploy/ansible/brai.yml
 The first deployment containing Goal agents requires this Ansible apply before any branch
 deploy. It creates the isolated Unix identity and protected EnvironmentFile, installs all 35
 systemd units (five service families across Production, Dev, and Preview A-E), and installs the
-narrow deploy sudo rules. A branch deploy intentionally fails instead of fabricating missing
-units or widening permissions.
+narrow deploy sudo rules plus the fixed root-owned Codex runtime preparation helper. Every later
+Goal-agent deploy gate invokes that helper without arguments immediately before the five exact
+systemd restarts, restoring only the `brai-codex-exec` traversal/read contract and proving
+`codex --version` as `brai-goal-agent`. Ansible also appends the same fixed helper to the managed
+Codex release sync, after its ordinary package/symlink update, so the daily CLI timer cannot restore
+the old `brai-deploy`-only package access after a successful Preview. A branch deploy intentionally
+fails instead of fabricating missing units, accepting an unusable Codex runtime, or widening permissions.
 
 The current local VPS setup keeps the existing production service name `brai-api.service`.
 Production and preview API services run from the source checkout uploaded into

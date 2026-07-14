@@ -45,6 +45,11 @@ test("systemd template is a hardened listener-free Temporal/LLM worker", () => {
   assert.match(unit, /Environment=BRAI_GOAL_AGENT_TASK_QUEUE=/);
   assert.match(unit, /runtime-policy\.json/);
   assert.match(unit, /UnsetEnvironment=\{\{ goal_agent_runtime_policy\.forbidden_environment_keys \| join\(' '\) \}\}/);
+  assert.match(unit, /ExecStartPre=\/usr\/bin\/test -r \{\{ brai_goal_agent_codex_home \}\}\/auth\.json/);
+  assert.match(unit, /ExecStartPre=\/usr\/bin\/test -r \{\{ brai_goal_agent_codex_home \}\}\/config\.toml/);
+  assert.match(unit, /ExecStartPre=\{\{ brai_codex_bin \}\} --version/);
+  assert.ok(unit.indexOf("ExecStartPre={{ brai_codex_bin }} --version")
+    < unit.indexOf("ExecStart={{ brai_node_bin }} src/entrypoints/"));
   for (const key of ["DATABASE_URL", "BRAI_PROD_DATABASE_URL", "SUPABASE_ACCESS_TOKEN", "BRAI_API_URL"]) {
     assert.ok(runtimePolicy.forbidden_environment_keys.includes(key));
   }
@@ -75,6 +80,9 @@ test("Ansible enforces a dedicated identity that cannot read API secrets", () =>
   assert.match(playbook, /name: Assert Brai Goal agent cannot read API secrets[\s\S]*?\/usr\/bin\/sudo[\s\S]*?"!"[\s\S]*?brai_api_env_source/);
   assert.match(playbook, /name: Ensure protected Brai env directory contract[\s\S]*?mode: "0751"/);
   assert.match(playbook, /name: Install Brai Goal agent environment contract[\s\S]*?mode: "0640"/);
+  assert.match(playbook, /name: Keep Node\.js library directories private to Codex executable readers[\s\S]*?group: "\{\{ brai_codex_exec_group \}\}"[\s\S]*?mode: "0750"[\s\S]*?brai_node_root \}\}\/lib[\s\S]*?brai_node_root \}\}\/lib\/node_modules/);
+  assert.match(playbook, /name: Allow Codex executable readers to enter scoped package directory[\s\S]*?group: "\{\{ brai_codex_exec_group \}\}"[\s\S]*?mode: "0750"/);
+  assert.match(playbook, /name: Grant read and execute access only to the Codex CLI package[\s\S]*?group: "\{\{ brai_codex_exec_group \}\}"[\s\S]*?mode: "u=rwX,g=rX,o="[\s\S]*?recurse: true/);
   assert.match(
     playbook,
     /name: Grant only Brai Codex auth readers access to shared credentials[\s\S]*?owner: root[\s\S]*?group: "\{\{ brai_codex_auth_group \}\}"[\s\S]*?mode: "0640"/,
@@ -86,6 +94,7 @@ test("Ansible enforces a dedicated identity that cannot read API secrets", () =>
   );
   assert.match(playbook, /name: Assert Brai Goal agent can read only its environment contract/);
   assert.match(playbook, /name: Assert Brai Goal agent cannot list protected env directory[\s\S]*?"!"[\s\S]*?-r[\s\S]*?brai_protected_env_dir/);
+  assert.match(playbook, /name: Assert Brai Goal agent can start Codex CLI[\s\S]*?\/usr\/bin\/env[\s\S]*?CODEX_HOME=\{\{ brai_goal_agent_codex_home \}\}[\s\S]*?HOME=\{\{ brai_goal_agent_codex_home \}\}[\s\S]*?brai_codex_bin[\s\S]*?--version/);
   assert.doesNotMatch(envTemplate, /DATABASE|SUPABASE|API_TOKEN|SERVICE_ROLE/);
   assert.match(playbook, /name: Allow Brai API service to read Goal agent contracts and retain Codex access[\s\S]*?brai_goal_agent_group[\s\S]*?append: true[\s\S]*?notify: Restart active Brai API services after Codex access change/);
   assert.match(playbook, /name: Check Brai API source directories before active-service restart[\s\S]*?source\/services\/brai_api[\s\S]*?register: brai_api_source_directories/);
@@ -100,11 +109,37 @@ test("deployment docs require first Ansible install and describe all 35 agent un
   assert.match(docs, /all 35[\s\S]*?five service families across Production, Dev, and Preview A-E/);
   assert.match(sudoers, /brai_envs\.items\(\)[\s\S]*?brai_goal_agents\.items\(\)[\s\S]*?systemctl restart/);
   assert.match(sudoers, /name in \['prod', 'dev'\][\s\S]*?systemctl enable --now/);
+  assert.match(sudoers, /NOPASSWD: \{\{ brai_goal_agent_runtime_prepare \}\} ""$/m);
+  assert.match(sudoers, /\{\{ brai_codex_maintenance_user \}\} ALL=\(root\) NOPASSWD: \{\{ brai_goal_agent_runtime_prepare \}\} ""/);
+  assert.doesNotMatch(sudoers, /brai_goal_agent_runtime_prepare \*/);
   assert.equal(sudoers.match(/systemctl stop \{\{ env\.service \}\}/g)?.length, 1);
   assert.ok(
     sudoers.indexOf("systemctl stop {{ env.service }}")
       < sudoers.indexOf("{% for agent_name, agent in brai_goal_agents.items() %}")
   );
+});
+
+test("the required Goal-agent gate repairs Codex access through one fixed root helper", () => {
+  const vars = read("deploy/ansible/group_vars/brai.yml");
+  const playbook = read("deploy/ansible/brai.yml");
+  const helper = read("deploy/ansible/templates/brai-goal-agent-runtime-prepare.sh.j2");
+  const gate = read("deploy/scripts/deploy-goal-agents.sh");
+  assert.match(vars, /^brai_goal_agent_runtime_prepare: \/srv\/opt\/brai-goal-agent-runtime-prepare\.sh$/m);
+  assert.match(vars, /^brai_codex_maintenance_sync: \/srv\/opt\/codex-maintenance\/sync-managed-release\.sh$/m);
+  assert.match(playbook, /name: Install Goal agent runtime preparation helper[\s\S]*?owner: root[\s\S]*?group: root[\s\S]*?mode: "0755"/);
+  assert.match(playbook, /name: Prepare and verify Goal agent Codex runtime access[\s\S]*?brai_goal_agent_runtime_prepare/);
+  assert.match(playbook, /name: Reconcile Goal agent access after every managed Codex update[\s\S]*?blockinfile:[\s\S]*?brai_codex_maintenance_sync[\s\S]*?\/usr\/bin\/sudo -n \{\{ brai_goal_agent_runtime_prepare \}\}/);
+  assert.match(helper, /\(\(\$# != 0\)\)/);
+  assert.match(helper, /\(\(EUID != 0\)\)/);
+  assert.match(helper, /CODEX_TARGET=.*readlink -f/);
+  assert.match(helper, /CODEX_PACKAGE\/bin\/codex\.js/);
+  assert.match(helper, /chgrp -R -- "\$CODEX_EXEC_GROUP" "\$CODEX_PACKAGE"/);
+  assert.match(helper, /chmod -R u=rwX,g=rX,o= "\$CODEX_PACKAGE"/);
+  assert.match(helper, /runuser -u "\$GOAL_AGENT_USER"[\s\S]*?env -i[\s\S]*?"\$CODEX_BIN" --version/);
+  const prepare = gate.indexOf('"${BRAI_SUDO:-sudo}" "$GOAL_AGENT_RUNTIME_PREPARE"');
+  const preflight = gate.indexOf('goal-agent-infrastructure-preflight.sh" "$ENVIRONMENT"');
+  const restart = gate.indexOf('systemctl restart "$unit"');
+  assert.ok(prepare > 0 && prepare < preflight && preflight < restart);
 });
 
 test("generic deploy fails early on missing agent infrastructure and leaves the independent gate pending", () => {

@@ -113,6 +113,14 @@ test("server access contract checks deploy ownership instead of agent write acce
   assert.match(script, /sudoStat: true/);
   assert.match(script, /sudo", \["-n", "stat"/);
   assert.doesNotMatch(script, /pathCheck\("env roots", envsRoot, \{ requireWrite: true/);
+  const protectedEnvCheck = script.slice(
+    script.indexOf('contractPathCheck("protected env dir"'),
+    script.indexOf('contractPathCheck("runtime api env"'),
+  );
+  assert.match(protectedEnvCheck, /requiredModeBits: 0o751/);
+  assert.match(protectedEnvCheck, /forbiddenModeBits: 0o006/);
+  assert.doesNotMatch(protectedEnvCheck, /requiredModeBits: 0o750/);
+  assert.doesNotMatch(protectedEnvCheck, /forbiddenModeBits: 0o007/);
 });
 
 test("server access contract checks operation helper sudo boundary", () => {

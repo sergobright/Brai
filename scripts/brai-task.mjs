@@ -773,8 +773,8 @@ function serverAccessContract(root = process.env.BRAI_ROOT ?? "/srv/projects/bra
       owner: "root",
       group: deployGroup,
       expectDirectory: true,
-      requiredModeBits: 0o750,
-      forbiddenModeBits: 0o007,
+      requiredModeBits: 0o751,
+      forbiddenModeBits: 0o006,
     }),
     contractPathCheck("runtime api env", apiEnvFile, {
       sudoStat: true,

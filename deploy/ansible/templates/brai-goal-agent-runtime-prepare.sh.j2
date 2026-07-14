@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if (($# != 0)); then
+  echo "Usage: $0" >&2
+  exit 2
+fi
+if ((EUID != 0)); then
+  echo "Goal-agent runtime preparation must run as root." >&2
+  exit 1
+fi
+
+GOAL_AGENT_USER={{ brai_goal_agent_user | quote }}
+CODEX_EXEC_GROUP={{ brai_codex_exec_group | quote }}
+NODE_ROOT={{ brai_node_root | quote }}
+CODEX_PACKAGE={{ (brai_node_root + '/lib/node_modules/@openai/codex') | quote }}
+CODEX_BIN={{ brai_codex_bin | quote }}
+CODEX_HOME={{ brai_goal_agent_codex_home | quote }}
+
+/usr/bin/getent passwd "$GOAL_AGENT_USER" >/dev/null
+/usr/bin/getent group "$CODEX_EXEC_GROUP" >/dev/null
+for directory in \
+  "$NODE_ROOT/lib" \
+  "$NODE_ROOT/lib/node_modules" \
+  "$NODE_ROOT/lib/node_modules/@openai"
+do
+  [[ -d "$directory" && ! -L "$directory" ]] || {
+    echo "Unsafe or missing Codex runtime directory: $directory" >&2
+    exit 1
+  }
+  /usr/bin/chgrp -- "$CODEX_EXEC_GROUP" "$directory"
+  /usr/bin/chmod 0750 "$directory"
+done
+
+[[ -d "$CODEX_PACKAGE" && ! -L "$CODEX_PACKAGE" ]] || {
+  echo "Unsafe or missing Codex CLI package: $CODEX_PACKAGE" >&2
+  exit 1
+}
+CODEX_TARGET="$(/usr/bin/readlink -f -- "$CODEX_BIN")"
+[[ "$CODEX_TARGET" == "$CODEX_PACKAGE/bin/codex.js" ]] || {
+  echo "Codex CLI target is outside the managed package: $CODEX_TARGET" >&2
+  exit 1
+}
+
+/usr/bin/chgrp -R -- "$CODEX_EXEC_GROUP" "$CODEX_PACKAGE"
+/usr/bin/chmod -R u=rwX,g=rX,o= "$CODEX_PACKAGE"
+/usr/sbin/runuser -u "$GOAL_AGENT_USER" -- \
+  /usr/bin/env -i \
+    "CODEX_HOME=$CODEX_HOME" \
+    "HOME=$CODEX_HOME" \
+    "PATH=$NODE_ROOT/bin:/usr/bin:/bin" \
+    "$CODEX_BIN" --version >/dev/null
+
+echo "Goal-agent Codex runtime access prepared and verified."

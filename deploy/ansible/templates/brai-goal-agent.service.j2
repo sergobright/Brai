@@ -14,6 +14,9 @@ Environment=BRAI_ENVIRONMENT={{ item.0.value.goal_agent_queue_environment }}
 Environment=BRAI_GOAL_AGENT_TASK_QUEUE={{ item.1.value.queue_base }}-{{ item.0.value.goal_agent_queue_environment }}
 {% set goal_agent_runtime_policy = lookup('file', playbook_dir + '/../../services/brai_goal_agents/runtime-policy.json') | from_json %}
 UnsetEnvironment={{ goal_agent_runtime_policy.forbidden_environment_keys | join(' ') }}
+ExecStartPre=/usr/bin/test -r {{ brai_goal_agent_codex_home }}/auth.json
+ExecStartPre=/usr/bin/test -r {{ brai_goal_agent_codex_home }}/config.toml
+ExecStartPre={{ brai_codex_bin }} --version
 ExecStart={{ brai_node_bin }} src/entrypoints/{{ item.1.value.entrypoint }}
 Restart=always
 RestartSec=5

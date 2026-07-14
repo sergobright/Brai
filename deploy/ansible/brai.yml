@@ -436,6 +436,52 @@
       tags:
         - brai-goal-agents
 
+    - name: Install Goal agent runtime preparation helper
+      ansible.builtin.template:
+        src: templates/brai-goal-agent-runtime-prepare.sh.j2
+        dest: "{{ brai_goal_agent_runtime_prepare }}"
+        owner: root
+        group: root
+        mode: "0755"
+        validate: "/bin/bash -n %s"
+      tags:
+        - brai-goal-agents
+
+    - name: Prepare and verify Goal agent Codex runtime access
+      ansible.builtin.command:
+        argv:
+          - "{{ brai_goal_agent_runtime_prepare }}"
+      changed_when: false
+      when: not ansible_check_mode
+      tags:
+        - brai-goal-agents
+
+    - name: Check managed Codex release sync helper
+      ansible.builtin.stat:
+        path: "{{ brai_codex_maintenance_sync }}"
+      register: brai_codex_maintenance_sync_file
+      tags:
+        - brai-goal-agents
+
+    - name: Refuse Goal agent runtime without managed Codex release sync
+      ansible.builtin.fail:
+        msg: "{{ brai_codex_maintenance_sync }} is missing; restore Codex maintenance before Goal agents."
+      when: not brai_codex_maintenance_sync_file.stat.exists
+      tags:
+        - brai-goal-agents
+
+    - name: Reconcile Goal agent access after every managed Codex update
+      ansible.builtin.blockinfile:
+        path: "{{ brai_codex_maintenance_sync }}"
+        marker: "# {mark} BRAI GOAL AGENT CODEX ACCESS"
+        insertafter: EOF
+        block: |
+          /usr/bin/sudo -n {{ brai_goal_agent_runtime_prepare }}
+        validate: "/bin/bash -n %s"
+      when: brai_codex_maintenance_sync_file.stat.exists
+      tags:
+        - brai-goal-agents
+
     - name: Ensure Syncthing apt keyring directory
       ansible.builtin.file:
         path: /etc/apt/keyrings
@@ -852,16 +898,18 @@
       tags:
         - brai-goal-agents
 
-    - name: Assert Brai Goal agent can execute Codex CLI
+    - name: Assert Brai Goal agent can start Codex CLI
       ansible.builtin.command:
         argv:
           - /usr/bin/sudo
           - -u
           - "{{ brai_goal_agent_user }}"
           - --
-          - /usr/bin/test
-          - -x
+          - /usr/bin/env
+          - "CODEX_HOME={{ brai_goal_agent_codex_home }}"
+          - "HOME={{ brai_goal_agent_codex_home }}"
           - "{{ brai_codex_bin }}"
+          - --version
       changed_when: false
       when: not ansible_check_mode
       tags:

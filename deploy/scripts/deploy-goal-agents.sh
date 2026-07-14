@@ -8,6 +8,7 @@ ENVS_ROOT="${BRAI_ENVS_ROOT:-/srv/projects/brai-envs}"
 BRANCH="${BRAI_BRANCH:?BRAI_BRANCH is required}"
 COMMIT="${BRAI_COMMIT:?BRAI_COMMIT is required}"
 GOAL_AGENT_USER="${BRAI_GOAL_AGENT_USER:-brai-goal-agent}"
+GOAL_AGENT_RUNTIME_PREPARE="/srv/opt/brai-goal-agent-runtime-prepare.sh"
 GOAL_AGENT_IDS=(
   activity.classifier
   goal.item-matcher
@@ -25,6 +26,11 @@ EXPECTED_ROOT="$ENVS_ROOT/$ENV_PATH/source"
   echo "Goal-agent gate source mismatch: expected $EXPECTED_ROOT, got $ROOT" >&2
   exit 1
 }
+[[ -x "$GOAL_AGENT_RUNTIME_PREPARE" ]] || {
+  echo "Goal-agent runtime preparation helper is missing; apply deploy/ansible/brai.yml." >&2
+  exit 1
+}
+"${BRAI_SUDO:-sudo}" "$GOAL_AGENT_RUNTIME_PREPARE"
 "$SCRIPT_DIR/goal-agent-infrastructure-preflight.sh" "$ENVIRONMENT"
 
 exec 8>"$ENVS_ROOT/.deploy-$ENV_PATH.lock"

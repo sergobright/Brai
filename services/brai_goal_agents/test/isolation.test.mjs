@@ -53,6 +53,22 @@ test("worker and systemd use the canonical fail-closed credential denylist", () 
   }
 });
 
+test("systemd verifies Codex access under the isolated worker identity before polling", () => {
+  const unit = fs.readFileSync(
+    path.resolve(import.meta.dirname, "../../../deploy/ansible/templates/brai-goal-agent.service.j2"),
+    "utf8"
+  );
+  const start = unit.indexOf("ExecStart={{ brai_node_bin }} src/entrypoints/");
+  for (const check of [
+    "ExecStartPre=/usr/bin/test -r {{ brai_goal_agent_codex_home }}/auth.json",
+    "ExecStartPre=/usr/bin/test -r {{ brai_goal_agent_codex_home }}/config.toml",
+    "ExecStartPre={{ brai_codex_bin }} --version"
+  ]) {
+    assert.ok(unit.indexOf(check) > 0 && unit.indexOf(check) < start, `${check} must fail before worker start`);
+  }
+  assert.doesNotMatch(unit, /^ExecStartPre=.*(?:sudo|brai-deploy)/m);
+});
+
 test("worker refuses model drift before opening a Temporal connection", async () => {
   let connected = false;
   await assert.rejects(() => runAgentWorker("goal.planner", {

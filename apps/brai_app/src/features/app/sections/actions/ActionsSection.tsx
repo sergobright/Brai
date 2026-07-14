@@ -323,6 +323,7 @@ export function ActionsSection({
             <InputGroup className="actions-add-form">
               <InputGroupInput
                 ref={desktopInputRef}
+                name="action-title"
                 value={draft}
                 maxLength={TITLE_MAX_LENGTH}
                 placeholder={workspace.selectedGoal ? "Добавить действие в цель" : "Добавить"}

@@ -267,6 +267,93 @@ describe("mobile OTA publish scripts", () => {
     expect(manifest.targetApkVersion).toBe(8);
   });
 
+  it("fails closed before non-native Preview OTA publication without a matching stable slot APK", async () => {
+    const deployBranch = await readFile(path.join(workspaceRoot, "deploy/scripts/deploy-branch.sh"), "utf8");
+    const guardIndex = deployBranch.indexOf("Cannot publish Preview");
+    expect(guardIndex).toBeGreaterThan(0);
+    expect(guardIndex).toBeLessThan(deployBranch.indexOf('"$SCRIPT_DIR/publish-client-web-layer.sh"'));
+
+    const cases = [
+      {
+        name: "missing-slot",
+        slot: undefined,
+        artifact: false,
+        error: "stable slot APK release is missing",
+      },
+      {
+        name: "preview-slot",
+        slot: { file: "brai-c-v10-preview1.apk", apkVersion: 10, versionCode: 100001, apkBuildKind: "preview" },
+        artifact: true,
+        error: "slot APK release is preview, expected stable",
+      },
+      {
+        name: "stale-slot",
+        slot: { file: "brai-c-v9.apk", apkVersion: 9, versionCode: 9, apkBuildKind: "stable" },
+        artifact: true,
+        error: "stable slot APK baseline 9/9 does not match Production 10/10",
+      },
+      {
+        name: "missing-artifact",
+        slot: { file: "brai-c-v10.apk", apkVersion: 10, versionCode: 10, apkBuildKind: "stable" },
+        artifact: false,
+        error: "stable slot APK artifact is missing: brai-c-v10.apk",
+      },
+      {
+        name: "matching-slot",
+        slot: { file: "brai-c-v10.apk", apkVersion: 10, versionCode: 10, apkBuildKind: "stable" },
+        artifact: true,
+        error: "Missing static export for BRAI_BUILD_CLIENT=false",
+      },
+    ];
+
+    for (const testCase of cases) {
+      const root = await fixtureRoot(`brai-deploy-slot-apk-${testCase.name}-`);
+      await mkdir(path.join(root, "deploy"), { recursive: true });
+      await copyFile(
+        path.join(workspaceRoot, "deploy/environments.json"),
+        path.join(root, "deploy/environments.json"),
+      );
+      const releaseDir = path.join(root, "releases");
+      await mkdir(releaseDir, { recursive: true });
+      const production = { file: "brai-v10.apk", apkVersion: 10, versionCode: 10, apkBuildKind: "stable" };
+      await writeFile(path.join(releaseDir, production.file), "production-apk");
+      if (testCase.slot && testCase.artifact) {
+        await writeFile(path.join(releaseDir, testCase.slot.file), "slot-apk");
+      }
+      await writeFile(
+        path.join(releaseDir, "releases.json"),
+        JSON.stringify({ schemaVersion: 2, sections: { production, ...(testCase.slot ? { c: testCase.slot } : {}) } }),
+      );
+
+      let stderr = "";
+      try {
+        await execFileAsync("bash", [path.join(workspaceRoot, "deploy/scripts/deploy-branch.sh")], {
+          env: {
+            ...process.env,
+            BRAI_ROOT: root,
+            BRAI_BRANCH: "codex/slot-apk-guard",
+            BRAI_COMMIT: "guard-commit",
+            BRAI_PREVIEW_SLOT: "C",
+            BRAI_NATIVE_APK_CHANGE: "false",
+            BRAI_DATABASE_URL: "postgresql://unused",
+            BRAI_APP_VERSION: "9.9.9",
+            BRAI_RELEASE_TARGET: releaseDir,
+            BRAI_ENV_ROOT: path.join(root, "envs/preview-c"),
+            BRAI_ENVS_ROOT: path.join(root, "envs"),
+            BRAI_BUILD_CLIENT: "false",
+            BRAI_RESTART_SERVICE: "false",
+            NODE_BIN: process.execPath,
+          },
+        });
+      } catch (error) {
+        stderr = String((error as { stderr?: string }).stderr ?? error);
+      }
+
+      expect(stderr).toContain(testCase.error);
+      expect(fs.existsSync(path.join(root, "envs/preview-c/mobile-update/manifest.json"))).toBe(false);
+    }
+  });
+
   it("keeps production app public and protects only preview web shells in Caddy", async () => {
     const template = await readFile(path.join(workspaceRoot, "deploy/ansible/templates/Caddyfile.j2"), "utf8");
     const playbook = await readFile(path.join(workspaceRoot, "deploy/ansible/brai.yml"), "utf8");

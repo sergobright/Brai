@@ -36,6 +36,9 @@ brai_codex_auth_group: brai-codex-auth
 brai_codex_auth_root: /srv/opt/codex-home
 brai_goal_agent_codex_home: /srv/opt/codex-runtime/brai-goal-agent
 brai_codex_bin: /srv/opt/codex-cli/bin/codex
+brai_goal_agent_runtime_prepare: /srv/opt/brai-goal-agent-runtime-prepare.sh
+brai_codex_maintenance_sync: /srv/opt/codex-maintenance/sync-managed-release.sh
+brai_codex_maintenance_user: mark
 brai_protected_env_dir: /etc/brai
 brai_api_env_source: /etc/brai/brai-api.env
 brai_db_telegram_backup_env_source: /etc/brai/brai-db-telegram-backup.env
