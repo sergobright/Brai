@@ -38,6 +38,7 @@ const BraiCmd = registerPlugin<BraiCmdPlugin>("BraiCmd");
 export type BraiCmdState = {
   native?: boolean;
   accountCredentialsActive?: boolean;
+  legacyCredentialMode?: boolean;
   accessGranted?: boolean;
   voiceOnlyMode?: boolean;
   queuePausedMode?: boolean;
@@ -322,10 +323,12 @@ export async function prepareBraiCmdPreliminaryProfile(displayName: string): Pro
 
 /** Blocks local credentials while an authenticated account is being activated and synchronized. */
 export async function beginBraiCmdAccountCredentialMode(userId: string): Promise<BraiCmdState | null> {
-  if (!isNativeAndroid() || !BraiCmd.beginAccountCredentialMode) return null;
+  if (!isNativeAndroid()) return null;
+  if (!BraiCmd.beginAccountCredentialMode) return { native: true, legacyCredentialMode: true };
   try {
     return await BraiCmd.beginAccountCredentialMode({ userId });
-  } catch {
+  } catch (error) {
+    if (isUnimplementedNativeMethod(error)) return { native: true, legacyCredentialMode: true };
     return null;
   }
 }
@@ -356,7 +359,10 @@ export async function syncBraiCmdProviderCredentials(): Promise<BraiCmdProviderC
   }
   try {
     return await BraiCmd.syncProviderCredentials();
-  } catch {
+  } catch (error) {
+    if (isUnimplementedNativeMethod(error)) {
+      return { ok: false, code: "native_update_required", message: "Обновите Android-приложение Brai." };
+    }
     return null;
   }
 }
@@ -416,8 +422,8 @@ export async function setBraiCmdAuthenticatedMode(userId: string, enabled: boole
   if (BraiCmd.setAuthenticatedMode) {
     try {
       return await BraiCmd.setAuthenticatedMode({ userId, enabled });
-    } catch {
-      return null;
+    } catch (error) {
+      if (!isUnimplementedNativeMethod(error)) return null;
     }
   }
   const [overlayState, voiceState, queueState] = await Promise.all([
@@ -475,4 +481,12 @@ export async function listenBraiCmdStateChanges(
 
 function isNativeAndroid(): boolean {
   return isNativeShell() && platformName() === "android";
+}
+
+function isUnimplementedNativeMethod(error: unknown): boolean {
+  const code = typeof error === "object" && error !== null && "code" in error
+    ? String(error.code).toUpperCase()
+    : "";
+  const message = error instanceof Error ? error.message.toLowerCase() : "";
+  return code === "UNIMPLEMENTED" || code === "METHOD_NOT_FOUND" || message.includes("not implemented");
 }

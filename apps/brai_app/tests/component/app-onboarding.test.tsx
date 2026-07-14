@@ -62,7 +62,6 @@ describe("BraiApp onboarding", () => {
   afterEach(() => vi.useRealTimers());
 
   it("shows the commissioning start screen before the normal shell on a fresh install", async () => {
-    vi.useFakeTimers();
     stubAndroidCapacitor();
     window.localStorage.removeItem(ONBOARDING_STORAGE_KEY);
     window.localStorage.setItem("brai_theme_mode", "light");
@@ -74,23 +73,13 @@ describe("BraiApp onboarding", () => {
 
     render(<BraiApp />);
 
-    const logo = screen.getByRole("img", { name: "Brai" });
-    expect(document.querySelector("[data-startup-splash]")).toBeInTheDocument();
-    expect(document.querySelectorAll("[data-startup-logo]")).toHaveLength(1);
-    expect(document.querySelector("[data-startup-logo]")).toHaveStyle({ animation: "brai-startup-logo-fade 1000ms linear both" });
-    const startButtonContainer = screen.getByRole("button", { name: "Приступить" }).parentElement;
-    expect(startButtonContainer).toHaveStyle({ opacity: "0" });
-
-    act(() => vi.advanceTimersByTime(2999));
-    expect(startButtonContainer).toHaveStyle({ opacity: "0" });
-
-    act(() => vi.advanceTimersByTime(1));
-    expect(screen.getByRole("button", { name: "Приступить" })).toBeInTheDocument();
+    const startButtonContainer = (await screen.findByRole("button", { name: "Приступить" })).parentElement;
+    expect(document.querySelector("[data-startup-splash]")).not.toBeInTheDocument();
+    expect(document.querySelectorAll("[data-startup-logo]")).toHaveLength(0);
+    expect(startButtonContainer).toHaveStyle({ opacity: "1" });
     expect(startButtonContainer).toHaveStyle({
       animation: "brai-onboarding-start-button 300ms ease-out both",
     });
-    expect(document.querySelector("[data-startup-logo]")).toBe(logo.closest("[data-startup-logo]"));
-    vi.useRealTimers();
     expect(screen.queryByText("ВВОД В ЭКСПЛУАТАЦИЮ")).not.toBeInTheDocument();
     expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
     expect(screen.queryByRole("textbox", { name: "Добавить" })).not.toBeInTheDocument();
@@ -111,6 +100,17 @@ describe("BraiApp onboarding", () => {
     expect(document.querySelector("[data-app-shell]")).toBeInTheDocument();
     expect(document.querySelector("[data-onboarding-flow]")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Приступить" })).not.toBeInTheDocument();
+  });
+
+  it("keeps an onboarded native launch black before React restores the saved theme", () => {
+    stubAndroidCapacitor();
+    window.localStorage.setItem(ONBOARDING_STORAGE_KEY, JSON.stringify({ complete: true }));
+    window.localStorage.setItem("brai_theme_mode", "light");
+    document.documentElement.dataset.theme = "light";
+
+    runAppInitScript();
+
+    expect(document.documentElement.dataset.theme).toBe("dark");
   });
 
   it("renders the first welcome cards without carousel arrow buttons", async () => {
@@ -431,7 +431,7 @@ describe("BraiApp onboarding", () => {
     expect(screen.getByText(/Brai обладает мощными ИИ-функциями и может работать даже без этих настроек\./)).toBeInTheDocument();
   });
 
-  it("keeps the logo splash above a synchronously restored onboarding step", () => {
+  it("restores an onboarding step without an intermediate logo screen", () => {
     stubAndroidCapacitor();
     window.localStorage.setItem(ONBOARDING_STORAGE_KEY, JSON.stringify({
       complete: false,
@@ -445,8 +445,8 @@ describe("BraiApp onboarding", () => {
 
     render(<BraiApp />);
 
-    expect(document.querySelector("[data-startup-splash] img[alt='Brai']")).toBeInTheDocument();
-    expect(document.querySelectorAll("[data-startup-logo]")).toHaveLength(1);
+    expect(document.querySelector("[data-startup-splash]")).not.toBeInTheDocument();
+    expect(document.querySelectorAll("[data-startup-logo]")).toHaveLength(0);
     expect(screen.getByText("Как распознавать голос")).toBeInTheDocument();
   });
 

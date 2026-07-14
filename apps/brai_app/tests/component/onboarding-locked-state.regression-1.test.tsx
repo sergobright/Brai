@@ -30,9 +30,7 @@ describe("locked onboarding persistence", () => {
       onOpenEngine={vi.fn()}
       onOpenNativeCmdSettings={vi.fn(async () => true)}
       onRequestOtp={vi.fn(async () => ({ ok: true, message: "ok" }))}
-      onStartupScreenChange={vi.fn()}
       onVerifyOtp={vi.fn(async () => undefined)}
-      startupIntroComplete
     />);
 
     expect(await screen.findByText("Нужен вход")).toBeInTheDocument();

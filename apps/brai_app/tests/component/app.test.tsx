@@ -58,6 +58,35 @@ describe("BraiApp shell", () => {
     expect(document.querySelector("[data-startup-splash]")).not.toBeInTheDocument();
   });
 
+  it("keeps dictation and context available with the legacy native bridge", async () => {
+    stubAndroidCapacitor();
+    const unimplemented = Object.assign(new Error("not implemented"), { code: "UNIMPLEMENTED" });
+    cmdPlugin.beginAccountCredentialMode.mockRejectedValue(unimplemented);
+    cmdPlugin.syncProviderCredentials.mockRejectedValue(unimplemented);
+    cmdPlugin.setAuthenticatedMode.mockRejectedValue(unimplemented);
+
+    render(<BraiApp />);
+
+    await waitFor(() => expect(cmdPlugin.setAccessKey).toHaveBeenCalledWith({
+      token: "authenticated-device-token",
+      displayName: "Test",
+      userId: "test-user",
+    }));
+    await waitFor(() => expect(cmdPlugin.setOverlayEnabled).toHaveBeenCalledWith({ enabled: true }));
+    expect(cmdPlugin.setVoiceOnlyMode).toHaveBeenCalledWith({ enabled: false });
+    expect(cmdPlugin.setQueuePausedMode).toHaveBeenCalledWith({ enabled: false });
+  });
+
+  it("keeps the native startup black until the local app state is ready", async () => {
+    stubAndroidCapacitor();
+
+    render(<BraiApp />);
+
+    expect(document.querySelector("[data-native-startup]")).toHaveClass("fixed", "inset-0", "bg-black");
+    expect(document.querySelector("[data-app-shell]")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Действия" })).toBeInTheDocument());
+  });
+
   it("keeps account overlays blocked while waiting for device access", async () => {
     stubAndroidCapacitor();
     cmdPlugin.ensureAccess.mockResolvedValue({ accessGranted: false });
@@ -224,6 +253,30 @@ describe("BraiApp shell", () => {
     await waitFor(() => expect(auth.onRequestOtp).toHaveBeenCalledWith("primary@example.com"));
     expect(await screen.findByText("Не удалось отправить код")).toBeInTheDocument();
     expect(auth.onVerifyOtp).not.toHaveBeenCalled();
+  });
+
+  it("mutes the login button, shows a spinner, and submits only once", async () => {
+    let finishLogin!: () => void;
+    const login = vi.fn(() => new Promise<void>((resolve) => {
+      finishLogin = resolve;
+    }));
+    const auth = authPanelProps();
+    render(<AuthPanel {...auth} mode="email" onEmailLogin={login} />);
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Email" }), { target: { value: "primary@example.com" } });
+    const form = screen.getByRole("button", { name: "Войти" }).closest("form");
+    fireEvent.submit(form as HTMLFormElement);
+    fireEvent.submit(form as HTMLFormElement);
+
+    await waitFor(() => expect(login).toHaveBeenCalledTimes(1));
+    const button = screen.getByRole("button", { name: "Войти" });
+    expect(button).toBeDisabled();
+    expect(button).toHaveAttribute("aria-busy", "true");
+    expect(button.querySelector(".animate-spin")).toBeInTheDocument();
+
+    await act(async () => finishLogin());
+    expect(button).toBeDisabled();
+    expect(button.querySelector(".animate-spin")).toBeInTheDocument();
   });
 
   it("uses explicit email-only login on Preview Android", async () => {
