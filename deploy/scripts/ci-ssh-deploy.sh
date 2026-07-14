@@ -149,21 +149,8 @@ find "$REMOTE_UPLOAD" -type d -exec chmod 2775 {} +
 REMOTE
 REMOTE_UPLOAD_OWNED="true"
 
-tar \
-  --exclude=.git \
-  --exclude=node_modules \
-  --exclude='*/node_modules' \
-  --exclude=.next \
-  --exclude=out \
-  --exclude='*/build' \
-  --exclude='*/.gradle' \
-  --exclude=deploy/site \
-  --exclude=deploy/web \
-  --exclude=deploy/mobile-update \
-  --exclude=deploy/releases \
-  --exclude=.brai-upload-terminal.json \
-  -czf - . | ssh -i "$KEY_FILE" -p "$SSH_PORT" -o StrictHostKeyChecking=accept-new "$BRAI_DEPLOY_USER@$BRAI_DEPLOY_HOST" \
-    bash -c '
+REMOTE_EXTRACT_SCRIPT=""
+read -r -d '' REMOTE_EXTRACT_SCRIPT <<'REMOTE_EXTRACT' || true
 set -euo pipefail
 REMOTE_UPLOAD="$1"
 UPLOAD_ROOT="$2"
@@ -184,7 +171,7 @@ write_upload_terminal_marker() {
   local marker_tmp="$REMOTE_UPLOAD/$UPLOAD_MARKER.tmp-$$"
   local finished_at
   finished_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-  printf "{\"status\":\"%s\",\"commit\":\"%s\",\"finishedAt\":\"%s\"}\\n" \
+  printf '{"status":"%s","commit":"%s","finishedAt":"%s"}\n' \
     "$TERMINAL_STATUS" "$BRAI_COMMIT" "$finished_at" >"$marker_tmp"
   mv -f -- "$marker_tmp" "$REMOTE_UPLOAD/$UPLOAD_MARKER"
 }
@@ -208,7 +195,25 @@ trap "abort_upload 130" INT
 trap "abort_upload 143" TERM
 tar -xzf - -C "$REMOTE_UPLOAD"
 UPLOAD_SUCCEEDED="true"
-' bash "$REMOTE_UPLOAD" "$UPLOAD_ROOT" "$REMOTE_UPLOAD_NAME" "$BRAI_COMMIT" "$UPLOAD_MARKER"
+REMOTE_EXTRACT
+printf -v REMOTE_EXTRACT_COMMAND 'bash -c %q bash %q %q %q %q %q' \
+  "$REMOTE_EXTRACT_SCRIPT" "$REMOTE_UPLOAD" "$UPLOAD_ROOT" "$REMOTE_UPLOAD_NAME" "$BRAI_COMMIT" "$UPLOAD_MARKER"
+
+tar \
+  --exclude=.git \
+  --exclude=node_modules \
+  --exclude='*/node_modules' \
+  --exclude=.next \
+  --exclude=out \
+  --exclude='*/build' \
+  --exclude='*/.gradle' \
+  --exclude=deploy/site \
+  --exclude=deploy/web \
+  --exclude=deploy/mobile-update \
+  --exclude=deploy/releases \
+  --exclude=.brai-upload-terminal.json \
+  -czf - . | ssh -i "$KEY_FILE" -p "$SSH_PORT" -o StrictHostKeyChecking=accept-new "$BRAI_DEPLOY_USER@$BRAI_DEPLOY_HOST" \
+    "$REMOTE_EXTRACT_COMMAND"
 
 DEPLOY_OUTPUT=""
 REMOTE_DEPLOY_OWNS_STAGING="true"

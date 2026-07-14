@@ -527,16 +527,19 @@ cleanup
 
 test("truncated remote tar upload writes a failed terminal marker", (t) => {
   const ci = read("deploy/scripts/ci-ssh-deploy.sh");
-  const uploadStart = ci.indexOf("    bash -c '\n", ci.indexOf("-czf - ."));
-  const uploadEnd = ci.indexOf("\n' bash \"$REMOTE_UPLOAD\"", uploadStart);
+  const uploadStartToken = "read -r -d '' REMOTE_EXTRACT_SCRIPT <<'REMOTE_EXTRACT' || true\n";
+  const uploadStart = ci.indexOf(uploadStartToken);
+  const uploadEnd = ci.indexOf("\nREMOTE_EXTRACT\n", uploadStart);
   assert.ok(uploadStart > 0 && uploadEnd > uploadStart);
-  const uploadScript = ci.slice(uploadStart + "    bash -c '\n".length, uploadEnd);
+  const uploadScript = ci.slice(uploadStart + uploadStartToken.length, uploadEnd);
   assert.match(uploadScript, /-d "\$REMOTE_UPLOAD" && ! -L "\$REMOTE_UPLOAD"/);
+  assert.match(ci, /printf -v REMOTE_EXTRACT_COMMAND 'bash -c %q bash %q %q %q %q %q'/);
+  assert.match(ci, /ssh[^\n]*\\\n\s+"\$REMOTE_EXTRACT_COMMAND"/);
 
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), "brai-truncated-upload-test-"));
   t.after(() => fs.rmSync(temp, { recursive: true, force: true }));
   const commit = "d".repeat(40);
-  const uploadRoot = path.join(temp, "ci-uploads");
+  const uploadRoot = path.join(temp, "ci uploads");
   const uploadName = `branch-${commit}.attempt-truncated`;
   const attempt = path.join(uploadRoot, uploadName);
   const archive = path.join(temp, "truncated.tar.gz");
@@ -548,7 +551,16 @@ test("truncated remote tar upload writes a failed terminal marker", (t) => {
   }));
 
   const archiveFd = fs.openSync(archive, "r");
-  const result = spawnSync("bash", ["-c", uploadScript, "bash", attempt, uploadRoot, uploadName, commit, ".brai-upload-terminal.json"], {
+  const quote = (value) => {
+    const result = spawnSync("bash", ["-c", 'printf "%q" "$1"', "quote-upload-value", value], { encoding: "utf8" });
+    assert.equal(result.status, 0, result.stderr);
+    return result.stdout;
+  };
+  const openSshCommand = [
+    "bash", "-c", quote(uploadScript), "bash",
+    ...[attempt, uploadRoot, uploadName, commit, ".brai-upload-terminal.json"].map(quote)
+  ].join(" ");
+  const result = spawnSync("bash", ["-c", openSshCommand], {
     stdio: [archiveFd, "pipe", "pipe"], encoding: "utf8"
   });
   fs.closeSync(archiveFd);
