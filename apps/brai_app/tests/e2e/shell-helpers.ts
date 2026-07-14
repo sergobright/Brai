@@ -171,9 +171,15 @@ export async function openProfileMenuItem(page: Page, name: string | RegExp) {
 
   const button = page.getByRole("button", { name }).first();
   if ((await button.count()) === 0 || !(await button.isVisible().catch(() => false))) {
-    await page.getByRole("button", { name: "Открыть левое меню" }).click();
-    await expect(sheet).toBeVisible();
-    await sheet.getByRole("button", { name }).click();
+    const mobileMenu = page.getByRole("button", { name: "Открыть левое меню" });
+    if ((await mobileMenu.count()) > 0 && await mobileMenu.isVisible()) {
+      await mobileMenu.click();
+      await expect(sheet).toBeVisible();
+      await sheet.getByRole("button", { name }).click();
+    } else {
+      await page.getByRole("button", { name: "Открыть меню профиля" }).click();
+      await page.getByRole("menuitem", { name }).click();
+    }
     return;
   }
 

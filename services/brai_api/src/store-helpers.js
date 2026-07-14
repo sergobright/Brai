@@ -25,7 +25,9 @@ export const INBOX_EVENT_TYPES = new Set([
   'create',
   'update_title',
   'update_description',
-  'delete'
+  'reorder',
+  'delete',
+  'restore'
 ]);
 export const ACTIVITY_STATUSES = new Set(['New', 'Done']);
 export const ACTIVITY_TYPES = new Set(['action', 'goal', 'operation']);
@@ -142,6 +144,7 @@ export function formatInboxItem(item) {
     status: INBOX_STATUSES.has(item.status) ? item.status : 'New',
     completed_at_utc: item.completed_at_utc ?? null,
     items_id: item.items_id ?? null,
+    sort_order: Number.isInteger(item.sort_order) ? item.sort_order : null,
     item_roles_id: Number.isInteger(item.item_roles_id) ? item.item_roles_id : null,
     initial_event_id: item.initial_event_id ?? null,
     workflow_execution_id: Number.isInteger(item.workflow_execution_id) ? item.workflow_execution_id : null,
@@ -153,7 +156,8 @@ export function formatInboxItem(item) {
     temporal_run_id: item.temporal_run_id ?? null,
     created_at_utc: item.created_at_utc,
     updated_at_utc: item.updated_at_utc,
-    deleted_at_utc: item.deleted_at_utc ?? null
+    deleted_at_utc: item.deleted_at_utc ?? null,
+    restored_at_utc: item.restored_at_utc ?? null
   };
 }
 

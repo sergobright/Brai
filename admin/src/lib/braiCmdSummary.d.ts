@@ -10,6 +10,12 @@ export type BraiCmdUsage = {
   totalMs: number;
 };
 
+export type BraiCmdFunctionSetting = {
+  key: string;
+  title: string;
+  enabled: boolean;
+};
+
 export type BraiCmdOwnerSummary =
   | { type: "legacy"; label: string }
   | { type: "preliminary"; label: string; preliminaryUserId: string }
@@ -51,6 +57,7 @@ export type BraiCmdRecentUsage = {
 export type BraiCmdAdminSummary = {
   settings: {
     registrationEnabled: boolean;
+    functions: Record<string, BraiCmdFunctionSetting>;
   };
   totals: BraiCmdUsage & {
     activeTokens: number;
@@ -69,3 +76,11 @@ export type BraiCmdAdminSummary = {
 export function readBraiCmdAdminSummary(options?: {
   databaseUrl?: string;
 }): Promise<BraiCmdAdminSummary>;
+
+export const BRAI_CMD_FUNCTIONS: ReadonlyArray<{ key: string; title: string }>;
+
+export function setBraiCmdFunctionEnabled(
+  key: string,
+  enabled: boolean,
+  options?: { databaseUrl?: string },
+): Promise<void>;

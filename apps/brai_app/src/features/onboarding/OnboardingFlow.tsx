@@ -39,7 +39,7 @@ import {
   requestAndroidMicrophone,
   requestAndroidNotifications,
 } from "@/shared/platform/androidCapabilities";
-import { ensureBraiCmdAccess, listenBraiCmdOnboardingEvents, prepareBraiCmdPreliminaryProfile, retryBraiCmdQueue, setBraiCmdAccessKey, setBraiCmdOverlayEnabled, setBraiCmdQueuePausedMode, setBraiCmdVoiceOnlyMode, vibrateBraiCmdPress } from "@/shared/platform/braiCmd";
+import { connectBraiCmdProvider, ensureBraiCmdAccess, listenBraiCmdOnboardingEvents, prepareBraiCmdPreliminaryProfile, probeBraiCmdProvider, retryBraiCmdQueue, setBraiCmdAccessKey, setBraiCmdOverlayEnabled, setBraiCmdQueuePausedMode, setBraiCmdVoiceOnlyMode, vibrateBraiCmdPress, type BraiCmdProviderId } from "@/shared/platform/braiCmd";
 import { installAndroidBackHandler, isNativeShell, platformName } from "@/shared/platform/platform";
 import type { AuthOnboardingContext, OtpSendResult } from "@/shared/api/braiApi";
 import { AnimatedShinyText } from "@/shared/ui/animated-shiny-text";
@@ -71,6 +71,7 @@ type OnboardingFlowProps = {
   onStartupScreenChange: (active: boolean) => void;
   onVerifyOtp: (email: string, otp: string, context?: AuthOnboardingContext) => Promise<void>;
   onDone: () => void;
+  onOpenEngine: () => void;
   onOpenNativeCmdSettings: () => Promise<boolean>;
   startupIntroComplete: boolean;
 };
@@ -96,7 +97,10 @@ const OnboardingChromeContext = createContext<{
 });
 
 const screenTransitionDelayMs = process.env.NODE_ENV === "test" ? 0 : 280;
-const providerOptions = ["Groq", "OpenAI", "Deepgram", "AssemblyAI"] as const;
+const providerOptions: Array<{ id: BraiCmdProviderId; label: string }> = [
+  { id: "groq", label: "Groq" },
+  { id: "openai", label: "OpenAI" },
+];
 const manualConfirmDelayMs = 3000;
 const nameSubmitMuteMs = process.env.NODE_ENV === "test" ? 0 : 2000;
 const verificationMinVisibleMs = process.env.NODE_ENV === "test" ? 1 : 1000;
@@ -208,6 +212,7 @@ export function OnboardingFlow({
   busy,
   onDone,
   onEmailLogin,
+  onOpenEngine,
   onOpenNativeCmdSettings,
   onRequestOtp,
   onStartupScreenChange,
@@ -217,8 +222,12 @@ export function OnboardingFlow({
   const [state, setState] = useState<OnboardingState>(() => loadInitialOnboardingState(authRequired));
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
-  const [provider, setProvider] = useState("Groq");
+  const [provider, setProvider] = useState<BraiCmdProviderId>("groq");
   const [providerKey, setProviderKey] = useState("");
+  const [providerModels, setProviderModels] = useState<string[]>([]);
+  const [providerModel, setProviderModel] = useState("");
+  const [providerVerified, setProviderVerified] = useState(false);
+  const [providerManualModel, setProviderManualModel] = useState(false);
   const [localUrl, setLocalUrl] = useState("");
   const [trainingText, setTrainingText] = useState("");
   const [offlineText, setOfflineText] = useState("");
@@ -241,13 +250,19 @@ export function OnboardingFlow({
   const transitionTimerRef = useRef<number | null>(null);
   const transitionFrameRef = useRef<number | null>(null);
   const failedCheckTimerRef = useRef<number | null>(null);
+  const providerRequestRef = useRef(0);
   const nameSubmitTimerRef = useRef<number | null>(null);
   const isAndroid = isNativeShell() && platformName() === "android";
+
+  useEffect(() => {
+    if (authRequired && state.complete && state.step === "locked") saveOnboardingState(state);
+  }, [authRequired, state]);
 
   useEffect(() => {
     const initialStep = stepRef.current;
     const loadTimer = window.setTimeout(() => {
       if (stepRef.current !== initialStep) return;
+      if (authRequired && (initialStep === "login" || initialStep === "cmd-settings")) return;
       const next = loadInitialOnboardingState(authRequired);
       stateRef.current = next;
       stepRef.current = next.step;
@@ -258,8 +273,8 @@ export function OnboardingFlow({
   }, [authRequired]);
 
   useEffect(() => {
-    if (state.complete && !authRequired) onDone();
-  }, [authRequired, onDone, state.complete]);
+    if (state.complete && !authRequired && state.step !== "locked" && state.step !== "login" && state.step !== "cmd-settings") onDone();
+  }, [authRequired, onDone, state.complete, state.step]);
 
   useEffect(() => () => {
     if (manualConfirmTimerRef.current != null) window.clearTimeout(manualConfirmTimerRef.current);
@@ -302,20 +317,13 @@ export function OnboardingFlow({
   }, [state.step]);
 
   useEffect(() => {
-    if (!isAndroid) return;
-    void setBraiCmdVoiceOnlyMode(true);
-  }, [isAndroid]);
-
-  useEffect(() => {
-    if (!isAndroid) return;
-    const dictationAvailable = state.complete || state.step.startsWith("training-") || state.step === "voice-ready";
-    void setBraiCmdOverlayEnabled(dictationAvailable);
-  }, [isAndroid, state.complete, state.step]);
-
-  useEffect(() => {
-    if (!isAndroid || !state.complete || !authRequired) return;
-    void ensureBraiCmdAccess(state.name.trim() || "Brai");
-  }, [authRequired, isAndroid, state.complete, state.name]);
+    if (!isAndroid || !authRequired) return;
+    const trainingActive = ["training-dictate", "training-offline", "training-queue", "training-storage", "voice-ready"].includes(state.step);
+    void Promise.all([
+      setBraiCmdOverlayEnabled(trainingActive),
+      setBraiCmdVoiceOnlyMode(trainingActive),
+    ]);
+  }, [authRequired, isAndroid, state.step]);
 
   useEffect(() => {
     if (!isAndroid) return;
@@ -330,6 +338,10 @@ export function OnboardingFlow({
     }
     void setBraiCmdQueuePausedMode(false);
   }, [isAndroid, state.step]);
+
+  useEffect(() => () => {
+    if (isAndroid) void setBraiCmdQueuePausedMode(false);
+  }, [isAndroid]);
 
   useEffect(() => {
     if (!isAndroid) return;
@@ -396,6 +408,7 @@ export function OnboardingFlow({
   }
 
   function go(step: OnboardingStep, next?: Partial<OnboardingState>) {
+    providerRequestRef.current += 1;
     setError("");
     setMessage("");
     setCheckingStep(null);
@@ -412,6 +425,7 @@ export function OnboardingFlow({
   }
 
   function back() {
+    providerRequestRef.current += 1;
     const current = stateRef.current;
     const previous = previousOnboardingStep(current);
     if (!previous) return;
@@ -436,8 +450,14 @@ export function OnboardingFlow({
   }
 
   async function completeSetup() {
-    await setBraiCmdOverlayEnabled(true);
     await setBraiCmdQueuePausedMode(false);
+    if (authRequired) {
+      await Promise.all([
+        setBraiCmdAccessKey("", "", ""),
+        setBraiCmdOverlayEnabled(false),
+        setBraiCmdVoiceOnlyMode(false),
+      ]);
+    }
     const current = stateRef.current;
     transitionTo({ ...current, complete: true, step: "login-check", history: [...current.history, current.step] });
   }
@@ -511,7 +531,7 @@ export function OnboardingFlow({
   function chooseVoiceMode(voiceMode: VoiceMode) {
     if (voiceMode === "provider") go("provider-key", { voiceMode });
     if (voiceMode === "local") go("local-server", { voiceMode });
-    if (voiceMode === "cloud") go("microphone", { voiceMode });
+    if (voiceMode === "cloud") go("cloud-privacy", { voiceMode });
   }
 
   async function submitName() {
@@ -590,20 +610,47 @@ export function OnboardingFlow({
       setError("Введите полный ключ доступа.");
       return;
     }
-    await setBraiCmdAccessKey(key.trim(), state.name.trim());
+    await setBraiCmdAccessKey(key.trim(), state.name.trim(), "");
     go("setup-start");
   }
 
   async function testProviderKey() {
-    if (readyStep === "provider-key") {
-      go("microphone");
-      return;
-    }
     if (!provider.trim() || providerKey.trim().length < 8) {
       setError("Выберите поставщика и введите полный ключ.");
       return;
     }
-    await runVerification("provider-key", async () => true, "Ключ не сохранён. Проверьте поставщика и ключ.");
+    setError("");
+    setCheckingStep("provider-key");
+    const requestId = ++providerRequestRef.current;
+    if (!providerVerified) {
+      const result = await probeBraiCmdProvider({ providerId: provider, apiKey: providerKey, capability: "speech" });
+      if (requestId !== providerRequestRef.current) return;
+      setCheckingStep(null);
+      if (!result?.ok) {
+        setError(result?.message || "Не удалось проверить ключ поставщика.");
+        return;
+      }
+      setProviderModels(result.models ?? []);
+      setProviderModel("");
+      setProviderManualModel(Boolean(result.manualModel));
+      setProviderVerified(true);
+      setMessage("Подключение проверено. Выберите модель распознавания.");
+      return;
+    }
+    if (!providerModel) {
+      setCheckingStep(null);
+      setError("Выберите модель распознавания.");
+      return;
+    }
+    const result = await connectBraiCmdProvider({ providerId: provider, apiKey: providerKey, model: providerModel, capability: "speech" });
+    if (requestId !== providerRequestRef.current) return;
+    setCheckingStep(null);
+    if (!result?.ok) {
+      setError(result?.message || "Не удалось подключить модель.");
+      return;
+    }
+    setMessage("");
+    go("microphone");
   }
 
   async function testLocalServer() {
@@ -709,7 +756,7 @@ export function OnboardingFlow({
     if (isAndroid) {
       const access = await ensureBraiCmdAccess(state.name.trim() || "Brai");
       if (!access?.accessGranted) {
-        setError("Не удалось подготовить доступ Brai CMD. Проверьте подключение и нажмите «Обучение» еще раз.");
+        setError("Не удалось подготовить облачную диктовку. Проверьте подключение и нажмите «Обучение» ещё раз.");
         return;
       }
       await setBraiCmdOverlayEnabled(true);
@@ -887,10 +934,16 @@ export function OnboardingFlow({
 
     if (state.step === "provider-key") {
       return (
-        <StepScreen actions={<CheckActionButton disabled={!provider || providerKey.trim().length < 8} status={checkStatus("provider-key")} onClick={testProviderKey} />}>
+        <StepScreen actions={<CheckActionButton disabled={!provider || providerKey.trim().length < 8 || (providerVerified && !providerModel)} status={checkStatus("provider-key")} onClick={testProviderKey} />}>
           <InfoBlock icon={KeyRound} title="Ключ поставщика" text="Выберите поставщика, введите ключ и сохраните его для голосового модуля." />
           <Select value={provider} onValueChange={(value) => {
-            setProvider(value);
+            providerRequestRef.current += 1;
+            setCheckingStep(null);
+            setProvider(value as BraiCmdProviderId);
+            setProviderVerified(false);
+            setProviderManualModel(false);
+            setProviderModels([]);
+            setProviderModel("");
             resetCheck("provider-key");
           }}>
             <SelectTrigger className="w-full" aria-label="Поставщик">
@@ -898,14 +951,40 @@ export function OnboardingFlow({
             </SelectTrigger>
             <SelectContent>
               {providerOptions.map((option) => (
-                <SelectItem key={option} value={option}>{option}</SelectItem>
+                <SelectItem key={option.id} value={option.id}>{option.label}</SelectItem>
               ))}
             </SelectContent>
           </Select>
           <Input value={providerKey} type="password" aria-label="Ключ поставщика" placeholder="API-ключ" onChange={(event) => {
+            providerRequestRef.current += 1;
+            setCheckingStep(null);
             setProviderKey(event.target.value);
+            setProviderVerified(false);
+            setProviderManualModel(false);
+            setProviderModels([]);
+            setProviderModel("");
             resetCheck("provider-key");
           }} />
+          {providerVerified && providerManualModel ? (
+            <Input value={providerModel} aria-label="Модель распознавания" placeholder="Введите идентификатор модели" onChange={(event) => {
+              providerRequestRef.current += 1;
+              setCheckingStep(null);
+              setProviderModel(event.target.value);
+            }} />
+          ) : providerVerified ? (
+            <Select value={providerModel} onValueChange={(value) => {
+              providerRequestRef.current += 1;
+              setCheckingStep(null);
+              setProviderModel(value);
+            }}>
+              <SelectTrigger className="w-full" aria-label="Модель распознавания">
+                <SelectValue placeholder="Выберите модель распознавания" />
+              </SelectTrigger>
+              <SelectContent>
+                {providerModels.map((model) => <SelectItem key={model} value={model}>{model}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          ) : null}
         </StepScreen>
       );
     }
@@ -975,7 +1054,7 @@ export function OnboardingFlow({
 
     if (state.step === "voice-ready") return <InfoScreen icon={CheckCircle2} title="Голосовое управление настроено" text="Brai CMD готов принимать голос, работать с очередью и вставлять результат в поле."><PrimaryButton onClick={completeSetup}>Готово</PrimaryButton></InfoScreen>;
     if (state.step === "login-check") return <InfoScreen icon={Lock} title="Проверяем вход" text="Если профиль уже открыт, вы попадете в кабинет. Если нет — доступ будет ограничен входом и настройками."><PrimaryButton onClick={() => authRequired ? go("locked") : onDone()}>Продолжить</PrimaryButton></InfoScreen>;
-    if (state.step === "locked") return <InfoScreen icon={Lock} title="Нужен вход" text="Пока вы не вошли, доступны только вход и настройки Brai CMD."><SecondaryButton onClick={openCmdSettings}>Настройки Brai CMD</SecondaryButton><PrimaryButton onClick={() => go("login")}>Войти</PrimaryButton></InfoScreen>;
+    if (state.step === "locked") return <InfoScreen icon={Lock} title="Нужен вход" text="Пока вы не вошли, доступны вход, Engine и настройки Brai CMD."><SecondaryButton type="button" onClick={openCmdSettings}>Настройки Brai CMD</SecondaryButton><SecondaryButton type="button" onClick={onOpenEngine}>Engine</SecondaryButton><PrimaryButton type="button" onClick={() => go("login")}>Войти</PrimaryButton></InfoScreen>;
     if (state.step === "login") return <OnboardingAuthForm busy={busy} mode={authMode} onEmailLogin={submitCloudEmailLogin} onRequestOtp={onRequestOtp} onVerifyOtp={submitCloudVerifyOtp} />;
     if (state.step === "cmd-settings") {
       return (
@@ -1170,7 +1249,7 @@ function StepActions({ children, preserveBottomGap = false }: { children: ReactN
         : "[@media(max-height:700px)]:gap-2 [@media(max-height:700px)]:pb-[calc(env(safe-area-inset-bottom)+0.5rem)] [@media(max-height:700px)]:pt-2 [@media(max-height:800px)_and_(min-aspect-ratio:2/3)]:pb-[calc(env(safe-area-inset-bottom)+0.25rem)] [@media(max-height:800px)_and_(min-aspect-ratio:2/3)]:pt-1",
     )}>
       {statusText ? <StatusCard text={statusText} tone={statusTone} /> : null}
-      {extraActions.length ? <div className="grid gap-2">{extraActions}</div> : null}
+      {extraActions.length ? <div className="grid gap-3">{extraActions}</div> : null}
       <div className={cx("grid gap-3", canBack && mainAction ? "grid-cols-[3rem_minmax(0,1fr)]" : canBack ? "grid-cols-[3rem]" : "grid-cols-1")}>
         {canBack ? (
           <Button type="button" variant="outline" className="size-12 rounded-full border-primary/20 bg-transparent p-0 transition-all duration-200 hover:bg-primary/10 active:scale-[0.96] active:bg-primary/15 [@media(max-height:800px)_and_(min-aspect-ratio:2/3)]:size-10" aria-label="Назад" onClick={onBack}>

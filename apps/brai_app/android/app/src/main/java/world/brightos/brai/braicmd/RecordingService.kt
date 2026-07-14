@@ -19,6 +19,41 @@ import java.net.UnknownHostException
 import java.util.concurrent.CopyOnWriteArraySet
 import java.util.concurrent.atomic.AtomicBoolean
 
+private data class QueueUploadCompletion(
+    val result: QueueWorkerResult,
+    val snapshot: BraiCmdQueueSnapshot,
+    val handoffRequested: Boolean
+)
+
+internal class QueueUploadHandoff {
+    private val lock = Any()
+    private var active = false
+    private var deferredOwnerId: String? = null
+
+    fun tryBegin(): Boolean = synchronized(lock) {
+        if (active) return@synchronized false
+        active = true
+        true
+    }
+
+    fun deferIfActive(ownerId: String, trigger: QueueRetryTrigger): Boolean = synchronized(lock) {
+        if (!active) return@synchronized false
+        if (trigger == QueueRetryTrigger.Manual || trigger == QueueRetryTrigger.Enqueue) {
+            deferredOwnerId = ownerId
+        }
+        true
+    }
+
+    fun <T> finish(block: (String?) -> T): T = synchronized(lock) {
+        try {
+            block(deferredOwnerId)
+        } finally {
+            deferredOwnerId = null
+            active = false
+        }
+    }
+}
+
 class RecordingService : Service() {
     private val handler = Handler(Looper.getMainLooper())
     private var recorder: MediaRecorder? = null
@@ -42,7 +77,8 @@ class RecordingService : Service() {
                 screenshotFileFromIntent(intent),
                 intent?.getBooleanExtra(EXTRA_INBOX_DELIVERY, false) == true,
                 intent?.getStringExtra(EXTRA_INBOX_TEXT_PREFIX).orEmpty(),
-                audioQueueActionFromIntent(intent)
+                audioQueueActionFromIntent(intent),
+                capturedOwnerIdFromIntent(intent)
             )
         }
         return START_NOT_STICKY
@@ -51,12 +87,18 @@ class RecordingService : Service() {
     override fun onDestroy() {
         val unfinishedFile = outputFile
         releaseRecorder()
-        if (unfinishedFile != null && unfinishedFile.exists() && unfinishedFile.length() >= 512L) {
+        val ownerStillCurrent = unfinishedFile?.let {
+            QueueOwnerStore.readOwnerId(it) == QueueOwnerStore.current(this).ownerId
+        } == true
+        if (unfinishedFile != null && ownerStillCurrent && unfinishedFile.exists() && unfinishedFile.length() >= 512L) {
             val pendingFile = finalizeRecording(unfinishedFile)
             ConversationContextStore.save(pendingFile, conversationContext)
             screenshotFile?.let { ScreenshotContextStore.save(pendingFile, it) }
             if (inboxDelivery) InboxPayloadStore.mark(pendingFile, inboxTextPrefix)
             InboxPayloadStore.saveAction(pendingFile, audioQueueAction)
+        } else if (unfinishedFile != null && !ownerStillCurrent) {
+            screenshotFile?.delete()
+            RecordingArchiveStore.deleteAudioWithSidecars(unfinishedFile)
         }
         outputFile = null
         conversationContext = null
@@ -72,10 +114,17 @@ class RecordingService : Service() {
         screenshot: File?,
         deliverToInbox: Boolean,
         textPrefix: String,
-        action: AudioQueueAction
+        action: AudioQueueAction,
+        capturedOwnerId: String?
     ) {
         if (recorder != null) {
             screenshot?.delete()
+            return
+        }
+        if (capturedOwnerId == null || QueueOwnerStore.current(this).ownerId != capturedOwnerId) {
+            screenshot?.delete()
+            BraiCmdBus.post(RecorderState.Error("Профиль изменился до начала записи"))
+            stopSelf()
             return
         }
         conversationContext = context
@@ -88,6 +137,7 @@ class RecordingService : Service() {
         val file = File(recordingsDir().apply { mkdirs() }, "brai-cmd-${System.currentTimeMillis()}.recording.m4a")
         val mediaRecorder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) MediaRecorder(this) else MediaRecorder()
         try {
+            QueueOwnerStore.claim(file, capturedOwnerId)
             mediaRecorder.setAudioSource(MediaRecorder.AudioSource.MIC)
             mediaRecorder.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
             mediaRecorder.setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
@@ -96,23 +146,42 @@ class RecordingService : Service() {
             mediaRecorder.setOutputFile(file.absolutePath)
             mediaRecorder.prepare()
             mediaRecorder.start()
-            recorder = mediaRecorder
-            outputFile = file
-            ScreenshotContextStore.save(file, screenshotFile)
-            if (inboxDelivery) InboxPayloadStore.mark(file, inboxTextPrefix)
-            InboxPayloadStore.saveAction(file, audioQueueAction)
-            screenshotFile = null
-            BraiCmdBus.post(RecorderState.Recording(0))
-            startAmplitudeTicker()
+            val accepted = QueueOwnerStore.withinBoundary {
+                if (QueueOwnerStore.current(this).ownerId != capturedOwnerId) return@withinBoundary false
+                recorder = mediaRecorder
+                outputFile = file
+                RecordingArchiveStore.saveNewMetadata(file)
+                ScreenshotContextStore.save(file, screenshotFile)
+                if (inboxDelivery) InboxPayloadStore.mark(file, inboxTextPrefix)
+                InboxPayloadStore.saveAction(file, audioQueueAction)
+                screenshotFile = null
+                BraiCmdBus.post(RecorderState.Recording(0))
+                startAmplitudeTicker()
+                true
+            }
+            if (!accepted) {
+                discardRecordingStart(mediaRecorder, file, "Профиль изменился до начала записи")
+            }
         } catch (error: Throwable) {
-            mediaRecorder.release()
-            screenshotFile?.delete()
-            screenshotFile = null
-            InboxPayloadStore.delete(file)
-            file.delete()
-            BraiCmdBus.post(RecorderState.Error(error.message ?: "Не удалось начать запись"))
-            stopSelf()
+            discardRecordingStart(mediaRecorder, file, "Запись не началась")
         }
+    }
+
+    private fun discardRecordingStart(mediaRecorder: MediaRecorder, file: File, message: String) {
+        recorder = null
+        outputFile = null
+        runCatching { mediaRecorder.stop() }
+        runCatching { mediaRecorder.release() }
+        screenshotFile?.delete()
+        screenshotFile = null
+        conversationContext = null
+        inboxDelivery = false
+        inboxTextPrefix = ""
+        audioQueueAction = AudioQueueAction.MainDictation
+        RecordingArchiveStore.deleteAudioWithSidecars(file)
+        BraiCmdBus.post(RecorderState.Error(message))
+        stopRecordingForeground()
+        stopSelf()
     }
 
     private fun stopRecordingAndQueueUpload() {
@@ -123,6 +192,7 @@ class RecordingService : Service() {
             recordingFile?.let { ConversationContextStore.delete(it) }
             recordingFile?.let { ScreenshotContextStore.delete(it) }
             recordingFile?.let { InboxPayloadStore.delete(it) }
+            recordingFile?.let { QueueOwnerStore.delete(it) }
             BraiCmdBus.post(RecorderState.Error("Запись слишком короткая"))
             stopRecordingForeground()
             stopSelf()
@@ -131,7 +201,7 @@ class RecordingService : Service() {
 
         val pendingFile = finalizeRecording(recordingFile)
         if (!pendingFile.exists()) {
-            BraiCmdBus.post(RecorderState.Error("Не удалось сохранить запись"))
+            BraiCmdBus.post(RecorderState.Error("Запись не сохранена"))
             stopRecordingForeground()
             stopSelf()
             return
@@ -139,10 +209,11 @@ class RecordingService : Service() {
         ConversationContextStore.save(pendingFile, conversationContext)
         ScreenshotContextStore.move(recordingFile, pendingFile)
         InboxPayloadStore.saveAction(pendingFile, audioQueueAction)
+        BraiCmdPlugin.notifyStateChanged()
         if (ConfigStore(this).onboardingQueuePaused) {
             BraiCmdPlugin.notifyOnboardingEvent("queueSaved", null)
             postPendingState(
-                message = "Запись сохранена в очереди. Отправка временно остановлена для проверки.",
+                message = "Ждёт сервер",
                 reason = PendingReason.Network
             )
             stopRecordingForeground()
@@ -165,10 +236,12 @@ class RecordingService : Service() {
         recordingFile?.let { ConversationContextStore.delete(it) }
         recordingFile?.let { ScreenshotContextStore.delete(it) }
         recordingFile?.let { InboxPayloadStore.delete(it) }
+        recordingFile?.let { QueueOwnerStore.delete(it) }
         recordingFile?.delete()
         BraiCmdBus.post(RecorderState.Idle)
         stopRecordingForeground()
         stopSelf()
+        retryPending(this, QueueRetryTrigger.Enqueue)
     }
 
     private fun uploadPendingRecordings() = uploadQueue(autoInsertAudioFileName = null)
@@ -180,13 +253,16 @@ class RecordingService : Service() {
 
     private fun uploadQueue(autoInsertAudioFileName: String?) {
         workerStartRequested.set(false)
-        if (!uploadInProgress.compareAndSet(false, true)) return
+        if (!uploadHandoff.tryBegin()) return
         startUploadForeground()
         BraiCmdBus.post(RecorderState.Uploading)
         Thread {
             var workerResult: QueueWorkerResult? = null
+            var workerOwnerId: String? = null
             try {
-                val transport = QueueTransportWorker(this).run(autoInsertAudioFileName)
+                val rawTransport = QueueTransportWorker(this).run(autoInsertAudioFileName)
+                workerOwnerId = rawTransport.ownerId
+                val transport = effectiveTransportForCurrentOwner(rawTransport, QueueOwnerStore.current(this).ownerId)
                 val retryStore = QueueRetryStore(this)
                 val nextRetryAt = when (transport.status) {
                     QueueTransportStatus.TransientFailure -> {
@@ -202,6 +278,11 @@ class RecordingService : Service() {
                         BraiCmdQueue.clearTransportFailures(this)
                         null
                     }
+                    QueueTransportStatus.Superseded -> {
+                        retryStore.reset()
+                        BraiCmdQueue.clearTransportFailures(this)
+                        null
+                    }
                 }
                 val snapshot = queueSnapshot(this)
                 workerResult = QueueWorkerResult(
@@ -209,6 +290,7 @@ class RecordingService : Service() {
                         QueueTransportStatus.Drained -> QueueWorkerStatus.Drained
                         QueueTransportStatus.TransientFailure -> QueueWorkerStatus.TransientFailure
                         QueueTransportStatus.Blocked -> QueueWorkerStatus.Blocked
+                        QueueTransportStatus.Superseded -> QueueWorkerStatus.Drained
                     },
                     snapshot = snapshot,
                     nextRetryAtMillis = nextRetryAt
@@ -225,15 +307,35 @@ class RecordingService : Service() {
                 val (message, reason) = pendingStatusFor(error)
                 postPendingState(snapshot, message, reason)
             } finally {
-                uploadInProgress.set(false)
-                val result = workerResult ?: QueueWorkerResult(QueueWorkerStatus.TransientFailure, queueSnapshot(this))
-                queueWorkerListeners.forEach { listener -> runCatching { listener(result) } }
-                stopRecordingForeground()
-                stopSelf()
-                if (result.status == QueueWorkerStatus.Drained &&
-                    result.snapshot.transport.total > 0 &&
-                    !ConfigStore(this).onboardingQueuePaused
-                ) {
+                val completion = uploadHandoff.finish { deferredRetryOwnerId ->
+                    val currentOwnerId = QueueOwnerStore.current(this).ownerId
+                    val currentSnapshot = queueSnapshot(this)
+                    val ownerChanged = workerOwnerId?.let { it != currentOwnerId } == true
+                    val handoffRequested = ownerChanged || deferredRetryOwnerId != null
+                    if (handoffRequested) {
+                        QueueRetryStore(this).reset()
+                        BraiCmdQueue.clearTransportFailures(this)
+                    }
+                    val result = (workerResult
+                        ?: QueueWorkerResult(QueueWorkerStatus.TransientFailure, currentSnapshot)).copy(
+                        status = if (handoffRequested) QueueWorkerStatus.Drained else workerResult?.status
+                            ?: QueueWorkerStatus.TransientFailure,
+                        snapshot = currentSnapshot,
+                        nextRetryAtMillis = if (handoffRequested) null else workerResult?.nextRetryAtMillis
+                    )
+                    QueueUploadCompletion(result, currentSnapshot, handoffRequested).also { completed ->
+                        if (completed.handoffRequested) postQueueState(
+                            QueueTransportResult(QueueTransportStatus.Superseded, currentOwnerId),
+                            completed.snapshot
+                        )
+                        queueWorkerListeners.forEach { listener -> runCatching { listener(completed.result) } }
+                        BraiCmdPlugin.notifyStateChanged()
+                        stopRecordingForeground()
+                        stopSelf()
+                    }
+                }
+                val result = completion.result
+                if (result.status == QueueWorkerStatus.Drained && !ConfigStore(this).onboardingQueuePaused) {
                     retryPending(this, QueueRetryTrigger.Enqueue)
                 }
             }
@@ -241,8 +343,8 @@ class RecordingService : Service() {
     }
 
     private fun postQueueState(transport: QueueTransportResult, snapshot: BraiCmdQueueSnapshot) {
-        if (transport.status != QueueTransportStatus.Drained) {
-            val failure = transport.failure ?: IOException("Не удалось отправить очередь")
+        if (transport.status != QueueTransportStatus.Drained && transport.status != QueueTransportStatus.Superseded) {
+            val failure = transport.failure ?: IOException("Не удалось сохранить в очередь")
             val (message, reason) = pendingStatusFor(failure)
             postPendingState(snapshot, message, reason)
             return
@@ -258,7 +360,7 @@ class RecordingService : Service() {
                 )
             )
             transport.permanentFailureMessage != null -> BraiCmdBus.post(RecorderState.Error(transport.permanentFailureMessage))
-            transport.inboxDelivered -> BraiCmdBus.post(RecorderState.InboxDelivered)
+            transport.inboxDelivered -> BraiCmdBus.post(RecorderState.InboxDelivered(transport.serverNotice))
             snapshot.readyToInsert.total > 0 -> BraiCmdBus.post(
                 RecorderState.TranscriptReady(
                     transcripts = snapshot.readyToInsert.total,
@@ -269,7 +371,7 @@ class RecordingService : Service() {
             )
             snapshot.transport.total > 0 -> postPendingState(
                 snapshot,
-                "Есть сохраненные данные в очереди",
+                "Не удалось сохранить в очередь",
                 PendingReason.Unknown
             )
             else -> BraiCmdBus.post(RecorderState.Idle)
@@ -294,46 +396,79 @@ class RecordingService : Service() {
         if (!file.name.contains(".recording.")) return file
         val pendingName = file.name.replace(".recording.", ".")
         val pendingFile = File(file.parentFile ?: recordingsDir(), pendingName)
+        val ownerPrepared = try {
+            QueueOwnerStore.copyOwner(file, pendingFile)
+        } catch (_: Throwable) {
+            return file
+        }
         if (file.renameTo(pendingFile)) {
+            if (ownerPrepared) QueueOwnerStore.delete(file)
             ConversationContextStore.move(file, pendingFile)
             ScreenshotContextStore.move(file, pendingFile)
             InboxPayloadStore.move(file, pendingFile)
+            RecordingArchiveStore.moveMetadata(file, pendingFile)
             return pendingFile
         }
         return runCatching {
             file.copyTo(pendingFile, overwrite = true)
             if (pendingFile.exists()) file.delete()
+            if (ownerPrepared) QueueOwnerStore.delete(file)
             ConversationContextStore.move(file, pendingFile)
             ScreenshotContextStore.move(file, pendingFile)
             InboxPayloadStore.move(file, pendingFile)
+            RecordingArchiveStore.moveMetadata(file, pendingFile)
             pendingFile
+        }.onFailure {
+            if (ownerPrepared) QueueOwnerStore.delete(pendingFile)
         }.getOrDefault(file)
     }
 
     private fun recordingsDir(): File = File(filesDir, RECORDINGS_DIR)
 
-    private fun pendingStatusFor(error: Throwable): Pair<String, PendingReason> =
+    internal fun pendingStatusFor(error: Throwable): Pair<String, PendingReason> =
         when (error) {
+            is QueueOwnerBlockedException ->
+                Pair("Сохранено для другого профиля", PendingReason.Server)
             is QueueAuthBlockedException ->
-                Pair("Данные сохранены. Обновите доступ и повторите отправку.", PendingReason.Server)
+                Pair("Сохранено, отправлю автоматически", PendingReason.Server)
             is QueueEmptyModelException ->
-                Pair("Данные сохранены. Модель вернула пустой текст; повторю автоматически.", PendingReason.Transcription)
+                Pair("Модель временно недоступна", PendingReason.Transcription)
             is UnknownHostException ->
-                Pair("Данные сохранены. Нет интернета; отправлю, когда связь вернется.", PendingReason.Network)
+                Pair("Ждёт интернет", PendingReason.Network)
             is SocketTimeoutException ->
-                Pair("Данные сохранены. Сервер долго не отвечает; повторю автоматически.", PendingReason.Server)
+                Pair("Ждёт сервер", PendingReason.Server)
+            is ProviderResponseException -> when {
+                error.statusCode == 401 || error.statusCode == 403 ->
+                    Pair("Данные сохранены. Проверьте API-ключ поставщика в настройках.", PendingReason.Transcription)
+                error.statusCode in 400..499 && error.statusCode !in setOf(408, 425, 429) ->
+                    Pair("Данные сохранены. Проверьте выбранную модель и настройки поставщика.", PendingReason.Transcription)
+                error.statusCode == 429 ->
+                    Pair("Данные сохранены. Поставщик временно ограничил запросы; повторю автоматически.", PendingReason.Transcription)
+                else ->
+                    Pair("Данные сохранены. Поставщик сейчас не отвечает; повторю автоматически.", PendingReason.Transcription)
+            }
             is ServerResponseException ->
-                if (error.statusCode == 401 || error.statusCode == 403) {
-                    Pair("Данные сохранены. Обновите доступ и повторите отправку.", PendingReason.Server)
+                if (error.code == "function_disabled") {
+                    Pair("Функция временно недоступна", PendingReason.Server)
+                } else if (error.statusCode == 401 || error.statusCode == 403) {
+                    Pair("Ждёт сервер", PendingReason.Server)
                 } else if (error.code == "upstream_error") {
-                    Pair("Данные сохранены. Модель сейчас не отвечает; повторю автоматически.", PendingReason.Transcription)
+                    Pair("Модель временно недоступна", PendingReason.Transcription)
+                } else if (error.statusCode == 413) {
+                    Pair("Файл слишком большой", PendingReason.Server)
+                } else if (error.statusCode == 415) {
+                    Pair("Формат не поддержан", PendingReason.Server)
+                } else if (error.statusCode == 422) {
+                    Pair("Данные повреждены", PendingReason.Server)
+                } else if (error.statusCode == 400) {
+                    Pair("Запрос отклонён", PendingReason.Server)
                 } else {
-                    Pair("Данные сохранены. Сервер не принял запрос; повторю автоматически.", PendingReason.Server)
+                    Pair("Ждёт сервер", PendingReason.Server)
                 }
             is IOException ->
-                Pair("Данные сохранены. Сейчас нет связи с сервером; повторю автоматически.", PendingReason.Network)
+                Pair("Ждёт интернет", PendingReason.Network)
             else ->
-                Pair("Данные сохранены. Не удалось отправить сейчас; повторю автоматически.", PendingReason.Unknown)
+                Pair("Не удалось сохранить в очередь", PendingReason.Unknown)
         }
 
     private fun startRecordingForeground() {
@@ -416,7 +551,8 @@ class RecordingService : Service() {
         private const val EXTRA_INBOX_DELIVERY = "world.brightos.brai.braicmd.extra.INBOX_DELIVERY"
         private const val EXTRA_INBOX_TEXT_PREFIX = "world.brightos.brai.braicmd.extra.INBOX_TEXT_PREFIX"
         private const val EXTRA_AUDIO_QUEUE_ACTION = "world.brightos.brai.braicmd.extra.AUDIO_QUEUE_ACTION"
-        private val uploadInProgress = AtomicBoolean(false)
+        private const val EXTRA_QUEUE_OWNER_ID = "world.brightos.brai.braicmd.extra.QUEUE_OWNER_ID"
+        private val uploadHandoff = QueueUploadHandoff()
         private val workerStartRequested = AtomicBoolean(false)
         private val queueWorkerListeners = CopyOnWriteArraySet<(QueueWorkerResult) -> Unit>()
 
@@ -426,7 +562,8 @@ class RecordingService : Service() {
             screenshotFile: File? = null,
             deliverToInbox: Boolean = false,
             inboxTextPrefix: String = "",
-            contextAction: ContextButtonAction? = null
+            contextAction: ContextButtonAction? = null,
+            owner: QueueOwnerScope = QueueOwnerStore.current(context)
         ) {
             val intent = Intent(context, RecordingService::class.java).setAction(ACTION_START)
             VisibleConversationContext.putInto(intent, conversationContext)
@@ -445,11 +582,12 @@ class RecordingService : Service() {
                 else -> AudioQueueAction.Unknown
             }
             intent.putExtra(EXTRA_AUDIO_QUEUE_ACTION, action.persistedValue)
+            intent.putExtra(EXTRA_QUEUE_OWNER_ID, owner.ownerId)
             try {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) context.startForegroundService(intent) else context.startService(intent)
             } catch (error: Throwable) {
                 screenshotFile?.delete()
-                BraiCmdBus.post(RecorderState.Error(error.message ?: "Android заблокировал запуск микрофона"))
+                BraiCmdBus.post(RecorderState.Error("Запись не началась"))
             }
         }
 
@@ -457,7 +595,7 @@ class RecordingService : Service() {
             try {
                 context.startService(Intent(context, RecordingService::class.java).setAction(ACTION_STOP))
             } catch (error: Throwable) {
-                BraiCmdBus.post(RecorderState.Error(error.message ?: "Не удалось остановить запись"))
+                BraiCmdBus.post(RecorderState.Error("Запись не остановлена"))
             }
         }
 
@@ -465,8 +603,12 @@ class RecordingService : Service() {
             try {
                 context.startService(Intent(context, RecordingService::class.java).setAction(ACTION_CANCEL))
             } catch (error: Throwable) {
-                BraiCmdBus.post(RecorderState.Error(error.message ?: "Не удалось отменить запись"))
+                BraiCmdBus.post(RecorderState.Error("Запись не остановлена"))
             }
+        }
+
+        internal fun cancelActiveForOwnerTransition(context: Context) {
+            if (BraiCmdBus.latest is RecorderState.Recording) cancel(context)
         }
 
         fun retryPending(context: Context): Boolean =
@@ -476,39 +618,56 @@ class RecordingService : Service() {
             context: Context,
             trigger: QueueRetryTrigger
         ): Boolean {
-            val state = BraiCmdBus.latest
-            val retryStore = QueueRetryStore(context)
             if (ConfigStore(context).onboardingQueuePaused ||
-                uploadInProgress.get() ||
-                state is RecorderState.Recording ||
-                (state is RecorderState.Uploading && trigger != QueueRetryTrigger.Enqueue) ||
                 !hasPendingRecordings(context)
             ) {
                 return false
             }
-            if (!workerStartRequested.compareAndSet(false, true)) return false
+            if (uploadHandoff.deferIfActive(QueueOwnerStore.current(context).ownerId, trigger)) return false
+            val state = BraiCmdBus.latest
+            val retryStore = QueueRetryStore(context)
+            if (
+                state is RecorderState.Recording ||
+                (retryStore.isBlocked && trigger in setOf(
+                    QueueRetryTrigger.Resume,
+                    QueueRetryTrigger.Scheduled,
+                    QueueRetryTrigger.Network
+                )) ||
+                (state is RecorderState.Uploading && trigger != QueueRetryTrigger.Enqueue)
+            ) {
+                return false
+            }
             if (trigger in setOf(QueueRetryTrigger.Manual, QueueRetryTrigger.Network, QueueRetryTrigger.Enqueue)) {
                 retryStore.allowImmediate()
             }
+            if (!workerStartRequested.compareAndSet(false, true)) return false
             val intent = Intent(context, RecordingService::class.java).setAction(ACTION_RETRY)
             return try {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) context.startForegroundService(intent) else context.startService(intent)
                 true
             } catch (error: Throwable) {
                 workerStartRequested.set(false)
-                BraiCmdBus.post(RecorderState.Error(error.message ?: "Не удалось повторить отправку сохраненной записи"))
+                BraiCmdBus.post(RecorderState.Error("Повтор не запущен"))
                 false
             }
         }
 
-        internal fun enqueueScreenshot(context: Context, screenshotFile: File): Boolean {
-            if (ScreenshotInboxStore.enqueue(context, screenshotFile) == null) return false
+        internal fun enqueueScreenshot(
+            context: Context,
+            screenshotFile: File,
+            owner: QueueOwnerScope
+        ): Boolean {
+            if (QueueOwnerStore.current(context).ownerId != owner.ownerId) {
+                screenshotFile.delete()
+                return false
+            }
+            if (ScreenshotInboxStore.enqueue(context, screenshotFile, owner) == null) return false
             val snapshot = queueSnapshot(context)
             if (ConfigStore(context).onboardingQueuePaused) {
                 BraiCmdPlugin.notifyOnboardingEvent("queueSaved", null)
                 BraiCmdBus.post(
                     RecorderState.Pending(
-                        message = "Скриншот сохранен в очереди. Отправка временно остановлена для проверки.",
+                        message = "Ждёт сервер",
                         recordings = snapshot.transport.total,
                         transcripts = snapshot.readyToInsert.total,
                         reason = PendingReason.Network
@@ -531,10 +690,10 @@ class RecordingService : Service() {
         }
 
         fun hasPendingRecordings(context: Context): Boolean =
-            AudioQueueStore.list(context).isNotEmpty() || ScreenshotInboxStore.list(context).isNotEmpty()
+            queueSnapshot(context).transport.total > 0
 
         fun pendingRecordingsCount(context: Context): Int =
-            AudioQueueStore.list(context).size + ScreenshotInboxStore.list(context).size
+            queueSnapshot(context).transport.total
 
         private fun audioQueueActionFromIntent(intent: Intent?): AudioQueueAction {
             val saved = intent?.getStringExtra(EXTRA_AUDIO_QUEUE_ACTION)
@@ -555,5 +714,18 @@ class RecordingService : Service() {
             if (path.isBlank()) return null
             return File(path).takeIf { it.isFile && it.length() > 0L }
         }
+
+        internal fun capturedOwnerIdFromIntent(intent: Intent?): String? =
+            intent?.getStringExtra(EXTRA_QUEUE_OWNER_ID)?.trim()?.takeIf(String::isNotBlank)
+
     }
 }
+
+internal fun effectiveTransportForCurrentOwner(
+    transport: QueueTransportResult,
+    currentOwnerId: String
+): QueueTransportResult = if (transport.ownerId == currentOwnerId) transport else transport.copy(
+    status = QueueTransportStatus.Superseded,
+    failure = QueueOwnerBlockedException(),
+    failedTransportIds = emptySet()
+)

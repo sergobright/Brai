@@ -3,6 +3,7 @@ import { spawn } from 'node:child_process';
 import crypto from 'node:crypto';
 import http from 'node:http';
 import path from 'node:path';
+import { RateLimiterMemory } from 'rate-limiter-flexible';
 import { WebSocketServer } from 'ws';
 import {
   INBOX_BODY_LIMIT_BYTES,
@@ -23,14 +24,26 @@ import {
   isBraiCmdPublicRoute,
   requireBraiCmdAccess
 } from './brai-cmd.js';
-import { sendReleaseLoginPage, serveRelease } from './release-routes.js';
+import {
+  sendReleaseLoginPage,
+  serveDeveloperReleaseFile,
+  serveLegacyProductionFile,
+  serveReleaseDownload,
+  serveReleasePage
+} from './release-routes.js';
 import { goalAgentsEnabledFromEnv } from './goal-agent-switch.js';
 import { BraiStore, formatFocusInterval, formatSession } from './store.js';
 import { scopedUserId, withUserScope } from './user-scope.js';
+import {
+  handleNativeProviderSync,
+  handleUserAiRoute,
+  isNativeProviderSyncRoute,
+  isUserAiRoute
+} from './user-ai-routes.js';
 
 const BASE_JSON_HEADERS = {
   'content-type': 'application/json; charset=utf-8',
-  'access-control-allow-methods': 'GET,POST,OPTIONS',
+  'access-control-allow-methods': 'GET,POST,PUT,PATCH,DELETE,OPTIONS',
   'access-control-allow-headers': 'authorization,content-type,x-api-key,x-brai-api-key,x-brai-target,x-brai-destination,x-brai-cmd-device-id,x-brai-cmd-client-version,x-brai-expected-user-id,x-airwhisper-device-id,x-airwhisper-client-version',
   'access-control-allow-credentials': 'true'
 };
@@ -39,6 +52,11 @@ const RELEASE_SESSION_COOKIE = 'brai_release_session';
 const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 30;
 const STATE_CHANGING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 const DRAW_SCENE_LIMIT_BYTES = 15 * 1024 * 1024;
+const BRAI_CMD_FUNCTION_DISABLED_CODE = 'function_disabled';
+const BRAI_CMD_FUNCTION_DISABLED_MESSAGE_KEY = 'message.function.disabled.default';
+const BRAI_CMD_CHAT_PREFIX = 'Добавить в контекст контакта';
+const BRAI_CMD_ACCOUNT_ACTIVATE_PATH = '/v1/brai-cmd/account-access/activate';
+const BRAI_CMD_ACCESS_REVOKE_PATH = '/v1/brai-cmd/access/revoke-self';
 
 export function createBraiServer({
   databaseUrl,
@@ -64,6 +82,8 @@ export function createBraiServer({
   codexModel = null,
   codexFallbackModel = null,
   codexTimeoutMs = null,
+  userAiEncryptionKey = null,
+  userAiFetch = fetch,
   inboxExternalAi = {},
   inboxImageDescriber = null,
   inboxNormalizer = null,
@@ -89,6 +109,8 @@ export function createBraiServer({
   store.logger = logger;
   store.goalAgentsEnabled = goalAgentsEnabled !== false;
   store.configureGoalAgentEnvironment(goalAgentEnvironment);
+  store.configureUserAiEncryptionKey(userAiEncryptionKey);
+  const releaseDownloadLimiter = new RateLimiterMemory({ points: 10, duration: 3600 });
   const braiCmdRuntime = createBraiCmdRuntime(braiCmd);
   const resolvedVaultRoot =
     typeof vaultRoot === 'string' && vaultRoot.trim()
@@ -132,7 +154,7 @@ export function createBraiServer({
               codexModel,
               codexFallbackModel,
               codexTimeoutMs,
-              externalAi: inboxExternalAi,
+              externalAi: { fetch: userAiFetch },
               imageDescriber: inboxImageDescriber,
               normalizer: inboxNormalizer,
               nowDate: now()
@@ -226,7 +248,7 @@ export function createBraiServer({
               codexModel,
               codexFallbackModel,
               codexTimeoutMs,
-              externalAi: inboxExternalAi,
+              externalAi: { fetch: userAiFetch },
               normalizer: activityNormalizer,
               nowDate: now()
             });
@@ -679,7 +701,12 @@ export function createBraiServer({
         return;
       }
 
-      if (url.pathname === '/releases/login' && req.method === 'POST') {
+      if (url.pathname === '/releases/login') {
+        redirect(res, '/dev-releases/');
+        return;
+      }
+
+      if (url.pathname === '/dev-releases/login' && req.method === 'POST') {
         const password = await readPassword(req);
         if (!releasePassword || password !== releasePassword) {
           recordRuntimeLog(store, logger, {
@@ -713,11 +740,34 @@ export function createBraiServer({
           message: 'Release login completed',
           jsonData: { route: url.pathname, secure_cookie: shouldUseSecureCookie(req) }
         });
-        redirect(res, '/releases/', { 'set-cookie': cookie });
+        redirect(res, '/dev-releases/', { 'set-cookie': cookie });
         return;
       }
 
-      if (url.pathname.startsWith('/releases')) {
+      if (url.pathname === '/releases' || url.pathname === '/releases/') {
+        serveReleasePage(req, res, releaseDir, sendJson, { publicOnly: true, store });
+        return;
+      }
+
+      const directReleaseMatch = url.pathname.match(/^\/releases\/download\/([^/]+)$/);
+      if (directReleaseMatch && req.method === 'GET') {
+        await serveReleaseDownload(req, res, decodeURIComponent(directReleaseMatch[1]), releaseDir, sendJson, {
+          limiter: releaseDownloadLimiter,
+          store
+        });
+        return;
+      }
+
+      const legacyReleaseMatch = url.pathname.match(/^\/releases\/([^/]+)$/);
+      if (legacyReleaseMatch && req.method === 'GET') {
+        await serveLegacyProductionFile(req, res, decodeURIComponent(legacyReleaseMatch[1]), releaseDir, sendJson, {
+          limiter: releaseDownloadLimiter,
+          store
+        });
+        return;
+      }
+
+      if (url.pathname.startsWith('/dev-releases')) {
         if (!hasValidSession(req, sessionSecret, now(), RELEASE_SESSION_COOKIE)) {
           recordRuntimeLog(store, logger, {
             traceId,
@@ -733,14 +783,26 @@ export function createBraiServer({
               session_cookie_present: Boolean(req.headers.cookie)
             }
           });
-          if (req.method === 'GET' && (url.pathname === '/releases' || url.pathname === '/releases/')) {
+          if (req.method === 'GET' && (url.pathname === '/dev-releases' || url.pathname === '/dev-releases/')) {
             sendReleaseLoginPage(res);
           } else {
-            redirect(res, '/releases/');
+            redirect(res, '/dev-releases/');
           }
           return;
         }
-        serveRelease(req, res, url, releaseDir, sendJson, store);
+        if (url.pathname === '/dev-releases' || url.pathname === '/dev-releases/') {
+          serveReleasePage(req, res, releaseDir, sendJson, { store });
+          return;
+        }
+        const developerReleaseMatch = url.pathname.match(/^\/dev-releases\/([^/]+)$/);
+        if (developerReleaseMatch && req.method === 'GET') {
+          await serveDeveloperReleaseFile(req, res, decodeURIComponent(developerReleaseMatch[1]), releaseDir, sendJson, {
+            limiter: releaseDownloadLimiter,
+            store
+          });
+          return;
+        }
+        sendJson(req, res, 404, { error: 'not_found' });
         return;
       }
 
@@ -856,7 +918,11 @@ export function createBraiServer({
         const access = requireBraiCmdAccess(req, store);
         const requestNow = now();
         const body = await readJson(req, { limit: INBOX_BODY_LIMIT_BYTES });
-        const ownerUserId = store.primaryUserId();
+        if (!store.braiCmdFunctionEnabled?.(braiCmdInboxFunctionKey(body))) {
+          sendBraiCmdFunctionDisabled(req, res, store, sendJson);
+          return;
+        }
+        const ownerUserId = access.userId ?? store.primaryUserId();
         const inboxBody = {
           ...body,
           target: 'inbox',
@@ -867,8 +933,70 @@ export function createBraiServer({
         const result = await withUserScope(ownerUserId, () => receiveInboxRequest(inboxBody, requestNow, { route: url.pathname }));
         const state = await withUserScope(ownerUserId, () => inboxState(store, requestNow));
         broadcast(sockets, { type: 'inbox_synced', inbox_state: state }, ownerUserId);
-        sendJson(req, res, result.created ? 201 : 200, { ok: true, target: 'inbox', ...result, state });
+        const notice = store.braiCmdNotice(
+          result.created ? 'message.inbox.created.default' : 'message.inbox.duplicate.default',
+          'success'
+        );
+        sendJson(req, res, result.created ? 201 : 200, { ok: true, target: 'inbox', ...result, state, notice });
         if (result.created) processInboxLater({ ownerUserId, inboxId: result.inbox_id });
+        return;
+      }
+
+      if (url.pathname === BRAI_CMD_ACCOUNT_ACTIVATE_PATH) {
+        assertNativeBraiCmdTransport(req);
+        if (req.method !== 'POST') {
+          sendJson(req, res, 405, { error: 'method_not_allowed' });
+          return;
+        }
+        const currentAccess = requireBraiCmdAccess(req, store);
+        const body = await readJson(req, { limit: 4096 });
+        const linkToken = firstTextField(body, ['link_token', 'linkToken']);
+        if (!linkToken) {
+          sendJson(req, res, 400, { error: 'link_token_required' });
+          return;
+        }
+        const issued = store.activateBraiCmdAccountLink({
+          linkToken,
+          currentAccess,
+          nowIso: now().toISOString()
+        });
+        requestUserId = issued.record.userId;
+        sendJson(req, res, 201, {
+          token: issued.token,
+          status: issued.record.status,
+          expires_at_utc: issued.record.expiresAt,
+          account_user_id: issued.record.userId
+        });
+        return;
+      }
+
+      if (url.pathname === BRAI_CMD_ACCESS_REVOKE_PATH) {
+        assertNativeBraiCmdTransport(req);
+        if (req.method !== 'POST') {
+          sendJson(req, res, 405, { error: 'method_not_allowed' });
+          return;
+        }
+        const access = requireBraiCmdAccess(req, store);
+        requestUserId = access.userId;
+        store.revokeBraiCmdToken(access.id);
+        sendJson(req, res, 200, { ok: true, status: 'revoked' });
+        return;
+      }
+
+      if (isNativeProviderSyncRoute(url.pathname)) {
+        assertNativeBraiCmdTransport(req);
+        const access = requireBraiCmdAccess(req, store);
+        requestUserId = access.userId;
+        await withUserScope(access.userId, () => handleNativeProviderSync({
+          req,
+          res,
+          access,
+          store,
+          sendJson,
+          readJson,
+          fetchImpl: userAiFetch,
+          now
+        }));
         return;
       }
 
@@ -929,6 +1057,47 @@ export function createBraiServer({
       }
 
       await withUserScope(authContext.userId, async () => {
+      if (isUserAiRoute(url.pathname)) {
+        await handleUserAiRoute({
+          req,
+          res,
+          url,
+          store,
+          sendJson,
+          readJson,
+          fetchImpl: userAiFetch,
+          now
+        });
+        return;
+      }
+
+      if (req.method === 'POST' && url.pathname === '/v1/brai-cmd/device-token') {
+        const body = await readJson(req, { limit: 16 * 1024 });
+        const deviceId = firstTextField(body, ['deviceId', 'device_id']);
+        if (!deviceId) {
+          sendJson(req, res, 400, { error: 'device_id_required' });
+          return;
+        }
+        if (deviceId.length > 200) {
+          sendJson(req, res, 400, { error: 'invalid_device_id' });
+          return;
+        }
+        const issued = store.issueBraiCmdAccountLink({
+          displayName: authContext.user?.name || authContext.user?.email || 'Brai',
+          deviceId,
+          userId: authContext.userId,
+          clientVersion: firstTextField(body, ['clientVersion', 'client_version']),
+          appPackage: firstTextField(body, ['appPackage', 'app_package']),
+          nowIso: now().toISOString()
+        });
+        sendJson(req, res, 201, {
+          token: issued.token,
+          status: 'pending',
+          expires_at_utc: issued.record.expiresAt
+        });
+        return;
+      }
+
       if (req.method === 'GET' && url.pathname === '/v1/settings') {
         sendJson(req, res, 200, settingsState(store, inboxExternalAi));
         return;
@@ -1087,6 +1256,25 @@ export function createBraiServer({
         return;
       }
 
+      if (url.pathname === '/v1/preferences') {
+        if (req.method === 'GET') {
+          sendJson(req, res, 200, store.userPreferences());
+          return;
+        }
+        if (req.method === 'PATCH') {
+          const body = await readJson(req, { limit: 4096 });
+          sendJson(req, res, 200, store.setUserPreferences(body, now().toISOString()));
+          return;
+        }
+        sendJson(req, res, 405, { error: 'method_not_allowed' });
+        return;
+      }
+
+      if (req.method === 'GET' && url.pathname === '/v1/archive') {
+        sendJson(req, res, 200, store.listArchive(url.searchParams.get('role') ?? 'activity'));
+        return;
+      }
+
       if (req.method === 'GET' && url.pathname === '/v1/draws') {
         sendJson(req, res, 200, { draws: listDrawScenes(resolvedVaultRoot) });
         return;
@@ -1144,6 +1332,14 @@ export function createBraiServer({
 
       if (req.method === 'GET' && url.pathname === '/v1/events') {
         sendJson(req, res, 200, { events: store.listEvents({ limit: url.searchParams.get('limit') }) });
+        return;
+      }
+
+      const itemEventsMatch = req.method === 'GET' ? url.pathname.match(/^\/v1\/items\/([^/]+)\/events$/) : null;
+      if (itemEventsMatch) {
+        sendJson(req, res, 200, {
+          events: store.listItemEvents(decodeURIComponent(itemEventsMatch[1]), { limit: url.searchParams.get('limit') })
+        });
         return;
       }
 
@@ -1449,9 +1645,8 @@ export function timerState(store, nowDate) {
 }
 
 export function settingsState(store, inboxExternalAi = {}) {
-  const settings = store.appSettings();
   return {
-    ...settings,
+    ...store.appSettings(),
     external_ai: {
       groq_configured: Boolean(inboxExternalAi.groqApiKey),
       openai_configured: Boolean(inboxExternalAi.openaiApiKey)
@@ -1516,19 +1711,30 @@ function latestApkRelease(releaseDir) {
   if (!releaseDir) return null;
   try {
     const releaseIndex = JSON.parse(fs.readFileSync(path.join(releaseDir, 'releases.json'), 'utf8'));
-    const production = releaseIndex.sections?.production;
-    const apkVersion = Number(production?.apkVersion ?? production?.version);
-    if (!production?.file || !Number.isInteger(apkVersion) || apkVersion <= 0) return null;
+    let targetReleaseKey = 'production';
+    try {
+      const manifest = JSON.parse(fs.readFileSync(path.join(path.dirname(releaseDir), 'mobile-update', 'manifest.json'), 'utf8'));
+      if (typeof manifest.targetApkReleaseKey === 'string' && manifest.targetApkReleaseKey) {
+        targetReleaseKey = manifest.targetApkReleaseKey;
+      }
+    } catch {
+      // Production remains the compatibility fallback when no manifest exists.
+    }
+    const target = releaseIndex.sections?.[targetReleaseKey] ?? releaseIndex.sections?.production;
+    const apkVersion = Number(target?.apkVersion ?? target?.version);
+    if (!target?.file || !Number.isInteger(apkVersion) || apkVersion <= 0) return null;
+    const releaseKey = target.releaseKey ?? targetReleaseKey;
     return {
-      file: production.file,
+      file: target.file,
       version: apkVersion,
-      version_code: Number.isInteger(production.versionCode) ? production.versionCode : apkVersion,
-      release_key: production.releaseKey ?? 'production',
-      apk_build_kind: production.apkBuildKind ?? 'stable',
-      preview_iteration: Number.isInteger(production.previewIteration) ? production.previewIteration : null,
+      version_code: Number.isInteger(target.versionCode) ? target.versionCode : apkVersion,
+      release_key: releaseKey,
+      apk_build_kind: target.apkBuildKind ?? 'stable',
+      preview_iteration: Number.isInteger(target.previewIteration) ? target.previewIteration : null,
       release_url: '/releases/',
-      published_at: production.publishedAt ?? null,
-      capabilities: Array.isArray(production.capabilities) ? production.capabilities : []
+      download_url: `/releases/download/${releaseKey}`,
+      published_at: target.publishedAt ?? null,
+      capabilities: Array.isArray(target.capabilities) ? target.capabilities : []
     };
   } catch {
     return null;
@@ -1798,9 +2004,56 @@ function requiresTrustedOrigin(req, authContext) {
   return authContext.sessionBased && STATE_CHANGING_METHODS.has(req.method ?? '');
 }
 
+function assertNativeBraiCmdTransport(req) {
+  // Node's native fetch adds Sec-Fetch-Mode alone; browsers also send Site/Dest (and POST Origin).
+  const browserMetadataPresent = Boolean(
+    req.headers?.['sec-fetch-site'] || req.headers?.['sec-fetch-dest'] || req.headers?.['sec-fetch-user']
+  );
+  if (req.headers?.origin || browserMetadataPresent) {
+    const error = new Error('native_transport_required');
+    error.status = 403;
+    throw error;
+  }
+}
+
 function redirect(res, location, extraHeaders = {}) {
   res.writeHead(303, { location, ...extraHeaders });
   res.end();
+}
+
+function braiCmdInboxFunctionKey(body) {
+  const explicit = firstTextField(body, ['brai_cmd_function', 'braiCmdFunction', 'function_key', 'functionKey']);
+  if (explicit) return explicit;
+
+  const text = typeof body?.text === 'string' ? body.text.trim() : '';
+  const hasAttachments = Array.isArray(body?.attachments) && body.attachments.length > 0;
+  const hasContext = body?.description_json && typeof body.description_json === 'object' && !Array.isArray(body.description_json);
+  if (hasAttachments && text === 'Скриншот') return 'screenshot_inbox';
+  if (hasAttachments) return 'screenshot_voice_inbox';
+  if (hasContext && text.startsWith(BRAI_CMD_CHAT_PREFIX)) return 'chat_context_inbox';
+  if (hasContext) return 'save_context_inbox';
+  return 'idea_voice_inbox';
+}
+
+function firstTextField(body, names) {
+  for (const name of names) {
+    const value = body?.[name];
+    if (typeof value === 'string' && value.trim()) return value.trim();
+  }
+  return '';
+}
+
+function sendBraiCmdFunctionDisabled(req, res, store, sendJson) {
+  const notice = store.braiCmdNotice?.(BRAI_CMD_FUNCTION_DISABLED_MESSAGE_KEY, 'error') ?? {
+    key: BRAI_CMD_FUNCTION_DISABLED_MESSAGE_KEY,
+    text: 'Функция временно недоступна',
+    tone: 'error'
+  };
+  sendJson(req, res, 403, {
+    error: notice.text,
+    code: BRAI_CMD_FUNCTION_DISABLED_CODE,
+    notice
+  });
 }
 
 function recordRuntimeLog(store, logger, input) {
@@ -1965,7 +2218,7 @@ function createdActivityIds(events) {
 
 async function readJson(req, { limit = 4096 } = {}) {
   const raw = await readRequestBody(req, { limit });
-  return raw ? JSON.parse(raw) : {};
+  return raw ? parseJsonBody(raw) : {};
 }
 
 async function readPassword(req) {
@@ -1975,9 +2228,19 @@ async function readPassword(req) {
     return new URLSearchParams(raw).get('password') ?? '';
   }
   if (contentType.includes('application/json')) {
-    return raw ? JSON.parse(raw).password ?? '' : '';
+    return raw ? parseJsonBody(raw).password ?? '' : '';
   }
   return raw;
+}
+
+function parseJsonBody(raw) {
+  try {
+    return JSON.parse(raw);
+  } catch {
+    const error = new Error('invalid_json');
+    error.status = 400;
+    throw error;
+  }
 }
 
 async function readRequestBody(req, { limit = 4096 } = {}) {
@@ -2098,13 +2361,15 @@ export function createUserVaultPreparer({
         `--id=${folderId}`,
         `--label=${label}`,
         `--path=${folderPath}`,
-        '--type=sendreceive'
+        '--type=sendreceive',
+        '--ignore-perms'
       ]);
       return;
     }
 
     await runSyncthingCli([...baseArgs, 'config', 'folders', folderId, 'label', 'set', label]);
     await runSyncthingCli([...baseArgs, 'config', 'folders', folderId, 'path', 'set', folderPath]);
+    await runSyncthingCli([...baseArgs, 'config', 'folders', folderId, 'ignore-perms', 'set', 'true']);
   };
 }
 

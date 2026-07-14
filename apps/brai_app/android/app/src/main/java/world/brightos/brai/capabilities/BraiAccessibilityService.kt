@@ -15,7 +15,6 @@ import android.view.Display
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
-import android.widget.Toast
 import world.brightos.brai.braicmd.AccessibilityContextReader
 import world.brightos.brai.braicmd.AccessibilityTextInserter
 import world.brightos.brai.braicmd.BraiCmdBus
@@ -138,10 +137,9 @@ class BraiAccessibilityService : AccessibilityService() {
         val inserted = insertTextIntoFocusedField(text)
         if (!inserted) {
             if (retryOnFocus && !retryingAutoInsert) autoInsertTranscriptFile = transcript.file.name
-            if (showToast) Toast.makeText(this, "Текст скопирован в буфер. Откройте нужное поле и нажмите кнопку еще раз.", Toast.LENGTH_LONG).show()
             BraiCmdBus.post(
                 RecorderState.Pending(
-                    message = "Текст сохранен и ожидает поле ввода",
+                    message = "Текст скопирован",
                     recordings = RecordingService.pendingRecordingsCount(this),
                     transcripts = pendingCount,
                     reason = PendingReason.Unknown
@@ -152,21 +150,22 @@ class BraiAccessibilityService : AccessibilityService() {
 
         if (autoInsertTranscriptFile == transcript.file.name) autoInsertTranscriptFile = null
         PendingTranscriptStore.delete(transcript)
+        BraiCmdPlugin.notifyStateChanged()
         BraiCmdPlugin.notifyOnboardingEvent("voiceTextInserted", text)
+        val pendingRecordings = RecordingService.pendingRecordingsCount(this)
         val pendingTranscripts = PendingTranscriptStore.list(this).size
-        if (!RecordingService.hasPendingRecordings(this) && pendingTranscripts == 0) {
+        if (pendingRecordings == 0 && pendingTranscripts == 0) {
             BraiCmdBus.post(RecorderState.Idle)
         } else {
             BraiCmdBus.post(
                 RecorderState.Pending(
-                    message = "Есть сохраненные записи или тексты в очереди",
-                    recordings = RecordingService.pendingRecordingsCount(this),
+                    message = if (pendingTranscripts > 0) "Текст скопирован" else "Ждёт интернет",
+                    recordings = pendingRecordings,
                     transcripts = pendingTranscripts,
-                    reason = PendingReason.Unknown
+                    reason = if (pendingRecordings > 0) PendingReason.Network else PendingReason.Unknown
                 )
             )
         }
-        if (showToast) Toast.makeText(this, "Сохраненный текст вставлен", Toast.LENGTH_SHORT).show()
         return true
     }
 

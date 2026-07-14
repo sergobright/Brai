@@ -331,6 +331,7 @@ test("local main sync preserves runtime dirs and hard resets to origin main", ()
   assert.match(script, /cp -a openspec\/changes\/\. "\$PRESERVED_OPENSPEC_CHANGES\/"/);
   assert.match(script, /restore_openspec_changes/);
   assert.match(script, /-e data\//);
+  assert.match(script, /-e vault\//);
   assert.match(script, /-e deploy\/web\//);
   assert.match(script, /-e deploy\/releases\//);
   assert.match(script, /brai-rescue/);
@@ -350,6 +351,7 @@ test("local main sync preserves runtime dirs and hard resets to origin main", ()
   assert.match(ciScript, /INSTALL_DEPENDENCIES.*== "true"/);
   assert.match(script, /apps\/brai_app\/node_modules/);
   assert.ok(script.match(/-type l -prune -o/g)?.length >= 4);
+  assert.ok(script.match(/-path "\$REPO\/vault" -prune -o/g)?.length >= 4);
   assert.match(script, /chmod u=rwx,g=rx,o=x deploy\/scripts/);
   assert.match(script, /chgrp brai-deploy "\$deploy_tool"/);
   assert.match(script, /chmod u=rwx,g=rx,o=rx "\$deploy_tool"/);
@@ -498,6 +500,11 @@ test("delivery classifier separates infra-docs from runtime preview", () => {
   assert.equal(deliveryClassForFile(".socraticodecontextartifacts.json"), "infra");
   assert.equal(deliveryClassForFile("deploy/scripts/publish-adr-site.sh"), "infra");
   assert.equal(deliveryClassForFile("scripts/run-log4brains.sh"), "infra");
+  assert.equal(deliveryClassForFile("scripts/install-brai-agent-skills.mjs"), "infra");
+  assert.equal(deliveryClassForFile("scripts/sync-hermes-skills.test.mjs"), "infra");
+  assert.equal(deliveryClassForFile("agent-skills/brai-debugging/SKILL.md"), "docs");
+  assert.equal(deliveryClassForFile("agent-skills/brai-debugging/agents/openai.yaml"), "infra");
+  assert.equal(deliveryClassForFile("optional-skills/hermes-agent/manifest.json"), "infra");
   assert.equal(deliveryClassForFile("tools/log4brains/package.json"), "infra");
   assert.equal(deliveryClassForFile("tools/log4brains/package-lock.json"), "infra");
   assert.equal(deliveryClassForFile("package.json"), "unknown");
@@ -524,6 +531,14 @@ test("delivery classifier separates infra-docs from runtime preview", () => {
           '+    "publish:apk": "deploy/scripts/publish-capacitor-apk.sh",',
           '+    "publish:adr": "deploy/scripts/publish-adr-site.sh"',
         ].join("\n"),
+      },
+    }).deliveryClass,
+    "infra-docs",
+  );
+  assert.equal(
+    classifyDelivery(["package.json"], {
+      diffs: {
+        "package.json": '+    "skills:install:brai": "scripts/use-node22.sh node scripts/install-brai-agent-skills.mjs",',
       },
     }).deliveryClass,
     "infra-docs",
@@ -885,6 +900,7 @@ test("remote deploy installs dependencies before replacing the active source tre
   const stageIndex = deploy.indexOf('cd "$REMOTE_UPLOAD"');
   const headroomIndex = deploy.indexOf('check_deploy_headroom "$ENVS_ROOT"');
   const installIndex = deploy.indexOf("npm --prefix services/brai_api ci", stageIndex);
+  const sourceLockIndex = deploy.indexOf('flock 8', installIndex);
   const previousIndex = deploy.indexOf('mv "$SOURCE_ROOT" "$PREVIOUS_SOURCE"', installIndex);
   const publishIndex = deploy.indexOf('mv "$REMOTE_UPLOAD" "$SOURCE_ROOT"', previousIndex);
   const deployBranchIndex = deploy.indexOf("deploy/scripts/deploy-branch.sh", publishIndex);
@@ -893,6 +909,8 @@ test("remote deploy installs dependencies before replacing the active source tre
   assert.ok(headroomIndex > 0);
   assert.ok(stageIndex < installIndex);
   assert.ok(headroomIndex < installIndex);
+  assert.ok(installIndex < sourceLockIndex);
+  assert.ok(sourceLockIndex < previousIndex);
   assert.ok(installIndex < previousIndex);
   assert.ok(previousIndex < publishIndex);
   assert.ok(publishIndex < deployBranchIndex);
@@ -900,6 +918,16 @@ test("remote deploy installs dependencies before replacing the active source tre
   assert.match(deploy, /BRAI_DEPLOY_MIN_FREE_GB:-4/);
   assert.match(deploy, /cleanup_stale_preview_previous_sources "\$\{PREVIOUS_SOURCE:-\}"/);
   assert.match(deploy, /"\$ENVS_ROOT"\/preview-\[a-e\]/);
+});
+
+test("direct Android builds share the deploy source-operation lock", () => {
+  const deploy = fs.readFileSync(new URL("../deploy/scripts/ci-ssh-deploy.sh", import.meta.url), "utf8");
+  const androidBuild = fs.readFileSync(new URL("../deploy/scripts/build-android-env-apk.sh", import.meta.url), "utf8");
+  assert.match(deploy, /\.source-operation\.lock/);
+  assert.match(deploy, /BRAI_SOURCE_OPERATION_LOCK_HELD=true/);
+  assert.match(androidBuild, /\.source-operation\.lock/);
+  assert.match(androidBuild, /BRAI_SOURCE_OPERATION_LOCK_HELD:-false/);
+  assert.match(androidBuild, /flock 8/);
 });
 
 test("preview deploy requires Postgres and preserves artifact setgid", () => {
@@ -935,6 +963,8 @@ test("preview deploy requires Postgres and preserves artifact setgid", () => {
   assert.match(playbook, /Ensure nested non-production data directories keep deploy setgid/);
   assert.match(playbook, /Ensure Syncthing vault root is writable by sync group/);
   assert.match(playbook, /Ensure existing Syncthing vault directories keep sync setgid/);
+  assert.match(playbook, /Ensure Syncthing keeps shared Vault files group-writable/);
+  assert.match(playbook, /UMask=0007/);
   assert.match(playbook, /owner: "{{ brai_syncthing_user }}"/);
   assert.match(playbook, /group: "{{ brai_source_group }}"/);
   assert.doesNotMatch(playbook, /SQLite|sqlite|brai\.sqlite/);
@@ -1493,6 +1523,7 @@ test("preview receipts must match exact branch and head", () => {
     short_changes: "Исправлен рабочий процесс версий.",
     detailed_changes: "Release notes передаются через preview handoff и acceptance PR.",
     reason: "Нужно не терять описания принятых сборок.",
+    testing: "Открыть Preview и проверить описанный пользовательский сценарий.",
   };
   const receipt = {
     branch: "codex/foo",
@@ -1592,13 +1623,13 @@ test("task state blocks local implementation work without exact preview receipt"
     const head = git(["rev-parse", "HEAD"], repo).stdout.trim();
     fs.writeFileSync(
       path.join(repo, ".brai-task", "preview-handoff.json"),
-      `${JSON.stringify({ branch: "codex/foo", commit: base, slot: "A", url: "https://a.test.brai.one", runId: 123, releaseNotes: { short_changes: "Исправлен тест.", detailed_changes: "Детали теста.", reason: "Нужно проверить receipt." }, verifiedAt: "2026-06-26T00:00:00.000Z" })}\n`,
+      `${JSON.stringify({ branch: "codex/foo", commit: base, slot: "A", url: "https://a.test.brai.one", runId: 123, releaseNotes: { short_changes: "Исправлен тест.", detailed_changes: "Детали теста.", reason: "Нужно проверить receipt.", testing: "Проверить пользовательский сценарий в Preview." }, verifiedAt: "2026-06-26T00:00:00.000Z" })}\n`,
     );
     assert.equal(deriveTaskState().ok, false);
 
     fs.writeFileSync(
       path.join(repo, ".brai-task", "preview-handoff.json"),
-      `${JSON.stringify({ branch: "codex/foo", commit: head, slot: "A", url: "https://a.test.brai.one", runId: 123, releaseNotes: { short_changes: "Исправлен тест.", detailed_changes: "Детали теста.", reason: "Нужно проверить receipt." }, verifiedAt: "2026-06-26T00:00:00.000Z" })}\n`,
+      `${JSON.stringify({ branch: "codex/foo", commit: head, slot: "A", url: "https://a.test.brai.one", runId: 123, releaseNotes: { short_changes: "Исправлен тест.", detailed_changes: "Детали теста.", reason: "Нужно проверить receipt.", testing: "Проверить пользовательский сценарий в Preview." }, verifiedAt: "2026-06-26T00:00:00.000Z" })}\n`,
     );
     assert.equal(deriveTaskState().ok, true);
 
@@ -1804,7 +1835,9 @@ test("delivery workflow avoids duplicate full checks on PR updates", () => {
 
 test("delivery workflow dispatches prod deploy through Temporal and bootstraps worker changes", () => {
   const workflow = fs.readFileSync(new URL("../.github/workflows/brai-delivery.yml", import.meta.url), "utf8");
+  const temporalWorkflow = fs.readFileSync(new URL("../services/brai_temporal/src/workflows.mjs", import.meta.url), "utf8");
   const deployProdJob = workflow.slice(workflow.indexOf("deploy-prod:"), workflow.indexOf("deploy-dev:"));
+  const prodPromotion = temporalWorkflow.slice(temporalWorkflow.indexOf("async function runProdPromotion"), temporalWorkflow.indexOf("async function runDevPromotion"));
 
   assert.match(deployProdJob, /permissions:\n\s+contents: write/);
   assert.match(deployProdJob, /id: temporal_worker_restart/);
@@ -1813,6 +1846,8 @@ test("delivery workflow dispatches prod deploy through Temporal and bootstraps w
   assert.match(deployProdJob, /Bootstrap Temporal worker for orchestration changes/);
   assert.match(deployProdJob, /ci-ssh-sync-main-checkout\.sh/);
   assert.match(deployProdJob, /dispatch-promotion --target prod/);
+  assert.ok(prodPromotion.indexOf("restartTemporalWorker: false") < prodPromotion.indexOf("cleanupAcceptedBranches({ recentMerged: true })"));
+  assert.ok(prodPromotion.indexOf("cleanupAcceptedBranches({ recentMerged: true })") < prodPromotion.indexOf("restartTemporalWorker: true"));
   assert.doesNotMatch(workflow, /sync-local-main-checkout:/);
 });
 
@@ -2083,6 +2118,7 @@ test("task state rejects same-thread writes after local acceptance marker", () =
           short_changes: "Исправлена остановка агента.",
           detailed_changes: "Stop hook блокирует ответ до завершения принятия preview.",
           reason: "Нельзя завершать задачу во время production delivery.",
+          testing: "Начать принятие Preview и убедиться, что задача остаётся активной.",
         },
         verifiedAt: "2026-06-26T00:00:00.000Z",
       })}\n`,
@@ -2312,6 +2348,8 @@ test("accepted preview stale cleanup is required", () => {
   assert.match(promoteScript, /already promoted for/);
   assert.match(requiredLoop, /exit 1/);
   assert.match(requiredLoop, /BRAI_REQUIRE_PREVIEW_SLOT_RELEASE=true/);
+  assert.match(requiredLoop, /BRAI_TARGET_BRANCH="\$TARGET_BRANCH"/);
+  assert.match(requiredLoop, /BRAI_TARGET_COMMIT="\$TARGET_COMMIT"/);
   assert.match(requiredLoop, /slot_released/);
   assert.match(script, /filter_cleanup_branches_to_active_previews/);
   assert.match(script, /accepted preview cleanup cannot continue safely/);
@@ -2320,9 +2358,15 @@ test("accepted preview stale cleanup is required", () => {
   assert.match(cleanupLoop, /Required cleanup failed/);
   assert.match(cleanupLoop, /exit 1/);
   assert.match(releaseScript, /cleanup-test-schemas\.mjs --branch "\$RELEASE_BRANCH" --legacy-before-hours 24/);
+  assert.match(releaseScript, /TARGET_BRANCH="\$\{6:-\}"/);
+  assert.match(releaseScript, /TARGET_COMMIT="\$\{7:-\}"/);
   assert.match(releaseScript, /stop_preview_unit_if_exists "brai-api-preview-\$SLOT_LOWER\.service"/);
   assert.match(releaseScript, /stop_preview_unit_if_exists "brai-admin-preview-\$SLOT_LOWER\.service"/);
   assert.match(releaseScript, /cleanup_released_preview_slot_artifacts/);
+  assert.match(releaseScript, /accepted_build_recorded\(\)/);
+  assert.match(releaseScript, /FROM build_version_refs/);
+  assert.match(releaseScript, /source_branch = \$1 AND target_branch = \$2 AND target_commit = \$3/);
+  assert.match(releaseScript, /"alreadyReleased":true/);
   assert.match(releaseScript, /"\$ENVS_ROOT"\/preview-\[a-e\]/);
   assert.match(releaseScript, /rm -rf "\$slot_root\/source" "\$slot_root"\/source\.previous-\* "\$slot_root\/web" "\$slot_root\/mobile-update"/);
   assert.doesNotMatch(releaseScript, /rm -rf .*data/);
@@ -2498,7 +2542,16 @@ console.log(JSON.stringify({
 NODE
 `);
   fs.chmodSync(temporalSignal, 0o755);
-  git(["add", ".gitignore", "base.txt", "deploy/environments.json", "deploy/scripts/ci-temporal-signal.sh"], repo);
+  fs.writeFileSync(path.join(repo, "deploy", "scripts", "preview-slots.sh"), "#!/usr/bin/env bash\nexit 0\n");
+  fs.chmodSync(path.join(repo, "deploy", "scripts", "preview-slots.sh"), 0o755);
+  git([
+    "add",
+    ".gitignore",
+    "base.txt",
+    "deploy/environments.json",
+    "deploy/scripts/ci-temporal-signal.sh",
+    "deploy/scripts/preview-slots.sh",
+  ], repo);
   git(["commit", "-m", "base"], repo);
   const base = git(["rev-parse", "HEAD"], repo).stdout.trim();
   git(["remote", "add", "origin", remote], repo);
@@ -2530,6 +2583,7 @@ NODE
       short_changes: "Подготовлен preview handoff.",
       detailed_changes: "Runtime ветка ждёт успешный delivery run и готовый preview slot.",
       reason: "Нужно проверить, что handoff не бросает активную доставку.",
+      testing: "Открыть Preview после завершения run и проверить готовность слота.",
     })}\n`,
   );
   fs.writeFileSync(

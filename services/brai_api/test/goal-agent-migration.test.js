@@ -83,7 +83,7 @@ test('0025 registers five isolated agent/workflow contracts and remains idempote
     assert.equal(unique.rowCount, 1);
     assert.match(unique.rows[0].indexdef, /UNIQUE/);
     assert.equal((await pool.query(`
-      SELECT count(*)::int AS count FROM schema_migrations WHERE version = 64
+      SELECT count(*)::int AS count FROM schema_migrations WHERE version = 65
     `)).rows[0].count, 1);
     const descriptions = (await pool.query(`
       SELECT table_name FROM table_descriptions
@@ -92,7 +92,7 @@ test('0025 registers five isolated agent/workflow contracts and remains idempote
     assert.deepEqual(descriptions, ['agents', 'ai_logs', 'workflow_executions']);
 
     const migration = fs.readFileSync(path.resolve(
-      import.meta.dirname, '../../../supabase/migrations/0025_goal_agent_workflows.sql'
+      import.meta.dirname, '../../../supabase/migrations/0029_goal_agent_workflows.sql'
     ), 'utf8');
     await pool.query(migration);
     assert.equal((await pool.query(`

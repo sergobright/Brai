@@ -28,6 +28,7 @@ export async function createInboxWorkflowRuntime({
   codexModel,
   codexFallbackModel,
   codexTimeoutMs,
+  userAiEncryptionKey,
   externalAi = {},
   address = process.env.TEMPORAL_ADDRESS ?? '127.0.0.1:7233',
   namespace = process.env.TEMPORAL_NAMESPACE ?? 'default',
@@ -37,6 +38,7 @@ export async function createInboxWorkflowRuntime({
 }) {
   const store = new BraiStore(databaseUrl);
   store.logger = logger;
+  store.configureUserAiEncryptionKey(userAiEncryptionKey);
   store.syncInboxWorkflowTaskQueue(taskQueue);
   store.syncActivityWorkflowTaskQueue(taskQueue);
   const workerStartedAt = now().toISOString();

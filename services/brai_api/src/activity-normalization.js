@@ -273,12 +273,12 @@ export async function normalizeActivityRawForWorkflow({
     validationError
   );
   const result = await normalizeJsonWithAgent({
+    store,
     agent,
-    settings: store.appSettings?.(),
     codexBin,
     codexModel,
     codexTimeoutMs,
-    externalAi,
+    providerFetch: externalAi?.fetch,
     normalizer,
     normalizerInput: { item, imageDescription, validationError },
     promptTemplate,
@@ -286,7 +286,6 @@ export async function normalizeActivityRawForWorkflow({
     strictOutputSchema: workflowVersion === ACTIVITY_WORKFLOW_DEFINITION_VERSION,
     cleanOutput: cleanActivityNormalization,
     defaultCodexModel: DEFAULT_INBOX_CODEX_MODEL,
-    externalTextModel: store.appSettings?.()?.inbox_text_model,
     schemaName: 'activity_normalization',
     timeoutPrefix: 'activity'
   });
@@ -300,6 +299,8 @@ export async function normalizeActivityRawForWorkflow({
     output: result.status === 'done' ? result : result.output,
     error: result.error,
     model: result.model,
+    mode: result.mode,
+    provider: result.provider,
     durationMs: result.durationMs,
     workflowId,
     runId,
@@ -318,6 +319,8 @@ export async function normalizeActivityRawForWorkflow({
     nowIso: nowDate.toISOString(),
     metadataJson: {
       model: result.model,
+      mode: result.mode,
+      provider: result.provider,
       duration_ms: result.durationMs,
       validation_failed: result.validationFailed === true
     }
@@ -437,7 +440,7 @@ function rawActivityText(item) {
 
 function recordActivityNormalizerAiLog(store, {
   agent, dt, status, activityId, item, imageDescription, output, error, model, durationMs,
-  workflowId, runId, attemptNumber
+  mode, provider, workflowId, runId, attemptNumber
 }) {
   return store.recordAiLog({
     agentId: ACTIVITY_NORMALIZER_AGENT_ID,
@@ -471,6 +474,8 @@ function recordActivityNormalizerAiLog(store, {
       usage: usageBlock(model),
       timings_ms: timingsBlock(durationMs),
       metadata: {
+        mode,
+        provider,
         error: error || null
       }
     }

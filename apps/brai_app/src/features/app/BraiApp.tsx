@@ -1,24 +1,29 @@
 "use client";
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
-import { BookOpen, Crown, Info, Settings } from "lucide-react";
-import { ensureBraiCmdAccess, openBraiCmdSettings, setBraiCmdOverlayEnabled, setBraiCmdQueuePausedMode, setBraiCmdVoiceOnlyMode } from "@/shared/platform/braiCmd";
+import { ArrowLeft, BookOpen, Crown, Info, PanelLeftClose, PanelLeftOpen } from "lucide-react";
+import type { AuthOnboardingContext } from "@/shared/api/braiApi";
+import { beginBraiCmdAccountCredentialMode, ensureBraiCmdAccess, getBraiCmdState, listenBraiCmdCredentialRefreshRequired, retryBraiCmdPendingAccountRevocation, retryBraiCmdQueue, setBraiCmdAccessKey, setBraiCmdAuthenticatedMode, setBraiCmdOverlayEnabled, syncBraiCmdProviderCredentials } from "@/shared/platform/braiCmd";
+import { useAppVersion } from "@/shared/config/runtime";
 import { installAndroidBackHandler, isNativeShell, platformName } from "@/shared/platform/platform";
 import { getBraiLocalStorageItem, removeBraiLocalStorageItem, setBraiLocalStorageItem } from "@/shared/storage/localStorageKeys";
 import { ScrollArea } from "@/shared/ui/scroll-area";
 import { SidebarInset, SidebarProvider } from "@/shared/ui/sidebar";
 import { OnboardingFlow, shouldShowOnboarding } from "@/features/onboarding/OnboardingFlow";
+import { loadOnboardingState } from "@/features/onboarding/onboardingModel";
 import { AuthScreen } from "./AuthScreen";
 import { AppStartupSplash } from "./AppStartupSplash";
 import { LocalDatabaseBlockedScreen } from "./LocalDatabaseBlockedScreen";
 import type { SectionId } from "./appModel";
 import { isPrimarySection, sectionIcon, sectionTitle } from "./appModel";
+import { braiCmdBootstrapRetryDelay } from "./braiCmdBootstrap.model";
 import { cx } from "./appUtils";
 import { IconButton, MobileContextSheet, ScreenHeader, ThemeButton } from "./chrome/AppChrome";
 import { useBraiAppState } from "./hooks/useBraiAppState";
 import { useActionsWorkspace } from "./hooks/useActionsWorkspace";
 import { DesktopRail, MainDock, MobileDockOverflowButton, MobileDockOverflowSheet, MobileMenuButton } from "./navigation/AppNavigation";
 import { MobileProfileDrawer, requestMobileProfileDrawerClose } from "./navigation/MobileProfileDrawer";
+import { ContextualRail, isContextualRailSection, useContextualRail } from "./navigation/ContextualRail";
 import { isMobileNavigationViewport, sectionSwipePageStyle, useLeftEdgeMenuSwipe } from "./navigation/useSectionSwipeNavigation";
 import { ActionsSection } from "./sections/actions/ActionsSection";
 import { ActionsInfoPanel } from "./sections/actions/ActionsInfoPanel";
@@ -28,43 +33,73 @@ import { BraiCmdSection } from "./sections/brai-cmd/BraiCmdSection";
 import { DrawsSection } from "./sections/draws/DrawsSection";
 import { EvilEyeSection } from "./sections/EvilEyeSection";
 import { EngineSection } from "./sections/engine/EngineSection";
+import { engineSectionView } from "./sections/engine/engineModel";
 import { FactorySection } from "./sections/factory/FactorySection";
 import { FocusBackground, FocusContextPanelSheet, FocusSection } from "./sections/focus/FocusSection";
 import { InboxSection } from "./sections/inbox/InboxSection";
 import { ProfileSection } from "./sections/profile/ProfileSection";
 import { SettingsSection } from "./sections/settings/SettingsSection";
 import type { MobileCreateDraft } from "./sections/MobileCreateComposer";
-const SECTION_PAGE_INSET_CLASS = "grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] pb-11 pl-7 pr-0 pt-3.5 max-[860px]:px-3.5 max-[860px]:pb-7 max-[860px]:pt-[var(--mobile-top-padding)]";
+const SECTION_PAGE_INSET_CLASS = "grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] pb-11 pl-7 pr-0 pt-3.5 max-[860px]:pb-7 max-[860px]:pl-3.5 max-[860px]:pr-0 max-[860px]:pt-[var(--mobile-top-padding)] max-[860px]:[&>.topbar]:pr-3.5";
 const FULLSCREEN_SECTION_PAGE_CLASS = "grid h-full min-h-0 grid-rows-[minmax(0,1fr)] p-0";
 const EMPTY_MOBILE_CREATE_DRAFT: MobileCreateDraft = { title: "", descriptionMd: "" };
 const ACTIONS_MOBILE_CREATE_DRAFT_STORAGE_KEY = "brai_actions_mobile_create_draft";
 const INBOX_MOBILE_CREATE_DRAFT_STORAGE_KEY = "brai_inbox_mobile_create_draft";
 export function BraiApp({ initialSection = "actions" }: { initialSection?: SectionId }) {
   const app = useBraiAppState(initialSection);
+  const appBuild = useAppVersion();
+  const engineView = engineSectionView({
+    appBuild,
+    appVersionState: app.versionState,
+    otaRefreshing: app.otaRefreshing,
+    otaState: app.otaState,
+    versionError: app.versionError,
+    versionRefreshing: app.versionRefreshing,
+  });
+  const engineDownloading = engineView.updateAction === "downloading-web" || engineView.updateAction === "downloading-apk";
+  const { authDisplayName, authUser, provisionBraiCmdDeviceToken } = app;
   const router = useRouter();
   const nativeAndroid = useMountedNativeAndroid();
   const [mobileDockMenu, setMobileDockMenu] = useState<"left" | "right" | null>(null);
   const [startupIntroComplete, setStartupIntroComplete] = useState(false);
   const [onboardingStartupActive, setOnboardingStartupActive] = useState(true);
-  const [onboardingVisible, setOnboardingVisible] = useState(() => shouldShowOnboarding(false));
+  const [onboardingVisible, setOnboardingVisible] = useState(() => shouldShowOnboarding(false) || (isNativeAndroid() && shouldKeepStoredLockedOnboarding()));
+  const [unauthEngineOpen, setUnauthEngineOpen] = useState(false);
+  const [unauthBraiCmdOpen, setUnauthBraiCmdOpen] = useState(false);
   const startupReady = app.localSnapshotReady || app.displaySyncStatus === "auth_required" || app.displaySyncStatus === "offline" || app.displaySyncStatus === "sync_failed";
   const domainMutationsBlocked = !app.localMutationReady && app.displaySyncStatus !== "auth_required";
   const onboardingAuthRequired = startupReady && app.displaySyncStatus === "auth_required";
-  const onboardingActive = nativeAndroid && (onboardingVisible || onboardingAuthRequired);
+  const unauthEngineActive = nativeAndroid && unauthEngineOpen;
+  const unauthBraiCmdActive = nativeAndroid && unauthBraiCmdOpen;
+  const storedLockedOnboarding = nativeAndroid && app.displaySyncStatus === "connecting" && shouldKeepStoredLockedOnboarding();
+  const onboardingActive = nativeAndroid && (onboardingVisible || onboardingAuthRequired || storedLockedOnboarding) && !unauthEngineActive && !unauthBraiCmdActive;
+  const visibleSection = unauthEngineActive ? "engine" : app.section;
+  const contextualRail = useContextualRail(visibleSection, app.authUser?.id);
+  const [contextualContent, setContextualContent] = useState<{ section: SectionId; content: ReactNode } | null>(null);
+  const registerContextualContent = useCallback((section: SectionId, content: ReactNode | null) => {
+    setContextualContent((current) => content == null
+      ? current?.section === section ? null : current
+      : { section, content });
+  }, []);
+  const registerDrawsRail = useCallback((content: ReactNode | null) => registerContextualContent("draws", content), [registerContextualContent]);
+  const registerArchiveRail = useCallback((content: ReactNode | null) => registerContextualContent("archive", content), [registerContextualContent]);
+  const activeContextualContent = contextualContent?.section === visibleSection ? contextualContent.content : null;
   const dockOverflowOpen = mobileDockMenu != null;
   const [actionsMobileCreateDraft, setActionsMobileCreateDraft] = useStoredMobileCreateDraft(ACTIONS_MOBILE_CREATE_DRAFT_STORAGE_KEY);
   const [inboxMobileCreateDraft, setInboxMobileCreateDraft] = useStoredMobileCreateDraft(INBOX_MOBILE_CREATE_DRAFT_STORAGE_KEY);
   const mobileViewport = useMountedMobileNavigationViewport();
   const [drawsFullScreen, setDrawsFullScreen] = useState(false);
   const { selectFilter: selectActionsWorkspaceFilter, workspace: actionsWorkspace } = useActionsWorkspace(app.actions, app.inbox, app.relations);
-  const drawsFullscreenActive = app.section === "draws" && drawsFullScreen;
+  const drawsFullscreenActive = visibleSection === "draws" && drawsFullScreen;
   const handleDrawsFullscreenChange = useCallback((nextFullScreen: boolean) => {
     setDrawsFullScreen(nextFullScreen);
     if (nextFullScreen) setMobileDockMenu(null);
   }, []);
   const sectionRef = useRef(app.section);
   const selectSectionRef = useRef(app.selectSection);
-  const adjacentSection = app.swipeNavigation.visual?.to;
+  const unauthEngineActiveRef = useRef(false);
+  const unauthBraiCmdActiveRef = useRef(false);
+  const adjacentSection = unauthEngineActive ? null : app.swipeNavigation.visual?.to;
   const handleStartupIntroComplete = useCallback(() => setStartupIntroComplete(true), []);
   const mobileMenuSwipe = useLeftEdgeMenuSwipe(
     () => {
@@ -80,24 +115,52 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
   }
 
   function openBraiCmd() {
-    void openBraiCmdSettings().then((opened) => {
-      if (!opened) app.selectSection("brai-cmd");
-    });
+    app.selectSection("brai-cmd");
   }
 
   async function openNativeBraiCmdSettings() {
-    return await openBraiCmdSettings();
+    setUnauthBraiCmdOpen(true);
+    return true;
+  }
+
+  function openUnauthEngine() {
+    setUnauthEngineOpen(true);
+  }
+
+  function closeUnauthSection() {
+    setUnauthEngineOpen(false);
+    setUnauthBraiCmdOpen(false);
+  }
+
+  async function onOnboardingEmailLogin(email: string, context?: AuthOnboardingContext) {
+    await app.onEmailLogin(email, context);
+  }
+
+  async function onOnboardingVerifyOtp(email: string, otp: string, context?: AuthOnboardingContext) {
+    await app.onVerifyOtp(email, otp, context);
   }
 
   useEffect(() => {
     sectionRef.current = app.section;
     selectSectionRef.current = app.selectSection;
-  }, [app.section, app.selectSection]);
+    unauthEngineActiveRef.current = unauthEngineActive;
+    unauthBraiCmdActiveRef.current = unauthBraiCmdActive;
+  }, [app.section, app.selectSection, unauthBraiCmdActive, unauthEngineActive]);
+
+  useEffect(() => {
+    if (!unauthEngineOpen) return;
+    if (nativeAndroid && (!app.localSnapshotReady || onboardingVisible || onboardingAuthRequired)) return;
+    const timeout = window.setTimeout(() => setUnauthEngineOpen(false), 0);
+    return () => window.clearTimeout(timeout);
+  }, [app.localSnapshotReady, nativeAndroid, onboardingAuthRequired, onboardingVisible, unauthEngineOpen]);
 
   useEffect(() => {
     if (!nativeAndroid) return;
     const timeout = window.setTimeout(() => {
-      setOnboardingVisible(shouldShowOnboarding(startupReady && app.displaySyncStatus === "auth_required"));
+      const shouldBeVisible =
+        shouldShowOnboarding(startupReady && app.displaySyncStatus === "auth_required") ||
+        (app.displaySyncStatus === "connecting" && shouldKeepStoredLockedOnboarding());
+      setOnboardingVisible((current) => current && app.displaySyncStatus === "connecting" ? true : shouldBeVisible);
     }, 0);
     return () => window.clearTimeout(timeout);
   }, [app.displaySyncStatus, nativeAndroid, startupReady]);
@@ -113,25 +176,159 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
 
   useEffect(() => {
     if (!nativeAndroid) return;
+    if (app.authUser) return;
     if (app.displaySyncStatus === "auth_required") {
-      void setBraiCmdVoiceOnlyMode(true);
-      return;
+      void Promise.all([
+        setBraiCmdAccessKey("", "", ""),
+        setBraiCmdOverlayEnabled(false),
+      ]);
     }
-    if (
-      onboardingVisible ||
-      !app.localSnapshotReady ||
-      app.displaySyncStatus === "connecting"
-    ) return;
-    void Promise.all([
-      ensureBraiCmdAccess(app.authDisplayName),
-      setBraiCmdOverlayEnabled(true),
-      setBraiCmdVoiceOnlyMode(false),
-      setBraiCmdQueuePausedMode(false),
-    ]);
-  }, [app.authDisplayName, app.displaySyncStatus, app.localSnapshotReady, nativeAndroid, onboardingVisible]);
+  }, [app.authUser, app.displaySyncStatus, nativeAndroid]);
+
+  useEffect(() => {
+    if (!nativeAndroid) return;
+    const retryPendingRevocation = () => void retryBraiCmdPendingAccountRevocation();
+    const retryWhenVisible = () => {
+      if (document.visibilityState === "visible") retryPendingRevocation();
+    };
+    window.addEventListener("online", retryPendingRevocation);
+    document.addEventListener("visibilitychange", retryWhenVisible);
+    retryPendingRevocation();
+    return () => {
+      window.removeEventListener("online", retryPendingRevocation);
+      document.removeEventListener("visibilitychange", retryWhenVisible);
+    };
+  }, [nativeAndroid]);
+
+  useEffect(() => {
+    if (!nativeAndroid || !authUser) return;
+    const authUserId = authUser.id;
+    let cancelled = false;
+    let attempt = 0;
+    let retryTimer: number | null = null;
+    let inFlight = false;
+    let credentialReady = false;
+    let credentialListener: { remove: () => Promise<void> } | null = null;
+
+    function scheduleRetry() {
+      if (cancelled || retryTimer != null) return;
+      const delay = braiCmdBootstrapRetryDelay(attempt);
+      attempt += 1;
+      retryTimer = window.setTimeout(() => {
+        retryTimer = null;
+        void provision();
+      }, delay);
+    }
+
+    async function provision() {
+      if (cancelled || inFlight) return;
+      inFlight = true;
+      try {
+        const accountMode = await beginBraiCmdAccountCredentialMode(authUserId);
+        if (!accountMode?.accountCredentialsActive) throw new Error("brai_cmd_account_mode_missing");
+        const access = await ensureBraiCmdAccess(authDisplayName || "Brai");
+        if (cancelled) return;
+        if (!access?.accessGranted) throw new Error("brai_cmd_device_access_missing");
+        const native = await getBraiCmdState();
+        if (cancelled) return;
+        if (!native?.deviceId) throw new Error("brai_cmd_device_id_missing");
+        const issued = await provisionBraiCmdDeviceToken({
+          deviceId: native.deviceId,
+          clientVersion: native.clientVersion,
+          appPackage: native.appPackage,
+        });
+        if (cancelled) return;
+        const credentialState = await setBraiCmdAccessKey(issued.token, authDisplayName, authUserId);
+        if (cancelled) return;
+        if (!credentialState?.accessGranted) throw new Error("brai_cmd_credential_not_saved");
+        const providerSync = await syncBraiCmdProviderCredentials();
+        if (cancelled) return;
+        if (!providerSync?.ok) {
+          if (providerSync?.code === "native_update_required") {
+            await setBraiCmdAuthenticatedMode(authUserId, false);
+            attempt = 0;
+            credentialReady = true;
+            return;
+          }
+          throw new Error(providerSync?.code || "brai_cmd_provider_sync_failed");
+        }
+        await enableAuthenticatedBraiCmdMode(authUserId);
+        if (cancelled) {
+          await setBraiCmdAuthenticatedMode(authUserId, false);
+          return;
+        }
+        await retryBraiCmdQueue();
+        attempt = 0;
+        credentialReady = true;
+      } catch {
+        scheduleRetry();
+      } finally {
+        inFlight = false;
+      }
+    }
+
+    function provisionNow(force = false) {
+      if (!force && credentialReady) return;
+      if (force) credentialReady = false;
+      if (retryTimer != null) window.clearTimeout(retryTimer);
+      retryTimer = null;
+      attempt = 0;
+      void provision();
+    }
+
+    async function resyncProviders() {
+      if (!credentialReady || cancelled || inFlight) {
+        provisionNow();
+        return;
+      }
+      inFlight = true;
+      try {
+        const result = await syncBraiCmdProviderCredentials();
+        if (!result?.ok) {
+          if (result?.code === "native_update_required") {
+            await setBraiCmdAuthenticatedMode(authUserId, false);
+            return;
+          }
+          throw new Error(result?.code || "brai_cmd_provider_sync_failed");
+        }
+      } catch {
+        credentialReady = false;
+        scheduleRetry();
+      } finally {
+        inFlight = false;
+      }
+    }
+
+    const onOnline = () => void resyncProviders();
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void resyncProviders();
+    };
+    window.addEventListener("online", onOnline);
+    document.addEventListener("visibilitychange", onVisible);
+    void listenBraiCmdCredentialRefreshRequired(() => provisionNow(true)).then((listener) => {
+      if (cancelled) void listener?.remove();
+      else credentialListener = listener;
+    });
+    provisionNow();
+
+    return () => {
+      cancelled = true;
+      void setBraiCmdAuthenticatedMode(authUserId, false);
+      if (retryTimer != null) window.clearTimeout(retryTimer);
+      window.removeEventListener("online", onOnline);
+      document.removeEventListener("visibilitychange", onVisible);
+      void credentialListener?.remove();
+    };
+  }, [authDisplayName, authUser, nativeAndroid, provisionBraiCmdDeviceToken]);
 
   useEffect(() => installAndroidBackHandler(() => {
     if (window.history.state?.braiMobileMenu || window.history.state?.braiMobileDockMenu || window.history.state?.braiMobileSheet || window.history.state?.braiActivityEditor || window.history.state?.braiOperationEditor || window.history.state?.braiMobileActionCreate || window.history.state?.braiInboxEditor || window.history.state?.braiMobileInboxCreate || window.history.state?.braiFactoryLog) return false;
+    if (unauthEngineActiveRef.current || unauthBraiCmdActiveRef.current) {
+      setUnauthEngineOpen(false);
+      setUnauthBraiCmdOpen(false);
+      selectSectionRef.current("actions");
+      return true;
+    }
     if (sectionRef.current === "actions") return false;
     if (window.history.state?.braiSection === sectionRef.current) {
       window.history.back();
@@ -143,6 +340,7 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
 
   function renderSectionScreen(screenSection: SectionId, isActivePage: boolean) {
     const hideScreenHeader = screenSection === "draws" && drawsFullscreenActive;
+    const authBlocked = app.displaySyncStatus === "auth_required" && !(unauthEngineActive && screenSection === "engine");
 
     return (
       <>
@@ -152,7 +350,19 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
             icon={sectionIcon(screenSection)}
             syncStatus={app.displaySyncStatus}
             pendingCount={app.totalPendingCount}
-            leading={isPrimarySection(screenSection) ? <MobileMenuButton onClick={openMobileMenu} /> : null}
+            leading={isPrimarySection(screenSection) || isContextualRailSection(screenSection) ? <MobileMenuButton onClick={openMobileMenu} /> : null}
+            desktopLeading={isContextualRailSection(screenSection) ? (
+              <button
+                type="button"
+                className="grid size-7 place-items-center rounded-md border-0 bg-transparent text-foreground hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                aria-label={contextualRail.open ? "Закрыть контекстную панель" : "Открыть контекстную панель"}
+                title={contextualRail.open ? "Закрыть контекстную панель" : "Открыть контекстную панель"}
+                aria-pressed={contextualRail.open}
+                onClick={() => contextualRail.setOpen(!contextualRail.open)}
+              >
+                {contextualRail.open ? <PanelLeftClose className="size-5" aria-hidden="true" /> : <PanelLeftOpen className="size-5" aria-hidden="true" />}
+              </button>
+            ) : undefined}
             trailing={
               screenSection === "actions" && mobileViewport ? (
                 <IconButton icon={Info} label="Информация о действиях" active={app.actionsInfoActive} onClick={app.toggleActionsInfoPanel} />
@@ -163,15 +373,13 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
                   <IconButton icon={Crown} label="Цели фокусировки" active={app.focusGoalActive} onClick={() => app.toggleFocusContextPanel("goal")} />
                   <IconButton icon={BookOpen} label="История фокуса" active={app.focusHistoryActive} className="min-[861px]:mr-5 max-[860px]:mr-1.5" onClick={() => app.toggleFocusContextPanel("history")} />
                 </>
-              ) : screenSection === "archive" ? (
-                <IconButton icon={Settings} label="Назад к настройкам" onClick={app.openSettingsPage} />
               ) : screenSection === "settings" ? (
                 <ThemeButton theme={app.theme} onTheme={app.setTheme} />
               ) : null
             }
           />
         ) : null}
-        {app.displaySyncStatus === "auth_required" ? (
+        {authBlocked ? (
           <AuthScreen
             busy={app.busy}
             layout="embedded"
@@ -225,13 +433,20 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
             onUpdateTitle={app.onUpdateInboxTitle}
             onAutosaveDetails={app.onAutosaveInboxDetails}
             onDelete={app.onDeleteInboxItem}
+            onReorder={app.onReorderInbox}
             mobileCreateDraft={inboxMobileCreateDraft}
             onMobileCreateDraftChange={setInboxMobileCreateDraft}
             dockOverflowOpen={dockOverflowOpen}
             onMobileOverlayChange={app.setActionOverlayOpen}
           />
         ) : screenSection === "archive" ? (
-          <ArchiveSection state={app.actions} localSnapshotReady={app.localSnapshotReady} onRestore={app.onRestoreAction} />
+          <ArchiveSection
+            activityState={app.actions}
+            localSnapshotReady={app.localSnapshotReady}
+            onRestoreAction={app.onRestoreAction}
+            onRestoreInbox={app.onRestoreInboxItem}
+            onRailContent={isActivePage ? registerArchiveRail : undefined}
+          />
         ) : screenSection === "profile" ? (
           <ProfileSection />
         ) : screenSection === "factory" ? (
@@ -256,7 +471,11 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
         ) : screenSection === "evil-eye" ? (
           <EvilEyeSection />
         ) : screenSection === "draws" ? (
-          <DrawsSection theme={app.theme} onFullscreenChange={isActivePage ? handleDrawsFullscreenChange : undefined} />
+          <DrawsSection
+            theme={app.theme}
+            onFullscreenChange={isActivePage ? handleDrawsFullscreenChange : undefined}
+            onRailContent={isActivePage ? registerDrawsRail : undefined}
+          />
         ) : screenSection === "engine" ? (
           <EngineSection
             appVersionState={app.versionState}
@@ -267,11 +486,15 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
             versionCheckedAt={app.versionCheckedAt}
             versionError={app.versionError}
             versionRefreshing={app.versionRefreshing}
+            onDownloadApk={app.downloadApkOnce}
+            onInstallApk={app.installApkOnce}
+            onDownloadWebUpdate={app.downloadWebUpdateOnce}
             onRefreshEngine={app.refreshEngineOnce}
           />
         ) : screenSection === "settings" ? (
           <SettingsSection
             settings={app.appSettings}
+            api={app.api}
             busy={app.busy}
             onUpdate={app.onUpdateAppSettings}
           />
@@ -296,13 +519,44 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
           authMode={app.authMode}
           busy={app.busy}
           onDone={() => setOnboardingVisible(false)}
-          onEmailLogin={app.onEmailLogin}
+          onEmailLogin={onOnboardingEmailLogin}
+          onOpenEngine={openUnauthEngine}
           onOpenNativeCmdSettings={openNativeBraiCmdSettings}
           onRequestOtp={app.onRequestOtp}
           onStartupScreenChange={setOnboardingStartupActive}
-          onVerifyOtp={app.onVerifyOtp}
+          onVerifyOtp={onOnboardingVerifyOtp}
           startupIntroComplete={startupIntroComplete}
         />
+      ) : unauthEngineActive || unauthBraiCmdActive ? (
+        <main className="grid h-dvh min-h-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden bg-background px-3.5 pb-[env(safe-area-inset-bottom)] pt-[env(safe-area-inset-top)]" data-standalone-section>
+          <ScreenHeader
+            title={unauthEngineActive ? "Engine" : "Brai CMD"}
+            icon={sectionIcon(unauthEngineActive ? "engine" : "brai-cmd")}
+            syncStatus={app.displaySyncStatus}
+            pendingCount={app.totalPendingCount}
+            leading={<IconButton icon={ArrowLeft} label="Назад" onClick={closeUnauthSection} />}
+          />
+          <ScrollArea scrollbar={false} className="min-h-0">
+            <div className="pb-6">
+              {unauthEngineActive ? (
+                <EngineSection
+                  appVersionState={app.versionState}
+                  bundlePublishedAt={app.bundlePublishedAt}
+                  otaCheckedAt={app.otaCheckedAt}
+                  otaRefreshing={app.otaRefreshing}
+                  otaState={app.otaState}
+                  versionCheckedAt={app.versionCheckedAt}
+                  versionError={app.versionError}
+                  versionRefreshing={app.versionRefreshing}
+                  onDownloadApk={app.downloadApkOnce}
+                  onInstallApk={app.installApkOnce}
+                  onDownloadWebUpdate={app.downloadWebUpdateOnce}
+                  onRefreshEngine={app.refreshEngineOnce}
+                />
+              ) : <BraiCmdSection />}
+            </div>
+          </ScrollArea>
+        </main>
       ) : (
         <SidebarProvider
       open={false}
@@ -318,7 +572,7 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
     >
       {!drawsFullscreenActive && !mobileViewport ? (
         <DesktopRail
-          section={app.section}
+          section={visibleSection}
           appVersionState={app.versionState}
           otaRefreshing={app.otaRefreshing}
           otaState={app.otaState}
@@ -335,16 +589,21 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
           onLogout={app.onLogout}
         />
       ) : null}
+      {!drawsFullscreenActive && contextualRail.supported ? (
+        <ContextualRail open={contextualRail.open} width={contextualRail.width} onWidth={contextualRail.setWidth}>
+          {activeContextualContent}
+        </ContextualRail>
+      ) : null}
       <SidebarInset className={cx("main-view m-0 h-full min-h-0 w-full min-w-0 overflow-hidden max-[860px]:overscroll-contain max-[860px]:[touch-action:pan-y]", app.swipeNavigation.visual && "is-section-swiping")} {...mobileMenuSwipe.handlers}>
-        {app.section === "focus" ? <FocusBackground active={app.active} mode={app.focusBackground} /> : null}
+        {visibleSection === "focus" ? <FocusBackground active={app.active} mode={app.focusBackground} /> : null}
         <ScrollArea scrollbar={false} className="main-scroll relative z-[1] h-full [&>[data-slot=scroll-area-viewport]>div]:h-full max-[860px]:[&>[data-slot=scroll-area-viewport]]:overscroll-contain max-[860px]:[&>[data-slot=scroll-area-viewport]]:[touch-action:pan-y]">
           <div className="section-swipe-stage relative m-0 h-full min-h-0 w-full overflow-x-hidden overflow-y-visible">
             <section
               className={cx("section-page section-page-current relative z-[1] min-w-0 [backface-visibility:hidden]", drawsFullscreenActive ? FULLSCREEN_SECTION_PAGE_CLASS : SECTION_PAGE_INSET_CLASS, app.swipeNavigation.visual && "will-change-transform")}
-              data-section-page={app.section}
+              data-section-page={visibleSection}
               style={sectionSwipePageStyle(app.swipeNavigation.visual, "current")}
             >
-              {renderSectionScreen(app.section, true)}
+              {renderSectionScreen(visibleSection, true)}
             </section>
             {adjacentSection && adjacentSection !== app.section ? (
               <section
@@ -361,7 +620,7 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
       </SidebarInset>
       {!drawsFullscreenActive ? (
         <MainDock
-          section={app.section}
+          section={visibleSection}
           hidden={app.actionOverlayOpen || app.mobileContextPanel != null}
           mobileViewport={mobileViewport}
           onSection={app.selectSection}
@@ -373,6 +632,7 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
         <>
           <MobileDockOverflowButton
             side="left"
+            hasUpdate={engineView.hasUpdate}
             hidden={app.mobileMenuOpen || mobileDockMenu === "left" || app.actionOverlayOpen}
             onClick={() => setMobileDockMenu("left")}
           />
@@ -388,16 +648,18 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
         <MobileProfileDrawer
           onClose={() => app.setMobileMenuOpen(false)}
         >
-          {app.section === "actions" ? (
+          {visibleSection === "actions" ? (
             <ActionsSidebarContent workspace={actionsWorkspace} contextReviews={app.contextReviews} onSelect={(filter) => { selectActionsWorkspaceFilter(filter); requestMobileProfileDrawerClose(); }} onCreateGoal={app.onCreateGoal} onRestoreGoal={app.onRestoreGoal} onResolve={app.onResolveContextDecision} onUndo={app.onUndoContextDecision} />
-          ) : null}
+          ) : activeContextualContent}
         </MobileProfileDrawer>
       ) : null}
       {mobileDockMenu && !drawsFullscreenActive ? (
         <MobileDockOverflowSheet
           side={mobileDockMenu}
-          section={app.section}
+          section={visibleSection}
           authUser={app.authUser}
+          engineDownloading={engineDownloading}
+          engineHasUpdate={engineView.hasUpdate}
           onClose={() => setMobileDockMenu(null)}
           onProfile={() => app.selectSection("profile")}
           onSettings={app.openSettingsPage}
@@ -408,33 +670,42 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
           onLogout={app.onLogout}
         />
       ) : null}
-      {app.mobileContextPanel === "actions-info" && app.section === "actions" ? (
+      {app.mobileContextPanel === "actions-info" && visibleSection === "actions" ? (
         <MobileContextSheet label="Информация о действиях" onClose={() => app.setMobileContextPanel(null)} onCloseStart={app.markMobileContextPanelClosing}>
           <ActionsInfoPanel mobile>
             <ActionsSidebarContent workspace={actionsWorkspace} contextReviews={app.contextReviews} onSelect={(filter) => { selectActionsWorkspaceFilter(filter); app.setMobileContextPanel(null); }} onCreateGoal={app.onCreateGoal} onRestoreGoal={app.onRestoreGoal} onResolve={app.onResolveContextDecision} onUndo={app.onUndoContextDecision} />
           </ActionsInfoPanel>
         </MobileContextSheet>
       ) : null}
-      {app.mobileContextPanel === "inbox-info" && app.section === "inbox" ? (
+      {app.mobileContextPanel === "inbox-info" && visibleSection === "inbox" ? (
         <MobileContextSheet label="Информация о входящих" onClose={() => app.setMobileContextPanel(null)} onCloseStart={app.markMobileContextPanelClosing}>
           <ActionsInfoPanel label="Информация о входящих" mobile />
         </MobileContextSheet>
       ) : null}
-      {app.mobileContextPanel === "focus-goal" && app.section === "focus" ? (
+      {app.mobileContextPanel === "focus-goal" && visibleSection === "focus" ? (
         <FocusContextPanelSheet panel="goal" history={app.history} goal={app.goal} todayKey={app.todayKey} onClose={() => app.setMobileContextPanel(null)} onCloseStart={app.markMobileContextPanelClosing} onDeleteSession={app.onDeleteFocusSession} onEditInterval={app.onEditFocusInterval} onEditSession={app.onEditFocusSession} />
       ) : null}
-      {app.mobileContextPanel === "focus-history" && app.section === "focus" ? (
+      {app.mobileContextPanel === "focus-history" && visibleSection === "focus" ? (
         <FocusContextPanelSheet panel="history" history={app.history} goal={app.goal} todayKey={app.todayKey} onClose={() => app.setMobileContextPanel(null)} onCloseStart={app.markMobileContextPanelClosing} onDeleteSession={app.onDeleteFocusSession} onEditInterval={app.onEditFocusInterval} onEditSession={app.onEditFocusSession} />
       ) : null}
         </SidebarProvider>
       )}
-      <AppStartupSplash
-        ready={startupReady}
-        persist={onboardingActive && onboardingStartupActive}
-        onIntroComplete={handleStartupIntroComplete}
-      />
+      {onboardingActive ? (
+        <AppStartupSplash
+          ready={startupReady}
+          persist={onboardingStartupActive}
+          onIntroComplete={handleStartupIntroComplete}
+        />
+      ) : null}
     </>
   );
+}
+
+async function enableAuthenticatedBraiCmdMode(userId: string): Promise<void> {
+  const state = await setBraiCmdAuthenticatedMode(userId, true);
+  if (!state?.overlayEnabled || state.voiceOnlyMode !== false || state.queuePausedMode !== false) {
+    throw new Error("brai_cmd_mode_not_applied");
+  }
 }
 
 function useMountedMobileNavigationViewport(): boolean {
@@ -459,6 +730,11 @@ function subscribeNativeAndroid() {
 
 function isNativeAndroid(): boolean {
   return isNativeShell() && platformName() === "android";
+}
+
+function shouldKeepStoredLockedOnboarding(): boolean {
+  const state = loadOnboardingState();
+  return state.complete && state.step === "locked";
 }
 
 function subscribeMobileNavigationViewport(onStoreChange: () => void) {

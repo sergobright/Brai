@@ -84,45 +84,54 @@ Brai SHALL process newly saved Inbox records asynchronously through the normaliz
 - **WHEN** the normalizer proposes a class key that is not in `inbox_classes`
 - **THEN** Brai creates or records a candidate class for later review through the apply/mutation path
 
-### Requirement: Text-only Inbox normalization uses bounded local Codex inference
-Brai SHALL normalize Inbox records without required image work through the
-installed local Codex CLI with a versioned structured-output contract.
+### Requirement: Text-only Inbox normalization uses the owner's selected inference mode
+Brai SHALL normalize Inbox records through the installed Codex CLI in internal mode or
+through the authenticated owner's verified external text profile in external mode while
+preserving the workflow definition's versioned structured-output contract.
 
-#### Scenario: Text-only record is normalized
-- **WHEN** a queued Inbox record has no image attachment requiring description
+#### Scenario: Text-only record is normalized in internal mode
+- **WHEN** a queued Inbox record has no image work and its owner uses internal mode
 - **THEN** `inbox.normalizer` calls local `codex exec --ephemeral`
 - **AND** the configured production default remains `gpt-5.4-mini`
-- **AND** the call passes the exact stored `brai.inbox.normalized.v2` strict output schema through `--output-schema`
-- **AND** the call runs from isolated temporary context with low reasoning and verbosity
+- **AND** a workflow definition supporting strict CLI output passes its exact stored schema through `--output-schema`
+- **AND** the call runs from an isolated temporary context with low reasoning and verbosity
 - **AND** a narrow model instruction file replaces unrelated general coding-agent instructions
-- **AND** title, description, class fields, and normalization text are locally validated before apply
-- **AND** the successful execution records model, attempt, and timings in `ai_logs`
 - **AND** no direct model-provider API bypasses Codex CLI
 
-#### Scenario: Local Codex execution fails
-- **WHEN** Codex CLI times out, exits unsuccessfully, refuses, or produces unusable output
-- **THEN** each real Codex execution is represented in `ai_logs`
-- **AND** Brai does not bypass Codex through a direct provider API
-- **AND** the raw Inbox record remains intact
-- **AND** the workflow reaches an explicit terminal status after its bounded attempts are exhausted
+#### Scenario: Text-only record is normalized in external mode
+- **WHEN** a queued Inbox record has no image work and its owner uses external mode
+- **THEN** `inbox.normalizer` calls the owner's selected text provider and model
+- **AND** the provider key comes only from the owner's encrypted credential
+- **AND** the provider receives the stored workflow schema through its supported structured-output contract
+- **AND** Brai does not use a project or server provider key
 
-#### Scenario: A legacy v1 execution was already persisted before upgrade
-- **WHEN** a queued or running execution is pinned to `inbox.raw-normalization` v1
-- **THEN** Brai keeps its workflow definition version and reads the retired v1 schema
-- **AND** it uses the isolated local Codex CLI with local v1 schema validation
-- **AND** it does not silently relabel that execution as v2 or send it through the v2 strict-schema contract
-- **AND** newly created executions use v2
+#### Scenario: Selected inference returns structured output
+- **WHEN** Codex CLI or the selected external provider returns normalization output
+- **THEN** Brai validates it against the exact stored schema for the pinned workflow definition
+- **AND** title, description, class fields, and normalization text are locally validated before apply
+- **AND** exactly one `ai_logs` row records each real inference attempt with mode, provider, model, status, attempt, and timings
 
-#### Scenario: Strict output cannot be accepted
-- **WHEN** the provider refuses the request or the returned object fails local schema or business validation
-- **THEN** Brai does not apply partial normalized data
+#### Scenario: Selected inference fails
+- **WHEN** Codex CLI or the selected external provider times out, rejects, refuses, is quota-limited, or returns unusable output
+- **THEN** each real inference attempt is represented exactly once in `ai_logs`
+- **AND** Brai does not apply partial normalized data
 - **AND** the raw Inbox record remains intact
-- **AND** the workflow reaches `needs_review` or `failed` with a bounded error code
+- **AND** the workflow reaches `needs_review` or `failed` with a bounded safe error after allowed attempts
 - **AND** the UI does not continue to report an active AI operation indefinitely
+- **AND** Brai does not switch inference modes or use a project or server provider key
+
+#### Scenario: A legacy workflow execution resumes
+- **WHEN** an execution pinned to an older workflow definition resumes
+- **THEN** it keeps that definition's version, stored schema, and attempt behavior
+- **AND** internal mode preserves isolated Codex execution and does not silently apply a later strict CLI schema contract to legacy v1
+- **AND** external mode uses only the current owner's selected profile while validating against the pinned schema
+- **AND** the execution is not silently relabeled as a newer workflow version
+- **AND** newly created executions use the current owner-scoped workflow contract
+- **AND** no inference call uses a project or server provider key
 
 #### Scenario: Text-only latency is measured
-- **WHEN** successful no-image Inbox workflows run in preview
+- **WHEN** successful no-image Inbox workflows run in Preview
 - **THEN** Brai measures latency from execution creation through completion
 - **AND** at least 30 runs report p50, p90, p95, and p99
 - **AND** about one second remains an optimization goal rather than an unmeasured release guarantee
-- **AND** the configured Codex timeout is the hard upper bound for each attempt
+- **AND** the configured timeout of the selected inference backend is the hard upper bound for each attempt

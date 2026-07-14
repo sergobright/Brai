@@ -12,6 +12,6 @@ export default defineConfig({
     globals: true,
     hookTimeout: 20_000,
     maxWorkers: 3,
-    testTimeout: 20_000,
+    testTimeout: 15_000,
   },
 });

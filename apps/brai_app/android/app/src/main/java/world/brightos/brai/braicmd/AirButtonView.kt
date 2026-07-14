@@ -16,6 +16,7 @@ import kotlin.math.sin
 
 class AirButtonView(context: Context) : View(context) {
     private val iconBitmap = BitmapFactory.decodeResource(resources, R.drawable.bright_command_large_hex)
+    private val marker = braiFloatingButtonMarker()
     private val iconBounds = Rect()
     private val bitmapPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
     private val strokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -33,14 +34,21 @@ class AirButtonView(context: Context) : View(context) {
 
     private var state: RecorderState = RecorderState.Idle
     private var queueBadge: QueueBadgeState? = null
+    private var updateAvailable = false
 
     fun setRecorderState(next: RecorderState) {
         state = next
         invalidate()
     }
 
-    fun setQueueState(failedCount: Int, readyCount: Int) {
-        queueBadge = resolveQueueBadgeState(failedCount, readyCount)
+    fun setQueueState(failedAudioCount: Int) {
+        queueBadge = resolveQueueBadgeState(failedAudioCount)
+        invalidate()
+    }
+
+    fun setUpdateAvailable(available: Boolean) {
+        if (updateAvailable == available) return
+        updateAvailable = available
         invalidate()
     }
 
@@ -59,6 +67,8 @@ class AirButtonView(context: Context) : View(context) {
             else -> Unit
         }
         queueBadge?.let { drawQueueBadge(canvas, it) }
+        if (updateAvailable) drawUpdateDot(canvas)
+        drawFloatingButtonMarker(canvas, marker, cx, cy, minOf(width, height).toFloat(), textPaint)
 
         if (state is RecorderState.Recording || state is RecorderState.Uploading) {
             postInvalidateOnAnimation()
@@ -104,12 +114,29 @@ class AirButtonView(context: Context) : View(context) {
         val badgeY = height * 0.23f
         val badgePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             style = Paint.Style.FILL
-            color = if (badge.tone == QueueBadgeTone.Ready) COLOR_BADGE_GREEN else COLOR_ICON_RED
+            color = COLOR_ICON_RED
         }
         canvas.drawCircle(badgeX, badgeY, badgeRadius, badgePaint)
         textPaint.color = COLOR_BADGE_TEXT
         textPaint.textSize = if (label.length == 1) width * 0.2f else width * 0.14f
         canvas.drawText(label, badgeX, badgeY - (textPaint.descent() + textPaint.ascent()) / 2f, textPaint)
+    }
+
+    private fun drawUpdateDot(canvas: Canvas) {
+        val radius = max(resources.displayMetrics.density * 4.5f, width * 0.065f)
+        val dotX = width * 0.77f
+        val dotY = height * 0.77f
+        val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.FILL
+            color = COLOR_UPDATE_DOT
+        }
+        val stroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE
+            strokeWidth = max(1f, radius * 0.22f)
+            color = COLOR_UPDATE_DOT_STROKE
+        }
+        canvas.drawCircle(dotX, dotY, radius, fill)
+        canvas.drawCircle(dotX, dotY, radius, stroke)
     }
 
     private fun drawError(canvas: Canvas, cx: Float, cy: Float) {
@@ -125,23 +152,13 @@ class AirButtonView(context: Context) : View(context) {
     companion object {
         private const val COLOR_ICON_RED = 0xFFFF2020.toInt()
         private const val COLOR_ICON_RED_SOFT = 0xB8FF2020.toInt()
-        private const val COLOR_BADGE_GREEN = 0xFF2ED36F.toInt()
         private const val COLOR_BADGE_TEXT = 0xFF050505.toInt()
+        private const val COLOR_UPDATE_DOT = 0xFFFFD24A.toInt()
+        private const val COLOR_UPDATE_DOT_STROKE = 0xFF241C00.toInt()
     }
 }
 
-internal enum class QueueBadgeTone {
-    Pending,
-    Ready
-}
+internal data class QueueBadgeState(val count: Int)
 
-internal data class QueueBadgeState(
-    val count: Int,
-    val tone: QueueBadgeTone
-)
-
-internal fun resolveQueueBadgeState(failedCount: Int, readyCount: Int): QueueBadgeState? = when {
-    readyCount > 0 -> QueueBadgeState(readyCount, QueueBadgeTone.Ready)
-    failedCount > 0 -> QueueBadgeState(failedCount, QueueBadgeTone.Pending)
-    else -> null
-}
+internal fun resolveQueueBadgeState(failedAudioCount: Int): QueueBadgeState? =
+    failedAudioCount.takeIf { it > 0 }?.let(::QueueBadgeState)

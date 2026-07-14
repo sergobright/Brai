@@ -89,6 +89,16 @@ env_database_url() {
     printf '%s' "${BRAI_DATABASE_URL:-}"
   )
 }
+env_release_password() {
+  local env_file="$1"
+  (
+    set -a
+    # shellcheck source=/dev/null
+    . "$env_file"
+    set +a
+    printf '%s' "${BRAI_RELEASE_PASSWORD:-}"
+  )
+}
 check_deploy_headroom() {
   local root="$1"
   local min_gb="${BRAI_DEPLOY_MIN_FREE_GB:-4}"
@@ -354,17 +364,17 @@ npm --prefix apps/brai_app ci
 npm --prefix services/brai_api ci
 npm --prefix services/brai_goal_agents ci
 npm --prefix admin ci
-find "$REMOTE_UPLOAD" -user "$(id -u)" -exec chmod u+rwX,g+rwX {} +
+find "$REMOTE_UPLOAD" ! -type l -user "$(id -u)" -exec chmod u+rwX,g+rwX {} +
 find "$REMOTE_UPLOAD" -type d -user "$(id -u)" -exec chmod g+s {} +
 
-DEPLOY_LOCK="$ENVS_ROOT/.deploy-$ENV_PATH.lock"
-exec 8>"$DEPLOY_LOCK"
+SOURCE_OPERATION_LOCK="$(dirname "$SOURCE_ROOT")/.source-operation.lock"
+exec 8>"$SOURCE_OPERATION_LOCK"
 flock 8
-
+export BRAI_SOURCE_OPERATION_LOCK_HELD=true
 SOURCE_PRESENT="false"
 if [[ -d "$SOURCE_ROOT" ]]; then
   SOURCE_PRESENT="true"
-  find "$SOURCE_ROOT" -user "$(id -u)" -exec chmod u+rwX,g+rwX {} + || true
+  find "$SOURCE_ROOT" ! -type l -user "$(id -u)" -exec chmod u+rwX,g+rwX {} + || true
 fi
 PREVIOUS_SOURCE="${SOURCE_ROOT}.previous-$(date -u +%Y%m%d%H%M%S)-$$"
 mkdir -p "$(dirname "$SOURCE_ROOT")"
@@ -386,6 +396,9 @@ set +a
 BRAI_PROD_DATABASE_URL="$(env_database_url /etc/brai/brai-api.env)"
 [[ -n "$BRAI_PROD_DATABASE_URL" ]] || { echo "BRAI_DATABASE_URL is missing in /etc/brai/brai-api.env" >&2; exit 1; }
 export BRAI_PROD_DATABASE_URL
+BRAI_RELEASE_PASSWORD="$(env_release_password /etc/brai/brai-api.env)"
+[[ -n "$BRAI_RELEASE_PASSWORD" ]] || { echo "BRAI_RELEASE_PASSWORD is missing in /etc/brai/brai-api.env" >&2; exit 1; }
+export BRAI_RELEASE_PASSWORD
 
 CURRENT_DATABASE_URL=""
 if [[ "$ENVIRONMENT" == "prod" ]]; then
@@ -490,6 +503,7 @@ if [[ "$ENVIRONMENT" == "prod" ]]; then
   . /etc/brai/brai-api.env
   set +a
 else
+  [[ -r "$ENVS_ROOT/$ENV_PATH/brai-api.env" ]] || { echo "$ENVS_ROOT/$ENV_PATH/brai-api.env is required for $ENVIRONMENT deploy" >&2; exit 1; }
   set -a
   # shellcheck source=/dev/null
   . "$ENVS_ROOT/$ENV_PATH/brai-api.env"

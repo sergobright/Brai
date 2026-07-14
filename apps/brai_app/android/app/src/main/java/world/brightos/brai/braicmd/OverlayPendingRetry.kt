@@ -121,7 +121,7 @@ internal class OverlayPendingRetry(
 
     /** Returns the delay that was scheduled, 0 for an immediate resume, or null when no retry is needed. */
     fun schedule(nowMillis: Long = System.currentTimeMillis()): Long? {
-        if (config.onboardingQueuePaused || !RecordingService.hasPendingRecordings(service)) {
+        if (config.onboardingQueuePaused || retryStore.isBlocked || !RecordingService.hasPendingRecordings(service)) {
             cancel()
             return null
         }

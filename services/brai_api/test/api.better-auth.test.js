@@ -68,6 +68,13 @@ test('test email login creates or reuses the primary Better Auth user without se
     assert.equal(session.body.authenticated, false);
     assert.equal(session.headers.get('set-cookie'), null);
 
+    const unauthenticatedDeviceToken = await jsonRequest(fixture.url, '/v1/brai-cmd/device-token', {
+      method: 'POST',
+      headers: { origin: 'capacitor://localhost' },
+      body: JSON.stringify({ deviceId: 'unauthenticated-install' })
+    });
+    assert.equal(unauthenticatedDeviceToken.status, 401);
+
     const empty = await jsonRequest(fixture.url, '/auth/test-email-login', {
       method: 'POST',
       headers: { origin: 'https://a.test.brightos.world' },
@@ -103,6 +110,205 @@ test('test email login creates or reuses the primary Better Auth user without se
       headers: { cookie: firstCookie, origin: 'capacitor://localhost' }
     });
     assert.equal(activities.status, 200);
+
+    const forbiddenDeviceToken = await jsonRequest(fixture.url, '/v1/brai-cmd/device-token', {
+      method: 'POST',
+      headers: { cookie: firstCookie, origin: 'https://untrusted.example' },
+      body: JSON.stringify({ deviceId: 'authenticated-install-1' })
+    });
+    assert.equal(forbiddenDeviceToken.status, 403);
+
+    const invalidDeviceToken = await jsonRequest(fixture.url, '/v1/brai-cmd/device-token', {
+      method: 'POST',
+      headers: { cookie: firstCookie, origin: 'capacitor://localhost' },
+      body: JSON.stringify({ deviceId: 'x'.repeat(201) })
+    });
+    assert.equal(invalidDeviceToken.status, 400);
+    assert.equal(invalidDeviceToken.body.error, 'invalid_device_id');
+
+    const anonymousFirstDevice = await jsonRequest(fixture.url, '/v1/access/request', {
+      method: 'POST',
+      body: JSON.stringify({ displayName: 'Before login', deviceId: 'authenticated-install-1' })
+    });
+    const anonymousSecondDevice = await jsonRequest(fixture.url, '/v1/access/request', {
+      method: 'POST',
+      body: JSON.stringify({ displayName: 'Before login', deviceId: 'authenticated-install-2' })
+    });
+    assert.equal(anonymousFirstDevice.status, 201);
+    assert.equal(anonymousSecondDevice.status, 201);
+
+    fixture.store.setBraiCmdSettings({ registrationEnabled: false });
+    const deviceToken = await jsonRequest(fixture.url, '/v1/brai-cmd/device-token', {
+      method: 'POST',
+      headers: { cookie: firstCookie, origin: 'capacitor://localhost' },
+      body: JSON.stringify({
+        deviceId: 'authenticated-install-1',
+        clientVersion: '60006',
+        appPackage: 'world.brightos.brai.preview.b.work'
+      })
+    });
+    assert.equal(deviceToken.status, 201);
+    assert.match(deviceToken.body.token, /^bl_/);
+    assert.equal(deviceToken.body.status, 'pending');
+    assert.equal((await jsonRequest(fixture.url, '/v1/health', {
+      headers: {
+        authorization: `Bearer ${deviceToken.body.token}`,
+        'x-brai-cmd-device-id': 'authenticated-install-1'
+      }
+    })).status, 401);
+
+    const browserActivation = await jsonRequest(fixture.url, '/v1/brai-cmd/account-access/activate', {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${anonymousFirstDevice.body.token}`,
+        'x-brai-cmd-device-id': 'authenticated-install-1',
+        origin: 'capacitor://localhost'
+      },
+      body: JSON.stringify({ link_token: deviceToken.body.token })
+    });
+    assert.equal(browserActivation.status, 403);
+    assert.equal(browserActivation.body.error, 'native_transport_required');
+
+    const activated = await jsonRequest(fixture.url, '/v1/brai-cmd/account-access/activate', {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${anonymousFirstDevice.body.token}`,
+        'x-brai-cmd-device-id': 'authenticated-install-1'
+      },
+      body: JSON.stringify({ link_token: deviceToken.body.token })
+    });
+    assert.equal(activated.status, 201);
+    assert.match(activated.body.token, /^aw_/);
+    assert.equal(activated.body.account_user_id, first.body.user.id);
+    const firstDeviceToken = fixture.store.db.prepare(`
+      SELECT user_id, source, status, device_id_hash, token_hash, expires_at_utc
+      FROM brai_cmd_access_tokens
+      WHERE user_id = ? AND status = 'active'
+    `).get(first.body.user.id);
+    assert.equal(firstDeviceToken.user_id, first.body.user.id);
+    assert.equal(firstDeviceToken.source, 'authenticated');
+    assert.equal(firstDeviceToken.status, 'active');
+    assert.notEqual(firstDeviceToken.device_id_hash, 'authenticated-install-1');
+    assert.notEqual(firstDeviceToken.token_hash, activated.body.token);
+    assert.ok(firstDeviceToken.expires_at_utc > '2026-07-01T09:00:00.000Z');
+
+    const health = await jsonRequest(fixture.url, '/v1/health', {
+      headers: {
+        authorization: `Bearer ${activated.body.token}`,
+        'x-brai-cmd-device-id': 'authenticated-install-1'
+      }
+    });
+    assert.equal(health.status, 200);
+
+    const replay = await jsonRequest(fixture.url, '/v1/brai-cmd/account-access/activate', {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${activated.body.token}`,
+        'x-brai-cmd-device-id': 'authenticated-install-1'
+      },
+      body: JSON.stringify({ link_token: deviceToken.body.token })
+    });
+    assert.equal(replay.status, 409);
+    assert.equal(replay.body.error, 'link_token_used');
+
+    const replacement = await jsonRequest(fixture.url, '/v1/brai-cmd/device-token', {
+      method: 'POST',
+      headers: { cookie: firstCookie, origin: 'capacitor://localhost' },
+      body: JSON.stringify({ deviceId: 'authenticated-install-1' })
+    });
+    assert.equal(replacement.status, 201);
+    assert.notEqual(replacement.body.token, deviceToken.body.token);
+    const replacementActivation = await jsonRequest(fixture.url, '/v1/brai-cmd/account-access/activate', {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${activated.body.token}`,
+        'x-brai-cmd-device-id': 'authenticated-install-1'
+      },
+      body: JSON.stringify({ link_token: replacement.body.token })
+    });
+    assert.equal(replacementActivation.status, 201);
+    const deviceTokenStatuses = fixture.store.db.prepare(`
+      SELECT status FROM brai_cmd_access_tokens
+      WHERE user_id = ?
+      ORDER BY created_at_utc, id
+    `).all(first.body.user.id).map((row) => row.status).sort();
+    assert.deepEqual(deviceTokenStatuses, ['active', 'revoked']);
+
+    const concurrentLinks = await Promise.all([
+      jsonRequest(fixture.url, '/v1/brai-cmd/device-token', {
+        method: 'POST',
+        headers: { cookie: firstCookie, origin: 'capacitor://localhost' },
+        body: JSON.stringify({ deviceId: 'authenticated-install-1' })
+      }),
+      jsonRequest(fixture.url, '/v1/brai-cmd/device-token', {
+        method: 'POST',
+        headers: { cookie: firstCookie, origin: 'capacitor://localhost' },
+        body: JSON.stringify({ deviceId: 'authenticated-install-1' })
+      })
+    ]);
+    assert.deepEqual(concurrentLinks.map((response) => response.status), [201, 201]);
+    const concurrent = await Promise.all(concurrentLinks.map((response) => jsonRequest(
+      fixture.url,
+      '/v1/brai-cmd/account-access/activate',
+      {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${replacementActivation.body.token}`,
+          'x-brai-cmd-device-id': 'authenticated-install-1'
+        },
+        body: JSON.stringify({ link_token: response.body.token })
+      }
+    )));
+    assert.equal(concurrent.filter((response) => response.status === 201).length, 1);
+    assert.equal(fixture.store.db.prepare(`
+      SELECT COUNT(*) AS count
+      FROM brai_cmd_access_tokens
+      WHERE user_id = ? AND status = 'active'
+    `).get(first.body.user.id).count, 1);
+    const activeConcurrentToken = concurrent.find((response) => response.status === 201).body.token;
+    assert.equal((await jsonRequest(fixture.url, '/v1/health', {
+        headers: {
+          authorization: `Bearer ${activeConcurrentToken}`,
+          'x-brai-cmd-device-id': 'authenticated-install-1'
+        }
+      })).status, 200);
+
+    const secondDevice = await jsonRequest(fixture.url, '/v1/brai-cmd/device-token', {
+      method: 'POST',
+      headers: { cookie: firstCookie, origin: 'capacitor://localhost' },
+      body: JSON.stringify({ deviceId: 'authenticated-install-2' })
+    });
+    assert.equal(secondDevice.status, 201);
+    const secondDeviceActivation = await jsonRequest(fixture.url, '/v1/brai-cmd/account-access/activate', {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${anonymousSecondDevice.body.token}`,
+        'x-brai-cmd-device-id': 'authenticated-install-2'
+      },
+      body: JSON.stringify({ link_token: secondDevice.body.token })
+    });
+    assert.equal(secondDeviceActivation.status, 201);
+    assert.equal(fixture.store.db.prepare(`
+      SELECT COUNT(*) AS count
+      FROM brai_cmd_access_tokens
+      WHERE user_id = ? AND status = 'active'
+    `).get(first.body.user.id).count, 2);
+
+    const revoked = await jsonRequest(fixture.url, '/v1/brai-cmd/access/revoke-self', {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${secondDeviceActivation.body.token}`,
+        'x-brai-cmd-device-id': 'authenticated-install-2'
+      },
+      body: '{}'
+    });
+    assert.equal(revoked.status, 200);
+    assert.equal((await jsonRequest(fixture.url, '/v1/health', {
+      headers: {
+        authorization: `Bearer ${secondDeviceActivation.body.token}`,
+        'x-brai-cmd-device-id': 'authenticated-install-2'
+      }
+    })).status, 401);
 
     const repeat = await jsonRequest(fixture.url, '/auth/test-email-login', {
       method: 'POST',
@@ -527,7 +733,32 @@ test('user vault preparer creates per-user subfolder and sync folder label by em
     assert.equal(fs.statSync(userPath).isDirectory(), true);
     assert.deepEqual(commands, [
       ['syncthing', 'cli', '--gui-address=127.0.0.1:8384', '--gui-apikey=test-key', 'config', 'folders', 'list'],
-      ['syncthing', 'cli', '--gui-address=127.0.0.1:8384', '--gui-apikey=test-key', 'config', 'folders', 'add', '--id=vault-user-user_123', '--label=sergey@example.com', `--path=${userPath}`, '--type=sendreceive']
+      ['syncthing', 'cli', '--gui-address=127.0.0.1:8384', '--gui-apikey=test-key', 'config', 'folders', 'add', '--id=vault-user-user_123', '--label=sergey@example.com', `--path=${userPath}`, '--type=sendreceive', '--ignore-perms']
+    ]);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('user vault preparer keeps shared folders from syncing restrictive permissions', async () => {
+  const root = await fs.promises.mkdtemp(path.join(process.env.TMPDIR || '/tmp', 'brai-vault-'));
+  const commands = [];
+  const runSyncthingCli = async (command) => {
+    commands.push(command);
+    return command.at(-1) === 'list' ? 'vault-user-user_123\n' : '';
+  };
+  const prepare = createUserVaultPreparer({
+    vaultRoot: root,
+    syncthingGuiAddress: '127.0.0.1:8384',
+    syncthingApiKey: 'test-key',
+    runSyncthingCli
+  });
+
+  try {
+    await prepare({ userId: 'user_123', email: 'sergey@example.com' });
+    assert.deepEqual(commands.at(-1), [
+      'syncthing', 'cli', '--gui-address=127.0.0.1:8384', '--gui-apikey=test-key',
+      'config', 'folders', 'vault-user-user_123', 'ignore-perms', 'set', 'true'
     ]);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });

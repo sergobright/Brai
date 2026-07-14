@@ -6,6 +6,7 @@ import { createGoalAgentWorkflowRuntime } from './goal-agent-workflow-runtime.js
 import { createInboxWorkflowRuntime } from './inbox-workflow-runtime.js';
 import { isPostgresUrl } from './postgres-sync-db.js';
 import { createBraiServer } from './server.js';
+import { parseUserAiEncryptionKey } from './store-user-ai.js';
 
 const dirname = path.dirname(fileURLToPath(import.meta.url));
 const serviceRoot = path.resolve(dirname, '..');
@@ -40,7 +41,8 @@ const codexModel = process.env.BRAI_CODEX_MODEL?.trim() || null;
 const codexFallbackModel = process.env.BRAI_CODEX_FALLBACK_MODEL?.trim() || null;
 const parsedCodexTimeoutMs = Number(process.env.BRAI_CODEX_TIMEOUT_MS);
 const codexTimeoutMs = Number.isFinite(parsedCodexTimeoutMs) ? parsedCodexTimeoutMs : null;
-const inboxExternalAi = {
+const userAiEncryptionKey = process.env.BRAI_USER_PROVIDER_ENCRYPTION_KEY?.trim() || '';
+const legacyInboxExternalAi = {
   groqApiKey: process.env.BRAI_INBOX_GROQ_API_KEY ?? process.env.GROQ_API_KEY ?? '',
   openaiApiKey: process.env.BRAI_INBOX_OPENAI_API_KEY ?? process.env.OPENAI_API_KEY ?? ''
 };
@@ -67,6 +69,13 @@ if (!sessionSecret) {
   process.exit(1);
 }
 
+try {
+  parseUserAiEncryptionKey(userAiEncryptionKey);
+} catch {
+  console.error('BRAI_USER_PROVIDER_ENCRYPTION_KEY must be a 32-byte base64url key');
+  process.exit(1);
+}
+
 const inboxWorkflow = await createInboxWorkflowRuntime({
   databaseUrl,
   storageRoot: inboxStorageRoot,
@@ -74,7 +83,8 @@ const inboxWorkflow = await createInboxWorkflowRuntime({
   codexModel,
   codexFallbackModel,
   codexTimeoutMs,
-  externalAi: inboxExternalAi
+  userAiEncryptionKey,
+  externalAi: {}
 });
 await inboxWorkflow.recoverQueued();
 inboxWorkflow.startQueuedReconciler();
@@ -107,7 +117,8 @@ const runtime = createBraiServer({
   codexModel,
   codexFallbackModel,
   codexTimeoutMs,
-  inboxExternalAi,
+  userAiEncryptionKey,
+  inboxExternalAi: legacyInboxExternalAi,
   inboxWorkflowStarter: inboxWorkflow.start,
   activityWorkflowStarter: inboxWorkflow.startActivity,
   goalAgentsEnabled,

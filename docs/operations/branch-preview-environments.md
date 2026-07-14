@@ -113,11 +113,11 @@ git config core.hooksPath .githooks
 Before a final preview-class implementation handoff, run:
 
 ```bash
-node scripts/brai-task.mjs release-notes --short "..." --details "..." --reason "..."
+node scripts/brai-task.mjs release-notes --short "..." --details "..." --reason "..." --testing "..."
 scripts/brai-preview-handoff.sh
 ```
 
-The verifier requires a clean tree, pushed `origin/<codex-branch>` at `HEAD`, successful `Brai delivery` jobs including `deploy-preview`, explicit Russian release notes, and a ready preview slot from the slot registry or Temporal. It writes an ignored `.brai-task/preview-handoff.json` receipt that the Codex `Stop` hook checks.
+The verifier requires a clean tree, pushed `origin/<codex-branch>` at `HEAD`, successful `Brai delivery` jobs including `deploy-preview`, explicit Russian release notes with user-testing guidance, and a ready preview slot from the slot registry or Temporal. Once the exact branch/commit is ready, handoff writes that authored guidance into the locked slot registry; Admin reads it as immutable test instructions and does not generate a summary on page load. Handoff then writes an ignored `.brai-task/preview-handoff.json` receipt that the Codex `Stop` hook checks.
 `scripts/brai-preview-handoff.sh` is not a one-shot probe anymore: by default it keeps polling transient `queued` / `in_progress` preview states until the preview is actually ready or a real failing blocker appears. Tune the polling window only through `BRAI_PREVIEW_HANDOFF_WAIT_MS` and `BRAI_PREVIEW_HANDOFF_POLL_MS` when you intentionally need a different budget.
 
 The final response format for preview-class work is the top-level handoff contract in `AGENTS.md`: after this command succeeds, the final implementation response starts with the command's `<slot emoji> Preview` header, then includes preview URL, branch, and commit before any summary. Do not print a preview emoji in intermediary updates, status replies, questions, acceptance monitoring, no-preview handoffs, or any reply where the slot or deployed commit is unverified. If the preview letter or URL is missing because every slot is occupied, the response must say the branch is queued and include queue position/source when available. If it is missing for any other reason, the response must say exactly which push, CI, or deploy step blocked it. Ordinary preview-class `codex/*` branch push/deploy is standing Brai CI/CD automation and must not be treated as an optional manual confirmation step or as a reason to stop the task while delivery is still active.

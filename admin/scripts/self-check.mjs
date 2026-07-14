@@ -97,6 +97,7 @@ try {
       last_used_at_utc text,
       client_version text NOT NULL DEFAULT '',
       app_package text NOT NULL DEFAULT '',
+      user_id text REFERENCES "user"(id) ON DELETE CASCADE,
       preliminary_users_id text REFERENCES preliminary_users(id)
     );
     CREATE TABLE brai_cmd_usage_events (
@@ -263,6 +264,7 @@ try {
   await db.query("INSERT INTO app_settings (key, value, updated_at_utc) VALUES ('primary_user_id', 'user-1', '2026-01-01T00:00:00.000Z')");
   await db.query(`INSERT INTO ${quoteIdentifier('odd"table;drop')} (payload) VALUES ($1)`, ["safe"]);
   await db.query("INSERT INTO brai_cmd_settings (key, value, updated_at_utc) VALUES ('registration_enabled', 'false', '2026-01-01T00:00:00.000Z')");
+  await db.query("INSERT INTO brai_cmd_settings (key, value, updated_at_utc) VALUES ('function.screenshot_inbox.enabled', 'false', '2026-01-01T00:00:00.000Z')");
   await db.query("INSERT INTO \"user\" (id, name, email) VALUES ('auth-1', 'Registered Demo', 'demo@example.com')");
   await db.query(`
     INSERT INTO preliminary_users (
@@ -274,12 +276,13 @@ try {
   `);
   await db.query(`
     INSERT INTO brai_cmd_access_tokens (
-      id, display_name, token_hash, device_id_hash, status, source,
+      id, display_name, token_hash, device_id_hash, status, source, user_id,
       created_at_utc, activated_at_utc, last_used_at_utc, client_version, app_package, preliminary_users_id
     ) VALUES
-      ('token-1', 'Demo', 'hash-1', 'device-1', 'active', 'self_service', '2026-01-01T00:00:00.000Z', '2026-01-01T00:05:00.000Z', '2026-01-03T00:00:00.000Z', '42', 'world.brightos.brai', 'prelim-1'),
-      ('token-2', 'Retired', 'hash-2', NULL, 'revoked', 'admin', '2026-01-02T00:00:00.000Z', NULL, NULL, '', '', NULL),
-      ('token-3', 'Pending', 'hash-3', 'device-3', 'active', 'self_service', '2026-01-04T00:00:00.000Z', '2026-01-04T00:05:00.000Z', NULL, '42', 'world.brightos.brai', 'prelim-2')
+      ('token-1', 'Demo', 'hash-1', 'device-1', 'active', 'self_service', NULL, '2026-01-01T00:00:00.000Z', '2026-01-01T00:05:00.000Z', '2026-01-03T00:00:00.000Z', '42', 'world.brightos.brai', 'prelim-1'),
+      ('token-2', 'Retired', 'hash-2', NULL, 'revoked', 'admin', NULL, '2026-01-02T00:00:00.000Z', NULL, NULL, '', '', NULL),
+      ('token-3', 'Pending', 'hash-3', 'device-3', 'active', 'self_service', NULL, '2026-01-04T00:00:00.000Z', '2026-01-04T00:05:00.000Z', NULL, '42', 'world.brightos.brai', 'prelim-2'),
+      ('token-4', 'Authenticated Demo', 'hash-4', 'device-4', 'active', 'authenticated', 'auth-1', '2026-01-05T00:00:00.000Z', '2026-01-05T00:00:00.000Z', NULL, '43', 'world.brightos.brai', NULL)
   `);
   await db.query(`
     INSERT INTO brai_cmd_usage_events (
@@ -409,15 +412,18 @@ try {
 
   const braiCmdSummary = await readBraiCmdAdminSummary({ databaseUrl });
   assert.equal(braiCmdSummary.settings.registrationEnabled, false, "brai cmd registration state is readable");
-  assert.equal(braiCmdSummary.totals.activeTokens, 2, "brai cmd active token count is aggregated");
+  assert.equal(braiCmdSummary.settings.functions.main_dictation.enabled, true, "brai cmd default function state is readable");
+  assert.equal(braiCmdSummary.settings.functions.screenshot_inbox.enabled, false, "brai cmd disabled function state is readable");
+  assert.equal(braiCmdSummary.totals.activeTokens, 3, "brai cmd active token count is aggregated");
   assert.equal(braiCmdSummary.totals.revokedTokens, 1, "brai cmd revoked token count is aggregated");
-  assert.equal(braiCmdSummary.totals.registeredTokens, 1, "brai cmd registered token count is aggregated");
+  assert.equal(braiCmdSummary.totals.registeredTokens, 2, "brai cmd registered token count is aggregated");
   assert.equal(braiCmdSummary.totals.preliminaryTokens, 1, "brai cmd preliminary token count is aggregated");
   assert.equal(braiCmdSummary.totals.legacyTokens, 1, "brai cmd legacy token count is aggregated");
   assert.equal(braiCmdSummary.totals.requests, 2, "brai cmd request total is aggregated");
   assert.equal(braiCmdSummary.totals.errors, 1, "brai cmd error total is aggregated");
-  assert.equal(braiCmdSummary.tokens[0].displayName, "Pending", "brai cmd tokens sort by creation date desc");
-  assert.equal(braiCmdSummary.tokens[0].owner.type, "preliminary", "brai cmd preliminary owner is attached");
+  assert.equal(braiCmdSummary.tokens[0].displayName, "Authenticated Demo", "brai cmd tokens sort by creation date desc");
+  assert.equal(braiCmdSummary.tokens[0].owner.type, "registered", "brai cmd direct auth owner is attached");
+  assert.equal(braiCmdSummary.tokens.find((token) => token.displayName === "Pending").owner.type, "preliminary", "brai cmd preliminary owner is attached");
   assert.equal(braiCmdSummary.tokens.find((token) => token.displayName === "Demo").usage.requests, 2, "brai cmd usage rolls up per token");
   assert.equal(braiCmdSummary.tokens.find((token) => token.displayName === "Demo").owner.type, "registered", "brai cmd registered owner is attached");
   assert.equal(braiCmdSummary.recentUsage[0].errorCode, "timeout", "recent brai cmd usage sorts newest first");

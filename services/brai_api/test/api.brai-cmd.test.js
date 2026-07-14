@@ -29,7 +29,7 @@ test('Brai Cmd access tokens, health, admin summary, and migrations work in Brai
       fixture.store.db.prepare('SELECT description FROM schema_migrations WHERE version = 59').get().description,
       'add preliminary Brai Cmd users'
     );
-    assert.ok(fixture.store.db.prepare("SELECT 1 FROM agents WHERE id = 'brai-cmd.dictate.transcription'").get());
+    assert.equal(fixture.store.db.prepare("SELECT 1 FROM agents WHERE id = 'brai-cmd.dictate.transcription'").get(), undefined);
 
     const denied = await fetch(`${fixture.url}/v1/health`);
     assert.equal(denied.status, 401);
@@ -125,6 +125,9 @@ test('Brai Cmd access tokens, health, admin summary, and migrations work in Brai
     assert.equal(admin.status, 200);
     const summary = await admin.json();
     assert.equal(summary.totals.activeTokens, 1);
+    assert.equal(summary.settings.messages['message.inbox.created.default'], 'Отправлено во входящие');
+    assert.equal(summary.settings.messages['message.function.disabled.default'], 'Функция временно недоступна');
+    assert.equal(summary.settings.functions.main_dictation.enabled, true);
 
     const settings = await fetch(`${fixture.url}/v1/brai-cmd/admin/settings`, {
       method: 'PUT',
@@ -132,9 +135,16 @@ test('Brai Cmd access tokens, health, admin summary, and migrations work in Brai
         authorization: `Bearer ${TOKEN}`,
         'content-type': 'application/json'
       },
-      body: JSON.stringify({ registrationEnabled: false })
+      body: JSON.stringify({
+        registrationEnabled: false,
+        messages: { 'message.inbox.created.default': 'Отправлено.' },
+        functions: { screenshot_inbox: { enabled: false } }
+      })
     });
     assert.equal(settings.status, 200);
+    const updatedSettings = await settings.json();
+    assert.equal(updatedSettings.settings.messages['message.inbox.created.default'], 'Отправлено');
+    assert.equal(updatedSettings.settings.functions.screenshot_inbox.enabled, false);
 
     const revoked = await fetch(`${fixture.url}/v1/brai-cmd/admin/tokens/${tokenRows[0].id}/revoke`, {
       method: 'POST',
@@ -201,6 +211,7 @@ test('Brai Cmd dictation accepts multipart audio and stores only usage metrics',
     assert.equal(processed.status, 200);
     assert.equal(processed.body.text, 'processed transcript');
     assert.equal(processed.body.postProcessed, true);
+    assert.equal(processed.body.notice, null);
     assert.equal(postProcessCalls, 1);
 
     const context = await dictate(fixture.url, token, 'device-2', {
@@ -209,21 +220,21 @@ test('Brai Cmd dictation accepts multipart audio and stores only usage metrics',
     });
     assert.equal(context.status, 200);
     assert.equal(context.body.text, 'context reply');
+    assert.equal(context.body.notice, null);
     assert.equal(contextReplyCalls, 1);
 
     const usage = fixture.store.db.prepare('SELECT * FROM brai_cmd_usage_events ORDER BY created_at_utc').all();
     assert.equal(usage.length, 2);
     assert.equal(usage.every((row) => row.success === 1), true);
     assert.equal(usage.every((row) => row.audio_bytes === 'fake-audio'.length), true);
+    assert.equal(usage[0].post_processing_input_chars, 'raw transcript'.length + 'fix it'.length);
+    assert.equal(usage[0].post_processing_output_chars, 'processed transcript'.length);
+    assert.equal(usage[1].post_processing_input_chars, 'raw transcript'.length + JSON.stringify({ messenger: 'telegram', messages: [] }).length);
+    assert.equal(usage[1].post_processing_output_chars, 'context reply'.length);
     assert.equal(JSON.stringify(usage).includes('processed transcript'), false);
     assert.equal(JSON.stringify(usage).includes('raw transcript'), false);
-    const aiLogs = fixture.store.db.prepare('SELECT agent_id, agent_version, status, json_data FROM ai_logs ORDER BY id').all();
-    assert.equal(aiLogs.length, 2);
-    assert.equal(aiLogs.every((row) => row.agent_id === 'brai-cmd.dictate.transcription'), true);
-    assert.equal(aiLogs.every((row) => row.agent_version === '1'), true);
-    assert.equal(aiLogs.every((row) => row.status === 'done'), true);
-    assert.equal(JSON.parse(aiLogs[0].json_data).outputs.find((output) => output.ref === 'response.text').value, 'processed transcript');
-    assert.equal(JSON.parse(aiLogs[1].json_data).outputs.find((output) => output.ref === 'response.text').value, 'context reply');
+    const aiLogs = fixture.store.db.prepare("SELECT agent_id, status, json_data FROM ai_logs WHERE agent_id LIKE 'brai-cmd.%' ORDER BY id").all();
+    assert.equal(aiLogs.length, 0);
 
     const runtimeLogs = fixture.store.db
       .prepare("SELECT json_data FROM logs WHERE operation = 'brai_cmd.dictate' ORDER BY id ASC")
@@ -238,6 +249,53 @@ test('Brai Cmd dictation accepts multipart audio and stores only usage metrics',
     assert.equal(runtimeLogs[1].context_requested, true);
     assert.equal(JSON.stringify(runtimeLogs).includes('processed transcript'), false);
     assert.equal(JSON.stringify(runtimeLogs).includes('raw transcript'), false);
+  } finally {
+    await fixture.close();
+  }
+});
+
+test('Brai Cmd diagnostics and text post-processing require access and keep content out of logs', async () => {
+  const fixture = await createFixture(['2026-07-03T12:11:00.000Z'], {
+    braiCmd: {
+      deps: {
+        probeTranscription: async () => ({ provider: 'fake', model: 'fake-speech' }),
+        postProcessTranscript: async (text, prompt) => {
+          assert.equal(text, 'secret transcript');
+          assert.equal(prompt, 'fix punctuation');
+          return { text: 'processed secret', provider: 'fake', model: 'fake-text' };
+        }
+      }
+    }
+  });
+  try {
+    const denied = await fetch(`${fixture.url}/v1/brai-cmd/diagnostics`, { method: 'POST', body: '{}' });
+    assert.equal(denied.status, 401);
+
+    const access = await jsonRequest(fixture.url, '/v1/access/request', {
+      method: 'POST',
+      body: JSON.stringify({ displayName: 'Tester', deviceId: 'device-diagnostics' })
+    });
+    const headers = {
+      authorization: `Bearer ${access.body.token}`,
+      'x-brai-cmd-device-id': 'device-diagnostics',
+      'x-brai-cmd-client-version': 'test',
+      'content-type': 'application/json'
+    };
+    const diagnostics = await fetch(`${fixture.url}/v1/brai-cmd/diagnostics`, {
+      method: 'POST', headers, body: JSON.stringify({ includeCloudTranscription: true })
+    });
+    assert.equal(diagnostics.status, 200);
+    assert.deepEqual((await diagnostics.json()).stages.cloudTranscription, { status: 'ok', provider: 'fake', model: 'fake-speech' });
+
+    const processed = await fetch(`${fixture.url}/v1/brai-cmd/post-process`, {
+      method: 'POST', headers, body: JSON.stringify({ text: 'secret transcript', prompt: 'fix punctuation' })
+    });
+    assert.equal(processed.status, 200);
+    assert.equal((await processed.json()).text, 'processed secret');
+
+    const logs = fixture.store.db.prepare("SELECT operation, json_data FROM logs WHERE operation LIKE 'brai_cmd.%'").all();
+    assert.equal(JSON.stringify(logs).includes('secret transcript'), false);
+    assert.equal(JSON.stringify(logs).includes('processed secret'), false);
   } finally {
     await fixture.close();
   }
@@ -277,6 +335,11 @@ test('Brai Cmd inbox route accepts Android access token and creates Inbox contex
     });
 
     assert.equal(response.status, 201);
+    assert.deepEqual(response.body.notice, {
+      key: 'message.inbox.created.default',
+      text: 'Отправлено во входящие',
+      tone: 'success'
+    });
     const item = response.body.state.inbox[0];
     assert.equal(item.title, 'разбери экран');
     assert.equal(item.explanation_text, 'разбери экран');
@@ -304,6 +367,11 @@ test('Brai Cmd inbox route accepts Android access token and creates Inbox contex
       })
     });
     assert.equal(duplicate.status, 200);
+    assert.deepEqual(duplicate.body.notice, {
+      key: 'message.inbox.duplicate.default',
+      text: 'Уже во входящих',
+      tone: 'success'
+    });
     const conflict = await jsonRequest(fixture.url, '/v1/brai-cmd/inbox', {
       method: 'POST',
       headers: {
@@ -345,6 +413,78 @@ test('Brai Cmd inbox route accepts Android access token and creates Inbox contex
   }
 });
 
+test('Brai Cmd disabled dictation function rejects before transcription', async () => {
+  let transcribeCalls = 0;
+  const fixture = await createFixture(['2026-07-05T12:00:00.000Z'], {
+    braiCmd: {
+      deps: {
+        transcribeAudio: async () => {
+          transcribeCalls += 1;
+          throw new Error('should not transcribe');
+        }
+      }
+    }
+  });
+
+  try {
+    const access = await jsonRequest(fixture.url, '/v1/access/request', {
+      method: 'POST',
+      body: JSON.stringify({ displayName: 'Tester', deviceId: 'device-disabled-dictate' })
+    });
+    fixture.store.setBraiCmdSettings({ functions: { main_dictation: false } });
+
+    const response = await dictate(fixture.url, access.body.token, 'device-disabled-dictate');
+
+    assert.equal(response.status, 403);
+    assert.equal(response.body.error, 'Функция временно недоступна');
+    assert.equal(response.body.code, 'function_disabled');
+    assert.deepEqual(response.body.notice, {
+      key: 'message.function.disabled.default',
+      text: 'Функция временно недоступна',
+      tone: 'error'
+    });
+    assert.equal(transcribeCalls, 0);
+    assert.equal(
+      fixture.store.db.prepare('SELECT success, error_code FROM brai_cmd_usage_events').get().error_code,
+      'function_disabled'
+    );
+  } finally {
+    await fixture.close();
+  }
+});
+
+test('Brai Cmd disabled inbox function rejects before Inbox creation', async () => {
+  const fixture = await createFixture(['2026-07-05T12:10:00.000Z']);
+
+  try {
+    const access = await jsonRequest(fixture.url, '/v1/access/request', {
+      method: 'POST',
+      body: JSON.stringify({ displayName: 'Tester', deviceId: 'device-disabled-inbox' })
+    });
+    fixture.store.setBraiCmdSettings({ functions: { screenshot_inbox: false } });
+
+    const response = await jsonRequest(fixture.url, '/v1/brai-cmd/inbox', {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${access.body.token}`,
+        'x-brai-cmd-device-id': 'device-disabled-inbox'
+      },
+      body: JSON.stringify({
+        text: 'Скриншот',
+        brai_cmd_function: 'screenshot_inbox',
+        idempotency_key: 'disabled-screenshot'
+      })
+    });
+
+    assert.equal(response.status, 403);
+    assert.equal(response.body.error, 'Функция временно недоступна');
+    assert.equal(response.body.code, 'function_disabled');
+    assert.equal(fixture.store.db.prepare('SELECT COUNT(*) AS count FROM inbox').get().count, 0);
+  } finally {
+    await fixture.close();
+  }
+});
+
 test('Brai Cmd dictation rejects bad requests and records failure usage', async () => {
   const fixture = await createFixture(['2026-07-03T12:20:00.000Z'], {
     braiCmd: {
@@ -376,10 +516,8 @@ test('Brai Cmd dictation rejects bad requests and records failure usage', async 
       fixture.store.db.prepare('SELECT success, error_code FROM brai_cmd_usage_events').get().error_code,
       'unsupported_media_type'
     );
-    const aiLog = fixture.store.db.prepare('SELECT agent_id, status, json_data FROM ai_logs').get();
-    assert.equal(aiLog.agent_id, 'brai-cmd.dictate.transcription');
-    assert.equal(aiLog.status, 'failed');
-    assert.equal(JSON.parse(aiLog.json_data).metadata.error, 'unsupported_media_type');
+    const aiLog = fixture.store.db.prepare("SELECT agent_id, status, json_data FROM ai_logs WHERE agent_id LIKE 'brai-cmd.%'").get();
+    assert.equal(aiLog, undefined);
   } finally {
     await fixture.close();
   }

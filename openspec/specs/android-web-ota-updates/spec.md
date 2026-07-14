@@ -152,3 +152,48 @@ Brai Android SHALL expose enough update state for release verification and troub
 - **WHEN** a maintainer verifies an Android OTA release
 - **THEN** the app or logs can identify the active bundle version, fallback version, last check status, and last non-secret update error
 - **AND** no private tokens, passwords, keys, or hashes are exposed
+
+### Requirement: Android update discovery does not download content
+
+Brai Android SHALL separate update discovery from user-initiated download operations.
+
+#### Scenario: Background update check finds a compatible bundle
+- **WHEN** startup, periodic, or Brai CMD logic calls `checkForUpdates()`
+- **THEN** Android validates the manifest and exposes the available version
+- **AND** it does not download or extract the archive
+
+#### Scenario: User downloads a discovered web update
+- **WHEN** a compatible update is available and the user calls `downloadUpdate()`
+- **THEN** Android downloads, verifies, and stages the archive using the existing candidate pipeline
+- **AND** state identifies the active operation and download result
+
+### Requirement: Android can download its channel APK
+
+Brai Android SHALL download, verify, retain, install, and clean up the installed channel APK under application control.
+
+#### Scenario: User downloads an APK
+- **WHEN** the user calls `downloadApk()` for an available native update
+- **THEN** Brai downloads the installed release key into application-private storage
+- **AND** bridge state exposes actual downloaded bytes, total bytes, and failure details
+- **AND** duplicate requests for the same active or ready target are not started
+
+#### Scenario: APK download completes
+- **WHEN** content length and release SHA-256 match
+- **THEN** Brai retains one verified APK candidate
+- **AND** immediately opens the system package installer when Android permits it
+- **AND** exposes an `Install` action that reopens the same installer if the user dismisses it
+
+#### Scenario: install-source permission is missing
+- **WHEN** Android does not permit Brai to request package installation
+- **THEN** Brai opens the system settings page for this app
+- **AND** keeps the verified APK ready without downloading it again
+
+#### Scenario: updated app starts
+- **WHEN** the installed version code satisfies the retained APK target
+- **THEN** Brai deletes the retained APK and partial download files
+- **AND** clears the install-ready state
+
+#### Scenario: APK download is invalid or interrupted
+- **WHEN** length or SHA-256 verification fails, storage fails, or the process did not finish the download
+- **THEN** Brai does not expose the file to the installer
+- **AND** removes the partial file and reports a retryable failure

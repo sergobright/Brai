@@ -11,6 +11,34 @@ enum class PendingReason {
     Unknown
 }
 
+enum class BraiCmdNoticeTone {
+    LocalError,
+    LocalSuccess,
+    ServerSuccess,
+    Update
+}
+
+data class BraiCmdNotice(
+    val text: String,
+    val tone: BraiCmdNoticeTone,
+    val key: String = ""
+)
+
+internal fun braiCmdNoticeText(raw: String): String =
+    raw.trim().trimEnd('.', '。', '．').trim().take(120)
+
+internal fun serverNoticeTone(raw: String): BraiCmdNoticeTone =
+    if (raw == "success") BraiCmdNoticeTone.ServerSuccess else BraiCmdNoticeTone.ServerSuccess
+
+internal fun shouldShowUpdateNoticeAfter(notice: BraiCmdNotice?): Boolean =
+    notice?.tone == BraiCmdNoticeTone.ServerSuccess && notice.text.isNotBlank()
+
+internal fun shouldShowUpdateDot(updateAvailable: Boolean, apkUpdateRequired: Boolean, checkInProgress: Boolean = false): Boolean =
+    !checkInProgress && (updateAvailable || apkUpdateRequired)
+
+internal fun contextButtonAvailable(overlayEnabled: Boolean, voiceOnly: Boolean, enabledActions: Int): Boolean =
+    overlayEnabled && !voiceOnly && enabledActions > 0
+
 sealed class RecorderState {
     data object Idle : RecorderState()
     data class Recording(val amplitude: Int) : RecorderState()
@@ -28,8 +56,9 @@ sealed class RecorderState {
         val provider: String = "",
         val model: String = ""
     ) : RecorderState()
-    data object InboxDelivered : RecorderState()
+    data class InboxDelivered(val notice: BraiCmdNotice? = null) : RecorderState()
     data class Error(val message: String) : RecorderState()
+    data class Notice(val notice: BraiCmdNotice) : RecorderState()
     data class InsertText(val text: String) : RecorderState()
 }
 

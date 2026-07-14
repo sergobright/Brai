@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { scopedUserId } from './user-scope.js';
 
 export const aiLogMethods = {
   recordAiLog(input) {
@@ -15,13 +16,14 @@ export const aiLogMethods = {
       workflow_id: input.workflowId ?? null,
       run_id: input.runId ?? null,
       attempt_number: Number.isInteger(input.attemptNumber) ? input.attemptNumber : null,
-      llm_call_id: input.llmCallId ?? null
+      llm_call_id: input.llmCallId ?? null,
+      user_id: input.userId ?? scopedUserId() ?? null
     };
     const info = this.db.prepare(`
       INSERT INTO ai_logs (
         agent_id, agent_version, dt, status, json_data, ai_title, flow_id, flow_command, trace_id,
-        workflow_id, run_id, attempt_number, llm_call_id
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        workflow_id, run_id, attempt_number, llm_call_id, user_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT (llm_call_id) WHERE llm_call_id IS NOT NULL DO NOTHING
       RETURNING id
     `).run(
@@ -37,13 +39,14 @@ export const aiLogMethods = {
       row.workflow_id,
       row.run_id,
       row.attempt_number,
-      row.llm_call_id
+      row.llm_call_id,
+      row.user_id
     );
     const id = Number(info.lastInsertRowid);
     if (!id && row.llm_call_id) {
       const existing = this.db.prepare(`
         SELECT id, agent_id, agent_version, status, json_data, ai_title, flow_id, flow_command, trace_id,
-          workflow_id, run_id, attempt_number, llm_call_id
+          workflow_id, run_id, attempt_number, llm_call_id, user_id
         FROM ai_logs WHERE llm_call_id = ?
       `).get(row.llm_call_id);
       if (!existing || aiLogFingerprint(existing) !== aiLogFingerprint(row)) {
@@ -75,17 +78,19 @@ export const aiLogMethods = {
 
   listAiLogs({ limit = 50 } = {}) {
     const rowLimit = Math.max(1, Math.min(Number(limit) || 50, 200));
+    const userId = scopedUserId();
     return this.db
       .prepare(
         `
           SELECT id, agent_id, agent_version, dt, status, json_data, ai_title, flow_id, flow_command, trace_id,
             workflow_id, run_id, attempt_number, llm_call_id
           FROM ai_logs
+          ${userId ? 'WHERE user_id = ?' : ''}
           ORDER BY dt DESC, id DESC
           LIMIT ?
         `
       )
-      .all(rowLimit)
+      .all(...(userId ? [userId, rowLimit] : [rowLimit]))
       .map((row) => ({
         ...row,
         json_data: parseJsonObject(row.json_data)
@@ -115,7 +120,8 @@ function aiLogFingerprint(row) {
     workflow_id: row.workflow_id,
     run_id: row.run_id,
     attempt_number: row.attempt_number,
-    llm_call_id: row.llm_call_id
+    llm_call_id: row.llm_call_id,
+    user_id: row.user_id
   })).digest('hex');
 }
 

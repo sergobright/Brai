@@ -7,7 +7,7 @@ import { createTestDatabase } from '../test-support/api.js';
 
 const migrationPath = path.resolve(
   import.meta.dirname,
-  '../../../supabase/migrations/0023_relations_goal_catalog.sql'
+  '../../../supabase/migrations/0027_relations_goal_catalog.sql'
 );
 
 test('Relations migration is additive, idempotent, and seeds only the v1 contracts', async () => {
@@ -138,7 +138,7 @@ test('Relations migration is additive, idempotent, and seeds only the v1 contrac
     assert.match(activityDescription.rows[0].long_description, /Raw Activity action\/goal/);
     assert.match(activityDescription.rows[0].long_description, /новые Operations принадлежат Inbox/);
     assert.equal((await pool.query('SELECT count(*)::int AS count FROM relations')).rows[0].count, 0);
-    assert.equal((await pool.query('SELECT count(*)::int AS count FROM schema_migrations WHERE version = 62')).rows[0].count, 1);
+    assert.equal((await pool.query('SELECT count(*)::int AS count FROM schema_migrations WHERE version = 63')).rows[0].count, 1);
   } finally {
     await pool.end();
     await database.drop();

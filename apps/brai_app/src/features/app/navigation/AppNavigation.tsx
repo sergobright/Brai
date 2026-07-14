@@ -8,6 +8,7 @@ import { useAppVersion } from "@/shared/config/runtime";
 import { installAndroidBackHandler } from "@/shared/platform/platform";
 import type { BraiOtaState } from "@/shared/platform/ota";
 import { FloatingDock } from "@/shared/ui/floating-dock";
+import { NavigationIndicator, UpdateNavigationDot } from "@/shared/ui/navigation-indicator";
 import { formatHourMinute } from "@/shared/time/format";
 import type { SyncStatus, TimerState } from "@/shared/types/timer";
 import { Sidebar, SidebarContent, SidebarFooter, SidebarMenuButton } from "@/shared/ui/sidebar";
@@ -58,39 +59,45 @@ export function DesktopRail({
       aria-label="Основная навигация"
     >
       <SidebarContent className="min-h-0" />
-      <SidebarFooter className="items-center gap-2">
-        <DesktopRailStatus syncStatus={syncStatus} pendingCount={pendingCount} />
-        <EngineRailButton
-          active={section === "engine"}
-          appVersionState={appVersionState}
-          otaRefreshing={otaRefreshing}
-          otaState={otaState}
-          versionError={versionError}
-          versionRefreshing={versionRefreshing}
-          onClick={onEngine}
-        />
-        <BraiUserDropdownMenu
-          activeSection={section}
-          align="end"
-          showEngine={false}
-          side="right"
-          trigger={
-            <button
-              type="button"
-              className="rail-profile flex size-10 items-center justify-center rounded-full border-0 bg-transparent p-0 outline-none transition-colors hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring/50"
-              aria-label="Открыть меню профиля"
-            >
-              <BraiUserAvatar user={authUser} className="size-8" />
-            </button>
-          }
-          user={authUser}
-          onArchive={onArchive}
-          onBraiCmd={onBraiCmd}
-          onEngine={onEngine}
-          onLogout={onLogout}
-          onProfile={onProfile}
-          onSettings={onSettings}
-        />
+      <SidebarFooter className="items-center gap-3">
+        <div className="desktop-rail-slot grid size-10 place-items-center">
+          <DesktopRailStatus syncStatus={syncStatus} pendingCount={pendingCount} />
+        </div>
+        <div className="desktop-rail-slot grid size-10 place-items-center">
+          <EngineRailButton
+            active={section === "engine"}
+            appVersionState={appVersionState}
+            otaRefreshing={otaRefreshing}
+            otaState={otaState}
+            versionError={versionError}
+            versionRefreshing={versionRefreshing}
+            onClick={onEngine}
+          />
+        </div>
+        <div className="desktop-rail-slot grid size-10 place-items-center">
+          <BraiUserDropdownMenu
+            activeSection={section}
+            align="end"
+            showEngine={false}
+            side="right"
+            trigger={
+              <button
+                type="button"
+                className="rail-profile flex size-10 items-center justify-center rounded-full border-0 bg-transparent p-0 outline-none transition-colors hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                aria-label="Открыть меню профиля"
+              >
+                <BraiUserAvatar user={authUser} className="size-8" />
+              </button>
+            }
+            user={authUser}
+            onArchive={onArchive}
+            onBraiCmd={onBraiCmd}
+            onEngine={onEngine}
+            onLogout={onLogout}
+            onProfile={onProfile}
+            onSettings={onSettings}
+          />
+        </div>
       </SidebarFooter>
     </Sidebar>
   );
@@ -98,8 +105,8 @@ export function DesktopRail({
 
 function DesktopRailStatus({ syncStatus, pendingCount }: { syncStatus: SyncStatus; pendingCount: number }) {
   return (
-    <div className="desktop-rail-status flex items-center justify-center py-1">
-      <StatusPill status={syncStatus} pendingCount={pendingCount} />
+    <div className="desktop-rail-status grid size-10 place-items-center">
+      <StatusPill className="size-10" status={syncStatus} pendingCount={pendingCount} />
     </div>
   );
 }
@@ -122,11 +129,13 @@ export function MobileDockOverflowButton({
   open = false,
   side,
   onClick,
+  hasUpdate = false,
 }: {
   hidden: boolean;
   open?: boolean;
   side: "left" | "right";
   onClick: () => void;
+  hasUpdate?: boolean;
 }) {
   return (
     <button
@@ -140,6 +149,7 @@ export function MobileDockOverflowButton({
       onClick={onClick}
     >
       {side === "left" ? <Ellipsis className="h-5 w-5" aria-hidden="true" /> : open ? <ChevronDown className="h-5 w-5" aria-hidden="true" /> : <ChevronUp className="h-5 w-5" aria-hidden="true" />}
+      {side === "left" && hasUpdate ? <NavigationIndicator position="bottom-center"><UpdateNavigationDot /></NavigationIndicator> : null}
     </button>
   );
 }
@@ -162,6 +172,8 @@ export function MobileDockOverflowSheet({
   onEngine,
   onArchive,
   onLogout,
+  engineDownloading = false,
+  engineHasUpdate = false,
 }: {
   side: "left" | "right";
   section: SectionId;
@@ -174,6 +186,8 @@ export function MobileDockOverflowSheet({
   onEngine: () => void;
   onArchive: () => void;
   onLogout: () => Promise<void>;
+  engineDownloading?: boolean;
+  engineHasUpdate?: boolean;
 }) {
   const suppressPopRef = useRef(false);
   const afterCloseRef = useRef<(() => void) | null>(null);
@@ -247,51 +261,55 @@ export function MobileDockOverflowSheet({
         style={backdropStyle}
         aria-hidden="true"
       />
-      <aside
-        ref={sheetRef}
-        className={cx(
-          "mobile-dock-overflow-sheet pointer-events-auto relative z-[1] grid min-w-0 overflow-hidden shadow-xl animate-[mobile-detail-sheet-in_180ms_ease-out] will-change-transform",
-          side === "left"
-            ? "max-h-[60dvh] w-full grid-rows-[auto_minmax(0,1fr)] rounded-t-2xl border-t border-border bg-card pb-[env(safe-area-inset-bottom)] pt-2"
-            : "h-16 w-full items-center justify-center border-y border-border/40 bg-background/95 px-8 py-1 shadow-none backdrop-blur-[14px] dark:bg-background/95",
-        )}
-        style={sheetStyle}
-        aria-label={side === "left" ? "Левое меню" : "Правое меню"}
-        {...sheetDragHandlers}
-        onClick={(event) => event.stopPropagation()}
-      >
-        {side === "left" ? (
-          <>
-            <header className="relative min-h-6 px-6 pt-2">
-              <button type="button" className="sr-only" aria-label="Закрыть панель: Левое меню" onClick={() => closeSheet()}>
-                Закрыть
-              </button>
-              <div className="mobile-dock-overflow-drag-zone absolute left-1/2 top-0 flex h-6 w-32 -translate-x-1/2 touch-none cursor-grab items-start justify-center pt-1.5 active:cursor-grabbing">
-                <span className="mobile-dock-overflow-grabber h-1 w-11 rounded-full bg-muted-foreground/30" aria-hidden="true" />
+      <div className="mobile-dock-overflow-motion relative z-[1] w-full animate-[mobile-detail-sheet-in_180ms_ease-out] will-change-transform">
+        <aside
+          ref={sheetRef}
+          className={cx(
+            "mobile-dock-overflow-sheet pointer-events-auto grid min-w-0 overflow-hidden shadow-xl will-change-transform",
+            side === "left"
+              ? "max-h-[60dvh] w-full grid-rows-[auto_minmax(0,1fr)] rounded-t-2xl border-t border-border bg-card pb-[env(safe-area-inset-bottom)] pt-2"
+              : "h-16 w-full items-center justify-center border-y border-border/40 bg-background/95 px-8 py-1 shadow-none backdrop-blur-[14px] dark:bg-background/95",
+          )}
+          style={sheetStyle}
+          aria-label={side === "left" ? "Левое меню" : "Правое меню"}
+          {...sheetDragHandlers}
+          onClick={(event) => event.stopPropagation()}
+        >
+          {side === "left" ? (
+            <>
+              <header className="relative min-h-6 px-6 pt-2">
+                <button type="button" className="sr-only" aria-label="Закрыть панель: Левое меню" onClick={() => closeSheet()}>
+                  Закрыть
+                </button>
+                <div className="mobile-dock-overflow-drag-zone absolute left-1/2 top-0 flex h-6 w-32 -translate-x-1/2 touch-none cursor-grab items-start justify-center pt-1.5 active:cursor-grabbing">
+                  <span className="mobile-dock-overflow-grabber h-1 w-11 rounded-full bg-muted-foreground/30" aria-hidden="true" />
+                </div>
+              </header>
+              <div className="min-h-0 px-3 pb-4">
+                <BraiUserMenuPanel
+                  activeSection={section}
+                  engineDownloading={engineDownloading}
+                  engineHasUpdate={engineHasUpdate}
+                  user={authUser}
+                  onArchive={() => closeThen(onArchive)}
+                  onBraiCmd={() => closeThen(onBraiCmd)}
+                  onEngine={() => closeThen(onEngine)}
+                  onLogout={() => closeThenAsync(onLogout)}
+                  onProfile={() => closeThen(onProfile)}
+                  onSettings={() => closeThen(onSettings)}
+                />
               </div>
-            </header>
-            <div className="min-h-0 px-3 pb-4">
-              <BraiUserMenuPanel
-                activeSection={section}
-                user={authUser}
-                onArchive={() => closeThen(onArchive)}
-                onBraiCmd={() => closeThen(onBraiCmd)}
-                onEngine={() => closeThen(onEngine)}
-                onLogout={() => closeThenAsync(onLogout)}
-                onProfile={() => closeThen(onProfile)}
-                onSettings={() => closeThen(onSettings)}
-              />
+            </>
+          ) : (
+            <div className="mobile-dock-overflow-icons flex min-h-0 w-full items-center justify-around gap-2">
+              <MobileDockOverflowActionButton icon={Pencil} label="Draws" active={section === "draws"} onClick={() => closeThen(onDraws)} />
+              {MOBILE_DOCK_PLACEHOLDER_ITEMS.map(({ icon: Icon, label }) => (
+                <MobileDockOverflowActionButton key={label} icon={Icon} label={`Заглушка: ${label}`} disabled />
+              ))}
             </div>
-          </>
-        ) : (
-          <div className="mobile-dock-overflow-icons flex min-h-0 w-full items-center justify-around gap-2">
-            <MobileDockOverflowActionButton icon={Pencil} label="Draws" active={section === "draws"} onClick={() => closeThen(onDraws)} />
-            {MOBILE_DOCK_PLACEHOLDER_ITEMS.map(({ icon: Icon, label }) => (
-              <MobileDockOverflowActionButton key={label} icon={Icon} label={`Заглушка: ${label}`} disabled />
-            ))}
-          </div>
-        )}
-      </aside>
+          )}
+        </aside>
+      </div>
     </div>
   );
 }
@@ -352,17 +370,19 @@ function EngineRailButton({
     versionRefreshing,
   });
   const Icon = view.hasUpdate ? Download : Cpu;
+  const downloading = view.updateAction === "downloading-web" || view.updateAction === "downloading-apk";
 
   return (
     <SidebarMenuButton
       type="button"
-      aria-label="Engine"
-      className="size-10 justify-center p-0"
+      aria-label={view.hasUpdate ? "Engine, доступно обновление" : "Engine"}
+      className="relative size-10 justify-center p-0"
       isActive={active}
       tooltip="Engine"
       onClick={onClick}
     >
-      <Icon aria-hidden="true" />
+      <Icon className={cx(downloading && "motion-safe:animate-bounce")} aria-hidden="true" />
+      {view.hasUpdate ? <NavigationIndicator><UpdateNavigationDot /></NavigationIndicator> : null}
       <span className="sr-only">Engine</span>
     </SidebarMenuButton>
   );

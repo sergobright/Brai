@@ -34,10 +34,54 @@ public class BraiOtaManagerTest {
     }
 
     @Test
+    public void updateIndicatorFollowsAvailableVersionOrApkRequirement() {
+        assertFalse(BraiOtaManager.isUpdateAvailable(null, "0.0.73", null, false));
+        assertFalse(BraiOtaManager.isUpdateAvailable("0.0.73", "0.0.73", null, false));
+        assertTrue(BraiOtaManager.isUpdateAvailable("0.0.74", "0.0.73", null, false));
+        assertTrue(BraiOtaManager.isUpdateAvailable("0.0.73", "0.0.73", null, true));
+    }
+
+    @Test
+    public void installedTargetApkClearsStoredApkUpdateRequirement() {
+        assertFalse(BraiOtaManager.isApkUpdateRequired(true, 60004, "60004"));
+        assertTrue(BraiOtaManager.isApkUpdateRequired(true, 60003, "60004"));
+        assertTrue(BraiOtaManager.isApkUpdateRequired(true, 60004, null));
+    }
+
+    @Test
     public void roundsDownloadProgressPercent() {
         assertEquals(67, BraiOtaManager.downloadProgressPercent(2, 3));
         assertEquals(100, BraiOtaManager.downloadProgressPercent(5, 3));
         assertEquals(0, BraiOtaManager.downloadProgressPercent(1, 0));
+    }
+
+    @Test
+    public void buildsInstalledChannelDownloadUrlAndFileName() {
+        assertEquals("https://api.b.test.brai.one/releases/download/b", BraiOtaManager.apkDownloadUrl("https://api.b.test.brai.one/", "b"));
+        assertEquals("brai-b-update-60004.apk", BraiOtaManager.apkDownloadFileName("b", "60004"));
+    }
+
+    @Test
+    public void preventsDuplicateApkDownloadsForTheSameTarget() {
+        assertFalse(BraiOtaManager.shouldStartApkDownload("downloading", "60004", "60005"));
+        assertFalse(BraiOtaManager.shouldStartApkDownload("downloaded", "60004", "60004"));
+        assertTrue(BraiOtaManager.shouldStartApkDownload("downloaded", "60004", "60005"));
+        assertTrue(BraiOtaManager.shouldStartApkDownload("failed", "60004", "60004"));
+    }
+
+    @Test
+    public void cleansStoredApkOnlyAfterTheTargetWasInstalled() {
+        assertFalse(BraiOtaManager.isInstalledApkTarget(90001, "90002"));
+        assertTrue(BraiOtaManager.isInstalledApkTarget(90002, "90002"));
+        assertFalse(BraiOtaManager.isInstalledApkTarget(90002, "unknown"));
+    }
+
+    @Test
+    public void requiresExactApkLengthAndChecksum() {
+        BraiOtaArchive.DownloadResult result = new BraiOtaArchive.DownloadResult("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", 12);
+        assertTrue(BraiOtaManager.isValidApkDownload(12, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", result));
+        assertFalse(BraiOtaManager.isValidApkDownload(11, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", result));
+        assertFalse(BraiOtaManager.isValidApkDownload(12, "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", result));
     }
 
     @Test

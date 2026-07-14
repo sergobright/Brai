@@ -8,7 +8,7 @@ import { copySchemaData } from '../../../deploy/scripts/supabase-branch.mjs';
 const databaseUrl = process.env.BRAI_TEST_DATABASE_URL?.trim();
 const authenticatedTokenCompatSql = fs.readFileSync(path.resolve(
   import.meta.dirname,
-  '../../../supabase/migrations/0026_authenticated_brai_cmd_tokens_compat.sql'
+  '../../../supabase/migrations/0030_authenticated_brai_cmd_tokens_compat.sql'
 ), 'utf8');
 
 test('preview production copy rolls back partial data and blocks concurrent writers', {
@@ -185,7 +185,7 @@ test('preview production copy preserves authenticated Brai Cmd token ownership',
     assert.equal((await pool.query(`
       SELECT count(*)::int AS count
       FROM ${qualified(targetSchema, 'schema_migrations')}
-      WHERE version = 65
+      WHERE version = 66
     `)).rows[0].count, 1);
     assert.match((await pool.query(`
       SELECT long_description

@@ -1,7 +1,7 @@
 import { act, fireEvent, render, renderHook, screen, waitFor, within } from "@testing-library/react";
 import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
-import { actionsWidgetPlugin, cachedActivitiesState, openProfileMenuItem, setupBraiAppTest, stubAndroidCapacitor } from "./app-test-support";
+import { actionsWidgetPlugin, audioPlay, cachedActivitiesState, openProfileMenuItem, setupBraiAppTest, stubAndroidCapacitor } from "./app-test-support";
 import { BraiApp } from "@/features/app/BraiApp";
 import { useBraiAppState } from "@/features/app/hooks/useBraiAppState";
 import { ActionRow } from "@/features/app/sections/actions/ActionRow";
@@ -214,6 +214,11 @@ describe("BraiApp actions", () => {
 
     await waitFor(() => expect(screen.getByRole("button", { name: /Выполнено 1/ })).toBeInTheDocument());
     expect(screen.getByRole("checkbox", { name: "Фокус" })).toBeChecked();
+    expect(audioPlay).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "Фокус" }));
+    await waitFor(() => expect(screen.getByRole("checkbox", { name: "Фокус" })).not.toBeChecked());
+    expect(audioPlay).toHaveBeenCalledTimes(1);
   });
 
   it("publishes Android widget snapshots for local create and status changes", async () => {
@@ -367,7 +372,10 @@ describe("BraiApp actions", () => {
       expect(await pendingActivityEvents()).toEqual(expect.arrayContaining([
         expect.objectContaining({
           actionId: "action-widget",
+          attemptCount: 1,
+          lastError: "offline",
           payload: { status: "Done" },
+          status: "failed",
           type: "set_status",
         }),
       ]));
@@ -412,7 +420,10 @@ describe("BraiApp actions", () => {
       expect(await pendingActivityEvents()).toEqual(expect.arrayContaining([
         expect.objectContaining({
           actionId: "action-widget-done",
+          attemptCount: 1,
+          lastError: "offline",
           payload: { status: "New" },
+          status: "failed",
           type: "set_status",
         }),
       ]));
@@ -437,6 +448,13 @@ describe("BraiApp actions", () => {
   });
 
   it("creates a mobile action with a description from the composer", async () => {
+    const defaultFetch = vi.mocked(fetch).getMockImplementation();
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      if (url.endsWith("/v1/activities/sync")) throw new Error("offline");
+      if (!defaultFetch) throw new Error("missing_default_fetch");
+      return await defaultFetch(input, init);
+    });
     render(<BraiApp />);
     await screen.findByText("Новых действий нет");
 
@@ -656,11 +674,11 @@ describe("BraiApp actions", () => {
 
     await openProfileMenuItem("Архив");
     await waitFor(() => expect(screen.getByRole("heading", { name: "Архив" })).toBeInTheDocument());
-    const archiveList = screen.getByLabelText("Удаленные действия");
+    const archiveList = screen.getByRole("region", { name: "Архив: Activities" });
     expect(within(archiveList).getByText("Фокус")).toBeInTheDocument();
     expect(archiveList.querySelector(".action-focus-button")).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Восстановить: Фокус", hidden: true }));
+    fireEvent.click(screen.getByRole("button", { name: "Восстановить: Фокус" }));
     await waitFor(() => expect(within(archiveList).queryByText("Фокус")).not.toBeInTheDocument());
 
     fireEvent.click(screen.getAllByRole("button", { name: "Действия" }).at(-1) as HTMLElement);

@@ -1,9 +1,11 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ChevronDown, Download, File, X } from "lucide-react";
 import { defaultApiBase } from "@/shared/config/runtime";
+import { BraiApi, type EventLogRow } from "@/shared/api/braiApi";
+import { getDisplayTimeZone } from "@/shared/time/format";
 import type { ActivityItem } from "@/shared/types/activities";
 import type { InboxItem } from "@/shared/types/inbox";
 import { Button } from "@/shared/ui/button";
@@ -230,29 +232,75 @@ export function DetailFields({ kind, item }: { kind: DetailPanelKind; item: Deta
   );
 }
 
-export function DetailHistory({ kind, item }: { kind: DetailPanelKind; item: DetailItem }) {
-  const rows: DetailValueRow[] =
-    kind === "actions"
-      ? [
-          { name: "Создано", value: itemValue(item, "created_at_utc") },
-          { name: "Обновлено", value: itemValue(item, "updated_at_utc") },
-          { name: "Завершено", value: itemValue(item, "completed_at_utc") },
-          { name: "Удалено", value: itemValue(item, "deleted_at_utc") },
-          { name: "Восстановлено", value: itemValue(item, "restored_at_utc") },
-        ]
-      : [
-          { name: "Создано", value: itemValue(item, "created_at_utc") },
-          { name: "Обновлено", value: itemValue(item, "updated_at_utc") },
-          { name: "Удалено", value: itemValue(item, "deleted_at_utc") },
-        ];
+export function DetailHistory({ item }: { kind: DetailPanelKind; item: DetailItem }) {
+  const api = useMemo(() => new BraiApi(defaultApiBase()), []);
+  const [eventState, setEventState] = useState<{ itemId: string; events: EventLogRow[] } | null>(null);
+  const events = eventState?.itemId === item.id ? eventState.events : null;
+
+  useEffect(() => {
+    let cancelled = false;
+    void api.itemEvents(item.id).then((result) => {
+      if (!cancelled) setEventState({ itemId: item.id, events: result.events });
+    }).catch(() => {
+      if (!cancelled) setEventState({ itemId: item.id, events: [] });
+    });
+    return () => { cancelled = true; };
+  }, [api, item.id]);
 
   return (
     <ScrollArea className="min-h-0 w-full min-w-0" role="tabpanel">
-      <div className="pb-6 pt-1">
-        <DetailRows rows={rows.filter((row) => !isEmptyDetailValue(row.value))} emptyText="История пуста" />
+      <div className="grid gap-2 pb-6 pt-1">
+        {events === null ? <p className="m-0 text-sm text-muted-foreground">Загрузка истории</p> : null}
+        {events?.length === 0 ? <p className="m-0 text-sm text-muted-foreground">Связанных событий нет</p> : null}
+        {events?.map((event) => (
+          <article key={event.id} className="rounded-lg border border-border p-3">
+            <div className="flex flex-wrap items-start justify-between gap-2">
+              <div className="min-w-0">
+                <h3 className="m-0 text-sm font-medium">{humanEventTitle(event)}</h3>
+                <time className="mt-1 block text-xs text-muted-foreground" dateTime={event.occurred_at_utc}>{formatEventDate(event.occurred_at_utc)}</time>
+              </div>
+              <span className={cn("rounded-full px-2 py-0.5 text-xs", event.status === "ignored" ? "bg-destructive/10 text-destructive" : "bg-primary/10 text-foreground")}>{event.status === "ignored" ? "Игнорировано" : "Принято"}</span>
+            </div>
+            {event.ignore_reason ? <p className="m-0 mt-2 text-sm text-destructive">Причина: {event.ignore_reason}</p> : null}
+            <Collapsible className="mt-2">
+              <CollapsibleTrigger className="text-xs text-muted-foreground hover:text-foreground">Технические детали</CollapsibleTrigger>
+              <CollapsibleContent>
+                <dl className="mt-2 grid gap-1 text-xs">
+                  <div><dt className="inline text-muted-foreground">ID: </dt><dd className="inline break-all">{event.event_id}</dd></div>
+                  <div><dt className="inline text-muted-foreground">Тип / action: </dt><dd className="inline">{event.event_type} / {event.event_action}</dd></div>
+                  <div><dt className="inline text-muted-foreground">Actor: </dt><dd className="inline">{event.actor_type}{event.actor_id ? ` · ${event.actor_id}` : ""}</dd></div>
+                </dl>
+                <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-md bg-secondary p-2 text-xs">{JSON.stringify(event.payload_json, null, 2)}</pre>
+              </CollapsibleContent>
+            </Collapsible>
+          </article>
+        ))}
       </div>
     </ScrollArea>
   );
+}
+
+function humanEventTitle(event: EventLogRow): string {
+  const payload = event.payload_json ?? {};
+  if (event.event_type === "create") return "Запись создана";
+  if (event.event_type === "update_title") return `Название изменено${typeof payload.title === "string" ? `: ${payload.title}` : ""}`;
+  if (event.event_type === "update_description") return "Описание изменено";
+  if (event.event_type === "set_status") return payload.status === "Done" ? "Отмечено выполненным" : "Возвращено в новые";
+  if (event.event_type === "delete") return "Перемещено в архив";
+  if (event.event_type === "restore") return "Восстановлено из архива";
+  if (event.event_type === "normalized" || event.event_type === "normalize") return "Данные нормализованы";
+  if (event.event_type === "reorder") return "Порядок списка изменён";
+  return event.title || event.event_action || event.event_type;
+}
+
+function formatEventDate(value: string): string {
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return value;
+  return new Intl.DateTimeFormat("ru-RU", {
+    dateStyle: "long",
+    timeStyle: "medium",
+    timeZone: getDisplayTimeZone(),
+  }).format(date);
 }
 
 export function DetailDbReference({ kind }: { kind: DetailPanelKind }) {

@@ -103,6 +103,84 @@ test('Activity validation retry keeps the supported primary model when no fallba
   }
 });
 
+test('Activity external normalization uses the account text profile and records its routing metadata', async () => {
+  const fixture = await createRawActivity('activity-external-profile', { seedUser: true });
+  const calls = [];
+  const userId = fixture.store.primaryUserId();
+  try {
+    await withUserScope(userId, async () => {
+      configureExternalActivityProfile(fixture.store);
+      const result = await processActivityItem({
+        store: fixture.store,
+        activityId: 'activity-external-profile',
+        codexBin: '/missing/codex-must-not-run',
+        externalAi: {
+          fetch: async (url, options) => {
+            calls.push({ url: String(url), body: JSON.parse(options.body) });
+            return new Response(JSON.stringify({
+              choices: [{ message: { content: JSON.stringify({
+                title: 'Внешняя нормализация',
+                description: 'Activity обработана аккаунтной моделью.',
+                reason: '',
+                normalization: 'Проверен внешний text-профиль.'
+              }) } }]
+            }), { status: 200 });
+          }
+        },
+        nowDate: new Date('2026-07-12T20:00:01.000Z')
+      });
+
+      assert.equal(result.ok, true);
+    });
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].url, 'https://api.groq.com/openai/v1/chat/completions');
+    assert.equal(calls[0].body.model, 'account-text-model');
+    const log = activityAiLogs(fixture, 'activity-external-profile')[0];
+    const json = JSON.parse(log.json_data);
+    assert.equal(log.status, 'done');
+    assert.equal(json.usage.model, 'account-text-model');
+    assert.equal(json.metadata.mode, 'external');
+    assert.equal(json.metadata.provider, 'groq');
+  } finally {
+    await fixture.close();
+  }
+});
+
+test('Activity external provider failure is terminal and never falls back to Codex', async () => {
+  const fixture = await createRawActivity('activity-external-failure', { seedUser: true });
+  const userId = fixture.store.primaryUserId();
+  let calls = 0;
+  try {
+    const result = await withUserScope(userId, async () => {
+      configureExternalActivityProfile(fixture.store);
+      return processActivityItem({
+        store: fixture.store,
+        activityId: 'activity-external-failure',
+        codexBin: '/missing/codex-must-not-run',
+        externalAi: {
+          fetch: async () => {
+            calls += 1;
+            return new Response(JSON.stringify({ error: { code: 'invalid_api_key' } }), { status: 401 });
+          }
+        },
+        nowDate: new Date('2026-07-12T20:00:01.000Z')
+      });
+    });
+
+    assert.deepEqual(result, { ok: false, reason: 'normalizer_failed' });
+    assert.equal(calls, 1);
+    const logs = activityAiLogs(fixture, 'activity-external-failure');
+    assert.equal(logs.length, 1);
+    const json = JSON.parse(logs[0].json_data);
+    assert.equal(logs[0].status, 'failed');
+    assert.equal(json.metadata.mode, 'external');
+    assert.equal(json.metadata.provider, 'groq');
+    assert.equal(json.metadata.error, 'invalid_key');
+  } finally {
+    await fixture.close();
+  }
+});
+
 test('Activity Temporal dispatch failure stays queued for recovery', async () => {
   const errors = [];
   const fixture = await createFixture(['2026-07-12T20:00:00.000Z'], {
@@ -258,9 +336,10 @@ test('Activity queued reconciler starts a durable queued workflow once', async (
   }
 });
 
-async function createRawActivity(activityId) {
+async function createRawActivity(activityId, { seedUser = false } = {}) {
   const fixture = await createFixture(['2026-07-12T20:00:00.000Z']);
   try {
+    if (seedUser) seedActivityUser(fixture.store);
     await syncCreate(fixture, activityId);
     return fixture;
   } catch (error) {
@@ -316,4 +395,38 @@ function seedNormalizedAction(store, id, nowIso) {
   store.ensureActivityRoleLink({
     id, title: id, description_md: '', author: '', created_at_utc: nowIso, updated_at_utc: nowIso
   });
+}
+
+function activityAiLogs(fixture, activityId) {
+  return fixture.store.db.prepare(`
+    SELECT status, json_data
+    FROM ai_logs
+    WHERE agent_id = 'activity.normalizer' AND flow_id = ?
+    ORDER BY id
+  `).all(activityId);
+}
+
+function configureExternalActivityProfile(store) {
+  store.putUserProviderCredential({
+    providerId: 'groq',
+    apiKey: 'account-provider-key',
+    verifiedAt: '2026-07-12T19:58:00.000Z',
+    nowIso: '2026-07-12T19:58:00.000Z'
+  });
+  store.setUserAiSettings({
+    model_provider_mode: 'external',
+    text: { provider_id: 'groq', model: 'account-text-model' },
+    vision: { provider_id: 'groq', model: 'account-vision-model' }
+  }, '2026-07-12T19:58:00.000Z');
+}
+
+function seedActivityUser(store) {
+  const userId = 'activity-ai-user';
+  store.db.prepare(`
+    INSERT INTO "user" ("id", "name", "email", "emailVerified", "createdAt", "updatedAt")
+    VALUES (?, 'Activity AI User', 'activity-ai@example.test', true, ?, ?)
+    ON CONFLICT ("id") DO NOTHING
+  `).run(userId, '2026-07-12T19:57:00.000Z', '2026-07-12T19:57:00.000Z');
+  store.claimFirstUser(userId, '2026-07-12T19:57:00.000Z');
+  return userId;
 }

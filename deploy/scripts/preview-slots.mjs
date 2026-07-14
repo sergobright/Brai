@@ -44,6 +44,9 @@ try {
         status: args[4] || null
       }, now);
       break;
+    case "note":
+      result = updateOwnedReviewNote(registry, args[0], args[1], args[2], now);
+      break;
     case "next-apk-preview":
       result = nextApkPreview(registry, args[0], args[1], args[2], now);
       break;
@@ -57,7 +60,7 @@ try {
       result = { ok: true, registry };
       break;
     default:
-      throw new Error("usage: preview-slots.sh init|status|allocate <branch> <commit> [generation]|assert-owned <branch> <commit>|ready <branch> <commit>|failed <branch> <commit>|apk <branch> <commit> <versionCode> <file> <version> [previewIteration] [buildKind]|clear-apk <branch> <commit>|supabase <branch> <commit> <name> [id] [status]|next-apk-preview <branch> <commit> <stableVersion>|release <branch-or-slot>|dequeue <branch>");
+      throw new Error("usage: preview-slots.sh init|status|allocate <branch> <commit> [generation]|assert-owned <branch> <commit>|ready <branch> <commit>|failed <branch> <commit>|note <branch> <commit> <base64-json>|apk <branch> <commit> <versionCode> <file> <version> [previewIteration] [buildKind]|clear-apk <branch> <commit>|supabase <branch> <commit> <name> [id] [status]|next-apk-preview <branch> <commit> <stableVersion>|release <branch-or-slot>|dequeue <branch>");
   }
 
   if (!readCommands.has(command)) {
@@ -76,11 +79,13 @@ function allocate(registry, branch, commit, rawGeneration, now) {
   if (existing) {
     assertLeaseAdvance(existing.entry, commit, generation);
     removeQueuedBranch(registry, branch);
+    const commitChanged = Boolean(existing.entry.commit && commit && existing.entry.commit !== commit);
     Object.assign(existing.entry, {
       status: "deploying",
       commit: commit ?? null,
       lease_generation: generation ?? existing.entry.lease_generation,
       updated_at: now,
+      ...(commitChanged ? { review_note: null } : {}),
     });
     return { ok: true, queued: false, allocatedNew: false, slot: existing.slot, entry: existing.entry };
   }
@@ -109,6 +114,35 @@ function assertOwned(registry, branch, commit) {
   if (!["deploying", "ready"].includes(existing.entry.status)) {
     throw new Error(`preview slot lease for ${branch}@${commit} is ${existing.entry.status}, not deploying or ready`);
   }
+  return { ok: true, slot: existing.slot, entry: existing.entry };
+}
+
+function updateOwnedReviewNote(registry, branch, commit, encoded, now) {
+  requireBranch(branch);
+  const existing = findByBranch(registry, branch);
+  if (!existing) throw new Error(`branch has no preview slot: ${branch}`);
+  if (!commit || existing.entry.commit !== commit || existing.entry.status !== "ready") {
+    throw new Error(`preview note revision mismatch: ${branch}@${commit || "(missing)"}`);
+  }
+  let note;
+  try {
+    note = JSON.parse(Buffer.from(String(encoded ?? ""), "base64").toString("utf8"));
+  } catch {
+    throw new Error("preview note must be valid base64 JSON");
+  }
+  for (const field of ["short_changes", "detailed_changes", "reason", "testing"]) {
+    if (!String(note?.[field] ?? "").trim()) throw new Error(`preview note ${field} is required`);
+  }
+  existing.entry.review_note = {
+    branch,
+    commit,
+    short_changes: String(note.short_changes).trim(),
+    detailed_changes: String(note.detailed_changes).trim(),
+    reason: String(note.reason).trim(),
+    testing: String(note.testing).trim(),
+    updated_at: now,
+  };
+  existing.entry.updated_at = now;
   return { ok: true, slot: existing.slot, entry: existing.entry };
 }
 
@@ -361,6 +395,7 @@ function defaultSlot(slot) {
     supabase_branch_status: null,
     assigned_at: null,
     updated_at: null,
+    review_note: null,
   };
 }
 

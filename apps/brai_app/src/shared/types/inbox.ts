@@ -1,4 +1,4 @@
-export type InboxEventType = "create" | "update_title" | "update_description" | "delete";
+export type InboxEventType = "create" | "update_title" | "update_description" | "reorder" | "delete" | "restore";
 
 export interface InboxItem {
   id: string;
@@ -21,6 +21,7 @@ export interface InboxItem {
   is_normalized: boolean;
   status: "New" | "Done";
   completed_at_utc: string | null;
+  sort_order?: number | null;
   item_roles_id?: number | null;
   initial_event_id?: string | null;
   workflow_execution_id?: number | null;
@@ -35,6 +36,7 @@ export interface InboxItem {
   created_at_utc: string;
   updated_at_utc: string;
   deleted_at_utc: string | null;
+  restored_at_utc?: string | null;
   pending?: boolean;
 }
 
@@ -81,6 +83,7 @@ export interface InboxEventPayload {
   preliminary_section?: string;
   normalization_text?: string;
   is_normalized?: boolean;
+  ordered_ids?: string[];
 }
 
 export interface PendingInboxEvent {

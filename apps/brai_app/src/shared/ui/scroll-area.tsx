@@ -49,7 +49,7 @@ function ScrollArea({
       type={type}
       scrollHideDelay={scrollHideDelay}
       className={cn(
-        "relative [--scroll-area-content-gutter:calc(var(--scroll-area-thumb-size)+var(--scroll-area-gap)+var(--scroll-area-gap))] [--scroll-area-gap:calc(var(--scroll-area-thumb-size)/2)] [--scroll-area-thumb-size:10px]",
+        "relative [--scroll-area-content-gutter:calc(var(--scroll-area-thumb-size)+var(--scroll-area-gap)+var(--scroll-area-gap))] [--scroll-area-gap:calc(var(--scroll-area-thumb-size)/2)] [--scroll-area-thumb-size:10px] max-[860px]:[--scroll-area-content-gutter:var(--scroll-area-thumb-size)] max-[860px]:[--scroll-area-gap:0px]",
         scrollbar && contentInset !== "none" && "[&>[data-slot=scroll-area-viewport]]:pr-[var(--scroll-area-content-gutter)]",
         scrollbar && contentInset === "balanced" && "[&>[data-slot=scroll-area-viewport]]:pl-[var(--scroll-area-content-gutter)]",
         className,

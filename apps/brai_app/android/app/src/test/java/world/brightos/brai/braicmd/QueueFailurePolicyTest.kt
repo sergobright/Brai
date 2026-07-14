@@ -30,7 +30,8 @@ class QueueFailurePolicyTest {
         listOf(
             QueueAuthBlockedException(),
             ServerResponseException(401, "unauthorized", "auth"),
-            ServerResponseException(403, "forbidden", "auth")
+            ServerResponseException(403, "forbidden", "auth"),
+            ServerResponseException(403, "function_disabled", "disabled")
         ).forEach { assertEquals(QueueFailureDisposition.Blocked, classifyQueueFailure(it)) }
     }
 

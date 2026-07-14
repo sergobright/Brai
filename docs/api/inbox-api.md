@@ -96,7 +96,11 @@ Brai CMD отправляет:
 | `attachments[]` | `inbox.attachment_links_json` |
 | `idempotency_key` | stable Inbox event id |
 
-Inbox state responses include read-model fields `status` and `completed_at_utc` for service-side lifecycle consumers.
+Inbox state responses include read-model fields `status`, `completed_at_utc`, `sort_order`, and `restored_at_utc`.
+
+### Product UI sync
+
+`POST /v1/inbox/events/sync` принимает пользовательские события `create`, `update_title`, `update_description`, `reorder`, `delete` и `restore`. `reorder` передаёт полный текущий порядок активных записей в `payload.ordered_ids`. `restore` возвращает запись наверх списка со статусом `New`, очищает completion/deletion state и сохраняет `restored_at_utc`. Сортировка и восстановление остаются частью общего idempotent event ledger; служебный status endpoint выше ими не заменяется.
 
 ## Processing
 

@@ -511,3 +511,102 @@ history rows by tapping or clicking the row itself instead of a pencil icon.
 - **THEN** history may display per-day chunks
 - **AND** editing or deleting any chunk targets the single canonical Focus
   session instead of creating separate physical sessions
+
+### Requirement: Settings manage account AI providers
+The shared Web/Android settings UI SHALL list masked account provider credentials and
+allow authenticated users to add, replace, and delete them and configure text and vision
+profiles without persisting plaintext credentials in browser storage.
+
+#### Scenario: Account providers are configured
+- **WHEN** an authenticated user opens model settings
+- **THEN** the UI shows connected providers with masked hints and verification metadata
+- **AND** it offers provider/model selectors for text and vision
+- **AND** it explains disabled external-mode or delete actions
+
+#### Scenario: A provider returns a long model list
+- **WHEN** Web or Android opens a provider model selector with more items than fit on screen
+- **THEN** the shared selector keeps the list inside a bounded scrolling viewport
+- **AND** mouse-wheel, touch, and keyboard scrolling remain available
+
+### Requirement: Account credentials synchronize through native Android code
+Brai Android SHALL synchronize account provider credentials through the native boundary
+without returning synchronized plaintext keys to React or the WebView.
+
+#### Scenario: Authenticated Android app synchronizes
+- **WHEN** a user-bound account token is activated or the app returns online/foreground
+- **THEN** native code imports eligible local keys and refreshes account key copies
+- **AND** Brai CMD keeps speech and post-processing model choices device-local
+
+#### Scenario: An account key is deleted after local import
+- **WHEN** an account provider key is explicitly deleted after the device already offered
+  the same anonymous local key to that account
+- **THEN** native code removes the account copy from its canonical set
+- **AND** later syncs or app restarts do not silently re-import that unchanged local key
+- **AND** the original anonymous key remains available after logout
+
+#### Scenario: Native account access is activated
+- **WHEN** an authenticated Android WebView provisions account access
+- **THEN** the browser receives only a short-lived one-time link token
+- **AND** Kotlin activates it with the existing device credential
+- **AND** only native code receives and stores the user-bound account token
+- **AND** React and the WebView never receive that account token
+
+#### Scenario: Account changes while native synchronization is pending
+- **WHEN** Android begins switching from one authenticated account to another
+- **THEN** it removes the previous user-bound token from normal request use before changing the account boundary
+- **AND** no local provider candidate can be imported into the previous account on behalf of the next account
+
+#### Scenario: Canonical credential refresh fails
+- **WHEN** Android cannot complete an account credential sync after an account key mutation
+- **THEN** native code clears cached account credential copies
+- **AND** Brai CMD fails explicitly until automatic synchronization succeeds
+- **AND** it never falls back to an anonymous local key while the account boundary is active
+
+#### Scenario: Android calls a provider directly
+- **WHEN** Brai CMD uses an anonymous or account-synchronized provider key
+- **THEN** the key is sent in an authorization header
+- **AND** the key is absent from the provider request URL
+
+#### Scenario: Browser calls a native-only account endpoint
+- **WHEN** a request to account activation, credential sync, or self-revoke has browser-origin headers
+- **THEN** Brai rejects it without returning account credentials or a user-bound token
+
+#### Scenario: Logout self-revoke is temporarily offline
+- **WHEN** Android cannot reach the self-revoke endpoint during logout or account switch
+- **THEN** it isolates the encrypted token for revoke-only retries
+- **AND** the token is never used for normal account requests
+- **AND** online or foreground lifecycle retries revocation until the server accepts it
+
+### Requirement: Engine exposes explicit human-readable update actions
+
+The client SHALL describe discovery, web download, and APK download without user-facing OTA terminology.
+
+#### Scenario: An update state is rendered
+- **WHEN** Engine is idle, checking, available, downloading, ready, or requires an APK
+- **THEN** its action text and icon match the current operation
+- **AND** the latest successful check time appears beside the action
+- **AND** user-visible Engine text contains no `OTA`
+
+#### Scenario: Native APK bridge is unavailable
+- **WHEN** an APK is required and `downloadApk()` is unavailable
+- **THEN** the client opens the installed channel's direct public download URL externally
+
+### Requirement: Navigation supports supplementary status indicators
+
+Navigation controls SHALL accept an arbitrary supplementary React node positioned without changing control geometry.
+
+#### Scenario: A navigation item has an indicator
+- **WHEN** an item supplies supplementary content without a position override
+- **THEN** it is absolutely positioned at the bottom-right
+- **AND** the control retains its original layout dimensions
+
+#### Scenario: Engine has any update
+- **WHEN** a web or APK update is available
+- **THEN** desktop and mobile Engine icons change from processor to download
+- **AND** a small yellow indicator appears at bottom-right
+- **AND** the download icon animates during downloads unless reduced motion is preferred
+
+#### Scenario: A hidden mobile item has an indicator
+- **WHEN** Engine in the mobile overflow menu has an update
+- **THEN** the three-dot button displays an aggregate yellow indicator at bottom-center
+- **AND** the three-dot icon does not move

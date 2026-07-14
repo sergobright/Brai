@@ -275,11 +275,14 @@ async function runProdPromotion(state, request) {
   }
 
   try {
-    await activities.cleanupAcceptedBranches({ recentMerged: true });
     await activities.syncMainCheckout({
       sha: state.sha,
-      restartTemporalWorker: request.restartTemporalWorker === true || request.restartTemporalWorker === "true"
+      restartTemporalWorker: false
     });
+    await activities.cleanupAcceptedBranches({ recentMerged: true });
+    if (request.restartTemporalWorker === true || request.restartTemporalWorker === "true") {
+      await activities.syncMainCheckout({ sha: state.sha, restartTemporalWorker: true });
+    }
   } catch (error) {
     applyPromotionEvent(state, eventLike(request, "prod_deploy_failed", { reason: reasonFromError(error) }));
     return;

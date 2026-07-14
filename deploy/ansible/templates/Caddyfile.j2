@@ -156,6 +156,10 @@ http://{{ domain }}, {{ domain }} {
     reverse_proxy 127.0.0.1:{{ brai_envs.prod.api_port }}
   }
 
+  handle /dev-releases* {
+    reverse_proxy 127.0.0.1:{{ brai_envs.prod.api_port }}
+  }
+
   handle /favicon.ico {
     root * {{ brai_repo }}/deploy/web
     file_server
@@ -220,6 +224,10 @@ http://{{ domain }}, {{ domain }} {
   }
 
   handle /releases* {
+    reverse_proxy 127.0.0.1:{{ env.api_port }}
+  }
+
+  handle /dev-releases* {
     reverse_proxy 127.0.0.1:{{ env.api_port }}
   }
 

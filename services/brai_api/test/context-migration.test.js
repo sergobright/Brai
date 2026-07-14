@@ -16,7 +16,7 @@ const CONTEXT_TABLES = [
   'context_policy_labels'
 ];
 const CONTEXT_MIGRATION_SQL = fs.readFileSync(path.resolve(
-  import.meta.dirname, '../../../supabase/migrations/0024_context_decision_calibration.sql'
+  import.meta.dirname, '../../../supabase/migrations/0028_context_decision_calibration.sql'
 ), 'utf8');
 
 test('context migration installs documented RLS-protected calibration schema', async () => {
@@ -39,7 +39,7 @@ test('context migration installs documented RLS-protected calibration schema', a
     `, [CONTEXT_TABLES]);
     assert.deepEqual(descriptions.rows.map((row) => row.table_name), CONTEXT_TABLES);
     assert.equal(
-      (await pool.query('SELECT count(*)::int AS count FROM schema_migrations WHERE version = 63')).rows[0].count,
+      (await pool.query('SELECT count(*)::int AS count FROM schema_migrations WHERE version = 64')).rows[0].count,
       1
     );
     await assertOwnerScopedOperationConstraints(pool);

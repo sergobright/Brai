@@ -1,25 +1,130 @@
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 
+const ACCOUNT_LINK_TTL_MS = 5 * 60 * 1000;
+const ACCESS_TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+
+const DEFAULT_BRAI_CMD_MESSAGES = Object.freeze({
+  'message.inbox.created.default': 'Отправлено во входящие',
+  'message.inbox.duplicate.default': 'Уже во входящих',
+  'message.dictate.success.main': '',
+  'message.function.disabled.default': 'Функция временно недоступна'
+});
+
+const DEFAULT_BRAI_CMD_FUNCTIONS = Object.freeze({
+  main_dictation: { key: 'main_dictation', title: 'Диктовка голос в текст', enabled: true },
+  idea_voice_inbox: { key: 'idea_voice_inbox', title: 'Идея голосом во входящие', enabled: true },
+  screenshot_inbox: { key: 'screenshot_inbox', title: 'Скриншот во входящие', enabled: true },
+  screenshot_voice_inbox: { key: 'screenshot_voice_inbox', title: 'Скриншот и голос во входящие', enabled: true },
+  chat_context_inbox: { key: 'chat_context_inbox', title: 'JSON чата и голос во входящие', enabled: true },
+  save_context_inbox: { key: 'save_context_inbox', title: 'Сохранить JSON и голос во входящие', enabled: true }
+});
+
 export const braiCmdStoreMethods = {
   braiCmdSettings() {
     const row = this.db.prepare("SELECT value FROM brai_cmd_settings WHERE key = 'registration_enabled'").get();
-    return { registrationEnabled: row?.value !== 'false' };
+    return {
+      registrationEnabled: row?.value !== 'false',
+      messages: this.braiCmdMessages(),
+      functions: this.braiCmdFunctions()
+    };
+  },
+
+  braiCmdMessages() {
+    const rows = this.db.prepare("SELECT key, value FROM brai_cmd_settings WHERE key LIKE 'message.%'").all();
+    const saved = Object.fromEntries(rows.map((row) => [row.key, cleanNoticeText(row.value)]));
+    return { ...DEFAULT_BRAI_CMD_MESSAGES, ...saved };
+  },
+
+  braiCmdNotice(key, tone = 'success') {
+    const text = this.braiCmdMessages()[key] ?? DEFAULT_BRAI_CMD_MESSAGES[key] ?? '';
+    const clean = cleanNoticeText(text);
+    return clean ? { key, text: clean, tone: cleanNoticeTone(tone) } : null;
+  },
+
+  braiCmdFunctions() {
+    const rows = this.db.prepare("SELECT key, value FROM brai_cmd_settings WHERE key LIKE 'function.%.enabled'").all();
+    const saved = new Map();
+    for (const row of rows) {
+      const key = functionKeyFromSettingKey(row.key);
+      if (key && Object.hasOwn(DEFAULT_BRAI_CMD_FUNCTIONS, key)) {
+        saved.set(key, row.value !== 'false');
+      }
+    }
+    return Object.fromEntries(Object.entries(DEFAULT_BRAI_CMD_FUNCTIONS).map(([key, value]) => [
+      key,
+      { ...value, enabled: saved.has(key) ? saved.get(key) : value.enabled }
+    ]));
+  },
+
+  braiCmdFunctionEnabled(key) {
+    const normalized = cleanFunctionKey(key);
+    if (!Object.hasOwn(DEFAULT_BRAI_CMD_FUNCTIONS, normalized)) return false;
+    return this.braiCmdFunctions()[normalized]?.enabled !== false;
   },
 
   setBraiCmdRegistrationEnabled(registrationEnabled) {
+    return this.setBraiCmdSettings({ registrationEnabled });
+  },
+
+  setBraiCmdSettings({ registrationEnabled, messages, functions } = {}) {
+    const now = new Date().toISOString();
+    const touched = {};
+    if (registrationEnabled !== undefined) {
+      this.db.prepare(`
+        INSERT INTO brai_cmd_settings (key, value, updated_at_utc)
+        VALUES ('registration_enabled', ?, ?)
+        ON CONFLICT(key) DO UPDATE SET
+          value = excluded.value,
+          updated_at_utc = excluded.updated_at_utc
+      `).run(registrationEnabled ? 'true' : 'false', now);
+      touched.registration_enabled = Boolean(registrationEnabled);
+    }
+    if (messages && typeof messages === 'object' && !Array.isArray(messages)) {
+      const upsert = this.db.prepare(`
+        INSERT INTO brai_cmd_settings (key, value, updated_at_utc)
+        VALUES (?, ?, ?)
+        ON CONFLICT(key) DO UPDATE SET
+          value = excluded.value,
+          updated_at_utc = excluded.updated_at_utc
+      `);
+      for (const [key, value] of Object.entries(messages)) {
+        if (!Object.hasOwn(DEFAULT_BRAI_CMD_MESSAGES, key)) continue;
+        upsert.run(key, cleanNoticeText(value), now);
+        touched[key] = true;
+      }
+    }
+    if (functions && typeof functions === 'object' && !Array.isArray(functions)) {
+      const upsert = this.db.prepare(`
+        INSERT INTO brai_cmd_settings (key, value, updated_at_utc)
+        VALUES (?, ?, ?)
+        ON CONFLICT(key) DO UPDATE SET
+          value = excluded.value,
+          updated_at_utc = excluded.updated_at_utc
+      `);
+      for (const [key, value] of Object.entries(functions)) {
+        const normalized = cleanFunctionKey(key);
+        if (!Object.hasOwn(DEFAULT_BRAI_CMD_FUNCTIONS, normalized)) continue;
+        const enabled = cleanFunctionEnabled(value);
+        if (enabled === null) continue;
+        const settingKey = `function.${normalized}.enabled`;
+        upsert.run(settingKey, enabled ? 'true' : 'false', now);
+        touched[settingKey] = enabled;
+      }
+    }
+    if (Object.keys(touched).length === 0) return this.braiCmdSettings();
     this.db.prepare(`
       INSERT INTO brai_cmd_settings (key, value, updated_at_utc)
-      VALUES ('registration_enabled', ?, ?)
+      VALUES ('messages_revision', ?, ?)
       ON CONFLICT(key) DO UPDATE SET
         value = excluded.value,
         updated_at_utc = excluded.updated_at_utc
-    `).run(registrationEnabled ? 'true' : 'false', new Date().toISOString());
+    `).run(now, now);
     safeRecordLog(this, {
       source: 'brai-cmd',
       operation: 'brai_cmd.admin_settings_update',
       status: 'done',
       message: 'Brai Cmd admin settings updated',
-      jsonData: { registration_enabled: Boolean(registrationEnabled) }
+      jsonData: touched
     });
     return this.braiCmdSettings();
   },
@@ -237,42 +342,18 @@ export const braiCmdStoreMethods = {
   },
 
   issueBraiCmdAccess(input) {
-    const token = `aw_${randomBytes(32).toString('base64url')}`;
-    const now = new Date().toISOString();
-    const record = {
-      id: randomUUID(),
-      displayName: normalizeDisplayName(input.displayName),
-      tokenHash: hashSecret(token),
-      deviceIdHash: input.deviceId ? hashSecret(input.deviceId.trim()) : null,
-      status: 'active',
-      source: input.source === 'admin' ? 'admin' : 'self_service',
-      createdAt: now,
-      activatedAt: input.deviceId ? now : null,
-      lastUsedAt: null,
-      clientVersion: cleanMetadata(input.clientVersion),
-      appPackage: cleanMetadata(input.appPackage),
-      preliminaryUsersId: cleanMetadata(input.preliminaryUsersId)
-    };
-    this.db.prepare(`
-      INSERT INTO brai_cmd_access_tokens (
-        id, display_name, token_hash, device_id_hash, status, source,
-        created_at_utc, activated_at_utc, last_used_at_utc, client_version, app_package,
-        preliminary_users_id
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      record.id,
-      record.displayName,
-      record.tokenHash,
-      record.deviceIdHash,
-      record.status,
-      record.source,
-      record.createdAt,
-      record.activatedAt,
-      record.lastUsedAt,
-      record.clientVersion,
-      record.appPackage,
-      record.preliminaryUsersId || null
-    );
+    const issued = buildBraiCmdAccess(input);
+    const { record } = issued;
+    this.db.transaction(() => {
+      if (record.userId && record.deviceIdHash) {
+        this.db.prepare(`
+          UPDATE brai_cmd_access_tokens
+          SET status = 'revoked'
+          WHERE user_id = ? AND device_id_hash = ? AND status = 'active'
+        `).run(record.userId, record.deviceIdHash);
+      }
+      insertBraiCmdAccess(this, record);
+    })();
     safeRecordLog(this, {
       dt: record.createdAt,
       source: 'brai-cmd',
@@ -284,11 +365,142 @@ export const braiCmdStoreMethods = {
         source: record.source,
         device_bound: Boolean(record.deviceIdHash),
         preliminary_users_id: record.preliminaryUsersId || null,
+        user_id: record.userId,
         client_version_present: Boolean(record.clientVersion),
         app_package_present: Boolean(record.appPackage)
       }
     });
+    return issued;
+  },
+
+  issueBraiCmdAccountLink(input) {
+    const userId = cleanMetadata(input.userId);
+    const deviceId = String(input.deviceId ?? '').trim();
+    if (!userId) throw braiCmdTokenError('account_required', 403);
+    if (!deviceId) throw braiCmdTokenError('device_id_required', 400);
+    const token = `bl_${randomBytes(32).toString('base64url')}`;
+    const createdAt = cleanIso(input.nowIso);
+    const record = {
+      id: randomUUID(),
+      tokenHash: hashSecret(token),
+      userId,
+      deviceIdHash: hashSecret(deviceId),
+      displayName: normalizeDisplayName(input.displayName),
+      clientVersion: cleanMetadata(input.clientVersion),
+      appPackage: cleanMetadata(input.appPackage),
+      createdAt,
+      expiresAt: new Date(Date.parse(createdAt) + ACCOUNT_LINK_TTL_MS).toISOString(),
+      usedAt: null
+    };
+    this.db.transaction(() => {
+      this.db.prepare(`
+        UPDATE brai_cmd_account_link_tokens
+        SET used_at_utc = ?
+        WHERE device_id_hash = ? AND used_at_utc IS NULL
+      `).run(createdAt, record.deviceIdHash);
+      this.db.prepare(`
+        INSERT INTO brai_cmd_account_link_tokens (
+          id, token_hash, user_id, device_id_hash, display_name,
+          client_version, app_package, created_at_utc, expires_at_utc, used_at_utc
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        record.id,
+        record.tokenHash,
+        record.userId,
+        record.deviceIdHash,
+        record.displayName,
+        record.clientVersion,
+        record.appPackage,
+        record.createdAt,
+        record.expiresAt,
+        record.usedAt
+      );
+    })();
+    safeRecordLog(this, {
+      dt: createdAt,
+      source: 'brai-cmd',
+      operation: 'brai_cmd.account_link_issue',
+      status: 'done',
+      userId,
+      message: 'Brai Cmd account link issued',
+      jsonData: {
+        account_link_id: record.id,
+        device_bound: true,
+        ttl_seconds: ACCOUNT_LINK_TTL_MS / 1000
+      }
+    });
     return { token, record };
+  },
+
+  activateBraiCmdAccountLink(input) {
+    const linkToken = String(input.linkToken ?? '').trim();
+    const currentAccess = input.currentAccess;
+    if (!/^bl_[A-Za-z0-9_-]{43}$/.test(linkToken)) throw braiCmdTokenError('invalid_link_token', 401);
+    if (!currentAccess?.id || !currentAccess.deviceIdHash) {
+      throw braiCmdTokenError('invalid_device_access', 401);
+    }
+    const deviceIdHash = currentAccess.deviceIdHash;
+    const nowIso = cleanIso(input.nowIso);
+    const issued = buildBraiCmdAccess({
+      displayName: 'Brai',
+      deviceIdHash,
+      source: 'authenticated',
+      nowIso
+    });
+    let link;
+    this.db.transaction(() => {
+      const activeAccess = this.db.prepare(`
+        SELECT status, device_id_hash, expires_at_utc
+        FROM brai_cmd_access_tokens WHERE id = ?
+      `).get(currentAccess.id);
+      if (
+        activeAccess?.status !== 'active'
+        || Date.parse(activeAccess.expires_at_utc) <= Date.parse(nowIso)
+        || !activeAccess.device_id_hash
+        || !safeEqualHex(activeAccess.device_id_hash, deviceIdHash)
+      ) {
+        throw braiCmdTokenError('invalid_device_access', 401);
+      }
+      link = this.db.prepare(`
+        SELECT * FROM brai_cmd_account_link_tokens WHERE token_hash = ?
+      `).get(hashSecret(linkToken));
+      if (!link) throw braiCmdTokenError('invalid_link_token', 401);
+      if (link.used_at_utc) throw braiCmdTokenError('link_token_used', 409);
+      if (link.expires_at_utc <= nowIso) throw braiCmdTokenError('link_token_expired', 401);
+      if (!safeEqualHex(link.device_id_hash, deviceIdHash)) {
+        throw braiCmdTokenError('link_device_mismatch', 403);
+      }
+      const consumed = this.db.prepare(`
+        UPDATE brai_cmd_account_link_tokens
+        SET used_at_utc = ?
+        WHERE id = ? AND used_at_utc IS NULL AND expires_at_utc > ?
+      `).run(nowIso, link.id, nowIso);
+      if (consumed.changes !== 1) throw braiCmdTokenError('invalid_link_token', 401);
+      issued.record.displayName = link.display_name;
+      issued.record.userId = link.user_id;
+      issued.record.clientVersion = link.client_version || issued.record.clientVersion;
+      issued.record.appPackage = link.app_package || issued.record.appPackage;
+      this.db.prepare(`
+        UPDATE brai_cmd_access_tokens
+        SET status = 'revoked'
+        WHERE device_id_hash = ? AND status = 'active'
+      `).run(deviceIdHash);
+      insertBraiCmdAccess(this, issued.record);
+    })();
+    safeRecordLog(this, {
+      dt: nowIso,
+      source: 'brai-cmd',
+      operation: 'brai_cmd.account_link_activate',
+      status: 'done',
+      userId: issued.record.userId,
+      message: 'Brai Cmd account link activated',
+      jsonData: {
+        account_link_id: link.id,
+        access_token_id: issued.record.id,
+        replaced_access_token_id: currentAccess.id
+      }
+    });
+    return issued;
   },
 
   authenticateBraiCmdAccess(token, deviceId, clientVersion = '') {
@@ -299,11 +511,14 @@ export const braiCmdStoreMethods = {
       WHERE status = 'active'
       ORDER BY created_at_utc
     `).all();
-    const row = rows.find((candidate) => safeEqualHex(candidate.token_hash, tokenHash));
+    const now = new Date().toISOString();
+    const nowMs = Date.parse(now);
+    const row = rows.find((candidate) => (
+      Date.parse(candidate.expires_at_utc) > nowMs && safeEqualHex(candidate.token_hash, tokenHash)
+    ));
     if (!row) return null;
     if (row.device_id_hash && !safeEqualHex(row.device_id_hash, deviceIdHash)) return null;
 
-    const now = new Date().toISOString();
     const cleanVersion = cleanMetadata(clientVersion);
     this.db.prepare(`
       UPDATE brai_cmd_access_tokens
@@ -356,14 +571,17 @@ export const braiCmdStoreMethods = {
       postProcessingMs: safeNumber(input.postProcessingMs),
       totalMs: safeNumber(input.totalMs),
       transcriptChars: safeNumber(input.transcriptChars),
+      postProcessingInputChars: safeNumber(input.postProcessingInputChars),
+      postProcessingOutputChars: safeNumber(input.postProcessingOutputChars),
       clientVersion: cleanMetadata(input.clientVersion)
     };
     this.db.prepare(`
       INSERT INTO brai_cmd_usage_events (
         id, access_token_id, created_at_utc, success, error_code,
         audio_bytes, audio_duration_ms, provider, model, fallback_used,
-        transcription_ms, post_processing_ms, total_ms, transcript_chars, client_version
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        transcription_ms, post_processing_ms, total_ms, transcript_chars,
+        post_processing_input_chars, post_processing_output_chars, client_version
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       row.id,
       row.accessTokenId,
@@ -379,6 +597,8 @@ export const braiCmdStoreMethods = {
       row.postProcessingMs,
       row.totalMs,
       row.transcriptChars,
+      row.postProcessingInputChars,
+      row.postProcessingOutputChars,
       row.clientVersion
     );
     this.recordLog?.({
@@ -402,6 +622,8 @@ export const braiCmdStoreMethods = {
         post_processing_ms: row.postProcessingMs,
         total_ms: row.totalMs,
         transcript_chars: row.transcriptChars,
+        post_processing_input_chars: row.postProcessingInputChars,
+        post_processing_output_chars: row.postProcessingOutputChars,
         client_version: row.clientVersion,
         post_processing_requested: Boolean(input.postProcessingRequested),
         context_requested: Boolean(input.contextRequested)
@@ -424,13 +646,15 @@ export const braiCmdStoreMethods = {
              COALESCE(SUM(u.audio_bytes), 0) AS audio_bytes,
              COALESCE(SUM(u.audio_duration_ms), 0) AS audio_duration_ms,
              COALESCE(SUM(u.transcript_chars), 0) AS transcript_chars,
+             COALESCE(SUM(u.post_processing_input_chars), 0) AS post_processing_input_chars,
+             COALESCE(SUM(u.post_processing_output_chars), 0) AS post_processing_output_chars,
              COALESCE(SUM(u.transcription_ms), 0) AS transcription_ms,
              COALESCE(SUM(u.post_processing_ms), 0) AS post_processing_ms,
              COALESCE(SUM(u.total_ms), 0) AS total_ms
       FROM brai_cmd_access_tokens t
       LEFT JOIN brai_cmd_usage_events u ON u.access_token_id = t.id
       LEFT JOIN preliminary_users p ON p.id = t.preliminary_users_id
-      LEFT JOIN "user" au ON au.id = p.user_id
+      LEFT JOIN "user" au ON au.id = COALESCE(t.user_id, p.user_id)
       GROUP BY t.id, p.id, au.id
       ORDER BY t.created_at_utc DESC
     `).all().map((row) => formatAdminToken(row));
@@ -465,12 +689,13 @@ export const braiCmdStoreMethods = {
                p.status AS preliminary_status,
                p.user_id AS preliminary_user_id,
                p.display_name AS preliminary_display_name,
+               t.user_id,
                au.email AS auth_user_email,
                au.name AS auth_user_name
         FROM brai_cmd_usage_events u
         LEFT JOIN brai_cmd_access_tokens t ON t.id = u.access_token_id
         LEFT JOIN preliminary_users p ON p.id = t.preliminary_users_id
-        LEFT JOIN "user" au ON au.id = p.user_id
+        LEFT JOIN "user" au ON au.id = COALESCE(t.user_id, p.user_id)
         ORDER BY u.created_at_utc DESC
         LIMIT 50
       `).all().map((row) => ({
@@ -488,7 +713,9 @@ export const braiCmdStoreMethods = {
         transcriptionMs: row.transcription_ms,
         postProcessingMs: row.post_processing_ms,
         totalMs: row.total_ms,
-        transcriptChars: row.transcript_chars
+        transcriptChars: row.transcript_chars,
+        postProcessingInputChars: row.post_processing_input_chars,
+        postProcessingOutputChars: row.post_processing_output_chars
       }))
     };
   }
@@ -501,14 +728,66 @@ function formatBraiCmdToken(row) {
     tokenHash: row.token_hash,
     deviceIdHash: row.device_id_hash,
     preliminaryUsersId: row.preliminary_users_id,
+    userId: row.user_id,
     status: row.status,
     source: row.source,
     createdAt: row.created_at_utc,
+    expiresAt: row.expires_at_utc,
     activatedAt: row.activated_at_utc,
     lastUsedAt: row.last_used_at_utc,
     clientVersion: row.client_version,
     appPackage: row.app_package
   };
+}
+
+function buildBraiCmdAccess(input) {
+  const token = `aw_${randomBytes(32).toString('base64url')}`;
+  const now = cleanIso(input.nowIso);
+  const deviceIdHash = input.deviceIdHash || (input.deviceId ? hashSecret(String(input.deviceId).trim()) : null);
+  return {
+    token,
+    record: {
+      id: randomUUID(),
+      displayName: normalizeDisplayName(input.displayName),
+      tokenHash: hashSecret(token),
+      deviceIdHash,
+      userId: cleanMetadata(input.userId) || null,
+      status: 'active',
+      source: input.source === 'admin' ? 'admin' : input.source === 'authenticated' ? 'authenticated' : 'self_service',
+      createdAt: now,
+      expiresAt: new Date(Date.parse(now) + ACCESS_TOKEN_TTL_MS).toISOString(),
+      activatedAt: deviceIdHash ? now : null,
+      lastUsedAt: null,
+      clientVersion: cleanMetadata(input.clientVersion),
+      appPackage: cleanMetadata(input.appPackage),
+      preliminaryUsersId: cleanMetadata(input.preliminaryUsersId)
+    }
+  };
+}
+
+function insertBraiCmdAccess(store, record) {
+  store.db.prepare(`
+    INSERT INTO brai_cmd_access_tokens (
+      id, display_name, token_hash, device_id_hash, user_id, status, source,
+      created_at_utc, expires_at_utc, activated_at_utc, last_used_at_utc, client_version, app_package,
+      preliminary_users_id
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    record.id,
+    record.displayName,
+    record.tokenHash,
+    record.deviceIdHash,
+    record.userId,
+    record.status,
+    record.source,
+    record.createdAt,
+    record.expiresAt,
+    record.activatedAt,
+    record.lastUsedAt,
+    record.clientVersion,
+    record.appPackage,
+    record.preliminaryUsersId || null
+  );
 }
 
 function formatAdminToken(row) {
@@ -518,6 +797,7 @@ function formatAdminToken(row) {
     status: row.status,
     source: row.source,
     createdAt: row.created_at_utc,
+    expiresAt: row.expires_at_utc,
     activatedAt: row.activated_at_utc,
     lastUsedAt: row.last_used_at_utc,
     clientVersion: row.client_version,
@@ -539,6 +819,15 @@ function formatAdminToken(row) {
 }
 
 function adminOwner(row) {
+  if (row.user_id) {
+    return {
+      type: 'registered',
+      userId: row.user_id,
+      label: row.auth_user_email || row.auth_user_name || row.display_name || 'Registered user',
+      email: row.auth_user_email || null,
+      name: row.auth_user_name || null
+    };
+  }
   if (!row.preliminary_users_id) return { type: 'legacy', label: 'Legacy access token' };
   if (row.preliminary_status === 'converted' && row.preliminary_user_id) {
     return {
@@ -602,9 +891,53 @@ function cleanMetadata(value) {
   return String(value ?? '').trim().slice(0, 120);
 }
 
+function cleanIso(value) {
+  const date = value ? new Date(value) : new Date();
+  if (!Number.isFinite(date.getTime())) throw braiCmdTokenError('invalid_timestamp', 500);
+  return date.toISOString();
+}
+
+function braiCmdTokenError(code, status) {
+  const error = new Error(code);
+  error.code = code;
+  error.status = status;
+  return error;
+}
+
+function functionKeyFromSettingKey(key) {
+  const value = String(key ?? '');
+  if (!value.startsWith('function.') || !value.endsWith('.enabled')) return '';
+  return cleanFunctionKey(value.slice('function.'.length, -'.enabled'.length));
+}
+
+function cleanFunctionKey(value) {
+  return String(value ?? '').trim().toLowerCase().replace(/[^a-z0-9_]/g, '').slice(0, 80);
+}
+
+function cleanFunctionEnabled(value) {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'string') {
+    const clean = value.trim().toLowerCase();
+    if (clean === 'true') return true;
+    if (clean === 'false') return false;
+  }
+  if (value && typeof value === 'object' && !Array.isArray(value) && typeof value.enabled === 'boolean') {
+    return value.enabled;
+  }
+  return null;
+}
+
 function safeNumber(value) {
   const number = Number(value ?? 0);
   return Number.isFinite(number) ? Math.max(0, Math.round(number)) : 0;
+}
+
+function cleanNoticeText(value) {
+  return String(value ?? '').trim().replace(/[.。．]+$/u, '').trim().slice(0, 120);
+}
+
+function cleanNoticeTone(value) {
+  return ['success', 'warning', 'error', 'info'].includes(value) ? value : 'success';
 }
 
 function safeRecordLog(store, input) {
@@ -623,6 +956,8 @@ function emptyUsage() {
     audioBytes: 0,
     audioDurationMs: 0,
     transcriptChars: 0,
+    postProcessingInputChars: 0,
+    postProcessingOutputChars: 0,
     transcriptionMs: 0,
     postProcessingMs: 0,
     totalMs: 0
@@ -636,6 +971,8 @@ function addUsage(left, right) {
   left.audioBytes += right.audioBytes;
   left.audioDurationMs += right.audioDurationMs;
   left.transcriptChars += right.transcriptChars;
+  left.postProcessingInputChars += right.postProcessingInputChars;
+  left.postProcessingOutputChars += right.postProcessingOutputChars;
   left.transcriptionMs += right.transcriptionMs;
   left.postProcessingMs += right.postProcessingMs;
   left.totalMs += right.totalMs;

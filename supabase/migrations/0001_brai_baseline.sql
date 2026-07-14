@@ -23,6 +23,12 @@ CREATE TABLE IF NOT EXISTS "user" (
   "updatedAt" timestamptz NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS user_ui_preferences (
+  user_id text PRIMARY KEY REFERENCES "user" ("id") ON DELETE CASCADE,
+  context_rail_width_px integer NOT NULL DEFAULT 256 CHECK (context_rail_width_px BETWEEN 192 AND 512),
+  updated_at_utc text NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS "session" (
   "id" text PRIMARY KEY,
   "expiresAt" timestamptz NOT NULL,
@@ -232,9 +238,11 @@ CREATE TABLE IF NOT EXISTS inbox (
   is_normalized integer NOT NULL DEFAULT 0 CHECK (is_normalized IN (0, 1)),
   status text NOT NULL DEFAULT 'New' CHECK (status IN ('New', 'Done')),
   completed_at_utc text,
+  sort_order integer,
   created_at_utc text NOT NULL,
   updated_at_utc text NOT NULL,
   deleted_at_utc text,
+  restored_at_utc text,
   last_event_id text,
   user_id text
 );
@@ -267,6 +275,7 @@ CREATE INDEX IF NOT EXISTS idx_inbox_related ON inbox (related_inbox_id);
 CREATE INDEX IF NOT EXISTS idx_inbox_item_date ON inbox (item_date);
 CREATE INDEX IF NOT EXISTS idx_inbox_normalized_updated ON inbox (is_normalized, updated_at_utc);
 CREATE INDEX IF NOT EXISTS idx_inbox_user_created ON inbox (user_id, created_at_utc);
+CREATE INDEX IF NOT EXISTS idx_inbox_new_sort_order ON inbox (status, sort_order) WHERE deleted_at_utc IS NULL AND sort_order IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS items (
   id text PRIMARY KEY,
@@ -468,6 +477,8 @@ CREATE TABLE IF NOT EXISTS brai_cmd_usage_events (
   post_processing_ms integer NOT NULL DEFAULT 0,
   total_ms integer NOT NULL DEFAULT 0,
   transcript_chars integer NOT NULL DEFAULT 0,
+  post_processing_input_chars integer NOT NULL DEFAULT 0,
+  post_processing_output_chars integer NOT NULL DEFAULT 0,
   client_version text NOT NULL DEFAULT ''
 );
 
@@ -622,70 +633,6 @@ INSERT INTO agents (
   source_module,
   updated_at_utc
 ) VALUES (
-  'brai-cmd.dictate.transcription',
-  '1',
-  'brai-cmd',
-  'runtime',
-  'active',
-  'Brai Cmd диктовка',
-  'Принимает аудио Brai Cmd, сохраняет usage metrics и пишет ai_logs без хранения исходного аудио.',
-  'Срабатывает при POST /v1/dictate с валидным Brai Cmd access token.',
-  'Пропускается при невалидном токене, неподдержанном media type или ошибке валидации.',
-  'Multipart audio, device id, client metadata и optional post-processing/context fields.',
-  'Текстовая расшифровка или ошибка с usage/ai_logs audit trail.',
-  'Использует runtime deps braiCmd для transcription, post-processing и context reply.',
-  'Пишет brai_cmd_usage_events и ai_logs; не сохраняет аудио или raw transcript в runtime таблицах.',
-  '',
-  '',
-  '',
-  NULL,
-  'Возвращает structured API error и пишет failed ai_log/usage row при runtime failure.',
-  'services/brai_api/src/brai-cmd-routes.js',
-  now()::text
-)
-ON CONFLICT (id) DO UPDATE SET
-  version = excluded.version,
-  target = excluded.target,
-  kind = excluded.kind,
-  status = excluded.status,
-  title = excluded.title,
-  summary = excluded.summary,
-  trigger_description = excluded.trigger_description,
-  conditions_description = excluded.conditions_description,
-  input_description = excluded.input_description,
-  output_description = excluded.output_description,
-  interactions_description = excluded.interactions_description,
-  side_effects_description = excluded.side_effects_description,
-  llm_provider = excluded.llm_provider,
-  llm_model = excluded.llm_model,
-  llm_prompt_template = excluded.llm_prompt_template,
-  llm_timeout_ms = excluded.llm_timeout_ms,
-  fallback_description = excluded.fallback_description,
-  source_module = excluded.source_module,
-  updated_at_utc = excluded.updated_at_utc;
-
-INSERT INTO agents (
-  id,
-  version,
-  target,
-  kind,
-  status,
-  title,
-  summary,
-  trigger_description,
-  conditions_description,
-  input_description,
-  output_description,
-  interactions_description,
-  side_effects_description,
-  llm_provider,
-  llm_model,
-  llm_prompt_template,
-  llm_timeout_ms,
-  fallback_description,
-  source_module,
-  updated_at_utc
-) VALUES (
   'inbox.image_describer',
   '1',
   'inbox',
@@ -811,6 +758,13 @@ ON CONFLICT (version_type_id) DO UPDATE
 SET last_version = GREATEST(build_version_counters.last_version, excluded.last_version);
 
 INSERT INTO table_descriptions (table_name, title, short_description, long_description, updated_at_utc) VALUES
+  (
+    'user_ui_preferences',
+    'User UI preferences',
+    'Синхронизируемые настройки интерфейса пользователя.',
+    'Хранит общую для web-аккаунта ширину contextual rail; локальные open/closed состояния страниц остаются на устройстве.',
+    now()::text
+  ),
   (
     'events',
     'Global events',

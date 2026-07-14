@@ -569,6 +569,26 @@
         path: /usr/lib/systemd/system/syncthing@.service
       register: brai_syncthing_system_service
 
+    - name: Ensure Syncthing service override directory
+      ansible.builtin.file:
+        path: "/etc/systemd/system/syncthing@{{ brai_syncthing_user }}.service.d"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Ensure Syncthing keeps shared Vault files group-writable
+      ansible.builtin.copy:
+        dest: "/etc/systemd/system/syncthing@{{ brai_syncthing_user }}.service.d/brai-vault.conf"
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          [Service]
+          UMask=0007
+      notify:
+        - Restart Syncthing
+
     - name: Enable Syncthing service
       ansible.builtin.systemd_service:
         name: "syncthing@{{ brai_syncthing_user }}.service"
@@ -1290,4 +1310,10 @@
     - name: Restart Brai Temporal worker
       ansible.builtin.systemd_service:
         name: brai-temporal-worker.service
+        state: restarted
+
+    - name: Restart Syncthing
+      ansible.builtin.systemd_service:
+        name: "syncthing@{{ brai_syncthing_user }}.service"
+        daemon_reload: true
         state: restarted

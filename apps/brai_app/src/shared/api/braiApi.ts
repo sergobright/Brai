@@ -12,8 +12,12 @@ import { normalizeRelationsState, type PendingRelationEvent, type RelationsState
 import { drainContextReviews, drainRelations } from "./pagination";
 interface RequestOptions extends RequestInit {
   json?: unknown;
+  timeoutMs?: number;
 }
 const REQUEST_TIMEOUT_MS = 8_000;
+const PROVIDER_READ_TIMEOUT_MS = 20_000;
+const PROVIDER_MUTATION_TIMEOUT_MS = 55_000;
+
 export type AuthUser = {
   id: string;
   email: string;
@@ -25,12 +29,9 @@ export type AuthSession = {
   user?: AuthUser | null;
 };
 
-export type OtpSendResult = {
-  sent?: boolean;
-  success?: boolean;
-  expires_in_seconds?: number;
-  resend_after_seconds?: number;
-  resend_strategy?: "rotate" | "reuse";
+export type BraiCmdDeviceToken = {
+  token: string;
+  status: "pending";
 };
 
 export type AuthOnboardingContext = {
@@ -39,6 +40,14 @@ export type AuthOnboardingContext = {
   duplicatePreliminaryUserId?: string;
   preliminaryClaimToken?: string;
   deviceFingerprint?: string;
+};
+
+export type OtpSendResult = {
+  sent?: boolean;
+  success?: boolean;
+  expires_in_seconds?: number;
+  resend_after_seconds?: number;
+  resend_strategy?: "rotate" | "reuse";
 };
 
 export type AiLogIoRow = {
@@ -76,6 +85,7 @@ export type EventLogRow = {
   event_action: string;
   title: string;
   items_id: string | null;
+  item_roles_id: number | null;
   subject_type: string;
   subject_id: string | null;
   actor_type: string;
@@ -86,6 +96,40 @@ export type EventLogRow = {
   ignore_reason: string | null;
   payload_json: Record<string, unknown>;
   trace_id: string | null;
+};
+
+export type UserPreferences = {
+  context_rail_width_px: number;
+};
+
+export type ArchiveRole = {
+  id: number;
+  title_system: string;
+  title: string;
+  description: string;
+  payload_table: string;
+  archived_count: number;
+};
+
+export type ArchivedRoleItem = {
+  id: string;
+  title: string;
+  description: string;
+  author: string;
+  created_at_utc: string;
+  updated_at_utc: string;
+  deleted_at_utc: string | null;
+  item_roles_id: number | null;
+  role_status: string;
+  role_system: string;
+  role_title: string;
+  payload: Record<string, unknown> | null;
+};
+
+export type ArchiveState = {
+  roles: ArchiveRole[];
+  selected_role: string | null;
+  items: ArchivedRoleItem[];
 };
 
 export type TechnicalLog = {
@@ -105,30 +149,41 @@ export type TechnicalLog = {
 
 export type ModelProviderMode = "internal" | "external";
 
+export type AiProviderId = "openai" | "groq" | "openrouter" | "gemini";
+
+export type AiCapability = "text" | "vision";
+
+export type AiProfile = {
+  provider_id: AiProviderId;
+  model: string;
+};
+
+export type AiSettings = {
+  model_provider_mode: ModelProviderMode;
+  text: AiProfile | null;
+  vision: AiProfile | null;
+};
+
+export type AiProviderCredential = {
+  provider_id: AiProviderId;
+  key_hint: string;
+  verified_at_utc: string;
+  updated_at_utc: string;
+  in_use_by: string[];
+};
+
+export type AiModel = {
+  id: string;
+  name?: string;
+  capabilities: string[];
+};
+
 export type AppSettings = {
   display_timezone: string;
-  model_provider_mode: ModelProviderMode;
-  inbox_text_provider: "groq";
-  inbox_text_model: string;
-  inbox_image_provider: "openai";
-  inbox_image_model: string;
-  external_ai: {
-    groq_configured: boolean;
-    openai_configured: boolean;
-  };
 };
 
 export const DEFAULT_APP_SETTINGS: AppSettings = {
   display_timezone: "Europe/Moscow",
-  model_provider_mode: "internal",
-  inbox_text_provider: "groq",
-  inbox_text_model: "openai/gpt-oss-120b",
-  inbox_image_provider: "openai",
-  inbox_image_model: "gpt-4.1-mini",
-  external_ai: {
-    groq_configured: false,
-    openai_configured: false,
-  },
 };
 
 export type DrawSceneSummary = {
@@ -143,6 +198,7 @@ export type DrawScene = DrawSceneSummary & {
 };
 
 export type BraiApiError = Error & {
+  code?: string;
   status?: number;
 };
 
@@ -244,15 +300,93 @@ export class BraiApi {
     return this.request(`/v1/goals/${encodeURIComponent(itemsId)}/plan`, { method: "POST" });
   }
 
-  async activityWorkflow(activityId: string): Promise<InboxWorkflowDetails> { return this.request(`/v1/activities/${encodeURIComponent(activityId)}/workflow`); }
-  async inboxWorkflow(inboxId: string): Promise<InboxWorkflowDetails> { return this.request(`/v1/inbox/${encodeURIComponent(inboxId)}/workflow`); }
-  async aiLogs(limit = 50): Promise<{ logs: AiLog[] }> { return this.request(`/v1/ai-logs?limit=${encodeURIComponent(String(limit))}`); }
-  async events(limit = 100): Promise<{ events: EventLogRow[] }> { return this.request(`/v1/events?limit=${encodeURIComponent(String(limit))}`); }
-  async logs(limit = 100): Promise<{ logs: TechnicalLog[] }> { return this.request(`/v1/logs?limit=${encodeURIComponent(String(limit))}`); }
-  async version(): Promise<AppVersionState> { return this.request("/v1/version"); }
-  async settings(): Promise<AppSettings> { return this.request("/v1/settings"); }
+  async inboxWorkflow(inboxId: string): Promise<InboxWorkflowDetails> {
+    return this.request(`/v1/inbox/${encodeURIComponent(inboxId)}/workflow`);
+  }
 
-  async updateSettings(patch: Partial<Pick<AppSettings, "display_timezone" | "model_provider_mode" | "inbox_text_model" | "inbox_image_model">>): Promise<AppSettings> {
+  async activityWorkflow(activityId: string): Promise<InboxWorkflowDetails> {
+    return this.request(`/v1/activities/${encodeURIComponent(activityId)}/workflow`);
+  }
+
+  async aiLogs(limit = 50): Promise<{ logs: AiLog[] }> {
+    return this.request(`/v1/ai-logs?limit=${encodeURIComponent(String(limit))}`);
+  }
+
+  async events(limit = 100): Promise<{ events: EventLogRow[] }> {
+    return this.request(`/v1/events?limit=${encodeURIComponent(String(limit))}`);
+  }
+
+  async itemEvents(itemId: string, limit = 200): Promise<{ events: EventLogRow[] }> {
+    return this.request(`/v1/items/${encodeURIComponent(itemId)}/events?limit=${encodeURIComponent(String(limit))}`);
+  }
+
+  async preferences(): Promise<UserPreferences> {
+    return this.request("/v1/preferences");
+  }
+
+  async updatePreferences(patch: UserPreferences): Promise<UserPreferences> {
+    return this.request("/v1/preferences", { method: "PATCH", json: patch });
+  }
+
+  async archive(role = "activity"): Promise<ArchiveState> {
+    return this.request(`/v1/archive?role=${encodeURIComponent(role)}`);
+  }
+
+  async logs(limit = 100): Promise<{ logs: TechnicalLog[] }> {
+    return this.request(`/v1/logs?limit=${encodeURIComponent(String(limit))}`);
+  }
+
+  async version(): Promise<AppVersionState> {
+    return this.request("/v1/version");
+  }
+
+  async settings(): Promise<AppSettings> {
+    return this.request("/v1/settings");
+  }
+
+  async aiProviders(): Promise<{ providers: AiProviderCredential[] }> {
+    return this.request("/v1/ai/providers");
+  }
+
+  async saveAiProvider(providerId: AiProviderId, apiKey: string): Promise<void> {
+    await this.request(`/v1/ai/providers/${encodeURIComponent(providerId)}`, {
+      method: "PUT",
+      json: { api_key: apiKey },
+      timeoutMs: PROVIDER_MUTATION_TIMEOUT_MS,
+    });
+  }
+
+  async deleteAiProvider(providerId: AiProviderId): Promise<void> {
+    await this.request(`/v1/ai/providers/${encodeURIComponent(providerId)}`, { method: "DELETE" });
+  }
+
+  async aiModels(providerId: AiProviderId, capability: AiCapability): Promise<{ models: AiModel[] }> {
+    return this.request(
+      `/v1/ai/providers/${encodeURIComponent(providerId)}/models?capability=${encodeURIComponent(capability)}`,
+      { timeoutMs: PROVIDER_READ_TIMEOUT_MS },
+    );
+  }
+
+  async aiSettings(): Promise<AiSettings> {
+    return this.request("/v1/ai/settings");
+  }
+
+  async updateAiSettings(settings: AiSettings): Promise<AiSettings> {
+    return this.request("/v1/ai/settings", {
+      method: "PATCH",
+      json: settings,
+      timeoutMs: PROVIDER_MUTATION_TIMEOUT_MS,
+    });
+  }
+
+  async braiCmdDeviceToken(device: { deviceId: string; clientVersion?: string; appPackage?: string }): Promise<BraiCmdDeviceToken> {
+    return this.request("/v1/brai-cmd/device-token", {
+      method: "POST",
+      json: device,
+    });
+  }
+
+  async updateSettings(patch: Partial<Pick<AppSettings, "display_timezone">>): Promise<AppSettings> {
     return this.request("/v1/settings", {
       method: "PATCH",
       json: patch,
@@ -395,27 +529,28 @@ export class BraiApi {
   }
 
   private async request<T>(path: string, options: RequestOptions = {}): Promise<T> {
-    const headers = new Headers(options.headers);
-    if (options.json !== undefined) headers.set("content-type", "application/json");
+    const { json, timeoutMs = REQUEST_TIMEOUT_MS, ...requestOptions } = options;
+    const headers = new Headers(requestOptions.headers);
+    if (json !== undefined) headers.set("content-type", "application/json");
     if (this.expectedUserId !== null && path.startsWith("/v1/")) headers.set("x-brai-expected-user-id", this.expectedUserId);
     const controller = new AbortController();
     const abortRequest = () => controller.abort();
-    if (options.signal?.aborted) abortRequest();
-    options.signal?.addEventListener("abort", abortRequest, { once: true });
-    const timeoutId = setTimeout(abortRequest, REQUEST_TIMEOUT_MS);
+    if (requestOptions.signal?.aborted) abortRequest();
+    requestOptions.signal?.addEventListener("abort", abortRequest, { once: true });
+    const timeoutId = setTimeout(abortRequest, timeoutMs);
     let response: Response;
 
     try {
       response = await fetch(resolvePath(this.baseUrl, path), {
-        ...options,
+        ...requestOptions,
         headers,
         credentials: "include",
         signal: controller.signal,
-        body: options.json === undefined ? options.body : JSON.stringify(options.json),
+        body: json === undefined ? requestOptions.body : JSON.stringify(json),
       });
     } finally {
       clearTimeout(timeoutId);
-      options.signal?.removeEventListener("abort", abortRequest);
+      requestOptions.signal?.removeEventListener("abort", abortRequest);
     }
 
     if (!response.ok) {
@@ -424,10 +559,18 @@ export class BraiApi {
         if (payload?.error === "user_scope_changed") throw new UserScopeChangedError();
       }
       const error = new Error(`brai_api_${response.status}`) as BraiApiError;
+      try {
+        const payload = await response.json() as { error?: unknown };
+        if (typeof payload.error === "string") error.code = payload.error;
+      } catch {
+        // The status remains enough when an upstream proxy returns a non-JSON error page.
+      }
       error.name = response.status === 401 ? "UnauthorizedError" : "BraiApiError";
       error.status = response.status;
       throw error;
     }
+
+    if (response.status === 204) return undefined as T;
 
     return (await response.json()) as T;
   }
@@ -473,6 +616,7 @@ export type AppTargetApk = {
   apk_build_kind?: string | null;
   preview_iteration?: number | null;
   release_url?: string | null;
+  download_url?: string | null;
   published_at: string | null;
   capabilities?: string[];
 };

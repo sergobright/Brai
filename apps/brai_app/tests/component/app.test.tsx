@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { cmdPlugin, openProfileMenuItem, setupBraiAppTest, stubAndroidCapacitor, testVersionState } from "./app-test-support";
 import { BraiApp } from "@/features/app/BraiApp";
@@ -14,8 +15,9 @@ const drawsCanvasSpy = vi.hoisted(() => vi.fn());
 
 vi.mock("@/features/app/sections/draws/DrawsCanvas", () => ({
   DrawsCanvas: (props: Record<string, unknown>) => {
+    const [initialData] = useState(props.initialData as { elements?: unknown[] });
     drawsCanvasSpy(props);
-    return <div data-testid="draws-canvas" />;
+    return <div data-element-count={initialData.elements?.length ?? 0} data-testid="draws-canvas" />;
   },
 }));
 
@@ -24,6 +26,7 @@ describe("BraiApp shell", () => {
 
   it("renders the actions-first shell", async () => {
     render(<BraiApp />);
+    expect(document.querySelector("[data-startup-splash]")).not.toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Действия" })).toBeInTheDocument();
     expect(screen.getAllByLabelText("Действия").length).toBeGreaterThan(0);
     ["Действия", "Входящие", "Фокус"].forEach((title) => {
@@ -39,7 +42,7 @@ describe("BraiApp shell", () => {
     expect(screen.getByRole("button", { name: "Открыть правое меню" })).toBeInTheDocument();
   });
 
-  it("enables dictation and context after the signed-in cabinet opens", async () => {
+  it("enables dictation and context after account credentials are synchronized", async () => {
     stubAndroidCapacitor();
 
     render(<BraiApp />);
@@ -47,19 +50,165 @@ describe("BraiApp shell", () => {
     await waitFor(() => expect(cmdPlugin.setOverlayEnabled).toHaveBeenCalledWith({ enabled: true }));
     await waitFor(() => expect(cmdPlugin.setVoiceOnlyMode).toHaveBeenCalledWith({ enabled: false }));
     expect(cmdPlugin.setQueuePausedMode).toHaveBeenCalledWith({ enabled: false });
+    await waitFor(() => expect(cmdPlugin.setAccessKey).toHaveBeenCalledWith({ token: "authenticated-device-token", displayName: "Test", userId: "test-user" }));
     expect(cmdPlugin.ensureAccess).toHaveBeenCalledWith({ displayName: "Test" });
+    expect(cmdPlugin.syncProviderCredentials.mock.invocationCallOrder[0]).toBeLessThan(
+      cmdPlugin.setOverlayEnabled.mock.invocationCallOrder.find((order) => order > cmdPlugin.syncProviderCredentials.mock.invocationCallOrder[0]) ?? 0,
+    );
+    expect(document.querySelector("[data-startup-splash]")).not.toBeInTheDocument();
   });
 
-  it("does not tie cabinet overlays to the legacy native access-name request", async () => {
+  it("keeps account overlays blocked while waiting for device access", async () => {
     stubAndroidCapacitor();
     cmdPlugin.ensureAccess.mockResolvedValue({ accessGranted: false });
 
     render(<BraiApp />);
 
+    await waitFor(() => expect(cmdPlugin.ensureAccess).toHaveBeenCalledWith({ displayName: "Test" }));
+    expect(cmdPlugin.setOverlayEnabled).toHaveBeenCalledWith({ enabled: false });
+    expect(cmdPlugin.setOverlayEnabled).not.toHaveBeenCalledWith({ enabled: true });
+    expect(cmdPlugin.setQueuePausedMode).toHaveBeenCalledWith({ enabled: true });
+    expect(cmdPlugin.setAccessKey).not.toHaveBeenCalled();
+  });
+
+  it("does not enable authenticated capture before canonical provider sync completes", async () => {
+    stubAndroidCapacitor();
+    let finishSync: ((result: { ok: true }) => void) | undefined;
+    cmdPlugin.syncProviderCredentials.mockImplementation(() => new Promise((resolve) => {
+      finishSync = resolve;
+    }));
+
+    render(<BraiApp />);
+
+    await waitFor(() => expect(cmdPlugin.setAccessKey).toHaveBeenCalledTimes(1));
+    expect(cmdPlugin.setOverlayEnabled).not.toHaveBeenCalledWith({ enabled: true });
+    expect(cmdPlugin.setQueuePausedMode).not.toHaveBeenCalledWith({ enabled: false });
+
+    act(() => finishSync?.({ ok: true }));
+
     await waitFor(() => expect(cmdPlugin.setOverlayEnabled).toHaveBeenCalledWith({ enabled: true }));
-    await waitFor(() => expect(cmdPlugin.setVoiceOnlyMode).toHaveBeenCalledWith({ enabled: false }));
     expect(cmdPlugin.setQueuePausedMode).toHaveBeenCalledWith({ enabled: false });
-    expect(cmdPlugin.ensureAccess).toHaveBeenCalledWith({ displayName: "Test" });
+  });
+
+  it("does not rotate a healthy device token on ordinary network recovery", async () => {
+    stubAndroidCapacitor();
+
+    render(<BraiApp />);
+
+    await waitFor(() => expect(cmdPlugin.setAccessKey).toHaveBeenCalledTimes(1));
+    expect(deviceTokenRequestCount()).toBe(1);
+
+    await act(async () => {
+      window.dispatchEvent(new Event("online"));
+      document.dispatchEvent(new Event("visibilitychange"));
+      await new Promise((resolve) => window.setTimeout(resolve, 0));
+    });
+
+    expect(deviceTokenRequestCount()).toBe(1);
+    expect(cmdPlugin.setAccessKey).toHaveBeenCalledTimes(1);
+  });
+
+  it("replaces the device token when native transport rejects its credential", async () => {
+    stubAndroidCapacitor();
+
+    render(<BraiApp />);
+
+    await waitFor(() => expect(cmdPlugin.setAccessKey).toHaveBeenCalledTimes(1));
+    const refreshListener = cmdPlugin.addListener.mock.calls.find(([eventName]) => eventName === "credentialRefreshRequired")?.[1];
+    expect(refreshListener).toEqual(expect.any(Function));
+
+    act(() => refreshListener());
+
+    await waitFor(() => expect(cmdPlugin.setAccessKey).toHaveBeenCalledTimes(2));
+    expect(deviceTokenRequestCount()).toBe(2);
+  });
+
+  it("keeps account mode blocked and retries a failed device-token bootstrap", async () => {
+    stubAndroidCapacitor();
+    const defaultFetch = vi.mocked(fetch).getMockImplementation();
+    let tokenAttempts = 0;
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
+      if (requestUrl(input).endsWith("/v1/brai-cmd/device-token") && tokenAttempts++ === 0) {
+        throw new Error("offline");
+      }
+      if (!defaultFetch) throw new Error("missing_default_fetch");
+      return await defaultFetch(input, init);
+    });
+
+    render(<BraiApp />);
+
+    await waitFor(() => expect(deviceTokenRequestCount()).toBe(1));
+    expect(cmdPlugin.setOverlayEnabled).toHaveBeenCalledWith({ enabled: false });
+    expect(cmdPlugin.setOverlayEnabled).not.toHaveBeenCalledWith({ enabled: true });
+    expect(cmdPlugin.setQueuePausedMode).toHaveBeenCalledWith({ enabled: true });
+    expect(cmdPlugin.setAccessKey).not.toHaveBeenCalled();
+
+    await waitFor(() => expect(cmdPlugin.setAccessKey).toHaveBeenCalledTimes(1), { timeout: 2_500 });
+    expect(deviceTokenRequestCount()).toBe(2);
+    expect(cmdPlugin.setOverlayEnabled).toHaveBeenCalledWith({ enabled: true });
+    expect(cmdPlugin.retryQueue).toHaveBeenCalled();
+  });
+
+  it("retries an unfinished bootstrap immediately when the network returns", async () => {
+    stubAndroidCapacitor();
+    const defaultFetch = vi.mocked(fetch).getMockImplementation();
+    let offline = true;
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
+      if (requestUrl(input).endsWith("/v1/brai-cmd/device-token") && offline) throw new Error("offline");
+      if (!defaultFetch) throw new Error("missing_default_fetch");
+      return await defaultFetch(input, init);
+    });
+
+    render(<BraiApp />);
+
+    await waitFor(() => expect(deviceTokenRequestCount()).toBe(1));
+    offline = false;
+    act(() => window.dispatchEvent(new Event("online")));
+
+    await waitFor(() => expect(cmdPlugin.setAccessKey).toHaveBeenCalledTimes(1));
+    expect(deviceTokenRequestCount()).toBe(2);
+  });
+
+  it("returns to signed-out native mode when device-token bootstrap reports an expired app session", async () => {
+    stubAndroidCapacitor();
+    const defaultFetch = vi.mocked(fetch).getMockImplementation();
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
+      if (requestUrl(input).endsWith("/v1/brai-cmd/device-token")) {
+        return new Response(JSON.stringify({ error: "unauthorized" }), {
+          status: 401,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (!defaultFetch) throw new Error("missing_default_fetch");
+      return await defaultFetch(input, init);
+    });
+
+    render(<BraiApp />);
+
+    await waitFor(() => expect(deviceTokenRequestCount()).toBe(1));
+    await waitFor(() => expect(cmdPlugin.setAccessKey).toHaveBeenLastCalledWith({ token: "", displayName: "", userId: "" }));
+    expect(cmdPlugin.setOverlayEnabled).toHaveBeenLastCalledWith({ enabled: false });
+  });
+
+  it("clears the technical credential and overlays even when server logout is offline", async () => {
+    stubAndroidCapacitor();
+    const defaultFetch = vi.mocked(fetch).getMockImplementation();
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
+      if (requestUrl(input).endsWith("/auth/logout")) {
+        throw new Error("offline");
+      }
+      if (!defaultFetch) throw new Error("missing_default_fetch");
+      return await defaultFetch(input, init);
+    });
+
+    render(<BraiApp />);
+
+    await waitFor(() => expect(cmdPlugin.setAccessKey).toHaveBeenCalledWith({ token: "authenticated-device-token", displayName: "Test", userId: "test-user" }));
+    await openProfileMenuItem("Выход");
+
+    await waitFor(() => expect(cmdPlugin.setAccessKey).toHaveBeenLastCalledWith({ token: "", displayName: "", userId: "" }));
+    await waitFor(() => expect(cmdPlugin.setOverlayEnabled).toHaveBeenLastCalledWith({ enabled: false }));
+    expect(cmdPlugin.setQueuePausedMode).toHaveBeenCalledWith({ enabled: false });
   });
 
   it("requests an OTP code from the shared auth form", async () => {
@@ -348,6 +497,21 @@ describe("BraiApp shell", () => {
     expect(initialData.appState).toEqual({ viewBackgroundColor: "#ffffff" });
   });
 
+  it("mounts Draws canvas with persisted elements after resolving the saved file name", async () => {
+    stubDrawsFetch({
+      type: "excalidraw",
+      version: 2,
+      source: "test",
+      elements: [{ id: "saved-ellipse", type: "ellipse" }],
+      appState: { viewBackgroundColor: "#ffffff" },
+      files: {},
+    });
+
+    render(<BraiApp initialSection="draws" />);
+
+    await waitFor(() => expect(screen.getByTestId("draws-canvas")).toHaveAttribute("data-element-count", "1"));
+  });
+
   it("keeps contextual actions before the rightmost sync status", async () => {
     render(<BraiApp />);
 
@@ -583,6 +747,8 @@ describe("BraiApp shell", () => {
     expect(contextScrollArea).toHaveClass(
       "[--scroll-area-thumb-size:10px]",
       "[--scroll-area-gap:calc(var(--scroll-area-thumb-size)/2)]",
+      "max-[860px]:[--scroll-area-content-gutter:var(--scroll-area-thumb-size)]",
+      "max-[860px]:[--scroll-area-gap:0px]",
       "[&>[data-slot=scroll-area-viewport]]:pr-[var(--scroll-area-content-gutter)]",
     );
     expect(contextScrollArea).not.toHaveClass("[&>[data-slot=scroll-area-scrollbar]]:right-1", "[&>[data-slot=scroll-area-viewport]>div]:pr-5");
@@ -1037,6 +1203,7 @@ describe("BraiApp shell", () => {
     await waitFor(() => expect(screen.getByText("Live действие")).toBeInTheDocument());
     await openProfileMenuItem("Архив");
     await waitFor(() => expect(screen.getByRole("heading", { name: "Архив" })).toBeInTheDocument());
+    expect(screen.queryByRole("button", { name: "Назад к настройкам" })).not.toBeInTheDocument();
     await waitFor(() => expect(screen.getByText("Live архив")).toBeInTheDocument());
   });
 
@@ -1128,7 +1295,7 @@ describe("BraiApp shell", () => {
     await waitFor(() => expect(document.documentElement).toHaveAttribute("data-platform", "android"));
   });
 
-  it("keeps the desktop rail compact and static", async () => {
+  it("keeps the desktop rail compact and opens a separate contextual rail", async () => {
     Object.defineProperty(window, "innerWidth", { configurable: true, writable: true, value: 1200 });
     render(<BraiApp />);
     const shell = document.querySelector(".app-shell");
@@ -1137,7 +1304,8 @@ describe("BraiApp shell", () => {
 
     expect(shell).toBeInstanceOf(HTMLElement);
     expect(rail).toBeInstanceOf(HTMLElement);
-    expect(topbar?.querySelector("[data-screen-icon]")).toBeInTheDocument();
+    expect(topbar?.querySelector("[data-screen-icon]")).not.toBeInTheDocument();
+    expect(topbar?.querySelector('[aria-label="Закрыть контекстную панель"]')).toBeInTheDocument();
     expect(topbar?.querySelector('[aria-label="Свернуть меню"]')).not.toBeInTheDocument();
     expect(shell).not.toHaveClass("is-rail-expanded");
     expect(rail).not.toHaveClass("expanded");
@@ -1154,6 +1322,7 @@ describe("BraiApp shell", () => {
     expect(rail).toContainElement(screen.getByRole("button", { name: "Открыть меню профиля" }));
     expect(rail).not.toContainElement(screen.queryByRole("button", { name: "Настройки" }));
     expect(rail).not.toContainElement(screen.queryByRole("button", { name: "Архив" }));
+    expect(document.querySelector(".contextual-rail")).toBeInTheDocument();
 
     fireEvent.click(screen.getAllByRole("button", { name: "Фокус" }).at(-1) as HTMLElement);
     await waitFor(() => expect(screen.getByRole("heading", { name: "Фокус" })).toBeInTheDocument());
@@ -1263,15 +1432,15 @@ function stubDrawsFetch(scene: Record<string, unknown> = {
     if (url.endsWith("/auth/session")) return authSessionResponse();
     if (url.endsWith("/v1/version")) return jsonResponse(testVersionState("0.0.10"));
     if (url.endsWith("/v1/draws")) {
-      return jsonResponse({
-        draws: [{
-          name: "Рисунок.excalidraw",
-          title: "Рисунок",
-          updated_at_utc: "2026-07-11T12:00:00.000Z",
-          size_bytes: 0,
-        }],
-      });
+      await new Promise((resolve) => window.setTimeout(resolve, 0));
+      return jsonResponse({ draws: [{
+        name: "Рисунок.excalidraw",
+        title: "Рисунок",
+        updated_at_utc: "2026-07-11T12:00:00.000Z",
+        size_bytes: 0,
+      }] });
     }
+    if (url.includes(encodeURIComponent("Новый рисунок.excalidraw"))) return jsonResponse({ error: "not_found" }, 404);
     if (url.includes("/v1/draws/")) {
       return jsonResponse({
         name: "Рисунок.excalidraw",
@@ -1322,6 +1491,10 @@ function requestUrl(input: RequestInfo | URL): string {
   if (typeof input === "string") return input;
   if (input instanceof URL) return input.toString();
   return input.url;
+}
+
+function deviceTokenRequestCount(): number {
+  return vi.mocked(fetch).mock.calls.filter(([input]) => requestUrl(input).endsWith("/v1/brai-cmd/device-token")).length;
 }
 
 function authPanelProps() {

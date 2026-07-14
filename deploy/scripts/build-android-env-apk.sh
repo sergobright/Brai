@@ -13,6 +13,13 @@ if [[ -z "$FLAVOR" ]]; then
   exit 1
 fi
 
+if [[ "${BRAI_SOURCE_OPERATION_LOCK_HELD:-false}" != "true" ]]; then
+  SOURCE_OPERATION_LOCK="${BRAI_SOURCE_OPERATION_LOCK:-$(dirname "$ROOT")/.source-operation.lock}"
+  exec 8>"$SOURCE_OPERATION_LOCK"
+  flock 8
+  export BRAI_SOURCE_OPERATION_LOCK_HELD=true
+fi
+
 mapfile -t META < <("$NODE_BIN" "$SCRIPT_DIR/resolve-android-env.mjs" "$FLAVOR")
 ENVIRONMENT="${META[0]}"
 SLOT="${META[1]}"

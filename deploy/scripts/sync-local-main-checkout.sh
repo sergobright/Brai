@@ -225,7 +225,7 @@ if [ "$PRUNE_MODE" -eq 1 ]; then
   exit 0
 fi
 
-for exclude_pattern in /.agents/ /data/ /deploy/site/ /deploy/web/ /deploy/mobile-update/ /deploy/releases/; do
+for exclude_pattern in /.agents/ /data/ /vault/ /deploy/site/ /deploy/web/ /deploy/mobile-update/ /deploy/releases/; do
   grep -Fxq "$exclude_pattern" .git/info/exclude || printf '%s\n' "$exclude_pattern" >>.git/info/exclude
 done
 
@@ -259,6 +259,7 @@ find "$REPO" \
   -path "$REPO/.git" -prune -o \
   -path "$REPO/.codex-worktrees" -prune -o \
   -path "$REPO/data" -prune -o \
+  -path "$REPO/vault" -prune -o \
   -path "$REPO/deploy/site" -prune -o \
   -path "$REPO/deploy/web" -prune -o \
   -path "$REPO/deploy/mobile-update" -prune -o \
@@ -275,6 +276,7 @@ find "$REPO" \
   -path "$REPO/.git" -prune -o \
   -path "$REPO/.codex-worktrees" -prune -o \
   -path "$REPO/data" -prune -o \
+  -path "$REPO/vault" -prune -o \
   -path "$REPO/deploy/site" -prune -o \
   -path "$REPO/deploy/web" -prune -o \
   -path "$REPO/deploy/mobile-update" -prune -o \
@@ -292,6 +294,7 @@ git_cmd reset --hard "origin/$BRANCH"
 git_cmd clean -fd \
   -e .agents/ \
   -e data/ \
+  -e vault/ \
   -e deploy/site/ \
   -e deploy/web/ \
   -e deploy/mobile-update/ \
@@ -317,6 +320,7 @@ if [ "${BRAI_MAIN_SYNC_LOCK_CHECKOUT:-1}" = "1" ]; then
     -path "$REPO/.git" -prune -o \
     -path "$REPO/.codex-worktrees" -prune -o \
     -path "$REPO/data" -prune -o \
+    -path "$REPO/vault" -prune -o \
     -path "$REPO/deploy/site" -prune -o \
     -path "$REPO/deploy/web" -prune -o \
     -path "$REPO/deploy/mobile-update" -prune -o \
@@ -333,6 +337,7 @@ if [ "${BRAI_MAIN_SYNC_LOCK_CHECKOUT:-1}" = "1" ]; then
     -path "$REPO/.git" -prune -o \
     -path "$REPO/.codex-worktrees" -prune -o \
     -path "$REPO/data" -prune -o \
+    -path "$REPO/vault" -prune -o \
     -path "$REPO/deploy/site" -prune -o \
     -path "$REPO/deploy/web" -prune -o \
     -path "$REPO/deploy/mobile-update" -prune -o \

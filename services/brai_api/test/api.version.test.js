@@ -55,6 +55,7 @@ test('version endpoint returns build ledger, APK line, and release-index OTA tar
       apk_build_kind: 'stable',
       preview_iteration: null,
       release_url: '/releases/',
+      download_url: '/releases/download/production',
       published_at: '2026-06-30T20:23:42Z',
       capabilities: ['AccessibilityService', 'Overlay', 'Microphone', 'MediaProjection']
     });
@@ -66,6 +67,7 @@ test('version endpoint returns build ledger, APK line, and release-index OTA tar
       apk_build_kind: 'stable',
       preview_iteration: null,
       release_url: '/releases/',
+      download_url: '/releases/download/production',
       published_at: '2026-06-30T20:23:42Z',
       capabilities: ['AccessibilityService', 'Overlay', 'Microphone', 'MediaProjection']
     });
@@ -81,6 +83,14 @@ test('version endpoint returns preview APK release metadata from release index',
         schemaVersion: 2,
         sections: {
           production: {
+            file: 'brai-v2.apk',
+            apkVersion: 2,
+            versionCode: 2,
+            releaseKey: 'production',
+            apkBuildKind: 'stable',
+            publishedAt: '2026-07-01T20:23:42Z'
+          },
+          a: {
             file: 'brai-a-v2-preview7.apk',
             apkVersion: 2,
             versionCode: 20007,
@@ -91,6 +101,13 @@ test('version endpoint returns preview APK release metadata from release index',
             capabilities: ['AccessibilityService']
           }
         }
+      })
+    },
+    mobileFiles: {
+      'manifest.json': JSON.stringify({
+        schemaVersion: 2,
+        otaVersion: '0.0.41',
+        targetApkReleaseKey: 'a'
       })
     }
   });
@@ -107,6 +124,7 @@ test('version endpoint returns preview APK release metadata from release index',
       apk_build_kind: 'preview',
       preview_iteration: 7,
       release_url: '/releases/',
+      download_url: '/releases/download/a',
       published_at: '2026-07-04T20:23:42Z',
       capabilities: ['AccessibilityService']
     });
@@ -128,7 +146,7 @@ test('version endpoint requires auth', async () => {
   }
 });
 
-test('release login uses short air password and ignores app sessions', async () => {
+test('public releases show Production while developer releases require their own session', async () => {
   const fixture = await createFixture([
     '2026-06-29T12:10:00.000Z',
     '2026-06-29T12:10:01.000Z',
@@ -140,6 +158,7 @@ test('release login uses short air password and ignores app sessions', async () 
     sessionSecret: SESSION_SECRET,
     releaseFiles: {
       'brai.apk': 'fake-apk',
+      'brai-dev.apk': 'fake-dev-apk',
       'index.html': 'stale release page',
       'releases.json': JSON.stringify({
         sections: {
@@ -149,7 +168,15 @@ test('release login uses short air password and ignores app sessions', async () 
             apkVersion: 7,
             apkBuildKind: 'stable',
             publishedAt: '2026-06-29T12:00:00.000Z',
-            sizeBytes: 10 * 1024 * 1024
+            sizeBytes: 10_000_000
+          },
+          dev: {
+            title: 'Brai Dev',
+            file: 'brai-dev.apk',
+            apkVersion: 7,
+            releaseKey: 'dev',
+            apkBuildKind: 'stable',
+            publishedAt: '2026-06-29T12:00:00.000Z'
           }
         }
       })
@@ -166,13 +193,24 @@ test('release login uses short air password and ignores app sessions', async () 
     const appCookie = appLogin.headers.get('set-cookie');
     assert.match(appCookie, /brai_session=/);
 
-    const appSessionRelease = await fetch(`${fixture.url}/releases/brai.apk`, {
+    const publicPage = await fetch(`${fixture.url}/releases/`);
+    assert.equal(publicPage.status, 200);
+    const publicHtml = await publicPage.text();
+    assert.match(publicHtml, /<h2>Brai<\/h2>/);
+    assert.doesNotMatch(publicHtml, /Brai Dev/);
+    assert.match(publicHtml, /href="\/releases\/download\/production"/);
+
+    const appSessionRelease = await fetch(`${fixture.url}/dev-releases/brai.apk`, {
       headers: { cookie: appCookie },
       redirect: 'manual'
     });
     assert.equal(appSessionRelease.status, 303);
 
-    const wrongReleaseLogin = await textRequest(fixture.url, '/releases/login', {
+    const legacyLogin = await textRequest(fixture.url, '/releases/login', { redirect: 'manual' });
+    assert.equal(legacyLogin.status, 303);
+    assert.equal(legacyLogin.headers.get('location'), '/dev-releases/');
+
+    const wrongReleaseLogin = await textRequest(fixture.url, '/dev-releases/login', {
       method: 'POST',
       headers: { 'content-type': 'application/x-www-form-urlencoded' },
       body: `password=${encodeURIComponent(WEB_PASSWORD)}`,
@@ -180,30 +218,33 @@ test('release login uses short air password and ignores app sessions', async () 
     });
     assert.equal(wrongReleaseLogin.status, 401);
 
-    const releaseLogin = await textRequest(fixture.url, '/releases/login', {
+    const releaseLogin = await textRequest(fixture.url, '/dev-releases/login', {
       method: 'POST',
       headers: { 'content-type': 'application/x-www-form-urlencoded' },
       body: 'password=air',
       redirect: 'manual'
     });
     assert.equal(releaseLogin.status, 303);
+    assert.equal(releaseLogin.headers.get('location'), '/dev-releases/');
     const releaseCookie = releaseLogin.headers.get('set-cookie');
     assert.match(releaseCookie, /brai_release_session=/);
 
-    const apk = await fetch(`${fixture.url}/releases/brai.apk`, { headers: { cookie: releaseCookie } });
+    const apk = await fetch(`${fixture.url}/dev-releases/brai.apk`, { headers: { cookie: releaseCookie } });
     assert.equal(apk.status, 200);
     assert.equal(apk.headers.get('content-length'), String(Buffer.byteLength('fake-apk')));
     assert.equal(await apk.text(), 'fake-apk');
 
-    const releasePage = await fetch(`${fixture.url}/releases/`, { headers: { cookie: releaseCookie } });
+    const releasePage = await fetch(`${fixture.url}/dev-releases/`, { headers: { cookie: releaseCookie } });
     assert.equal(releasePage.status, 200);
-    assert.match(await releasePage.text(), /<p class="version">v7<\/p><span class="size">10 МБ<\/span>/);
+    const developerHtml = await releasePage.text();
+    assert.match(developerHtml, /<p class="version">v7<\/p><span class="size">10 МБ<\/span>/);
+    assert.match(developerHtml, /Brai Dev/);
   } finally {
     await fixture.close();
   }
 });
 
-test('release login and APK serving write compact runtime logs', async () => {
+test('release downloads are keyed, filtered, attachment responses with one hourly IP limit', async () => {
   const fixture = await createFixture([
     '2026-06-29T12:10:00.000Z',
     '2026-06-29T12:10:01.000Z',
@@ -211,14 +252,23 @@ test('release login and APK serving write compact runtime logs', async () => {
   ], {
     releasePassword: RELEASE_PASSWORD,
     sessionSecret: SESSION_SECRET,
-    releaseFiles: { 'brai.apk': 'fake-apk' }
+    releaseFiles: {
+      'brai.apk': 'fake-apk',
+      'brai-b.apk': 'fake-preview-b',
+      'releases.json': JSON.stringify({
+        sections: {
+          production: { title: 'Brai', file: 'brai.apk', releaseKey: 'production', apkVersion: 7 },
+          b: { title: 'Brai B', file: 'brai-b.apk', releaseKey: 'b', apkVersion: 7, sha256: 'b'.repeat(64) }
+        }
+      })
+    }
   });
 
   try {
-    const unauthorized = await fetch(`${fixture.url}/releases/brai.apk`, { redirect: 'manual' });
+    const unauthorized = await fetch(`${fixture.url}/dev-releases/brai.apk`, { redirect: 'manual' });
     assert.equal(unauthorized.status, 303);
 
-    const login = await textRequest(fixture.url, '/releases/login', {
+    const login = await textRequest(fixture.url, '/dev-releases/login', {
       method: 'POST',
       headers: { 'content-type': 'application/x-www-form-urlencoded' },
       body: `password=${encodeURIComponent(RELEASE_PASSWORD)}`,
@@ -228,11 +278,36 @@ test('release login and APK serving write compact runtime logs', async () => {
     const cookie = login.headers.get('set-cookie');
     assert.match(cookie, /brai_release_session=/);
 
-    const apk = await fetch(`${fixture.url}/releases/brai.apk`, { headers: { cookie } });
+    const apk = await fetch(`${fixture.url}/releases/download/b`, {
+      headers: { 'x-forwarded-for': '198.51.100.20' }
+    });
     assert.equal(apk.status, 200);
-    assert.equal(await apk.text(), 'fake-apk');
-    const missing = await fetch(`${fixture.url}/releases/missing.apk`, { headers: { cookie } });
+    assert.equal(apk.headers.get('content-type'), 'application/vnd.android.package-archive');
+    assert.equal(apk.headers.get('content-length'), String(Buffer.byteLength('fake-preview-b')));
+    assert.equal(apk.headers.get('content-disposition'), 'attachment; filename="brai-b.apk"');
+    assert.equal(apk.headers.get('x-brai-apk-sha256'), 'b'.repeat(64));
+    assert.equal(await apk.text(), 'fake-preview-b');
+
+    const legacyProduction = await fetch(`${fixture.url}/releases/brai.apk`);
+    assert.equal(legacyProduction.status, 200);
+    assert.equal(await legacyProduction.text(), 'fake-apk');
+    const hiddenLegacy = await fetch(`${fixture.url}/releases/brai-b.apk`);
+    assert.equal(hiddenLegacy.status, 404);
+    const missing = await fetch(`${fixture.url}/releases/download/unknown`);
     assert.equal(missing.status, 404);
+
+    for (let download = 2; download <= 10; download += 1) {
+      const response = await fetch(`${fixture.url}/releases/download/b`, {
+        headers: { 'x-forwarded-for': '198.51.100.20' }
+      });
+      assert.equal(response.status, 200);
+      await response.arrayBuffer();
+    }
+    const limited = await fetch(`${fixture.url}/releases/download/b`, {
+      headers: { 'x-forwarded-for': '198.51.100.20' }
+    });
+    assert.equal(limited.status, 429);
+    assert.ok(Number(limited.headers.get('retry-after')) > 0);
 
     const logs = fixture.store.db
       .prepare("SELECT source, operation, status, reason, json_data FROM logs WHERE source IN ('auth', 'release') ORDER BY id ASC")
@@ -240,8 +315,9 @@ test('release login and APK serving write compact runtime logs', async () => {
       .map((row) => ({ ...row, json_data: JSON.parse(row.json_data) }));
     assert.equal(logs.some((log) => log.operation === 'auth.denied' && log.reason === 'release_session_required'), true);
     assert.equal(logs.some((log) => log.operation === 'release.login' && log.status === 'done'), true);
-    assert.equal(logs.some((log) => log.operation === 'release.file_served' && log.status === 'done' && log.json_data.extension === 'apk'), true);
+    assert.equal(logs.some((log) => log.operation === 'release.file_served' && log.status === 'done' && log.json_data.release_key === 'b'), true);
     assert.equal(logs.some((log) => log.operation === 'release.file_served' && log.status === 'failed' && log.reason === 'not_found'), true);
+    assert.equal(logs.some((log) => log.operation === 'release.file_served' && log.status === 'failed' && log.reason === 'rate_limited' && log.json_data.outcome === 'rate_limited'), true);
     assert.equal(JSON.stringify(logs).includes(RELEASE_PASSWORD), false);
   } finally {
     await fixture.close();

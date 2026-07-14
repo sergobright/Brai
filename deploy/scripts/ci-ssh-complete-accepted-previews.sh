@@ -200,6 +200,8 @@ for index in "${!REQUIRED_BRANCHES[@]}"; do
     if BRAI_BRANCH="$branch" \
       BRAI_ACCEPTED_PREVIEW=true \
       BRAI_REQUIRE_PREVIEW_SLOT_RELEASE=true \
+      BRAI_TARGET_BRANCH="$TARGET_BRANCH" \
+      BRAI_TARGET_COMMIT="$TARGET_COMMIT" \
         "$SCRIPT_DIR/ci-ssh-release-slot.sh"; then
       signal_temporal_preview "$branch" supabase_preview_released "" "$source_sha"
       signal_temporal_preview "$branch" slot_released "" "$source_sha"

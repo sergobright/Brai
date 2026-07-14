@@ -29,6 +29,7 @@ enum class ContextButtonGlyph {
 
 class ScreenshotButtonView(context: Context) : View(context) {
     private val iconBitmap by lazy { BitmapFactory.decodeResource(resources, R.drawable.bright_command_small_circle) }
+    private val marker = braiFloatingButtonMarker()
     private val iconBounds = Rect()
     private val glyphPath = Path()
     private val bitmapPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
@@ -70,8 +71,8 @@ class ScreenshotButtonView(context: Context) : View(context) {
         invalidate()
     }
 
-    fun setQueueState(failedCount: Int, readyCount: Int = 0) {
-        queueBadge = resolveQueueBadgeState(failedCount, readyCount)
+    fun setQueueState(failedAudioCount: Int) {
+        queueBadge = resolveQueueBadgeState(failedAudioCount)
         invalidate()
     }
 
@@ -90,7 +91,12 @@ class ScreenshotButtonView(context: Context) : View(context) {
             drawCheck(canvas, cx, cy)
             return
         }
-        if (glyph == ContextButtonGlyph.Logo) drawIcon(canvas) else drawButtonShell(canvas, cx, cy, radius)
+        if (glyph == ContextButtonGlyph.Logo) {
+            drawIcon(canvas)
+            drawFloatingButtonMarker(canvas, marker, cx, cy, minOf(width, height).toFloat(), textPaint)
+        } else {
+            drawButtonShell(canvas, cx, cy, radius)
+        }
         if (glyph == ContextButtonGlyph.Close) {
             drawGlyph(canvas, cx, cy)
             return
@@ -131,7 +137,10 @@ class ScreenshotButtonView(context: Context) : View(context) {
     private fun drawHubTransition(canvas: Canvas, cx: Float, cy: Float, radius: Float) {
         val logoAlpha = ((1f - menuExpansionProgress) * 255).roundToInt()
         val crossAlpha = (menuExpansionProgress * 255).roundToInt()
-        if (logoAlpha > 0) drawIcon(canvas, logoAlpha)
+        if (logoAlpha > 0) {
+            drawIcon(canvas, logoAlpha)
+            drawFloatingButtonMarker(canvas, marker, cx, cy, minOf(width, height).toFloat(), textPaint, logoAlpha)
+        }
         if (crossAlpha <= 0) return
         drawButtonShell(canvas, cx, cy, radius, crossAlpha)
         strokePaint.color = COLOR_ICON_RED
@@ -229,7 +238,7 @@ class ScreenshotButtonView(context: Context) : View(context) {
         val badgeRadius = width * 0.17f
         val badgeX = width * 0.76f
         val badgeY = height * 0.24f
-        fillPaint.color = if (badge.tone == QueueBadgeTone.Ready) COLOR_BADGE_GREEN else COLOR_ICON_RED
+        fillPaint.color = COLOR_ICON_RED
         canvas.drawCircle(badgeX, badgeY, badgeRadius, fillPaint)
         fillPaint.color = COLOR_BUTTON_BACKGROUND
         textPaint.color = COLOR_BUTTON_BACKGROUND
@@ -251,7 +260,6 @@ class ScreenshotButtonView(context: Context) : View(context) {
         private const val COLOR_BUTTON_BACKGROUND = 0xFF050505.toInt()
         private const val COLOR_ICON_RED = 0xFFFF2020.toInt()
         private const val COLOR_ICON_RED_SOFT = 0xB8FF2020.toInt()
-        private const val COLOR_BADGE_GREEN = 0xFF2ED36F.toInt()
     }
 }
 
