@@ -31,6 +31,15 @@ function makeWritable(root: string) {
   }
 }
 
+async function waitForPath(filePath: string, timeoutMs = 5_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (fs.existsSync(filePath)) return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error(`Timed out waiting for ${filePath}`);
+}
+
 describe("mobile OTA publish scripts", () => {
   it("publishes browser web and Android OTA from one web-layer command", async () => {
     const root = await fixtureRoot("brai-client-web-layer-");
@@ -521,11 +530,11 @@ describe("mobile OTA publish scripts", () => {
     expect(script.indexOf('npm --prefix services/brai_api ci')).toBeLessThan(script.indexOf(sourceChmod));
     expect(script.indexOf(sourceChmod)).toBeLessThan(script.indexOf('mv "$SOURCE_ROOT" "$PREVIOUS_SOURCE"'));
     expect(script).toContain('check_deploy_headroom "$ENVS_ROOT"');
-    expect(script).toContain('BRAI_DEPLOY_MIN_FREE_GB:-4');
-    expect(script).toContain('cleanup_stale_preview_previous_sources "${PREVIOUS_SOURCE:-}"');
+    expect(script).toContain('BRAI_DEPLOY_MIN_FREE_GB:-12');
+    expect(script).not.toContain('cleanup_stale_preview_previous_sources');
     expect(script.indexOf('check_deploy_headroom "$ENVS_ROOT"')).toBeLessThan(script.indexOf('npm ci'));
-    expect(script.indexOf('deploy/scripts/deploy-branch.sh')).toBeLessThan(script.indexOf('rm -rf "$PREVIOUS_SOURCE"', script.indexOf('deploy/scripts/deploy-branch.sh')));
-    expect(script).toContain('"$ENVS_ROOT"/preview-[a-e]');
+    expect(script.indexOf('remove_owned_previous_source', script.indexOf('deploy/scripts/deploy-branch.sh'))).toBe(-1);
+    expect(script).not.toContain('source.previous-*');
   });
 
   it("keeps preview runtime Supabase env mandatory and artifacts writable by the deploy group", async () => {
@@ -703,6 +712,61 @@ describe("mobile OTA publish scripts", () => {
     });
 
     await expect(readFile(path.join(root, "deploy/releases/brai-v1.apk"), "utf8")).resolves.toBe("apk");
+  });
+
+  it("waits for the shared release lock before swapping an APK and its metadata", async () => {
+    const root = await fixtureRoot("brai-apk-release-lock-");
+    await writeStaticExport(root, "apk-lock");
+    await mkdir(path.join(root, "deploy"), { recursive: true });
+    await copyFile(
+      path.join(workspaceRoot, "deploy/environments.json"),
+      path.join(root, "deploy/environments.json"),
+    );
+    const apkPath = path.join(root, "app-release.apk");
+    const releaseDir = path.join(root, "deploy/releases");
+    const readyPath = path.join(root, "lock-ready");
+    await writeFile(apkPath, "apk-under-lock");
+    await mkdir(releaseDir, { recursive: true });
+
+    const holder = execFile("bash", ["-c", 'exec 9<"$1"; flock 9; touch "$2"; IFS= read -r _', "holder", releaseDir, readyPath]);
+    const holderDone = new Promise<void>((resolve, reject) => {
+      holder.once("error", reject);
+      holder.once("close", (code) => code === 0 ? resolve() : reject(new Error(`lock holder exited ${code}`)));
+    });
+    await waitForPath(readyPath);
+
+    const publisher = execFile("bash", [path.join(workspaceRoot, "deploy/scripts/publish-capacitor-apk.sh")], {
+      env: {
+        ...process.env,
+        BRAI_ROOT: root,
+        BRAI_APK_SOURCE: apkPath,
+        BRAI_APK_VERSION: "1",
+        BRAI_ANDROID_VERSION_CODE: "2999",
+        BRAI_PUBLISHED_AT: "2026-06-15T00:00:00Z",
+      },
+    });
+    const publisherDone = new Promise<void>((resolve, reject) => {
+      let stderr = "";
+      publisher.stderr?.on("data", (chunk) => { stderr += chunk; });
+      publisher.once("error", reject);
+      publisher.once("close", (code) => code === 0 ? resolve() : reject(new Error(`publisher exited ${code}: ${stderr}`)));
+    });
+
+    try {
+      await waitForPath(path.join(releaseDir, `.brai-v1.apk.${publisher.pid}.tmp`));
+      expect(fs.existsSync(path.join(releaseDir, "brai-v1.apk"))).toBe(false);
+      expect(fs.existsSync(path.join(releaseDir, "releases.json"))).toBe(false);
+      holder.stdin?.end("release\n");
+      await holderDone;
+      await publisherDone;
+    } finally {
+      holder.stdin?.end("release\n");
+      holder.kill();
+    }
+
+    await expect(readFile(path.join(releaseDir, "brai-v1.apk"), "utf8")).resolves.toBe("apk-under-lock");
+    const releases = JSON.parse(await readFile(path.join(releaseDir, "releases.json"), "utf8"));
+    expect(releases.sections.production.file).toBe("brai-v1.apk");
   });
 
   it("publishes a Dev APK card without restoring a Dev server path", async () => {

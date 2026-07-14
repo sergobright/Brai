@@ -16,7 +16,9 @@ const workers = await Promise.all(
       connection,
       namespace,
       taskQueue,
-      workflowsPath
+      workflowsPath,
+      maxHeartbeatThrottleInterval: "1 second",
+      shutdownForceTime: "8 seconds"
     })
   )
 );

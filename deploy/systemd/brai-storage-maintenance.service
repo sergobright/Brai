@@ -1,0 +1,19 @@
+[Unit]
+Description=Brai bounded storage maintenance
+After=local-fs.target
+
+[Service]
+Type=oneshot
+ExecStart=/srv/opt/node-v22.16.0/bin/node /srv/opt/brai-storage-maintenance.mjs --apply
+NoNewPrivileges=true
+PrivateNetwork=true
+ProtectHome=true
+ProtectControlGroups=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectSystem=strict
+ReadWritePaths=/srv/projects/brai-envs /srv/projects/brai/deploy/releases
+RestrictSUIDSGID=true
+UMask=0022
+StandardOutput=journal
+StandardError=journal

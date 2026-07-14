@@ -150,6 +150,7 @@ stop_preview_unit_if_exists() {
   fi
 }
 cleanup_released_preview_slot_artifacts() {
+  local release_json="$1"
   [[ -n "$SLOT_LOWER" ]] || return 0
   local slot_root="$ENVS_ROOT/preview-$SLOT_LOWER"
   case "$slot_root" in
@@ -159,9 +160,51 @@ cleanup_released_preview_slot_artifacts() {
       return 1
       ;;
   esac
+  printf '%s' "$release_json" | node -e '
+let raw = "";
+process.stdin.on("data", (chunk) => raw += chunk);
+process.stdin.on("end", () => {
+  const result = JSON.parse(raw);
+  process.exit(result.released === true && result.slot?.toLowerCase() === process.argv[1] ? 0 : 1);
+});
+' "$SLOT_LOWER" || return 0
+  [[ -d "$slot_root" && ! -L "$slot_root" ]] || {
+    echo "Preview slot root is missing or unsafe: $slot_root" >&2
+    return 1
+  }
+  local source_lock="$slot_root/.source-operation.lock"
+  [[ -f "$source_lock" && ! -L "$source_lock" ]] || {
+    echo "Preview source operation lock is missing or unsafe: $source_lock" >&2
+    return 1
+  }
+  exec 8<>"$source_lock"
+  flock -x 8
+  local registry_lock="$ENVS_ROOT/preview-slots.lock"
+  [[ -f "$registry_lock" && ! -L "$registry_lock" && -f "$REGISTRY" && ! -L "$REGISTRY" ]] || {
+    echo "Preview slot registry boundary is missing or unsafe" >&2
+    exec 8>&-
+    return 1
+  }
+  exec 9<>"$registry_lock"
+  flock -x 9
+  if ! node - "$REGISTRY" "$SLOT_LOWER" <<'NODE'
+const fs = require("node:fs");
+const [registryPath, slot] = process.argv.slice(2);
+const registry = JSON.parse(fs.readFileSync(registryPath, "utf8"));
+const entry = registry[slot.toUpperCase()];
+process.exit(entry?.status === "free" && !entry.branch ? 0 : 1);
+NODE
+  then
+    echo "Preview slot $SLOT_LOWER was reallocated; skipping released artifact cleanup." >&2
+    exec 9>&-
+    exec 8>&-
+    return 0
+  fi
+  exec 9>&-
   shopt -s nullglob
   rm -rf "$slot_root/source" "$slot_root"/source.previous-* "$slot_root/web" "$slot_root/mobile-update"
   shopt -u nullglob
+  exec 8>&-
 }
 accepted_build_recorded() {
   [[ "$BRAI_ACCEPTED_PREVIEW" == "true" && -n "$TARGET_BRANCH" && -n "$TARGET_COMMIT" ]] || return 1
@@ -208,7 +251,7 @@ if [[ -n "$SLOT_LOWER" ]]; then
   done
 fi
 RELEASE_JSON="$(bash deploy/scripts/preview-slots.sh release "$RELEASE_BRANCH")"
-cleanup_released_preview_slot_artifacts
+cleanup_released_preview_slot_artifacts "$RELEASE_JSON"
 if [[ "$REQUIRE_RELEASE" == "true" ]] &&
   ! printf '%s' "$RELEASE_JSON" | node -e 'let raw = ""; process.stdin.on("data", c => raw += c); process.stdin.on("end", () => process.exit(JSON.parse(raw).released === true ? 0 : 1));' &&
   accepted_build_recorded; then

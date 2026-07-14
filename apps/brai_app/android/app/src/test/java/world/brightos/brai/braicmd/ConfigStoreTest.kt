@@ -22,6 +22,7 @@ class ConfigStoreTest {
     @Before
     fun setUp() {
         context.getSharedPreferences(AppConstants.PREFS, 0).edit().clear().commit()
+        context.getSharedPreferences("airwhisper", 0).edit().clear().commit()
         context.getSharedPreferences("brai_cmd_secure", 0).edit().clear().commit()
         secure = SecureStringStore(context, SecretKeySpec(ByteArray(32) { (it + 7).toByte() }, "AES"))
         store = ConfigStore(context, secure)
@@ -60,6 +61,15 @@ class ConfigStoreTest {
         store.overlayEnabled = true
 
         assertTrue(ConfigStore(RuntimeEnvironment.getApplication()).overlayEnabled)
+    }
+
+    @Test
+    fun airwhisperPreferencesAreNotImported() {
+        context.getSharedPreferences("airwhisper", 0).edit()
+            .putBoolean(AppConstants.KEY_OVERLAY_ENABLED, true)
+            .commit()
+
+        assertFalse(ConfigStore(context, secure).overlayEnabled)
     }
 
     @Test

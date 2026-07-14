@@ -225,7 +225,10 @@ echo "Building Brai Admin..."
 
 if [[ "$ENVIRONMENT" == "prod" ]]; then
   if [[ -f "$RELEASE_TARGET/releases.json" ]]; then
+    exec 6<"$RELEASE_TARGET"
+    flock 6
     BRAI_RELEASE_TARGET="$RELEASE_TARGET" "$NODE_BIN" "$SCRIPT_DIR/update-release-index.mjs" --render-only
+    exec 6>&-
   fi
 fi
 

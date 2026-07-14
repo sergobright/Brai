@@ -56,46 +56,35 @@ export function isBraiCmdPublicRoute(pathname) {
     '/v1/brai-cmd/access/request',
     '/v1/brai-cmd/dictate',
     '/v1/brai-cmd/diagnostics',
-    '/v1/brai-cmd/post-process',
-    '/v1/airwhisper/health',
-    '/v1/airwhisper/preliminary-profile',
-    '/v1/airwhisper/access/request',
-    '/v1/airwhisper/dictate'
+    '/v1/brai-cmd/post-process'
   ].includes(pathname);
 }
 
 export function isBraiCmdAdminRoute(pathname) {
   return pathname === '/v1/brai-cmd/admin/summary' ||
-    pathname === '/v1/airwhisper/admin/summary' ||
     pathname === '/v1/brai-cmd/admin/settings' ||
-    pathname === '/v1/airwhisper/admin/settings' ||
-    /^\/v1\/(?:brai-cmd|airwhisper)\/admin\/tokens\/[^/]+\/revoke$/.test(pathname);
+    /^\/v1\/brai-cmd\/admin\/tokens\/[^/]+\/revoke$/.test(pathname);
 }
 
 export async function handleBraiCmdPublicRoute({ req, res, url, store, runtime, sendJson }) {
   try {
     if (req.method === 'GET' && (
       url.pathname === '/v1/health' ||
-      url.pathname === '/v1/brai-cmd/health' ||
-      url.pathname === '/v1/airwhisper/health'
+      url.pathname === '/v1/brai-cmd/health'
     )) {
       requireBraiCmdAccess(req, store);
       sendJson(req, res, 200, { status: 'ok' });
       return;
     }
 
-    if (req.method === 'POST' && (
-      url.pathname === '/v1/brai-cmd/preliminary-profile' ||
-      url.pathname === '/v1/airwhisper/preliminary-profile'
-    )) {
+    if (req.method === 'POST' && url.pathname === '/v1/brai-cmd/preliminary-profile') {
       await handlePreliminaryProfile({ req, res, store, sendJson });
       return;
     }
 
     if (req.method === 'POST' && (
       url.pathname === '/v1/access/request' ||
-      url.pathname === '/v1/brai-cmd/access/request' ||
-      url.pathname === '/v1/airwhisper/access/request'
+      url.pathname === '/v1/brai-cmd/access/request'
     )) {
       await handleAccessRequest({ req, res, store, sendJson });
       return;
@@ -169,8 +158,7 @@ export async function handleBraiCmdPublicRoute({ req, res, url, store, runtime, 
 
     if (req.method === 'POST' && (
       url.pathname === '/v1/dictate' ||
-      url.pathname === '/v1/brai-cmd/dictate' ||
-      url.pathname === '/v1/airwhisper/dictate'
+      url.pathname === '/v1/brai-cmd/dictate'
     )) {
       const access = requireBraiCmdAccess(req, store);
       await handleDictate({ req, res, store, runtime, access, sendJson, route: url.pathname });
@@ -185,18 +173,12 @@ export async function handleBraiCmdPublicRoute({ req, res, url, store, runtime, 
 
 export async function handleBraiCmdAdminRoute({ req, res, url, store, sendJson }) {
   try {
-    if (req.method === 'GET' && (
-      url.pathname === '/v1/brai-cmd/admin/summary' ||
-      url.pathname === '/v1/airwhisper/admin/summary'
-    )) {
+    if (req.method === 'GET' && url.pathname === '/v1/brai-cmd/admin/summary') {
       sendJson(req, res, 200, store.braiCmdAdminSummary());
       return;
     }
 
-    if (req.method === 'PUT' && (
-      url.pathname === '/v1/brai-cmd/admin/settings' ||
-      url.pathname === '/v1/airwhisper/admin/settings'
-    )) {
+    if (req.method === 'PUT' && url.pathname === '/v1/brai-cmd/admin/settings') {
       const body = await readJsonBody(req, 64 * 1024);
       const settings = store.setBraiCmdSettings({
         ...(Object.hasOwn(body, 'registrationEnabled') ? { registrationEnabled: Boolean(body.registrationEnabled) } : {}),
@@ -207,7 +189,7 @@ export async function handleBraiCmdAdminRoute({ req, res, url, store, sendJson }
       return;
     }
 
-    const revokeMatch = url.pathname.match(/^\/v1\/(?:brai-cmd|airwhisper)\/admin\/tokens\/([^/]+)\/revoke$/);
+    const revokeMatch = url.pathname.match(/^\/v1\/brai-cmd\/admin\/tokens\/([^/]+)\/revoke$/);
     if (req.method === 'POST' && revokeMatch) {
       const token = store.revokeBraiCmdToken(decodeURIComponent(revokeMatch[1]));
       if (!token) throw new BraiCmdHttpError(404, 'Token not found', 'not_found');
@@ -223,8 +205,8 @@ export async function handleBraiCmdAdminRoute({ req, res, url, store, sendJson }
 
 export function requireBraiCmdAccess(req, store) {
   const token = bearerToken(req);
-  const deviceId = headerValue(req, 'x-brai-cmd-device-id') || headerValue(req, 'x-airwhisper-device-id');
-  const clientVersion = headerValue(req, 'x-brai-cmd-client-version') || headerValue(req, 'x-airwhisper-client-version');
+  const deviceId = headerValue(req, 'x-brai-cmd-device-id');
+  const clientVersion = headerValue(req, 'x-brai-cmd-client-version');
   if (!token) {
     recordBraiCmdAccessDenied(store, req, 'unauthorized', 401, { tokenPresent: false, deviceIdPresent: Boolean(deviceId), clientVersionPresent: Boolean(clientVersion) });
     throw new BraiCmdHttpError(401, 'Missing bearer token', 'unauthorized');
@@ -360,7 +342,7 @@ async function handleDictate({ req, res, store, runtime, access, sendJson, route
   const started = Date.now();
   const requestId = randomUUID();
   const { config, deps } = runtime;
-  const clientVersion = headerValue(req, 'x-brai-cmd-client-version') || headerValue(req, 'x-airwhisper-client-version');
+  const clientVersion = headerValue(req, 'x-brai-cmd-client-version');
   let audioBytes = 0;
   let audioDurationMs = 0;
   let transcriptionMs = 0;

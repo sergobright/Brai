@@ -907,29 +907,65 @@ test("production deploy resolves ledger version through the shared resolver", ()
   assert.doesNotMatch(script, /version_type_id = 'apk'/);
 });
 
-test("remote deploy installs dependencies before replacing the active source tree", () => {
+test("remote deploy serializes dependency staging before replacing the active source tree", () => {
   const deploy = fs.readFileSync(new URL("../deploy/scripts/ci-ssh-deploy.sh", import.meta.url), "utf8");
+  const uploadHeadroomIndex = deploy.indexOf("check_upload_headroom\n");
+  const uploadIndex = deploy.indexOf('tar -xzf - -C "$REMOTE_UPLOAD"');
   const stageIndex = deploy.indexOf('cd "$REMOTE_UPLOAD"');
+  const sourceLockIndex = deploy.indexOf('flock 8');
+  const stagingLockIndex = deploy.indexOf('flock 7', sourceLockIndex);
   const headroomIndex = deploy.indexOf('check_deploy_headroom "$ENVS_ROOT"');
-  const installIndex = deploy.indexOf("npm --prefix services/brai_api ci", stageIndex);
-  const sourceLockIndex = deploy.indexOf('flock 8', installIndex);
+  const firstInstallIndex = deploy.indexOf("\nnpm ci\n", stageIndex);
+  const installIndex = deploy.indexOf("npm --prefix services/brai_api ci", firstInstallIndex);
+  const finalInstallIndex = deploy.indexOf("npm --prefix admin ci", installIndex);
+  const stagingUnlockIndex = deploy.indexOf('exec 7>&-', finalInstallIndex);
   const previousIndex = deploy.indexOf('mv "$SOURCE_ROOT" "$PREVIOUS_SOURCE"', installIndex);
+  const previousMarkerIndex = deploy.indexOf('mv -f -- "$previous_marker_tmp" "$PREVIOUS_SOURCE/.brai-previous-source.json"', previousIndex);
   const publishIndex = deploy.indexOf('mv "$REMOTE_UPLOAD" "$SOURCE_ROOT"', previousIndex);
+  const markerRemovalIndex = deploy.indexOf('rm -f -- "$SOURCE_ROOT/$UPLOAD_MARKER"', publishIndex);
+  const attemptMarkerIndex = deploy.indexOf('>"$SOURCE_ROOT/.brai-deploy-attempt"', markerRemovalIndex);
   const deployBranchIndex = deploy.indexOf("deploy/scripts/deploy-branch.sh", publishIndex);
-  const previousCleanupIndex = deploy.indexOf('rm -rf "$PREVIOUS_SOURCE"', deployBranchIndex);
   assert.ok(stageIndex > 0);
+  assert.ok(uploadHeadroomIndex > 0);
+  assert.ok(uploadHeadroomIndex < uploadIndex);
+  assert.ok(sourceLockIndex > 0);
+  assert.ok(stagingLockIndex > sourceLockIndex);
   assert.ok(headroomIndex > 0);
-  assert.ok(stageIndex < installIndex);
-  assert.ok(headroomIndex < installIndex);
-  assert.ok(installIndex < sourceLockIndex);
+  assert.ok(stageIndex < sourceLockIndex);
+  assert.ok(sourceLockIndex < stagingLockIndex);
+  assert.ok(stagingLockIndex < headroomIndex);
+  assert.ok(headroomIndex < firstInstallIndex);
+  assert.ok(firstInstallIndex < installIndex);
+  assert.ok(installIndex < finalInstallIndex);
+  assert.ok(finalInstallIndex < stagingUnlockIndex);
+  assert.ok(stagingUnlockIndex < previousIndex);
   assert.ok(sourceLockIndex < previousIndex);
   assert.ok(installIndex < previousIndex);
-  assert.ok(previousIndex < publishIndex);
+  assert.ok(previousIndex < previousMarkerIndex);
+  assert.ok(previousMarkerIndex < publishIndex);
+  assert.ok(publishIndex < markerRemovalIndex);
+  assert.ok(markerRemovalIndex < attemptMarkerIndex);
   assert.ok(publishIndex < deployBranchIndex);
-  assert.ok(deployBranchIndex < previousCleanupIndex);
-  assert.match(deploy, /BRAI_DEPLOY_MIN_FREE_GB:-4/);
-  assert.match(deploy, /cleanup_stale_preview_previous_sources "\$\{PREVIOUS_SOURCE:-\}"/);
-  assert.match(deploy, /"\$ENVS_ROOT"\/preview-\[a-e\]/);
+  assert.equal(deploy.indexOf("remove_owned_previous_source", deployBranchIndex), -1);
+  assert.match(deploy, /BRAI_DEPLOY_MIN_FREE_GB:-12/);
+  assert.match(deploy, /10#\$min_gb < 12/);
+  assert.match(deploy, /STAGING_OPERATION_LOCK="\$UPLOAD_ROOT\/\.staging-operation\.lock"/);
+  assert.match(deploy, /REMOTE_UPLOAD="\$UPLOAD_ROOT\/\$SAFE_BRANCH-\$BRAI_COMMIT\.attempt-\$SAFE_ATTEMPT_ID"/);
+  assert.match(deploy, /\{"status":"active","commit":"%s","finishedAt":null\}/);
+  assert.match(deploy, /terminal_status="succeeded"/);
+  assert.match(deploy, /terminal_status="cancelled"/);
+  assert.match(deploy, /write_attempt_terminal_marker "\$terminal_status"[\s\S]*?rm -rf -- "\$ATTEMPT_STAGING"/);
+  assert.match(deploy, /UPLOAD_SUCCEEDED="false"[\s\S]*?trap finish_upload EXIT/);
+  assert.match(deploy, /trap "abort_upload 129" HUP/);
+  assert.match(deploy, /trap "abort_upload 130" INT/);
+  assert.match(deploy, /trap "abort_upload 143" TERM/);
+  assert.match(deploy, /tar -xzf - -C "\$REMOTE_UPLOAD"[\s\S]*?UPLOAD_SUCCEEDED="true"/);
+  assert.match(deploy, /trap 'deploy_cleanup \$\?' EXIT/);
+  assert.match(deploy, /trap 'deploy_cleanup \$\?' ERR/);
+  assert.match(deploy, /trap 'deploy_cleanup 129' HUP/);
+  assert.match(deploy, /trap 'deploy_cleanup 130' INT/);
+  assert.match(deploy, /trap 'deploy_cleanup 143' TERM/);
+  assert.doesNotMatch(deploy, /source\.orphan|source\.cutover|source\.previous-\*/);
 });
 
 test("production deploy tolerates an omitted preview lease generation", () => {
@@ -1256,8 +1292,33 @@ test("SocratiCode watcher service is an always-on repo-managed daemon", () => {
   assert.match(unit, /WorkingDirectory=\/srv\/projects\/brai/);
   assert.match(unit, /Restart=always/);
   assert.match(unit, /ExecStart=\/srv\/opt\/node-v22\.16\.0\/bin\/node \/srv\/projects\/brai\/scripts\/brai-socraticode-watcher\.mjs/);
-  assert.match(script, /runSocraticodeCheck\(\{ mode: "ensure"/);
+  assert.match(script, /reason === "startup" \? "ensure" : "preflight"/);
+  assert.doesNotMatch(script, /preflight failed; running ensure/);
   assert.match(script, /60_000/);
+});
+
+test("storage maintenance is bounded, scheduled, and installed through Ansible", () => {
+  const service = fs.readFileSync(new URL("../deploy/systemd/brai-storage-maintenance.service", import.meta.url), "utf8");
+  const timer = fs.readFileSync(new URL("../deploy/systemd/brai-storage-maintenance.timer", import.meta.url), "utf8");
+  const playbook = fs.readFileSync(new URL("../deploy/ansible/brai.yml", import.meta.url), "utf8");
+  const maintenance = fs.readFileSync(new URL("../deploy/scripts/storage-maintenance.mjs", import.meta.url), "utf8");
+  const publisher = fs.readFileSync(new URL("../deploy/scripts/publish-capacitor-apk.sh", import.meta.url), "utf8");
+  const deployBranch = fs.readFileSync(new URL("../deploy/scripts/deploy-branch.sh", import.meta.url), "utf8");
+
+  assert.match(service, /brai-storage-maintenance\.mjs --apply/);
+  assert.match(service, /StandardOutput=journal/);
+  assert.match(service, /ProtectSystem=strict/);
+  assert.match(service, /ReadWritePaths=\/srv\/projects\/brai-envs \/srv\/projects\/brai\/deploy\/releases/);
+  assert.match(timer, /OnCalendar=\*-\*-\* 03:30:00 UTC/);
+  assert.match(playbook, /brai-storage-maintenance\.timer/);
+  assert.match(playbook, /"max-size": "50m"/);
+  assert.match(playbook, /"max-file": "3"/);
+  assert.doesNotMatch(playbook, /Restart Docker/);
+  assert.match(maintenance, /\.\.\.lockedEnvironments\.map\(\(\{ lockPath \}\) => lockPath\),\s+stagingLockPath,\s+config\.releaseDir/);
+  assert.match(maintenance, /spawn\(command\[0\], command\.slice\(1\)/);
+  assert.match(maintenance, /removePreviousSourceCandidates/);
+  assert.match(publisher, /exec 6<"\$TARGET_DIR"\s+flock 6/);
+  assert.match(deployBranch, /exec 6<"\$RELEASE_TARGET"\s+flock 6[\s\S]+update-release-index\.mjs" --render-only/);
 });
 
 test("task starter creates writable nested worktrees from repo and supports legacy task roots", () => {

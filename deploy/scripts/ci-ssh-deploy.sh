@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# File-size exception: deploy, rollback, and cleanup traps share process-local ownership state; splitting this state machine would weaken fail-closed recovery.
 set -euo pipefail
 
 : "${BRAI_DEPLOY_HOST:?BRAI_DEPLOY_HOST is required}"
@@ -6,6 +7,7 @@ set -euo pipefail
 : "${BRAI_DEPLOY_SSH_KEY:?BRAI_DEPLOY_SSH_KEY is required}"
 : "${BRAI_BRANCH:?BRAI_BRANCH is required}"
 : "${BRAI_COMMIT:?BRAI_COMMIT is required}"
+[[ "$BRAI_COMMIT" =~ ^[0-9a-f]{40}$ ]] || { echo "BRAI_COMMIT must be a full lowercase SHA" >&2; exit 1; }
 
 DEPLOY_REPO="${BRAI_DEPLOY_REPO:-/srv/projects/brai}"
 SSH_PORT="${BRAI_DEPLOY_SSH_PORT:-22}"
@@ -13,36 +15,139 @@ ENVS_ROOT="${BRAI_ENVS_ROOT:-/srv/projects/brai-envs}"
 UPLOAD_ROOT="${BRAI_DEPLOY_UPLOAD_ROOT:-$ENVS_ROOT/ci-uploads}"
 SAFE_BRANCH="$(printf '%s' "$BRAI_BRANCH" | tr -c 'A-Za-z0-9._-' '-')"
 BRAI_PREVIEW_LEASE_GENERATION="${BRAI_PREVIEW_LEASE_GENERATION:-${GITHUB_RUN_ID:-}}"
-REMOTE_UPLOAD="$UPLOAD_ROOT/$SAFE_BRANCH-$BRAI_COMMIT"
+ATTEMPT_ID="${GITHUB_RUN_ID:-local}-${GITHUB_RUN_ATTEMPT:-0}-${GITHUB_JOB:-deploy}-$$-$RANDOM"
+SAFE_ATTEMPT_ID="$(printf '%s' "$ATTEMPT_ID" | tr -c 'A-Za-z0-9._-' '-')"
+REMOTE_UPLOAD="$UPLOAD_ROOT/$SAFE_BRANCH-$BRAI_COMMIT.attempt-$SAFE_ATTEMPT_ID"
+REMOTE_UPLOAD_NAME="$(basename "$REMOTE_UPLOAD")"
+UPLOAD_MARKER=".brai-upload-terminal.json"
+CLEANUP_TERMINAL_STATUS="failed"
+REMOTE_UPLOAD_OWNED="false"
+REMOTE_DEPLOY_OWNS_STAGING="false"
+DEPLOY_MIN_FREE_GB="${BRAI_DEPLOY_MIN_FREE_GB:-12}"
+if ! [[ "$DEPLOY_MIN_FREE_GB" =~ ^[0-9]+$ ]] || (( 10#$DEPLOY_MIN_FREE_GB < 12 )); then
+  echo "BRAI_DEPLOY_MIN_FREE_GB must be an integer of at least 12 GiB, got: $DEPLOY_MIN_FREE_GB" >&2
+  exit 1
+fi
 if [[ -z "${BRAI_NATIVE_APK_CHANGE:-}" ]]; then
   BRAI_NATIVE_APK_CHANGE="$(node deploy/scripts/detect-native-apk-change.mjs "$BRAI_BRANCH" "${BRAI_BASE_COMMIT:-}")"
 fi
 KEY_FILE="$(mktemp "${TMPDIR:-/tmp}/brai-deploy-key.XXXXXX")"
+cleanup_remote_upload() {
+  [[ -f "$KEY_FILE" ]] || return 0
+  ssh -i "$KEY_FILE" -p "$SSH_PORT" -o StrictHostKeyChecking=accept-new "$BRAI_DEPLOY_USER@$BRAI_DEPLOY_HOST" \
+    bash -s -- "$REMOTE_UPLOAD" "$UPLOAD_ROOT" "$REMOTE_UPLOAD_NAME" "$BRAI_COMMIT" "$UPLOAD_MARKER" "$CLEANUP_TERMINAL_STATUS" <<'REMOTE' || true
+set -euo pipefail
+REMOTE_UPLOAD="$1"
+UPLOAD_ROOT="$2"
+REMOTE_UPLOAD_NAME="$3"
+BRAI_COMMIT="$4"
+UPLOAD_MARKER="$5"
+TERMINAL_STATUS="$6"
+[[ "$REMOTE_UPLOAD" == "$UPLOAD_ROOT/$REMOTE_UPLOAD_NAME" && "$REMOTE_UPLOAD_NAME" == *.attempt-* ]] || {
+  echo "Refusing cleanup for non-attempt upload path: $REMOTE_UPLOAD" >&2
+  exit 1
+}
+[[ "$BRAI_COMMIT" =~ ^[0-9a-f]{40}$ && "$REMOTE_UPLOAD_NAME" == *-"$BRAI_COMMIT".attempt-* ]] || {
+  echo "Refusing cleanup for mismatched deployment commit" >&2
+  exit 1
+}
+[[ "$TERMINAL_STATUS" == "failed" || "$TERMINAL_STATUS" == "cancelled" || "$TERMINAL_STATUS" == "succeeded" ]] || {
+  echo "Refusing invalid terminal upload status: $TERMINAL_STATUS" >&2
+  exit 1
+}
+[[ -d "$UPLOAD_ROOT" && ! -L "$UPLOAD_ROOT" ]] || exit 1
+STAGING_OPERATION_LOCK="$UPLOAD_ROOT/.staging-operation.lock"
+[[ -f "$STAGING_OPERATION_LOCK" && ! -L "$STAGING_OPERATION_LOCK" ]] || exit 1
+exec 7<>"$STAGING_OPERATION_LOCK"
+flock 7
+if [[ -e "$REMOTE_UPLOAD" || -L "$REMOTE_UPLOAD" ]]; then
+  if [[ -d "$REMOTE_UPLOAD" && ! -L "$REMOTE_UPLOAD" ]]; then
+    {
+      marker_tmp="$REMOTE_UPLOAD/$UPLOAD_MARKER.tmp-$$"
+      finished_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+      printf '{"status":"%s","commit":"%s","finishedAt":"%s"}\n' \
+        "$TERMINAL_STATUS" "$BRAI_COMMIT" "$finished_at" >"$marker_tmp"
+      mv -f -- "$marker_tmp" "$REMOTE_UPLOAD/$UPLOAD_MARKER"
+    } || true
+  fi
+  rm -rf -- "$REMOTE_UPLOAD"
+fi
+REMOTE
+}
 cleanup() {
+  local status=$?
+  trap - EXIT ERR TERM INT HUP
+  set +e
+  if (( status == 0 )); then
+    CLEANUP_TERMINAL_STATUS="succeeded"
+  fi
+  if [[ "$REMOTE_UPLOAD_OWNED" == "true" && "$REMOTE_DEPLOY_OWNS_STAGING" != "true" ]]; then
+    cleanup_remote_upload
+  fi
   rm -f "$KEY_FILE"
+  exit "$status"
+}
+abort() {
+  local status="$1"
+  CLEANUP_TERMINAL_STATUS="${2:-failed}"
+  trap - ERR
+  exit "$status"
 }
 trap cleanup EXIT
+trap 'abort $?' ERR
+trap 'abort 129 cancelled' HUP
+trap 'abort 130 cancelled' INT
+trap 'abort 143 cancelled' TERM
 
 printf '%s\n' "$BRAI_DEPLOY_SSH_KEY" >"$KEY_FILE"
 chmod 600 "$KEY_FILE"
 
 ssh -i "$KEY_FILE" -p "$SSH_PORT" -o StrictHostKeyChecking=accept-new "$BRAI_DEPLOY_USER@$BRAI_DEPLOY_HOST" \
-  bash -s -- "$REMOTE_UPLOAD" "$UPLOAD_ROOT" <<'REMOTE'
+  bash -s -- "$REMOTE_UPLOAD" "$UPLOAD_ROOT" "$REMOTE_UPLOAD_NAME" "$BRAI_COMMIT" "$UPLOAD_MARKER" "$DEPLOY_MIN_FREE_GB" <<'REMOTE'
 set -euo pipefail
 REMOTE_UPLOAD="$1"
 UPLOAD_ROOT="$2"
+REMOTE_UPLOAD_NAME="$3"
+BRAI_COMMIT="$4"
+UPLOAD_MARKER="$5"
+DEPLOY_MIN_FREE_GB="$6"
 umask 0002
-case "$REMOTE_UPLOAD" in
-  "$UPLOAD_ROOT"/*) ;;
-  *)
-    echo "Refusing to reset upload path outside $UPLOAD_ROOT: $REMOTE_UPLOAD" >&2
-    exit 1
-    ;;
-esac
-rm -rf "$REMOTE_UPLOAD"
-mkdir -p "$REMOTE_UPLOAD"
+[[ "$REMOTE_UPLOAD" == "$UPLOAD_ROOT/$REMOTE_UPLOAD_NAME" && "$REMOTE_UPLOAD_NAME" == *.attempt-* ]] || {
+  echo "Refusing to create non-attempt upload path: $REMOTE_UPLOAD" >&2
+  exit 1
+}
+[[ "$BRAI_COMMIT" =~ ^[0-9a-f]{40}$ && "$REMOTE_UPLOAD_NAME" == *-"$BRAI_COMMIT".attempt-* ]] || {
+  echo "Refusing upload for mismatched deployment commit" >&2
+  exit 1
+}
+check_upload_headroom() {
+  local available_kb
+  available_kb="$(df -Pk "$UPLOAD_ROOT" | awk 'NR == 2 { print $4 }')"
+  local required_kb=$((10#$DEPLOY_MIN_FREE_GB * 1024 * 1024))
+  if (( available_kb < required_kb )); then
+    echo "Not enough free disk space before upload: need at least ${DEPLOY_MIN_FREE_GB} GiB, have $((available_kb / 1024 / 1024)) GiB." >&2
+    return 1
+  fi
+}
+[[ -d "$UPLOAD_ROOT" && ! -L "$UPLOAD_ROOT" ]] || {
+  echo "CI upload root is missing or unsafe: $UPLOAD_ROOT" >&2
+  exit 1
+}
+STAGING_OPERATION_LOCK="$UPLOAD_ROOT/.staging-operation.lock"
+[[ -f "$STAGING_OPERATION_LOCK" && ! -L "$STAGING_OPERATION_LOCK" ]] || {
+  echo "Staging operation lock is missing or unsafe: $STAGING_OPERATION_LOCK" >&2
+  exit 1
+}
+exec 7<>"$STAGING_OPERATION_LOCK"
+flock 7
+check_upload_headroom
+mkdir "$REMOTE_UPLOAD"
+marker_tmp="$REMOTE_UPLOAD/$UPLOAD_MARKER.tmp-$$"
+printf '{"status":"active","commit":"%s","finishedAt":null}\n' "$BRAI_COMMIT" >"$marker_tmp"
+mv -f -- "$marker_tmp" "$REMOTE_UPLOAD/$UPLOAD_MARKER"
 find "$REMOTE_UPLOAD" -type d -exec chmod 2775 {} +
 REMOTE
+REMOTE_UPLOAD_OWNED="true"
 
 tar \
   --exclude=.git \
@@ -56,12 +161,60 @@ tar \
   --exclude=deploy/web \
   --exclude=deploy/mobile-update \
   --exclude=deploy/releases \
+  --exclude=.brai-upload-terminal.json \
   -czf - . | ssh -i "$KEY_FILE" -p "$SSH_PORT" -o StrictHostKeyChecking=accept-new "$BRAI_DEPLOY_USER@$BRAI_DEPLOY_HOST" \
-    tar -xzf - -C "$REMOTE_UPLOAD"
+    bash -c '
+set -euo pipefail
+REMOTE_UPLOAD="$1"
+UPLOAD_ROOT="$2"
+REMOTE_UPLOAD_NAME="$3"
+BRAI_COMMIT="$4"
+UPLOAD_MARKER="$5"
+UPLOAD_SUCCEEDED="false"
+TERMINAL_STATUS="failed"
+[[ -d "$UPLOAD_ROOT" && ! -L "$UPLOAD_ROOT" ]] || exit 1
+STAGING_OPERATION_LOCK="$UPLOAD_ROOT/.staging-operation.lock"
+[[ -f "$STAGING_OPERATION_LOCK" && ! -L "$STAGING_OPERATION_LOCK" ]] || exit 1
+exec 7<>"$STAGING_OPERATION_LOCK"
+flock 7
+write_upload_terminal_marker() {
+  [[ "$REMOTE_UPLOAD" == "$UPLOAD_ROOT/$REMOTE_UPLOAD_NAME" && "$REMOTE_UPLOAD_NAME" == *-"$BRAI_COMMIT".attempt-* ]] || return 1
+  [[ "$BRAI_COMMIT" =~ ^[0-9a-f]{40}$ \
+    && -d "$REMOTE_UPLOAD" && ! -L "$REMOTE_UPLOAD" ]] || return 1
+  local marker_tmp="$REMOTE_UPLOAD/$UPLOAD_MARKER.tmp-$$"
+  local finished_at
+  finished_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  printf "{\"status\":\"%s\",\"commit\":\"%s\",\"finishedAt\":\"%s\"}\\n" \
+    "$TERMINAL_STATUS" "$BRAI_COMMIT" "$finished_at" >"$marker_tmp"
+  mv -f -- "$marker_tmp" "$REMOTE_UPLOAD/$UPLOAD_MARKER"
+}
+finish_upload() {
+  local status=$?
+  trap - EXIT HUP INT TERM
+  if [[ "$UPLOAD_SUCCEEDED" != "true" ]]; then
+    write_upload_terminal_marker || true
+  fi
+  exit "$status"
+}
+abort_upload() {
+  TERMINAL_STATUS="cancelled"
+  UPLOAD_SUCCEEDED="false"
+  trap - HUP INT TERM
+  exit "$1"
+}
+trap finish_upload EXIT
+trap "abort_upload 129" HUP
+trap "abort_upload 130" INT
+trap "abort_upload 143" TERM
+tar -xzf - -C "$REMOTE_UPLOAD"
+UPLOAD_SUCCEEDED="true"
+' bash "$REMOTE_UPLOAD" "$UPLOAD_ROOT" "$REMOTE_UPLOAD_NAME" "$BRAI_COMMIT" "$UPLOAD_MARKER"
 
 DEPLOY_OUTPUT=""
+REMOTE_DEPLOY_OWNS_STAGING="true"
+REMOTE_UPLOAD_OWNED="false"
 if ! DEPLOY_OUTPUT="$(ssh -i "$KEY_FILE" -p "$SSH_PORT" -o StrictHostKeyChecking=accept-new "$BRAI_DEPLOY_USER@$BRAI_DEPLOY_HOST" \
-  bash -s -- "$DEPLOY_REPO" "$REMOTE_UPLOAD" "$BRAI_BRANCH" "$BRAI_COMMIT" "$BRAI_NATIVE_APK_CHANGE" "$BRAI_PREVIEW_LEASE_GENERATION" <<'REMOTE'
+  bash -s -- "$DEPLOY_REPO" "$REMOTE_UPLOAD" "$BRAI_BRANCH" "$BRAI_COMMIT" "$BRAI_NATIVE_APK_CHANGE" "$BRAI_PREVIEW_LEASE_GENERATION" "$UPLOAD_ROOT" "$UPLOAD_MARKER" "$DEPLOY_MIN_FREE_GB" <<'REMOTE'
 set -euo pipefail
 DEPLOY_REPO="$1"
 REMOTE_UPLOAD="$2"
@@ -69,6 +222,10 @@ BRAI_BRANCH="$3"
 BRAI_COMMIT="$4"
 BRAI_NATIVE_APK_CHANGE="$5"
 BRAI_PREVIEW_LEASE_GENERATION="${6:-}"
+UPLOAD_ROOT="$7"
+UPLOAD_MARKER="$8"
+DEPLOY_MIN_FREE_GB="$9"
+ATTEMPT_STAGING="$REMOTE_UPLOAD"
 ENVS_ROOT="${BRAI_ENVS_ROOT:-/srv/projects/brai-envs}"
 NODE_PREFIX="${BRAI_NODE_PREFIX:-/srv/opt/node-v22.16.0/bin}"
 if [[ -d "$NODE_PREFIX" ]]; then
@@ -101,38 +258,60 @@ env_release_password() {
 }
 check_deploy_headroom() {
   local root="$1"
-  local min_gb="${BRAI_DEPLOY_MIN_FREE_GB:-4}"
-  if ! [[ "$min_gb" =~ ^[0-9]+$ ]]; then
-    echo "BRAI_DEPLOY_MIN_FREE_GB must be a non-negative integer, got: $min_gb" >&2
+  local min_gb="$DEPLOY_MIN_FREE_GB"
+  if ! [[ "$min_gb" =~ ^[0-9]+$ ]] || (( 10#$min_gb < 12 )); then
+    echo "BRAI_DEPLOY_MIN_FREE_GB must be an integer of at least 12 GiB, got: $min_gb" >&2
     exit 1
   fi
   mkdir -p "$root"
   local available_kb
   available_kb="$(df -Pk "$root" | awk 'NR == 2 { print $4 }')"
-  local required_kb=$((min_gb * 1024 * 1024))
+  local required_kb=$((10#$min_gb * 1024 * 1024))
   if (( available_kb < required_kb )); then
-    echo "Not enough free disk space under $root: need at least ${min_gb}GB before deploy, have $((available_kb / 1024 / 1024))GB." >&2
+    echo "Not enough free disk space under $root: need at least ${min_gb} GiB before deploy, have $((available_kb / 1024 / 1024)) GiB." >&2
     exit 1
   fi
 }
-cleanup_stale_preview_previous_sources() {
-  local keep="${1:-}"
-  [[ "${ENVIRONMENT:-}" == preview-* ]] || return 0
-  local slot_root="$ENVS_ROOT/$ENV_PATH"
-  case "$slot_root" in
-    "$ENVS_ROOT"/preview-[a-e]) ;;
-    *)
-      echo "Refusing stale source.previous cleanup outside preview slots: $slot_root" >&2
-      return 1
-      ;;
-  esac
-  shopt -s nullglob
-  local previous
-  for previous in "$slot_root"/source.previous-*; do
-    [[ -n "$keep" && "$previous" == "$keep" ]] && continue
-    rm -rf "$previous"
-  done
-  shopt -u nullglob
+is_deploy_attempt_suffix() {
+  local suffix="$1"
+  [[ "$suffix" =~ ^[0-9]{14}-[0-9]+$ \
+    || "$suffix" =~ ^(local|[0-9]+)-[0-9]+-[A-Za-z0-9._-]+-[0-9]+-[0-9]+$ ]]
+}
+assert_attempt_staging_path() {
+  local path="$1"
+  local name
+  local suffix="${DEPLOY_ATTEMPT_SUFFIX:-}"
+  name="$(basename "$path")"
+  [[ "$BRAI_COMMIT" =~ ^[0-9a-f]{40}$ \
+    && -n "$path" && "$path" == "$ATTEMPT_STAGING" \
+    && "$path" == "$UPLOAD_ROOT/$name" \
+    && "$name" == *-"$BRAI_COMMIT".attempt-"$suffix" ]] \
+    && is_deploy_attempt_suffix "$suffix"
+}
+remove_attempt_staging() {
+  local terminal_status="${1:-failed}"
+  [[ ! -e "$ATTEMPT_STAGING" && ! -L "$ATTEMPT_STAGING" ]] && return 0
+  assert_attempt_staging_path "$ATTEMPT_STAGING" || {
+    echo "Refusing cleanup for non-attempt staging path: $ATTEMPT_STAGING" >&2
+    return 1
+  }
+  write_attempt_terminal_marker "$terminal_status" || true
+  rm -rf -- "$ATTEMPT_STAGING"
+}
+write_attempt_terminal_marker() {
+  local status="$1"
+  [[ "$status" == "failed" || "$status" == "cancelled" || "$status" == "succeeded" ]] || {
+    echo "Refusing invalid terminal upload status: $status" >&2
+    return 1
+  }
+  assert_attempt_staging_path "$ATTEMPT_STAGING" || return 1
+  [[ -d "$ATTEMPT_STAGING" && ! -L "$ATTEMPT_STAGING" ]] || return 0
+  local marker_tmp="$ATTEMPT_STAGING/$UPLOAD_MARKER.tmp-$$"
+  local finished_at
+  finished_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  printf '{"status":"%s","commit":"%s","finishedAt":"%s"}\n' \
+    "$status" "$BRAI_COMMIT" "$finished_at" >"$marker_tmp"
+  mv -f -- "$marker_tmp" "$ATTEMPT_STAGING/$UPLOAD_MARKER"
 }
 mark_preview_failed() {
   if [[ "$BRAI_BRANCH" == codex/* && -n "${BRAI_PREVIEW_SLOT:-}" ]]; then
@@ -142,9 +321,8 @@ mark_preview_failed() {
 restore_previous_source() {
   if [[ "${PREVIOUS_SOURCE_READY:-false}" == "true" ]]; then
     if [[ -d "${SOURCE_ROOT:-}" ]]; then
-      local failed_source="$REMOTE_UPLOAD"
-      [[ ! -e "$failed_source" ]] || failed_source="${REMOTE_UPLOAD}.failed-$$"
-      mv "$SOURCE_ROOT" "$failed_source" || return 1
+      [[ ! -e "$ATTEMPT_STAGING" ]] || return 1
+      mv "$SOURCE_ROOT" "$ATTEMPT_STAGING" || return 1
     fi
     mv "$PREVIOUS_SOURCE" "$SOURCE_ROOT" || return 1
     PREVIOUS_SOURCE_READY="false"
@@ -152,25 +330,10 @@ restore_previous_source() {
     return 0
   fi
   if [[ "${SOURCE_SWAPPED:-false}" == "true" && -d "${SOURCE_ROOT:-}" ]]; then
-    [[ ! -e "$REMOTE_UPLOAD" ]] || return 1
-    mv "$SOURCE_ROOT" "$REMOTE_UPLOAD" || return 1
+    [[ ! -e "$ATTEMPT_STAGING" ]] || return 1
+    mv "$SOURCE_ROOT" "$ATTEMPT_STAGING" || return 1
     SOURCE_SWAPPED="false"
   fi
-}
-deploy_failed() {
-  local failed_status=$?
-  set +e
-  if [[ "${NEW_API_HEALTHY:-false}" != "true" ]]; then
-    if ! rollback_before_new_api_health; then
-      echo "Rollback verification failed after the original deployment error; ${SERVICE_NAME:-API} remains failed closed." >&2
-    fi
-  fi
-  mark_preview_failed
-  if [[ "${SOURCE_SWAPPED:-false}" == "true" ]]; then
-    cleanup_stale_preview_previous_sources "${PREVIOUS_SOURCE:-}" || true
-  fi
-  set -e
-  return "$failed_status"
 }
 assert_api_quiesced() {
   if systemctl is-active --quiet "$SERVICE_NAME"; then
@@ -245,6 +408,48 @@ rollback_before_new_api_health() {
 
   return "$rollback_failed"
 }
+reconcile_source_swap_state() {
+  if [[ "${PREVIOUS_SOURCE_READY:-false}" != "true" && -n "${PREVIOUS_SOURCE:-}" \
+    && -d "$PREVIOUS_SOURCE" && ! -e "${SOURCE_ROOT:-}" ]]; then
+    PREVIOUS_SOURCE_READY="true"
+  fi
+  if [[ "${SOURCE_SWAPPED:-false}" != "true" && -d "${SOURCE_ROOT:-}" \
+    && ! -e "$ATTEMPT_STAGING" \
+    && ( "${PREVIOUS_SOURCE_READY:-false}" == "true" || "${SOURCE_PRESENT:-false}" == "false" ) ]]; then
+    SOURCE_SWAPPED="true"
+  fi
+}
+deploy_cleanup() {
+  local status="${1:-$?}"
+  [[ "${DEPLOY_CLEANUP_RUNNING:-false}" != "true" ]] || exit "$status"
+  DEPLOY_CLEANUP_RUNNING="true"
+  trap - EXIT ERR TERM INT HUP
+  set +e
+
+  local terminal_status="failed"
+  if (( status == 0 )); then
+    terminal_status="succeeded"
+  elif (( status == 129 || status == 130 || status == 143 )); then
+    terminal_status="cancelled"
+  fi
+  if (( status != 0 )); then
+    reconcile_source_swap_state
+    if [[ "${NEW_API_HEALTHY:-false}" != "true" \
+      && ( "${API_TRANSITION_STARTED:-false}" == "true" \
+        || "${API_QUIESCED:-false}" == "true" \
+        || "${SOURCE_SWAPPED:-false}" == "true" \
+        || "${PREVIOUS_SOURCE_READY:-false}" == "true" ) ]]; then
+      if ! rollback_before_new_api_health; then
+        echo "Rollback verification failed after the original deployment error; ${SERVICE_NAME:-API} remains failed closed." >&2
+      fi
+    fi
+    mark_preview_failed
+  fi
+
+  cleanup_preview_queue
+  remove_attempt_staging "$terminal_status" || true
+  exit "$status"
+}
 run_goal_agent_drain_check() {
   local database_url="$1"
   local phase="$2"
@@ -297,13 +502,35 @@ cleanup_preview_queue() {
     deploy/scripts/preview-slots.sh dequeue "$BRAI_BRANCH" >/dev/null || true
   fi
 }
+DEPLOY_ATTEMPT_SUFFIX="${ATTEMPT_STAGING##*.attempt-}"
+is_deploy_attempt_suffix "$DEPLOY_ATTEMPT_SUFFIX" || {
+  echo "Invalid deployment attempt staging path: $ATTEMPT_STAGING" >&2
+  exit 1
+}
+assert_attempt_staging_path "$ATTEMPT_STAGING" || {
+  echo "Refusing deployment from non-attempt staging path: $ATTEMPT_STAGING" >&2
+  exit 1
+}
+BRAI_PREVIEW_QUEUED="false"
+SOURCE_ROOT=""
+PREVIOUS_SOURCE=""
+SOURCE_SWAPPED="false"
+PREVIOUS_SOURCE_READY="false"
+API_WAS_ACTIVE="false"
+API_TRANSITION_STARTED="false"
+API_QUIESCED="false"
+NEW_API_HEALTHY="false"
+DEPLOY_CLEANUP_RUNNING="false"
+trap 'deploy_cleanup $?' EXIT
+trap 'deploy_cleanup $?' ERR
+trap 'deploy_cleanup 129' HUP
+trap 'deploy_cleanup 130' INT
+trap 'deploy_cleanup 143' TERM
 if [[ "$BRAI_BRANCH" == codex/* ]]; then
   [[ -n "$BRAI_PREVIEW_LEASE_GENERATION" ]] || {
     echo "BRAI_PREVIEW_LEASE_GENERATION or GITHUB_RUN_ID is required for Preview deploy." >&2
     exit 1
   }
-  BRAI_PREVIEW_QUEUED="false"
-  trap cleanup_preview_queue EXIT
   QUEUE_MAX_ATTEMPTS="${BRAI_PREVIEW_QUEUE_MAX_ATTEMPTS:-720}"
   QUEUE_POLL_SECONDS="${BRAI_PREVIEW_QUEUE_POLL_SECONDS:-30}"
   for ((attempt = 1; attempt <= QUEUE_MAX_ATTEMPTS; attempt += 1)); do
@@ -321,12 +548,10 @@ if [[ "$BRAI_BRANCH" == codex/* ]]; then
     sleep "$QUEUE_POLL_SECONDS"
   done
   BRAI_PREVIEW_QUEUED="false"
-  trap - EXIT
   BRAI_PREVIEW_SLOT="$(printf '%s' "$ALLOCATION_JSON" | allocation_field slot)"
   BRAI_PREVIEW_ALLOCATED_NEW="$(printf '%s' "$ALLOCATION_JSON" | allocation_field allocatedNew)"
   export BRAI_PREVIEW_SLOT BRAI_PREVIEW_ALLOCATED_NEW
   printf 'BRAI_PREVIEW_SLOT_OUTPUT=%s\n' "$BRAI_PREVIEW_SLOT"
-  trap deploy_failed ERR
 fi
 
 mapfile -t DEPLOY_META < <(node deploy/scripts/resolve-deploy-env.mjs "$BRAI_BRANCH")
@@ -336,12 +561,6 @@ SERVICE_NAME="${DEPLOY_META[4]}"
 API_PORT="${DEPLOY_META[5]}"
 SOURCE_ROOT="$ENVS_ROOT/$ENV_PATH/source"
 GOAL_AGENT_RUNTIME_GROUP="${BRAI_GOAL_AGENT_GROUP:-brai-goal-agent}"
-SOURCE_SWAPPED="false"
-PREVIOUS_SOURCE_READY="false"
-API_WAS_ACTIVE="false"
-API_QUIESCED="false"
-NEW_API_HEALTHY="false"
-trap deploy_failed ERR
 case "$SOURCE_ROOT" in
   "$ENVS_ROOT"/*/source) ;;
   *)
@@ -349,6 +568,34 @@ case "$SOURCE_ROOT" in
     exit 1
     ;;
 esac
+[[ -d "$ENVS_ROOT" && ! -L "$ENVS_ROOT" ]] || {
+  echo "Deployment environment root is missing or unsafe: $ENVS_ROOT" >&2
+  exit 1
+}
+ENV_ROOT="$(dirname "$SOURCE_ROOT")"
+[[ -d "$ENV_ROOT" && ! -L "$ENV_ROOT" ]] || {
+  echo "Deployment environment directory is missing or unsafe: $ENV_ROOT" >&2
+  exit 1
+}
+SOURCE_OPERATION_LOCK="$ENV_ROOT/.source-operation.lock"
+[[ -f "$SOURCE_OPERATION_LOCK" && ! -L "$SOURCE_OPERATION_LOCK" ]] || {
+  echo "Source operation lock is missing or unsafe: $SOURCE_OPERATION_LOCK" >&2
+  exit 1
+}
+exec 8<>"$SOURCE_OPERATION_LOCK"
+flock 8
+export BRAI_SOURCE_OPERATION_LOCK_HELD=true
+[[ -d "$UPLOAD_ROOT" && ! -L "$UPLOAD_ROOT" ]] || {
+  echo "CI upload root is missing or unsafe: $UPLOAD_ROOT" >&2
+  exit 1
+}
+STAGING_OPERATION_LOCK="$UPLOAD_ROOT/.staging-operation.lock"
+[[ -f "$STAGING_OPERATION_LOCK" && ! -L "$STAGING_OPERATION_LOCK" ]] || {
+  echo "Staging operation lock is missing or unsafe: $STAGING_OPERATION_LOCK" >&2
+  exit 1
+}
+exec 7<>"$STAGING_OPERATION_LOCK"
+flock 7
 check_deploy_headroom "$ENVS_ROOT"
 deploy/scripts/goal-agent-infrastructure-preflight.sh "$ENVIRONMENT"
 
@@ -364,20 +611,24 @@ npm --prefix apps/brai_app ci
 npm --prefix services/brai_api ci
 npm --prefix services/brai_goal_agents ci
 npm --prefix admin ci
+exec 7>&-
 find "$REMOTE_UPLOAD" ! -type l -user "$(id -u)" -exec chmod u+rwX,g+rwX {} +
 find "$REMOTE_UPLOAD" -type d -user "$(id -u)" -exec chmod g+s {} +
 
-SOURCE_OPERATION_LOCK="$(dirname "$SOURCE_ROOT")/.source-operation.lock"
-exec 8>"$SOURCE_OPERATION_LOCK"
-flock 8
-export BRAI_SOURCE_OPERATION_LOCK_HELD=true
 SOURCE_PRESENT="false"
-if [[ -d "$SOURCE_ROOT" ]]; then
+if [[ -e "$SOURCE_ROOT" || -L "$SOURCE_ROOT" ]]; then
+  [[ -d "$SOURCE_ROOT" && ! -L "$SOURCE_ROOT" ]] || {
+    echo "Existing source path is not a plain directory: $SOURCE_ROOT" >&2
+    exit 1
+  }
   SOURCE_PRESENT="true"
   find "$SOURCE_ROOT" ! -type l -user "$(id -u)" -exec chmod u+rwX,g+rwX {} + || true
 fi
-PREVIOUS_SOURCE="${SOURCE_ROOT}.previous-$(date -u +%Y%m%d%H%M%S)-$$"
-mkdir -p "$(dirname "$SOURCE_ROOT")"
+PREVIOUS_SOURCE="${SOURCE_ROOT}.previous-${DEPLOY_ATTEMPT_SUFFIX}"
+[[ ! -e "$PREVIOUS_SOURCE" && ! -L "$PREVIOUS_SOURCE" ]] || {
+  echo "Owned previous source path already exists: $PREVIOUS_SOURCE" >&2
+  exit 1
+}
 
 if [[ "$ENVIRONMENT" == preview-* ]]; then
   exec 9>>"$ENVS_ROOT/preview-slots.lock"
@@ -416,6 +667,7 @@ if systemctl is-active --quiet "$SERVICE_NAME"; then
     exit 1
   fi
   API_WAS_ACTIVE="true"
+  API_TRANSITION_STARTED="true"
   "${BRAI_SUDO:-sudo}" systemctl stop "$SERVICE_NAME"
 fi
 API_QUIESCED="true"
@@ -476,9 +728,15 @@ fi
 if [[ "$SOURCE_PRESENT" == "true" ]]; then
   mv "$SOURCE_ROOT" "$PREVIOUS_SOURCE"
   PREVIOUS_SOURCE_READY="true"
+  previous_marker_tmp="$PREVIOUS_SOURCE/.brai-previous-source.json.tmp-$$"
+  node -e 'const [attempt, branch, commit] = process.argv.slice(1); process.stdout.write(`${JSON.stringify({ attempt, replacedByBranch: branch, replacedByCommit: commit, createdAt: new Date().toISOString() })}\n`);' \
+    "$DEPLOY_ATTEMPT_SUFFIX" "$BRAI_BRANCH" "$BRAI_COMMIT" >"$previous_marker_tmp"
+  mv -f -- "$previous_marker_tmp" "$PREVIOUS_SOURCE/.brai-previous-source.json"
 fi
 mv "$REMOTE_UPLOAD" "$SOURCE_ROOT"
 SOURCE_SWAPPED="true"
+rm -f -- "$SOURCE_ROOT/$UPLOAD_MARKER"
+printf '%s\n' "$DEPLOY_ATTEMPT_SUFFIX" >"$SOURCE_ROOT/.brai-deploy-attempt"
 printf '%s\n' "$BRAI_COMMIT" >"$SOURCE_ROOT/.brai-deploy-commit"
 printf '%s\n' "$BRAI_BRANCH" >"$SOURCE_ROOT/.brai-deploy-branch"
 if [[ "$ENVIRONMENT" == preview-* ]]; then
@@ -531,9 +789,6 @@ if [[ "$BRAI_NATIVE_APK_CHANGE" == "true" ]]; then
   fi
 fi
 deploy/scripts/deploy-branch.sh
-rm -rf "$PREVIOUS_SOURCE"
-PREVIOUS_SOURCE_READY="false"
-cleanup_stale_preview_previous_sources
 REMOTE
 )"; then
   printf '%s\n' "$DEPLOY_OUTPUT"

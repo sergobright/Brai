@@ -190,6 +190,10 @@ The `state` query exposes `deliveryClass`, `handoff`, `autoMerge`, `tasks`, `mis
 
 `PromotionWorkflow` tracks accepted preview promotion, target deploy, and preview slot release:
 
+`dispatch-promotion` forwards the first `INT`, `TERM`, or `HUP` to a cancellation request bounded to 10 seconds. Later signals are coalesced while the tracked client and cleanup finish; they never force-kill the exact-SHA worker before its Activity process groups have stopped. A failed or timed-out request emits an explicit `BLOCKER` diagnostic, does not claim cancellation success, and requires an `inventory` check before delivery is retried.
+Temporal activities heartbeat every second with a 15-second timeout and wait for cancellation completion. Commands run in a POSIX process group: cancellation sends `TERM` to the group and escalates to `KILL` after five seconds, ensuring local SSH disconnects and triggers the remote deploy cleanup traps.
+The exact-SHA Preview wrapper owns the real Node client and worker PIDs. On an interrupted dispatch it waits for the cancelled workflow result before gracefully stopping the local worker and SSH tunnel. If terminal cancellation cannot be confirmed, it reports the blocker and then uses bounded worker shutdown to abort the remaining local Activity process group without masking the original command exit.
+
 - Workflow ID for production deploy: `brai:promotion:prod:<sha>`.
 - Workflow ID for Dev deploy: `brai:promotion:dev:<sha>`.
 - Prod dispatch/event sequence: `promotion_requested`, `prod_deploy_started`, `accepted_previews_started`, `supabase_prod_migration_started`, `prod_version_recorded`, `goal_agents_deploy_started`, `supabase_prod_migration_passed` or `supabase_prod_migration_failed`, `goal_agents_deploy_passed` or `goal_agents_deploy_failed`, `accepted_previews_passed` or `accepted_previews_failed`, `prod_deploy_passed` or `prod_deploy_failed`, `released`.

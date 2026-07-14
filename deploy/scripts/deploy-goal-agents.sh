@@ -35,6 +35,13 @@ EXPECTED_ROOT="$ENVS_ROOT/$ENV_PATH/source"
 
 exec 8>"$ENVS_ROOT/.deploy-$ENV_PATH.lock"
 flock 8
+SOURCE_OPERATION_LOCK="$ENVS_ROOT/$ENV_PATH/.source-operation.lock"
+[[ -f "$SOURCE_OPERATION_LOCK" && ! -L "$SOURCE_OPERATION_LOCK" ]] || {
+  echo "Goal-agent gate source-operation lock is missing or unsafe: $SOURCE_OPERATION_LOCK" >&2
+  exit 1
+}
+exec 9<>"$SOURCE_OPERATION_LOCK"
+flock 9
 
 [[ -r "$ROOT/.brai-deploy-commit" && "$(<"$ROOT/.brai-deploy-commit")" == "$COMMIT" ]] || {
   echo "Goal-agent gate source commit does not match $COMMIT" >&2
@@ -147,6 +154,27 @@ if [[ "$ENVIRONMENT" == preview-* ]]; then
   assert_preview_owned
   "$SCRIPT_DIR/preview-slots.sh" ready "$BRANCH" "$COMMIT" >/dev/null
   printf 'BRAI_PREVIEW_SLOT_OUTPUT=%s\n' "${BRAI_PREVIEW_SLOT:?BRAI_PREVIEW_SLOT is required}"
+fi
+
+DEPLOY_ATTEMPT_FILE="$ROOT/.brai-deploy-attempt"
+[[ -f "$DEPLOY_ATTEMPT_FILE" && ! -L "$DEPLOY_ATTEMPT_FILE" ]] || {
+  echo "Goal-agent gate deploy-attempt marker is missing or unsafe: $DEPLOY_ATTEMPT_FILE" >&2
+  exit 1
+}
+DEPLOY_ATTEMPT_SUFFIX="$(<"$DEPLOY_ATTEMPT_FILE")"
+[[ "$DEPLOY_ATTEMPT_SUFFIX" =~ ^[0-9]{14}-[0-9]+$ \
+  || "$DEPLOY_ATTEMPT_SUFFIX" =~ ^(local|[0-9]+)-[0-9]+-[A-Za-z0-9._-]+-[0-9]+-[0-9]+$ ]] || {
+  echo "Goal-agent gate deploy-attempt marker is invalid" >&2
+  exit 1
+}
+READY_MARKER="$ROOT/.brai-goal-agent-ready.json"
+READY_MARKER_TMP="$READY_MARKER.tmp-$$"
+"$NODE_BIN" -e 'const [attempt, branch, commit] = process.argv.slice(1); process.stdout.write(`${JSON.stringify({ attempt, branch, commit, readyAt: new Date().toISOString() })}\n`);' \
+  "$DEPLOY_ATTEMPT_SUFFIX" "$BRANCH" "$COMMIT" >"$READY_MARKER_TMP"
+mv -f -- "$READY_MARKER_TMP" "$READY_MARKER"
+exec 9>&-
+if ! "${BRAI_SUDO:-sudo}" systemctl --no-block start brai-storage-maintenance.service; then
+  echo "Warning: immediate previous-source cleanup did not start; the maintenance timer remains the fallback." >&2
 fi
 
 echo "Goal-agent deployment gate passed for $BRANCH@$COMMIT in $ENVIRONMENT."

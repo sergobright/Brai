@@ -29,3 +29,15 @@ test("preview deploy dispatch and query are bound to the requested SHA", () => {
   assert.match(source, /cancel-preview-deploy/);
   assert.match(source, /previewDeployWorkflowId\(required\(opts, "branch"\), required\(opts, "sha"\)\)/);
 });
+
+test("promotion dispatch forwards termination signals to Temporal cancellation", () => {
+  const source = fs.readFileSync(path.join(import.meta.dirname, "../src/client.mjs"), "utf8");
+  const dispatchStart = source.indexOf("async function dispatchPromotion");
+  const dispatchBody = source.slice(dispatchStart, source.indexOf("async function dispatchReleasePreview", dispatchStart));
+
+  assert.match(dispatchBody, /process\.on\("SIG(?:TERM|INT|HUP)"/);
+  assert.match(dispatchBody, /cancellationPromise = cancelWorkflowWithTimeout\(handle\)/);
+  assert.match(dispatchBody, /if \(requestedSignal\) process\.exit\(exitCode\)/);
+  assert.match(dispatchBody, /Promise\.race\([\s\S]*signalFailure/);
+  assert.match(dispatchBody, /BLOCKER: Temporal cancellation was not confirmed/);
+});
