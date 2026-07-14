@@ -51,7 +51,7 @@ describe("BraiApp shell", () => {
     await waitFor(() => expect(cmdPlugin.setVoiceOnlyMode).toHaveBeenCalledWith({ enabled: false }));
     expect(cmdPlugin.setQueuePausedMode).toHaveBeenCalledWith({ enabled: false });
     await waitFor(() => expect(cmdPlugin.setAccessKey).toHaveBeenCalledWith({ token: "authenticated-device-token", displayName: "Test", userId: "test-user" }));
-    expect(cmdPlugin.ensureAccess).not.toHaveBeenCalled();
+    expect(cmdPlugin.ensureAccess).toHaveBeenCalledWith({ displayName: "Test" });
     expect(cmdPlugin.syncProviderCredentials.mock.invocationCallOrder[0]).toBeLessThan(
       cmdPlugin.setOverlayEnabled.mock.invocationCallOrder.find((order) => order > cmdPlugin.syncProviderCredentials.mock.invocationCallOrder[0]) ?? 0,
     );
@@ -77,18 +77,26 @@ describe("BraiApp shell", () => {
     expect(cmdPlugin.setQueuePausedMode).toHaveBeenCalledWith({ enabled: false });
   });
 
-  it("provisions account access without requesting a preliminary device token", async () => {
+  it("waits for native device access before activating account access", async () => {
     stubAndroidCapacitor();
-    cmdPlugin.ensureAccess.mockResolvedValue({ accessGranted: false });
+    let finishAccess: ((state: { accessGranted: true }) => void) | undefined;
+    cmdPlugin.ensureAccess.mockImplementation(() => new Promise((resolve) => {
+      finishAccess = resolve;
+    }));
 
     render(<BraiApp />);
+
+    await waitFor(() => expect(cmdPlugin.ensureAccess).toHaveBeenCalledWith({ displayName: "Test" }));
+    expect(deviceTokenRequestCount()).toBe(0);
+    expect(cmdPlugin.setAccessKey).not.toHaveBeenCalledWith(expect.objectContaining({ token: "authenticated-device-token" }));
+
+    act(() => finishAccess?.({ accessGranted: true }));
 
     await waitFor(() => expect(cmdPlugin.setAccessKey).toHaveBeenCalledWith({
       token: "authenticated-device-token",
       displayName: "Test",
       userId: "test-user",
     }));
-    expect(cmdPlugin.ensureAccess).not.toHaveBeenCalled();
     await waitFor(() => expect(cmdPlugin.setOverlayEnabled).toHaveBeenCalledWith({ enabled: true }));
   });
 

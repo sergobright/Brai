@@ -136,6 +136,26 @@ class NetworkClientErrorRegression1Test {
     }
 
     @Test
+    fun missingDeviceAccessIsAcquiredAfterAccountBoundaryStarts() {
+        config.authToken = ""
+        config.beginAccountCredentialMode("user-a")
+        server.enqueue(200, """{"token":"fresh-device-token","displayName":"Brai"}""")
+        server.enqueue(200, """{"status":"ok"}""")
+
+        client.ensureDeviceAccess("Brai", "fingerprint")
+
+        assertEquals("user-a", config.accountUserId)
+        assertEquals("fresh-device-token", config.authToken)
+        assertEquals(
+            listOf(
+                "POST /v1/access/request HTTP/1.1",
+                "GET /v1/health HTTP/1.1"
+            ),
+            server.requests.map { it.line }
+        )
+    }
+
+    @Test
     fun transientHealthFailureKeepsStoredAccess() {
         server.response = 503 to """{"code":"internal_error"}"""
 

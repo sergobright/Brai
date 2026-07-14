@@ -302,14 +302,6 @@ export async function openBraiCmdSettings(): Promise<boolean> {
 export async function ensureBraiCmdAccess(displayName: string): Promise<BraiCmdState | null> {
   if (!isNativeAndroid()) return null;
   try {
-    let state = await BraiCmd.getState();
-    if (state.accountCredentialsActive) {
-      for (let attempt = 0; attempt < 40 && !state.accessGranted; attempt += 1) {
-        await new Promise((resolve) => window.setTimeout(resolve, 250));
-        state = await BraiCmd.getState();
-      }
-      return state;
-    }
     return await BraiCmd.ensureAccess({ displayName });
   } catch {
     return null;
