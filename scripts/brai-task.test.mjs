@@ -1784,7 +1784,9 @@ test("delivery workflow avoids duplicate full checks on PR updates", () => {
 
 test("delivery workflow dispatches prod deploy through Temporal and bootstraps worker changes", () => {
   const workflow = fs.readFileSync(new URL("../.github/workflows/brai-delivery.yml", import.meta.url), "utf8");
+  const temporalWorkflow = fs.readFileSync(new URL("../services/brai_temporal/src/workflows.mjs", import.meta.url), "utf8");
   const deployProdJob = workflow.slice(workflow.indexOf("deploy-prod:"), workflow.indexOf("deploy-dev:"));
+  const prodPromotion = temporalWorkflow.slice(temporalWorkflow.indexOf("async function runProdPromotion"), temporalWorkflow.indexOf("async function runDevPromotion"));
 
   assert.match(deployProdJob, /permissions:\n\s+contents: write/);
   assert.match(deployProdJob, /id: temporal_worker_restart/);
@@ -1793,6 +1795,8 @@ test("delivery workflow dispatches prod deploy through Temporal and bootstraps w
   assert.match(deployProdJob, /Bootstrap Temporal worker for orchestration changes/);
   assert.match(deployProdJob, /ci-ssh-sync-main-checkout\.sh/);
   assert.match(deployProdJob, /dispatch-promotion --target prod/);
+  assert.ok(prodPromotion.indexOf("restartTemporalWorker: false") < prodPromotion.indexOf("cleanupAcceptedBranches({ recentMerged: true })"));
+  assert.ok(prodPromotion.indexOf("cleanupAcceptedBranches({ recentMerged: true })") < prodPromotion.indexOf("restartTemporalWorker: true"));
   assert.doesNotMatch(workflow, /sync-local-main-checkout:/);
 });
 
