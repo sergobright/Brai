@@ -920,6 +920,11 @@ test("remote deploy installs dependencies before replacing the active source tre
   assert.match(deploy, /"\$ENVS_ROOT"\/preview-\[a-e\]/);
 });
 
+test("production deploy tolerates an omitted preview lease generation", () => {
+  const deploy = fs.readFileSync(new URL("../deploy/scripts/ci-ssh-deploy.sh", import.meta.url), "utf8");
+  assert.match(deploy, /BRAI_PREVIEW_LEASE_GENERATION="\$\{6:-\}"/);
+});
+
 test("direct Android builds share the deploy source-operation lock", () => {
   const deploy = fs.readFileSync(new URL("../deploy/scripts/ci-ssh-deploy.sh", import.meta.url), "utf8");
   const androidBuild = fs.readFileSync(new URL("../deploy/scripts/build-android-env-apk.sh", import.meta.url), "utf8");
