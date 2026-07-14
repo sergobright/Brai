@@ -4,13 +4,15 @@ import {
   loadActivityEditDrafts,
   loadActivitiesState,
   markdownPreviewSource,
+  markActivityAttempt,
+  markActivityFailure,
   pendingActivityEvents,
   projectActivitiesState,
   saveActivityEditDraft,
   saveActivitiesState,
   visibleDescriptionPreview,
 } from "@/shared/storage/activityStore";
-import { clientDb, getMeta } from "@/shared/storage/db";
+import { ClientUserScopeChangedError, clientDb, getMeta, setMeta } from "@/shared/storage/db";
 import type { ActivitiesState } from "@/shared/types/activities";
 
 describe("action store", () => {
@@ -237,6 +239,46 @@ describe("action store", () => {
 
     expect((await loadActivitiesState())?.actions[0].description_md).toBe("новое описание");
     expect(await getMeta<number>("lastActionServerRevision")).toBe(5);
+  });
+
+  it("rejects old-owner Activity writes and sync bookkeeping without touching user B data", async () => {
+    await setMeta("currentUserId", "user-a");
+    const expectedUserId = "user-a";
+    await setMeta("currentUserId", "user-b");
+    await saveActivitiesState(state(5, "Действие B"), "user-b");
+    const userBEvent = await enqueueActivityEvent({
+      type: "create",
+      payload: { title: "Новое действие B" },
+      baseServerRevision: 5,
+      expectedUserId: "user-b",
+    });
+    const nextClientSequence = await getMeta<number>("nextClientSequence");
+
+    await expect(enqueueActivityEvent({
+      type: "create",
+      payload: { title: "Старое действие A" },
+      baseServerRevision: 5,
+      expectedUserId,
+    })).rejects.toBeInstanceOf(ClientUserScopeChangedError);
+    await expect(saveActivitiesState(
+      state(9, "Снимок A"),
+      expectedUserId,
+    )).rejects.toBeInstanceOf(ClientUserScopeChangedError);
+    await expect(markActivityAttempt(
+      [userBEvent],
+      expectedUserId,
+    )).rejects.toBeInstanceOf(ClientUserScopeChangedError);
+    await expect(markActivityFailure(
+      [userBEvent],
+      "old_owner",
+      expectedUserId,
+    )).rejects.toBeInstanceOf(ClientUserScopeChangedError);
+    await expect(pendingActivityEvents(expectedUserId))
+      .rejects.toBeInstanceOf(ClientUserScopeChangedError);
+
+    expect(await pendingActivityEvents("user-b")).toEqual([userBEvent]);
+    expect((await loadActivitiesState("user-b"))?.actions[0].title).toBe("Действие B");
+    expect(await getMeta<number>("nextClientSequence")).toBe(nextClientSequence);
   });
 });
 

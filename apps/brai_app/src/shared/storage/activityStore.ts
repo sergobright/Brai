@@ -1,4 +1,10 @@
-import { clientDb, ensureClientMeta, getMeta, randomId, setMeta } from "./db";
+import {
+  assertClientUserInCurrentTransaction,
+  clientDb,
+  ensureClientMeta,
+  randomId,
+  setMeta,
+} from "./db";
 import { migrateBraiLocalStoragePrefix, removeBraiLocalStorageItem, setBraiLocalStorageItem } from "./localStorageKeys";
 import type {
   ActivitiesState,
@@ -22,9 +28,13 @@ export async function enqueueActivityEvent(params: {
   actionId?: string;
   payload: ActivityEventPayload;
   baseServerRevision: number;
+  expectedUserId?: string;
 }): Promise<PendingActivityEvent> {
   const db = clientDb();
   return db.transaction("rw", db.meta, db.action_outbox_events, async () => {
+    if (params.expectedUserId !== undefined) {
+      await assertClientUserInCurrentTransaction(params.expectedUserId);
+    }
     const meta = await ensureClientMeta();
     const sequence = meta.nextClientSequence;
     const now = new Date().toISOString();
@@ -63,16 +73,26 @@ export async function enqueueActivityEvent(params: {
   });
 }
 
-export async function pendingActivityEvents(): Promise<PendingActivityEvent[]> {
-  return clientDb().action_outbox_events.orderBy("clientSequence").toArray();
+export async function pendingActivityEvents(expectedUserId?: string): Promise<PendingActivityEvent[]> {
+  const db = clientDb();
+  return db.transaction("r", db.meta, db.action_outbox_events, async () => {
+    if (expectedUserId !== undefined) await assertClientUserInCurrentTransaction(expectedUserId);
+    return db.action_outbox_events.orderBy("clientSequence").toArray();
+  });
 }
 
-export async function markActivityAttempt(events: PendingActivityEvent[]): Promise<void> {
+/** Marks Activity events as being attempted within the optional expected owner scope. */
+export async function markActivityAttempt(
+  events: PendingActivityEvent[],
+  expectedUserId?: string,
+): Promise<void> {
+  const db = clientDb();
   const now = new Date().toISOString();
-  await clientDb().transaction("rw", clientDb().action_outbox_events, async () => {
+  await db.transaction("rw", db.meta, db.action_outbox_events, async () => {
+    if (expectedUserId !== undefined) await assertClientUserInCurrentTransaction(expectedUserId);
     await Promise.all(
       events.map((event) =>
-        clientDb().action_outbox_events.update(event.eventId, {
+        db.action_outbox_events.update(event.eventId, {
           status: "syncing",
           attemptCount: event.attemptCount + 1,
           lastSyncAttemptAtUtc: now,
@@ -83,11 +103,17 @@ export async function markActivityAttempt(events: PendingActivityEvent[]): Promi
   });
 }
 
-export async function markActivityFailure(events: PendingActivityEvent[], message: string): Promise<void> {
-  await clientDb().transaction("rw", clientDb().action_outbox_events, async () => {
+export async function markActivityFailure(
+  events: PendingActivityEvent[],
+  message: string,
+  expectedUserId?: string,
+): Promise<void> {
+  const db = clientDb();
+  await db.transaction("rw", db.meta, db.action_outbox_events, async () => {
+    if (expectedUserId !== undefined) await assertClientUserInCurrentTransaction(expectedUserId);
     await Promise.all(
       events.map((event) =>
-        clientDb().action_outbox_events.update(event.eventId, {
+        db.action_outbox_events.update(event.eventId, {
           status: "failed",
           lastError: message,
         }),
@@ -96,19 +122,35 @@ export async function markActivityFailure(events: PendingActivityEvent[], messag
   });
 }
 
-export async function acknowledgeActivityEvents(ids: string[]): Promise<void> {
-  await clientDb().action_outbox_events.bulkDelete(ids);
+export async function acknowledgeActivityEvents(ids: string[], expectedUserId?: string): Promise<void> {
+  const db = clientDb();
+  await db.transaction("rw", db.meta, db.action_outbox_events, async () => {
+    if (expectedUserId !== undefined) await assertClientUserInCurrentTransaction(expectedUserId);
+    await db.action_outbox_events.bulkDelete(ids);
+  });
 }
 
 /** Persists typed Action, Goal, and legacy Operation projections at a monotonic revision. */
-export async function saveActivitiesState(state: ActivitiesState): Promise<boolean> {
+export async function saveActivitiesState(
+  state: ActivitiesState,
+  expectedUserId?: string,
+): Promise<boolean> {
   const db = clientDb();
-  return db.transaction("rw", db.actions_cache, db.meta, () => saveActivitiesSnapshotInCurrentTransaction(state));
+  return db.transaction(
+    "rw",
+    db.actions_cache,
+    db.meta,
+    () => saveActivitiesSnapshotInCurrentTransaction(state, expectedUserId),
+  );
 }
 
 /** Writes an Activity snapshot inside the caller's Dexie transaction. */
-export async function saveActivitiesSnapshotInCurrentTransaction(state: ActivitiesState): Promise<boolean> {
+export async function saveActivitiesSnapshotInCurrentTransaction(
+  state: ActivitiesState,
+  expectedUserId?: string,
+): Promise<boolean> {
   const db = clientDb();
+  if (expectedUserId !== undefined) await assertClientUserInCurrentTransaction(expectedUserId);
   const currentRevision = Number((await db.meta.get("lastActionServerRevision"))?.value ?? 0);
   if (state.server_revision < currentRevision || (currentRevision > 0 && state.server_revision === currentRevision)) return false;
 
@@ -132,9 +174,10 @@ export async function saveActivitiesSnapshotInCurrentTransaction(state: Activiti
 /**
  * Loads the activities snapshot and its revision from one IndexedDB read transaction.
  */
-export async function loadActivitiesState(): Promise<ActivitiesState | null> {
+export async function loadActivitiesState(expectedUserId?: string): Promise<ActivitiesState | null> {
   const db = clientDb();
   const { actions, revision, serverTimeUtc } = await db.transaction("r", db.actions_cache, db.meta, async () => {
+    if (expectedUserId !== undefined) await assertClientUserInCurrentTransaction(expectedUserId);
     const [cachedActions, revisionRow, serverTimeRow] = await Promise.all([
       db.actions_cache.toArray(),
       db.meta.get("lastActionServerRevision"),
@@ -159,8 +202,12 @@ export async function loadActivitiesState(): Promise<ActivitiesState | null> {
   };
 }
 
-export async function lastActivityServerRevision(): Promise<number> {
-  return (await getMeta<number>("lastActionServerRevision")) ?? 0;
+export async function lastActivityServerRevision(expectedUserId?: string): Promise<number> {
+  const db = clientDb();
+  return db.transaction("r", db.meta, async () => {
+    if (expectedUserId !== undefined) await assertClientUserInCurrentTransaction(expectedUserId);
+    return Number((await db.meta.get("lastActionServerRevision"))?.value ?? 0);
+  });
 }
 
 /**

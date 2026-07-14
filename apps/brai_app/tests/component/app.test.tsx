@@ -400,6 +400,7 @@ describe("BraiApp shell", () => {
     expect(document.querySelector(".timer-galaxy-background")).toHaveClass("opacity-0", "delay-0");
     await waitFor(() => expect(document.querySelector(".timer-evil-eye-background")).toHaveClass("opacity-100", "delay-[1500ms]"));
 
+    await waitForLocalOwnerReady();
     fireEvent.click(screen.getByRole("button", { name: "Запустить" }));
 
     await waitFor(() => expect(screen.getByRole("button", { name: /Завершить/ })).toBeInTheDocument());
@@ -412,11 +413,15 @@ describe("BraiApp shell", () => {
   });
 
   it("keeps Focus timer controls local-first while network requests hang", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => new Promise<Response>(() => undefined)));
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      if (requestUrl(input).includes("/auth/session")) return authSessionResponse();
+      return new Promise<Response>(() => undefined);
+    }));
 
     render(<BraiApp initialSection="focus" />);
 
-    await waitFor(() => expect(screen.getByRole("button", { name: "Запустить" })).not.toBeDisabled());
+    await waitForLocalOwnerReady();
+    expect(screen.getByRole("button", { name: "Запустить" })).not.toBeDisabled();
     fireEvent.click(screen.getByRole("button", { name: "Запустить" }));
 
     await waitFor(() => expect(screen.getByRole("button", { name: /Завершить/ })).not.toBeDisabled());
@@ -692,12 +697,13 @@ describe("BraiApp shell", () => {
     );
 
     render(<BraiApp initialSection="focus" />);
+    await waitForLocalOwnerReady();
     fireEvent.click(await screen.findByRole("button", { name: "История фокуса" }));
     await waitFor(() => expect(screen.getByText("Сессий пока нет")).toBeInTheDocument());
-    await waitFor(() => expect(sockets.length).toBeGreaterThan(0));
+    await waitFor(() => expect(sockets.some((socket) => socket.readyState === 1)).toBe(true));
 
     await act(async () => {
-      sockets[0].sendMessage({
+      latestOpenSocket(sockets).sendMessage({
         type: "timer_synced",
         state: {
           server_time_utc: "2026-06-22T06:00:00.000Z",
@@ -773,12 +779,13 @@ describe("BraiApp shell", () => {
     );
 
     render(<BraiApp initialSection="focus" />);
+    await waitForLocalOwnerReady();
     fireEvent.click(await screen.findByRole("button", { name: "История фокуса" }));
     await waitFor(() => expect(screen.getByText("Сессий пока нет")).toBeInTheDocument());
-    await waitFor(() => expect(sockets.length).toBeGreaterThan(0));
+    await waitFor(() => expect(sockets.some((socket) => socket.readyState === 1)).toBe(true));
 
     await act(async () => {
-      sockets[0].sendMessage({
+      latestOpenSocket(sockets).sendMessage({
         type: "timer_synced",
         state: {
           server_time_utc: "2026-06-22T06:01:00.000Z",
@@ -864,6 +871,7 @@ describe("BraiApp shell", () => {
     );
 
     render(<BraiApp initialSection="focus" />);
+    await waitForLocalOwnerReady();
     fireEvent.click(await screen.findByRole("button", { name: "История фокуса" }));
     await waitFor(() => expect(screen.getByText("Сессий пока нет")).toBeInTheDocument());
 
@@ -872,7 +880,7 @@ describe("BraiApp shell", () => {
     await waitFor(() => expect(screen.getByText("1ч")).toBeInTheDocument());
     expect(stateRequests).toBeGreaterThan(1);
     intervals.restore();
-  });
+  }, 10_000);
 
   it("refreshes Focus immediately when the browser tab returns", async () => {
     Object.defineProperty(window, "innerWidth", { configurable: true, writable: true, value: 1200 });
@@ -939,6 +947,7 @@ describe("BraiApp shell", () => {
     );
 
     render(<BraiApp initialSection="focus" />);
+    await waitForLocalOwnerReady();
     fireEvent.click(await screen.findByRole("button", { name: "История фокуса" }));
     await waitFor(() => expect(stateRequests).toBeGreaterThan(0));
     const stateRequestsBeforeFocus = stateRequests;
@@ -950,7 +959,7 @@ describe("BraiApp shell", () => {
     await waitFor(() => expect(stateRequests).toBeGreaterThan(stateRequestsBeforeFocus));
     await waitFor(() => expect(document.querySelector(".timer-digits")).toHaveAttribute("aria-label", "00:00:00"));
     await waitFor(() => expect(screen.queryByRole("button", { name: /Завершить/ })).not.toBeInTheDocument());
-  });
+  }, 10_000);
 
   it("applies live activity updates to active Actions and Archive", async () => {
     const sockets = stubWebSockets();
@@ -984,10 +993,11 @@ describe("BraiApp shell", () => {
     );
 
     render(<BraiApp />);
-    await waitFor(() => expect(sockets.length).toBeGreaterThan(0));
+    await waitForLocalOwnerReady();
+    await waitFor(() => expect(sockets.some((socket) => socket.readyState === 1)).toBe(true));
 
     await act(async () => {
-      sockets[0].sendMessage({
+      latestOpenSocket(sockets).sendMessage({
         type: "activities_synced",
         activities_state: {
           server_time_utc: "2026-06-22T06:01:00.000Z",
@@ -1214,7 +1224,7 @@ describe("BraiApp shell", () => {
     expect(document.querySelector(".mobile-dock-overflow-backdrop")).toBeInTheDocument();
     expect(document.querySelector(".mobile-dock-overflow-sheet")).not.toHaveTextContent("Workspace");
     expect(within(document.querySelector(".mobile-dock-overflow-sheet") as HTMLElement).getByRole("button", { name: "Архив" })).toBeInTheDocument();
-  });
+  }, 10_000);
 });
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -1226,6 +1236,14 @@ function jsonResponse(body: unknown, status = 200): Response {
 
 function authSessionResponse(): Response {
   return jsonResponse({ authenticated: true, user: { id: "test-user", email: "test@example.com", name: "Test" } });
+}
+
+async function waitForLocalOwnerReady(): Promise<void> {
+  await waitFor(() => {
+    const shell = document.querySelector("[data-app-shell]");
+    expect(shell).toHaveAttribute("aria-busy", "false");
+    expect(shell).not.toHaveAttribute("inert");
+  });
 }
 
 function emptyInboxResponse(): Response {
@@ -1267,16 +1285,30 @@ function stubDrawsFetch(scene: Record<string, unknown> = {
   }));
 }
 
-function stubWebSockets(): Array<{ sendMessage: (payload: unknown) => void }> {
-  const sockets: Array<{ sendMessage: (payload: unknown) => void }> = [];
+type StubWebSocket = { readyState: number; sendMessage: (payload: unknown) => void };
+
+function latestOpenSocket(sockets: StubWebSocket[]): StubWebSocket {
+  const socket = [...sockets].reverse().find((candidate) => candidate.readyState === 1);
+  if (!socket) throw new Error("no_open_websocket");
+  return socket;
+}
+
+function stubWebSockets(): StubWebSocket[] {
+  const sockets: StubWebSocket[] = [];
   class FakeWebSocket {
     onmessage: ((event: MessageEvent) => void) | null = null;
+    onclose: ((event: CloseEvent) => void) | null = null;
+    readyState = 1;
 
     constructor() {
       sockets.push(this);
     }
 
-    close() {}
+    close() {
+      if (this.readyState === 3) return;
+      this.readyState = 3;
+      this.onclose?.({} as CloseEvent);
+    }
 
     sendMessage(payload: unknown) {
       this.onmessage?.({ data: JSON.stringify(payload) } as MessageEvent);

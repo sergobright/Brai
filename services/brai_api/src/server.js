@@ -31,7 +31,7 @@ import { scopedUserId, withUserScope } from './user-scope.js';
 const BASE_JSON_HEADERS = {
   'content-type': 'application/json; charset=utf-8',
   'access-control-allow-methods': 'GET,POST,OPTIONS',
-  'access-control-allow-headers': 'authorization,content-type,x-api-key,x-brai-api-key,x-brai-target,x-brai-destination,x-brai-cmd-device-id,x-brai-cmd-client-version,x-airwhisper-device-id,x-airwhisper-client-version',
+  'access-control-allow-headers': 'authorization,content-type,x-api-key,x-brai-api-key,x-brai-target,x-brai-destination,x-brai-cmd-device-id,x-brai-cmd-client-version,x-brai-expected-user-id,x-airwhisper-device-id,x-airwhisper-client-version',
   'access-control-allow-credentials': 'true'
 };
 const SESSION_COOKIE = 'brai_session';
@@ -918,6 +918,10 @@ export function createBraiServer({
         sendJson(req, res, 403, { error: 'forbidden_origin' });
         return;
       }
+      if (expectedUserScopeChanged(req.headers['x-brai-expected-user-id'], authContext.userId)) {
+        sendJson(req, res, 409, { error: 'user_scope_changed' });
+        return;
+      }
 
       if (isBraiCmdAdminRoute(url.pathname)) {
         await withUserScope(authContext.userId, () => handleBraiCmdAdminRoute({ req, res, url, store, sendJson }));
@@ -1333,6 +1337,22 @@ export function createBraiServer({
         socket.destroy();
         return;
       }
+      if (expectedUserScopeChanged(url.searchParams.getAll('expected_user_id'), authContext.userId)) {
+        recordRuntimeLog(store, logger, {
+          traceId,
+          source: 'auth',
+          operation: 'auth.websocket',
+          status: 'failed',
+          severityText: 'WARN',
+          userId: authContext.userId,
+          reason: 'user_scope_changed',
+          message: 'WebSocket upgrade rejected',
+          jsonData: { path: url.pathname }
+        });
+        socket.write('HTTP/1.1 409 Conflict\r\n\r\n');
+        socket.destroy();
+        return;
+      }
 
       wss.handleUpgrade(req, socket, head, (ws) => {
         ws.userId = authContext.userId;
@@ -1574,6 +1594,12 @@ async function authenticateRequest(req, token, parsedUrl, sessionSecret, now, au
   }
 
   return { authorized: false, sessionBased: false, userId: null, user: null };
+}
+
+function expectedUserScopeChanged(values, authenticatedUserId) {
+  return [values].flat().some((value) =>
+    typeof value === 'string' && value.trim() && value.trim() !== authenticatedUserId
+  );
 }
 
 async function betterAuthSession(req, auth) {

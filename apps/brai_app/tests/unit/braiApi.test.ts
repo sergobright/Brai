@@ -48,6 +48,54 @@ describe("BraiApi", () => {
     expect(response.target_apk?.file).toBe("brai-v2.apk");
   });
 
+  it("binds and clears the expected owner for v1 HTTP and live requests", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
+      new Response(JSON.stringify({}), { status: 200, headers: { "content-type": "application/json" } }));
+    const api = new BraiApi("https://api.example.test");
+
+    api.setExpectedUserId("user/1");
+    await api.state();
+
+    expect(new Headers(fetchMock.mock.calls[0][1]?.headers).get("x-brai-expected-user-id")).toBe("user/1");
+    expect(new URL(api.liveUrl()).searchParams.get("expected_user_id")).toBe("user/1");
+
+    api.setExpectedUserId(null);
+    await api.state();
+
+    expect(new Headers(fetchMock.mock.calls[1][1]?.headers).has("x-brai-expected-user-id")).toBe(false);
+    expect(new URL(api.liveUrl()).searchParams.has("expected_user_id")).toBe(false);
+  });
+
+  it("does not send an expected owner to auth requests", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ authenticated: true, user: null }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    const api = new BraiApi("https://api.example.test");
+    api.setExpectedUserId("user-1");
+
+    await api.session();
+
+    expect(new Headers(fetchMock.mock.calls[0][1]?.headers).has("x-brai-expected-user-id")).toBe(false);
+  });
+
+  it("surfaces an expected-owner rejection as a scope change", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ error: "user_scope_changed" }), {
+        status: 409,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+
+    await expect(new BraiApi("https://api.example.test").state()).rejects.toMatchObject({
+      name: "UserScopeChangedError",
+      message: "client_user_scope_changed",
+      status: 409,
+    });
+  });
+
   it("sends explicit preview email login to the test auth endpoint", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(JSON.stringify({ authenticated: false, user: null }), {

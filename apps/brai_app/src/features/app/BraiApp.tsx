@@ -48,6 +48,7 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
   const [onboardingStartupActive, setOnboardingStartupActive] = useState(true);
   const [onboardingVisible, setOnboardingVisible] = useState(() => shouldShowOnboarding(false));
   const startupReady = app.localSnapshotReady || app.displaySyncStatus === "auth_required" || app.displaySyncStatus === "offline" || app.displaySyncStatus === "sync_failed";
+  const domainMutationsBlocked = !app.localMutationReady && app.displaySyncStatus !== "auth_required";
   const onboardingAuthRequired = startupReady && app.displaySyncStatus === "auth_required";
   const onboardingActive = nativeAndroid && (onboardingVisible || onboardingAuthRequired);
   const dockOverflowOpen = mobileDockMenu != null;
@@ -305,6 +306,8 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
       ) : (
         <SidebarProvider
       open={false}
+      inert={domainMutationsBlocked}
+      aria-busy={domainMutationsBlocked}
       className={cx(
         "app-shell h-dvh min-h-0 overflow-hidden [--sticky-top-offset:0px] max-[860px]:grid max-[860px]:grid-rows-[minmax(0,1fr)_auto] max-[860px]:[--mobile-top-padding:env(safe-area-inset-top)]",
         app.actionOverlayOpen && "has-mobile-action-overlay max-[860px]:pb-0",

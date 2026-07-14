@@ -5,10 +5,10 @@ import type {
   ContextDecisionsState,
   ContextNotification,
 } from "@/shared/types/contextDecisions";
-import { clientDb, getMeta } from "./db";
+import { assertClientUserInCurrentTransaction, clientDb } from "./db";
 
 /** Persists the compact product review snapshot without touching domain outboxes. */
-export async function saveContextDecisionsState(state: ContextDecisionsState): Promise<boolean> {
+export async function saveContextDecisionsState(state: ContextDecisionsState, expectedUserId?: string): Promise<boolean> {
   const db = clientDb();
   const rows: ContextDecisionCacheRow[] = [
     ...state.decisions.map(decisionRow),
@@ -16,6 +16,7 @@ export async function saveContextDecisionsState(state: ContextDecisionsState): P
     ...state.notifications.map(notificationRow),
   ];
   return db.transaction("rw", db.context_decisions_cache, db.meta, async () => {
+    if (expectedUserId !== undefined) await assertClientUserInCurrentTransaction(expectedUserId);
     const currentRevision = Number((await db.meta.get("lastContextDecisionServerRevision"))?.value ?? 0);
     if (state.server_revision < currentRevision) return false;
     await db.context_decisions_cache.clear();
@@ -30,9 +31,10 @@ export async function saveContextDecisionsState(state: ContextDecisionsState): P
 }
 
 /** Loads pending decisions, audits, and one-time notifications from IndexedDB. */
-export async function loadContextDecisionsState(): Promise<ContextDecisionsState | null> {
+export async function loadContextDecisionsState(expectedUserId?: string): Promise<ContextDecisionsState | null> {
   const db = clientDb();
   const result = await db.transaction("r", db.context_decisions_cache, db.meta, async () => {
+    if (expectedUserId !== undefined) await assertClientUserInCurrentTransaction(expectedUserId);
     const [rows, revision, serverTime] = await Promise.all([
       db.context_decisions_cache.toArray(),
       db.meta.get("lastContextDecisionServerRevision"),
@@ -54,8 +56,12 @@ export async function loadContextDecisionsState(): Promise<ContextDecisionsState
   };
 }
 
-export async function lastContextDecisionServerRevision(): Promise<number> {
-  return (await getMeta<number>("lastContextDecisionServerRevision")) ?? 0;
+export async function lastContextDecisionServerRevision(expectedUserId?: string): Promise<number> {
+  const db = clientDb();
+  return db.transaction("r", db.meta, async () => {
+    if (expectedUserId !== undefined) await assertClientUserInCurrentTransaction(expectedUserId);
+    return Number((await db.meta.get("lastContextDecisionServerRevision"))?.value ?? 0);
+  });
 }
 
 function decisionRow(item: ContextDecision): ContextDecisionCacheRow {

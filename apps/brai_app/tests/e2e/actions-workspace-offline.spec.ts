@@ -4,6 +4,7 @@ test("keeps an API-offline Goal in the Actions workspace after desktop and mobil
   await mockAuthenticatedEmptyWorkspace(page);
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "Действия", exact: true })).toBeVisible();
+  await expect(page.getByText("Новых действий нет", { exact: true })).toBeVisible();
 
   await page.route("**/api/v1/**", (route) => route.abort("internetdisconnected"));
   await page.evaluate(() => {
@@ -20,6 +21,8 @@ test("keeps an API-offline Goal in the Actions workspace after desktop and mobil
   await navigation.getByRole("button", { name: "Создать", exact: true }).click();
   await expect(navigation.getByRole("button", { name: goalTitle, exact: true })).toBeVisible();
 
+  await page.unroute("**/api/auth/session");
+  await page.route("**/api/auth/session", (route) => route.abort("internetdisconnected"));
   await page.reload();
   await expect(page.getByRole("heading", { name: "Действия", exact: true })).toBeVisible();
   const restoredNavigation = await openWorkspaceNavigation(page, testInfo);

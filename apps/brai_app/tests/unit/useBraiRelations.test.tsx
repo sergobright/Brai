@@ -4,6 +4,7 @@ import { useBraiRelations } from "@/features/app/hooks/useBraiRelations";
 import type { BraiApi } from "@/shared/api/braiApi";
 import { clientDb } from "@/shared/storage/db";
 import { pendingRelationEvents } from "@/shared/storage/relationStore";
+import { pendingActivityEvents } from "@/shared/storage/activityStore";
 import { emptyActivitiesState } from "@/shared/types/activities";
 import type { PendingRelationEvent, RelationItem, RelationsState, RelationsSyncResponse } from "@/shared/types/relations";
 
@@ -103,6 +104,83 @@ describe("useBraiRelations", () => {
     await waitFor(() => expect(syncRelationEvents).toHaveBeenCalledTimes(2));
     expect(syncRelationEvents.mock.calls.map(([input]) => input.events.length)).toEqual([500, 1]);
     await waitFor(async () => expect(await pendingRelationEvents()).toEqual([]));
+  }, 15_000);
+
+  it("revalidates the session before capturing Relation events for sync", async () => {
+    await clientDb().relation_outbox_events.put(pendingRelationEvent(1));
+    const syncRelationEvents = vi.fn();
+    const beforeSync = vi.fn(async () => {
+      await clientDb().relation_outbox_events.clear();
+      return null;
+    });
+    const api = { syncRelationEvents } as unknown as BraiApi;
+    const { result } = renderHook(() => useBraiRelations({
+      api,
+      beforeSync,
+      flushActionPending: vi.fn(),
+      getActions: emptyActivitiesState,
+      setActions: vi.fn(),
+      setActionPendingCount: vi.fn(),
+      setSyncStatus: vi.fn(),
+    }));
+
+    await act(async () => result.current.flushRelationPending());
+
+    expect(beforeSync).toHaveBeenCalledOnce();
+    expect(syncRelationEvents).not.toHaveBeenCalled();
+    expect(await pendingRelationEvents()).toEqual([]);
+  });
+
+  it("checks the local mutation boundary before every durable Relation path", async () => {
+    const blocked = new Error("local_snapshot_not_ready");
+    const beforeLocalMutation = vi.fn(() => { throw blocked; });
+    const syncRelationEvents = vi.fn();
+    const flushActionPending = vi.fn(async () => undefined);
+    const api = { syncRelationEvents } as unknown as BraiApi;
+    const { result } = renderHook(() => useBraiRelations({
+      api,
+      beforeLocalMutation,
+      flushActionPending,
+      getActions: emptyActivitiesState,
+      setActions: vi.fn(),
+      setActionPendingCount: vi.fn(),
+      setSyncStatus: vi.fn(),
+    }));
+
+    const attempts: Array<() => Promise<void>> = [
+      () => result.current.onAddToGoals("action-1", ["goal-1"]),
+      () => result.current.onRemoveFromGoal(relation("relation-1")),
+      () => result.current.onReorderGoal("goal-1", ["relation-1"]),
+      () => result.current.onCreateActionInGoal("Новое действие", "", "goal-1"),
+    ];
+
+    for (const attempt of attempts) await expect(act(attempt)).rejects.toBe(blocked);
+
+    expect(beforeLocalMutation).toHaveBeenCalledTimes(attempts.length);
+    expect(flushActionPending).not.toHaveBeenCalled();
+    expect(syncRelationEvents).not.toHaveBeenCalled();
+    expect(await pendingActivityEvents()).toEqual([]);
+    expect(await pendingRelationEvents()).toEqual([]);
+  });
+
+  it("does not apply the local mutation boundary to Goal planning", async () => {
+    const beforeLocalMutation = vi.fn(() => { throw new Error("unexpected_guard"); });
+    const requestGoalPlan = vi.fn(async () => ({ status: "queued" as const, execution_id: 12, workflow_id: "goal-plan-12" }));
+    const api = { requestGoalPlan } as unknown as BraiApi;
+    const { result } = renderHook(() => useBraiRelations({
+      api,
+      beforeLocalMutation,
+      flushActionPending: vi.fn(),
+      getActions: emptyActivitiesState,
+      setActions: vi.fn(),
+      setActionPendingCount: vi.fn(),
+      setSyncStatus: vi.fn(),
+    }));
+
+    await act(async () => { await result.current.onPlanGoal({ id: "goal-1" }); });
+
+    expect(requestGoalPlan).toHaveBeenCalledWith("goal-1");
+    expect(beforeLocalMutation).not.toHaveBeenCalled();
   });
 });
 

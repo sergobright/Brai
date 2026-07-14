@@ -1,4 +1,10 @@
-import { clientDb, ensureClientMeta, getMeta, randomId, setMeta } from "./db";
+import {
+  assertClientUserInCurrentTransaction,
+  clientDb,
+  ensureClientMeta,
+  randomId,
+  setMeta,
+} from "./db";
 import { addDays, getDisplayTimeZone, localDateFromUtcMs, localDateStartUtcMs, localHourFromUtcMs } from "@/shared/time/format";
 import type {
   GoalData,
@@ -16,9 +22,13 @@ export async function enqueueTimerEvent(params: {
   type: TimerEventType;
   baseServerRevision: number;
   metadata?: Record<string, unknown>;
+  expectedUserId?: string;
 }): Promise<PendingTimerEvent> {
   const db = clientDb();
   return db.transaction("rw", db.meta, db.outbox_events, async () => {
+    if (params.expectedUserId !== undefined) {
+      await assertClientUserInCurrentTransaction(params.expectedUserId);
+    }
     const meta = await ensureClientMeta();
     const sequence = meta.nextClientSequence;
     const now = new Date().toISOString();
@@ -49,10 +59,12 @@ export async function enqueueFocusSessionEdit(params: {
   startedAtUtc: string;
   endedAtUtc: string;
   baseServerRevision: number;
+  expectedUserId?: string;
 }): Promise<PendingTimerEvent> {
   return enqueueTimerEvent({
     type: "edit_session",
     baseServerRevision: params.baseServerRevision,
+    expectedUserId: params.expectedUserId,
     metadata: {
       focus_session_id: params.sessionId,
       started_at_utc: params.startedAtUtc,
@@ -64,10 +76,12 @@ export async function enqueueFocusSessionEdit(params: {
 export async function enqueueFocusSessionDelete(params: {
   sessionId: string;
   baseServerRevision: number;
+  expectedUserId?: string;
 }): Promise<PendingTimerEvent> {
   return enqueueTimerEvent({
     type: "delete_session",
     baseServerRevision: params.baseServerRevision,
+    expectedUserId: params.expectedUserId,
     metadata: {
       focus_session_id: params.sessionId,
     },
@@ -77,10 +91,12 @@ export async function enqueueFocusSessionDelete(params: {
 export async function enqueueStartActionFocus(params: {
   activityId: string;
   baseServerRevision: number;
+  expectedUserId?: string;
 }): Promise<PendingTimerEvent> {
   return enqueueTimerEvent({
     type: "start_activity_focus",
     baseServerRevision: params.baseServerRevision,
+    expectedUserId: params.expectedUserId,
     metadata: { activity_id: params.activityId },
   });
 }
@@ -88,10 +104,12 @@ export async function enqueueStartActionFocus(params: {
 export async function enqueueSwitchActionFocus(params: {
   activityId: string;
   baseServerRevision: number;
+  expectedUserId?: string;
 }): Promise<PendingTimerEvent> {
   return enqueueTimerEvent({
     type: "switch_activity_focus",
     baseServerRevision: params.baseServerRevision,
+    expectedUserId: params.expectedUserId,
     metadata: { activity_id: params.activityId },
   });
 }
@@ -99,24 +117,29 @@ export async function enqueueSwitchActionFocus(params: {
 export async function enqueueStopActionFocus(params: {
   activityId?: string | null;
   baseServerRevision: number;
+  expectedUserId?: string;
 }): Promise<PendingTimerEvent> {
   return enqueueTimerEvent({
     type: "stop_activity_focus",
     baseServerRevision: params.baseServerRevision,
+    expectedUserId: params.expectedUserId,
     metadata: params.activityId ? { activity_id: params.activityId } : undefined,
   });
 }
 
+/** Adds a completed Focus interval edit to the timer outbox. */
 export async function enqueueFocusIntervalEdit(params: {
   intervalId: string;
   sessionId: string;
   startedAtUtc: string;
   endedAtUtc: string;
   baseServerRevision: number;
+  expectedUserId?: string;
 }): Promise<PendingTimerEvent> {
   return enqueueTimerEvent({
     type: "edit_focus_interval",
     baseServerRevision: params.baseServerRevision,
+    expectedUserId: params.expectedUserId,
     metadata: {
       focus_interval_id: params.intervalId,
       focus_session_id: params.sessionId,
@@ -126,16 +149,22 @@ export async function enqueueFocusIntervalEdit(params: {
   });
 }
 
-export async function pendingEvents(): Promise<PendingTimerEvent[]> {
-  return clientDb().outbox_events.orderBy("clientSequence").toArray();
+export async function pendingEvents(expectedUserId?: string): Promise<PendingTimerEvent[]> {
+  const db = clientDb();
+  return db.transaction("r", db.meta, db.outbox_events, async () => {
+    if (expectedUserId !== undefined) await assertClientUserInCurrentTransaction(expectedUserId);
+    return db.outbox_events.orderBy("clientSequence").toArray();
+  });
 }
 
-export async function markAttempt(events: PendingTimerEvent[]): Promise<void> {
+export async function markAttempt(events: PendingTimerEvent[], expectedUserId?: string): Promise<void> {
+  const db = clientDb();
   const now = new Date().toISOString();
-  await clientDb().transaction("rw", clientDb().outbox_events, async () => {
+  await db.transaction("rw", db.meta, db.outbox_events, async () => {
+    if (expectedUserId !== undefined) await assertClientUserInCurrentTransaction(expectedUserId);
     await Promise.all(
       events.map((event) =>
-        clientDb().outbox_events.update(event.eventId, {
+        db.outbox_events.update(event.eventId, {
           status: "syncing",
           attemptCount: event.attemptCount + 1,
           lastSyncAttemptAtUtc: now,
@@ -146,11 +175,17 @@ export async function markAttempt(events: PendingTimerEvent[]): Promise<void> {
   });
 }
 
-export async function markFailure(events: PendingTimerEvent[], message: string): Promise<void> {
-  await clientDb().transaction("rw", clientDb().outbox_events, async () => {
+export async function markFailure(
+  events: PendingTimerEvent[],
+  message: string,
+  expectedUserId?: string,
+): Promise<void> {
+  const db = clientDb();
+  await db.transaction("rw", db.meta, db.outbox_events, async () => {
+    if (expectedUserId !== undefined) await assertClientUserInCurrentTransaction(expectedUserId);
     await Promise.all(
       events.map((event) =>
-        clientDb().outbox_events.update(event.eventId, {
+        db.outbox_events.update(event.eventId, {
           status: "failed",
           lastError: message,
         }),
@@ -159,32 +194,50 @@ export async function markFailure(events: PendingTimerEvent[], message: string):
   });
 }
 
-export async function acknowledgeEvents(ids: string[]): Promise<void> {
-  await clientDb().outbox_events.bulkDelete(ids);
+export async function acknowledgeEvents(ids: string[], expectedUserId?: string): Promise<void> {
+  const db = clientDb();
+  await db.transaction("rw", db.meta, db.outbox_events, async () => {
+    if (expectedUserId !== undefined) await assertClientUserInCurrentTransaction(expectedUserId);
+    await db.outbox_events.bulkDelete(ids);
+  });
 }
 
 export async function saveIgnoredEvents(
   ignored: Array<{ event_id: string; reason: string }>,
+  expectedUserId?: string,
 ): Promise<void> {
   if (ignored.length === 0) return;
+  const db = clientDb();
   const now = new Date().toISOString();
-  await clientDb().ignored_events.bulkPut(
-    ignored.map((event) => ({
-      eventId: event.event_id,
-      reason: event.reason,
-      acknowledgedAtUtc: now,
-    })),
-  );
+  await db.transaction("rw", db.meta, db.ignored_events, async () => {
+    if (expectedUserId !== undefined) await assertClientUserInCurrentTransaction(expectedUserId);
+    await db.ignored_events.bulkPut(
+      ignored.map((event) => ({
+        eventId: event.event_id,
+        reason: event.reason,
+        acknowledgedAtUtc: now,
+      })),
+    );
+  });
 }
 
 /**
  * Stores the latest canonical timer snapshot and active interval details.
  */
-export async function saveCanonicalState(state: TimerState): Promise<boolean> {
-  const currentRevision = await lastServerRevision();
+export async function saveCanonicalState(state: TimerState, expectedUserId?: string): Promise<boolean> {
+  const db = clientDb();
+  return db.transaction("rw", db.meta, db.canonical_state, async () => {
+    if (expectedUserId !== undefined) await assertClientUserInCurrentTransaction(expectedUserId);
+    return saveCanonicalSnapshotInCurrentTransaction(state);
+  });
+}
+
+async function saveCanonicalSnapshotInCurrentTransaction(state: TimerState): Promise<boolean> {
+  const db = clientDb();
+  const currentRevision = Number((await db.meta.get("lastServerRevision"))?.value ?? 0);
   if (state.server_revision < currentRevision) return false;
 
-  await clientDb().canonical_state.put({
+  await db.canonical_state.put({
     key: "current",
     serverRevision: state.server_revision,
     serverTimeUtc: state.server_time_utc,
@@ -197,13 +250,50 @@ export async function saveCanonicalState(state: TimerState): Promise<boolean> {
     activeSessionStartedByActivityId: state.active_session_started_by_activity_id ?? state.active_session?.started_by_activity_id ?? null,
     updatedAtUtc: new Date().toISOString(),
   });
-  await setMeta("lastServerRevision", state.server_revision);
-  await setMeta("lastSuccessfulSyncAtUtc", new Date().toISOString());
+  await db.meta.bulkPut([
+    { key: "lastServerRevision", value: state.server_revision },
+    { key: "lastSuccessfulSyncAtUtc", value: new Date().toISOString() },
+  ]);
   return true;
 }
 
-export async function loadCanonicalState(): Promise<TimerState | null> {
-  const row = await clientDb().canonical_state.get("current");
+/** Atomically applies a timer sync response and its terminal outbox outcomes. */
+export async function acknowledgeTimerSyncEvents(params: {
+  acknowledgedEventIds: string[];
+  ignoredEvents: Array<{ event_id: string; reason: string }>;
+  state: TimerState;
+  expectedUserId?: string;
+}): Promise<boolean> {
+  const db = clientDb();
+  const ignored = new Map(params.ignoredEvents.map((event) => [event.event_id, event.reason]));
+  const acknowledged = [...new Set([...params.acknowledgedEventIds, ...ignored.keys()])];
+  return db.transaction(
+    "rw",
+    [db.meta, db.outbox_events, db.ignored_events, db.canonical_state],
+    async () => {
+      if (params.expectedUserId !== undefined) {
+        await assertClientUserInCurrentTransaction(params.expectedUserId);
+      }
+      if (ignored.size > 0) {
+        const acknowledgedAtUtc = new Date().toISOString();
+        await db.ignored_events.bulkPut(
+          [...ignored].map(([eventId, reason]) => ({ eventId, reason, acknowledgedAtUtc })),
+        );
+      }
+      const accepted = await saveCanonicalSnapshotInCurrentTransaction(params.state);
+      await db.outbox_events.bulkDelete(acknowledged);
+      return accepted;
+    },
+  );
+}
+
+/** Loads the canonical timer snapshot for the optional expected owner. */
+export async function loadCanonicalState(expectedUserId?: string): Promise<TimerState | null> {
+  const db = clientDb();
+  const row = await db.transaction("r", db.meta, db.canonical_state, async () => {
+    if (expectedUserId !== undefined) await assertClientUserInCurrentTransaction(expectedUserId);
+    return db.canonical_state.get("current");
+  });
   if (!row) return null;
   return {
     server_time_utc: row.serverTimeUtc,
@@ -219,22 +309,45 @@ export async function loadCanonicalState(): Promise<TimerState | null> {
   };
 }
 
-export async function saveHistoryCache(history: HistoryData): Promise<void> {
-  await clientDb().sessions_cache.clear();
-  if (history.sessions.length > 0) {
-    await clientDb().sessions_cache.bulkPut(history.sessions);
-  }
+export async function saveHistoryCache(history: HistoryData, expectedUserId?: string): Promise<void> {
+  const db = clientDb();
+  await db.transaction("rw", db.meta, db.sessions_cache, async () => {
+    if (expectedUserId !== undefined) await assertClientUserInCurrentTransaction(expectedUserId);
+    await saveHistorySnapshotInCurrentTransaction(history);
+  });
 }
 
-export async function loadHistoryCache(): Promise<HistoryData> {
-  const sessions = await clientDb().sessions_cache.orderBy("started_at_utc").reverse().toArray();
+async function saveHistorySnapshotInCurrentTransaction(history: HistoryData): Promise<void> {
+  const db = clientDb();
+  await db.sessions_cache.clear();
+  if (history.sessions.length > 0) await db.sessions_cache.bulkPut(history.sessions);
+}
+
+export async function loadHistoryCache(expectedUserId?: string): Promise<HistoryData> {
+  const db = clientDb();
+  const sessions = await db.transaction("r", db.meta, db.sessions_cache, async () => {
+    if (expectedUserId !== undefined) await assertClientUserInCurrentTransaction(expectedUserId);
+    return db.sessions_cache.orderBy("started_at_utc").reverse().toArray();
+  });
   return {
     sessions,
     groups: groupSessionsByDate(sessions),
   };
 }
 
-export async function saveGoalCache(goal: GoalData, serverRevision = 0): Promise<void> {
+export async function saveGoalCache(
+  goal: GoalData,
+  serverRevision = 0,
+  expectedUserId?: string,
+): Promise<void> {
+  const db = clientDb();
+  await db.transaction("rw", db.meta, db.goal_cache, async () => {
+    if (expectedUserId !== undefined) await assertClientUserInCurrentTransaction(expectedUserId);
+    await saveGoalSnapshotInCurrentTransaction(goal, serverRevision);
+  });
+}
+
+async function saveGoalSnapshotInCurrentTransaction(goal: GoalData, serverRevision: number): Promise<void> {
   await clientDb().goal_cache.put({
     key: "challenge",
     payloadJson: goal,
@@ -243,12 +356,41 @@ export async function saveGoalCache(goal: GoalData, serverRevision = 0): Promise
   });
 }
 
-export async function loadGoalCache(): Promise<GoalData | null> {
-  return (await clientDb().goal_cache.get("challenge"))?.payloadJson ?? null;
+/** Stores matching History and Focus Goal responses in one owner-checked transaction. */
+export async function saveHistoryAndGoalCache(params: {
+  history: HistoryData;
+  goal: GoalData;
+  serverRevision?: number;
+  expectedUserId?: string;
+}): Promise<boolean> {
+  const db = clientDb();
+  const serverRevision = params.serverRevision ?? 0;
+  return db.transaction("rw", [db.meta, db.sessions_cache, db.goal_cache], async () => {
+    if (params.expectedUserId !== undefined) {
+      await assertClientUserInCurrentTransaction(params.expectedUserId);
+    }
+    const currentRevision = (await db.goal_cache.get("challenge"))?.serverRevision ?? 0;
+    if (serverRevision < currentRevision) return false;
+    await saveHistorySnapshotInCurrentTransaction(params.history);
+    await saveGoalSnapshotInCurrentTransaction(params.goal, serverRevision);
+    return true;
+  });
 }
 
-export async function lastServerRevision(): Promise<number> {
-  return (await getMeta<number>("lastServerRevision")) ?? 0;
+export async function loadGoalCache(expectedUserId?: string): Promise<GoalData | null> {
+  const db = clientDb();
+  return db.transaction("r", db.meta, db.goal_cache, async () => {
+    if (expectedUserId !== undefined) await assertClientUserInCurrentTransaction(expectedUserId);
+    return (await db.goal_cache.get("challenge"))?.payloadJson ?? null;
+  });
+}
+
+export async function lastServerRevision(expectedUserId?: string): Promise<number> {
+  const db = clientDb();
+  return db.transaction("r", db.meta, async () => {
+    if (expectedUserId !== undefined) await assertClientUserInCurrentTransaction(expectedUserId);
+    return Number((await db.meta.get("lastServerRevision"))?.value ?? 0);
+  });
 }
 
 function groupSessionsByDate(sessions: HistoryData["sessions"]): HistoryData["groups"] {

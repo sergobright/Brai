@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { loadContextDecisionsState, saveContextDecisionsState } from "@/shared/storage/contextDecisionStore";
-import { clientDb } from "@/shared/storage/db";
+import { ClientUserScopeChangedError, clientDb, setMeta } from "@/shared/storage/db";
 import type { ContextDecisionsState } from "@/shared/types/contextDecisions";
 
 describe("context decision store", () => {
@@ -33,6 +33,23 @@ describe("context decision store", () => {
 
     expect((await loadContextDecisionsState())?.server_revision).toBe(3);
     expect((await loadContextDecisionsState())?.decisions).toMatchObject([{ id: "decision-1" }]);
+  });
+
+  it("keeps the new owner's context snapshot untouched by a stale tab", async () => {
+    await setMeta("currentUserId", "user-a");
+    await setMeta("currentUserId", "user-b");
+    await saveContextDecisionsState(state(3), "user-b");
+    const beforeCache = await clientDb().context_decisions_cache.toArray();
+
+    await expect(saveContextDecisionsState({ ...state(4), decisions: [] }, "user-a"))
+      .rejects.toBeInstanceOf(ClientUserScopeChangedError);
+    await expect(loadContextDecisionsState("user-a")).rejects.toBeInstanceOf(ClientUserScopeChangedError);
+
+    expect(await clientDb().context_decisions_cache.toArray()).toEqual(beforeCache);
+    expect(await loadContextDecisionsState("user-b")).toMatchObject({
+      server_revision: 3,
+      decisions: [{ id: "decision-1" }],
+    });
   });
 });
 

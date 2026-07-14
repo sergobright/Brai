@@ -2,7 +2,8 @@ import type { Dispatch, SetStateAction } from "react";
 import { cleanTitle, normalizeDescription } from "@/shared/activities/text";
 import { clearActivityEditDraft, enqueueActivityEvent, pendingActivityEvents, projectActivitiesState } from "@/shared/storage/activityStore";
 import { enqueueActivityDeleteWithRelationEnds } from "@/shared/storage/activityRelationStore";
-import type { ActivityItem, ActivitiesState, ActivityStatus } from "@/shared/types/activities";
+import { ClientUserScopeChangedError } from "@/shared/storage/db";
+import type { ActivityItem, ActivitiesState, ActivityStatus, PendingActivityEvent } from "@/shared/types/activities";
 import type { SyncStatus } from "@/shared/types/timer";
 import { ACTION_DELETE_COLLAPSE_MS } from "../sections/actions/constants";
 
@@ -20,6 +21,7 @@ export function createBraiActionCommands({
   getRelationServerRevision,
   onRelationLifecycleQueued,
   beforeGoalStatusChange,
+  beforeLocalMutation,
 }: {
   actions: ActivitiesState;
   flushActionPending: () => Promise<void>;
@@ -29,16 +31,24 @@ export function createBraiActionCommands({
   setActions: Dispatch<SetStateAction<ActivitiesState>>;
   setSyncStatus: Dispatch<SetStateAction<SyncStatus>>;
   getRelationServerRevision?: () => number;
-  onRelationLifecycleQueued?: () => Promise<void>;
-  beforeGoalStatusChange?: (goal: ActivityItem, status: ActivityStatus) => Promise<void>;
+  onRelationLifecycleQueued?: (expectedOwnerId?: string) => Promise<void>;
+  beforeGoalStatusChange?: (goal: ActivityItem, status: ActivityStatus, expectedOwnerId?: string) => Promise<void>;
+  beforeLocalMutation?: (expectedOwnerId?: string) => string;
 }) {
   function currentActions(): ActivitiesState {
     return getActions?.() ?? actions;
   }
 
-  async function queueActionEvent(event: Parameters<typeof enqueueActivityEvent>[0]) {
-    await enqueueActivityEvent(event);
-    const queued = await pendingActivityEvents();
+  async function queueActionEvent(event: Parameters<typeof enqueueActivityEvent>[0], expectedOwnerId?: string) {
+    const ownerId = beforeLocalMutation?.(expectedOwnerId);
+    let queued: PendingActivityEvent[];
+    try {
+      await enqueueActivityEvent({ ...event, expectedUserId: ownerId });
+      queued = await pendingActivityEvents(ownerId);
+    } catch (error) {
+      if (error instanceof ClientUserScopeChangedError) return;
+      throw error;
+    }
     const projected = projectActivitiesState(currentActions(), queued);
     setActions(projected);
     setActionPendingCount(queued.length);
@@ -86,31 +96,37 @@ export function createBraiActionCommands({
     const current = currentActions();
     const currentAction = findActivity(current, action.id) ?? action;
     const nextDescription = normalizeDescription(descriptionMd);
-    let changed = false;
+    const titleChanged = Boolean(trimmed && trimmed !== currentAction.title);
+    const descriptionChanged = nextDescription !== normalizeDescription(currentAction.description_md);
 
-    if (trimmed && trimmed !== currentAction.title) {
+    if (!titleChanged && !descriptionChanged) {
+      clearActivityEditDraft(action.id);
+      return;
+    }
+    const ownerId = beforeLocalMutation?.();
+    if (titleChanged) {
+      beforeLocalMutation?.(ownerId);
       await enqueueActivityEvent({
         type: "update_title",
         actionId: action.id,
         payload: { title: trimmed },
         baseServerRevision: current.server_revision,
+        expectedUserId: ownerId,
       });
-      changed = true;
     }
-    if (nextDescription !== normalizeDescription(currentAction.description_md)) {
+    if (descriptionChanged) {
+      beforeLocalMutation?.(ownerId);
       await enqueueActivityEvent({
         type: "update_description",
         actionId: action.id,
         payload: { description_md: nextDescription },
         baseServerRevision: current.server_revision,
+        expectedUserId: ownerId,
       });
-      changed = true;
     }
 
     clearActivityEditDraft(action.id);
-    if (!changed) return;
-
-    const queued = await pendingActivityEvents();
+    const queued = await pendingActivityEvents(ownerId);
     const projected = projectActivitiesState(currentActions(), queued);
     setActions(projected);
     setActionPendingCount(queued.length);
@@ -119,7 +135,7 @@ export function createBraiActionCommands({
     void flushActionPending().catch(() => undefined);
   }
 
-  async function onSetActionStatus(action: ActivityItem, status: ActivityStatus) {
+  async function onSetActionStatus(action: ActivityItem, status: ActivityStatus, expectedOwnerId?: string) {
     const current = currentActions();
     const currentAction = findActivity(current, action.id) ?? action;
     if (currentAction.status === status) return;
@@ -128,33 +144,39 @@ export function createBraiActionCommands({
       actionId: action.id,
       payload: { status },
       baseServerRevision: current.server_revision,
-    });
+    }, expectedOwnerId);
   }
 
   async function onDeleteAction(action: ActivityItem) {
     const current = currentActions();
+    const ownerId = beforeLocalMutation?.();
     await enqueueActivityDeleteWithRelationEnds({
       activityId: action.id,
       activityBaseServerRevision: current.server_revision,
       relationBaseServerRevision: getRelationServerRevision?.() ?? 0,
+      expectedUserId: ownerId,
     });
-    await onRelationLifecycleQueued?.();
-    await delayActionProjection();
+    await onRelationLifecycleQueued?.(ownerId);
+    beforeLocalMutation?.(ownerId);
+    await delayActionProjection(ownerId);
   }
 
   async function onRestoreAction(action: ActivityItem) {
     const current = currentActions();
+    const ownerId = beforeLocalMutation?.();
     await enqueueActivityEvent({
       type: "restore",
       actionId: action.id,
       payload: {},
       baseServerRevision: current.server_revision,
+      expectedUserId: ownerId,
     });
-    await delayActionProjection();
+    await delayActionProjection(ownerId);
   }
 
-  async function delayActionProjection() {
-    const queued = await pendingActivityEvents();
+  async function delayActionProjection(ownerId?: string) {
+    beforeLocalMutation?.(ownerId);
+    const queued = await pendingActivityEvents(ownerId);
     const projectedNow = projectActivitiesState(currentActions(), queued);
     setActionPendingCount(queued.length);
     setSyncStatus("pending_sync");
@@ -183,8 +205,9 @@ export function createBraiActionCommands({
   }
 
   async function onSetGoalStatus(goal: ActivityItem, status: ActivityStatus) {
-    await beforeGoalStatusChange?.(goal, status);
-    await onSetActionStatus(goal, status);
+    const ownerId = beforeLocalMutation?.();
+    await beforeGoalStatusChange?.(goal, status, ownerId);
+    await onSetActionStatus(goal, status, ownerId);
   }
 
   return {

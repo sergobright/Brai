@@ -1,7 +1,7 @@
 import { cleanTitle, normalizeDescription } from "@/shared/activities/text";
 import type { InboxEventPayload, InboxEventType, InboxItem, InboxState, PendingInboxEvent } from "@/shared/types/inbox";
 import { emptyInboxState } from "@/shared/types/inbox";
-import { clientDb, ensureClientMeta, getMeta, randomId, setMeta } from "./db";
+import { assertClientUserInCurrentTransaction, clientDb, ensureClientMeta, randomId, setMeta } from "./db";
 
 export { cleanTitle, markdownPreviewSource, normalizeDescription, visibleDescriptionPreview } from "@/shared/activities/text";
 
@@ -13,9 +13,11 @@ export async function enqueueInboxEvent(params: {
   inboxId?: string;
   payload: InboxEventPayload;
   baseServerRevision: number;
+  expectedUserId?: string;
 }): Promise<PendingInboxEvent> {
   const db = clientDb();
   return db.transaction("rw", db.meta, db.inbox_outbox_events, async () => {
+    if (params.expectedUserId !== undefined) await assertClientUserInCurrentTransaction(params.expectedUserId);
     const meta = await ensureClientMeta();
     const sequence = meta.nextClientSequence;
     const now = new Date().toISOString();
@@ -51,16 +53,22 @@ export async function enqueueInboxEvent(params: {
   });
 }
 
-export async function pendingInboxEvents(): Promise<PendingInboxEvent[]> {
-  return clientDb().inbox_outbox_events.orderBy("clientSequence").toArray();
+export async function pendingInboxEvents(expectedUserId?: string): Promise<PendingInboxEvent[]> {
+  const db = clientDb();
+  return db.transaction("r", db.meta, db.inbox_outbox_events, async () => {
+    if (expectedUserId !== undefined) await assertClientUserInCurrentTransaction(expectedUserId);
+    return db.inbox_outbox_events.orderBy("clientSequence").toArray();
+  });
 }
 
-export async function markInboxAttempt(events: PendingInboxEvent[]): Promise<void> {
+export async function markInboxAttempt(events: PendingInboxEvent[], expectedUserId?: string): Promise<void> {
   const now = new Date().toISOString();
-  await clientDb().transaction("rw", clientDb().inbox_outbox_events, async () => {
+  const db = clientDb();
+  await db.transaction("rw", db.meta, db.inbox_outbox_events, async () => {
+    if (expectedUserId !== undefined) await assertClientUserInCurrentTransaction(expectedUserId);
     await Promise.all(
       events.map((event) =>
-        clientDb().inbox_outbox_events.update(event.eventId, {
+        db.inbox_outbox_events.update(event.eventId, {
           status: "syncing",
           attemptCount: event.attemptCount + 1,
           lastSyncAttemptAtUtc: now,
@@ -71,11 +79,13 @@ export async function markInboxAttempt(events: PendingInboxEvent[]): Promise<voi
   });
 }
 
-export async function markInboxFailure(events: PendingInboxEvent[], message: string): Promise<void> {
-  await clientDb().transaction("rw", clientDb().inbox_outbox_events, async () => {
+export async function markInboxFailure(events: PendingInboxEvent[], message: string, expectedUserId?: string): Promise<void> {
+  const db = clientDb();
+  await db.transaction("rw", db.meta, db.inbox_outbox_events, async () => {
+    if (expectedUserId !== undefined) await assertClientUserInCurrentTransaction(expectedUserId);
     await Promise.all(
       events.map((event) =>
-        clientDb().inbox_outbox_events.update(event.eventId, {
+        db.inbox_outbox_events.update(event.eventId, {
           status: "failed",
           lastError: message,
         }),
@@ -84,8 +94,12 @@ export async function markInboxFailure(events: PendingInboxEvent[], message: str
   });
 }
 
-export async function acknowledgeInboxEvents(ids: string[]): Promise<void> {
-  await clientDb().inbox_outbox_events.bulkDelete(ids);
+export async function acknowledgeInboxEvents(ids: string[], expectedUserId?: string): Promise<void> {
+  const db = clientDb();
+  await db.transaction("rw", db.meta, db.inbox_outbox_events, async () => {
+    if (expectedUserId !== undefined) await assertClientUserInCurrentTransaction(expectedUserId);
+    await db.inbox_outbox_events.bulkDelete(ids);
+  });
 }
 
 /** Atomically accepts an Inbox sync snapshot, ignored rows, and outbox acknowledgements. */
@@ -93,6 +107,7 @@ export async function acknowledgeInboxSyncEvents(params: {
   acknowledgedEventIds: string[];
   ignoredEvents: Array<{ event_id: string; reason: string }>;
   state: InboxState;
+  expectedUserId?: string;
 }): Promise<boolean> {
   const acknowledged = [...new Set([
     ...params.acknowledgedEventIds,
@@ -100,6 +115,7 @@ export async function acknowledgeInboxSyncEvents(params: {
   ])];
   const db = clientDb();
   return db.transaction("rw", db.inbox_cache, db.inbox_outbox_events, db.ignored_events, db.meta, async () => {
+    if (params.expectedUserId !== undefined) await assertClientUserInCurrentTransaction(params.expectedUserId);
     if (params.ignoredEvents.length > 0) {
       const acknowledgedAtUtc = new Date().toISOString();
       await db.ignored_events.bulkPut(params.ignoredEvents.map((event) => ({
@@ -108,20 +124,21 @@ export async function acknowledgeInboxSyncEvents(params: {
         acknowledgedAtUtc,
       })));
     }
-    const accepted = await saveInboxSnapshotInCurrentTransaction(params.state);
+    const accepted = await saveInboxSnapshotInCurrentTransaction(params.state, params.expectedUserId);
     await db.inbox_outbox_events.bulkDelete(acknowledged);
     return accepted;
   });
 }
 
-export async function saveInboxState(state: InboxState): Promise<boolean> {
+export async function saveInboxState(state: InboxState, expectedUserId?: string): Promise<boolean> {
   const db = clientDb();
-  return db.transaction("rw", db.inbox_cache, db.meta, () => saveInboxSnapshotInCurrentTransaction(state));
+  return db.transaction("rw", db.inbox_cache, db.meta, () => saveInboxSnapshotInCurrentTransaction(state, expectedUserId));
 }
 
 /** Writes an Inbox snapshot inside the caller's Dexie transaction. */
-export async function saveInboxSnapshotInCurrentTransaction(state: InboxState): Promise<boolean> {
+export async function saveInboxSnapshotInCurrentTransaction(state: InboxState, expectedUserId?: string): Promise<boolean> {
   const db = clientDb();
+  if (expectedUserId !== undefined) await assertClientUserInCurrentTransaction(expectedUserId);
   const currentRevision = Number((await db.meta.get("lastInboxServerRevision"))?.value ?? 0);
   if (state.server_revision < currentRevision || (currentRevision > 0 && state.server_revision === currentRevision)) return false;
 
@@ -139,9 +156,10 @@ export async function saveInboxSnapshotInCurrentTransaction(state: InboxState): 
 /**
  * Loads the inbox snapshot and revision from IndexedDB.
  */
-export async function loadInboxState(): Promise<InboxState | null> {
+export async function loadInboxState(expectedUserId?: string): Promise<InboxState | null> {
   const db = clientDb();
   const { items, revision, serverTimeUtc } = await db.transaction("r", db.inbox_cache, db.meta, async () => {
+    if (expectedUserId !== undefined) await assertClientUserInCurrentTransaction(expectedUserId);
     const [cachedItems, revisionRow, serverTimeRow] = await Promise.all([
       db.inbox_cache.toArray(),
       db.meta.get("lastInboxServerRevision"),
@@ -161,8 +179,12 @@ export async function loadInboxState(): Promise<InboxState | null> {
   };
 }
 
-export async function lastInboxServerRevision(): Promise<number> {
-  return (await getMeta<number>("lastInboxServerRevision")) ?? 0;
+export async function lastInboxServerRevision(expectedUserId?: string): Promise<number> {
+  const db = clientDb();
+  return db.transaction("r", db.meta, async () => {
+    if (expectedUserId !== undefined) await assertClientUserInCurrentTransaction(expectedUserId);
+    return Number((await db.meta.get("lastInboxServerRevision"))?.value ?? 0);
+  });
 }
 
 /**

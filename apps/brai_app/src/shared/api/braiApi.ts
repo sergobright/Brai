@@ -146,6 +146,15 @@ export type BraiApiError = Error & {
   status?: number;
 };
 
+export class UserScopeChangedError extends Error {
+  status = 409;
+
+  constructor() {
+    super("client_user_scope_changed");
+    this.name = "UserScopeChangedError";
+  }
+}
+
 function authPayload<T extends Record<string, unknown>>(base: T, context?: AuthOnboardingContext): T & Partial<AuthOnboardingContext> {
   const preliminaryUserId = context?.preliminaryUserId || context?.duplicatePreliminaryUserId;
   return {
@@ -161,7 +170,11 @@ function authPayload<T extends Record<string, unknown>>(base: T, context?: AuthO
  * Wraps the Brai HTTP API with typed client methods.
  */
 export class BraiApi {
+  private expectedUserId: string | null = null;
+
   constructor(private readonly baseUrl: string) {}
+
+  setExpectedUserId(userId: string | null): void { this.expectedUserId = userId; }
 
   async session(): Promise<AuthSession> { return this.request("/auth/session"); }
 
@@ -377,12 +390,14 @@ export class BraiApi {
   liveUrl(): string {
     const target = new URL(resolvePath(this.baseUrl, "/v1/live"), window.location.href);
     target.protocol = target.protocol === "https:" ? "wss:" : "ws:";
+    if (this.expectedUserId !== null) target.searchParams.set("expected_user_id", this.expectedUserId);
     return target.toString();
   }
 
   private async request<T>(path: string, options: RequestOptions = {}): Promise<T> {
     const headers = new Headers(options.headers);
     if (options.json !== undefined) headers.set("content-type", "application/json");
+    if (this.expectedUserId !== null && path.startsWith("/v1/")) headers.set("x-brai-expected-user-id", this.expectedUserId);
     const controller = new AbortController();
     const abortRequest = () => controller.abort();
     if (options.signal?.aborted) abortRequest();
@@ -404,6 +419,10 @@ export class BraiApi {
     }
 
     if (!response.ok) {
+      if (response.status === 409) {
+        const payload = await response.clone().json().catch(() => null) as { error?: unknown } | null;
+        if (payload?.error === "user_scope_changed") throw new UserScopeChangedError();
+      }
       const error = new Error(`brai_api_${response.status}`) as BraiApiError;
       error.name = response.status === 401 ? "UnauthorizedError" : "BraiApiError";
       error.status = response.status;

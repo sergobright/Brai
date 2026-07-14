@@ -10,7 +10,7 @@ import type {
   RelationTypeItem,
 } from "@/shared/types/relations";
 import { emptyRelationsState } from "@/shared/types/relations";
-import { clientDb, ensureClientMeta, getMeta, randomId, setMeta } from "./db";
+import { assertClientUserInCurrentTransaction, clientDb, ensureClientMeta, getMeta, randomId, setMeta } from "./db";
 import {
   normalizeRelationItem,
   resolveRelationId,
@@ -25,9 +25,11 @@ export async function enqueueRelationEvent(params: {
   relationId?: string;
   payload: RelationEventPayload;
   baseServerRevision: number;
+  expectedUserId?: string;
 }): Promise<PendingRelationEvent> {
   const db = clientDb();
   return db.transaction("rw", db.meta, db.relation_outbox_events, async () => {
+    if (params.expectedUserId !== undefined) await assertClientUserInCurrentTransaction(params.expectedUserId);
     const aliases = (await getMeta<RelationIdAliases>("relationIdAliases")) ?? {};
     const relationId = resolveRelationId(params.relationId, aliases);
     const payload = resolveRelationPayload(params.payload, aliases);
@@ -66,6 +68,7 @@ export async function enqueueActionWithGoalRelation(params: {
   position?: number;
   activityBaseServerRevision: number;
   relationBaseServerRevision: number;
+  expectedUserId?: string;
 }): Promise<{ activityEvent: PendingActivityEvent; relationEvent: PendingRelationEvent }> {
   const title = cleanTitle(params.title);
   const goalItemsId = params.goalItemsId.trim();
@@ -73,6 +76,7 @@ export async function enqueueActionWithGoalRelation(params: {
   if (!goalItemsId) throw new Error("goal_items_id_required");
   const db = clientDb();
   return db.transaction("rw", db.meta, db.action_outbox_events, db.relation_outbox_events, async () => {
+    if (params.expectedUserId !== undefined) await assertClientUserInCurrentTransaction(params.expectedUserId);
     const meta = await ensureClientMeta();
     const now = new Date().toISOString();
     const activitySequence = meta.nextClientSequence;
@@ -120,15 +124,20 @@ export async function enqueueActionWithGoalRelation(params: {
   });
 }
 
-export async function pendingRelationEvents(): Promise<PendingRelationEvent[]> {
-  return (await clientDb().relation_outbox_events.orderBy("clientSequence").toArray())
-    .filter((event) => event.status !== "blocked");
+export async function pendingRelationEvents(expectedUserId?: string): Promise<PendingRelationEvent[]> {
+  const db = clientDb();
+  return db.transaction("r", db.meta, db.relation_outbox_events, async () => {
+    if (expectedUserId !== undefined) await assertClientUserInCurrentTransaction(expectedUserId);
+    return (await db.relation_outbox_events.orderBy("clientSequence").toArray())
+      .filter((event) => event.status !== "blocked");
+  });
 }
 
 /** Marks causal intents whose Activity dependency was terminally ignored. */
-export async function reconcileRelationDependencies(): Promise<void> {
+export async function reconcileRelationDependencies(expectedUserId?: string): Promise<void> {
   const db = clientDb();
-  await db.transaction("rw", db.relation_outbox_events, db.ignored_events, async () => {
+  await db.transaction("rw", db.meta, db.relation_outbox_events, db.ignored_events, async () => {
+    if (expectedUserId !== undefined) await assertClientUserInCurrentTransaction(expectedUserId);
     const relations = await db.relation_outbox_events.toArray();
     const dependencyIds = [...new Set(relations.flatMap((event) => event.payload.dependency_event_ids ?? []))];
     if (dependencyIds.length === 0) return;
@@ -147,18 +156,22 @@ export async function reconcileRelationDependencies(): Promise<void> {
 }
 
 /** Returns only Relation events whose local Activity dependencies have left the Activity outbox. */
-export async function readyRelationEvents(): Promise<PendingRelationEvent[]> {
+export async function readyRelationEvents(expectedUserId?: string): Promise<PendingRelationEvent[]> {
   const db = clientDb();
   const [relations, pendingActivities, canonicalActivities] = await db.transaction(
     "r",
+    db.meta,
     db.relation_outbox_events,
     db.action_outbox_events,
     db.actions_cache,
-    () => Promise.all([
-      db.relation_outbox_events.orderBy("clientSequence").toArray(),
-      db.action_outbox_events.toArray(),
-      db.actions_cache.toArray(),
-    ]),
+    async () => {
+      if (expectedUserId !== undefined) await assertClientUserInCurrentTransaction(expectedUserId);
+      return Promise.all([
+        db.relation_outbox_events.orderBy("clientSequence").toArray(),
+        db.action_outbox_events.toArray(),
+        db.actions_cache.toArray(),
+      ]);
+    },
   );
   const pendingActivityIds = new Set(pendingActivities.map((event) => event.eventId));
   const canonicalById = new Map(canonicalActivities.map((activity) => [activity.id, activity]));
@@ -177,49 +190,62 @@ export async function readyRelationEvents(): Promise<PendingRelationEvent[]> {
   });
 }
 
-export async function markRelationAttempt(events: PendingRelationEvent[]): Promise<void> {
+export async function markRelationAttempt(events: PendingRelationEvent[], expectedUserId?: string): Promise<void> {
   const now = new Date().toISOString();
   await updateRelationEvents(events, (event) => ({
     status: "syncing",
     attemptCount: event.attemptCount + 1,
     lastSyncAttemptAtUtc: now,
     lastError: null,
-  }));
+  }), expectedUserId);
 }
 
-export async function markRelationFailure(events: PendingRelationEvent[], message: string): Promise<void> {
-  await updateRelationEvents(events, () => ({ status: "failed", lastError: boundedReason(message) }));
+export async function markRelationFailure(
+  events: PendingRelationEvent[],
+  message: string,
+  expectedUserId?: string,
+): Promise<void> {
+  await updateRelationEvents(events, () => ({ status: "failed", lastError: boundedReason(message) }), expectedUserId);
 }
 
 /** Retains bounded ignored-event context, including the original local intent. */
 export async function saveRelationSyncIssues(
   issues: Array<{ event_id: string; reason: string; relation_id?: string; change_type?: RelationEventType; payload?: RelationEventPayload }>,
+  expectedUserId?: string,
   nowIso = new Date().toISOString(),
 ): Promise<void> {
   if (issues.length === 0) return;
-  const previous = (await getMeta<RelationSyncIssue[]>("relationSyncIssues")) ?? [];
-  const byId = new Map(previous.map((issue) => [issue.event_id, issue]));
-  for (const issue of issues) {
-    byId.set(issue.event_id, {
-      event_id: issue.event_id,
-      reason: boundedReason(issue.reason),
-      occurred_at_utc: nowIso,
-      ...(issue.relation_id ? { relation_id: issue.relation_id } : {}),
-      ...(issue.change_type ? { change_type: issue.change_type } : {}),
-      ...(issue.payload ? { payload: normalizedRelationPayload(issue.payload) } : {}),
-    });
-  }
-  await setMeta("relationSyncIssues", [...byId.values()]
-    .sort((left, right) => right.occurred_at_utc.localeCompare(left.occurred_at_utc))
-    .slice(0, 20));
+  const db = clientDb();
+  await db.transaction("rw", db.meta, async () => {
+    if (expectedUserId !== undefined) await assertClientUserInCurrentTransaction(expectedUserId);
+    const previous = (await getMeta<RelationSyncIssue[]>("relationSyncIssues")) ?? [];
+    const byId = new Map(previous.map((issue) => [issue.event_id, issue]));
+    for (const issue of issues) {
+      byId.set(issue.event_id, {
+        event_id: issue.event_id,
+        reason: boundedReason(issue.reason),
+        occurred_at_utc: nowIso,
+        ...(issue.relation_id ? { relation_id: issue.relation_id } : {}),
+        ...(issue.change_type ? { change_type: issue.change_type } : {}),
+        ...(issue.payload ? { payload: normalizedRelationPayload(issue.payload) } : {}),
+      });
+    }
+    await setMeta("relationSyncIssues", [...byId.values()]
+      .sort((left, right) => right.occurred_at_utc.localeCompare(left.occurred_at_utc))
+      .slice(0, 20));
+  });
 }
 
 /** Returns recent terminal/retryable Relation sync issues for product feedback. */
-export async function loadRelationSyncIssues(): Promise<RelationSyncIssue[]> {
-  const [persisted, outbox] = await Promise.all([
-    getMeta<RelationSyncIssue[]>("relationSyncIssues"),
-    clientDb().relation_outbox_events.toArray(),
-  ]);
+export async function loadRelationSyncIssues(expectedUserId?: string): Promise<RelationSyncIssue[]> {
+  const db = clientDb();
+  const [persisted, outbox] = await db.transaction("r", db.meta, db.relation_outbox_events, async () => {
+    if (expectedUserId !== undefined) await assertClientUserInCurrentTransaction(expectedUserId);
+    return Promise.all([
+      getMeta<RelationSyncIssue[]>("relationSyncIssues"),
+      db.relation_outbox_events.toArray(),
+    ]);
+  });
   const live = outbox
     .filter((event) => event.status === "blocked" || event.status === "failed")
     .map((event) => ({
@@ -234,16 +260,22 @@ export async function loadRelationSyncIssues(): Promise<RelationSyncIssue[]> {
 }
 
 /** Stores only a complete monotonic Relation snapshot and repairs legacy partial caches. */
-export async function saveRelationsState(state: RelationsState): Promise<boolean> {
+export async function saveRelationsState(state: RelationsState, expectedUserId?: string): Promise<boolean> {
   if (state.next_cursor) return false;
   const db = clientDb();
-  return db.transaction("rw", db.relations_cache, db.meta, () => saveRelationsSnapshotInCurrentTransaction(state));
+  return db.transaction(
+    "rw",
+    db.relations_cache,
+    db.meta,
+    () => saveRelationsSnapshotInCurrentTransaction(state, expectedUserId),
+  );
 }
 
 /** Loads the canonical Relation snapshot from one IndexedDB transaction. */
-export async function loadRelationsState(): Promise<RelationsState | null> {
+export async function loadRelationsState(expectedUserId?: string): Promise<RelationsState | null> {
   const db = clientDb();
   const result = await db.transaction("r", db.relations_cache, db.meta, async () => {
+    if (expectedUserId !== undefined) await assertClientUserInCurrentTransaction(expectedUserId);
     const [relations, revision, serverTime, relationTypes] = await Promise.all([
       db.relations_cache.toArray(),
       db.meta.get("lastRelationServerRevision"),
@@ -269,8 +301,12 @@ export async function loadRelationsState(): Promise<RelationsState | null> {
   };
 }
 
-export async function lastRelationServerRevision(): Promise<number> {
-  return (await getMeta<number>("lastRelationServerRevision")) ?? 0;
+export async function lastRelationServerRevision(expectedUserId?: string): Promise<number> {
+  const db = clientDb();
+  return db.transaction("r", db.meta, async () => {
+    if (expectedUserId !== undefined) await assertClientUserInCurrentTransaction(expectedUserId);
+    return Number((await db.meta.get("lastRelationServerRevision"))?.value ?? 0);
+  });
 }
 
 /** Applies pending Relation events over the last accepted server snapshot. */
@@ -434,11 +470,17 @@ async function removeStaleReorders(event: PendingRelationEvent): Promise<void> {
 async function updateRelationEvents(
   events: PendingRelationEvent[],
   patch: (event: PendingRelationEvent) => Partial<PendingRelationEvent>,
+  expectedUserId?: string,
 ): Promise<void> {
   const db = clientDb();
-  await db.transaction("rw", db.relation_outbox_events, () => Promise.all(
-    events.map((event) => db.relation_outbox_events.update(event.eventId, patch(event))),
-  ).then(() => undefined));
+  await db.transaction("rw", db.meta, db.relation_outbox_events, async () => {
+    if (expectedUserId !== undefined) await assertClientUserInCurrentTransaction(expectedUserId);
+    const current = await db.relation_outbox_events.bulkGet(events.map((event) => event.eventId));
+    const updated = current
+      .filter((event): event is PendingRelationEvent => event != null)
+      .map((event) => ({ ...event, ...patch(event) }));
+    if (updated.length > 0) await db.relation_outbox_events.bulkPut(updated);
+  });
 }
 
 function uniqueStrings(value: unknown): string[] {

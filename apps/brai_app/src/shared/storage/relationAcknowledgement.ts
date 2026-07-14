@@ -1,5 +1,5 @@
 import type { PendingRelationEvent, RelationEventPayload, RelationItem, RelationsState } from "@/shared/types/relations";
-import { clientDb, getMeta, setMeta } from "./db";
+import { assertClientUserInCurrentTransaction, clientDb, getMeta, setMeta } from "./db";
 
 export type RelationIdAliases = Record<string, string>;
 
@@ -29,10 +29,12 @@ export async function acknowledgeRelationEvents(params: {
   acceptedEvents: PendingRelationEvent[];
   ignoredEvents: Array<{ event_id: string; reason: string }>;
   state: RelationsState;
+  expectedUserId?: string;
 }): Promise<boolean> {
   if (params.state.next_cursor) throw new Error("relation_snapshot_incomplete");
   const db = clientDb();
   return db.transaction("rw", db.meta, db.relations_cache, db.relation_outbox_events, db.ignored_events, async () => {
+    if (params.expectedUserId !== undefined) await assertClientUserInCurrentTransaction(params.expectedUserId);
     const existing = (await getMeta<RelationIdAliases>("relationIdAliases")) ?? {};
     const aliases = { ...existing };
     const rebaseTargets = new Set<string>();
@@ -65,7 +67,7 @@ export async function acknowledgeRelationEvents(params: {
         acknowledgedAtUtc,
       })));
     }
-    const accepted = await saveRelationsSnapshotInCurrentTransaction(params.state);
+    const accepted = await saveRelationsSnapshotInCurrentTransaction(params.state, params.expectedUserId);
     await db.relation_outbox_events.bulkDelete(params.acknowledgedEventIds);
     await setMeta("relationIdAliases", aliases);
     return accepted;
@@ -73,9 +75,13 @@ export async function acknowledgeRelationEvents(params: {
 }
 
 /** Writes a complete Relation snapshot inside the caller's Dexie transaction. */
-export async function saveRelationsSnapshotInCurrentTransaction(state: RelationsState): Promise<boolean> {
+export async function saveRelationsSnapshotInCurrentTransaction(
+  state: RelationsState,
+  expectedUserId?: string,
+): Promise<boolean> {
   if (state.next_cursor) return false;
   const db = clientDb();
+  if (expectedUserId !== undefined) await assertClientUserInCurrentTransaction(expectedUserId);
   const [revisionRow, completeRow] = await Promise.all([
     db.meta.get("lastRelationServerRevision"),
     db.meta.get("relationsSnapshotComplete"),

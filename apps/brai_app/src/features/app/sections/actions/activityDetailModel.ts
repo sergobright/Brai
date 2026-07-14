@@ -57,7 +57,7 @@ function createActivityDraftAutosave() {
     const next = latest;
     latest = null;
     clearTimers();
-    void callback(action, next.title, next.descriptionMd);
+    void callback(action, next.title, next.descriptionMd).catch(() => undefined);
   }
 
   return {

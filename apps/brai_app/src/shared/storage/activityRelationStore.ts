@@ -1,6 +1,12 @@
 import type { ActivitiesState, PendingActivityEvent } from "@/shared/types/activities";
 import type { PendingRelationEvent, RelationItem } from "@/shared/types/relations";
-import { clientDb, ensureClientMeta, randomId, setMeta } from "./db";
+import {
+  assertClientUserInCurrentTransaction,
+  clientDb,
+  ensureClientMeta,
+  randomId,
+  setMeta,
+} from "./db";
 import { saveActivitiesSnapshotInCurrentTransaction } from "./activityStore";
 
 /**
@@ -12,6 +18,7 @@ export async function acknowledgeActivitySyncEvents(params: {
   acknowledgedEventIds: string[];
   ignoredEvents: Array<{ event_id: string; reason: string }>;
   state: ActivitiesState;
+  expectedUserId?: string;
 }): Promise<boolean> {
   const ignored = new Map(params.ignoredEvents.map((event) => [event.event_id, event.reason]));
   const acknowledged = [...new Set([...params.acknowledgedEventIds, ...ignored.keys()])];
@@ -21,6 +28,9 @@ export async function acknowledgeActivitySyncEvents(params: {
     "rw",
     [db.meta, db.action_outbox_events, db.actions_cache, db.ignored_events, db.relation_outbox_events],
     async () => {
+      if (params.expectedUserId !== undefined) {
+        await assertClientUserInCurrentTransaction(params.expectedUserId);
+      }
       if (ignored.size > 0) {
         const acknowledgedAtUtc = new Date().toISOString();
         await db.ignored_events.bulkPut([...ignored].map(([eventId, reason]) => ({
@@ -55,6 +65,7 @@ export async function enqueueActivityDeleteWithRelationEnds(params: {
   activityId: string;
   activityBaseServerRevision: number;
   relationBaseServerRevision: number;
+  expectedUserId?: string;
 }): Promise<PendingActivityEvent> {
   const db = clientDb();
   return db.transaction(
@@ -64,6 +75,9 @@ export async function enqueueActivityDeleteWithRelationEnds(params: {
     db.relation_outbox_events,
     db.relations_cache,
     async () => {
+      if (params.expectedUserId !== undefined) {
+        await assertClientUserInCurrentTransaction(params.expectedUserId);
+      }
       const meta = await ensureClientMeta();
       const now = new Date().toISOString();
       const activityEvent = deleteActivityEvent({

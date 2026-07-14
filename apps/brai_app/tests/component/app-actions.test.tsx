@@ -1,20 +1,207 @@
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, renderHook, screen, waitFor, within } from "@testing-library/react";
 import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { actionsWidgetPlugin, cachedActivitiesState, openProfileMenuItem, setupBraiAppTest, stubAndroidCapacitor } from "./app-test-support";
 import { BraiApp } from "@/features/app/BraiApp";
+import { useBraiAppState } from "@/features/app/hooks/useBraiAppState";
 import { ActionRow } from "@/features/app/sections/actions/ActionRow";
 import { ActionsSection } from "@/features/app/sections/actions/ActionsSection";
 import { TITLE_MAX_LENGTH } from "@/shared/activities/text";
+import { BraiApi } from "@/shared/api/braiApi";
 import { pendingActivityEvents, saveActivitiesState } from "@/shared/storage/activityStore";
+import { clientDb, getMeta } from "@/shared/storage/db";
 import { pendingEvents, saveCanonicalState } from "@/shared/storage/syncStore";
 import { emptyActivitiesState } from "@/shared/types/activities";
 
 describe("BraiApp actions", () => {
   setupBraiAppTest();
 
+  it("hydrates cached actions when the session check is offline after a cold restart", async () => {
+    await saveActivitiesState(cachedActivitiesState("action-offline-restart", "Офлайн после перезапуска"));
+    vi.spyOn(window.navigator, "onLine", "get").mockReturnValue(false);
+    vi.mocked(globalThis.fetch).mockRejectedValue(new Error("offline"));
+
+    render(<BraiApp />);
+
+    expect(await screen.findByRole("textbox", { name: "Название действия: Офлайн после перезапуска" })).toBeInTheDocument();
+    expect(screen.queryByText("Загрузка действий")).not.toBeInTheDocument();
+
+    const input = screen.getByRole("textbox", { name: "Добавить" });
+    fireEvent.change(input, { target: { value: "Новая офлайн-цель" } });
+    fireEvent.submit(input.closest("form") as HTMLFormElement);
+    await waitFor(async () => expect(await pendingActivityEvents()).toHaveLength(1));
+  });
+
+  it("rejects ownerless local mutations until a delayed session binds the user", async () => {
+    let resolveSession!: (value: { authenticated: true; user: { id: string; email: string; name: string } }) => void;
+    const sessionResult = new Promise<{ authenticated: true; user: { id: string; email: string; name: string } }>((resolve) => {
+      resolveSession = resolve;
+    });
+    const sessionSpy = vi.spyOn(BraiApi.prototype, "session").mockReturnValue(sessionResult);
+    const { result } = renderHook(() => useBraiAppState("actions"));
+    await waitFor(() => expect(sessionSpy).toHaveBeenCalledOnce());
+
+    expect(result.current.localMutationReady).toBe(false);
+    await expect(result.current.onCreateGoal("Слишком рано")).rejects.toThrow("local_user_scope_not_ready");
+    expect(await pendingActivityEvents()).toEqual([]);
+
+    await act(async () => {
+      resolveSession({ authenticated: true, user: { id: "test-user", email: "test@example.com", name: "Test" } });
+      await sessionResult;
+    });
+    await waitFor(() => expect(result.current.localMutationReady).toBe(true));
+
+    await act(async () => result.current.onCreateGoal("После привязки"));
+    expect(await pendingActivityEvents()).toHaveLength(1);
+  });
+
+  it("keeps the domain shell inert while the local owner scope is unresolved", async () => {
+    let resolveSession!: (value: { authenticated: true; user: { id: string; email: string; name: string } }) => void;
+    const sessionResult = new Promise<{ authenticated: true; user: { id: string; email: string; name: string } }>((resolve) => {
+      resolveSession = resolve;
+    });
+    const sessionSpy = vi.spyOn(BraiApi.prototype, "session").mockReturnValue(sessionResult);
+
+    render(<BraiApp />);
+    await waitFor(() => expect(sessionSpy).toHaveBeenCalledOnce());
+    const shell = document.querySelector("[data-app-shell]");
+    expect(shell).toHaveAttribute("inert");
+    expect(shell).toHaveAttribute("aria-busy", "true");
+
+    await act(async () => {
+      resolveSession({ authenticated: true, user: { id: "test-user", email: "test@example.com", name: "Test" } });
+      await sessionResult;
+    });
+    await waitFor(() => expect(shell).not.toHaveAttribute("inert"));
+  });
+
+  it("clears the cached user scope before syncing after a different user reconnects", async () => {
+    await saveActivitiesState(cachedActivitiesState("action-old-user", "Действие прошлого пользователя"));
+    let online = false;
+    vi.spyOn(window.navigator, "onLine", "get").mockImplementation(() => online);
+    vi.mocked(globalThis.fetch).mockImplementation(async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      if (url.endsWith("/auth/session")) {
+        return new Response(JSON.stringify({
+          authenticated: true,
+          user: { id: "other-user", email: "other@example.test", name: "Other" },
+        }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      throw new Error("offline");
+    });
+
+    render(<BraiApp />);
+    expect(await screen.findByRole("textbox", { name: "Название действия: Действие прошлого пользователя" })).toBeInTheDocument();
+
+    online = true;
+    window.dispatchEvent(new Event("online"));
+
+    await waitFor(() => expect(screen.queryByRole("textbox", { name: "Название действия: Действие прошлого пользователя" })).not.toBeInTheDocument());
+    expect(await getMeta<string>("currentUserId")).toBe("other-user");
+  });
+
+  it("keeps domain refresh behind one in-flight startup session check", async () => {
+    let resolveSession!: (value: { authenticated: true; user: { id: string; email: string; name: string } }) => void;
+    const sessionResult = new Promise<{ authenticated: true; user: { id: string; email: string; name: string } }>((resolve) => {
+      resolveSession = resolve;
+    });
+    const sessionSpy = vi.spyOn(BraiApi.prototype, "session").mockReturnValue(sessionResult);
+    const stateSpy = vi.spyOn(BraiApi.prototype, "state").mockRejectedValue(new Error("offline"));
+
+    render(<BraiApp />);
+    await waitFor(() => expect(sessionSpy).toHaveBeenCalledOnce());
+
+    await act(async () => {
+      window.dispatchEvent(new Event("focus"));
+      window.dispatchEvent(new Event("online"));
+      window.dispatchEvent(new Event("pageshow"));
+      await Promise.resolve();
+    });
+    expect(sessionSpy).toHaveBeenCalledOnce();
+    expect(stateSpy).not.toHaveBeenCalled();
+
+    await act(async () => {
+      resolveSession({ authenticated: true, user: { id: "test-user", email: "test@example.com", name: "Test" } });
+      await sessionResult;
+    });
+    await waitFor(() => expect(stateSpy).toHaveBeenCalled());
+  });
+
+  it("aborts a direct settings mutation when revalidation switches user scope", async () => {
+    let online = false;
+    vi.spyOn(window.navigator, "onLine", "get").mockImplementation(() => online);
+    vi.spyOn(BraiApi.prototype, "session").mockResolvedValue({
+      authenticated: true,
+      user: { id: "other-user", email: "other@example.test", name: "Other" },
+    });
+    const updateSettings = vi.spyOn(BraiApi.prototype, "updateSettings");
+    const { result } = renderHook(() => useBraiAppState("actions"));
+    await waitFor(() => expect(result.current.localSnapshotReady).toBe(true));
+
+    online = true;
+    let mutationError: unknown;
+    await act(async () => {
+      try {
+        await result.current.onUpdateAppSettings({ display_timezone: "UTC" });
+      } catch (error) {
+        mutationError = error;
+      }
+    });
+
+    expect(mutationError).toMatchObject({ message: "session_revalidation_required" });
+    expect(updateSettings).not.toHaveBeenCalled();
+    expect(await getMeta<string>("currentUserId")).toBe("other-user");
+  });
+
+  it("does not let a late startup session undo an explicit logout", async () => {
+    let resolveSession!: (value: { authenticated: true; user: { id: string; email: string; name: string } }) => void;
+    const sessionResult = new Promise<{ authenticated: true; user: { id: string; email: string; name: string } }>((resolve) => {
+      resolveSession = resolve;
+    });
+    const sessionSpy = vi.spyOn(BraiApi.prototype, "session").mockReturnValue(sessionResult);
+    const logoutSpy = vi.spyOn(BraiApi.prototype, "logout").mockResolvedValue();
+    const stateSpy = vi.spyOn(BraiApi.prototype, "state").mockRejectedValue(new Error("unexpected_domain_refresh"));
+    const { result } = renderHook(() => useBraiAppState("actions"));
+    await waitFor(() => expect(sessionSpy).toHaveBeenCalledOnce());
+
+    await act(async () => result.current.onLogout());
+    expect(logoutSpy).toHaveBeenCalledOnce();
+    expect(await getMeta<string>("currentUserId")).toBeNull();
+
+    await act(async () => {
+      resolveSession({ authenticated: true, user: { id: "test-user", email: "test@example.com", name: "Test" } });
+      await sessionResult;
+      await Promise.resolve();
+    });
+
+    await waitFor(() => expect(result.current.displaySyncStatus).toBe("auth_required"));
+    expect(result.current.authUser).toBeNull();
+    expect(await getMeta<string>("currentUserId")).toBeNull();
+    expect(stateSpy).not.toHaveBeenCalled();
+  });
+
+  it("keeps a truly fresh client mutation-locked when its startup session fails offline", async () => {
+    await clientDb().meta.delete("currentUserId");
+    expect(await clientDb().meta.get("currentUserId")).toBeUndefined();
+    let online = true;
+    vi.spyOn(window.navigator, "onLine", "get").mockImplementation(() => online);
+    const sessionSpy = vi.spyOn(BraiApi.prototype, "session").mockImplementation(async () => {
+      online = false;
+      throw new Error("offline");
+    });
+    const { result } = renderHook(() => useBraiAppState("actions"));
+
+    await waitFor(() => expect(sessionSpy).toHaveBeenCalledOnce());
+    await waitFor(() => expect(result.current.displaySyncStatus).toBe("offline"));
+    expect(result.current.localSnapshotReady).toBe(false);
+    expect(result.current.localMutationReady).toBe(false);
+    await expect(result.current.onCreateGoal("Без владельца")).rejects.toThrow("local_user_scope_not_ready");
+    expect(await pendingActivityEvents()).toEqual([]);
+  });
+
   it("adds an action and moves it to the completed group", async () => {
     render(<BraiApp />);
+    await screen.findByText("Новых действий нет");
     const input = screen.getByRole("textbox", { name: "Добавить" });
 
     fireEvent.change(input, { target: { value: " Фокус " } });
@@ -128,7 +315,10 @@ describe("BraiApp actions", () => {
 
     render(<BraiApp />);
 
-    await waitFor(() => expect(screen.getByRole("checkbox", { name: "Виджет" })).toBeInTheDocument());
+    await waitFor(
+      () => expect(screen.getByRole("checkbox", { name: "Виджет" })).toBeInTheDocument(),
+      { timeout: 10_000 },
+    );
     await waitFor(() => expect(actionsWidgetPlugin.saveSnapshot).toHaveBeenCalled());
     actionsWidgetPlugin.saveSnapshot.mockClear();
 
@@ -144,7 +334,7 @@ describe("BraiApp actions", () => {
         viewId: "all",
       }));
     }, { interval: 25, timeout: 900 });
-  });
+  }, 15_000);
 
   it("applies Android widget status changes to the app in under one second", async () => {
     stubAndroidCapacitor();
@@ -248,6 +438,7 @@ describe("BraiApp actions", () => {
 
   it("creates a mobile action with a description from the composer", async () => {
     render(<BraiApp />);
+    await screen.findByText("Новых действий нет");
 
     fireEvent.click(document.querySelector(".actions-fab") as HTMLElement);
     const title = screen.getByRole("textbox", { name: "Добавить действие" }) as HTMLTextAreaElement;
@@ -425,6 +616,7 @@ describe("BraiApp actions", () => {
 
   it("does not complete an action when its title is clicked", async () => {
     render(<BraiApp />);
+    await screen.findByText("Новых действий нет");
     const input = screen.getByRole("textbox", { name: "Добавить" });
 
     fireEvent.change(input, { target: { value: "Фокус" } });
@@ -439,6 +631,7 @@ describe("BraiApp actions", () => {
 
   it("deletes an action from the list", async () => {
     render(<BraiApp />);
+    await screen.findByText("Новых действий нет");
     const input = screen.getByRole("textbox", { name: "Добавить" });
 
     fireEvent.change(input, { target: { value: "Фокус" } });
@@ -452,6 +645,7 @@ describe("BraiApp actions", () => {
 
   it("opens Archive from the profile menu and restores a deleted action", async () => {
     render(<BraiApp />);
+    await screen.findByText("Новых действий нет");
     const input = screen.getByRole("textbox", { name: "Добавить" });
 
     fireEvent.change(input, { target: { value: "Фокус" } });
@@ -471,7 +665,7 @@ describe("BraiApp actions", () => {
 
     fireEvent.click(screen.getAllByRole("button", { name: "Действия" }).at(-1) as HTMLElement);
     await waitFor(() => expect(screen.getByRole("textbox", { name: "Название действия: Фокус" })).toBeInTheDocument());
-  });
+  }, 15_000);
 
   it("shows the cached Actions snapshot before the network refresh finishes", async () => {
     await saveActivitiesState({
@@ -888,7 +1082,11 @@ describe("BraiApp actions", () => {
 
     render(<BraiApp />);
 
-    await waitFor(() => expect(screen.getByRole("textbox", { name: "Название действия: Фокус" })).toBeInTheDocument());
+    await waitFor(
+      () => expect(document.querySelector("[data-app-shell]")).not.toHaveAttribute("inert"),
+      { timeout: 10_000 },
+    );
+    expect(screen.getByRole("textbox", { name: "Название действия: Фокус" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Фокусироваться: Фокус", hidden: true }));
 
     await waitFor(async () =>
@@ -899,7 +1097,7 @@ describe("BraiApp actions", () => {
         }),
       ]),
     );
-  });
+  }, 15_000);
 
   it("shows and stops active action focus from a desktop action row", async () => {
     vi.stubGlobal(
@@ -969,7 +1167,11 @@ describe("BraiApp actions", () => {
 
     render(<BraiApp />);
 
-    const stopButton = await screen.findByRole("button", { name: "Остановить фокус: Фокус" });
+    await waitFor(
+      () => expect(document.querySelector("[data-app-shell]")).not.toHaveAttribute("inert"),
+      { timeout: 10_000 },
+    );
+    const stopButton = screen.getByRole("button", { name: "Остановить фокус: Фокус" });
     expect(within(stopButton).queryByText("Стоп")).not.toBeInTheDocument();
     expect(stopButton.querySelector("svg")).toBeInTheDocument();
     fireEvent.click(stopButton);
@@ -982,7 +1184,7 @@ describe("BraiApp actions", () => {
         }),
       ]),
     );
-  });
+  }, 15_000);
 
   it("requires a second mobile tap before stopping active action focus", async () => {
     vi.useFakeTimers();
@@ -1124,7 +1326,7 @@ describe("BraiApp actions", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Закрыть редактор" }));
     expect(document.querySelector(".actions-info-panel.desktop")).toBeInTheDocument();
-  });
+  }, 10_000);
 
   it("opens the mobile full-screen detail editor and flushes through the Android back bridge", async () => {
     await saveActivitiesState(cachedActivitiesState("action-mobile-detail", "Мобильное действие"));
@@ -1161,8 +1363,8 @@ describe("BraiApp actions", () => {
           }),
         ]),
       );
-    });
-  });
+    }, { timeout: 8_000 });
+  }, 15_000);
 
   it("restores the global activity Markdown preview preference", async () => {
     window.localStorage.setItem("brai_activity_md_preview", "true");

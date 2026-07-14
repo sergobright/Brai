@@ -4,11 +4,12 @@ import {
   enqueueInboxEvent,
   loadInboxState,
   markInboxAttempt,
+  markInboxFailure,
   pendingInboxEvents,
   projectInboxState,
   saveInboxState,
 } from "@/shared/storage/inboxStore";
-import { clientDb, getMeta } from "@/shared/storage/db";
+import { ClientUserScopeChangedError, clientDb, getMeta, setMeta } from "@/shared/storage/db";
 import type { InboxState } from "@/shared/types/inbox";
 
 describe("inbox store", () => {
@@ -97,6 +98,46 @@ describe("inbox store", () => {
     expect(await getMeta<number>("lastInboxServerRevision")).toBe(5);
   });
 
+  it("keeps the new owner's Inbox cache and outbox untouched by a stale tab", async () => {
+    await setMeta("currentUserId", "user-a");
+    await setMeta("currentUserId", "user-b");
+    const event = await enqueueInboxEvent({
+      type: "create",
+      payload: { title: "B event" },
+      baseServerRevision: 1,
+      expectedUserId: "user-b",
+    });
+    await saveInboxState(state(1, "inbox-b", "B snapshot"), "user-b");
+    const beforeOutbox = await clientDb().inbox_outbox_events.toArray();
+    const beforeSequence = await getMeta<number>("nextClientSequence");
+
+    await expect(enqueueInboxEvent({
+      type: "create",
+      payload: { title: "stale A event" },
+      baseServerRevision: 1,
+      expectedUserId: "user-a",
+    })).rejects.toBeInstanceOf(ClientUserScopeChangedError);
+    await expect(markInboxAttempt([event], "user-a")).rejects.toBeInstanceOf(ClientUserScopeChangedError);
+    await expect(markInboxFailure([event], "stale failure", "user-a"))
+      .rejects.toBeInstanceOf(ClientUserScopeChangedError);
+    await expect(saveInboxState(state(2, "inbox-a", "stale A snapshot"), "user-a"))
+      .rejects.toBeInstanceOf(ClientUserScopeChangedError);
+    await expect(acknowledgeInboxSyncEvents({
+      acknowledgedEventIds: [event.eventId],
+      ignoredEvents: [],
+      state: state(2, "inbox-a", "stale A acknowledgement"),
+      expectedUserId: "user-a",
+    })).rejects.toBeInstanceOf(ClientUserScopeChangedError);
+    await expect(pendingInboxEvents("user-a")).rejects.toBeInstanceOf(ClientUserScopeChangedError);
+
+    expect(await pendingInboxEvents("user-b")).toEqual(beforeOutbox);
+    expect(await getMeta<number>("nextClientSequence")).toBe(beforeSequence);
+    expect(await loadInboxState("user-b")).toMatchObject({
+      server_revision: 1,
+      inbox: [{ id: "inbox-b", title: "B snapshot" }],
+    });
+  });
+
   it("cannot lose an acknowledged Inbox item between outbox removal and canonical snapshot", async () => {
     const event = await enqueueInboxEvent({
       type: "create",
@@ -155,6 +196,10 @@ function state(serverRevision: number, id: string, title: string, descriptionMd 
         title,
         description_md: descriptionMd,
         source: "",
+        source_key: "",
+        response_required: false,
+        related_inbox_id: null,
+        record_type_id: 4,
         item_date: null,
         author: "",
         preliminary_section: "",

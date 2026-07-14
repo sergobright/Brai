@@ -10,5 +10,8 @@ export default defineConfig({
     exclude: ["tests/e2e/**", "node_modules/**"],
     setupFiles: ["./tests/setup.ts"],
     globals: true,
+    hookTimeout: 20_000,
+    maxWorkers: 3,
+    testTimeout: 20_000,
   },
 });

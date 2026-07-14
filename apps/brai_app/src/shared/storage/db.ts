@@ -38,6 +38,18 @@ export interface MetaRow {
   value: unknown;
 }
 
+export type ClientOwnerScope = {
+  userId: string;
+  epoch: number;
+};
+
+export class ClientUserScopeChangedError extends Error {
+  constructor() {
+    super("client_user_scope_changed");
+    this.name = "ClientUserScopeChangedError";
+  }
+}
+
 export interface CanonicalStateRow {
   key: "current";
   serverRevision: number;
@@ -178,6 +190,12 @@ export async function setMeta(key: string, value: unknown): Promise<void> {
   await clientDb().meta.put({ key, value });
 }
 
+/** Verifies an expected owner from inside the caller's Dexie transaction. */
+export async function assertClientUserInCurrentTransaction(expectedUserId: string): Promise<void> {
+  const currentUserId = (await clientDb().meta.get("currentUserId"))?.value;
+  if (currentUserId !== expectedUserId) throw new ClientUserScopeChangedError();
+}
+
 /**
  * Ensures every local outbox write has a stable device id and sequence.
  */
@@ -212,7 +230,10 @@ export async function ensureClientMeta(): Promise<{
 /**
  * Clears user-owned local data when the authenticated server user changes.
  */
-export async function ensureClientUser(userId: string | null): Promise<void> {
+export async function ensureClientUser(
+  userId: string | null,
+  expectedCurrentUserId?: string | null,
+): Promise<void> {
   const db = clientDb();
   const environment = appEnvironment();
   const runtimeScope = environment === "prod" ? null : `${environment}:${appCommit() || "unknown"}`;
@@ -239,9 +260,13 @@ export async function ensureClientUser(userId: string | null): Promise<void> {
         db.meta.get("runtimeScope"),
       ]);
       const currentUserId = (existingUser?.value as string | null | undefined) ?? null;
-      const userChanged = Boolean(existingUser) && currentUserId !== userId;
+      if (expectedCurrentUserId !== undefined && currentUserId !== expectedCurrentUserId) {
+        throw new ClientUserScopeChangedError();
+      }
+      // Ownerless local data must never be adopted when the first authenticated user is bound.
+      const ownerChanged = existingUser ? currentUserId !== userId : userId !== null;
       const runtimeChanged = runtimeScope !== null && existingRuntimeScope?.value !== runtimeScope;
-      if (!userChanged && !runtimeChanged) {
+      if (!ownerChanged && !runtimeChanged) {
         await setMeta("currentUserId", userId);
         return;
       }
@@ -257,7 +282,7 @@ export async function ensureClientUser(userId: string | null): Promise<void> {
         db.ignored_events.clear(),
         db.meta.bulkDelete(SERVER_STATE_META_KEYS),
       ];
-      if (userChanged) {
+      if (ownerChanged) {
         clearing.push(
           db.outbox_events.clear(),
           db.action_outbox_events.clear(),

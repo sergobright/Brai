@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { loadActivitiesState } from "@/shared/storage/activityStore";
 import { acknowledgeActivitySyncEvents, enqueueActivityDeleteWithRelationEnds } from "@/shared/storage/activityRelationStore";
-import { clientDb, getMeta, setMeta } from "@/shared/storage/db";
+import { ClientUserScopeChangedError, clientDb, getMeta, setMeta } from "@/shared/storage/db";
 import {
   enqueueActionWithGoalRelation,
   enqueueRelationEvent,
@@ -11,6 +11,8 @@ import {
   pendingRelationEvents,
   projectRelationsState,
   readyRelationEvents,
+  reconcileRelationDependencies,
+  saveRelationSyncIssues,
   saveRelationsState,
 } from "@/shared/storage/relationStore";
 import type { ActivitiesState } from "@/shared/types/activities";
@@ -97,6 +99,55 @@ describe("relation store", () => {
       lastError: "offline",
     }]);
     expect((await readyRelationEvents()).map((event) => event.eventId)).toEqual([result.relationEvent.eventId]);
+  });
+
+  it("keeps the new owner's Relation cache and outboxes untouched by a stale tab", async () => {
+    await setMeta("currentUserId", "user-a");
+    await setMeta("currentUserId", "user-b");
+    const event = await enqueueRelationEvent({
+      type: "create",
+      payload: { relation_type_id: "part_of", source_items_id: "action-b", target_items_id: "goal-b" },
+      baseServerRevision: 1,
+      expectedUserId: "user-b",
+    });
+    await saveRelationsState(state(1), "user-b");
+    const beforeRelationOutbox = await clientDb().relation_outbox_events.toArray();
+    const beforeActionOutbox = await clientDb().action_outbox_events.toArray();
+    const beforeCache = await clientDb().relations_cache.toArray();
+    const beforeSequence = await getMeta<number>("nextClientSequence");
+
+    await expect(enqueueRelationEvent({
+      type: "create",
+      payload: { relation_type_id: "part_of", source_items_id: "action-a", target_items_id: "goal-a" },
+      baseServerRevision: 1,
+      expectedUserId: "user-a",
+    })).rejects.toBeInstanceOf(ClientUserScopeChangedError);
+    await expect(enqueueActionWithGoalRelation({
+      title: "stale A action",
+      goalItemsId: "goal-a",
+      activityBaseServerRevision: 1,
+      relationBaseServerRevision: 1,
+      expectedUserId: "user-a",
+    })).rejects.toBeInstanceOf(ClientUserScopeChangedError);
+    await expect(markRelationAttempt([event], "user-a")).rejects.toBeInstanceOf(ClientUserScopeChangedError);
+    await expect(markRelationFailure([event], "stale failure", "user-a"))
+      .rejects.toBeInstanceOf(ClientUserScopeChangedError);
+    await expect(reconcileRelationDependencies("user-a")).rejects.toBeInstanceOf(ClientUserScopeChangedError);
+    await expect(saveRelationSyncIssues(
+      [{ event_id: event.eventId, reason: "stale issue" }],
+      "user-a",
+      "2026-07-13T00:00:00.000Z",
+    )).rejects.toBeInstanceOf(ClientUserScopeChangedError);
+    await expect(saveRelationsState({ ...state(2), relations: [] }, "user-a"))
+      .rejects.toBeInstanceOf(ClientUserScopeChangedError);
+    await expect(pendingRelationEvents("user-a")).rejects.toBeInstanceOf(ClientUserScopeChangedError);
+
+    expect(await pendingRelationEvents("user-b")).toEqual(beforeRelationOutbox);
+    expect(await clientDb().action_outbox_events.toArray()).toEqual(beforeActionOutbox);
+    expect(await clientDb().relations_cache.toArray()).toEqual(beforeCache);
+    expect(await getMeta<number>("nextClientSequence")).toBe(beforeSequence);
+    expect(await getMeta("relationSyncIssues")).toBeNull();
+    expect(await loadRelationsState("user-b")).toMatchObject({ server_revision: 1, relations: [{ id: "relation-1" }] });
   });
 
   it("cannot lose an acknowledged Action between outbox removal and canonical snapshot", async () => {

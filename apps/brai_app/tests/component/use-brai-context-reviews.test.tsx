@@ -44,6 +44,21 @@ describe("useBraiContextReviews", () => {
     expect(api.contextDecisions).toHaveBeenCalledTimes(3);
   });
 
+  it("aborts a stale context mutation when session revalidation changes identity", async () => {
+    const api = {
+      resolveContextDecision: vi.fn(async () => ({})),
+      contextDecisions: vi.fn(async () => emptyContextDecisionsState()),
+    } as unknown as BraiApi;
+    const beforeMutation = vi.fn(async () => null);
+    const { result } = renderHook(() => useBraiContextReviews(api, beforeMutation));
+    const decision = { ...auditDecision(), audit_id: null };
+
+    await expect(result.current.onResolveContextDecision(decision, "accept")).rejects.toThrow("session_revalidation_required");
+
+    expect(beforeMutation).toHaveBeenCalledWith(api);
+    expect(api.resolveContextDecision).not.toHaveBeenCalled();
+  });
+
   it("retries every status and applies only one revision-consistent snapshot", async () => {
     const contextDecisions = vi.fn()
       .mockResolvedValueOnce(reviewState(2, "pending-2", "pending"))

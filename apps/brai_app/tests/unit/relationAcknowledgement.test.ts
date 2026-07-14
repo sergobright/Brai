@@ -3,7 +3,7 @@ import {
   acknowledgeRelationEvents,
   type RelationIdAliases,
 } from "@/shared/storage/relationAcknowledgement";
-import { clientDb, getMeta } from "@/shared/storage/db";
+import { ClientUserScopeChangedError, clientDb, getMeta, setMeta } from "@/shared/storage/db";
 import {
   enqueueRelationEvent,
   loadRelationsState,
@@ -137,6 +137,38 @@ describe("Relation acknowledgement", () => {
     });
     expect(await clientDb().ignored_events.get("ignored-relation-event")).toMatchObject({ reason: "stale_revision" });
     expect(await loadRelationsState()).toMatchObject({ server_revision: 2, relations: [{ id: "canonical-relation" }] });
+  });
+
+  it("does not apply a stale tab acknowledgement to the new owner's Relations", async () => {
+    await setMeta("currentUserId", "user-a");
+    await setMeta("currentUserId", "user-b");
+    await saveRelationsState(relationState([relation("relation-b", "action-b", 0)], 1), "user-b");
+    const event = await enqueueRelationEvent({
+      type: "end",
+      relationId: "relation-b",
+      payload: { reason: "removed_by_user" },
+      baseServerRevision: 1,
+      expectedUserId: "user-b",
+    });
+    const beforeOutbox = await clientDb().relation_outbox_events.toArray();
+    const beforeCache = await clientDb().relations_cache.toArray();
+
+    await expect(acknowledgeRelationEvents({
+      acknowledgedEventIds: [event.eventId],
+      acceptedEvents: [event],
+      ignoredEvents: [{ event_id: "ignored-by-a", reason: "stale_revision" }],
+      state: relationState([], 2),
+      expectedUserId: "user-a",
+    })).rejects.toBeInstanceOf(ClientUserScopeChangedError);
+
+    expect(await clientDb().relation_outbox_events.toArray()).toEqual(beforeOutbox);
+    expect(await clientDb().relations_cache.toArray()).toEqual(beforeCache);
+    expect(await clientDb().ignored_events.get("ignored-by-a")).toBeUndefined();
+    expect(await getMeta<RelationIdAliases>("relationIdAliases")).toBeNull();
+    expect(await loadRelationsState("user-b")).toMatchObject({
+      server_revision: 1,
+      relations: [{ id: "relation-b" }],
+    });
   });
 });
 
