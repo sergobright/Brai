@@ -1,23 +1,32 @@
 "use client";
-
-import type { CSSProperties, FormEvent, KeyboardEvent, MouseEvent, PointerEvent } from "react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import type { CSSProperties, FormEvent, MouseEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, FilePenLine, Plus } from "lucide-react";
 import { installAndroidBackHandler } from "@/shared/platform/platform";
 import { cleanTitle, TITLE_MAX_LENGTH } from "@/shared/activities/text";
 import type { ActivityItem, ActivitiesState, ActivityStatus } from "@/shared/types/activities";
+import { emptyInboxState } from "@/shared/types/inbox";
+import { emptyRelationsState, type RelationItem, type RelationSyncIssue } from "@/shared/types/relations";
+import { emptyContextDecisionsState, type ContextDecision, type ContextDecisionsState, type ContextResolution, type GoalPlanResponse } from "@/shared/types/contextDecisions";
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/shared/ui/input-group";
 import { ScrollArea } from "@/shared/ui/scroll-area";
 import { cx } from "../../appUtils";
 import { MobileCreateComposer, mobileCreateDraftHasText, type MobileCreateDraft } from "../MobileCreateComposer";
 import { useMobileSheetTop } from "../../hooks/useMobileSheetTop";
-import { ActionRow, type DetailTitleFocus } from "./ActionRow";
+import { useMobileNavigationViewport } from "../../navigation/useSectionSwipeNavigation";
+import type { DetailTitleFocus } from "./ActionRow";
 import { SortableActionList } from "./ActionList";
 import { ActionsInfoPanel } from "./ActionsInfoPanel";
 import { ActivityDetailEditor } from "./ActivityDetailEditor";
-import { useRestoreActionEditDrafts } from "./actionsModel";
-import { ACTIONS_SPLIT_DEFAULT_PERCENT, ACTIONS_SPLIT_MIN_PERCENT, clampActionsSplitPercent } from "./constants";
-
+import { GoalBadges, GoalMembershipPicker } from "./GoalMembershipControls";
+import { GoalWorkspaceHeader } from "./GoalWorkspaceHeader";
+import { ActionsSidebarContent } from "./ActionsSidebarContent";
+import { OperationDetailPanel } from "./OperationWorkspaceItem";
+import { RelationSyncAlert } from "./RelationSyncAlert";
+import { WorkspaceWorkList } from "./WorkspaceWorkList";
+import { buildActionsWorkspace, type ActionsWorkspaceView, type WorkspaceFilterId, type WorkspaceWorkItem } from "./actionsWorkspaceModel";
+import { useActionsSplit, useRestoreActionEditDrafts } from "./actionsModel";
+import { ACTIONS_SPLIT_MIN_PERCENT } from "./constants";
 export function ActionsSection({
   state,
   localSnapshotReady,
@@ -36,6 +45,22 @@ export function ActionsSection({
   activeActivityElapsedSeconds,
   onStartActionFocus,
   onStopActionFocus,
+  workspace: providedWorkspace,
+  onSelectWorkspaceFilter = () => undefined,
+  onCreateGoal = async () => undefined,
+  onRestoreGoal = async () => undefined,
+  onAutosaveGoalDetails = async () => undefined,
+  onSetGoalStatus = async () => undefined,
+  onDeleteGoal = async () => undefined,
+  onPlanGoal = async () => ({ status: "queued", execution_id: "local", workflow_id: "local" }),
+  onAddToGoals = async () => undefined,
+  onRemoveFromGoal = async () => undefined,
+  onReorderGoal = async () => undefined,
+  onCreateActionInGoal = async () => undefined,
+  contextReviews = emptyContextDecisionsState(),
+  relationSyncIssues = [],
+  onResolveContextDecision = async () => undefined,
+  onUndoContextDecision = async () => undefined,
 }: {
   state: ActivitiesState;
   localSnapshotReady: boolean;
@@ -54,40 +79,58 @@ export function ActionsSection({
   onStartActionFocus: (activityId: string) => Promise<void>;
   onStopActionFocus: (activityId?: string | null) => Promise<void>;
   onMobileOverlayChange: (open: boolean) => void;
+  workspace?: ActionsWorkspaceView;
+  onSelectWorkspaceFilter?: (filter: WorkspaceFilterId) => void;
+  onCreateGoal?: (title: string, descriptionMd?: string) => Promise<void>;
+  onRestoreGoal?: (goal: ActivityItem) => Promise<void>;
+  onAutosaveGoalDetails?: (goal: ActivityItem, title: string, descriptionMd: string) => Promise<void>;
+  onSetGoalStatus?: (goal: ActivityItem, status: ActivityStatus) => Promise<void>;
+  onDeleteGoal?: (goal: ActivityItem) => Promise<void>;
+  onPlanGoal?: (goal: ActivityItem) => Promise<GoalPlanResponse>;
+  onAddToGoals?: (itemsId: string, goalIds: string[]) => Promise<void>;
+  onRemoveFromGoal?: (relation: RelationItem) => Promise<void>;
+  onReorderGoal?: (goalId: string, orderedRelationIds: string[]) => Promise<void>;
+  onCreateActionInGoal?: (title: string, descriptionMd: string, goalItemsId: string) => Promise<void>;
+  contextReviews?: ContextDecisionsState;
+  relationSyncIssues?: RelationSyncIssue[];
+  onResolveContextDecision?: (decision: ContextDecision, resolution: ContextResolution, editedPayload?: Record<string, unknown>) => Promise<void>;
+  onUndoContextDecision?: (decision: ContextDecision) => Promise<void>;
 }) {
+  const fallbackWorkspace = useMemo(() => buildActionsWorkspace({ activities: state, inbox: emptyInboxState(), relations: emptyRelationsState(), filter: "actions" }), [state]);
+  const workspace = providedWorkspace ?? fallbackWorkspace;
   const [draft, setDraft] = useState("");
   const [mobileCreateOpen, setMobileCreateOpen] = useState(false);
   const [selectedActionId, setSelectedActionId] = useState<string | null>(null);
   const [mobileEditActionId, setMobileEditActionId] = useState<string | null>(null);
   const [doneOpen, setDoneOpen] = useState(true);
   const [openDeleteActionId, setOpenDeleteActionId] = useState<string | null>(null);
-  const [splitPercent, setSplitPercent] = useState(ACTIONS_SPLIT_DEFAULT_PERCENT);
   const [titleDrafts, setTitleDrafts] = useState<Record<string, string>>({});
   const [detailTitleFocusRequest, setDetailTitleFocusRequest] = useState(0);
   const suppressMobileCreatePopRef = useRef(false);
   const mobileCreateSubmitInFlightRef = useRef(false);
   const workspaceRef = useRef<HTMLDivElement | null>(null);
-  const splitDragStyleRef = useRef<{ cursor: string; userSelect: string } | null>(null);
   const desktopInputRef = useRef<HTMLInputElement | null>(null);
-  const newActions = state.actions.filter((action) => action.status === "New");
-  const doneActions = state.actions.filter((action) => action.status === "Done");
-  const selectedAction = selectedActionId ? state.actions.find((action) => action.id === selectedActionId) : null;
+  const { onSplitKeyDown, onSplitPointerDown, onSplitPointerEnd, onSplitPointerMove, resetSplit, splitPercent } = useActionsSplit(workspaceRef);
+  const newItems = workspace.newItems;
+  const doneItems = workspace.doneItems;
+  const selectedItem = selectedActionId ? workspace.allItems.find((item) => item.id === selectedActionId) : null;
+  const selectedAction = selectedItem?.kind === "action" ? selectedItem.activity ?? null : null;
+  const selectedOperation = selectedItem?.kind === "operation" ? selectedItem : null;
   const mobileEditAction = mobileEditActionId ? state.actions.find((action) => action.id === mobileEditActionId) : null;
   const visibleOpenDeleteActionId =
     openDeleteActionId && state.actions.some((action) => action.id === openDeleteActionId) ? openDeleteActionId : null;
-  const mobileOverlayOpen = mobileCreateOpen || mobileEditAction != null;
+  const mobileViewport = useMobileNavigationViewport();
+  const mobileOperationOpen = mobileViewport && selectedOperation != null;
+  const mobileOverlayOpen = mobileCreateOpen || mobileEditAction != null || mobileOperationOpen;
   const desktopSidePanelOpen = true;
   const mobileSheetTop = useMobileSheetTop();
   const mobileCreateHasDraft = mobileCreateDraftHasText(mobileCreateDraft);
   const MobileCreateFabIcon = mobileCreateHasDraft ? FilePenLine : Plus;
-  const mobileCreateFabLabel = mobileCreateHasDraft ? "Продолжить черновик действия" : "Добавить действие";
-
+  const mobileCreateFabLabel = mobileCreateHasDraft ? "Продолжить черновик действия" : workspace.selectedGoal ? `Добавить действие в цель ${workspace.selectedGoal.title}` : "Добавить действие";
   useEffect(() => {
     if (autoFocusAddInput) desktopInputRef.current?.focus();
   }, [autoFocusAddInput]);
-
   useRestoreActionEditDrafts(state.actions, onAutosaveDetails);
-
   useEffect(() => {
     onMobileOverlayChange(mobileOverlayOpen);
     if (!mobileOverlayOpen) return undefined;
@@ -98,7 +141,6 @@ export function ActionsSection({
       onMobileOverlayChange(false);
     };
   }, [mobileOverlayOpen, onMobileOverlayChange]);
-
   function closeOpenDeleteFromOutside(event: MouseEvent<HTMLElement>) {
     if (!visibleOpenDeleteActionId) return;
     const target = event.target instanceof Element ? event.target : null;
@@ -107,15 +149,14 @@ export function ActionsSection({
     event.stopPropagation();
     setOpenDeleteActionId(null);
   }
-
   async function submitDesktop(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const title = cleanTitle(draft);
     if (!title) return;
     setDraft("");
-    await onCreate(title);
+    if (workspace.selectedGoal) await onCreateActionInGoal(title, "", workspace.selectedGoal.id);
+    else await onCreate(title);
   }
-
   function openMobileCreate() {
     setOpenDeleteActionId(null);
     setMobileCreateOpen(true);
@@ -131,7 +172,7 @@ export function ActionsSection({
 
   function openMobileEdit(action: ActivityItem) {
     setOpenDeleteActionId(null);
-    setSplitPercent(ACTIONS_SPLIT_DEFAULT_PERCENT);
+    resetSplit();
     setSelectedActionId(action.id);
     setMobileEditActionId(action.id);
   }
@@ -150,9 +191,17 @@ export function ActionsSection({
   }
 
   function selectAction(actionId: string, focusDetailTitle: DetailTitleFocus = "end") {
-    if (selectedActionId !== actionId) setSplitPercent(ACTIONS_SPLIT_DEFAULT_PERCENT);
+    if (selectedActionId !== actionId) resetSplit();
     setSelectedActionId(actionId);
     if (focusDetailTitle === "end") setDetailTitleFocusRequest((current) => current + 1);
+  }
+
+  function selectWorkItem(item: WorkspaceWorkItem, focusDetailTitle: DetailTitleFocus = "end") {
+    if (item.kind === "action" && item.activity) {
+      selectAction(item.activity.id, focusDetailTitle);
+      return;
+    }
+    setSelectedActionId(item.id);
   }
 
   async function submitMobile(title: string, descriptionMd: string) {
@@ -161,7 +210,8 @@ export function ActionsSection({
     onMobileCreateDraftChange({ title: "", descriptionMd: "" });
     closeMobileCreate();
     try {
-      await onCreate(title, descriptionMd);
+      if (workspace.selectedGoal) await onCreateActionInGoal(title, descriptionMd, workspace.selectedGoal.id);
+      else await onCreate(title, descriptionMd);
     } finally {
       mobileCreateSubmitInFlightRef.current = false;
     }
@@ -195,57 +245,45 @@ export function ActionsSection({
     });
   }, [closeMobileCreate, mobileCreateOpen]);
 
-  function onSplitPointerDown(event: PointerEvent<HTMLButtonElement>) {
-    const workspace = workspaceRef.current;
-    if (!workspace) return;
-    event.preventDefault();
-    splitDragStyleRef.current = {
-      cursor: document.documentElement.style.cursor,
-      userSelect: document.body.style.userSelect,
-    };
-    document.documentElement.style.cursor = "ew-resize";
-    document.body.style.userSelect = "none";
-    event.currentTarget.setPointerCapture(event.pointerId);
+  function renderMemberships(item: WorkspaceWorkItem) {
+    return (
+      <div className="flex min-w-0 items-center justify-between gap-2">
+        <GoalBadges item={item} onSelect={onSelectWorkspaceFilter} />
+        <GoalMembershipPicker item={item} goals={[...workspace.activeGoals, ...workspace.completedGoals]} onAdd={onAddToGoals} onRemove={onRemoveFromGoal} />
+      </div>
+    );
   }
 
-  function onSplitPointerMove(event: PointerEvent<HTMLButtonElement>) {
-    if (!event.currentTarget.hasPointerCapture(event.pointerId)) return;
-    const workspace = workspaceRef.current;
-    if (!workspace) return;
-    const bounds = workspace.getBoundingClientRect();
-    const rawPercent = ((event.clientX - bounds.left) / bounds.width) * 100;
-    setSplitPercent(clampActionsSplitPercent(rawPercent));
+  async function reorderGoalGroup(status: ActivityStatus, orderedIds: string[]) {
+    if (!workspace.selectedGoal) return;
+    const other = (status === "New" ? workspace.doneItems : workspace.newItems).map((item) => item.id);
+    const fullOrder = status === "New" ? [...orderedIds, ...other] : [...other, ...orderedIds];
+    const relationIds = fullOrder.map((id) => workspace.allItems.find((item) => item.id === id)?.selectedRelation?.id).filter((id): id is string => Boolean(id));
+    await onReorderGoal(workspace.selectedGoal.id, relationIds);
   }
 
-  function onSplitPointerEnd(event: PointerEvent<HTMLButtonElement>) {
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId);
-    }
-    const previous = splitDragStyleRef.current;
-    if (!previous) return;
-    document.documentElement.style.cursor = previous.cursor;
-    document.body.style.userSelect = previous.userSelect;
-    splitDragStyleRef.current = null;
-  }
-
-  function onSplitKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
-    if (event.key === "ArrowLeft") {
-      event.preventDefault();
-      setSplitPercent((current) => clampActionsSplitPercent(current - 2));
-    }
-    if (event.key === "ArrowRight") {
-      event.preventDefault();
-      setSplitPercent((current) => clampActionsSplitPercent(current + 2));
-    }
-    if (event.key === "Home") {
-      event.preventDefault();
-      setSplitPercent(ACTIONS_SPLIT_MIN_PERCENT);
-    }
-    if (event.key === "End") {
-      event.preventDefault();
-      setSplitPercent(100 - ACTIONS_SPLIT_MIN_PERCENT);
-    }
-  }
+  const workspaceListProps = {
+    goals: [...workspace.activeGoals, ...workspace.completedGoals],
+    filter: workspace.filter,
+    selectedId: selectedActionId,
+    titleDrafts,
+    openDeleteActionId: visibleOpenDeleteActionId,
+    activeActivityId,
+    activeActivityElapsedSeconds,
+    onSelect: selectWorkItem,
+    onEditMobile: openMobileEdit,
+    onUpdateTitle,
+    onTitleDraftChange: setTitleDraft,
+    onSetStatus,
+    onDelete,
+    onOpenDelete: setOpenDeleteActionId,
+    onCloseDelete: () => setOpenDeleteActionId(null),
+    onStartFocus: (action: ActivityItem) => onStartActionFocus(action.id),
+    onStopFocus: (action: ActivityItem) => onStopActionFocus(action.id),
+    onSelectFilter: onSelectWorkspaceFilter,
+    onAddToGoals,
+    onRemoveFromGoal,
+  };
 
   return (
     <section
@@ -269,14 +307,27 @@ export function ActionsSection({
         }
       >
         <ScrollArea className="actions-list-pane h-full min-h-0 min-w-0 max-[860px]:[&>[data-slot=scroll-area-viewport]>div]:pb-24">
+          {workspace.selectedGoal && workspace.selectedGoalProgress ? (
+            <GoalWorkspaceHeader
+              key={`${workspace.selectedGoal.id}:${workspace.selectedGoal.updated_at_utc}`}
+              goal={workspace.selectedGoal}
+              progress={workspace.selectedGoalProgress}
+              onSave={onAutosaveGoalDetails}
+              onSetStatus={onSetGoalStatus}
+              onDelete={onDeleteGoal}
+              onPlan={onPlanGoal}
+            />
+          ) : null}
+          {relationSyncIssues[0] ? <RelationSyncAlert issue={relationSyncIssues[0]} /> : null}
           <form className="sticky top-0 z-[4] mb-[18px] max-[860px]:hidden" onSubmit={submitDesktop}>
             <InputGroup className="actions-add-form">
               <InputGroupInput
                 ref={desktopInputRef}
+                name="action-title"
                 value={draft}
                 maxLength={TITLE_MAX_LENGTH}
-                placeholder="Добавить"
-                aria-label="Добавить"
+                placeholder={workspace.selectedGoal ? "Добавить действие в цель" : "Добавить"}
+                aria-label={workspace.selectedGoal ? "Добавить действие в цель" : "Добавить"}
                 autoFocus={autoFocusAddInput}
                 onChange={(event) => setDraft(event.target.value)}
               />
@@ -286,14 +337,14 @@ export function ActionsSection({
             </InputGroup>
           </form>
 
-          <div className="actions-list grid self-start" aria-label="Новые действия">
-            {newActions.length === 0 ? (
+          <div className="actions-list grid self-start" aria-label="Новые пункты">
+            {newItems.length === 0 ? (
               <div className="actions-empty px-[52px] py-6 font-normal text-muted-foreground max-[860px]:px-3.5 max-[860px]:py-[18px] max-[860px]:text-center">
-                {localSnapshotReady ? "Новых действий нет" : "Загрузка действий"}
+                {localSnapshotReady ? workspace.selectedGoal ? "В этой цели пока нет пунктов" : "Новых действий нет" : "Загрузка действий"}
               </div>
-            ) : (
+            ) : workspace.filter === "actions" ? (
               <SortableActionList
-                actions={newActions}
+                actions={newItems.map((item) => item.activity).filter((item): item is ActivityItem => Boolean(item))}
                 selectedActionId={selectedActionId}
                 openDeleteActionId={visibleOpenDeleteActionId}
                 onSelect={selectAction}
@@ -310,17 +361,28 @@ export function ActionsSection({
                 activeActivityElapsedSeconds={activeActivityElapsedSeconds}
                 onStartFocus={(action) => onStartActionFocus(action.id)}
                 onStopFocus={(action) => onStopActionFocus(action.id)}
+                renderAfter={(action) => {
+                  const item = newItems.find((entry) => entry.id === action.id);
+                  return item ? renderMemberships(item) : null;
+                }}
+              />
+            ) : (
+              <WorkspaceWorkList
+                {...workspaceListProps}
+                items={newItems}
+                sortable={workspace.selectedGoal != null}
+                onReorder={(orderedIds) => reorderGoalGroup("New", orderedIds)}
               />
             )}
           </div>
 
-          {doneActions.length > 0 ? (
-            <section className="actions-done-group mt-[22px] self-start" aria-label="Выполненные действия">
+          {doneItems.length > 0 ? (
+            <section className="actions-done-group mt-[22px] self-start" aria-label="Выполненные пункты">
               <button
                 type="button"
                 className="actions-done-toggle inline-flex min-h-8 items-center gap-1.5 border-0 bg-transparent p-0 text-sm font-medium text-foreground"
                 aria-expanded={doneOpen}
-                aria-label={`Выполнено ${doneActions.length}`}
+                aria-label={`Выполнено ${doneItems.length}`}
                 onClick={() => setDoneOpen((current) => !current)}
               >
                 <ChevronDown
@@ -328,31 +390,16 @@ export function ActionsSection({
                   aria-hidden="true"
                 />
                 <span>Выполнено</span>
-                <strong className="text-sm font-semibold text-primary">{doneActions.length}</strong>
+                <strong className="text-sm font-semibold text-primary">{doneItems.length}</strong>
               </button>
               {doneOpen ? (
                 <div className="actions-list done grid">
-                  {doneActions.map((action) => (
-                    <ActionRow
-                      key={action.id}
-                      action={action}
-                      titleDraft={titleDrafts[action.id]}
-                      selected={selectedActionId === action.id}
-                      onSelect={(focusDetailTitle) => selectAction(action.id, focusDetailTitle)}
-                      onEditMobile={openMobileEdit}
-                      onUpdateTitle={onUpdateTitle}
-                      onTitleDraftChange={setTitleDraft}
-                      onSetStatus={onSetStatus}
-                      onDelete={onDelete}
-                      activeFocus={activeActivityId === action.id}
-                      activeFocusElapsedSeconds={activeActivityId === action.id ? activeActivityElapsedSeconds : 0}
-                      onStartFocus={(item) => onStartActionFocus(item.id)}
-                      onStopFocus={(item) => onStopActionFocus(item.id)}
-                      deleteOpen={visibleOpenDeleteActionId === action.id}
-                      onOpenDelete={() => setOpenDeleteActionId(action.id)}
-                      onCloseDelete={() => setOpenDeleteActionId(null)}
-                    />
-                  ))}
+                  <WorkspaceWorkList
+                    {...workspaceListProps}
+                    items={doneItems}
+                    sortable={workspace.selectedGoal != null}
+                    onReorder={(orderedIds) => reorderGoalGroup("Done", orderedIds)}
+                  />
                 </div>
               ) : null}
             </section>
@@ -389,8 +436,12 @@ export function ActionsSection({
                 onTitleDraftChange={setTitleDraft}
                 onAutosaveDetails={onAutosaveDetails}
               />
+            ) : selectedOperation && !mobileOperationOpen ? (
+              <OperationDetailPanel item={selectedOperation} mode="desktop" onClose={() => setSelectedActionId(null)} />
             ) : (
-              <ActionsInfoPanel />
+              <ActionsInfoPanel>
+                <ActionsSidebarContent workspace={workspace} contextReviews={contextReviews} onSelect={onSelectWorkspaceFilter} onCreateGoal={onCreateGoal} onRestoreGoal={onRestoreGoal} onResolve={onResolveContextDecision} onUndo={onUndoContextDecision} />
+              </ActionsInfoPanel>
             )}
           </>
         ) : null}
@@ -437,6 +488,9 @@ export function ActionsSection({
           onTitleDraftChange={setTitleDraft}
           onAutosaveDetails={onAutosaveDetails}
         />
+      ) : null}
+      {mobileOperationOpen && selectedOperation ? (
+        <OperationDetailPanel item={selectedOperation} mode="mobile" onClose={() => setSelectedActionId(null)} />
       ) : null}
     </section>
   );

@@ -1,0 +1,22 @@
+{
+  "name": "@brai/goal-agents",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "health": "node src/health.mjs",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "@temporalio/activity": "^1.20.2",
+    "@temporalio/client": "^1.20.2",
+    "@temporalio/worker": "^1.20.2",
+    "@temporalio/workflow": "^1.20.2"
+  },
+  "overrides": {
+    "protobufjs": "7.6.4"
+  }
+}

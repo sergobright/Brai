@@ -14,12 +14,13 @@ import {
 } from "@/shared/platform/androidActionsWidget";
 import { consumeAndroidTimerStopRequest, startAndroidTimerNotification, stopAndroidTimerNotification } from "@/shared/platform/androidTimerNotification";
 import { isNativeShell, platformName } from "@/shared/platform/platform";
-import { acknowledgeActionEvents, enqueueActivityEvent, loadActionsState, markActionAttempt, markActionFailure, pendingActionEvents, projectActionsState, saveActionsState } from "@/shared/storage/activityStore";
-import { ensureClientMeta, ensureClientUser } from "@/shared/storage/db";
-import { acknowledgeInboxEvents, loadInboxState, markInboxAttempt, markInboxFailure, pendingInboxEvents, projectInboxState, saveInboxState } from "@/shared/storage/inboxStore";
+import { enqueueActivityEvent, loadActionsState, markActionAttempt, markActionFailure, pendingActionEvents, projectActionsState, saveActionsState } from "@/shared/storage/activityStore";
+import { acknowledgeActivitySyncEvents } from "@/shared/storage/activityRelationStore";
+import { ClientUserScopeChangedError, ensureClientMeta, ensureClientUser, getMeta, type ClientOwnerScope, LocalDatabaseUnavailableError, openClientDbWithRetry } from "@/shared/storage/db";
+import { acknowledgeInboxSyncEvents, loadInboxState, markInboxAttempt, markInboxFailure, pendingInboxEvents, projectInboxState, saveInboxState } from "@/shared/storage/inboxStore";
 import { getBraiLocalStorageItem, setBraiLocalStorageItem } from "@/shared/storage/localStorageKeys";
 import { projectHistoryData, projectTimerState } from "@/shared/storage/projection";
-import { acknowledgeEvents, enqueueFocusIntervalEdit, enqueueFocusSessionDelete, enqueueFocusSessionEdit, enqueueStartActionFocus, enqueueStopActionFocus, enqueueSwitchActionFocus, enqueueTimerEvent, loadCanonicalState, loadGoalCache, loadHistoryCache, markAttempt, markFailure, pendingEvents, saveCanonicalState, saveGoalCache, saveHistoryCache, saveIgnoredEvents } from "@/shared/storage/syncStore";
+import { acknowledgeTimerSyncEvents, enqueueFocusIntervalEdit, enqueueFocusSessionDelete, enqueueFocusSessionEdit, enqueueStartActionFocus, enqueueStopActionFocus, enqueueSwitchActionFocus, enqueueTimerEvent, loadCanonicalState, loadGoalCache, loadHistoryCache, markAttempt, markFailure, pendingEvents, saveCanonicalState, saveHistoryAndGoalCache } from "@/shared/storage/syncStore";
 import { setDisplayTimeZone, tickTimerState } from "@/shared/time/format";
 import type { ActionsState } from "@/shared/types/activities";
 import { emptyActionsState } from "@/shared/types/activities";
@@ -35,13 +36,16 @@ import { isMobileNavigationViewport, useMobileNavigationViewport, useSectionSwip
 import { createBraiActionCommands } from "./useBraiActionCommands";
 import { createBraiInboxCommands } from "./useBraiInboxCommands";
 import { useBraiLiveUpdates } from "./useBraiLiveUpdates";
+import { useBraiContextReviews } from "./useBraiContextReviews";
 import { useBraiOta } from "./useBraiOta";
+import { useBraiRelations } from "./useBraiRelations";
 import { useBraiTheme } from "./useBraiTheme";
 import { useBraiVersion } from "./useBraiVersion";
 
 const ANDROID_ACTIONS_WIDGET_STATUS_POLL_MS = 250;
 const ANDROID_ACTIONS_WIDGET_SNAPSHOT_DEBOUNCE_MS = 75;
 const APP_SETTINGS_STORAGE_KEY = "brai_app_settings";
+type SessionRevalidationResult = "validated" | "identity_changed" | "auth_required" | "transport_failed" | "not_ready" | "superseded";
 
 async function beginNativeAccountCredentialBoundary(userId: string): Promise<void> {
   if (!isNativeShell() || platformName() !== "android") return;
@@ -66,19 +70,29 @@ export function useBraiAppState(initialSection: SectionId) {
   const api = useMemo(() => new BraiApi(apiBase), [apiBase]);
   const { refreshVersionOnce, versionCheckedAt, versionError, versionRefreshing, versionState } = useBraiVersion(api);
   const apiRef = useRef(api);
-  const refreshAllRef = useRef<(sourceApi?: BraiApi) => Promise<void>>(async () => undefined);
-  const refreshStateAndFlushRef = useRef<() => Promise<void>>(async () => undefined);
-  const applyServerStateRef = useRef<(state: TimerState) => Promise<void>>(async () => undefined);
-  const applyActivitiesStateRef = useRef<(state: ActionsState) => Promise<void>>(async () => undefined);
-  const applyInboxStateRef = useRef<(state: InboxState) => Promise<void>>(async () => undefined);
+  const refreshAllRef = useRef<(sourceApi?: BraiApi, scope?: ClientOwnerScope) => Promise<void>>(async () => undefined);
+  const refreshStateAndFlushRef = useRef<(scope?: ClientOwnerScope) => Promise<void>>(async () => undefined);
+  const applyServerStateRef = useRef<(state: TimerState, scope?: ClientOwnerScope) => Promise<void>>(async () => undefined);
+  const applyActivitiesStateRef = useRef<(state: ActionsState, scope?: ClientOwnerScope) => Promise<void>>(async () => undefined);
+  const applyInboxStateRef = useRef<(state: InboxState, scope?: ClientOwnerScope) => Promise<void>>(async () => undefined);
   const consumeAndroidActionsWidgetStatusChangesRef = useRef<() => Promise<void>>(async () => undefined);
   const timerRevisionRef = useRef(0);
   const actionsRevisionRef = useRef(0);
   const inboxRevisionRef = useRef(0);
   const historyGoalRevisionRef = useRef(0);
+  const historyGoalRequestRef = useRef(0);
   const activeRef = useRef(false);
   const androidStopInFlightRef = useRef(false);
   const androidWidgetStatusInFlightRef = useRef(false);
+  const sessionRevalidationRequiredRef = useRef(true);
+  const sessionAuthorizedRef = useRef(false);
+  const sessionRevalidationEnabledRef = useRef(false);
+  const sessionRevalidationPromiseRef = useRef<Promise<SessionRevalidationResult> | null>(null);
+  const sessionRevalidationEpochRef = useRef(0);
+  const authTransitionTailRef = useRef<Promise<void>>(Promise.resolve());
+  const localOwnerIdRef = useRef<string | null>(null);
+  const localSnapshotReadyRef = useRef(false);
+  const localMutationReadyRef = useRef(false);
   const androidActionsSnapshotVersionRef = useRef(0);
   const androidActionsSnapshotLatestRef = useRef<ActionsState | null>(null);
   const androidActionsSnapshotTimerRef = useRef<number | null>(null);
@@ -93,14 +107,16 @@ export function useBraiAppState(initialSection: SectionId) {
   const [history, setHistory] = useState<HistoryData>(() => emptyHistory());
   const [goal, setGoal] = useState<GoalData>(() => emptyGoal());
   const [localSnapshotReady, setLocalSnapshotReady] = useState(false);
+  const [localMutationReady, setLocalMutationReady] = useState(false);
+  const [liveOwnerScope, setLiveOwnerScope] = useState<ClientOwnerScope | null>(null);
+  const [localDatabaseBlocked, setLocalDatabaseBlocked] = useState(false);
   const [syncStatus, setSyncStatus] = useState<SyncStatus>("connecting");
   const [pendingCount, setPendingCount] = useState(0);
   const [actionPendingCount, setActionPendingCount] = useState(0);
   const [inboxPendingCount, setInboxPendingCount] = useState(0);
   const [busy, setBusy] = useState(false);
   const [authUser, setAuthUser] = useState<AuthUser | null>(null);
-  const authTransitionRef = useRef(0);
-  const bootPromiseRef = useRef<Promise<void> | null>(null);
+  const handleErrorRef = useRef<(error: unknown) => void>(() => undefined);
   const authMode = resolveAuthMode(isProductionEnvironment());
   const [timerBusy, setTimerBusy] = useState(false);
   const [actionOverlayOpen, setActionOverlayOpen] = useState(false);
@@ -110,6 +126,120 @@ export function useBraiAppState(initialSection: SectionId) {
   const [mobileContextPanelClosing, setMobileContextPanelClosing] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const mobileViewport = useMobileNavigationViewport();
+  const relationWorkspace = useBraiRelations({
+    api,
+    beforeLocalMutation: assertLocalMutationReady,
+    beforeSync: revalidateSessionScope,
+    isScopeCurrent: isServerScopeCurrent,
+    onScopeChanged: handleError,
+    flushActionPending,
+    getActions: () => actionsRef.current,
+    setActions: setActionsAndRef,
+    setActionPendingCount,
+    setSyncStatus,
+  });
+  const contextReviewWorkspace = useBraiContextReviews(api, revalidateSessionScope, isServerScopeCurrent);
+
+  function setLocalSnapshotAvailability(ready: boolean) {
+    localSnapshotReadyRef.current = ready;
+    setLocalSnapshotReady(ready);
+  }
+
+  function setLocalMutationAvailability(ready: boolean) {
+    const ownerReady = ready && localOwnerIdRef.current !== null;
+    localMutationReadyRef.current = ownerReady;
+    setLocalMutationReady(ownerReady);
+  }
+
+  function assertLocalMutationReady(expectedOwnerId?: string): string {
+    const ownerId = localOwnerIdRef.current;
+    if (!localMutationReadyRef.current || !ownerId || (expectedOwnerId && expectedOwnerId !== ownerId)) {
+      throw new Error("local_user_scope_not_ready");
+    }
+    return ownerId;
+  }
+
+  function bindLocalOwner(userId: string | null, sourceApi?: BraiApi) {
+    localOwnerIdRef.current = userId;
+    api.setExpectedUserId(userId);
+    apiRef.current.setExpectedUserId(userId);
+    sourceApi?.setExpectedUserId(userId);
+  }
+
+  function beginSessionTransition(): number {
+    const epoch = sessionRevalidationEpochRef.current + 1;
+    sessionRevalidationEpochRef.current = epoch;
+    sessionRevalidationPromiseRef.current = null;
+    sessionRevalidationEnabledRef.current = false;
+    sessionRevalidationRequiredRef.current = true;
+    sessionAuthorizedRef.current = false;
+    setLiveOwnerScope(null);
+    setLocalMutationAvailability(false);
+    androidActionsSnapshotLatestRef.current = null;
+    if (androidActionsSnapshotTimerRef.current != null) {
+      window.clearTimeout(androidActionsSnapshotTimerRef.current);
+      androidActionsSnapshotTimerRef.current = null;
+    }
+    void clearAndroidActionsWidgetData().catch(() => undefined);
+    return epoch;
+  }
+
+  function isSessionEpochCurrent(epoch: number): boolean {
+    return sessionRevalidationEpochRef.current === epoch;
+  }
+
+  function currentServerScope(): ClientOwnerScope | null {
+    const userId = localOwnerIdRef.current;
+    if (!userId || !sessionAuthorizedRef.current || sessionRevalidationRequiredRef.current) return null;
+    return { userId, epoch: sessionRevalidationEpochRef.current };
+  }
+
+  function isServerScopeCurrent(scope: ClientOwnerScope | null | undefined): scope is ClientOwnerScope {
+    const current = currentServerScope();
+    return Boolean(scope && current && scope.userId === current.userId && scope.epoch === current.epoch);
+  }
+
+  function resolveServerScope(scope?: ClientOwnerScope): ClientOwnerScope | null {
+    const resolved = scope ?? currentServerScope();
+    return isServerScopeCurrent(resolved) ? resolved : null;
+  }
+
+  function authorizeServerScope(userId: string, sourceApi?: BraiApi): ClientOwnerScope {
+    bindLocalOwner(userId, sourceApi);
+    sessionRevalidationRequiredRef.current = false;
+    sessionAuthorizedRef.current = true;
+    const scope = { userId, epoch: sessionRevalidationEpochRef.current };
+    setLiveOwnerScope(scope);
+    return scope;
+  }
+
+  function queueAuthTransition<T>(work: (epoch: number, expectedOwnerId: string | null) => Promise<T>): Promise<T> {
+    const expectedOwnerId = localOwnerIdRef.current;
+    const epoch = beginSessionTransition();
+    setBusy(true);
+    const result = authTransitionTailRef.current.catch(() => undefined).then(() => work(epoch, expectedOwnerId));
+    authTransitionTailRef.current = result.then(() => undefined, () => undefined);
+    return result.finally(() => {
+      if (isSessionEpochCurrent(epoch)) setBusy(false);
+    });
+  }
+
+  function isClientScopeChangedError(error: unknown): boolean {
+    return error instanceof ClientUserScopeChangedError
+      || (error instanceof Error && (error.name === "UserScopeChangedError" || error.message === "client_user_scope_changed"));
+  }
+
+  function handleClientScopeChanged() {
+    beginSessionTransition();
+    bindLocalOwner(null);
+    sessionRevalidationRequiredRef.current = false;
+    sessionAuthorizedRef.current = false;
+    setAuthUser(null);
+    resetUserSnapshots();
+    setLocalSnapshotAvailability(true);
+    setSyncStatus("auth_required");
+    setBusy(false);
+  }
 
   function applyAppSettings(settings: AppSettings) {
     setDisplayTimeZone(settings.display_timezone);
@@ -135,8 +265,9 @@ export function useBraiAppState(initialSection: SectionId) {
     setActionsAndRef(nextState);
   }
 
-  async function setProjectedActionsSnapshot(canonical: ActionsState) {
-    const queuedActions = await pendingActionEvents();
+  async function setProjectedActionsSnapshot(canonical: ActionsState, scope?: ClientOwnerScope) {
+    const queuedActions = await pendingActionEvents(scope?.userId);
+    if (scope && !isServerScopeCurrent(scope)) return queuedActions;
     setActionsSnapshot(projectActionsState(canonical, queuedActions));
     setActionPendingCount(queuedActions.length);
     return queuedActions;
@@ -146,72 +277,99 @@ export function useBraiAppState(initialSection: SectionId) {
     setInbox((current) => (current.server_revision > nextState.server_revision ? current : nextState));
   }
 
-  async function applyServerState(state: TimerState) {
-    const queued = await pendingEvents();
+  async function applyServerState(state: TimerState, requestedScope?: ClientOwnerScope) {
+    const scope = resolveServerScope(requestedScope);
+    if (!scope) return;
+    const historyWasUninitialized = historyGoalRevisionRef.current === 0;
+    const queued = await pendingEvents(scope.userId);
+    if (!isServerScopeCurrent(scope)) return;
     if (queued.length > 0) {
-      await flushPending();
+      await flushPending(apiRef.current, scope);
       return;
     }
     if (state.server_revision < timerRevisionRef.current) return;
     timerRevisionRef.current = state.server_revision;
-    const accepted = await saveCanonicalState(state);
-    if (!accepted) return;
+    const accepted = await saveCanonicalState(state, scope.userId);
+    if (!accepted || !isServerScopeCurrent(scope)) return;
     setTimerSnapshot(tickTimerState(state));
     setSyncStatus("synced");
     if (state.server_revision > historyGoalRevisionRef.current) {
       try {
-        await refreshHistoryAndGoal(apiRef.current, state.server_revision);
+        await refreshHistoryAndGoal(apiRef.current, state.server_revision, scope);
+        // A live event can beat the boot snapshot; one follow-up read closes that startup race.
+        if (historyWasUninitialized) await refreshHistoryAndGoal(apiRef.current, state.server_revision, scope);
       } catch (error) {
         handleError(error);
       }
     }
   }
 
-  async function applyActivitiesState(state: ActionsState) {
-    const queued = await pendingActionEvents();
+  async function applyActivitiesState(state: ActionsState, requestedScope?: ClientOwnerScope) {
+    const scope = resolveServerScope(requestedScope);
+    if (!scope) return;
+    const queued = await pendingActionEvents(scope.userId);
+    if (!isServerScopeCurrent(scope)) return;
     if (queued.length > 0) {
-      await flushActionPending();
+      await flushActionPending(apiRef.current, scope);
       return;
     }
     if (state.server_revision < actionsRevisionRef.current) return;
     actionsRevisionRef.current = state.server_revision;
-    const accepted = await saveActionsState(state);
-    if (!accepted) return;
-    const latestQueuedActions = await setProjectedActionsSnapshot(state);
-    const [timerQueued, inboxQueued] = await Promise.all([pendingEvents(), pendingInboxEvents()]);
+    const accepted = await saveActionsState(state, scope.userId);
+    if (!accepted || !isServerScopeCurrent(scope)) return;
+    const latestQueuedActions = await setProjectedActionsSnapshot(state, scope);
+    const [timerQueued, inboxQueued] = await Promise.all([pendingEvents(scope.userId), pendingInboxEvents(scope.userId)]);
+    if (!isServerScopeCurrent(scope)) return;
     setSyncStatus(latestQueuedActions.length + timerQueued.length + inboxQueued.length > 0 ? "pending_sync" : "synced");
+    void relationWorkspace.flushRelationPending(apiRef.current, scope).catch(handleError);
   }
 
-  async function applyInboxState(state: InboxState) {
-    const queued = await pendingInboxEvents();
+  async function applyInboxState(state: InboxState, requestedScope?: ClientOwnerScope) {
+    const scope = resolveServerScope(requestedScope);
+    if (!scope) return;
+    const queued = await pendingInboxEvents(scope.userId);
+    if (!isServerScopeCurrent(scope)) return;
     if (queued.length > 0) {
-      await flushInboxPending();
+      await flushInboxPending(apiRef.current, scope);
       return;
     }
     if (state.server_revision < inboxRevisionRef.current) return;
     inboxRevisionRef.current = state.server_revision;
-    const accepted = await saveInboxState(state);
-    if (!accepted) return;
+    const accepted = await saveInboxState(state, scope.userId);
+    if (!accepted || !isServerScopeCurrent(scope)) return;
     setInboxSnapshot(projectInboxState(state, []));
     setInboxPendingCount(0);
     setSyncStatus("synced");
   }
 
-  async function refreshStateAndFlush() {
+  async function refreshStateAndFlush(requestedScope?: ClientOwnerScope) {
+    if (requestedScope && !isServerScopeCurrent(requestedScope)) return;
+    if (!(await revalidateSessionBeforeSync())) return;
+    const scope = resolveServerScope(requestedScope);
+    if (!scope) return;
     try {
       const state = await apiRef.current.state();
-      await applyServerState(state);
-      await flushPending();
-      await refreshActionsAndFlush();
-      await refreshInboxAndFlush();
+      if (!isServerScopeCurrent(scope)) return;
+      await applyServerState(state, scope);
+      await flushPending(apiRef.current, scope);
+      await refreshActionsAndFlush(apiRef.current, scope);
+      await refreshInboxAndFlush(apiRef.current, scope);
+      await Promise.all([
+        relationWorkspace.refreshRelationsAndFlush(apiRef.current, scope).catch(handleError),
+        contextReviewWorkspace.refreshContextReviews(apiRef.current, scope).catch(handleError),
+      ]);
     } catch (error) {
       handleError(error);
     }
   }
 
-  async function refreshAll(sourceApi = apiRef.current) {
+  async function refreshAll(sourceApi = apiRef.current, requestedScope?: ClientOwnerScope) {
+    const scope = resolveServerScope(requestedScope);
+    if (!scope) return;
+    sourceApi.setExpectedUserId(scope.userId);
     setBusy(true);
     try {
+      const historyGoalRequestId = ++historyGoalRequestRef.current;
       const [nextSettings, nextState, nextHistory, nextGoal, nextActions, nextInbox] = await Promise.all([
         sourceApi.settings(),
         sourceApi.state(),
@@ -220,31 +378,43 @@ export function useBraiAppState(initialSection: SectionId) {
         sourceApi.actions(),
         sourceApi.inbox(),
       ]);
+      if (!isServerScopeCurrent(scope)) return;
       applyAppSettings(nextSettings);
-      const [queued, queuedInbox] = await Promise.all([pendingEvents(), pendingInboxEvents()]);
-      let queuedActions = await pendingActionEvents();
+      const [queued, queuedInbox] = await Promise.all([pendingEvents(scope.userId), pendingInboxEvents(scope.userId)]);
+      let queuedActions = await pendingActionEvents(scope.userId);
+      if (!isServerScopeCurrent(scope)) return;
       const accepted =
-        nextState.server_revision >= timerRevisionRef.current && (await saveCanonicalState(nextState));
+        nextState.server_revision >= timerRevisionRef.current && (await saveCanonicalState(nextState, scope.userId));
+      if (!isServerScopeCurrent(scope)) return;
       if (accepted) {
-        const normalizedHistory = normalizeHistory(nextHistory);
-        await Promise.all([
-          saveHistoryCache(normalizedHistory),
-          saveGoalCache(nextGoal, nextState.server_revision),
-        ]);
         timerRevisionRef.current = nextState.server_revision;
-        historyGoalRevisionRef.current = nextState.server_revision;
         setTimerSnapshot(projectTimerState(nextState, queued));
-        setHistory(projectHistoryData(normalizedHistory, queued));
-        setGoal(nextGoal);
+        if (historyGoalRequestId === historyGoalRequestRef.current) {
+          const normalizedHistory = normalizeHistory(nextHistory);
+          await saveHistoryAndGoalCache({
+            history: normalizedHistory,
+            goal: nextGoal,
+            serverRevision: nextState.server_revision,
+            expectedUserId: scope.userId,
+          });
+          if (!isServerScopeCurrent(scope)) return;
+          historyGoalRevisionRef.current = nextState.server_revision;
+          setHistory(projectHistoryData(normalizedHistory, queued));
+          setGoal(nextGoal);
+        }
+      } else if (nextState.server_revision < timerRevisionRef.current) {
+        await refreshHistoryAndGoal(sourceApi, timerRevisionRef.current, scope);
       }
       const actionsAccepted =
-        nextActions.server_revision >= actionsRevisionRef.current && (await saveActionsState(nextActions));
+        nextActions.server_revision >= actionsRevisionRef.current && (await saveActionsState(nextActions, scope.userId));
+      if (!isServerScopeCurrent(scope)) return;
       if (actionsAccepted) {
         actionsRevisionRef.current = nextActions.server_revision;
-        queuedActions = await setProjectedActionsSnapshot(nextActions);
+        queuedActions = await setProjectedActionsSnapshot(nextActions, scope);
       }
       const inboxAccepted =
-        nextInbox.server_revision >= inboxRevisionRef.current && (await saveInboxState(nextInbox));
+        nextInbox.server_revision >= inboxRevisionRef.current && (await saveInboxState(nextInbox, scope.userId));
+      if (!isServerScopeCurrent(scope)) return;
       if (inboxAccepted) {
         inboxRevisionRef.current = nextInbox.server_revision;
         setInboxSnapshot(projectInboxState(nextInbox, queuedInbox));
@@ -253,13 +423,17 @@ export function useBraiAppState(initialSection: SectionId) {
       setActionPendingCount(queuedActions.length);
       setInboxPendingCount(queuedInbox.length);
       setSyncStatus(queued.length + queuedActions.length + queuedInbox.length > 0 ? "pending_sync" : "synced");
-      await flushPending(sourceApi);
-      await flushActionPending(sourceApi);
-      await flushInboxPending(sourceApi);
+      await flushPending(sourceApi, scope);
+      await flushActionPending(sourceApi, scope);
+      await flushInboxPending(sourceApi, scope);
+      await Promise.all([
+        relationWorkspace.refreshRelationsAndFlush(sourceApi, scope).catch(handleError),
+        contextReviewWorkspace.refreshContextReviews(sourceApi, scope).catch(handleError),
+      ]);
     } catch (error) {
       handleError(error);
     } finally {
-      setBusy(false);
+      if (scope.epoch === sessionRevalidationEpochRef.current) setBusy(false);
     }
   }
 
@@ -268,29 +442,29 @@ export function useBraiAppState(initialSection: SectionId) {
       try {
         return await apiRef.current.braiCmdDeviceToken(device);
       } catch (error) {
-        if (error instanceof Error && error.name === "UnauthorizedError") {
-          authTransitionRef.current += 1;
-          setAuthUser(null);
-          await ensureClientUser(null);
-          setLocalSnapshotReady(true);
-          setSyncStatus("auth_required");
-        }
+        handleErrorRef.current(error);
         throw error;
       }
     },
     [],
   );
 
-  async function flushPending(sourceApi = apiRef.current) {
-    const queued = await pendingEvents();
+  async function flushPending(sourceApi = apiRef.current, requestedScope?: ClientOwnerScope) {
+    if (requestedScope && !isServerScopeCurrent(requestedScope)) return;
+    if (!(await revalidateSessionBeforeSync(sourceApi))) return;
+    const scope = resolveServerScope(requestedScope);
+    if (!scope) return;
+    sourceApi.setExpectedUserId(scope.userId);
+    const queued = await pendingEvents(scope.userId);
+    if (!isServerScopeCurrent(scope)) return;
     setPendingCount(queued.length);
     if (queued.length === 0) {
-      if ((await pendingActionEvents()).length + (await pendingInboxEvents()).length === 0) setSyncStatus("synced");
+      if ((await pendingActionEvents(scope.userId)).length + (await pendingInboxEvents(scope.userId)).length === 0) setSyncStatus("synced");
       return;
     }
 
     setSyncStatus("pending_sync");
-    await markAttempt(queued);
+    await markAttempt(queued, scope.userId);
     try {
       const meta = await ensureClientMeta();
       const response = await sourceApi.syncEvents({
@@ -299,26 +473,35 @@ export function useBraiAppState(initialSection: SectionId) {
         events: queued,
         lastKnownServerTimeUtc: timer.server_time_utc,
       });
+      if (!isServerScopeCurrent(scope)) return;
       const ignoredIds = response.ignored_events.map((event) => event.event_id);
-      await acknowledgeEvents([...response.acknowledged_event_ids, ...ignoredIds]);
-      await saveIgnoredEvents(response.ignored_events);
-      const accepted =
-        response.state.server_revision >= timerRevisionRef.current && (await saveCanonicalState(response.state));
-      const remaining = await pendingEvents();
-      const currentState = accepted ? response.state : (await loadCanonicalState()) ?? response.state;
+      const accepted = await acknowledgeTimerSyncEvents({
+        acknowledgedEventIds: [...response.acknowledged_event_ids, ...ignoredIds],
+        ignoredEvents: response.ignored_events,
+        state: response.state,
+        expectedUserId: scope.userId,
+      });
+      if (!isServerScopeCurrent(scope)) return;
+      const remaining = await pendingEvents(scope.userId);
+      const currentState = accepted ? response.state : (await loadCanonicalState(scope.userId)) ?? response.state;
+      if (!isServerScopeCurrent(scope)) return;
       if (currentState.server_revision >= timerRevisionRef.current) {
         timerRevisionRef.current = currentState.server_revision;
         setTimerSnapshot(projectTimerState(currentState, remaining));
       }
       setPendingCount(remaining.length);
-      const [actionQueued, inboxQueued] = await Promise.all([pendingActionEvents(), pendingInboxEvents()]);
+      const [actionQueued, inboxQueued] = await Promise.all([pendingActionEvents(scope.userId), pendingInboxEvents(scope.userId)]);
       setSyncStatus(remaining.length + actionQueued.length + inboxQueued.length > 0 ? "pending_sync" : "synced");
 
       if (accepted) {
-        await refreshHistoryAndGoal(sourceApi, response.server_revision);
+        await refreshHistoryAndGoal(sourceApi, response.server_revision, scope);
       }
     } catch (error) {
-      await markFailure(queued, error instanceof Error ? error.message : "sync_failed");
+      if (isClientScopeChangedError(error)) {
+        handleError(error);
+        return;
+      }
+      await markFailure(queued, error instanceof Error ? error.message : "sync_failed", scope.userId);
       handleError(error);
     }
   }
@@ -331,27 +514,42 @@ export function useBraiAppState(initialSection: SectionId) {
     }, 0);
   }
 
-  async function refreshHistoryAndGoal(sourceApi = apiRef.current, serverRevision = timer.server_revision) {
+  async function refreshHistoryAndGoal(
+    sourceApi = apiRef.current,
+    serverRevision = timer.server_revision,
+    requestedScope?: ClientOwnerScope,
+  ) {
+    const scope = resolveServerScope(requestedScope);
+    if (!scope) return;
     if (serverRevision < historyGoalRevisionRef.current) return;
+    const requestId = ++historyGoalRequestRef.current;
     const [nextHistory, nextGoal] = await Promise.all([sourceApi.history(), sourceApi.goal()]);
-    if (serverRevision < historyGoalRevisionRef.current) return;
+    if (!isServerScopeCurrent(scope) || requestId !== historyGoalRequestRef.current || serverRevision < historyGoalRevisionRef.current) return;
     const normalizedHistory = normalizeHistory(nextHistory);
-    await Promise.all([
-      saveHistoryCache(normalizedHistory),
-      saveGoalCache(nextGoal, serverRevision),
-    ]);
+    await saveHistoryAndGoalCache({
+      history: normalizedHistory,
+      goal: nextGoal,
+      serverRevision,
+      expectedUserId: scope.userId,
+    });
+    if (!isServerScopeCurrent(scope)) return;
     historyGoalRevisionRef.current = serverRevision;
-    setHistory(projectHistoryData(normalizedHistory, await pendingEvents()));
+    setHistory(projectHistoryData(normalizedHistory, await pendingEvents(scope.userId)));
+    if (!isServerScopeCurrent(scope)) return;
     setGoal(nextGoal);
   }
 
   async function updateAppSettings(patch: Parameters<BraiApi["updateSettings"]>[0]) {
+    if (!(await revalidateSessionBeforeSync())) throw new Error("session_revalidation_required");
+    const scope = currentServerScope();
+    if (!scope) throw new Error("session_revalidation_required");
     setBusy(true);
     try {
       const nextSettings = await apiRef.current.updateSettings(patch);
+      if (!isServerScopeCurrent(scope)) throw new Error("session_revalidation_required");
       applyAppSettings(nextSettings);
       setTimer((current) => ({ ...current, timezone: nextSettings.display_timezone }));
-      await refreshHistoryAndGoal(apiRef.current, timerRevisionRef.current);
+      await refreshHistoryAndGoal(apiRef.current, timerRevisionRef.current, scope);
     } catch (error) {
       handleError(error);
       throw error;
@@ -360,24 +558,29 @@ export function useBraiAppState(initialSection: SectionId) {
     }
   }
 
-  async function refreshActionsAndFlush(sourceApi = apiRef.current) {
+  async function refreshActionsAndFlush(sourceApi = apiRef.current, requestedScope?: ClientOwnerScope) {
+    const scope = resolveServerScope(requestedScope);
+    if (!scope) return;
     try {
       const nextActions = await sourceApi.actions();
-      let queuedActions = await pendingActionEvents();
+      if (!isServerScopeCurrent(scope)) return;
+      let queuedActions = await pendingActionEvents(scope.userId);
       const accepted =
-        nextActions.server_revision >= actionsRevisionRef.current && (await saveActionsState(nextActions));
+        nextActions.server_revision >= actionsRevisionRef.current && (await saveActionsState(nextActions, scope.userId));
+      if (!isServerScopeCurrent(scope)) return;
       if (accepted) {
         actionsRevisionRef.current = nextActions.server_revision;
-        queuedActions = await setProjectedActionsSnapshot(nextActions);
+        queuedActions = await setProjectedActionsSnapshot(nextActions, scope);
       }
       setActionPendingCount(queuedActions.length);
-      await flushActionPending(sourceApi);
+      await flushActionPending(sourceApi, scope);
     } catch (error) {
       handleError(error);
     }
   }
 
-  async function flushActionPending(sourceApi = apiRef.current) {
+  async function flushActionPending(sourceApi = apiRef.current, requestedScope?: ClientOwnerScope) {
+    if (requestedScope && !isServerScopeCurrent(requestedScope)) return;
     if (actionFlushInFlightRef.current) {
       actionFlushQueuedRef.current = true;
       return;
@@ -386,23 +589,28 @@ export function useBraiAppState(initialSection: SectionId) {
     try {
       do {
         actionFlushQueuedRef.current = false;
-        await flushActionPendingOnce(sourceApi);
+        if (!(await revalidateSessionBeforeSync(sourceApi))) return;
+        const scope = resolveServerScope(requestedScope);
+        if (!scope) return;
+        sourceApi.setExpectedUserId(scope.userId);
+        await flushActionPendingOnce(sourceApi, scope);
       } while (actionFlushQueuedRef.current);
     } finally {
       actionFlushInFlightRef.current = false;
     }
   }
 
-  async function flushActionPendingOnce(sourceApi = apiRef.current) {
-    const queued = await pendingActionEvents();
+  async function flushActionPendingOnce(sourceApi: BraiApi, scope: ClientOwnerScope) {
+    const queued = await pendingActionEvents(scope.userId);
+    if (!isServerScopeCurrent(scope)) return;
     setActionPendingCount(queued.length);
     if (queued.length === 0) {
-      if ((await pendingEvents()).length + (await pendingInboxEvents()).length === 0) setSyncStatus("synced");
+      if ((await pendingEvents(scope.userId)).length + (await pendingInboxEvents(scope.userId)).length === 0) setSyncStatus("synced");
       return;
     }
 
     setSyncStatus("pending_sync");
-    await markActionAttempt(queued);
+    await markActionAttempt(queued, scope.userId);
     try {
       const meta = await ensureClientMeta();
       const response = await sourceApi.syncActionEvents({
@@ -411,18 +619,21 @@ export function useBraiAppState(initialSection: SectionId) {
         events: queued,
         lastKnownServerTimeUtc: actionsRef.current.server_time_utc,
       });
-      const ignoredIds = response.ignored_events.map((event) => event.event_id);
-      await acknowledgeActionEvents([...response.acknowledged_event_ids, ...ignoredIds]);
-      await saveIgnoredEvents(response.ignored_events);
-      const accepted =
-        response.state.server_revision >= actionsRevisionRef.current && (await saveActionsState(response.state));
-      const remaining = await pendingActionEvents();
+      if (!isServerScopeCurrent(scope)) return;
+      const accepted = await acknowledgeActivitySyncEvents({
+        acknowledgedEventIds: response.acknowledged_event_ids,
+        ignoredEvents: response.ignored_events,
+        state: response.state,
+        expectedUserId: scope.userId,
+      });
+      if (!isServerScopeCurrent(scope)) return;
+      const remaining = await pendingActionEvents(scope.userId);
       let projected: ActionsState | null = null;
       if (accepted) {
         actionsRevisionRef.current = response.state.server_revision;
         projected = projectActionsState(response.state, remaining);
       } else {
-        const cachedState = await loadActionsState();
+        const cachedState = await loadActionsState(scope.userId);
         if (cachedState && cachedState.server_revision > actionsRevisionRef.current) {
           actionsRevisionRef.current = cachedState.server_revision;
           projected = projectActionsState(cachedState, remaining);
@@ -430,15 +641,21 @@ export function useBraiAppState(initialSection: SectionId) {
           projected = projectActionsState(actionsRef.current, remaining);
         }
       }
+      if (!isServerScopeCurrent(scope)) return;
       if (projected) {
         setActionsAndRef(projected);
         requestAndroidActionsSnapshotPublish(projected);
       }
       setActionPendingCount(remaining.length);
-      const [timerQueued, inboxQueued] = await Promise.all([pendingEvents(), pendingInboxEvents()]);
+      const [timerQueued, inboxQueued] = await Promise.all([pendingEvents(scope.userId), pendingInboxEvents(scope.userId)]);
       setSyncStatus(remaining.length + timerQueued.length + inboxQueued.length > 0 ? "pending_sync" : "synced");
+      void relationWorkspace.flushRelationPending(sourceApi, scope).catch(handleError);
     } catch (error) {
-      await markActionFailure(queued, error instanceof Error ? error.message : "sync_failed");
+      if (isClientScopeChangedError(error)) {
+        handleError(error);
+        return;
+      }
+      await markActionFailure(queued, error instanceof Error ? error.message : "sync_failed", scope.userId);
       handleError(error);
     }
   }
@@ -447,8 +664,10 @@ export function useBraiAppState(initialSection: SectionId) {
     if (androidWidgetStatusInFlightRef.current) return;
     androidWidgetStatusInFlightRef.current = true;
     try {
+      const ownerId = assertLocalMutationReady();
       const changes = await pendingAndroidActionsWidgetStatusChanges();
       if (changes.length === 0) return;
+      assertLocalMutationReady(ownerId);
 
       const currentActions = actionsRef.current;
       const statusById = new Map(currentActions.actions.map((action) => [action.id, action.status]));
@@ -465,14 +684,15 @@ export function useBraiAppState(initialSection: SectionId) {
           actionId: change.actionId,
           payload: { status: change.status },
           baseServerRevision: currentActions.server_revision,
+          expectedUserId: ownerId,
         });
         statusById.set(change.actionId, change.status);
         acknowledgedIds.push(change.id);
         enqueued = true;
       }
 
-      const queued = await pendingActionEvents();
-      const canonical = await loadActionsState();
+      const queued = await pendingActionEvents(ownerId);
+      const canonical = await loadActionsState(ownerId);
       const projected = projectActionsState(canonical ?? currentActions, queued);
       setActionsAndRef(projected);
       await publishAndroidActionsSnapshot(projected);
@@ -487,33 +707,43 @@ export function useBraiAppState(initialSection: SectionId) {
     }
   }
 
-  async function refreshInboxAndFlush(sourceApi = apiRef.current) {
+  async function refreshInboxAndFlush(sourceApi = apiRef.current, requestedScope?: ClientOwnerScope) {
+    const scope = resolveServerScope(requestedScope);
+    if (!scope) return;
     try {
       const nextInbox = await sourceApi.inbox();
-      const queuedInbox = await pendingInboxEvents();
+      if (!isServerScopeCurrent(scope)) return;
+      const queuedInbox = await pendingInboxEvents(scope.userId);
       const accepted =
-        nextInbox.server_revision >= inboxRevisionRef.current && (await saveInboxState(nextInbox));
+        nextInbox.server_revision >= inboxRevisionRef.current && (await saveInboxState(nextInbox, scope.userId));
+      if (!isServerScopeCurrent(scope)) return;
       if (accepted) {
         inboxRevisionRef.current = nextInbox.server_revision;
         setInboxSnapshot(projectInboxState(nextInbox, queuedInbox));
       }
       setInboxPendingCount(queuedInbox.length);
-      await flushInboxPending(sourceApi);
+      await flushInboxPending(sourceApi, scope);
     } catch (error) {
       handleError(error);
     }
   }
 
-  async function flushInboxPending(sourceApi = apiRef.current) {
-    const queued = await pendingInboxEvents();
+  async function flushInboxPending(sourceApi = apiRef.current, requestedScope?: ClientOwnerScope) {
+    if (requestedScope && !isServerScopeCurrent(requestedScope)) return;
+    if (!(await revalidateSessionBeforeSync(sourceApi))) return;
+    const scope = resolveServerScope(requestedScope);
+    if (!scope) return;
+    sourceApi.setExpectedUserId(scope.userId);
+    const queued = await pendingInboxEvents(scope.userId);
+    if (!isServerScopeCurrent(scope)) return;
     setInboxPendingCount(queued.length);
     if (queued.length === 0) {
-      if ((await pendingEvents()).length + (await pendingActionEvents()).length === 0) setSyncStatus("synced");
+      if ((await pendingEvents(scope.userId)).length + (await pendingActionEvents(scope.userId)).length === 0) setSyncStatus("synced");
       return;
     }
 
     setSyncStatus("pending_sync");
-    await markInboxAttempt(queued);
+    await markInboxAttempt(queued, scope.userId);
     try {
       const meta = await ensureClientMeta();
       const response = await sourceApi.syncInboxEvents({
@@ -522,32 +752,41 @@ export function useBraiAppState(initialSection: SectionId) {
         events: queued,
         lastKnownServerTimeUtc: inbox.server_time_utc,
       });
-      const ignoredIds = response.ignored_events.map((event) => event.event_id);
-      await acknowledgeInboxEvents([...response.acknowledged_event_ids, ...ignoredIds]);
-      await saveIgnoredEvents(response.ignored_events);
-      const accepted =
-        response.state.server_revision >= inboxRevisionRef.current && (await saveInboxState(response.state));
-      const remaining = await pendingInboxEvents();
-      const currentState = accepted ? response.state : (await loadInboxState()) ?? response.state;
+      if (!isServerScopeCurrent(scope)) return;
+      const accepted = await acknowledgeInboxSyncEvents({
+        acknowledgedEventIds: response.acknowledged_event_ids,
+        ignoredEvents: response.ignored_events,
+        state: response.state,
+        expectedUserId: scope.userId,
+      });
+      if (!isServerScopeCurrent(scope)) return;
+      const remaining = await pendingInboxEvents(scope.userId);
+      const currentState = accepted ? response.state : (await loadInboxState(scope.userId)) ?? response.state;
+      if (!isServerScopeCurrent(scope)) return;
       if (currentState.server_revision >= inboxRevisionRef.current) {
         inboxRevisionRef.current = currentState.server_revision;
         setInboxSnapshot(projectInboxState(currentState, remaining));
       }
       setInboxPendingCount(remaining.length);
-      const [timerQueued, actionQueued] = await Promise.all([pendingEvents(), pendingActionEvents()]);
+      const [timerQueued, actionQueued] = await Promise.all([pendingEvents(scope.userId), pendingActionEvents(scope.userId)]);
       setSyncStatus(remaining.length + timerQueued.length + actionQueued.length > 0 ? "pending_sync" : "synced");
     } catch (error) {
-      await markInboxFailure(queued, error instanceof Error ? error.message : "sync_failed");
+      if (isClientScopeChangedError(error)) {
+        handleError(error);
+        return;
+      }
+      await markInboxFailure(queued, error instanceof Error ? error.message : "sync_failed", scope.userId);
       handleError(error);
     }
   }
 
   async function onStart() {
+    const ownerId = assertLocalMutationReady();
     if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
     setTimerBusy(true);
     try {
-      await enqueueTimerEvent({ type: "start", baseServerRevision: timer.server_revision });
-      const queued = await pendingEvents();
+      await enqueueTimerEvent({ type: "start", baseServerRevision: timer.server_revision, expectedUserId: ownerId });
+      const queued = await pendingEvents(ownerId);
       setTimerSnapshot(projectTimerState(timer, queued));
       setPendingCount(queued.length);
       setSyncStatus("pending_sync");
@@ -558,6 +797,7 @@ export function useBraiAppState(initialSection: SectionId) {
   }
 
   async function onStop() {
+    const ownerId = assertLocalMutationReady();
     if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
     setTimerBusy(true);
     try {
@@ -565,8 +805,9 @@ export function useBraiAppState(initialSection: SectionId) {
         type: "stop",
         baseServerRevision: timer.server_revision,
         metadata: { global_stop: true },
+        expectedUserId: ownerId,
       });
-      const queued = await pendingEvents();
+      const queued = await pendingEvents(ownerId);
       setTimerSnapshot(projectTimerState(timer, queued));
       setPendingCount(queued.length);
       setSyncStatus("pending_sync");
@@ -577,13 +818,15 @@ export function useBraiAppState(initialSection: SectionId) {
   }
 
   async function onEditFocusSession(sessionId: string, startedAtUtc: string, endedAtUtc: string) {
+    const ownerId = assertLocalMutationReady();
     await enqueueFocusSessionEdit({
       sessionId,
       startedAtUtc,
       endedAtUtc,
       baseServerRevision: timer.server_revision,
+      expectedUserId: ownerId,
     });
-    const queued = await pendingEvents();
+    const queued = await pendingEvents(ownerId);
     setHistory((current) => projectHistoryData(current, queued));
     setPendingCount(queued.length);
     setSyncStatus("pending_sync");
@@ -591,11 +834,13 @@ export function useBraiAppState(initialSection: SectionId) {
   }
 
   async function onDeleteFocusSession(sessionId: string) {
+    const ownerId = assertLocalMutationReady();
     await enqueueFocusSessionDelete({
       sessionId,
       baseServerRevision: timer.server_revision,
+      expectedUserId: ownerId,
     });
-    const queued = await pendingEvents();
+    const queued = await pendingEvents(ownerId);
     setHistory((current) => projectHistoryData(current, queued));
     setPendingCount(queued.length);
     setSyncStatus("pending_sync");
@@ -603,14 +848,15 @@ export function useBraiAppState(initialSection: SectionId) {
   }
 
   async function onStartActionFocus(activityId: string) {
+    const ownerId = assertLocalMutationReady();
     const activeActivityId = timer.active_activity_id ?? timer.active_interval?.activity_id ?? timer.active_session?.active_activity_id ?? null;
     if (activeActivityId === activityId) return;
     if (timer.active_session) {
-      await enqueueSwitchActionFocus({ activityId, baseServerRevision: timer.server_revision });
+      await enqueueSwitchActionFocus({ activityId, baseServerRevision: timer.server_revision, expectedUserId: ownerId });
     } else {
-      await enqueueStartActionFocus({ activityId, baseServerRevision: timer.server_revision });
+      await enqueueStartActionFocus({ activityId, baseServerRevision: timer.server_revision, expectedUserId: ownerId });
     }
-    const queued = await pendingEvents();
+    const queued = await pendingEvents(ownerId);
     setTimerSnapshot(projectTimerState(timer, queued));
     setPendingCount(queued.length);
     setSyncStatus("pending_sync");
@@ -618,8 +864,9 @@ export function useBraiAppState(initialSection: SectionId) {
   }
 
   async function onSwitchActionFocus(activityId: string) {
-    await enqueueSwitchActionFocus({ activityId, baseServerRevision: timer.server_revision });
-    const queued = await pendingEvents();
+    const ownerId = assertLocalMutationReady();
+    await enqueueSwitchActionFocus({ activityId, baseServerRevision: timer.server_revision, expectedUserId: ownerId });
+    const queued = await pendingEvents(ownerId);
     setTimerSnapshot(projectTimerState(timer, queued));
     setPendingCount(queued.length);
     setSyncStatus("pending_sync");
@@ -627,8 +874,9 @@ export function useBraiAppState(initialSection: SectionId) {
   }
 
   async function onStopActionFocus(activityId?: string | null) {
-    await enqueueStopActionFocus({ activityId, baseServerRevision: timer.server_revision });
-    const queued = await pendingEvents();
+    const ownerId = assertLocalMutationReady();
+    await enqueueStopActionFocus({ activityId, baseServerRevision: timer.server_revision, expectedUserId: ownerId });
+    const queued = await pendingEvents(ownerId);
     setTimerSnapshot(projectTimerState(timer, queued));
     setPendingCount(queued.length);
     setSyncStatus("pending_sync");
@@ -636,14 +884,16 @@ export function useBraiAppState(initialSection: SectionId) {
   }
 
   async function onEditFocusInterval(intervalId: string, sessionId: string, startedAtUtc: string, endedAtUtc: string) {
+    const ownerId = assertLocalMutationReady();
     await enqueueFocusIntervalEdit({
       intervalId,
       sessionId,
       startedAtUtc,
       endedAtUtc,
       baseServerRevision: timer.server_revision,
+      expectedUserId: ownerId,
     });
-    const queued = await pendingEvents();
+    const queued = await pendingEvents(ownerId);
     setHistory((current) => projectHistoryData(current, queued));
     setPendingCount(queued.length);
     setSyncStatus("pending_sync");
@@ -658,11 +908,60 @@ export function useBraiAppState(initialSection: SectionId) {
     setTimer(emptyTimerState());
     setActionsAndRef(emptyActionsState());
     setInbox(emptyInboxState());
+    relationWorkspace.resetRelations();
+    contextReviewWorkspace.resetContextReviews();
     setHistory(emptyHistory());
     setGoal(emptyGoal());
     setPendingCount(0);
     setActionPendingCount(0);
     setInboxPendingCount(0);
+  }
+
+  async function clearAuthenticatedScope(
+    epoch: number,
+    expectedCurrentUserId: string | null = localOwnerIdRef.current,
+    nextClientUserId: string | null = null,
+  ) {
+    if (!isSessionEpochCurrent(epoch)) return false;
+    bindLocalOwner(null);
+    setAuthUser(null);
+    setLiveOwnerScope(null);
+    setLocalMutationAvailability(false);
+    await ensureClientUser(nextClientUserId, expectedCurrentUserId);
+    if (!isSessionEpochCurrent(epoch)) return false;
+    resetUserSnapshots();
+    setLocalSnapshotAvailability(true);
+    sessionRevalidationRequiredRef.current = false;
+    sessionAuthorizedRef.current = false;
+    return true;
+  }
+
+  async function applyAuthenticatedTransition(
+    result: { authenticated: boolean; user?: AuthUser | null },
+    epoch: number,
+    sourceApi: BraiApi,
+  ) {
+    if (!isSessionEpochCurrent(epoch)) return;
+    const userId = result.authenticated && result.user?.id?.trim() ? result.user.id : null;
+    if (!userId) {
+      const currentUserId = await getMeta<string>("currentUserId");
+      if (await clearAuthenticatedScope(epoch, currentUserId)) setSyncStatus("auth_required");
+      return;
+    }
+
+    await beginNativeAccountCredentialBoundary(userId);
+    if (!isSessionEpochCurrent(epoch)) return;
+    const currentUserId = await getMeta<string>("currentUserId");
+    if (!isSessionEpochCurrent(epoch)) return;
+    await ensureClientUser(userId, currentUserId);
+    if (!isSessionEpochCurrent(epoch)) return;
+    resetUserSnapshots();
+    setAuthUser(result.user ?? null);
+    const scope = authorizeServerScope(userId, sourceApi);
+    setLocalSnapshotAvailability(true);
+    setLocalMutationAvailability(true);
+    setSyncStatus("connecting");
+    await refreshAll(sourceApi, scope);
   }
 
   async function onRequestOtp(email: string): Promise<OtpSendResult> {
@@ -698,72 +997,74 @@ export function useBraiAppState(initialSection: SectionId) {
     return preliminaryUserId ? `preliminary:${preliminaryUserId}` : null;
   }
   async function onVerifyOtp(email: string, otp: string, context?: AuthOnboardingContext) {
-    const authTransition = ++authTransitionRef.current;
-    setBusy(true);
-    try {
-      const result = await api.verifyOtp(email, otp, context);
-      if (!result.authenticated || !result.user) throw new Error("authentication_failed");
-      if (authTransitionRef.current !== authTransition) throw new Error("authentication_superseded");
-      await beginNativeAccountCredentialBoundary(result.user.id);
-      if (authTransitionRef.current !== authTransition) throw new Error("authentication_superseded");
-      setAuthUser(result.user);
-      await ensureClientUser(result.user.id);
-      resetUserSnapshots();
-      setSyncStatus("connecting");
-      await refreshAll();
-    } catch (error) {
-      if (authTransitionRef.current === authTransition) setSyncStatus("auth_required");
-      throw error;
-    } finally {
-      if (authTransitionRef.current === authTransition) setBusy(false);
-    }
+    return queueAuthTransition(async (epoch) => {
+      sessionRevalidationEnabledRef.current = false;
+      try {
+        const result = await api.verifyOtp(email, otp, context);
+        if (!isSessionEpochCurrent(epoch)) return;
+        await applyAuthenticatedTransition(result, epoch, api);
+      } catch (error) {
+        if (!isSessionEpochCurrent(epoch)) return;
+        sessionRevalidationRequiredRef.current = true;
+        sessionAuthorizedRef.current = false;
+        setLiveOwnerScope(null);
+        setLocalMutationAvailability(false);
+        setSyncStatus("auth_required");
+        throw error;
+      } finally {
+        if (isSessionEpochCurrent(epoch)) sessionRevalidationEnabledRef.current = true;
+      }
+    });
   }
 
   async function onEmailLogin(email: string, context?: AuthOnboardingContext) {
-    const authTransition = ++authTransitionRef.current;
-    setBusy(true);
-    try {
-      const result = await api.testEmailLogin(email, context);
-      if (!result.authenticated || !result.user) throw new Error("authentication_failed");
-      if (authTransitionRef.current !== authTransition) throw new Error("authentication_superseded");
-      await beginNativeAccountCredentialBoundary(result.user.id);
-      if (authTransitionRef.current !== authTransition) throw new Error("authentication_superseded");
-      setAuthUser(result.user);
-      await ensureClientUser(result.user.id);
-      resetUserSnapshots();
-      setSyncStatus("connecting");
-      await refreshAll();
-    } catch (error) {
-      if (authTransitionRef.current === authTransition) setSyncStatus("auth_required");
-      throw error;
-    } finally {
-      if (authTransitionRef.current === authTransition) setBusy(false);
-    }
+    return queueAuthTransition(async (epoch) => {
+      sessionRevalidationEnabledRef.current = false;
+      try {
+        const result = await api.testEmailLogin(email, context);
+        if (!isSessionEpochCurrent(epoch)) return;
+        await applyAuthenticatedTransition(result, epoch, api);
+      } catch (error) {
+        if (!isSessionEpochCurrent(epoch)) return;
+        sessionRevalidationRequiredRef.current = true;
+        sessionAuthorizedRef.current = false;
+        setLiveOwnerScope(null);
+        setLocalMutationAvailability(false);
+        setSyncStatus("auth_required");
+        throw error;
+      } finally {
+        if (isSessionEpochCurrent(epoch)) sessionRevalidationEnabledRef.current = true;
+      }
+    });
   }
 
   async function onLogout() {
-    await bootPromiseRef.current;
-    authTransitionRef.current += 1;
-    await bootPromiseRef.current;
     const onboarding = loadOnboardingState();
     const preliminaryDisplayName = onboarding.name.trim() || authUser?.name || "Brai";
-    await setBraiCmdAccessKey("", "", "");
-    try {
-      await api.logout();
-    } catch {
-      // Native account credentials and the local session boundary still clear while offline.
-    }
-    const preliminaryClientUserId = await restorePreliminaryClientUser(preliminaryDisplayName);
-    await Promise.all([
-      setBraiCmdOverlayEnabled(true),
-      setBraiCmdVoiceOnlyMode(true),
-      setBraiCmdQueuePausedMode(false),
-    ]);
-    setAuthUser(null);
-    await ensureClientUser(preliminaryClientUserId);
-    resetUserSnapshots();
-    setLocalSnapshotReady(true);
-    setSyncStatus("auth_required");
+    return queueAuthTransition(async (epoch) => {
+      sessionRevalidationEnabledRef.current = false;
+      try {
+        await setBraiCmdAccessKey("", "", "");
+        try {
+          await api.logout();
+        } catch {
+          // Signing out still clears the device and local account boundaries while offline.
+        }
+        if (!isSessionEpochCurrent(epoch)) return;
+        const preliminaryClientUserId = await restorePreliminaryClientUser(preliminaryDisplayName).catch(() => null);
+        await Promise.allSettled([
+          setBraiCmdOverlayEnabled(true),
+          setBraiCmdVoiceOnlyMode(true),
+          setBraiCmdQueuePausedMode(false),
+        ]);
+        if (!isSessionEpochCurrent(epoch)) return;
+        const currentUserId = await getMeta<string>("currentUserId");
+        if (!isSessionEpochCurrent(epoch)) return;
+        if (await clearAuthenticatedScope(epoch, currentUserId, preliminaryClientUserId)) setSyncStatus("auth_required");
+      } finally {
+        if (isSessionEpochCurrent(epoch)) sessionRevalidationEnabledRef.current = true;
+      }
+    });
   }
 
   async function refreshEngineOnce() {
@@ -771,19 +1072,143 @@ export function useBraiAppState(initialSection: SectionId) {
   }
 
   function handleError(error: unknown) {
+    if (isClientScopeChangedError(error)) {
+      handleClientScopeChanged();
+      return;
+    }
     if (error instanceof Error && error.name === "UnauthorizedError") {
-      authTransitionRef.current += 1;
-      setAuthUser(null);
-      void ensureClientUser(null);
-      setLocalSnapshotReady(true);
-      setSyncStatus("auth_required");
+      const expectedOwnerId = localOwnerIdRef.current;
+      const epoch = beginSessionTransition();
+      void clearAuthenticatedScope(epoch, expectedOwnerId)
+        .then((cleared) => {
+          if (cleared) setSyncStatus("auth_required");
+        })
+        .catch((clearError) => {
+          if (isClientScopeChangedError(clearError)) handleClientScopeChanged();
+          else setSyncStatus("sync_failed");
+        });
       return;
     }
     setSyncStatus(typeof navigator !== "undefined" && navigator.onLine ? "sync_failed" : "offline");
   }
+  handleErrorRef.current = handleError;
+
+  async function hydrateLocalSnapshot() {
+    const ownerId = localOwnerIdRef.current;
+    if (!ownerId) return;
+    const [cachedState, cachedHistory, cachedGoal, cachedActions, cachedInbox, queued, queuedActions, queuedInbox] = await Promise.all([
+      loadCanonicalState(ownerId),
+      loadHistoryCache(ownerId),
+      loadGoalCache(ownerId),
+      loadActionsState(ownerId),
+      loadInboxState(ownerId),
+      pendingEvents(ownerId),
+      pendingActionEvents(ownerId),
+      pendingInboxEvents(ownerId),
+      relationWorkspace.loadLocalRelations(ownerId),
+      contextReviewWorkspace.loadLocalContextReviews(ownerId),
+    ]);
+    if (localOwnerIdRef.current !== ownerId) return;
+
+    setPendingCount(queued.length);
+    setActionPendingCount(queuedActions.length);
+    setInboxPendingCount(queuedInbox.length);
+    if (cachedState) {
+      timerRevisionRef.current = cachedState.server_revision;
+      setTimerSnapshot(projectTimerState(cachedState, queued));
+    }
+    if (cachedHistory.sessions.length > 0) setHistory(projectHistoryData(cachedHistory, queued));
+    if (cachedGoal) setGoal(cachedGoal);
+    if (cachedActions) actionsRevisionRef.current = cachedActions.server_revision;
+    setActionsSnapshot(projectActionsState(cachedActions, queuedActions));
+    if (cachedInbox) inboxRevisionRef.current = cachedInbox.server_revision;
+    setInboxSnapshot(projectInboxState(cachedInbox, queuedInbox));
+  }
+
+  async function performSessionRevalidation(sourceApi: BraiApi): Promise<SessionRevalidationResult> {
+    const epoch = sessionRevalidationEpochRef.current;
+    let observedCurrentUserId = localOwnerIdRef.current;
+    try {
+      const session = await sourceApi.session();
+      if (epoch !== sessionRevalidationEpochRef.current) return "superseded";
+      const nextUserId = session.authenticated && session.user?.id?.trim() ? session.user.id : null;
+      const currentUserId = await getMeta<string>("currentUserId");
+      observedCurrentUserId = currentUserId;
+      if (epoch !== sessionRevalidationEpochRef.current) return "superseded";
+      const boundUserId = localOwnerIdRef.current;
+      if (boundUserId && currentUserId && currentUserId !== boundUserId && nextUserId !== currentUserId) {
+        handleClientScopeChanged();
+        return "superseded";
+      }
+      if (!nextUserId) {
+        if (await clearAuthenticatedScope(epoch, currentUserId)) setSyncStatus("auth_required");
+        return "auth_required";
+      }
+
+      await beginNativeAccountCredentialBoundary(nextUserId);
+      if (epoch !== sessionRevalidationEpochRef.current) return "superseded";
+      await ensureClientUser(nextUserId, currentUserId);
+      if (epoch !== sessionRevalidationEpochRef.current) return "superseded";
+      const identityChanged = nextUserId !== currentUserId || nextUserId !== boundUserId;
+      if (identityChanged) {
+        setLocalSnapshotAvailability(false);
+        resetUserSnapshots();
+        setLocalSnapshotAvailability(true);
+      }
+      setAuthUser(session.user ?? null);
+      authorizeServerScope(nextUserId, sourceApi);
+      if (localSnapshotReadyRef.current) setLocalMutationAvailability(true);
+      return identityChanged ? "identity_changed" : "validated";
+    } catch (error) {
+      if (epoch !== sessionRevalidationEpochRef.current) return "superseded";
+      if (error instanceof Error && error.name === "UnauthorizedError") {
+        if (await clearAuthenticatedScope(epoch, observedCurrentUserId)) setSyncStatus("auth_required");
+        return "auth_required";
+      } else {
+        handleError(error);
+        if (typeof navigator !== "undefined" && !navigator.onLine && localOwnerIdRef.current && localSnapshotReadyRef.current) {
+          setLocalMutationAvailability(true);
+        }
+        return "transport_failed";
+      }
+    }
+  }
+
+  async function revalidateSession(sourceApi = apiRef.current): Promise<SessionRevalidationResult> {
+    if (!sessionRevalidationRequiredRef.current) return sessionAuthorizedRef.current ? "validated" : "auth_required";
+    if (!sessionRevalidationEnabledRef.current) return "not_ready";
+    if (typeof navigator !== "undefined" && !navigator.onLine) {
+      if (localOwnerIdRef.current && localSnapshotReadyRef.current) setLocalMutationAvailability(true);
+      setSyncStatus("offline");
+      return "transport_failed";
+    }
+    if (sessionRevalidationPromiseRef.current) return sessionRevalidationPromiseRef.current;
+
+    setLocalMutationAvailability(false);
+    const request = performSessionRevalidation(sourceApi);
+    sessionRevalidationPromiseRef.current = request;
+    try {
+      return await request;
+    } finally {
+      if (sessionRevalidationPromiseRef.current === request) sessionRevalidationPromiseRef.current = null;
+    }
+  }
+
+  async function revalidateSessionBeforeSync(sourceApi = apiRef.current): Promise<boolean> {
+    return (await revalidateSession(sourceApi)) === "validated";
+  }
+
+  async function revalidateSessionScope(
+    sourceApi = apiRef.current,
+    requestedScope?: ClientOwnerScope,
+  ): Promise<ClientOwnerScope | null> {
+    if (requestedScope && !isServerScopeCurrent(requestedScope)) return null;
+    if (!(await revalidateSessionBeforeSync(sourceApi))) return null;
+    return resolveServerScope(requestedScope);
+  }
 
   const publishAndroidActionsSnapshot = useCallback((nextActions: ActionsState): Promise<void> => {
-    if (!localSnapshotReady || syncStatus === "auth_required") return Promise.resolve();
+    if (!localSnapshotReady || !localMutationReady || syncStatus === "auth_required") return Promise.resolve();
     // Native widget taps bump the stored version by +1; JS advances in wider steps to avoid equal-version drops.
     const snapshotVersion = Math.max(Date.now() * 1000, androidActionsSnapshotVersionRef.current + 1000);
     androidActionsSnapshotVersionRef.current = snapshotVersion;
@@ -792,10 +1217,10 @@ export function useBraiAppState(initialSection: SectionId) {
       actions: nextActions.actions,
       snapshotVersion,
     });
-  }, [localSnapshotReady, syncStatus]);
+  }, [localMutationReady, localSnapshotReady, syncStatus]);
 
   const flushAndroidActionsSnapshotPublish = useCallback((nextActions?: ActionsState): void => {
-    if (!localSnapshotReady || syncStatus === "auth_required") return;
+    if (!localSnapshotReady || !localMutationReady || syncStatus === "auth_required") return;
     if (nextActions) androidActionsSnapshotLatestRef.current = nextActions;
     if (androidActionsSnapshotTimerRef.current != null) {
       window.clearTimeout(androidActionsSnapshotTimerRef.current);
@@ -803,22 +1228,23 @@ export function useBraiAppState(initialSection: SectionId) {
     }
     const latest = androidActionsSnapshotLatestRef.current;
     if (latest) void publishAndroidActionsSnapshot(latest).catch(() => undefined);
-  }, [localSnapshotReady, publishAndroidActionsSnapshot, syncStatus]);
+  }, [localMutationReady, localSnapshotReady, publishAndroidActionsSnapshot, syncStatus]);
 
   const requestAndroidActionsSnapshotPublish = useCallback((nextActions: ActionsState): void => {
-    if (!localSnapshotReady || syncStatus === "auth_required") return;
+    if (!localSnapshotReady || !localMutationReady || syncStatus === "auth_required") return;
     androidActionsSnapshotLatestRef.current = nextActions;
     if (androidActionsSnapshotTimerRef.current != null) return;
     androidActionsSnapshotTimerRef.current = window.setTimeout(() => {
       flushAndroidActionsSnapshotPublish();
     }, ANDROID_ACTIONS_WIDGET_SNAPSHOT_DEBOUNCE_MS);
-  }, [flushAndroidActionsSnapshotPublish, localSnapshotReady, syncStatus]);
+  }, [flushAndroidActionsSnapshotPublish, localMutationReady, localSnapshotReady, syncStatus]);
 
   useEffect(() => () => {
     if (androidActionsSnapshotTimerRef.current != null) window.clearTimeout(androidActionsSnapshotTimerRef.current);
   }, []);
 
   useEffect(() => {
+    api.setExpectedUserId(localOwnerIdRef.current);
     apiRef.current = api;
     refreshAllRef.current = refreshAll;
     refreshStateAndFlushRef.current = refreshStateAndFlush;
@@ -830,68 +1256,55 @@ export function useBraiAppState(initialSection: SectionId) {
 
   useEffect(() => {
     let cancelled = false;
-    const bootAuthTransition = authTransitionRef.current;
 
     async function boot() {
+      await openClientDbWithRetry();
+      setLocalDatabaseBlocked(false);
       await ensureClientMeta();
       const resolvedApiBase = defaultApiBase();
       const bootApi = new BraiApi(resolvedApiBase);
       if (cancelled) return;
       setApiBase(resolvedApiBase);
+      sessionRevalidationEnabledRef.current = true;
 
-      const session = await bootApi.session();
-      if (cancelled || authTransitionRef.current !== bootAuthTransition) return;
-      if (!session.authenticated) {
-        setAuthUser(null);
-        resetUserSnapshots();
-        setLocalSnapshotReady(true);
-        setSyncStatus("auth_required");
+      const cachedUserId = await getMeta<string>("currentUserId");
+      bindLocalOwner(cachedUserId, bootApi);
+      if (cachedUserId && typeof navigator !== "undefined" && !navigator.onLine) {
+        await ensureClientUser(cachedUserId);
+        await hydrateLocalSnapshot();
+        if (cancelled) return;
+        setLocalSnapshotAvailability(true);
+        setLocalMutationAvailability(true);
+        setSyncStatus("offline");
         return;
       }
 
-      const sessionUser = session.user;
-      if (!sessionUser) {
-        setAuthUser(null);
-        resetUserSnapshots();
-        setLocalSnapshotReady(true);
-        setSyncStatus("auth_required");
+      const sessionResult = await revalidateSession(bootApi);
+      if (cancelled) return;
+      if (sessionResult === "transport_failed") {
+        if (cachedUserId) {
+          await ensureClientUser(cachedUserId);
+          await hydrateLocalSnapshot();
+          if (cancelled) return;
+          setLocalSnapshotAvailability(true);
+          if (typeof navigator !== "undefined" && !navigator.onLine) setLocalMutationAvailability(true);
+        }
         return;
       }
-      await beginNativeAccountCredentialBoundary(sessionUser.id);
-      if (cancelled || authTransitionRef.current !== bootAuthTransition) return;
-      setAuthUser(sessionUser);
-      await ensureClientUser(sessionUser.id);
-      const [cachedState, cachedHistory, cachedGoal, cachedActions, cachedInbox, queued, queuedActions, queuedInbox] = await Promise.all([
-        loadCanonicalState(),
-        loadHistoryCache(),
-        loadGoalCache(),
-        loadActionsState(),
-        loadInboxState(),
-        pendingEvents(),
-        pendingActionEvents(),
-        pendingInboxEvents(),
-      ]);
+      if (sessionResult === "auth_required" || sessionResult === "not_ready" || sessionResult === "superseded") return;
 
-      if (cancelled || authTransitionRef.current !== bootAuthTransition) return;
-      setPendingCount(queued.length);
-      setActionPendingCount(queuedActions.length);
-      setInboxPendingCount(queuedInbox.length);
-      if (cachedState) {
-        timerRevisionRef.current = cachedState.server_revision;
-        setTimerSnapshot(projectTimerState(cachedState, queued));
-      }
-      if (cachedHistory.sessions.length > 0) setHistory(projectHistoryData(cachedHistory, queued));
-      if (cachedGoal) setGoal(cachedGoal);
-      if (cachedActions) actionsRevisionRef.current = cachedActions.server_revision;
-      setActionsSnapshot(projectActionsState(cachedActions, queuedActions));
-      if (cachedInbox) inboxRevisionRef.current = cachedInbox.server_revision;
-      setInboxSnapshot(projectInboxState(cachedInbox, queuedInbox));
-      setLocalSnapshotReady(true);
-      await refreshAllRef.current(bootApi);
+      if (sessionResult === "validated") await hydrateLocalSnapshot();
+      if (cancelled) return;
+      setLocalSnapshotAvailability(true);
+      setLocalMutationAvailability(true);
+      const scope = currentServerScope();
+      if (scope) await refreshAllRef.current(bootApi, scope);
     }
 
-    bootPromiseRef.current = boot().catch(handleError);
-    void bootPromiseRef.current;
+    void boot().catch((error) => {
+      if (error instanceof LocalDatabaseUnavailableError) setLocalDatabaseBlocked(true);
+      handleError(error);
+    });
     return () => {
       cancelled = true;
     };
@@ -901,6 +1314,8 @@ export function useBraiAppState(initialSection: SectionId) {
 
   useBraiLiveUpdates({
     api,
+    ownerScope: liveOwnerScope,
+    ownerEpochRef: sessionRevalidationEpochRef,
     syncStatus,
     setTimer,
     refreshStateAndFlushRef,
@@ -912,14 +1327,14 @@ export function useBraiAppState(initialSection: SectionId) {
   useEffect(() => {
     if (!localSnapshotReady) return;
     if (syncStatus === "auth_required") {
-      void clearAndroidActionsWidgetData();
+      void clearAndroidActionsWidgetData().catch(() => undefined);
       return;
     }
     requestAndroidActionsSnapshotPublish(actions);
   }, [actions, localSnapshotReady, requestAndroidActionsSnapshotPublish, syncStatus]);
 
   useEffect(() => {
-    if (!localSnapshotReady || syncStatus === "auth_required") return undefined;
+    if (!localSnapshotReady || !localMutationReady || syncStatus === "auth_required") return undefined;
     const publishLatest = () => {
       const nextActions = actionsRef.current;
       flushAndroidActionsSnapshotPublish(nextActions);
@@ -939,11 +1354,12 @@ export function useBraiAppState(initialSection: SectionId) {
       window.removeEventListener("pageshow", publishLatest);
       document.removeEventListener("visibilitychange", publishOnVisibilityChange);
     };
-  }, [flushAndroidActionsSnapshotPublish, localSnapshotReady, syncStatus]);
+  }, [flushAndroidActionsSnapshotPublish, localMutationReady, localSnapshotReady, syncStatus]);
 
   useEffect(() => {
     if (
       !localSnapshotReady ||
+      !localMutationReady ||
       syncStatus === "auth_required" ||
       !isNativeShell() ||
       platformName() !== "android"
@@ -973,11 +1389,11 @@ export function useBraiAppState(initialSection: SectionId) {
       window.removeEventListener("pageshow", consume);
       document.removeEventListener("visibilitychange", consume);
     };
-  }, [localSnapshotReady, syncStatus]);
+  }, [localMutationReady, localSnapshotReady, syncStatus]);
 
   const active = timer.active_session != null;
   const activeStartedAtUtc = timer.active_session?.started_at_utc ?? null;
-  const totalPendingCount = pendingCount + actionPendingCount + inboxPendingCount;
+  const totalPendingCount = pendingCount + actionPendingCount + inboxPendingCount + relationWorkspace.relationPendingCount;
   const displaySyncStatus =
     totalPendingCount > 0 && syncStatus === "synced" ? "pending_sync" : syncStatus;
 
@@ -1109,14 +1525,21 @@ export function useBraiAppState(initialSection: SectionId) {
   const focusHistoryActive = mobileViewport ? mobileContextPanelActive && mobileContextPanel === "focus-history" : focusContextPanel === "history";
   const actionCommands = createBraiActionCommands({
     actions,
+    beforeLocalMutation: assertLocalMutationReady,
     flushActionPending,
     getActions: () => actionsRef.current,
     publishActionsSnapshot: async (nextActions) => requestAndroidActionsSnapshotPublish(nextActions),
     setActionPendingCount,
     setActions: setActionsAndRef,
     setSyncStatus,
+    getRelationServerRevision: () => relationWorkspace.relations.server_revision,
+    onRelationLifecycleQueued: relationWorkspace.reprojectRelationOutbox,
+    beforeGoalStatusChange: async (goal, status, expectedOwnerId) => {
+      if (status === "Done") await relationWorkspace.ensureGoalRelationsSynced(goal.id, expectedOwnerId);
+    },
   });
   const inboxCommands = createBraiInboxCommands({
+    beforeLocalMutation: assertLocalMutationReady,
     flushInboxPending,
     inbox,
     setInbox,
@@ -1124,7 +1547,7 @@ export function useBraiAppState(initialSection: SectionId) {
     setSyncStatus,
   });
 
-  return { actionOverlayOpen, actions, actionsInfoActive, active, api, appSettings, authDisplayName: authUser?.name ?? "", authMode, authUser, bundlePublishedAt, busy, displaySyncStatus, downloadApkOnce, downloadWebUpdateOnce, focusBackground, focusContextPanel, focusGoalActive, focusHistoryActive, goal, history, inbox, inboxInfoActive, installApkOnce, localSnapshotReady, markMobileContextPanelClosing, mobileContextPanel, mobileMenuOpen, ...actionCommands, ...inboxCommands, onDeleteFocusSession, onEditFocusInterval, onEditFocusSession, onEmailLogin, onLogout, onRequestOtp, onStart, onStartActionFocus, onStop, onStopActionFocus, onSwitchActionFocus, onUpdateAppSettings: updateAppSettings, onVerifyOtp, openSettingsPage, otaCheckedAt, otaRefreshing, otaState, provisionBraiCmdDeviceToken, refreshEngineOnce, refreshOtaStateOnce, section, selectSection, setActionOverlayOpen, setFocusBackground, setMobileContextPanel: setMobileContextPanelState, setMobileMenuOpen, setTheme, swipeNavigation, theme, timer, timerBusy, todayKey, toggleActionsInfoPanel, toggleFocusContextPanel, toggleInboxInfoPanel, totalPendingCount, versionCheckedAt, versionError, versionRefreshing, versionState };
+  return { actionOverlayOpen, actions, actionsInfoActive, active, api, appSettings, authDisplayName: authUser?.name ?? "", authMode, authUser, bundlePublishedAt, busy, displaySyncStatus, downloadApkOnce, downloadWebUpdateOnce, focusBackground, focusContextPanel, focusGoalActive, focusHistoryActive, goal, history, inbox, inboxInfoActive, installApkOnce, localDatabaseBlocked, localMutationReady, localSnapshotReady, markMobileContextPanelClosing, mobileContextPanel, mobileMenuOpen, ...actionCommands, ...inboxCommands, ...relationWorkspace, ...contextReviewWorkspace, onDeleteFocusSession, onEditFocusInterval, onEditFocusSession, onEmailLogin, onLogout, onRequestOtp, onStart, onStartActionFocus, onStop, onStopActionFocus, onSwitchActionFocus, onUpdateAppSettings: updateAppSettings, onVerifyOtp, openSettingsPage, otaCheckedAt, otaRefreshing, otaState, provisionBraiCmdDeviceToken, refreshEngineOnce, refreshOtaStateOnce, section, selectSection, setActionOverlayOpen, setFocusBackground, setMobileContextPanel: setMobileContextPanelState, setMobileMenuOpen, setTheme, swipeNavigation, theme, timer, timerBusy, todayKey, toggleActionsInfoPanel, toggleFocusContextPanel, toggleInboxInfoPanel, totalPendingCount, versionCheckedAt, versionError, versionRefreshing, versionState };
 }
 
 function loadAppSettingsPreference(): AppSettings {

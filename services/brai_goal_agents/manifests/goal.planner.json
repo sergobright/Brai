@@ -1,0 +1,85 @@
+{
+  "id": "goal.planner",
+  "version": "1",
+  "workflow_definition_version": 1,
+  "worker_build_id": "goal-planner.v1",
+  "workflow_type": "GoalPlannerWorkflow",
+  "queue_base": "brai-agent-goal-planner",
+  "entrypoint": "src/entrypoints/goal-planner.mjs",
+  "input_schema_version": "brai.goal-agent.input.v1",
+  "prompt_version": "goal-planner.v1",
+  "output_schema_version": "brai.goal-planner.result.v1",
+  "model_env": "BRAI_GOAL_PLANNER_MODEL",
+  "default_model": "gpt-5.4-mini",
+  "timeout_ms": 90000,
+  "retry": { "schema_attempts": 3 },
+  "decision_kinds": ["goal_plan"],
+  "review_only": true,
+  "explicit_trigger_only": true,
+  "minimum_steps": 2,
+  "maximum_steps": 20,
+  "prompt": "Только по явному запросу пользователя предложи для одного существующего Goal от 2 до 20 исполнимых Action drafts. Учитывай существующие members, не создавай Operations, nested Goals или Relations. Верни упорядоченный review-only package; пользователь сможет отредактировать его до применения.",
+  "output_schema": {
+    "type": "object",
+    "required": ["schema_version", "agent_id", "agent_version", "decisions"],
+    "additionalProperties": false,
+    "properties": {
+      "schema_version": { "type": "string", "const": "1" },
+      "agent_id": { "type": "string", "const": "goal.planner" },
+      "agent_version": { "type": "string", "const": "1" },
+      "decisions": {
+        "type": "array",
+        "maxItems": 1,
+        "items": {
+          "type": "object",
+          "required": ["decision_kind", "subject_items_id", "confidence", "rationale", "evidence", "proposal"],
+          "additionalProperties": false,
+          "properties": {
+            "decision_kind": { "type": "string", "const": "goal_plan" },
+            "subject_items_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+            "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+            "rationale": { "type": "string", "minLength": 1, "maxLength": 500 },
+            "evidence": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 10,
+              "items": {
+                "type": "object",
+                "required": ["items_id", "field", "excerpt"],
+                "additionalProperties": false,
+                "properties": {
+                  "items_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+                  "field": { "type": "string", "enum": ["title", "description_md", "reason", "normalization"] },
+                  "excerpt": { "type": "string", "minLength": 1, "maxLength": 200 }
+                }
+              }
+            },
+            "proposal": {
+              "type": "object",
+              "required": ["goal_items_id", "steps"],
+              "additionalProperties": false,
+              "properties": {
+                "goal_items_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+                "steps": {
+                  "type": "array",
+                  "minItems": 2,
+                  "maxItems": 20,
+                  "items": {
+                    "type": "object",
+                    "required": ["title", "description_md", "position"],
+                    "additionalProperties": false,
+                    "properties": {
+                      "title": { "type": "string", "minLength": 1, "maxLength": 80 },
+                      "description_md": { "type": "string", "maxLength": 8000 },
+                      "position": { "type": "integer", "minimum": 0, "maximum": 19 }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

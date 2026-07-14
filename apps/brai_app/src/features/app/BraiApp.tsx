@@ -1,5 +1,4 @@
 "use client";
-
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, BookOpen, Crown, Info, PanelLeftClose, PanelLeftOpen } from "lucide-react";
@@ -14,18 +13,22 @@ import { OnboardingFlow, shouldShowOnboarding } from "@/features/onboarding/Onbo
 import { loadOnboardingState } from "@/features/onboarding/onboardingModel";
 import { AuthScreen } from "./AuthScreen";
 import { AppStartupSplash } from "./AppStartupSplash";
+import { LocalDatabaseBlockedScreen } from "./LocalDatabaseBlockedScreen";
 import type { SectionId } from "./appModel";
 import { isPrimarySection, sectionIcon, sectionTitle } from "./appModel";
 import { braiCmdBootstrapRetryDelay } from "./braiCmdBootstrap.model";
 import { cx } from "./appUtils";
 import { IconButton, MobileContextSheet, ScreenHeader, ThemeButton } from "./chrome/AppChrome";
 import { useBraiAppState } from "./hooks/useBraiAppState";
-import { DesktopRail, MainDock, MobileDockOverflowButton, MobileDockOverflowSheet, MobileMenuButton, MobileProfileDrawer } from "./navigation/AppNavigation";
+import { useActionsWorkspace } from "./hooks/useActionsWorkspace";
+import { DesktopRail, MainDock, MobileDockOverflowButton, MobileDockOverflowSheet, MobileMenuButton } from "./navigation/AppNavigation";
+import { MobileProfileDrawer, requestMobileProfileDrawerClose } from "./navigation/MobileProfileDrawer";
 import { ContextualRail, isContextualRailSection, useContextualRail } from "./navigation/ContextualRail";
 import { isMobileNavigationViewport, sectionSwipePageStyle, useLeftEdgeMenuSwipe } from "./navigation/useSectionSwipeNavigation";
 import { ActionsSection } from "./sections/actions/ActionsSection";
 import { ActionsInfoPanel } from "./sections/actions/ActionsInfoPanel";
 import { ArchiveSection } from "./sections/actions/ArchiveSection";
+import { ActionsSidebarContent } from "./sections/actions/ActionsSidebarContent";
 import { BraiCmdSection } from "./sections/brai-cmd/BraiCmdSection";
 import { DrawsSection } from "./sections/draws/DrawsSection";
 import { EvilEyeSection } from "./sections/EvilEyeSection";
@@ -37,13 +40,11 @@ import { InboxSection } from "./sections/inbox/InboxSection";
 import { ProfileSection } from "./sections/profile/ProfileSection";
 import { SettingsSection } from "./sections/settings/SettingsSection";
 import type { MobileCreateDraft } from "./sections/MobileCreateComposer";
-
 const SECTION_PAGE_INSET_CLASS = "grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] pb-11 pl-7 pr-0 pt-3.5 max-[860px]:pb-7 max-[860px]:pl-3.5 max-[860px]:pr-0 max-[860px]:pt-[var(--mobile-top-padding)] max-[860px]:[&>.topbar]:pr-3.5";
 const FULLSCREEN_SECTION_PAGE_CLASS = "grid h-full min-h-0 grid-rows-[minmax(0,1fr)] p-0";
 const EMPTY_MOBILE_CREATE_DRAFT: MobileCreateDraft = { title: "", descriptionMd: "" };
 const ACTIONS_MOBILE_CREATE_DRAFT_STORAGE_KEY = "brai_actions_mobile_create_draft";
 const INBOX_MOBILE_CREATE_DRAFT_STORAGE_KEY = "brai_inbox_mobile_create_draft";
-
 export function BraiApp({ initialSection = "actions" }: { initialSection?: SectionId }) {
   const app = useBraiAppState(initialSection);
   const appBuild = useAppVersion();
@@ -66,6 +67,7 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
   const [unauthEngineOpen, setUnauthEngineOpen] = useState(false);
   const [unauthBraiCmdOpen, setUnauthBraiCmdOpen] = useState(false);
   const startupReady = app.localSnapshotReady || app.displaySyncStatus === "auth_required" || app.displaySyncStatus === "offline" || app.displaySyncStatus === "sync_failed";
+  const domainMutationsBlocked = !app.localMutationReady && app.displaySyncStatus !== "auth_required";
   const onboardingAuthRequired = startupReady && app.displaySyncStatus === "auth_required";
   const unauthEngineActive = nativeAndroid && unauthEngineOpen;
   const unauthBraiCmdActive = nativeAndroid && unauthBraiCmdOpen;
@@ -87,6 +89,7 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
   const [inboxMobileCreateDraft, setInboxMobileCreateDraft] = useStoredMobileCreateDraft(INBOX_MOBILE_CREATE_DRAFT_STORAGE_KEY);
   const mobileViewport = useMountedMobileNavigationViewport();
   const [drawsFullScreen, setDrawsFullScreen] = useState(false);
+  const { selectFilter: selectActionsWorkspaceFilter, workspace: actionsWorkspace } = useActionsWorkspace(app.actions, app.inbox, app.relations);
   const drawsFullscreenActive = visibleSection === "draws" && drawsFullScreen;
   const handleDrawsFullscreenChange = useCallback((nextFullScreen: boolean) => {
     setDrawsFullScreen(nextFullScreen);
@@ -99,7 +102,10 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
   const adjacentSection = unauthEngineActive ? null : app.swipeNavigation.visual?.to;
   const handleStartupIntroComplete = useCallback(() => setStartupIntroComplete(true), []);
   const mobileMenuSwipe = useLeftEdgeMenuSwipe(
-    () => setMobileDockMenu("left"),
+    () => {
+      if (app.section === "actions") app.setMobileMenuOpen(true);
+      else setMobileDockMenu("left");
+    },
     !app.mobileMenuOpen && !mobileDockMenu && !app.mobileContextPanel && !app.actionOverlayOpen,
   );
   const webAuthRequired = !nativeAndroid && app.displaySyncStatus === "auth_required";
@@ -316,7 +322,7 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
   }, [authDisplayName, authUser, nativeAndroid, provisionBraiCmdDeviceToken]);
 
   useEffect(() => installAndroidBackHandler(() => {
-    if (window.history.state?.braiMobileMenu || window.history.state?.braiMobileDockMenu || window.history.state?.braiMobileSheet || window.history.state?.braiActivityEditor || window.history.state?.braiMobileActionCreate || window.history.state?.braiInboxEditor || window.history.state?.braiMobileInboxCreate || window.history.state?.braiFactoryLog) return false;
+    if (window.history.state?.braiMobileMenu || window.history.state?.braiMobileDockMenu || window.history.state?.braiMobileSheet || window.history.state?.braiActivityEditor || window.history.state?.braiOperationEditor || window.history.state?.braiMobileActionCreate || window.history.state?.braiInboxEditor || window.history.state?.braiMobileInboxCreate || window.history.state?.braiFactoryLog) return false;
     if (unauthEngineActiveRef.current || unauthBraiCmdActiveRef.current) {
       setUnauthEngineOpen(false);
       setUnauthBraiCmdOpen(false);
@@ -401,6 +407,22 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
             activeActivityElapsedSeconds={app.timer.active_interval_elapsed_seconds ?? 0}
             onStartActionFocus={app.onStartActionFocus}
             onStopActionFocus={app.onStopActionFocus}
+            workspace={actionsWorkspace}
+            onSelectWorkspaceFilter={selectActionsWorkspaceFilter}
+            onCreateGoal={app.onCreateGoal}
+            onRestoreGoal={app.onRestoreGoal}
+            onAutosaveGoalDetails={app.onAutosaveGoalDetails}
+            onSetGoalStatus={app.onSetGoalStatus}
+            onDeleteGoal={app.onDeleteGoal}
+            onPlanGoal={app.onPlanGoal}
+            onAddToGoals={app.onAddToGoals}
+            onRemoveFromGoal={app.onRemoveFromGoal}
+            onReorderGoal={app.onReorderGoal}
+            onCreateActionInGoal={app.onCreateActionInGoal}
+            contextReviews={app.contextReviews}
+            relationSyncIssues={app.relationSyncIssues}
+            onResolveContextDecision={app.onResolveContextDecision}
+            onUndoContextDecision={app.onUndoContextDecision}
           />
         ) : screenSection === "inbox" ? (
           <InboxSection
@@ -486,7 +508,9 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
   if (webAuthRequired) {
     return <main className="min-h-dvh bg-background" data-auth-redirect />;
   }
-
+  if (app.localDatabaseBlocked) {
+    return <LocalDatabaseBlockedScreen />;
+  }
   return (
     <>
       {onboardingActive ? (
@@ -536,6 +560,8 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
       ) : (
         <SidebarProvider
       open={false}
+      inert={domainMutationsBlocked}
+      aria-busy={domainMutationsBlocked}
       className={cx(
         "app-shell h-dvh min-h-0 overflow-hidden [--sticky-top-offset:0px] max-[860px]:grid max-[860px]:grid-rows-[minmax(0,1fr)_auto] max-[860px]:[--mobile-top-padding:env(safe-area-inset-top)]",
         app.actionOverlayOpen && "has-mobile-action-overlay max-[860px]:pb-0",
@@ -621,7 +647,11 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
       {app.mobileMenuOpen && !drawsFullscreenActive ? (
         <MobileProfileDrawer
           onClose={() => app.setMobileMenuOpen(false)}
-        >{activeContextualContent}</MobileProfileDrawer>
+        >
+          {visibleSection === "actions" ? (
+            <ActionsSidebarContent workspace={actionsWorkspace} contextReviews={app.contextReviews} onSelect={(filter) => { selectActionsWorkspaceFilter(filter); requestMobileProfileDrawerClose(); }} onCreateGoal={app.onCreateGoal} onRestoreGoal={app.onRestoreGoal} onResolve={app.onResolveContextDecision} onUndo={app.onUndoContextDecision} />
+          ) : activeContextualContent}
+        </MobileProfileDrawer>
       ) : null}
       {mobileDockMenu && !drawsFullscreenActive ? (
         <MobileDockOverflowSheet
@@ -642,7 +672,9 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
       ) : null}
       {app.mobileContextPanel === "actions-info" && visibleSection === "actions" ? (
         <MobileContextSheet label="Информация о действиях" onClose={() => app.setMobileContextPanel(null)} onCloseStart={app.markMobileContextPanelClosing}>
-          <ActionsInfoPanel mobile />
+          <ActionsInfoPanel mobile>
+            <ActionsSidebarContent workspace={actionsWorkspace} contextReviews={app.contextReviews} onSelect={(filter) => { selectActionsWorkspaceFilter(filter); app.setMobileContextPanel(null); }} onCreateGoal={app.onCreateGoal} onRestoreGoal={app.onRestoreGoal} onResolve={app.onResolveContextDecision} onUndo={app.onUndoContextDecision} />
+          </ActionsInfoPanel>
         </MobileContextSheet>
       ) : null}
       {app.mobileContextPanel === "inbox-info" && visibleSection === "inbox" ? (

@@ -1,0 +1,40 @@
+[Unit]
+Description=Brai Goal agent {{ item.1.value.id }} ({{ item.0.key }})
+Wants=brai-temporal.service
+After=network-online.target brai-temporal.service
+
+[Service]
+Type=simple
+User={{ brai_goal_agent_user }}
+Group={{ brai_goal_agent_group }}
+SupplementaryGroups={{ brai_codex_exec_group }} {{ brai_codex_auth_group }}
+WorkingDirectory={{ brai_env_root }}/{{ item.0.value.path }}/source/services/brai_goal_agents
+EnvironmentFile={{ brai_goal_agents_env_source }}
+Environment=BRAI_ENVIRONMENT={{ item.0.value.goal_agent_queue_environment }}
+Environment=BRAI_GOAL_AGENT_TASK_QUEUE={{ item.1.value.queue_base }}-{{ item.0.value.goal_agent_queue_environment }}
+{% set goal_agent_runtime_policy = lookup('file', playbook_dir + '/../../services/brai_goal_agents/runtime-policy.json') | from_json %}
+UnsetEnvironment={{ goal_agent_runtime_policy.forbidden_environment_keys | join(' ') }}
+ExecStartPre=/usr/bin/test -r {{ brai_goal_agent_codex_home }}/auth.json
+ExecStartPre=/usr/bin/test -r {{ brai_goal_agent_codex_home }}/config.toml
+ExecStartPre={{ brai_codex_bin }} --version
+ExecStart={{ brai_node_bin }} src/entrypoints/{{ item.1.value.entrypoint }}
+Restart=always
+RestartSec=5
+TimeoutStopSec=45
+UMask=0077
+NoNewPrivileges=true
+PrivateDevices=true
+PrivateTmp=true
+ProtectControlGroups=true
+ProtectHome=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectSystem=strict
+ReadOnlyPaths={{ brai_codex_auth_root }}
+ReadWritePaths={{ brai_goal_agent_codex_home }}
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictSUIDSGID=true
+CapabilityBoundingSet=
+
+[Install]
+WantedBy=multi-user.target

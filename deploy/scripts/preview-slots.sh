@@ -9,7 +9,7 @@ REGISTRY="${BRAI_PREVIEW_REGISTRY:-$ENVS_ROOT/preview-slots.json}"
 LOCK="${BRAI_PREVIEW_LOCK:-$ENVS_ROOT/preview-slots.lock}"
 COMMAND="${1:-}"
 
-if [ "$COMMAND" = "status" ]; then
+if [ "$COMMAND" = "status" ] || [ "$COMMAND" = "assert-owned" ]; then
   if [ -e "$LOCK" ]; then
     if [ ! -r "$LOCK" ]; then
       echo "Preview slot lock is not readable: $LOCK" >&2

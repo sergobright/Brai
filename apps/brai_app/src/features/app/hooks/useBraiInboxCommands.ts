@@ -14,20 +14,23 @@ export function createBraiInboxCommands({
   setInbox,
   setInboxPendingCount,
   setSyncStatus,
+  beforeLocalMutation,
 }: {
   flushInboxPending: () => Promise<void>;
   inbox: InboxState;
   setInbox: Dispatch<SetStateAction<InboxState>>;
   setInboxPendingCount: Dispatch<SetStateAction<number>>;
   setSyncStatus: Dispatch<SetStateAction<SyncStatus>>;
+  beforeLocalMutation?: (expectedOwnerId?: string) => string;
 }) {
   async function queueInboxEvent(event: Parameters<typeof enqueueInboxEvent>[0]) {
-    await enqueueInboxEvent(event);
-    const queued = await pendingInboxEvents();
+    const ownerId = beforeLocalMutation?.();
+    await enqueueInboxEvent({ ...event, expectedUserId: ownerId });
+    const queued = await pendingInboxEvents(ownerId);
     setInbox(projectInboxState(inbox, queued));
     setInboxPendingCount(queued.length);
     setSyncStatus("pending_sync");
-    await flushInboxPending();
+    void flushInboxPending().catch(() => undefined);
   }
 
   async function onCreateInboxItem(title: string, descriptionMd = "") {
@@ -55,48 +58,55 @@ export function createBraiInboxCommands({
     const trimmed = cleanTitle(title);
     const current = inbox.inbox.find((entry) => entry.id === item.id) ?? item;
     const nextDescription = normalizeDescription(descriptionMd);
-    let changed = false;
+    const titleChanged = Boolean(trimmed && trimmed !== current.title);
+    const descriptionChanged = nextDescription !== normalizeDescription(current.description_md);
 
-    if (trimmed && trimmed !== current.title) {
+    if (!titleChanged && !descriptionChanged) return;
+    const ownerId = beforeLocalMutation?.();
+
+    if (titleChanged) {
+      beforeLocalMutation?.(ownerId);
       await enqueueInboxEvent({
         type: "update_title",
         inboxId: item.id,
         payload: { title: trimmed },
         baseServerRevision: inbox.server_revision,
+        expectedUserId: ownerId,
       });
-      changed = true;
     }
-    if (nextDescription !== normalizeDescription(current.description_md)) {
+    if (descriptionChanged) {
+      beforeLocalMutation?.(ownerId);
       await enqueueInboxEvent({
         type: "update_description",
         inboxId: item.id,
         payload: { description_md: nextDescription },
         baseServerRevision: inbox.server_revision,
+        expectedUserId: ownerId,
       });
-      changed = true;
     }
-    if (!changed) return;
 
-    const queued = await pendingInboxEvents();
+    const queued = await pendingInboxEvents(ownerId);
     setInbox(projectInboxState(inbox, queued));
     setInboxPendingCount(queued.length);
     setSyncStatus("pending_sync");
-    await flushInboxPending();
+    void flushInboxPending().catch(() => undefined);
   }
 
   async function onDeleteInboxItem(item: InboxItem) {
+    const ownerId = beforeLocalMutation?.();
     await enqueueInboxEvent({
       type: "delete",
       inboxId: item.id,
       payload: {},
       baseServerRevision: inbox.server_revision,
+      expectedUserId: ownerId,
     });
-    const queued = await pendingInboxEvents();
+    const queued = await pendingInboxEvents(ownerId);
     setInboxPendingCount(queued.length);
     setSyncStatus("pending_sync");
     window.setTimeout(() => {
       setInbox((current) => projectInboxState(current, queued));
-      void flushInboxPending();
+      void flushInboxPending().catch(() => undefined);
     }, ACTION_DELETE_COLLAPSE_MS);
   }
 

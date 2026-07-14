@@ -144,7 +144,7 @@ fi
 stop_preview_unit_if_exists() {
   local unit="$1"
   command -v systemctl >/dev/null 2>&1 || return 0
-  if "${BRAI_SUDO:-sudo}" systemctl cat "$unit" >/dev/null 2>&1; then
+  if systemctl cat "$unit" >/dev/null 2>&1; then
     "${BRAI_SUDO:-sudo}" systemctl stop "$unit" >&2
     "${BRAI_SUDO:-sudo}" systemctl reset-failed "$unit" >&2 || true
   fi
@@ -203,6 +203,9 @@ fi
 if [[ -n "$SLOT_LOWER" ]]; then
   stop_preview_unit_if_exists "brai-api-preview-$SLOT_LOWER.service"
   stop_preview_unit_if_exists "brai-admin-preview-$SLOT_LOWER.service"
+  for agent_slug in activity-classifier goal-item-matcher goal-member-finder goal-discovery goal-planner; do
+    stop_preview_unit_if_exists "brai-agent-$agent_slug-preview-$SLOT_LOWER.service"
+  done
 fi
 RELEASE_JSON="$(bash deploy/scripts/preview-slots.sh release "$RELEASE_BRANCH")"
 cleanup_released_preview_slot_artifacts

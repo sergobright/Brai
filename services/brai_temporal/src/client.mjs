@@ -6,6 +6,8 @@ import {
   PROMOTION_EVENTS,
   PROMOTION_TASK_QUEUE,
   STATE_QUERY,
+  previewDeployWorkflowId,
+  previewReadyForSha,
   previewWorkflowId,
   promotionWorkflowId
 } from "./state.mjs";
@@ -40,6 +42,10 @@ try {
     await dispatchReleasePreview(client, opts);
   } else if (command === "query-preview") {
     await queryWorkflow(client, previewWorkflowId(required(opts, "branch")));
+  } else if (command === "query-preview-deploy") {
+    await readWorkflowResult(client, previewDeployWorkflowId(required(opts, "branch"), required(opts, "sha")));
+  } else if (command === "cancel-preview-deploy") {
+    await cancelPreviewDeploy(client, opts);
   } else if (command === "query-promotion") {
     await queryWorkflow(client, promotionWorkflowId(required(opts, "target"), required(opts, "sha")));
   } else if (command === "inventory") {
@@ -63,13 +69,33 @@ try {
 async function dispatchPreviewDeploy(client, options) {
   const branch = required(options, "branch");
   const sha = required(options, "sha");
+  if (process.env.BRAI_TEMPORAL_EXACT_SHA_PREVIEW !== "true") {
+    throw new Error("dispatch-preview-deploy requires the exact-SHA branch worker");
+  }
   const event = buildEvent("preview_deploy_requested", options, sha);
-  const handle = await startAndSignalPreview(client, branch, sha, event);
-  const state = await waitForState(handle, (current) =>
-    current.status === "ready_for_review" ||
-    (current.tasks?.preview_deploy?.status === "passed" && current.tasks?.supabase_preview?.status === "passed")
-  );
+  const { handle, started } = await startOrGet(client, "BranchPreviewDeployWorkflow", {
+    args: [{
+      branch,
+      sha,
+      baseSha: event.baseSha,
+      at: event.at,
+      source: event.source
+    }],
+    taskQueue: process.env.BRAI_TEMPORAL_PREVIEW_TASK_QUEUE ?? PREVIEW_TASK_QUEUE,
+    workflowId: previewDeployWorkflowId(branch, sha),
+    workflowIdConflictPolicy: "TERMINATE_EXISTING"
+  });
+  console.log(`${started ? "started" : "using"} ${handle.workflowId} exact-sha-preview-deploy`);
+  const state = await waitForState(handle, (current) => previewReadyForSha(current, sha));
   printState(state);
+}
+
+async function cancelPreviewDeploy(client, options) {
+  const branch = required(options, "branch");
+  const sha = required(options, "sha");
+  const workflowId = previewDeployWorkflowId(branch, sha);
+  await client.workflow.getHandle(workflowId).cancel();
+  console.log(`cancelled ${workflowId}`);
 }
 
 async function dispatchNoPreviewHandoff(client, options) {
@@ -77,7 +103,9 @@ async function dispatchNoPreviewHandoff(client, options) {
   const sha = required(options, "sha");
   const event = buildEvent("no_preview_handoff_requested", options, sha);
   const handle = await startAndSignalPreview(client, branch, sha, event);
-  const state = await waitForState(handle, (current) => current.autoMerge === "enabled");
+  const state = await waitForState(handle, (current) =>
+    current.lastSha === sha && current.autoMerge === "enabled" && taskPassedForSha(current, "auto_merge", sha)
+  );
   printState(state);
 }
 
@@ -86,7 +114,9 @@ async function dispatchNoPreviewMerged(client, options) {
   const sha = required(options, "sha");
   const event = buildEvent("no_preview_merged_requested", options, sha);
   const handle = await startAndSignalPreview(client, branch, sha, event);
-  const state = await waitForState(handle, (current) => current.terminal && current.status === "no_preview_merged");
+  const state = await waitForState(handle, (current) =>
+    current.lastSha === sha && current.terminal && current.status === "no_preview_merged"
+  );
   printState(state);
 }
 
@@ -107,7 +137,7 @@ async function dispatchReleasePreview(client, options) {
   const sha = required(options, "sha");
   const event = buildEvent("slot_release_requested", options, sha);
   const handle = await startAndSignalPreview(client, branch, sha, event);
-  const state = await waitForState(handle, (current) => current.terminal);
+  const state = await waitForState(handle, (current) => current.lastSha === sha && current.terminal);
   printState(state);
 }
 
@@ -209,8 +239,17 @@ function isBlocked(state) {
   return state?.status === "waiting_for_fix" || Boolean(state?.blocker);
 }
 
+function taskPassedForSha(state, task, sha) {
+  return state.tasks?.[task]?.status === "passed" && state.tasks[task].sha === sha;
+}
+
 async function queryWorkflow(client, workflowId) {
   const state = await client.workflow.getHandle(workflowId).query(STATE_QUERY);
+  printState(state);
+}
+
+async function readWorkflowResult(client, workflowId) {
+  const state = await client.workflow.getHandle(workflowId).result();
   printState(state);
 }
 
@@ -280,6 +319,7 @@ async function queryWorkflowState(client, workflowId, timeoutMs) {
 }
 
 function groupFor(workflowId) {
+  if (workflowId.startsWith("brai:preview-deploy:")) return "brai-preview";
   if (workflowId.startsWith("brai:preview:")) return "brai-preview";
   if (workflowId.startsWith("brai:promotion:")) return "brai-promotion";
   if (workflowId.startsWith("bright-os:")) return "legacy-bright-os";
@@ -387,5 +427,7 @@ function usage() {
   npm run signal -- dispatch-release-preview --branch codex/example --sha <sha> --close-outcome abandoned_closed
   npm run signal -- promotion --target prod --sha <sha> --event prod_deploy_started
   npm run signal -- query-preview --branch codex/example
+  npm run signal -- query-preview-deploy --branch codex/example --sha <sha>
+  npm run signal -- cancel-preview-deploy --branch codex/example --sha <sha>
   npm run signal -- inventory [--status RUNNING] [--prefix brai:]`);
 }

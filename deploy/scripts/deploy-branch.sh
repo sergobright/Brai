@@ -171,13 +171,51 @@ export NEXT_PUBLIC_BRAI_COMMIT="$COMMIT"
 export NEXT_PUBLIC_BRAI_OTA_CHANNEL="$DOMAIN/mobile-update"
 export NEXT_PUBLIC_BRAI_API="/api"
 export NEXT_PUBLIC_BRAI_ANDROID_API="$ANDROID_API"
+RELEASE_TARGET="${BRAI_RELEASE_TARGET:-$ROOT/deploy/releases}"
 
 if [[ "$ENVIRONMENT" == preview-* && "$BRANCH" == codex/* && "${BRAI_NATIVE_APK_CHANGE:-false}" != "true" ]]; then
   export BRAI_TARGET_APK_VERSION="$("$NODE_BIN" "$SCRIPT_DIR/resolve-required-apk-version.mjs" prod apkVersion)"
   export BRAI_TARGET_APK_RELEASE_KEY="${SLOT,,}"
   export BRAI_TARGET_APK_BUILD_KIND="stable"
   export BRAI_TARGET_APK_PREVIEW_ITERATION="0"
-  export BRAI_TARGET_APK_VERSION_CODE="$BRAI_TARGET_APK_VERSION"
+  export BRAI_TARGET_APK_VERSION_CODE="$("$NODE_BIN" "$SCRIPT_DIR/resolve-required-apk-version.mjs" prod versionCode)"
+  "$NODE_BIN" -e '
+const fs = require("node:fs");
+const path = require("node:path");
+const [releaseIndex, releaseKey, targetApkVersion, targetVersionCode] = process.argv.slice(1);
+const fail = (reason) => {
+  console.error(`Cannot publish Preview ${releaseKey.toUpperCase()} OTA: ${reason}`);
+  process.exit(1);
+};
+if (!fs.existsSync(releaseIndex)) fail(`release index is missing: ${releaseIndex}`);
+let releases;
+try {
+  releases = JSON.parse(fs.readFileSync(releaseIndex, "utf8"));
+} catch {
+  fail(`release index is invalid: ${releaseIndex}`);
+}
+const production = releases.sections?.production;
+const slot = releases.sections?.[releaseKey];
+const productionApkVersion = Number(production?.apkVersion);
+const productionVersionCode = Number(production?.versionCode);
+if (!Number.isInteger(productionApkVersion) || productionApkVersion <= 0
+  || !Number.isInteger(productionVersionCode) || productionVersionCode <= 0) {
+  fail("Production APK baseline is missing apkVersion or versionCode");
+}
+if (productionApkVersion !== Number(targetApkVersion) || productionVersionCode !== Number(targetVersionCode)) {
+  fail("resolved Production APK target does not match releases.json");
+}
+if (!slot?.file) fail("stable slot APK release is missing");
+if (slot.apkBuildKind !== "stable") fail(`slot APK release is ${slot.apkBuildKind || "unknown"}, expected stable`);
+const releaseRoot = path.dirname(releaseIndex);
+const slotFile = path.resolve(releaseRoot, slot.file);
+if (path.dirname(slotFile) !== path.resolve(releaseRoot) || !fs.existsSync(slotFile)) {
+  fail(`stable slot APK artifact is missing: ${slot.file}`);
+}
+if (Number(slot.apkVersion) !== productionApkVersion || Number(slot.versionCode) !== productionVersionCode) {
+  fail(`stable slot APK baseline ${slot.apkVersion}/${slot.versionCode} does not match Production ${productionApkVersion}/${productionVersionCode}`);
+}
+' "$RELEASE_TARGET/releases.json" "$BRAI_TARGET_APK_RELEASE_KEY" "$BRAI_TARGET_APK_VERSION" "$BRAI_TARGET_APK_VERSION_CODE"
 fi
 
 "$SCRIPT_DIR/publish-client-web-layer.sh"
@@ -186,7 +224,6 @@ echo "Building Brai Admin..."
 (cd "$ROOT/admin" && npm run build)
 
 if [[ "$ENVIRONMENT" == "prod" ]]; then
-  RELEASE_TARGET="${BRAI_RELEASE_TARGET:-$ROOT/deploy/releases}"
   if [[ -f "$RELEASE_TARGET/releases.json" ]]; then
     BRAI_RELEASE_TARGET="$RELEASE_TARGET" "$NODE_BIN" "$SCRIPT_DIR/update-release-index.mjs" --render-only
   fi
@@ -227,8 +264,12 @@ fi
 
 if command -v systemctl >/dev/null 2>&1 && [[ "${BRAI_RESTART_SERVICE:-true}" != "false" ]]; then
   check_api_service_contract
-  echo "Restarting $SERVICE_NAME..."
-  "${BRAI_SUDO:-sudo}" systemctl restart "$SERVICE_NAME"
+  if [[ "${BRAI_API_ALREADY_RESTARTED:-false}" == "true" ]]; then
+    echo "Using the already provisionally verified $SERVICE_NAME."
+  else
+    echo "Restarting $SERVICE_NAME..."
+    "${BRAI_SUDO:-sudo}" systemctl restart "$SERVICE_NAME"
+  fi
   wait_for_preview_api
   if [[ "$ENVIRONMENT" == "prod" ]]; then
     echo "Running Codex CLI service smoke as brai..."
@@ -245,8 +286,6 @@ if [[ "$ENVIRONMENT" == preview-* ]]; then
   if [[ "$BRANCH" == codex/* && "${BRAI_NATIVE_APK_CHANGE:-false}" != "true" ]]; then
     "$SCRIPT_DIR/preview-slots.sh" clear-apk "$BRANCH" "$COMMIT" >/dev/null
   fi
-  echo "Marking preview slot ready..."
-  "$SCRIPT_DIR/preview-slots.sh" ready "$BRANCH" "$COMMIT" >/dev/null
 fi
 
-echo "Deployed $BRANCH@$COMMIT to $ENVIRONMENT ($DOMAIN) with bundle $BUNDLE_VERSION."
+echo "Deployed application $BRANCH@$COMMIT to $ENVIRONMENT ($DOMAIN) with bundle $BUNDLE_VERSION; Goal-agent gate remains pending."

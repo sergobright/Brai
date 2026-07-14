@@ -13,6 +13,27 @@
         name: "{{ brai_service_group }}"
         system: true
 
+    - name: Create Brai Goal agent group
+      ansible.builtin.group:
+        name: "{{ brai_goal_agent_group }}"
+        system: true
+      tags:
+        - brai-goal-agents
+
+    - name: Create Brai Codex executable group
+      ansible.builtin.group:
+        name: "{{ brai_codex_exec_group }}"
+        system: true
+      tags:
+        - brai-goal-agents
+
+    - name: Create Brai Codex auth group
+      ansible.builtin.group:
+        name: "{{ brai_codex_auth_group }}"
+        system: true
+      tags:
+        - brai-goal-agents
+
     - name: Create service user
       ansible.builtin.user:
         name: "{{ brai_service_user }}"
@@ -21,11 +42,49 @@
         create_home: false
         system: true
 
+    - name: Create isolated Brai Goal agent user
+      ansible.builtin.user:
+        name: "{{ brai_goal_agent_user }}"
+        group: "{{ brai_goal_agent_group }}"
+        groups:
+          - "{{ brai_codex_exec_group }}"
+          - "{{ brai_codex_auth_group }}"
+        append: false
+        shell: /usr/sbin/nologin
+        create_home: false
+        system: true
+      tags:
+        - brai-goal-agents
+
     - name: Allow service user to write deploy-owned runtime files
       ansible.builtin.user:
         name: "{{ brai_service_user }}"
         groups: "{{ brai_deploy_user }}"
         append: true
+
+    - name: Allow Brai API service to read Goal agent contracts and retain Codex access
+      ansible.builtin.user:
+        name: "{{ brai_service_user }}"
+        groups:
+          - "{{ brai_goal_agent_group }}"
+          - "{{ brai_codex_exec_group }}"
+          - "{{ brai_codex_auth_group }}"
+        append: true
+      when: not ansible_check_mode
+      notify: Restart active Brai API services after Codex access change
+      tags:
+        - brai-goal-agents
+
+    - name: Allow deploy user to publish Goal agent source and Codex executables
+      ansible.builtin.user:
+        name: "{{ brai_deploy_user }}"
+        groups:
+          - "{{ brai_goal_agent_group }}"
+          - "{{ brai_codex_exec_group }}"
+        append: true
+      when: not ansible_check_mode
+      tags:
+        - brai-goal-agents
 
     - name: Allow local deploy writers to update environment files
       ansible.builtin.user:
@@ -40,8 +99,11 @@
         state: directory
         owner: root
         group: "{{ brai_deploy_user }}"
-        mode: "0750"
+        # Service-specific env groups need pathname traversal, but only
+        # brai-deploy may list the directory. Individual files remain 0640.
+        mode: "0751"
       tags:
+        - brai-goal-agents
         - brai-env-contract
         - targeted-infra-apply
 
@@ -187,6 +249,92 @@
         - brai-env-contract
         - targeted-infra-apply
 
+    - name: Check shared Brai Codex auth files exist
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      register: brai_codex_auth_files
+      loop:
+        - "{{ brai_codex_auth_root }}/auth.json"
+        - "{{ brai_codex_auth_root }}/config.toml"
+      tags:
+        - brai-goal-agents
+
+    - name: Refuse to provision Goal agents without shared Codex auth files
+      ansible.builtin.fail:
+        msg: "{{ item.item }} is missing; provision Codex auth outside Git before installing Goal agents."
+      loop: "{{ brai_codex_auth_files.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+      when: not item.stat.exists
+      tags:
+        - brai-goal-agents
+
+    - name: Isolate shared Brai Codex auth directory
+      ansible.builtin.file:
+        path: "{{ brai_codex_auth_root }}"
+        state: directory
+        group: "{{ brai_codex_auth_group }}"
+        mode: "0750"
+      when: not ansible_check_mode
+      notify: Restart active Brai API services after Codex access change
+      tags:
+        - brai-goal-agents
+
+    - name: Grant only Brai Codex auth readers access to shared credentials
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: file
+        owner: root
+        group: "{{ brai_codex_auth_group }}"
+        mode: "0640"
+      loop:
+        - "{{ brai_codex_auth_root }}/auth.json"
+        - "{{ brai_codex_auth_root }}/config.toml"
+      when: not ansible_check_mode
+      notify: Restart active Brai API services after Codex access change
+      tags:
+        - brai-goal-agents
+
+    - name: Create isolated Brai Goal agent Codex home
+      ansible.builtin.file:
+        path: "{{ brai_goal_agent_codex_home }}"
+        state: directory
+        owner: "{{ brai_goal_agent_user }}"
+        group: "{{ brai_goal_agent_group }}"
+        mode: "0700"
+      when: not ansible_check_mode
+      tags:
+        - brai-goal-agents
+
+    - name: Link isolated Goal agent Codex home to read-only shared auth
+      ansible.builtin.file:
+        src: "{{ brai_codex_auth_root }}/{{ item }}"
+        dest: "{{ brai_goal_agent_codex_home }}/{{ item }}"
+        state: link
+        follow: false
+        owner: "{{ brai_goal_agent_user }}"
+        group: "{{ brai_goal_agent_group }}"
+        force: true
+      loop:
+        - auth.json
+        - config.toml
+      when: not ansible_check_mode
+      tags:
+        - brai-goal-agents
+
+    - name: Install Brai Goal agent environment contract
+      ansible.builtin.template:
+        src: templates/brai-goal-agents.env.j2
+        dest: "{{ brai_goal_agents_env_source }}"
+        owner: root
+        group: "{{ brai_goal_agent_group }}"
+        mode: "0640"
+      when: not ansible_check_mode
+      tags:
+        - brai-env-contract
+        - brai-goal-agents
+        - targeted-infra-apply
+
     - name: Create environment root
       ansible.builtin.file:
         path: "{{ brai_env_root }}"
@@ -219,15 +367,19 @@
         - "{{ brai_node_root }}"
         - "{{ brai_node_root }}/bin"
 
-    - name: Keep Node.js library directories private to deploy group
+    - name: Keep Node.js library directories private to Codex executable readers
       ansible.builtin.file:
         path: "{{ item }}"
         state: directory
-        group: "{{ brai_deploy_user }}"
+        group: "{{ brai_codex_exec_group }}"
         mode: "0750"
       loop:
         - "{{ brai_node_root }}/lib"
         - "{{ brai_node_root }}/lib/node_modules"
+      when: not ansible_check_mode
+      notify: Restart active Brai API services after Codex access change
+      tags:
+        - brai-goal-agents
 
     - name: Allow deploy user to execute Node.js binary
       ansible.builtin.file:
@@ -246,6 +398,89 @@
       loop:
         - "{{ brai_node_root }}/lib/node_modules/corepack"
         - "{{ brai_node_root }}/lib/node_modules/npm"
+
+    - name: Check Codex CLI package exists
+      ansible.builtin.stat:
+        path: "{{ brai_node_root }}/lib/node_modules/@openai/codex"
+      register: brai_codex_package
+      tags:
+        - brai-goal-agents
+
+    - name: Refuse to provision Goal agents without Codex CLI package
+      ansible.builtin.fail:
+        msg: "{{ brai_node_root }}/lib/node_modules/@openai/codex is missing; install Codex CLI before Goal agents."
+      when: not brai_codex_package.stat.exists
+      tags:
+        - brai-goal-agents
+
+    - name: Allow Codex executable readers to enter scoped package directory
+      ansible.builtin.file:
+        path: "{{ brai_node_root }}/lib/node_modules/@openai"
+        state: directory
+        group: "{{ brai_codex_exec_group }}"
+        mode: "0750"
+      when: not ansible_check_mode
+      notify: Restart active Brai API services after Codex access change
+      tags:
+        - brai-goal-agents
+
+    - name: Grant read and execute access only to the Codex CLI package
+      ansible.builtin.file:
+        path: "{{ brai_node_root }}/lib/node_modules/@openai/codex"
+        state: directory
+        group: "{{ brai_codex_exec_group }}"
+        mode: "u=rwX,g=rX,o="
+        recurse: true
+      when: not ansible_check_mode
+      notify: Restart active Brai API services after Codex access change
+      tags:
+        - brai-goal-agents
+
+    - name: Install Goal agent runtime preparation helper
+      ansible.builtin.template:
+        src: templates/brai-goal-agent-runtime-prepare.sh.j2
+        dest: "{{ brai_goal_agent_runtime_prepare }}"
+        owner: root
+        group: root
+        mode: "0755"
+        validate: "/bin/bash -n %s"
+      tags:
+        - brai-goal-agents
+
+    - name: Prepare and verify Goal agent Codex runtime access
+      ansible.builtin.command:
+        argv:
+          - "{{ brai_goal_agent_runtime_prepare }}"
+      changed_when: false
+      when: not ansible_check_mode
+      tags:
+        - brai-goal-agents
+
+    - name: Check managed Codex release sync helper
+      ansible.builtin.stat:
+        path: "{{ brai_codex_maintenance_sync }}"
+      register: brai_codex_maintenance_sync_file
+      tags:
+        - brai-goal-agents
+
+    - name: Refuse Goal agent runtime without managed Codex release sync
+      ansible.builtin.fail:
+        msg: "{{ brai_codex_maintenance_sync }} is missing; restore Codex maintenance before Goal agents."
+      when: not brai_codex_maintenance_sync_file.stat.exists
+      tags:
+        - brai-goal-agents
+
+    - name: Reconcile Goal agent access after every managed Codex update
+      ansible.builtin.blockinfile:
+        path: "{{ brai_codex_maintenance_sync }}"
+        marker: "# {mark} BRAI GOAL AGENT CODEX ACCESS"
+        insertafter: EOF
+        block: |
+          /usr/bin/sudo -n {{ brai_goal_agent_runtime_prepare }}
+        validate: "/bin/bash -n %s"
+      when: brai_codex_maintenance_sync_file.stat.exists
+      tags:
+        - brai-goal-agents
 
     - name: Ensure Syncthing apt keyring directory
       ansible.builtin.file:
@@ -524,6 +759,16 @@
         label: "{{ item.key }}"
       when: not ansible_check_mode
 
+    - name: Check Brai API source directories before active-service restart
+      ansible.builtin.stat:
+        path: "{{ brai_env_root }}/{{ item.value.path }}/source/services/brai_api"
+      loop: "{{ brai_envs | dict2items | list }}"
+      loop_control:
+        label: "{{ item.value.service }}"
+      register: brai_api_source_directories
+      tags:
+        - brai-goal-agents
+
     - name: Install Brai API systemd units
       ansible.builtin.template:
         src: templates/brai-api.service.j2
@@ -534,7 +779,11 @@
       loop: "{{ brai_envs | dict2items | list }}"
       loop_control:
         label: "{{ item.value.service }}"
-      notify: Reload systemd
+      notify:
+        - Reload systemd
+        - Restart active Brai API services after Codex access change
+      tags:
+        - brai-goal-agents
 
     - name: Install Brai Admin systemd units
       ansible.builtin.template:
@@ -547,6 +796,217 @@
       loop_control:
         label: "{{ item.value.admin_service }}"
       notify: Reload systemd
+
+    - name: Install environment-qualified Brai Goal agent systemd units
+      ansible.builtin.template:
+        src: templates/brai-goal-agent.service.j2
+        dest: "/etc/systemd/system/{{ item.1.value.unit_base }}{{ item.0.value.goal_agent_service_suffix }}.service"
+        owner: root
+        group: root
+        mode: "0644"
+      loop: "{{ brai_envs | dict2items | product(brai_goal_agents | dict2items) | list }}"
+      loop_control:
+        label: "{{ item.1.value.unit_base }}{{ item.0.value.goal_agent_service_suffix }}.service"
+      notify: Reload systemd
+      tags:
+        - brai-goal-agents
+
+    - name: Reload systemd before Goal agent identity verification
+      ansible.builtin.meta: flush_handlers
+      when: not ansible_check_mode
+      tags:
+        - brai-goal-agents
+
+    - name: Read Brai API service UID
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/id
+          - -u
+          - "{{ brai_service_user }}"
+      register: brai_api_effective_uid
+      changed_when: false
+      when: not ansible_check_mode
+      tags:
+        - brai-goal-agents
+
+    - name: Read effective Brai Goal agent UID through sudo
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/sudo
+          - -u
+          - "{{ brai_goal_agent_user }}"
+          - --
+          - /usr/bin/id
+          - -u
+      register: brai_goal_agent_effective_uid
+      changed_when: false
+      when: not ansible_check_mode
+      tags:
+        - brai-goal-agents
+
+    - name: Read effective Brai Goal agent groups through sudo
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/sudo
+          - -u
+          - "{{ brai_goal_agent_user }}"
+          - --
+          - /usr/bin/id
+          - -Gn
+      register: brai_goal_agent_effective_groups
+      changed_when: false
+      when: not ansible_check_mode
+      tags:
+        - brai-goal-agents
+
+    - name: Assert isolated Brai Goal agent effective identity
+      ansible.builtin.assert:
+        that:
+          - brai_goal_agent_effective_uid.stdout != brai_api_effective_uid.stdout
+          - (brai_goal_agent_effective_groups.stdout.split() | sort) == ([brai_goal_agent_group, brai_codex_exec_group, brai_codex_auth_group] | sort)
+          - brai_service_group not in brai_goal_agent_effective_groups.stdout.split()
+          - brai_deploy_user not in brai_goal_agent_effective_groups.stdout.split()
+        fail_msg: "Brai Goal agent effective UID/groups violate the API/deploy isolation contract."
+      when: not ansible_check_mode
+      tags:
+        - brai-goal-agents
+
+    - name: Assert Brai Goal agent cannot read API secrets
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/sudo
+          - -u
+          - "{{ brai_goal_agent_user }}"
+          - --
+          - /usr/bin/test
+          - "!"
+          - -r
+          - "{{ brai_api_env_source }}"
+      changed_when: false
+      when: not ansible_check_mode
+      tags:
+        - brai-goal-agents
+
+    - name: Assert Brai Goal agent can read only its environment contract
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/sudo
+          - -u
+          - "{{ brai_goal_agent_user }}"
+          - --
+          - /usr/bin/test
+          - -r
+          - "{{ brai_goal_agents_env_source }}"
+      changed_when: false
+      when: not ansible_check_mode
+      tags:
+        - brai-goal-agents
+
+    - name: Assert Brai Goal agent cannot list protected env directory
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/sudo
+          - -u
+          - "{{ brai_goal_agent_user }}"
+          - --
+          - /usr/bin/test
+          - "!"
+          - -r
+          - "{{ brai_protected_env_dir }}"
+      changed_when: false
+      when: not ansible_check_mode
+      tags:
+        - brai-goal-agents
+
+    - name: Assert Brai Goal agent can start Codex CLI
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/sudo
+          - -u
+          - "{{ brai_goal_agent_user }}"
+          - --
+          - /usr/bin/env
+          - "CODEX_HOME={{ brai_goal_agent_codex_home }}"
+          - "HOME={{ brai_goal_agent_codex_home }}"
+          - "{{ brai_codex_bin }}"
+          - --version
+      changed_when: false
+      when: not ansible_check_mode
+      tags:
+        - brai-goal-agents
+
+    - name: Assert Brai Goal agent can read shared Codex auth
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/sudo
+          - -u
+          - "{{ brai_goal_agent_user }}"
+          - --
+          - /usr/bin/test
+          - -r
+          - "{{ brai_goal_agent_codex_home }}/auth.json"
+      changed_when: false
+      when: not ansible_check_mode
+      tags:
+        - brai-goal-agents
+
+    - name: Read installed Brai Goal agent unit users
+      ansible.builtin.command:
+        argv:
+          - /bin/systemctl
+          - show
+          - --property=User
+          - --value
+          - "{{ item.1.value.unit_base }}{{ item.0.value.goal_agent_service_suffix }}.service"
+      loop: "{{ brai_envs | dict2items | product(brai_goal_agents | dict2items) | list }}"
+      loop_control:
+        label: "{{ item.1.value.unit_base }}{{ item.0.value.goal_agent_service_suffix }}.service"
+      register: brai_goal_agent_unit_users
+      changed_when: false
+      when: not ansible_check_mode
+      tags:
+        - brai-goal-agents
+
+    - name: Read installed Brai Goal agent unit groups
+      ansible.builtin.command:
+        argv:
+          - /bin/systemctl
+          - show
+          - --property=Group
+          - --value
+          - "{{ item.1.value.unit_base }}{{ item.0.value.goal_agent_service_suffix }}.service"
+      loop: "{{ brai_envs | dict2items | product(brai_goal_agents | dict2items) | list }}"
+      loop_control:
+        label: "{{ item.1.value.unit_base }}{{ item.0.value.goal_agent_service_suffix }}.service"
+      register: brai_goal_agent_unit_groups
+      changed_when: false
+      when: not ansible_check_mode
+      tags:
+        - brai-goal-agents
+
+    - name: Assert all Brai Goal agent units use the isolated identity
+      ansible.builtin.assert:
+        that:
+          - (brai_goal_agent_unit_users.results | map(attribute='stdout') | unique | list) == [brai_goal_agent_user]
+          - (brai_goal_agent_unit_groups.results | map(attribute='stdout') | unique | list) == [brai_goal_agent_group]
+        fail_msg: "At least one Goal agent systemd unit is not bound to the isolated Unix identity."
+      when: not ansible_check_mode
+      tags:
+        - brai-goal-agents
+
+    - name: Verify installed Brai Goal agent systemd units
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/systemd-analyze
+          - verify
+          - "/etc/systemd/system/{{ item.1.value.unit_base }}{{ item.0.value.goal_agent_service_suffix }}.service"
+      loop: "{{ brai_envs | dict2items | product(brai_goal_agents | dict2items) | list }}"
+      loop_control:
+        label: "{{ item.1.value.unit_base }}{{ item.0.value.goal_agent_service_suffix }}.service"
+      changed_when: false
+      when: not ansible_check_mode
+      tags:
+        - brai-goal-agents
 
     - name: Install Brai main checkout sync script
       ansible.builtin.copy:
@@ -817,11 +1277,25 @@
         group: root
         mode: "0440"
         validate: "visudo -cf %s"
+      tags:
+        - brai-goal-agents
 
   handlers:
     - name: Reload systemd
       ansible.builtin.systemd_service:
         daemon_reload: true
+
+    - name: Restart active Brai API services after Codex access change
+      ansible.builtin.command:
+        argv:
+          - /bin/systemctl
+          - try-restart
+          - "{{ item.item.value.service }}"
+      loop: "{{ brai_api_source_directories.results | default([]) }}"
+      loop_control:
+        label: "{{ item.item.value.service }}"
+      when: item.stat.exists
+      changed_when: true
 
     - name: Validate Caddy
       ansible.builtin.command:

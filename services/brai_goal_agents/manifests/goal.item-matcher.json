@@ -1,0 +1,71 @@
+{
+  "id": "goal.item-matcher",
+  "version": "1",
+  "workflow_definition_version": 1,
+  "worker_build_id": "goal-item-matcher.v1",
+  "workflow_type": "GoalItemMatcherWorkflow",
+  "queue_base": "brai-agent-goal-item-matcher",
+  "entrypoint": "src/entrypoints/goal-item-matcher.mjs",
+  "input_schema_version": "brai.goal-agent.input.v1",
+  "prompt_version": "goal-item-matcher.v1",
+  "output_schema_version": "brai.goal-item-matcher.result.v1",
+  "model_env": "BRAI_GOAL_ITEM_MATCHER_MODEL",
+  "default_model": "gpt-5.4-mini",
+  "timeout_ms": 60000,
+  "retry": { "schema_attempts": 3 },
+  "decision_kinds": ["relation_add"],
+  "review_only": false,
+  "page_size": 50,
+  "prompt": "Для одного Action или нормализованной Operation выбери подходящие существующие Goals из переданной страницы до 50 записей. Предлагай только directed relation part_of от work Item к Goal. Не создавай Goals, не повторяй существующие memberships и не используй ID вне входного snapshot.",
+  "output_schema": {
+    "type": "object",
+    "required": ["schema_version", "agent_id", "agent_version", "decisions"],
+    "additionalProperties": false,
+    "properties": {
+      "schema_version": { "type": "string", "const": "1" },
+      "agent_id": { "type": "string", "const": "goal.item-matcher" },
+      "agent_version": { "type": "string", "const": "1" },
+      "decisions": {
+        "type": "array",
+        "maxItems": 50,
+        "items": {
+          "type": "object",
+          "required": ["decision_kind", "subject_items_id", "confidence", "rationale", "evidence", "proposal"],
+          "additionalProperties": false,
+          "properties": {
+            "decision_kind": { "type": "string", "const": "relation_add" },
+            "subject_items_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+            "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+            "rationale": { "type": "string", "minLength": 1, "maxLength": 500 },
+            "evidence": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 5,
+              "items": {
+                "type": "object",
+                "required": ["items_id", "field", "excerpt"],
+                "additionalProperties": false,
+                "properties": {
+                  "items_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+                  "field": { "type": "string", "enum": ["title", "description_md", "reason", "normalization"] },
+                  "excerpt": { "type": "string", "minLength": 1, "maxLength": 200 }
+                }
+              }
+            },
+            "proposal": {
+              "type": "object",
+              "required": ["relation_type_id", "source_items_id", "target_items_id", "suggested_position"],
+              "additionalProperties": false,
+              "properties": {
+                "relation_type_id": { "type": "string", "const": "part_of" },
+                "source_items_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+                "target_items_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+                "suggested_position": { "type": ["integer", "null"], "minimum": 0, "maximum": 2147483647 }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

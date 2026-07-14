@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { cancellationSignal } from "@temporalio/activity";
 import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -13,6 +14,27 @@ export async function deployBranch({ branch, sha, baseSha = "" }) {
 
   return withSourceCheckout({ branch, sha }, async (cwd, gitEnv) => {
     const result = await runExistingScript("deploy/scripts/ci-ssh-deploy.sh", [], {
+      cwd,
+      env: await deployEnv({
+        ...gitEnv,
+        BRAI_BRANCH: branch,
+        BRAI_COMMIT: sha,
+        BRAI_BASE_COMMIT: baseSha
+      })
+    });
+    return {
+      ...result,
+      previewSlot: parsePreviewSlot(result.stdout)
+    };
+  });
+}
+
+export async function verifyGoalAgentDeployment({ branch, sha, baseSha = "" }) {
+  assertSafeBranch(branch);
+  assertSafeSha(sha);
+
+  return withSourceCheckout({ branch, sha }, async (cwd, gitEnv) => {
+    const result = await runExistingScript("deploy/scripts/ci-ssh-deploy-goal-agents.sh", [], {
       cwd,
       env: await deployEnv({
         ...gitEnv,
@@ -255,9 +277,11 @@ function runExistingScript(script, args, { cwd, env }) {
 
 function runCommand(command, args, { cwd = ROOT, env = process.env, allowFailure = false } = {}) {
   return new Promise((resolve, reject) => {
+    const signal = activityCancellationSignal();
     const child = spawn(command, args, {
       cwd,
       env,
+      ...(signal ? { signal } : {}),
       stdio: ["ignore", "pipe", "pipe"]
     });
     let stdout = "";
@@ -275,6 +299,14 @@ function runCommand(command, args, { cwd = ROOT, env = process.env, allowFailure
       else reject(Object.assign(new Error(commandFailureMessage(command, code, stdout, stderr)), result));
     });
   });
+}
+
+function activityCancellationSignal() {
+  try {
+    return cancellationSignal();
+  } catch {
+    return null;
+  }
 }
 
 function parsePreviewSlot(output) {

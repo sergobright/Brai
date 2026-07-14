@@ -262,7 +262,7 @@ test("shows Engine in the mobile dock overflow menu", async ({ page }, testInfo)
 test("keeps Engine text out of the collapsed desktop rail on load", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop", "desktop-only rail");
 
-  await page.context().addCookies([{ name: "sidebar_state", value: "false", url: "http://127.0.0.1:3201" }]);
+  await page.context().addCookies([{ name: "sidebar_state", value: "false", url: `http://127.0.0.1:${process.env.BRAI_PLAYWRIGHT_PORT ?? "3201"}` }]);
   await page.goto("/engine");
 
   const rail = page.locator(".desktop-rail");

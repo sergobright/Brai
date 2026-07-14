@@ -331,7 +331,7 @@ export function ActivityDetailEditor({
       <div className={infoChromeInset}>
         <DetailPanelTabBar activeTab={activeTab} className="mt-0" onChange={setActiveTab} />
       </div>
-      <ScrollArea className="actions-detail-description-scroll min-h-0 w-full min-w-0" role="tabpanel">
+      <ScrollArea className="actions-detail-description-scroll min-h-0 w-full min-w-0" contentInset="none" role="tabpanel">
         <div className={cx("min-h-full w-full min-w-0", infoScrollInset)}>
           {detailTitle}
           <div className="h-px bg-border" aria-hidden="true" />
@@ -349,7 +349,7 @@ export function ActivityDetailEditor({
     </>
   );
   const panelRows = activeTab === "info" ? "grid-rows-[auto_auto_minmax(0,1fr)]" : "grid-rows-[auto_auto_auto_auto_minmax(0,1fr)]";
-  const panelPadding = activeTab === "info" ? "px-0" : mode === "mobile" ? "px-[18px]" : "pl-7 pr-7";
+  const panelPadding = activeTab === "info" ? "px-0" : mode === "mobile" ? "pl-[18px] pr-5" : "pl-7 pr-7";
 
   if (mode === "mobile") {
     return (

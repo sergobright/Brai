@@ -1,10 +1,19 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { Card } from "@/shared/ui/card";
 import { ScrollArea } from "@/shared/ui/scroll-area";
 import { cx } from "../../appUtils";
 
-export function ActionsInfoPanel({ label = "Информация о действиях", mobile = false }: { label?: string; mobile?: boolean }) {
+export function ActionsInfoPanel({
+  children,
+  label = "Информация о действиях",
+  mobile = false,
+}: {
+  children?: ReactNode;
+  label?: string;
+  mobile?: boolean;
+}) {
   return (
     <aside
       className={cx(
@@ -17,14 +26,10 @@ export function ActionsInfoPanel({ label = "Информация о действ
       data-nav-swipe-exclusion
     >
       {mobile ? (
-        <Card className="min-h-40 p-5">
-          <p className="m-0 text-sm font-normal text-muted-foreground">Панель информации</p>
-        </Card>
+        <Card className="min-h-40 p-3">{children ?? <p className="m-0 text-sm font-normal text-muted-foreground">Панель информации</p>}</Card>
       ) : (
         <ScrollArea className="min-h-0">
-          <Card className="min-h-40 p-5">
-            <p className="m-0 text-sm font-normal text-muted-foreground">Панель информации</p>
-          </Card>
+          <Card className="min-h-40 p-3">{children ?? <p className="m-0 text-sm font-normal text-muted-foreground">Панель информации</p>}</Card>
         </ScrollArea>
       )}
     </aside>

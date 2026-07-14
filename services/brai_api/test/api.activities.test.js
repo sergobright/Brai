@@ -147,23 +147,11 @@ test('action created through sync is normalized into an Activity role', async ()
   }
 });
 
-test('future UI-created operation uses the Activity normalization workflow', async () => {
-  const fixture = await createFixture([
-    '2026-06-16T10:00:00.000Z',
-    '2026-06-16T10:00:01.000Z',
-    '2026-06-16T10:00:02.000Z'
-  ], {
-    activityAutoProcess: true,
-    activityNormalizer: async ({ item }) => ({
-      title: `${item.title} normalized`,
-      description: `${item.description_md} normalized`,
-      reason: item.reason ? `${item.reason} normalized` : '',
-      normalization: `Activity subtype: ${item.activity_type_id}`
-    })
-  });
+test('new Activity Operations are rejected because Operations belong to normalized Inbox', async () => {
+  const fixture = await createFixture(['2026-06-16T10:00:00.000Z']);
 
   try {
-    await request(fixture.url, '/v1/activities/events/sync', {
+    const response = await request(fixture.url, '/v1/activities/events/sync', {
       method: 'POST',
       body: JSON.stringify({
         device: { device_id: 'web-device', platform: 'web' },
@@ -177,14 +165,10 @@ test('future UI-created operation uses the Activity normalization workflow', asy
       })
     });
 
-    await waitFor(() => fixture.store.getActivityItem('operation-1')?.item_roles_id != null);
-    const operation = fixture.store.getActivityItem('operation-1');
-    assert.equal(operation.activity_type_id, 'operation');
-    assert.equal(operation.author, 'User');
-    assert.equal(operation.title, 'UI operation normalized');
-    assert.equal(operation.description_md, 'Raw operation normalized');
-    assert.equal(operation.reason, 'Future UI source normalized');
-    assert.ok(Number.isInteger(operation.item_roles_id));
+    assert.deepEqual(response.body.ignored_events, [
+      { event_id: 'operation-create', reason: 'invalid_activity_type' }
+    ]);
+    assert.equal(fixture.store.getActivityItem('operation-1'), null);
   } finally {
     await fixture.close();
   }

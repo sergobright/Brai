@@ -42,7 +42,7 @@ test("renders the mobile floating dock without inactive circular backgrounds", a
 test("keeps the desktop rail static and compact across reloads", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop", "desktop-only rail");
 
-  await page.context().addCookies([{ name: "sidebar_state", value: "true", url: "http://127.0.0.1:3201" }]);
+  await page.context().addCookies([{ name: "sidebar_state", value: "true", url: `http://127.0.0.1:${process.env.BRAI_PLAYWRIGHT_PORT ?? "3201"}` }]);
   await page.goto("/");
   await expect(page.locator(".desktop-rail")).not.toHaveClass(/expanded/);
   await expect

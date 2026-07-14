@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { Pool } from 'pg';
+import { loadGoalAgentManifests } from '../src/goal-agent-workflow-runtime.js';
 import { createBraiServer } from '../src/server.js';
 
 export const TOKEN = 'test-token';
@@ -75,10 +76,13 @@ export async function createFixture(times, options = {}) {
       commit: options.commit,
       databaseBranch: options.databaseBranch,
       testEmailLogin: options.testEmailLogin,
+      goalAgentsEnabled: options.goalAgentsEnabled ?? true,
       shutdownGraceMs: options.shutdownGraceMs,
       now: () => new Date(times[Math.min(index++, times.length - 1)]),
       logger: options.logger ?? { error: () => {} }
     });
+    runtime.store.configureGoalAgentEnvironment(options.goalAgentEnvironment ?? 'prod');
+    runtime.store.syncGoalAgentCatalog(await loadGoalAgentManifests(), times[0]);
 
     const close = async () => {
       if (closed) return;
@@ -99,6 +103,8 @@ export async function createFixture(times, options = {}) {
     return {
       url: `http://127.0.0.1:${address.port}`,
       wsUrl: `ws://127.0.0.1:${address.port}`,
+      databaseUrl: database.url,
+      openDatabasePool: () => new Pool({ connectionString: database.url, ssl: postgresSsl(database.url) }),
       runtime,
       store: runtime.store,
       close
@@ -243,6 +249,10 @@ export async function createTestDatabase(migrations = [
   '0020_inbox_operation_status.sql',
   '0021_activity_raw_normalization_workflows.sql',
   '0022_activity_image_describer_workflow_step.sql',
+  '0027_relations_goal_catalog.sql',
+  '0028_context_decision_calibration.sql',
+  '0029_goal_agent_workflows.sql',
+  '0030_authenticated_brai_cmd_tokens_compat.sql',
   '0026_user_ai_provider_credentials.sql'
 ]) {
   const baseUrl = process.env.BRAI_TEST_DATABASE_URL?.trim();

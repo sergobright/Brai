@@ -102,7 +102,7 @@ export const activityWorkflowStoreMethods = {
       WHERE w.role_contract_id = 'activity'
         AND w.status = 'queued'
         AND a.item_roles_id IS NULL
-        AND a.activity_type_id IN ('action', 'operation')
+        AND a.activity_type_id IN ('action', 'goal')
       ORDER BY w.created_at_utc, w.id
       LIMIT ?
     `).all(rowLimit);
@@ -433,6 +433,15 @@ export const activityWorkflowStoreMethods = {
           AND run_id IS NOT DISTINCT FROM ?
       `).run(localStatus, completedAt, now, execution.id, operationId, temporalRunId);
       if (updatedExecution.changes !== 1) throw businessError('workflow_execution_changed');
+      if (scopedUserId() && this.getAgent('goal.discovery')) {
+        this.scheduleGoalAgentForActivity({
+          itemsId: id,
+          triggerKind: 'activity_normalized',
+          triggerRevision: this.getActivityServerRevision(),
+          nowIso: now
+        });
+        this.noteGoalDiscoveryChanges({ nowIso: now });
+      }
       return { ok: true, idempotent: false, items_id: id, item_roles_id: linked.item_roles_id, workflow_execution_id: execution.id };
     });
     const result = run();

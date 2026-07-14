@@ -20,6 +20,7 @@ export const inboxEventMethods = {
       .prepare(
         `
           SELECT i.*,
+            ir.items_id,
             w.status AS workflow_status,
             w.current_step AS workflow_step,
             w.attempt_count AS workflow_attempt_count,
@@ -27,14 +28,46 @@ export const inboxEventMethods = {
             w.workflow_id AS temporal_workflow_id,
             w.run_id AS temporal_run_id
           FROM inbox i
+          LEFT JOIN item_roles ir ON ir.id = i.item_roles_id
           LEFT JOIN workflow_executions w ON w.id = i.workflow_execution_id
           WHERE i.deleted_at_utc IS NULL
+            AND (i.item_roles_id IS NULL OR ir.status = 'active')
             ${scope.clause}
           ORDER BY
             CASE WHEN i.sort_order IS NULL THEN 0 ELSE 1 END ASC,
             CASE WHEN i.sort_order IS NULL THEN COALESCE(i.restored_at_utc, i.created_at_utc) END DESC,
             i.sort_order ASC,
             i.updated_at_utc DESC,
+            i.id ASC
+        `
+      )
+      .all(...scope.params)
+      .map(formatInboxItem);
+  }
+,
+
+  listOperations() {
+    const scope = scopeSql('i');
+    return this.db
+      .prepare(
+        `
+          SELECT i.*, ir.items_id,
+            w.status AS workflow_status,
+            w.current_step AS workflow_step,
+            w.attempt_count AS workflow_attempt_count,
+            w.last_error AS workflow_last_error,
+            w.workflow_id AS temporal_workflow_id,
+            w.run_id AS temporal_run_id
+          FROM inbox i
+          JOIN item_roles ir ON ir.id = i.item_roles_id AND ir.status = 'active'
+          LEFT JOIN workflow_executions w ON w.id = i.workflow_execution_id
+          WHERE i.deleted_at_utc IS NULL
+            AND i.preliminary_section = 'operation'
+            AND i.is_normalized = 1
+            ${scope.clause}
+          ORDER BY
+            CASE i.status WHEN 'New' THEN 0 ELSE 1 END,
+            COALESCE(i.completed_at_utc, i.updated_at_utc) DESC,
             i.id ASC
         `
       )
@@ -65,6 +98,7 @@ export const inboxEventMethods = {
     return formatInboxItem(this.db
       .prepare(`
         SELECT i.*,
+          ir.items_id,
           w.status AS workflow_status,
           w.current_step AS workflow_step,
           w.attempt_count AS workflow_attempt_count,
@@ -72,6 +106,7 @@ export const inboxEventMethods = {
           w.workflow_id AS temporal_workflow_id,
           w.run_id AS temporal_run_id
         FROM inbox i
+        LEFT JOIN item_roles ir ON ir.id = i.item_roles_id
         LEFT JOIN workflow_executions w ON w.id = i.workflow_execution_id
         WHERE i.id = ? ${scope.clause}
       `)
@@ -231,6 +266,7 @@ export const inboxEventMethods = {
         throw statusError('not_found', 404);
       }
       if (item.status === status) return { inbox_id: item.id, changed: false, status };
+      this.lockGoalInvariantLists({ memberItemsIds: [item.id] });
 
       const clientSequence = this.nextInboxClientSequence(deviceId);
       const eventId = `inbox:api:${cleanHash.slice(0, 32)}:status:${String(status).toLowerCase()}:${clientSequence}`;
@@ -264,6 +300,12 @@ export const inboxEventMethods = {
         server_sequence: eventSequence,
         payload_json: JSON.stringify({ status })
       }], receivedAt);
+      const reopenedGoalIds = this.recheckGoalsForMember(item.id, {
+        reason: 'operation_status_changed',
+        causalEventId: eventId,
+        operationId: eventId,
+        nowIso: receivedAt
+      });
       recordInboxTechnicalLog(this, {
         dt: receivedAt,
         source: 'inbox',
@@ -280,7 +322,7 @@ export const inboxEventMethods = {
           changed: true
         }
       });
-      return { inbox_id: item.id, changed: true, status };
+      return { inbox_id: item.id, changed: true, status, reopened_goal_ids: reopenedGoalIds };
     });
     return run();
   }
@@ -349,6 +391,7 @@ export const inboxEventMethods = {
     const serverClockOffsetMs = Number.isFinite(Date.parse(lastKnownServerTimeUtc))
       ? Date.parse(receivedAt) - Date.parse(lastKnownServerTimeUtc)
       : null;
+    const uploaded = Array.isArray(events) ? events : [];
     const acknowledged = [];
     const ignored = [];
     const acceptedEvents = [];
@@ -364,14 +407,35 @@ export const inboxEventMethods = {
         { lastSyncAtUtc: receivedAt, lastServerClockOffsetMs: serverClockOffsetMs }
       );
 
-      for (const rawEvent of Array.isArray(events) ? events : []) {
+      const invariantItemsIds = invariantMutationItems(uploaded);
+      this.lockGoalInvariantLists({ memberItemsIds: invariantItemsIds });
+      for (const rawEvent of uploaded) {
         const result = this.ingestInboxEvent(deviceId, rawEvent, receivedAt);
         if (result.event_id) acknowledged.push(result.event_id);
         if (result.ignored) ignored.push(result.ignored);
-        if (result.accepted_event) acceptedEvents.push(result.accepted_event);
+        if (result.accepted_event) {
+          acceptedEvents.push(result.accepted_event);
+          this.projectAcceptedInboxEvents([result.accepted_event], receivedAt);
+          this.reconcileInboxRelations([result.accepted_event], receivedAt);
+        }
       }
-
-      this.projectAcceptedInboxEvents(acceptedEvents, receivedAt);
+      if (scopedUserId() && this.getAgent('goal.discovery')) {
+        const revision = this.getInboxServerRevision();
+        for (const event of acceptedEvents.filter((entry) =>
+          ['update_title', 'update_description'].includes(entry.type))) {
+          this.scheduleGoalAgentForInbox({
+            inboxId: event.inbox_id,
+            triggerKind: 'inbox_meaningful_text_changed',
+            triggerRevision: revision,
+            nowIso: receivedAt
+          });
+        }
+        const relevantCount = acceptedEvents.filter((event) => {
+          if (!['update_title', 'update_description', 'set_status', 'delete'].includes(event.type)) return false;
+          return this.getInboxItem(event.inbox_id)?.preliminary_section === 'operation';
+        }).length;
+        if (relevantCount > 0) this.noteGoalDiscoveryChanges({ count: relevantCount, nowIso: receivedAt });
+      }
     });
     run();
 
@@ -882,6 +946,11 @@ function statusError(message, status) {
   const error = new Error(message);
   error.status = status;
   return error;
+}
+
+function invariantMutationItems(events) {
+  return [...new Set(events.filter((event) => ['set_status', 'delete'].includes(sanitizeText(event?.type)))
+    .map((event) => sanitizeText(event?.inbox_id)).filter(Boolean))];
 }
 
 export function recordInboxTechnicalLog(store, input) {

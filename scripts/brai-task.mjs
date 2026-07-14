@@ -87,6 +87,7 @@ export {
   linkDependencyDirs,
   findOpenTaskForThread,
   parseHookInput,
+  readPreviewSlot,
   taskStartGuidance,
   taskWorktreeParent,
   validateSocraticodeRequirement,
@@ -787,8 +788,8 @@ function serverAccessContract(root = process.env.BRAI_ROOT ?? "/srv/projects/bra
       owner: "root",
       group: deployGroup,
       expectDirectory: true,
-      requiredModeBits: 0o750,
-      forbiddenModeBits: 0o007,
+      requiredModeBits: 0o751,
+      forbiddenModeBits: 0o006,
     }),
     contractPathCheck("runtime api env", apiEnvFile, {
       sudoStat: true,
@@ -2113,31 +2114,52 @@ function findSuccessfulDeliveryRun(branch, sha, requiredJobs = ["public-guard", 
 
 function readPreviewSlot(branch, sha) {
   const registryPath = process.env.BRAI_PREVIEW_REGISTRY ?? "/srv/projects/brai-envs/preview-slots.json";
+  let registrySlot = null;
   if (fs.existsSync(registryPath)) {
     const registry = JSON.parse(fs.readFileSync(registryPath, "utf8"));
     for (const slot of ["A", "B", "C", "D", "E"]) {
       const entry = registry[slot] ?? {};
-      if (entry.branch === branch && entry.commit === sha && entry.status === "ready") return slot;
+      if (entry.branch !== branch) continue;
+      if (entry.commit !== sha) throw new Error(`${branch} preview slot ${slot} belongs to ${entry.commit || "(missing)"}, not ${sha}.`);
+      if (entry.status === "ready") {
+        registrySlot = slot;
+        break;
+      }
+      throw new Error(`${branch}@${sha} preview slot ${slot} is ${entry.status || "unknown"}, not ready.`);
     }
-    const queuedIndex = Array.isArray(registry.queue) ? registry.queue.findIndex((entry) => entry?.branch === branch && entry?.commit === sha) : -1;
-    if (queuedIndex >= 0) throw new Error(`${branch}@${sha} is queued for preview at position ${queuedIndex + 1}.`);
+    const queuedIndex = Array.isArray(registry.queue) ? registry.queue.findIndex((entry) => entry?.branch === branch) : -1;
+    if (queuedIndex >= 0) {
+      const queued = registry.queue[queuedIndex];
+      if (queued.commit !== sha) throw new Error(`${branch} preview queue entry belongs to ${queued.commit || "(missing)"}, not ${sha}.`);
+      throw new Error(`${branch}@${sha} is queued for preview at position ${queuedIndex + 1}.`);
+    }
   }
 
-  const temporal = queryTemporalPreview(branch);
-  const slot = temporal.slot ?? temporal.tasks?.slot?.slot ?? temporal.previewSlot;
-  const status = temporal.status ?? temporal.state?.status;
-  const blocker = temporal.blocker ?? temporal.state?.blocker;
+  const queried = queryTemporalPreview(branch, sha);
+  const temporal = queried.state ?? queried;
+  const slot = temporal.slot ?? temporal.previewSlot;
+  const status = temporal.status;
+  const blocker = temporal.blocker;
+  if (temporal.lastSha !== sha) throw new Error(`Temporal preview state is for ${temporal.lastSha || "(missing)"}, not ${branch}@${sha}.`);
   if (!slot || !/^[A-E]$/.test(slot)) throw new Error(`Temporal did not report a preview slot for ${branch}@${sha}.`);
+  if (registrySlot && registrySlot !== slot) {
+    throw new Error(`${branch}@${sha} registry slot ${registrySlot} does not match Temporal slot ${slot}.`);
+  }
   if (blocker) throw new Error(`Temporal preview blocker: ${typeof blocker === "string" ? blocker : JSON.stringify(blocker)}`);
-  if (status && !["ready_for_review", "ready"].includes(status)) throw new Error(`Temporal preview state is ${status}, not ready_for_review.`);
-  return slot;
+  if (!["ready_for_review", "ready"].includes(status)) throw new Error(`Temporal preview state is ${status || "(missing)"}, not ready_for_review.`);
+  for (const task of ["checks", "supabase_preview", "goal_agents_deploy", "preview_deploy"]) {
+    if (temporal.tasks?.[task]?.status !== "passed" || temporal.tasks[task].sha !== sha) {
+      throw new Error(`Temporal preview task ${task} is not passed for ${branch}@${sha}.`);
+    }
+  }
+  return registrySlot ?? slot;
 }
 
-function queryTemporalPreview(branch) {
-  const result = spawnSync("deploy/scripts/ci-temporal-signal.sh", ["query-preview", "--branch", branch], {
+function queryTemporalPreview(branch, sha) {
+  const result = spawnSync("deploy/scripts/ci-temporal-signal.sh", ["query-preview-deploy", "--branch", branch, "--sha", sha], {
     cwd: git("rev-parse", "--show-toplevel"),
     encoding: "utf8",
-    env: { ...process.env, BRAI_TEMPORAL_REQUIRED: "true" },
+    env: { ...gitEnv(), BRAI_TEMPORAL_REQUIRED: "true" },
   });
   if (result.status !== 0) {
     throw new Error(`Temporal query failed:\n${result.stderr || result.stdout || "(no output)"}`);

@@ -5,6 +5,8 @@ import { createQueuedInboxWorkflowReconciler } from '../src/inbox-workflow-runti
 import { actionEvent, createFixture, request, waitFor } from '../test-support/api.js';
 import { withUserScope } from '../src/user-scope.js';
 
+const GOAL_OWNER = 'raw-goal-owner';
+
 test('Activity normalization retries validation failures three times and requests review', async () => {
   const fixture = await createRawActivity('activity-needs-review');
   const validationErrors = [];
@@ -213,6 +215,58 @@ test('Activity Temporal dispatch failure stays queued for recovery', async () =>
   }
 });
 
+test('raw Goal is dispatched, normalized, and becomes a valid Relation endpoint', async () => {
+  const now = '2026-07-12T20:00:00.000Z';
+  const fixture = await createFixture([now]);
+  try {
+    claimGoalOwner(fixture, now);
+    withUserScope(GOAL_OWNER, () => fixture.store.syncActivityEvents({
+      device: { device_id: 'raw-goal-device', platform: 'web' },
+      events: [actionEvent('raw-goal-create', 1, 'create', 'raw-goal', now, {
+        title: 'Сырая цель', description_md: 'Довести Relations до Preview', activity_type_id: 'goal'
+      })],
+      nowIso: now
+    }));
+
+    assert.deepEqual(fixture.store.listQueuedActivityWorkflowStarts(), [{
+      activity_id: 'raw-goal', owner_user_id: GOAL_OWNER
+    }]);
+    const normalized = await withUserScope(GOAL_OWNER, () => processActivityItem({
+      store: fixture.store,
+      activityId: 'raw-goal',
+      codexModel: 'test-model',
+      normalizer: async () => ({
+        title: 'Довести Relations до Preview',
+        description: 'Подготовить и проверить Relations перед Preview.',
+        reason: '',
+        normalization: 'Raw Goal нормализован без смены доменного типа.'
+      }),
+      nowDate: new Date('2026-07-12T20:00:01.000Z')
+    }));
+
+    assert.equal(normalized.items_id, 'raw-goal');
+    const goal = withUserScope(GOAL_OWNER, () => fixture.store.getActivityItem('raw-goal'));
+    assert.equal(goal.activity_type_id, 'goal');
+    assert.ok(goal.item_roles_id);
+    assert.equal(goal.workflow_status, 'completed');
+
+    withUserScope(GOAL_OWNER, () => {
+      seedNormalizedAction(fixture.store, 'raw-goal-member', now);
+      fixture.store.createRelationWithEvent({
+        id: 'raw-goal-relation', relationTypeId: 'part_of',
+        sourceItemsId: 'raw-goal-member', targetItemsId: 'raw-goal',
+        operationId: 'raw-goal-relation-operation', actorType: 'user', actorId: GOAL_OWNER,
+        nowIso: '2026-07-12T20:00:02.000Z'
+      });
+      assert.deepEqual(fixture.store.listGoalMembers('raw-goal').map((member) => member.items_id), [
+        'raw-goal-member'
+      ]);
+    });
+  } finally {
+    await fixture.close();
+  }
+});
+
 test('Activity completion observer failure remains running for durable reconciliation', async () => {
   const errors = [];
   let fixture;
@@ -318,6 +372,29 @@ function activityAiLogCount(fixture, activityId) {
     FROM ai_logs
     WHERE agent_id = 'activity.normalizer' AND flow_id = ?
   `).get(activityId).count);
+}
+
+function claimGoalOwner(fixture, nowIso) {
+  fixture.store.db.prepare(`
+    INSERT INTO "user" (id, name, email, "emailVerified", "createdAt", "updatedAt")
+    VALUES (?, 'Raw Goal Owner', 'raw-goal-owner@example.test', true, now(), now())
+  `).run(GOAL_OWNER);
+  fixture.store.db.prepare(`
+    INSERT INTO app_settings (key, value, updated_at_utc)
+    VALUES ('primary_user_id', ?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value
+  `).run(GOAL_OWNER, nowIso);
+}
+
+function seedNormalizedAction(store, id, nowIso) {
+  store.db.prepare(`
+    INSERT INTO activities (
+      id, activity_type_id, title, description_md, author, reason, status,
+      created_at_utc, updated_at_utc, user_id
+    ) VALUES (?, 'action', ?, '', '', '', 'New', ?, ?, ?)
+  `).run(id, id, nowIso, nowIso, GOAL_OWNER);
+  store.ensureActivityRoleLink({
+    id, title: id, description_md: '', author: '', created_at_utc: nowIso, updated_at_utc: nowIso
+  });
 }
 
 function activityAiLogs(fixture, activityId) {

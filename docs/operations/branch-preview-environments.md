@@ -35,7 +35,7 @@ database state before the slot is reused.
 
 If the preview branch changes the Android native boundary, deploy also builds a slot-specific preview APK and records `brai-<slot>-vN-previewM.apk`, APK `vN`, branch-local preview `M`, and `versionCode=N*10000+M` in the preview slot registry. Preview OTA manifests then target the same release key, build kind, stable `N`, and preview `M`, so stale slot APKs block with an APK update screen instead of silently running an incompatible web bundle.
 
-Infrastructure/documentation-only branches can use the Temporal no-preview path when the delivery class is `infra-docs`. Strict technical-only branches can use the same no-preview path as `technical-no-preview` when the changed files are limited to tests, test configuration, or narrowly allowed agent-operation bookkeeping that is proven by CI rather than browser review. That path records `delivery_classified` and `no_preview_required`, then dispatches Temporal handoff/merge activities instead of allocating a slot. Temporal marks `supabase_preview`, `preview_deploy`, `accepted_preview_promotion`, `supabase_preview_release`, and `slot_release` as `not_applicable`; after `no_preview_merged`, the branch lifecycle is complete without a slot.
+Infrastructure/documentation-only branches can use the Temporal no-preview path when the delivery class is `infra-docs`. Strict technical-only branches can use the same no-preview path as `technical-no-preview` when the changed files are limited to tests, test configuration, or narrowly allowed agent-operation bookkeeping that is proven by CI rather than browser review. That path records `delivery_classified` and `no_preview_required`, then dispatches Temporal handoff/merge activities instead of allocating a slot. Temporal marks `supabase_preview`, `goal_agents_deploy`, `preview_deploy`, `accepted_preview_promotion`, `supabase_preview_release`, and `slot_release` as `not_applicable`; after `no_preview_merged`, the branch lifecycle is complete without a slot.
 
 Local dev server URLs are agent-only verification aids. The user-facing handoff for preview-class project changes is the preview slot URL after `deploy-preview` succeeds; if CI/deploy is not complete, report that blocker instead of asking the project owner to open `localhost` or `127.0.0.1`.
 
@@ -183,12 +183,19 @@ sudo -u brai /srv/projects/brai-envs/prod/source/deploy/scripts/codex-cli-smoke.
 systemctl restart brai-temporal-worker.service
 systemd-run --unit=brai-temporal-worker-delayed-restart --on-active=* --collect /bin/systemctl restart brai-temporal-worker.service
 sudo -u brai /srv/projects/brai-envs/prod/source/deploy/scripts/complete-operation-activities.sh --local operation:agent-task:*
+systemctl stop brai-api.service
 systemctl restart brai-api.service
+systemctl stop brai-api-dev.service
 systemctl restart brai-api-dev.service
+systemctl stop brai-api-preview-a.service
 systemctl restart brai-api-preview-a.service
+systemctl stop brai-api-preview-b.service
 systemctl restart brai-api-preview-b.service
+systemctl stop brai-api-preview-c.service
 systemctl restart brai-api-preview-c.service
+systemctl stop brai-api-preview-d.service
 systemctl restart brai-api-preview-d.service
+systemctl stop brai-api-preview-e.service
 systemctl restart brai-api-preview-e.service
 systemctl restart brai-admin.service
 systemctl restart brai-admin-dev.service
@@ -274,12 +281,24 @@ Apply after check mode passes and secrets/env files exist on the VPS:
 ansible-playbook -i deploy/ansible/inventory.example.ini deploy/ansible/brai.yml
 ```
 
+The first deployment containing Goal agents requires this Ansible apply before any branch
+deploy. It creates the isolated Unix identity and protected EnvironmentFile, installs all 35
+systemd units (five service families across Production, Dev, and Preview A-E), and installs the
+narrow deploy sudo rules plus the fixed root-owned Codex runtime preparation helper. Every later
+Goal-agent deploy gate invokes that helper without arguments immediately before the five exact
+systemd restarts, restoring only the `brai-codex-exec` traversal/read contract and proving
+`codex --version` as `brai-goal-agent`. Ansible also appends the same fixed helper to the managed
+Codex release sync, after its ordinary package/symlink update, so the daily CLI timer cannot restore
+the old `brai-deploy`-only package access after a successful Preview. A branch deploy intentionally
+fails instead of fabricating missing units, accepting an unusable Codex runtime, or widening permissions.
+
 The current local VPS setup keeps the existing production service name `brai-api.service`.
 Production and preview API services run from the source checkout uploaded into
 `/srv/projects/brai-envs/<environment>/source/services/brai_api`; Admin services run from the
 matching `/srv/projects/brai-envs/<environment>/source/admin` checkout as the configured service user/group.
 The limited `brai-deploy` user owns `/srv/projects/brai-envs`, publishes only the deployment
-artifacts above, and uses sudo only for Caddy validation, Caddy reload, and matching Brai API/Admin service restarts.
+artifacts above, and uses sudo only for Caddy validation/reload, the Temporal maintenance commands,
+matching Brai API/Admin restarts, and exact restart/enable/stop commands for those 35 Goal-agent units.
 The Brai runtime user also belongs to the `brai-deploy` group and API units run with
 `SupplementaryGroups=brai-deploy` for deploy artifact coordination without broadening the sudo
 boundary. Runtime DB access uses protected Supabase Postgres env values.

@@ -5,6 +5,8 @@
 {{ brai_deploy_user }} ALL=({{ brai_service_user }}) NOPASSWD: {{ brai_env_root }}/{{ brai_envs.prod.path }}/source/deploy/scripts/codex-cli-smoke.sh
 {{ brai_deploy_user }} ALL=(root) NOPASSWD: /bin/systemctl restart brai-temporal-worker.service
 {{ brai_deploy_user }} ALL=(root) NOPASSWD: /usr/bin/systemd-run --unit=brai-temporal-worker-delayed-restart --on-active=* --collect /bin/systemctl restart brai-temporal-worker.service
+{{ brai_deploy_user }} ALL=(root) NOPASSWD: {{ brai_goal_agent_runtime_prepare }} ""
+{{ brai_codex_maintenance_user }} ALL=(root) NOPASSWD: {{ brai_goal_agent_runtime_prepare }} ""
 {{ brai_deploy_user }} ALL=({{ brai_service_user }}) NOPASSWD: {{ brai_env_root }}/{{ brai_envs.prod.path }}/source/deploy/scripts/create-operation-activity.sh --local *
 {{ brai_deploy_user }} ALL=({{ brai_service_user }}) NOPASSWD: {{ brai_env_root }}/{{ brai_envs.prod.path }}/source/deploy/scripts/complete-operation-activities.sh --local *
 {{ brai_deploy_user }} ALL=({{ brai_service_user }}) NOPASSWD: {{ brai_env_root }}/{{ brai_envs.prod.path }}/source/deploy/scripts/list-operation-activities.sh --local *
@@ -15,9 +17,19 @@
 {% endfor %}
 {% for name, env in brai_envs.items() %}
 {{ brai_deploy_user }} ALL=(root) NOPASSWD: /bin/systemctl restart {{ env.service }}
-{{ brai_deploy_user }} ALL=(root) NOPASSWD: /bin/systemctl restart {{ env.admin_service }}
-{% if name.startswith('preview-') %}
 {{ brai_deploy_user }} ALL=(root) NOPASSWD: /bin/systemctl stop {{ env.service }}
+{{ brai_deploy_user }} ALL=(root) NOPASSWD: /bin/systemctl restart {{ env.admin_service }}
+{% for agent_name, agent in brai_goal_agents.items() %}
+{{ brai_deploy_user }} ALL=(root) NOPASSWD: /bin/systemctl restart {{ agent.unit_base }}{{ env.goal_agent_service_suffix }}.service
+{% if name in ['prod', 'dev'] %}
+{{ brai_deploy_user }} ALL=(root) NOPASSWD: /bin/systemctl enable --now {{ agent.unit_base }}{{ env.goal_agent_service_suffix }}.service
+{% endif %}
+{% if name.startswith('preview-') %}
+{{ brai_deploy_user }} ALL=(root) NOPASSWD: /bin/systemctl stop {{ agent.unit_base }}{{ env.goal_agent_service_suffix }}.service
+{{ brai_deploy_user }} ALL=(root) NOPASSWD: /bin/systemctl reset-failed {{ agent.unit_base }}{{ env.goal_agent_service_suffix }}.service
+{% endif %}
+{% endfor %}
+{% if name.startswith('preview-') %}
 {{ brai_deploy_user }} ALL=(root) NOPASSWD: /bin/systemctl stop {{ env.admin_service }}
 {{ brai_deploy_user }} ALL=(root) NOPASSWD: /bin/systemctl reset-failed {{ env.service }}
 {{ brai_deploy_user }} ALL=(root) NOPASSWD: /bin/systemctl reset-failed {{ env.admin_service }}

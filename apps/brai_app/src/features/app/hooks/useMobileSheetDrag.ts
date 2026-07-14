@@ -105,6 +105,10 @@ export function useMobileSheetDrag({
   const finishClose = useCallback(() => {
     clearTimer();
     onCloseStartRef.current?.();
+    if (prefersReducedMotion()) {
+      onCloseRef.current();
+      return;
+    }
     setClosing(true);
     scheduleOffset(closeDistance(sheetElementRef.current, axis));
     timerRef.current = window.setTimeout(() => {
@@ -188,6 +192,11 @@ export function useMobileSheetDrag({
       return;
     }
 
+    if (prefersReducedMotion()) {
+      setSettling(false);
+      scheduleOffset(0);
+      return;
+    }
     setSettling(true);
     scheduleOffset(0);
     timerRef.current = window.setTimeout(() => {
@@ -288,14 +297,15 @@ export function useMobileSheetDrag({
     };
   }, [applyOffset, onNativeTouchEnd, onNativeTouchMove, onNativeTouchStart]);
 
+  const reduceMotion = prefersReducedMotion();
   const sheetStyle = {
     transform: sheetTransform(axis),
-    transition: dragging ? "none" : closing ? `transform ${SETTLE_MS}ms ease-in` : settling ? `transform ${SETTLE_MS}ms ease-out` : undefined,
+    transition: dragging || reduceMotion ? "none" : closing ? `transform ${SETTLE_MS}ms ease-in` : settling ? `transform ${SETTLE_MS}ms ease-out` : undefined,
   } as CSSProperties;
 
   const backdropStyle = {
     opacity: `var(${BACKDROP_OPACITY_VAR}, 1)`,
-    transition: dragging ? "none" : closing ? `opacity ${SETTLE_MS}ms ease-in` : settling ? `opacity ${SETTLE_MS}ms ease-out` : undefined,
+    transition: dragging || reduceMotion ? "none" : closing ? `opacity ${SETTLE_MS}ms ease-in` : settling ? `opacity ${SETTLE_MS}ms ease-out` : undefined,
   } as CSSProperties;
 
   return {
@@ -357,4 +367,8 @@ function backdropOpacity(offset: number, size = window.innerHeight) {
   const fadeStart = safeSize * BACKDROP_FADE_START_RATIO;
   if (offset <= fadeStart) return 1;
   return Math.max(0, 1 - (offset - fadeStart) / (safeSize - fadeStart));
+}
+
+function prefersReducedMotion() {
+  return typeof window !== "undefined" && typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 }

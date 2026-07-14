@@ -1,9 +1,93 @@
-import test from "node:test";
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { spawnSync } from "node:child_process";
+import test from "node:test";
+
+test("late commit A cannot mutate or complete commit B preview lease", (context) => {
+  const { envsRoot, run } = runner(context);
+
+  assert.equal(run("allocate", "codex/race", "commit-a", "10").status, 0);
+  assert.equal(run("assert-owned", "codex/race", "commit-a").status, 0);
+  assert.equal(run("allocate", "codex/race", "commit-b", "20").status, 0);
+  const registryPath = path.join(envsRoot, "preview-slots.json");
+  const beforeAssert = fs.readFileSync(registryPath, "utf8");
+
+  const staleAssert = run("assert-owned", "codex/race", "commit-a");
+  assert.equal(staleAssert.status, 1);
+  assert.match(staleAssert.stderr, /belongs to commit-b, not commit-a/);
+  assert.equal(run("assert-owned", "codex/race", "commit-b").status, 0);
+  assert.equal(fs.readFileSync(registryPath, "utf8"), beforeAssert);
+
+  for (const args of [
+    ["allocate", "codex/race", "commit-a", "10"],
+    ["allocate", "codex/race", "commit-c", "20"],
+    ["allocate", "codex/race", "commit-c"]
+  ]) {
+    const result = run(...args);
+    assert.equal(result.status, 1, `${args.join(" ")} unexpectedly superseded generation 20`);
+  }
+
+  for (const args of [
+    ["ready", "codex/race", "commit-a"],
+    ["failed", "codex/race", "commit-a"],
+    ["clear-apk", "codex/race", "commit-a"],
+    ["supabase", "codex/race", "commit-a", "stale-branch", "stale-id", "ACTIVE_HEALTHY"],
+    ["next-apk-preview", "codex/race", "commit-a", "1"],
+    ["apk", "codex/race", "commit-a", "10001", "brai.apk", "1", "1", "preview"]
+  ]) {
+    const result = run(...args);
+    assert.equal(result.status, 1, `${args.join(" ")} unexpectedly succeeded`);
+    assert.match(result.stderr, /belongs to commit-b, not commit-a/);
+  }
+
+  const beforeReady = JSON.parse(run("status").stdout).registry.A;
+  assert.equal(beforeReady.commit, "commit-b");
+  assert.equal(beforeReady.lease_generation, 20);
+  assert.equal(beforeReady.status, "deploying");
+
+  assert.equal(run("ready", "codex/race", "commit-b").status, 0);
+  const ready = JSON.parse(run("status").stdout).registry.A;
+  assert.equal(ready.commit, "commit-b");
+  assert.equal(ready.status, "ready");
+  assert.equal(run("supabase", "codex/race", "commit-b", "current-branch", "current-id", "ACTIVE_HEALTHY").status, 0);
+  const withSupabase = JSON.parse(run("status").stdout).registry.A;
+  assert.equal(withSupabase.supabase_branch_name, "current-branch");
+  assert.equal(withSupabase.supabase_branch_id, "current-id");
+});
+
+test("queued preview lease also rejects a lower generation", (context) => {
+  const { run } = runner(context);
+  for (let index = 0; index < 5; index += 1) {
+    assert.equal(run("allocate", `codex/owner-${index}`, `owner-${index}`, String(index + 1)).status, 0);
+  }
+  assert.equal(run("allocate", "codex/queued", "commit-b", "20").status, 0);
+  const stale = run("allocate", "codex/queued", "commit-a", "10");
+  assert.equal(stale.status, 1);
+  assert.match(stale.stderr, /stale preview lease generation 10; current generation is 20/);
+
+  const queued = JSON.parse(run("status").stdout).registry.queue.find((entry) => entry.branch === "codex/queued");
+  assert.equal(queued.commit, "commit-b");
+  assert.equal(queued.lease_generation, 20);
+});
+
+function runner(context) {
+  const envsRoot = fs.mkdtempSync(path.join(os.tmpdir(), "brai-preview-cas-"));
+  context.after(() => fs.rmSync(envsRoot, { recursive: true, force: true }));
+  const run = (...args) => spawnSync("bash", ["deploy/scripts/preview-slots.sh", ...args], {
+    cwd: path.resolve(import.meta.dirname, "../.."),
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      NODE_BIN: process.execPath,
+      BRAI_ENVS_ROOT: envsRoot,
+      BRAI_PREVIEW_REGISTRY: path.join(envsRoot, "preview-slots.json"),
+      BRAI_PREVIEW_LOCK: path.join(envsRoot, "preview-slots.lock")
+    }
+  });
+  return { envsRoot, run };
+}
 
 test("Preview note is revision-bound and cleared by a new commit", () => {
   const root = path.resolve(import.meta.dirname, "../..");

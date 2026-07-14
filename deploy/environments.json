@@ -14,6 +14,8 @@
       "adminPort": 3040,
       "serviceName": "brai-api.service",
       "adminServiceName": "brai-admin.service",
+      "goalAgentServiceSuffix": "",
+      "goalAgentQueueEnvironment": "prod",
       "path": "prod",
       "releaseKey": "production"
     },
@@ -29,6 +31,8 @@
       "adminPort": 3041,
       "serviceName": "brai-api-dev.service",
       "adminServiceName": "brai-admin-dev.service",
+      "goalAgentServiceSuffix": "-dev",
+      "goalAgentQueueEnvironment": "dev",
       "path": "dev",
       "releaseKey": "dev"
     },
@@ -44,6 +48,8 @@
       "adminPort": 3042,
       "serviceName": "brai-api-preview-a.service",
       "adminServiceName": "brai-admin-preview-a.service",
+      "goalAgentServiceSuffix": "-preview-a",
+      "goalAgentQueueEnvironment": "preview-a",
       "path": "preview-a",
       "releaseKey": "a"
     },
@@ -59,6 +65,8 @@
       "adminPort": 3043,
       "serviceName": "brai-api-preview-b.service",
       "adminServiceName": "brai-admin-preview-b.service",
+      "goalAgentServiceSuffix": "-preview-b",
+      "goalAgentQueueEnvironment": "preview-b",
       "path": "preview-b",
       "releaseKey": "b"
     },
@@ -74,6 +82,8 @@
       "adminPort": 3044,
       "serviceName": "brai-api-preview-c.service",
       "adminServiceName": "brai-admin-preview-c.service",
+      "goalAgentServiceSuffix": "-preview-c",
+      "goalAgentQueueEnvironment": "preview-c",
       "path": "preview-c",
       "releaseKey": "c"
     },
@@ -89,6 +99,8 @@
       "adminPort": 3045,
       "serviceName": "brai-api-preview-d.service",
       "adminServiceName": "brai-admin-preview-d.service",
+      "goalAgentServiceSuffix": "-preview-d",
+      "goalAgentQueueEnvironment": "preview-d",
       "path": "preview-d",
       "releaseKey": "d"
     },
@@ -104,6 +116,8 @@
       "adminPort": 3046,
       "serviceName": "brai-api-preview-e.service",
       "adminServiceName": "brai-admin-preview-e.service",
+      "goalAgentServiceSuffix": "-preview-e",
+      "goalAgentQueueEnvironment": "preview-e",
       "path": "preview-e",
       "releaseKey": "e"
     }

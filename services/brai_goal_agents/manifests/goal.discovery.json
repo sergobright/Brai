@@ -1,0 +1,82 @@
+{
+  "id": "goal.discovery",
+  "version": "1",
+  "workflow_definition_version": 1,
+  "worker_build_id": "goal-discovery.v1",
+  "workflow_type": "GoalDiscoveryWorkflow",
+  "queue_base": "brai-agent-goal-discovery",
+  "entrypoint": "src/entrypoints/goal-discovery.mjs",
+  "input_schema_version": "brai.goal-agent.input.v1",
+  "prompt_version": "goal-discovery.v1",
+  "output_schema_version": "brai.goal-discovery.result.v1",
+  "model_env": "BRAI_GOAL_DISCOVERY_MODEL",
+  "default_model": "gpt-5.4-mini",
+  "timeout_ms": 90000,
+  "retry": { "schema_attempts": 3 },
+  "decision_kinds": ["goal_discovery"],
+  "review_only": true,
+  "page_size": 50,
+  "pipeline": {
+    "stages": ["map", "merge"],
+    "minimum_members": 2,
+    "maximum_members": 50,
+    "maximum_proposals": 20
+  },
+  "prompt": "В stage map сгруппируй переданную страницу до 50 существующих Actions/Operations в bounded candidate Goals. В stage merge объедини переданные cluster summaries и удали семантические дубликаты. Если snapshot.comparison_mode=filter_only и переданы existing_goals, верни только неизменённое подмножество входных candidates: не добавляй и не переписывай decision_kind, subject_items_id, confidence, rationale или proposal; можно лишь удалить semantic duplicates существующих Goals. Каждый draft обязан иметь минимум два существующих member ID и subject_items_id=null, потому что discovery относится к watermark пользователя, а не к одному Item. Не создавай данные и не предлагай part_of напрямую: возвращай только review-only goal_discovery drafts.",
+  "output_schema": {
+    "type": "object",
+    "required": ["schema_version", "agent_id", "agent_version", "decisions"],
+    "additionalProperties": false,
+    "properties": {
+      "schema_version": { "type": "string", "const": "1" },
+      "agent_id": { "type": "string", "const": "goal.discovery" },
+      "agent_version": { "type": "string", "const": "1" },
+      "decisions": {
+        "type": "array",
+        "maxItems": 20,
+        "items": {
+          "type": "object",
+          "required": ["decision_kind", "subject_items_id", "confidence", "rationale", "evidence", "proposal"],
+          "additionalProperties": false,
+          "properties": {
+            "decision_kind": { "type": "string", "const": "goal_discovery" },
+            "subject_items_id": { "type": ["string", "null"], "minLength": 1, "maxLength": 128 },
+            "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+            "rationale": { "type": "string", "minLength": 1, "maxLength": 500 },
+            "evidence": {
+              "type": "array",
+              "minItems": 2,
+              "maxItems": 10,
+              "items": {
+                "type": "object",
+                "required": ["items_id", "field", "excerpt"],
+                "additionalProperties": false,
+                "properties": {
+                  "items_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+                  "field": { "type": "string", "enum": ["title", "description_md", "reason", "normalization"] },
+                  "excerpt": { "type": "string", "minLength": 1, "maxLength": 200 }
+                }
+              }
+            },
+            "proposal": {
+              "type": "object",
+              "required": ["title", "description_md", "member_items_ids"],
+              "additionalProperties": false,
+              "properties": {
+                "title": { "type": "string", "minLength": 1, "maxLength": 80 },
+                "description_md": { "type": "string", "maxLength": 8000 },
+                "member_items_ids": {
+                  "type": "array",
+                  "minItems": 2,
+                  "maxItems": 50,
+                  "uniqueItems": true,
+                  "items": { "type": "string", "minLength": 1, "maxLength": 128 }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -45,8 +45,32 @@ describe("BraiApp gestures", () => {
     expect(document.querySelector('[data-section-page="focus"]')).not.toBeInTheDocument();
   });
 
-  it("opens the left mobile dock overflow from a left-edge page swipe", async () => {
+  it("opens the Actions navigation drawer from a left-edge page swipe", async () => {
     render(<BraiApp />);
+    const main = screen.getByRole("main");
+
+    fireEvent.touchStart(main, {
+      changedTouches: [{ identifier: 1, clientX: 2, clientY: 220 }],
+    });
+    fireEvent.touchMove(main, {
+      changedTouches: [{ identifier: 1, clientX: 88, clientY: 224 }],
+    });
+    fireEvent.touchEnd(main, {
+      changedTouches: [{ identifier: 1, clientX: 116, clientY: 224 }],
+    });
+
+    const drawer = await screen.findByRole("dialog", { name: "Списки действий" });
+    expect(drawer).toHaveClass("mobile-profile-drawer", "w-[min(86vw,22rem)]");
+    expect(within(drawer).getByRole("navigation", { name: "Списки действий" })).toBeInTheDocument();
+    expect(within(drawer).getByRole("button", { name: /^Все\d*$/ })).toBeInTheDocument();
+    expect(document.querySelector(".mobile-dock-overflow-sheet")).not.toBeInTheDocument();
+
+    fireEvent.click(within(drawer).getByRole("button", { name: /Операции/ }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Списки действий" })).not.toBeInTheDocument());
+  });
+
+  it("keeps the left-edge swipe routed to dock overflow outside Actions", async () => {
+    render(<BraiApp initialSection="focus" />);
     const main = screen.getByRole("main");
 
     fireEvent.touchStart(main, {
@@ -66,6 +90,7 @@ describe("BraiApp gestures", () => {
     });
     expect(sheet).toHaveAttribute("aria-label", "Левое меню");
     expect(within(sheet).getByRole("button", { name: "Настройки" })).toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "Списки действий" })).not.toBeInTheDocument();
   });
 
   it("switches adjacent mobile tabs by swiping anywhere across the bottom menu zone", async () => {
@@ -100,7 +125,7 @@ describe("BraiApp gestures", () => {
     fireEvent.click(screen.getByRole("button", { name: "Открыть меню" }));
     swipe(dock as HTMLElement, { fromX: 320, toX: 180 });
 
-    expect(screen.getByRole("heading", { name: "Действия" })).toBeInTheDocument();
+    expect(document.querySelector('[data-section-page="actions"]')).toBeInTheDocument();
   });
 
   it("closes the mobile profile drawer through the Android back bridge", async () => {
@@ -110,7 +135,7 @@ describe("BraiApp gestures", () => {
     await waitFor(() => expect(window.BraiAndroidBack).toBeTypeOf("function"));
     expect(window.BraiAndroidBack?.()).toBe(true);
 
-    await waitFor(() => expect(document.querySelector(".mobile-menu-backdrop")).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Списки действий" })).not.toBeInTheDocument());
   });
 
   it("closes the mobile dock overflow through the Android back bridge", async () => {
@@ -123,34 +148,21 @@ describe("BraiApp gestures", () => {
     await waitFor(() => expect(document.querySelector(".mobile-dock-overflow-sheet")).not.toBeInTheDocument());
   });
 
-  it("drags the mobile profile drawer back to the screen edge", async () => {
+  it("keeps focus inside the modal drawer and restores it after Escape", async () => {
     render(<BraiApp />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Открыть меню" }));
-    const drawer = document.querySelector(".mobile-profile-drawer") as HTMLElement | null;
-    const backdrop = document.querySelector(".mobile-menu-backdrop > div") as HTMLElement | null;
-    expect(drawer).toBeInstanceOf(HTMLElement);
-    expect(backdrop).toBeInstanceOf(HTMLElement);
-    Object.defineProperty(drawer, "getBoundingClientRect", {
-      configurable: true,
-      value: () => ({ bottom: 640, height: 640, left: 0, right: 300, top: 0, width: 300, x: 0, y: 0 }),
-    });
+    const trigger = screen.getByRole("button", { name: "Открыть меню" });
+    trigger.focus();
+    fireEvent.click(trigger);
+    const drawer = await screen.findByRole("dialog", { name: "Списки действий" });
+    expect(drawer).toHaveAttribute("aria-modal", "true");
+    expect(within(drawer).getByRole("button", { name: "Закрыть меню" })).toHaveClass("size-11");
+    await waitFor(() => expect(drawer).toContainElement(document.activeElement as HTMLElement));
 
-    fireEvent.touchStart(drawer as HTMLElement, {
-      changedTouches: [{ identifier: 1, clientX: 280, clientY: 120 }],
-    });
-    fireEvent.touchMove(drawer as HTMLElement, {
-      changedTouches: [{ identifier: 1, clientX: 80, clientY: 124 }],
-    });
+    fireEvent.keyDown(document, { key: "Escape", code: "Escape" });
 
-    await waitFor(() => expect((drawer as HTMLElement).style.getPropertyValue("--mobile-sheet-offset")).toBe("190px"));
-    expect(Number((backdrop as HTMLElement).style.getPropertyValue("--mobile-sheet-backdrop-opacity"))).toBeLessThan(1);
-
-    fireEvent.touchEnd(drawer as HTMLElement, {
-      changedTouches: [{ identifier: 1, clientX: 80, clientY: 124 }],
-    });
-
-    await waitFor(() => expect(document.querySelector(".mobile-menu-backdrop")).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Списки действий" })).not.toBeInTheDocument());
+    await waitFor(() => expect(trigger).toHaveFocus());
   });
 
   it("keeps vertical gestures as page scroll instead of tab navigation", () => {

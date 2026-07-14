@@ -10,6 +10,7 @@ describe("BraiApp inbox", () => {
 
   it("creates a mobile inbox item with a description from the composer", async () => {
     render(<BraiApp />);
+    await screen.findByText("Новых действий нет");
 
     fireEvent.click(screen.getAllByRole("button", { name: "Входящие" }).at(-1) as HTMLElement);
     await waitFor(() => expect(screen.getByRole("heading", { name: "Входящие" })).toBeInTheDocument());
@@ -60,6 +61,7 @@ describe("BraiApp inbox", () => {
     Object.defineProperty(window, "innerWidth", { configurable: true, writable: true, value: 1200 });
 
     render(<BraiApp />);
+    await screen.findByText("Новых действий нет");
 
     fireEvent.click(screen.getAllByRole("button", { name: "Входящие" }).at(-1) as HTMLElement);
     await waitFor(() => expect(screen.getByRole("heading", { name: "Входящие" })).toBeInTheDocument());

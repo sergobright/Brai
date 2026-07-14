@@ -2,6 +2,8 @@ export type InboxEventType = "create" | "update_title" | "update_description" | 
 
 export interface InboxItem {
   id: string;
+  /** Canonical Item endpoint; normalized legacy responses may omit it when it equals `id`. */
+  items_id?: string | null;
   title: string;
   description_md: string;
   source: string;
