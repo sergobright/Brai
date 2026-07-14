@@ -56,6 +56,7 @@ export function ScreenHeader({
   syncStatus,
   pendingCount,
   leading,
+  desktopLeading,
   trailing,
 }: {
   title: string;
@@ -63,6 +64,7 @@ export function ScreenHeader({
   syncStatus: SyncStatus;
   pendingCount: number;
   leading?: ReactNode;
+  desktopLeading?: ReactNode;
   trailing?: ReactNode;
 }) {
   const environmentLabel = useEnvironmentBadgeLabel();
@@ -71,7 +73,7 @@ export function ScreenHeader({
     <header className="topbar sticky top-[var(--sticky-top-offset)] z-[18] mb-2 grid min-h-14 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-4 bg-transparent py-2 max-[860px]:min-h-[50px] max-[860px]:gap-2.5 max-[860px]:py-1 max-[860px]:pb-2">
       <div className="topbar-leading hidden max-[860px]:flex" data-galaxy-interaction-block>{leading}</div>
       <div className="hidden items-center gap-2 min-[861px]:flex">
-        <Icon className="size-5 text-foreground" data-screen-icon aria-hidden="true" />
+        {desktopLeading ?? <Icon className="size-5 text-foreground" data-screen-icon aria-hidden="true" />}
         <Separator orientation="vertical" className="mr-2 data-[orientation=vertical]:h-4" />
       </div>
       <div className="screen-title min-w-0">

@@ -10,6 +10,8 @@ DEPLOY_REPO="${BRAI_DEPLOY_REPO:-/srv/projects/brai}"
 SSH_PORT="${BRAI_DEPLOY_SSH_PORT:-22}"
 ENVS_ROOT="${BRAI_ENVS_ROOT:-/srv/projects/brai-envs}"
 REQUIRE_RELEASE="${BRAI_REQUIRE_PREVIEW_SLOT_RELEASE:-false}"
+TARGET_BRANCH="${BRAI_TARGET_BRANCH:-}"
+TARGET_COMMIT="${BRAI_TARGET_COMMIT:-}"
 NODE_BIN="${NODE_BIN:-node}"
 KEY_FILE="$(mktemp "${TMPDIR:-/tmp}/brai-deploy-key.XXXXXX")"
 cleanup() {
@@ -21,13 +23,15 @@ printf '%s\n' "$BRAI_DEPLOY_SSH_KEY" >"$KEY_FILE"
 chmod 600 "$KEY_FILE"
 
 RELEASE_JSON="$(ssh -i "$KEY_FILE" -p "$SSH_PORT" -o StrictHostKeyChecking=accept-new "$BRAI_DEPLOY_USER@$BRAI_DEPLOY_HOST" \
-  bash -s -- "$DEPLOY_REPO" "$ENVS_ROOT" "$BRAI_BRANCH" "$REQUIRE_RELEASE" "${BRAI_ACCEPTED_PREVIEW:-false}" <<'REMOTE'
+  bash -s -- "$DEPLOY_REPO" "$ENVS_ROOT" "$BRAI_BRANCH" "$REQUIRE_RELEASE" "${BRAI_ACCEPTED_PREVIEW:-false}" "$TARGET_BRANCH" "$TARGET_COMMIT" <<'REMOTE'
 set -euo pipefail
 DEPLOY_REPO="$1"
 ENVS_ROOT="$2"
 BRAI_BRANCH="$3"
 REQUIRE_RELEASE="$4"
 BRAI_ACCEPTED_PREVIEW="$5"
+TARGET_BRANCH="$6"
+TARGET_COMMIT="$7"
 RELEASE_BRANCH="$BRAI_BRANCH"
 NODE_PREFIX="${BRAI_NODE_PREFIX:-/srv/opt/node-v22.16.0/bin}"
 if [[ -d "$NODE_PREFIX" ]]; then
@@ -159,6 +163,35 @@ cleanup_released_preview_slot_artifacts() {
   rm -rf "$slot_root/source" "$slot_root"/source.previous-* "$slot_root/web" "$slot_root/mobile-update"
   shopt -u nullglob
 }
+accepted_build_recorded() {
+  [[ "$BRAI_ACCEPTED_PREVIEW" == "true" && -n "$TARGET_BRANCH" && -n "$TARGET_COMMIT" ]] || return 1
+  local source_root="$ENVS_ROOT/prod/source"
+  [[ -r "/etc/brai/brai-api.env" && -r "$source_root/services/brai_api/package.json" ]] || return 1
+  (
+    set -a
+    # shellcheck source=/dev/null
+    . /etc/brai/brai-api.env
+    set +a
+    [[ -n "${BRAI_DATABASE_URL:-}" ]] || exit 1
+    node --input-type=module - "$source_root" "$BRAI_DATABASE_URL" "$RELEASE_BRANCH" "$TARGET_BRANCH" "$TARGET_COMMIT" <<'NODE'
+const { createRequire } = await import("node:module");
+const [sourceRoot, databaseUrl, sourceBranch, targetBranch, targetCommit] = process.argv.slice(2);
+const require = createRequire(`${sourceRoot}/services/brai_api/package.json`);
+const { Pool } = require("pg");
+const pool = new Pool({ connectionString: databaseUrl, ssl: /supabase\.(?:co|com)|pooler\.supabase\.com/.test(databaseUrl) ? { rejectUnauthorized: false } : false });
+try {
+  const result = await pool.query(`
+    SELECT 1 FROM build_version_refs
+    WHERE version_type_id = 'build' AND source_branch = $1 AND target_branch = $2 AND target_commit = $3
+    LIMIT 1
+  `, [sourceBranch, targetBranch, targetCommit]);
+  process.exit(result.rows.length ? 0 : 1);
+} finally {
+  await pool.end();
+}
+NODE
+  )
+}
 if [[ "$RELEASE_BRANCH" == codex/* ]]; then
   if [[ -n "$SUPABASE_PREVIEW_BRANCH" ]]; then
     node deploy/scripts/supabase-branch.mjs delete-preview --branch "$RELEASE_BRANCH" --name "$SUPABASE_PREVIEW_BRANCH" >&2
@@ -173,6 +206,11 @@ if [[ -n "$SLOT_LOWER" ]]; then
 fi
 RELEASE_JSON="$(bash deploy/scripts/preview-slots.sh release "$RELEASE_BRANCH")"
 cleanup_released_preview_slot_artifacts
+if [[ "$REQUIRE_RELEASE" == "true" ]] &&
+  ! printf '%s' "$RELEASE_JSON" | node -e 'let raw = ""; process.stdin.on("data", c => raw += c); process.stdin.on("end", () => process.exit(JSON.parse(raw).released === true ? 0 : 1));' &&
+  accepted_build_recorded; then
+  RELEASE_JSON='{"ok":true,"released":true,"dequeued":false,"alreadyReleased":true}'
+fi
 printf '%s\n' "$RELEASE_JSON"
 REMOTE
 )"

@@ -1,10 +1,11 @@
 "use client";
 
 import type { ReactElement } from "react";
-import { Archive, CircleUserRound, Command, Cpu, LogOut, Settings, type LucideIcon } from "lucide-react";
+import { Archive, CircleUserRound, Command, Cpu, Download, LogOut, Settings, type LucideIcon } from "lucide-react";
 import type { AuthUser } from "@/shared/api/braiApi";
 import { Avatar, AvatarFallback } from "@/shared/ui/avatar";
 import { cn } from "@/shared/ui/cn";
+import { NavigationIndicator, UpdateNavigationDot } from "@/shared/ui/navigation-indicator";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -21,12 +22,16 @@ type MenuItem = {
   icon: LucideIcon;
   label: string;
   onSelect: () => void | Promise<void>;
+  indicator?: boolean;
+  iconClassName?: string;
 };
 
 type BraiUserMenuProps = {
   activeSection?: "profile" | "archive" | "brai-cmd" | "engine" | "settings" | string;
   className?: string;
   showEngine?: boolean;
+  engineDownloading?: boolean;
+  engineHasUpdate?: boolean;
   user: AuthUser | null;
   onArchive: () => void;
   onBraiCmd: () => void;
@@ -76,6 +81,8 @@ export function BraiUserMenuPanel({
   activeSection,
   className,
   showEngine = true,
+  engineDownloading = false,
+  engineHasUpdate = false,
   user,
   onArchive,
   onBraiCmd,
@@ -89,7 +96,14 @@ export function BraiUserMenuPanel({
     { label: "Профиль", icon: CircleUserRound, active: activeSection === "profile", onSelect: onProfile },
     { label: "Архив", icon: Archive, active: activeSection === "archive", onSelect: onArchive },
     { label: "Brai CMD", icon: Command, active: activeSection === "brai-cmd", onSelect: onBraiCmd },
-    ...(showEngine ? [{ label: "Engine", icon: Cpu, active: activeSection === "engine", onSelect: onEngine }] : []),
+    ...(showEngine ? [{
+      label: "Engine",
+      icon: engineHasUpdate ? Download : Cpu,
+      active: activeSection === "engine",
+      onSelect: onEngine,
+      indicator: engineHasUpdate,
+      iconClassName: engineDownloading ? "motion-safe:animate-bounce" : undefined,
+    }] : []),
   ];
   const settingsItems: MenuItem[] = [
     { label: "Настройки", icon: Settings, active: activeSection === "settings", onSelect: onSettings },
@@ -173,11 +187,15 @@ function DropdownItem({ item }: { item: MenuItem }) {
   const Icon = item.icon;
   return (
     <DropdownMenuItem
+      aria-label={item.label}
       variant={item.destructive ? "destructive" : "default"}
       className={cn(itemClass, item.active && "bg-accent text-accent-foreground")}
       onSelect={() => void item.onSelect()}
     >
-      <Icon size={20} />
+      <span className="relative flex size-5 shrink-0 items-center justify-center">
+        <Icon className={cn("size-5", item.iconClassName)} aria-hidden="true" />
+        {item.indicator ? <NavigationIndicator><UpdateNavigationDot /></NavigationIndicator> : null}
+      </span>
       <span>{item.label}</span>
     </DropdownMenuItem>
   );
@@ -196,6 +214,7 @@ function MenuButton({ item }: { item: MenuItem }) {
   return (
     <button
       type="button"
+      aria-label={item.label}
       className={cn(
         "flex w-full cursor-pointer items-center gap-2 rounded-sm p-2 text-left text-sm font-medium text-popover-foreground outline-none transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:bg-accent focus-visible:text-accent-foreground",
         item.active && "bg-accent text-accent-foreground",
@@ -203,7 +222,10 @@ function MenuButton({ item }: { item: MenuItem }) {
       )}
       onClick={() => void item.onSelect()}
     >
-      <Icon className="size-5 shrink-0" aria-hidden="true" />
+      <span className="relative flex size-5 shrink-0 items-center justify-center">
+        <Icon className={cn("size-5", item.iconClassName)} aria-hidden="true" />
+        {item.indicator ? <NavigationIndicator><UpdateNavigationDot /></NavigationIndicator> : null}
+      </span>
       <span>{item.label}</span>
     </button>
   );

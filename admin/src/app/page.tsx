@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { headers } from "next/headers";
 import type { ReactNode } from "react";
-import { ArrowDownUp, CalendarClock, ChevronDown, ChevronFirst, ChevronLast, ChevronLeft, ChevronRight, Command, Database, FileKey2, Table2, Webhook, Workflow } from "lucide-react";
+import { ArrowDownUp, CalendarClock, ChevronDown, ChevronFirst, ChevronLast, ChevronLeft, ChevronRight, CloudCog, Command, Database, FileKey2, Table2, Webhook, Workflow } from "lucide-react";
 import { RoleContractsRail, RoleContractsWorkspace, WorkflowsRail, WorkflowsWorkspace, type RoleFilters, type WorkflowFilters } from "@/app/admin-observability";
 import { AdminInteractionFeedback } from "@/app/admin-observability-client";
 import { AnimatedThemeToggler } from "@/shared/ui/animated-theme-toggler";
@@ -16,6 +16,7 @@ import { formatBytes, formatCell } from "@/lib/format";
 import { PAGE_SIZE, readDatabaseView, readPrimaryUserId, readRoleContractsAdmin, readWorkflowAdminSummary } from "@/lib/database";
 import { readBraiCmdAdminSummary } from "@/lib/braiCmdSummary";
 import type { DbForeignKey, DbIncomingForeignKey, DbSortDirection, DbTable, DbView } from "@/lib/database";
+import { readPreviewSlots, type PreviewSlot, type PreviewSlotsSummary } from "@/lib/previewSlots";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -24,7 +25,7 @@ type SearchParams = Promise<Record<string, string | string[] | undefined>>;
 type AdminAccess = { status: "allowed" | "forbidden" | "not_configured" | "signed_out" | "unavailable" };
 type AdminSessionResponse = { authenticated?: boolean; user?: { id?: unknown } | null };
 type RequestHeaders = { get(name: string): string | null };
-type SectionName = "database" | "handlers" | "schedules" | "workflows" | "role-contracts" | "brai-cmd";
+type SectionName = "database" | "handlers" | "schedules" | "workflows" | "role-contracts" | "brai-cmd" | "previews";
 type TabName = "rows" | "relations" | "columns" | "indexes";
 
 export default async function Home({ searchParams }: { searchParams: SearchParams }) {
@@ -48,6 +49,7 @@ export default async function Home({ searchParams }: { searchParams: SearchParam
     })
     : emptyDatabaseView();
   const braiCmdSummary = activeSection === "brai-cmd" ? await readBraiCmdAdminSummary() : null;
+  const previewSlots = activeSection === "previews" ? await readPreviewSlots() : null;
   const workflowFilters: WorkflowFilters = {
     cursor: first(params.cursor),
     dateFrom: first(params.dateFrom),
@@ -104,6 +106,8 @@ export default async function Home({ searchParams }: { searchParams: SearchParam
         <SchedulesRail count={view.selectedTable?.name === "handler_schedules" ? view.rowCount : 0} />
       ) : activeSection === "brai-cmd" && braiCmdSummary ? (
         <BraiCmdRail summary={braiCmdSummary} />
+      ) : activeSection === "previews" && previewSlots ? (
+        <PreviewSlotsRail summary={previewSlots} />
       ) : (
         <TableRail selectedName={selectedName} stats={view.stats} tables={view.tables} />
       )}
@@ -120,6 +124,8 @@ export default async function Home({ searchParams }: { searchParams: SearchParam
               <SchedulesSection sortDirection={sortDirection} view={view} />
             ) : activeSection === "brai-cmd" && braiCmdSummary ? (
               <BraiCmdAdminSection summary={braiCmdSummary} />
+            ) : activeSection === "previews" && previewSlots ? (
+              <PreviewSlotsSection summary={previewSlots} />
             ) : view.selectedTable ? (
               <>
                 <EntityHeader description={view.tableDescription} tableName={view.selectedTable.name} />
@@ -310,6 +316,15 @@ function PrimaryRail({ activeSection }: { activeSection: SectionName }) {
           <span className="sr-only">База данных</span>
         </ButtonLink>
         <ButtonLink
+          aria-current={activeSection === "previews" ? "page" : undefined}
+          href="/?section=previews"
+          size="icon-lg"
+          variant={activeSection === "previews" ? "default" : "outline"}
+        >
+          <CloudCog className="size-5" />
+          <span className="sr-only">Preview-слоты</span>
+        </ButtonLink>
+        <ButtonLink
           aria-current={activeSection === "handlers" ? "page" : undefined}
           href="/?section=handlers"
           size="icon-lg"
@@ -392,6 +407,99 @@ function BraiCmdRail({ summary }: { summary: Awaited<ReturnType<typeof readBraiC
       </div>
     </aside>
   );
+}
+
+function PreviewSlotsRail({ summary }: { summary: PreviewSlotsSummary }) {
+  return (
+    <aside className="grid min-h-0 border-b bg-card md:border-b-0 md:border-r">
+      <div className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)] gap-3 p-3">
+        <header className="grid gap-1">
+          <div className="text-sm font-semibold">Preview-слоты</div>
+          <div className="text-xs text-muted-foreground">Очередь: {summary.queue.length}</div>
+        </header>
+        <ScrollArea className="min-h-0" contentInset="none">
+          <div className="grid gap-2">
+            {summary.slots.map((slot) => (
+              <Card key={slot.slot} className="flex items-center justify-between gap-3 p-3">
+                <span className="font-semibold">{slot.slot}</span>
+                <Badge variant={slot.status === "ready" ? "default" : "secondary"}>{previewStatus(slot.status)}</Badge>
+              </Card>
+            ))}
+          </div>
+        </ScrollArea>
+      </div>
+    </aside>
+  );
+}
+
+function PreviewSlotsSection({ summary }: { summary: PreviewSlotsSummary }) {
+  return (
+    <>
+      <Card>
+        <CardHeader className="p-5">
+          <CardTitle>Preview environments</CardTitle>
+          <CardDescription>Текущее read-only состояние слотов и сохранённые инструкции пользовательского тестирования.</CardDescription>
+        </CardHeader>
+      </Card>
+      {summary.error ? <Card className="border-destructive p-4 text-sm text-destructive">Registry недоступен: {summary.error}</Card> : null}
+      <div className="grid gap-3 xl:grid-cols-2">
+        {summary.slots.map((slot) => <PreviewSlotCard key={slot.slot} slot={slot} />)}
+      </div>
+      <Card>
+        <CardHeader className="p-4"><CardTitle className="text-base">Очередь</CardTitle></CardHeader>
+        <CardContent className="grid gap-2 px-4 pb-4">
+          {summary.queue.length ? summary.queue.map((entry, index) => (
+            <div key={entry.branch} className="grid gap-1 border-b py-2 text-sm last:border-b-0">
+              <span>{index + 1}. {entry.branch}</span>
+              <code className="text-xs text-muted-foreground">{shortCommit(entry.commit)}</code>
+              <span className="text-xs text-muted-foreground">В очереди: {formatPreviewTime(entry.queued_at)} · обновлено: {formatPreviewTime(entry.updated_at)}</span>
+            </div>
+          )) : <p className="m-0 text-sm text-muted-foreground">Очередь пуста.</p>}
+        </CardContent>
+      </Card>
+    </>
+  );
+}
+
+function PreviewSlotCard({ slot }: { slot: PreviewSlot }) {
+  const note = slot.review_note && slot.review_note.branch === slot.branch && slot.review_note.commit === slot.commit ? slot.review_note : null;
+  return (
+    <Card>
+      <CardHeader className="gap-2 p-4">
+        <div className="flex items-center justify-between gap-3"><CardTitle>Preview {slot.slot}</CardTitle><Badge variant={slot.status === "ready" ? "default" : "secondary"}>{previewStatus(slot.status)}</Badge></div>
+        {slot.url ? <a className="truncate text-sm text-primary hover:underline" href={slot.url} target="_blank" rel="noreferrer">{slot.url}</a> : null}
+      </CardHeader>
+      <CardContent className="grid gap-3 px-4 pb-4 text-sm">
+        <dl className="grid gap-1">
+          <div><dt className="inline text-muted-foreground">Branch: </dt><dd className="inline break-all">{slot.branch ?? "—"}</dd></div>
+          <div><dt className="inline text-muted-foreground">Commit: </dt><dd className="inline font-mono">{shortCommit(slot.commit)}</dd></div>
+          <div><dt className="inline text-muted-foreground">Назначен: </dt><dd className="inline">{formatPreviewTime(slot.assigned_at)}</dd></div>
+          <div><dt className="inline text-muted-foreground">Обновлён: </dt><dd className="inline">{formatPreviewTime(slot.updated_at)}</dd></div>
+          <div><dt className="inline text-muted-foreground">APK: </dt><dd className="inline">{slot.apk_file ? `${slot.apk_file} · ${slot.apk_version ?? "?"} (${slot.apk_version_code ?? "?"}) · ${slot.apk_build_kind ?? "unknown"}${slot.apk_preview_iteration ? ` #${slot.apk_preview_iteration}` : ""} · ${formatPreviewTime(slot.apk_updated_at)}` : "—"}</dd></div>
+          <div><dt className="inline text-muted-foreground">Supabase: </dt><dd className="inline">{slot.supabase_branch_name ? `${slot.supabase_branch_name}${slot.supabase_branch_id ? ` (${slot.supabase_branch_id})` : ""} · ${slot.supabase_branch_status ?? "unknown"}` : "—"}</dd></div>
+        </dl>
+        {note ? (
+          <div className="grid gap-2 rounded-lg border bg-muted/20 p-3">
+            <h3 className="m-0 font-semibold">{note.short_changes}</h3>
+            <p className="m-0 whitespace-pre-wrap text-muted-foreground">{note.detailed_changes}</p>
+            <div><h4 className="m-0 text-sm font-semibold">Что тестировать</h4><p className="m-0 mt-1 whitespace-pre-wrap">{note.testing}</p></div>
+            <div><h4 className="m-0 text-sm font-semibold">Зачем</h4><p className="m-0 mt-1 whitespace-pre-wrap text-muted-foreground">{note.reason}</p></div>
+          </div>
+        ) : <p className="m-0 text-sm text-muted-foreground">Для текущего commit тестовая заметка ещё не сохранена.</p>}
+      </CardContent>
+    </Card>
+  );
+}
+
+function previewStatus(status: string) {
+  return ({ free: "Свободен", deploying: "Собирается", ready: "Готов", failed: "Ошибка" } as Record<string, string>)[status] ?? status;
+}
+
+function shortCommit(commit: string | null) { return commit ? commit.slice(0, 12) : "—"; }
+function formatPreviewTime(value: string | null) {
+  if (!value) return "—";
+  const date = new Date(value);
+  return Number.isFinite(date.getTime()) ? new Intl.DateTimeFormat("ru-RU", { dateStyle: "medium", timeStyle: "short" }).format(date) : value;
 }
 
 function SchedulesRail({ count }: { count: number }) {
@@ -1056,6 +1164,7 @@ function parseSection(value: string | undefined): SectionName {
   if (value === "handlers") return "handlers";
   if (value === "workflows") return "workflows";
   if (value === "role-contracts") return "role-contracts";
+  if (value === "previews") return "previews";
   return value === "brai-cmd" ? "brai-cmd" : "database";
 }
 

@@ -100,10 +100,30 @@ export function createBraiInboxCommands({
     }, ACTION_DELETE_COLLAPSE_MS);
   }
 
+  async function onReorderInbox(orderedIds: string[]) {
+    await queueInboxEvent({
+      type: "reorder",
+      inboxId: "inbox:list",
+      payload: { ordered_ids: orderedIds },
+      baseServerRevision: inbox.server_revision,
+    });
+  }
+
+  async function onRestoreInboxItem(item: InboxItem) {
+    await queueInboxEvent({
+      type: "restore",
+      inboxId: item.id,
+      payload: {},
+      baseServerRevision: inbox.server_revision,
+    });
+  }
+
   return {
     onAutosaveInboxDetails,
     onCreateInboxItem,
     onDeleteInboxItem,
+    onReorderInbox,
+    onRestoreInboxItem,
     onUpdateInboxTitle,
   };
 }

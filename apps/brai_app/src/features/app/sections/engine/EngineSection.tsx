@@ -1,6 +1,6 @@
 "use client";
 
-import { RefreshCw } from "lucide-react";
+import { Download, RefreshCw } from "lucide-react";
 import type { AppVersionState } from "@/shared/api/braiApi";
 import { useAppVersion } from "@/shared/config/runtime";
 import type { BraiOtaState } from "@/shared/platform/ota";
@@ -12,7 +12,7 @@ import { Field, FieldLabel } from "@/shared/ui/field";
 import { Progress } from "@/shared/ui/progress";
 import { SECTION_GRID_CLASS } from "../../appModel";
 import { cx } from "../../appUtils";
-import { engineSectionView } from "./engineModel";
+import { engineSectionView, type EngineSectionView } from "./engineModel";
 
 export function EngineSection({
   appVersionState,
@@ -22,6 +22,9 @@ export function EngineSection({
   versionCheckedAt,
   versionError,
   versionRefreshing,
+  onDownloadApk,
+  onInstallApk,
+  onDownloadWebUpdate,
   onRefreshEngine,
 }: {
   appVersionState: AppVersionState | null;
@@ -32,92 +35,106 @@ export function EngineSection({
   versionCheckedAt: string | null;
   versionError: boolean;
   versionRefreshing: boolean;
+  onDownloadApk: () => Promise<BraiOtaState | null>;
+  onInstallApk: () => Promise<BraiOtaState | null>;
+  onDownloadWebUpdate: () => Promise<BraiOtaState | null>;
   onRefreshEngine: () => Promise<void>;
 }) {
   const appBuild = useAppVersion();
-  const view = engineSectionView({
-    appBuild,
-    appVersionState,
-    otaRefreshing,
-    otaState,
-    versionError,
-    versionRefreshing,
-  });
-  const isAndroid = platformName() === "android";
-  const checkedAt = versionCheckedAt ?? otaCheckedAt;
+  const view = engineSectionView({ appBuild, appVersionState, otaRefreshing, otaState, versionError, versionRefreshing });
+  const checkedAt = [otaCheckedAt, versionCheckedAt]
+    .filter((value): value is string => Boolean(value))
+    .sort((left, right) => Date.parse(right) - Date.parse(left))[0] ?? null;
+
+  async function runAction() {
+    if (view.updateAction === "check") {
+      await onRefreshEngine();
+    } else if (view.updateAction === "download-web") {
+      if (platformName() === "android") await onDownloadWebUpdate();
+      else window.location.reload();
+    } else if (view.updateAction === "download-apk") {
+      const state = await onDownloadApk();
+      if (!state) window.open(view.apkReleaseUrl, "_blank", "noopener,noreferrer");
+    } else if (view.updateAction === "install-apk") {
+      await onInstallApk();
+    }
+  }
+
+  const button = updateButton(view.updateAction, view.apkInstallPermissionRequired);
+  const ButtonIcon = button.icon;
 
   return (
     <section className={cx(SECTION_GRID_CLASS, "content-start items-start xl:w-1/2")} aria-label="Engine">
       <Card className="grid w-full content-start gap-3 self-start p-4 sm:gap-4 sm:p-5">
         <div className="grid gap-1.5">
-          <h2 className="m-0 text-lg leading-tight tracking-normal sm:text-xl">Текущая OTA-версия {view.installedVersion}</h2>
+          <h2 className="m-0 text-lg leading-tight tracking-normal sm:text-xl">Текущая версия {view.installedVersion}</h2>
           <p className="m-0 text-sm leading-5 text-muted-foreground">{view.updateStatus.body}</p>
-          {checkedAt ? <p className="m-0 text-xs text-muted-foreground">Проверено {moscowTime(checkedAt)}</p> : null}
         </div>
 
-        {!isAndroid && view.hasUpdate ? <WebUpdateNotice latestVersion={view.latestVersion} /> : null}
-        {isAndroid && view.androidUpdateStage !== "idle" ? <AndroidUpdateNotice view={view} /> : null}
+        {(view.hasUpdate && view.updateAction !== "web-ready") || ["downloading-web", "downloading-apk", "install-apk"].includes(view.updateAction)
+          ? <UpdateNotice view={view} />
+          : null}
 
-        <Button className="justify-self-start" type="button" variant="secondary" size="sm" disabled={view.isChecking} onClick={() => void onRefreshEngine()}>
-          <RefreshCw className={cx("size-4", view.isChecking && "animate-spin")} aria-hidden="true" />
-          {view.isChecking ? "Проверяем..." : "Проверить обновления"}
-        </Button>
+        <div className="flex min-w-0 items-center gap-3">
+          <Button type="button" variant="secondary" size="sm" disabled={button.disabled} onClick={() => void runAction()}>
+            <ButtonIcon className={cx("size-4", button.animated && "motion-safe:animate-bounce", view.updateAction === "checking" && "motion-safe:animate-spin")} aria-hidden="true" />
+            {button.text}
+          </Button>
+          {checkedAt ? <p className="m-0 ml-auto whitespace-nowrap text-xs text-muted-foreground">Проверено {moscowTime(checkedAt)}</p> : null}
+        </div>
       </Card>
     </section>
   );
 }
 
-function WebUpdateNotice({ latestVersion }: { latestVersion: string }) {
-  return (
-    <div className="grid gap-1 rounded-md border border-border bg-muted/50 px-3 py-2.5">
-      <p className="m-0 text-sm font-medium">Доступна OTA-версия {latestVersion}</p>
-      <p className="m-0 text-sm text-muted-foreground">Перезагрузите страницу, чтобы получить новую версию.</p>
-    </div>
-  );
-}
-
-function AndroidUpdateNotice({ view }: { view: ReturnType<typeof engineSectionView> }) {
-  if (view.apkUpdateAvailable) {
+function UpdateNotice({ view }: { view: EngineSectionView }) {
+  if (view.updateAction === "download-apk") {
+    return <Notice text={`Доступна новая версия приложения. Для обновления нужен APK${view.requiredApkLabel ? ` ${view.requiredApkLabel}` : ""}.`} />;
+  }
+  if (view.updateAction === "downloading-apk") {
+    const progress = view.downloadProgressPercent ?? 0;
     return (
-      <div className="grid gap-2 rounded-md border border-border bg-muted/50 px-3 py-2.5">
-        <p className="m-0 text-sm font-medium">Нужен новый APK</p>
-        <p className="m-0 text-sm text-muted-foreground">
-          {view.requiredApkLabel ? `Требуется APK ${view.requiredApkLabel}.` : "Требуется более новый APK."}
-        </p>
-        <a className="text-sm font-semibold text-primary underline-offset-4 hover:underline" href={view.apkReleaseUrl}>
-          Открыть APK-релизы
-        </a>
-      </div>
+      <Field className="gap-2 rounded-md border border-border bg-muted/50 px-3 py-2.5">
+        <FieldLabel htmlFor="engine-apk-progress" className="flex w-full items-center gap-2 text-sm">
+          <span className="min-w-0 truncate">Скачивается APK{view.requiredApkLabel ? ` ${view.requiredApkLabel}` : ""}</span>
+          <span className="ml-auto tabular-nums">{progress}%</span>
+        </FieldLabel>
+        <Progress value={progress} id="engine-apk-progress" className="h-1.5" />
+      </Field>
     );
   }
-
-  if (view.androidUpdateStage === "ready") {
-    return (
-      <div className="rounded-md border border-border bg-muted/50 px-3 py-2.5">
-        <p className="m-0 text-sm font-medium">OTA-версия {view.latestVersion} загружена</p>
-        <p className="m-0 text-sm text-muted-foreground">Закройте приложение, чтобы новая версия применилась.</p>
-      </div>
-    );
+  if (view.updateAction === "install-apk") {
+    return <Notice text={view.apkInstallPermissionRequired ? "APK скачан. Разрешите Brai устанавливать обновления, затем нажмите «Установить»." : "APK скачан и проверен. Если установщик был закрыт, нажмите «Установить»."} />;
   }
-
-  if (view.androidUpdateStage === "downloading") {
+  if (view.updateAction === "downloading-web") {
     const progress = view.downloadProgressPercent ?? 0;
     const version = view.downloadProgressVersion ?? view.latestVersion;
     return (
       <Field className="gap-2 rounded-md border border-border bg-muted/50 px-3 py-2.5">
         <FieldLabel htmlFor="engine-update-progress" className="flex w-full items-center gap-2 text-sm">
-          <span className="min-w-0 truncate">Загрузка OTA-версии {version}</span>
+          <span className="min-w-0 truncate">Скачивается обновление {version}</span>
           <span className="ml-auto tabular-nums">{progress}%</span>
         </FieldLabel>
         <Progress value={progress} id="engine-update-progress" className="h-1.5" />
       </Field>
     );
   }
+  return <Notice text={`Доступна новая версия ${view.latestVersion}.`} />;
+}
 
-  return (
-    <div className="rounded-md border border-border bg-muted/50 px-3 py-2.5">
-      <p className="m-0 text-sm font-medium">Доступна OTA-версия {view.latestVersion}</p>
-      <p className="m-0 text-sm text-muted-foreground">Нажмите «Проверить обновления», чтобы скачать её.</p>
-    </div>
-  );
+function Notice({ text }: { text: string }) {
+  return <div className="rounded-md border border-border bg-muted/50 px-3 py-2.5"><p className="m-0 text-sm font-medium">{text}</p></div>;
+}
+
+function updateButton(action: EngineSectionView["updateAction"], permissionRequired = false) {
+  switch (action) {
+    case "checking": return { text: "Проверяем...", icon: RefreshCw, disabled: true, animated: false };
+    case "download-web": return { text: "Скачать обновление", icon: Download, disabled: false, animated: false };
+    case "downloading-web":
+    case "downloading-apk": return { text: "Скачивается", icon: Download, disabled: true, animated: true };
+    case "web-ready": return { text: "Скачано", icon: Download, disabled: true, animated: false };
+    case "download-apk": return { text: "Скачать APK", icon: Download, disabled: false, animated: false };
+    case "install-apk": return { text: permissionRequired ? "Разрешить установку" : "Установить", icon: Download, disabled: false, animated: false };
+    default: return { text: "Проверить обновления", icon: RefreshCw, disabled: false, animated: false };
+  }
 }

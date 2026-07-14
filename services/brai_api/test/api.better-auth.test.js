@@ -733,7 +733,32 @@ test('user vault preparer creates per-user subfolder and sync folder label by em
     assert.equal(fs.statSync(userPath).isDirectory(), true);
     assert.deepEqual(commands, [
       ['syncthing', 'cli', '--gui-address=127.0.0.1:8384', '--gui-apikey=test-key', 'config', 'folders', 'list'],
-      ['syncthing', 'cli', '--gui-address=127.0.0.1:8384', '--gui-apikey=test-key', 'config', 'folders', 'add', '--id=vault-user-user_123', '--label=sergey@example.com', `--path=${userPath}`, '--type=sendreceive']
+      ['syncthing', 'cli', '--gui-address=127.0.0.1:8384', '--gui-apikey=test-key', 'config', 'folders', 'add', '--id=vault-user-user_123', '--label=sergey@example.com', `--path=${userPath}`, '--type=sendreceive', '--ignore-perms']
+    ]);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('user vault preparer keeps shared folders from syncing restrictive permissions', async () => {
+  const root = await fs.promises.mkdtemp(path.join(process.env.TMPDIR || '/tmp', 'brai-vault-'));
+  const commands = [];
+  const runSyncthingCli = async (command) => {
+    commands.push(command);
+    return command.at(-1) === 'list' ? 'vault-user-user_123\n' : '';
+  };
+  const prepare = createUserVaultPreparer({
+    vaultRoot: root,
+    syncthingGuiAddress: '127.0.0.1:8384',
+    syncthingApiKey: 'test-key',
+    runSyncthingCli
+  });
+
+  try {
+    await prepare({ userId: 'user_123', email: 'sergey@example.com' });
+    assert.deepEqual(commands.at(-1), [
+      'syncthing', 'cli', '--gui-address=127.0.0.1:8384', '--gui-apikey=test-key',
+      'config', 'folders', 'vault-user-user_123', 'ignore-perms', 'set', 'true'
     ]);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });

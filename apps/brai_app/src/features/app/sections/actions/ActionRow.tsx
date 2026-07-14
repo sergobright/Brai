@@ -6,6 +6,7 @@ import { LoaderCircle, Square, Timer, Trash2, Undo2 } from "lucide-react";
 import { useSwipeable } from "react-swipeable";
 import { cleanTitle, limitTitle, visibleDescriptionPreview } from "@/shared/activities/text";
 import type { ActivityItem, ActivityStatus } from "@/shared/types/activities";
+import { playCompletionSound } from "@/shared/platform/completionSound";
 import { formatHourMinute } from "@/shared/time/format";
 import { Checkbox } from "@/shared/ui/checkbox";
 import { cx } from "../../appUtils";
@@ -218,7 +219,10 @@ export function ActionRow({
             id={checkboxId}
             aria-label={title}
             disabled={readonly}
-            onCheckedChange={(checked) => void onSetStatus(action, checked ? "Done" : "New")}
+            onCheckedChange={(checked) => {
+              if (checked && action.status === "New") playCompletionSound();
+              void onSetStatus(action, checked ? "Done" : "New");
+            }}
           />
         </span>
         <div className="action-main flex min-w-0 flex-1 flex-col gap-1">

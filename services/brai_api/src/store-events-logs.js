@@ -170,6 +170,26 @@ export const eventsLogsMethods = {
     `).all(...scope.params, rowLimit).map((row) => ({ ...row, payload_json: parseJsonObject(row.payload_json) }));
   },
 
+  listItemEvents(itemId, { limit = 200 } = {}) {
+    const id = sanitizeText(itemId);
+    if (!id) return [];
+    const rowLimit = boundedLimit(limit);
+    const scope = scopeSql('e');
+    return this.db.prepare(`
+      SELECT e.*
+      FROM events e
+      WHERE (
+        e.items_id = ?
+        OR e.subject_id = ?
+        OR e.item_roles_id IN (SELECT r.id FROM item_roles r WHERE r.items_id = ?)
+      )
+        ${scope.clause}
+      ORDER BY e.occurred_at_utc DESC, e.server_sequence DESC
+      LIMIT ?
+    `).all(id, id, id, ...scope.params, rowLimit)
+      .map((row) => ({ ...row, payload_json: parseJsonObject(row.payload_json) }));
+  },
+
   listLogs({ limit = 100 } = {}) {
     const rowLimit = boundedLimit(limit);
     const scope = scopeSql();

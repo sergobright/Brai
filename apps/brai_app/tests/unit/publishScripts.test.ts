@@ -311,6 +311,7 @@ describe("mobile OTA publish scripts", () => {
     expect(productionAdminBlock).toContain("brai_envs.prod.admin_port");
     expect(productionAdminBlock).not.toContain("brai_basic_auth_directive");
     expect(productionTemplate).toContain("@admin path /admin /admin/*");
+    expect(productionTemplate).toContain("handle /dev-releases*");
     expect(productionTemplate.indexOf("handle @admin")).toBeLessThan(productionTemplate.indexOf("handle {"));
     expect(productionShellBlock).not.toContain("brai_basic_auth_directive");
     expect(nonProductionTemplate).not.toMatch(/\{\{ env\.domain \}\} \{\n\s+\{\{ brai_basic_auth_directive \}\}/);
@@ -319,6 +320,7 @@ describe("mobile OTA publish scripts", () => {
     expect(adminBlock).toContain("brai_basic_auth_directive");
     expect(adminBlock).toContain("env.admin_port");
     expect(nonProductionTemplate).toContain("@admin path /admin /admin/*");
+    expect(nonProductionTemplate).toContain("handle /dev-releases*");
     expect(mobileIndex).toBeGreaterThan(nonProductionTemplate.indexOf("handle /releases*"));
     expect(mobileIndex).toBeLessThan(nonProductionTemplate.indexOf("handle {"));
     expect(mobileBlock).toContain('header /manifest.json Cache-Control "no-store"');
@@ -1043,7 +1045,7 @@ describe("mobile OTA publish scripts", () => {
             apkBuildKind: "stable",
             previewIteration: null,
             publishedAt: "2026-06-23T09:13:50Z",
-            sizeBytes: 123,
+            sizeBytes: 20_080_000,
             sha256: "abc",
             capabilities: [],
           },
@@ -1057,7 +1059,7 @@ describe("mobile OTA publish scripts", () => {
 
     const html = await readFile(path.join(releaseDir, "index.html"), "utf8");
     expect(html).toContain("<h2>Brai</h2>");
-    expect(html).toContain('<div class="version-row"><p class="version">v7</p><span class="size">0 МБ</span></div>');
+    expect(html).toContain('<div class="version-row"><p class="version">v7</p><span class="size">20,08 МБ</span></div>');
     expect(html).toContain('<a class="download" href="./brai-v7.apk">Скачать</a>');
   });
 

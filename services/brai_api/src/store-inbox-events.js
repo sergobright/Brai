@@ -6,6 +6,7 @@ import {
   formatInboxItem,
   isPostgresInteger,
   normalizeMarkdownSource,
+  normalizeOrderedIds,
   parseJsonArray,
   parseJsonObject,
   sanitizeText
@@ -29,7 +30,12 @@ export const inboxEventMethods = {
           LEFT JOIN workflow_executions w ON w.id = i.workflow_execution_id
           WHERE i.deleted_at_utc IS NULL
             ${scope.clause}
-          ORDER BY i.created_at_utc DESC, i.updated_at_utc DESC, i.id ASC
+          ORDER BY
+            CASE WHEN i.sort_order IS NULL THEN 0 ELSE 1 END ASC,
+            CASE WHEN i.sort_order IS NULL THEN COALESCE(i.restored_at_utc, i.created_at_utc) END DESC,
+            i.sort_order ASC,
+            i.updated_at_utc DESC,
+            i.id ASC
         `
       )
       .all(...scope.params)
@@ -445,7 +451,7 @@ export const inboxEventMethods = {
       ignoreReason = 'invalid_type';
       occurredAt = receivedAt;
       payload.raw_type = rawType;
-    } else if (!inboxId) {
+    } else if (rawType !== 'reorder' && !inboxId) {
       status = 'ignored';
       ignoreReason = 'inbox_id_required';
       occurredAt = Number.isFinite(occurredMs) ? new Date(occurredMs).toISOString() : receivedAt;
@@ -470,12 +476,17 @@ export const inboxEventMethods = {
       status = 'ignored';
       ignoreReason = 'description_required';
       occurredAt = new Date(occurredMs).toISOString();
+    } else if (rawType === 'reorder' && !Array.isArray(payload.ordered_ids)) {
+      status = 'ignored';
+      ignoreReason = 'ordered_ids_required';
+      occurredAt = new Date(occurredMs).toISOString();
     } else {
       occurredAt = new Date(occurredMs).toISOString();
       if (payload.title) payload.title = sanitizeText(payload.title);
       if (typeof payload.description_md === 'string') {
         payload.description_md = normalizeMarkdownSource(payload.description_md);
       }
+      if (Array.isArray(payload.ordered_ids)) payload.ordered_ids = normalizeOrderedIds(payload.ordered_ids);
       if (rawType === 'normalize') {
         if (payload.preliminary_section) payload.preliminary_section = sanitizeClassKey(payload.preliminary_section);
         if (typeof payload.normalization_text === 'string') {
@@ -555,8 +566,8 @@ export const inboxEventMethods = {
       title: `Inbox ${event.type}`,
       itemsId: linked?.item_roles_id ? event.inbox_id : null,
       itemRolesId: linked?.item_roles_id ?? null,
-      subjectType: 'inbox',
-      subjectId: event.inbox_id,
+      subjectType: event.type === 'reorder' ? 'inbox_list' : 'inbox',
+      subjectId: event.type === 'reorder' ? null : event.inbox_id,
       actorType: event.device_id === 'inbox-ai' ? 'agent' : 'user',
       actorId: event.device_id,
       deviceId: event.device_id,
@@ -587,8 +598,9 @@ export const inboxEventMethods = {
 ,
 
   projectAcceptedInboxEvents(events, nowIso) {
-    const inboxIds = new Set(events.map((event) => event.inbox_id).filter(Boolean));
+    const inboxIds = new Set(events.filter((event) => event.type !== 'reorder').map((event) => event.inbox_id).filter(Boolean));
     for (const inboxId of inboxIds) this.projectInboxItem(inboxId, nowIso);
+    this.applyLatestInboxReorder();
     for (const event of events) {
       if (event.type === 'create' && event.inbox_id) {
         this.ensureInboxWorkflowExecution({ inboxId: event.inbox_id, nowIso });
@@ -647,6 +659,7 @@ export const inboxEventMethods = {
           is_normalized: item?.is_normalized ?? 0,
           status: item?.status ?? 'New',
           completed_at_utc: item?.completed_at_utc ?? null,
+          sort_order: item?.sort_order ?? null,
           initial_event_id: item?.initial_event_id ?? event.id,
           ingest_idempotency_hash: event.device_id === 'inbox-api'
             ? sanitizeText(payload.ingest_idempotency_hash) ?? item?.ingest_idempotency_hash ?? null
@@ -657,6 +670,7 @@ export const inboxEventMethods = {
           created_at_utc: item?.created_at_utc ?? event.occurred_at_utc,
           updated_at_utc: event.occurred_at_utc,
           deleted_at_utc: null,
+          restored_at_utc: item?.restored_at_utc ?? null,
           last_event_id: event.event_id
         };
       } else if (event.type === 'update_title' && item) {
@@ -693,6 +707,15 @@ export const inboxEventMethods = {
         item.last_event_id = event.event_id;
       } else if (event.type === 'delete' && item) {
         item.deleted_at_utc = event.occurred_at_utc;
+        item.sort_order = null;
+        item.updated_at_utc = event.occurred_at_utc;
+        item.last_event_id = event.event_id;
+      } else if (event.type === 'restore' && item) {
+        item.deleted_at_utc = null;
+        item.restored_at_utc = event.occurred_at_utc;
+        item.status = 'New';
+        item.completed_at_utc = null;
+        item.sort_order = null;
         item.updated_at_utc = event.occurred_at_utc;
         item.last_event_id = event.event_id;
       }
@@ -710,10 +733,10 @@ export const inboxEventMethods = {
             id, title, description_text, source, source_key, response_required,
             related_inbox_id, record_type_id, item_date, author, preliminary_section,
             urgency, attachment_links_json, explanation_text, normalization_text,
-            is_normalized, status, completed_at_utc, created_at_utc, updated_at_utc,
-            deleted_at_utc, last_event_id, initial_event_id, ingest_idempotency_hash,
+            is_normalized, status, completed_at_utc, sort_order, created_at_utc, updated_at_utc,
+            deleted_at_utc, restored_at_utc, last_event_id, initial_event_id, ingest_idempotency_hash,
             ingest_payload_hash, user_id
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT(id) DO UPDATE SET
             title = excluded.title,
             description_text = excluded.description_text,
@@ -732,9 +755,11 @@ export const inboxEventMethods = {
             is_normalized = excluded.is_normalized,
             status = excluded.status,
             completed_at_utc = excluded.completed_at_utc,
+            sort_order = excluded.sort_order,
             created_at_utc = excluded.created_at_utc,
             updated_at_utc = excluded.updated_at_utc,
             deleted_at_utc = excluded.deleted_at_utc,
+            restored_at_utc = excluded.restored_at_utc,
             last_event_id = excluded.last_event_id,
             initial_event_id = COALESCE(inbox.initial_event_id, excluded.initial_event_id),
             ingest_idempotency_hash = COALESCE(inbox.ingest_idempotency_hash, excluded.ingest_idempotency_hash),
@@ -763,15 +788,55 @@ export const inboxEventMethods = {
         item.is_normalized === 1 ? 1 : 0,
         INBOX_STATUSES.has(item.status) ? item.status : 'New',
         item.completed_at_utc ?? null,
+        Number.isInteger(item.sort_order) ? item.sort_order : null,
         item.created_at_utc,
         item.updated_at_utc ?? nowIso,
         item.deleted_at_utc ?? null,
+        item.restored_at_utc ?? null,
         item.last_event_id ?? null,
         item.initial_event_id ?? null,
         item.ingest_idempotency_hash ?? null,
         item.ingest_payload_hash ?? null,
         scopedUserId()
       );
+    this.syncInboxEntityLifecycle(item);
+  },
+
+  applyLatestInboxReorder() {
+    const scope = scopeSql();
+    const event = this.db.prepare(`
+      SELECT event_id, occurred_at_utc, payload_json
+      FROM events
+      WHERE event_domain = 'inbox' AND event_type = 'reorder' AND status = 'accepted'
+        ${scope.clause}
+      ORDER BY occurred_at_utc DESC, domain_sequence DESC
+      LIMIT 1
+    `).get(...scope.params);
+    if (!event) return;
+    const orderedIds = normalizeOrderedIds(parseJsonObject(event.payload_json).ordered_ids);
+    for (const [index, id] of orderedIds.entries()) {
+      this.db.prepare(`
+        UPDATE inbox SET sort_order = ?, updated_at_utc = ?, last_event_id = ?
+        WHERE id = ? AND deleted_at_utc IS NULL${scope.clause}
+      `).run(index, event.occurred_at_utc, event.event_id, id, ...scope.params);
+    }
+  },
+
+  syncInboxEntityLifecycle(item) {
+    const linked = this.db.prepare(`
+      SELECT i.item_roles_id, r.items_id
+      FROM inbox i JOIN item_roles r ON r.id = i.item_roles_id
+      WHERE i.id = ?
+    `).get(item.id);
+    if (!linked) return;
+    const status = item.deleted_at_utc ? 'deleted' : 'active';
+    this.db.prepare(`
+      UPDATE items SET title = ?, description = ?, updated_at_utc = ?, deleted_at_utc = ?
+      WHERE id = ?
+    `).run(item.title, item.description_text ?? '', item.updated_at_utc, item.deleted_at_utc ?? null, linked.items_id);
+    this.db.prepare(`
+      UPDATE item_roles SET status = ?, active_to_utc = ? WHERE id = ?
+    `).run(status, item.deleted_at_utc ?? null, linked.item_roles_id);
   }
 };
 

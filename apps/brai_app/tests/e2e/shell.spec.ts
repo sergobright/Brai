@@ -93,6 +93,15 @@ test("keeps the compact desktop rail slim and centered", async ({ page }, testIn
   expect(Number.parseFloat(activeIconSize)).toBeLessThanOrEqual(16);
   expect(horizontalCenterOffset(avatar, rail)).toBeLessThanOrEqual(1.5);
   expect(horizontalCenterOffset(activeItem, rail)).toBeLessThanOrEqual(1.5);
+
+  const slots = await page.locator(".desktop-rail-slot").evaluateAll((elements) =>
+    elements.map((element) => {
+      const box = element.getBoundingClientRect();
+      return box.top + box.height / 2;
+    }),
+  );
+  expect(slots).toHaveLength(3);
+  expect(Math.abs((slots[1] - slots[0]) - (slots[2] - slots[1]))).toBeLessThanOrEqual(1);
 });
 
 test("keeps the desktop floating dock fixed near the bottom center", async ({ page }, testInfo) => {

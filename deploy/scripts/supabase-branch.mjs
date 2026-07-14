@@ -56,6 +56,7 @@ async function main() {
     upsertEnvFile(envFile, {
       BRAI_DATABASE_URL: databaseUrl,
       BRAI_SUPABASE_BRANCH: name,
+      BRAI_RELEASE_PASSWORD: requiredEnv("BRAI_RELEASE_PASSWORD"),
       BRAI_TEST_EMAIL_LOGIN: "true",
       BRAI_USER_PROVIDER_ENCRYPTION_KEY: userProviderEncryptionKey(envFile),
       ...rotatedSessionSecret(envFile)
@@ -76,6 +77,7 @@ async function main() {
     upsertEnvFile(envFile, {
       BRAI_DATABASE_URL: databaseUrl,
       BRAI_SUPABASE_BRANCH: name,
+      BRAI_RELEASE_PASSWORD: requiredEnv("BRAI_RELEASE_PASSWORD"),
       BRAI_TEST_EMAIL_LOGIN: "true",
       BRAI_USER_PROVIDER_ENCRYPTION_KEY: userProviderEncryptionKey(envFile),
       ...rotatedSessionSecret(envFile)

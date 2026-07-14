@@ -1,6 +1,7 @@
 package world.brightos.brai.widget
 
 import android.content.Context
+import android.media.MediaPlayer
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.key
 import androidx.datastore.preferences.core.Preferences
@@ -52,6 +53,7 @@ class ToggleBraiActionCallback : ActionCallback {
         }
         val revision = parameters[RevisionKey]?.toLongOrNull() ?: 0L
         if (actionId.isBlank() || nextStatus !in setOf("New", "Done")) return
+        if (nextStatus == "Done") playCompletionSound(context)
         withContext(Dispatchers.IO) {
             BraiActionsWidgetStore(context).enqueueStatusChange(
                 viewId = DEFAULT_ACTIONS_WIDGET_VIEW_ID,
@@ -62,6 +64,20 @@ class ToggleBraiActionCallback : ActionCallback {
         }
         BraiActionsWidgetPlugin.notifyStatusChangesPending()
         BraiActionsWidget.updateEveryInstanceNowAndSoon(context, glanceId)
+    }
+}
+
+private fun playCompletionSound(context: Context) {
+    runCatching {
+        MediaPlayer.create(context, R.raw.brai_sound_done)?.apply {
+            setVolume(0.5f, 0.5f)
+            setOnCompletionListener { player -> player.release() }
+            setOnErrorListener { player, _, _ ->
+                player.release()
+                true
+            }
+            start()
+        }
     }
 }
 

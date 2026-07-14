@@ -108,6 +108,7 @@ class OverlayController(private val service: BraiAccessibilityService) {
     private var inputButtonRequested = false
     private var updateAvailable = false
     private var apkUpdateRequired = false
+    private var updateCheckInProgress = false
     private var downRawX = 0f
     private var downRawY = 0f
     private var downX = 0
@@ -846,22 +847,10 @@ class OverlayController(private val service: BraiAccessibilityService) {
     }
 
     private fun updateQueueIndicators(snapshot: BraiCmdQueueSnapshot = BraiCmdQueue.snapshot(service)) {
-        val mainReady = snapshot.readyToInsert.mainDictation
-        button?.setQueueState(
-            pendingCount = snapshot.transport.main + snapshot.transport.unknown,
-            readyCount = mainReady
-        )
-        button?.setUpdateAvailable(shouldShowUpdateDot(updateAvailable, apkUpdateRequired))
+        button?.setQueueState(failedAudioCount(snapshot))
+        button?.setUpdateAvailable(shouldShowUpdateDot(updateAvailable, apkUpdateRequired, updateCheckInProgress))
         contextActionButtons.forEach { (menuAction, view) ->
-            val chatReady = if (menuAction.action == ContextButtonAction.ChatContextInbox) {
-                snapshot.readyToInsert.chatReply
-            } else {
-                0
-            }
-            view.setQueueState(
-                pendingCount = snapshot.transport[menuAction.action],
-                readyCount = chatReady
-            )
+            view.setQueueState(failedAudioCount(snapshot, menuAction.action))
         }
     }
 
@@ -950,11 +939,11 @@ class OverlayController(private val service: BraiAccessibilityService) {
     private fun scheduleUpdateNotice() {
         cancelUpdateNotice()
         refreshUpdateIndicator(startCheck = false)
-        if (!shouldShowUpdateDot(updateAvailable, apkUpdateRequired)) return
+        if (!shouldShowUpdateDot(updateAvailable, apkUpdateRequired, updateCheckInProgress)) return
         updateNoticeRunnable = Runnable {
             updateNoticeRunnable = null
             refreshUpdateIndicator(startCheck = false)
-            if (!shouldShowUpdateDot(updateAvailable, apkUpdateRequired)) return@Runnable
+            if (!shouldShowUpdateDot(updateAvailable, apkUpdateRequired, updateCheckInProgress)) return@Runnable
             showNotice(
                 BraiCmdNotice(
                     text = if (apkUpdateRequired) "Нужен новый APK" else "Доступно обновление",
@@ -992,7 +981,11 @@ class OverlayController(private val service: BraiAccessibilityService) {
 
     private fun refreshUpdateIndicator(startCheck: Boolean) {
         val manager = BraiOtaRegistry.getManager() ?: BraiOtaManager(service)
-        if (startCheck) manager.checkForUpdatesAsync()
+        if (startCheck) {
+            updateCheckInProgress = true
+            button?.setUpdateAvailable(false)
+            manager.checkForUpdatesAsync()
+        }
         settleUpdateIndicator(manager)
     }
 
@@ -1012,7 +1005,12 @@ class OverlayController(private val service: BraiAccessibilityService) {
     private fun applyUpdateIndicatorState(state: org.json.JSONObject) {
         updateAvailable = state.optBoolean("updateAvailable", false)
         apkUpdateRequired = state.optBoolean("apkUpdateRequired", false)
-        button?.setUpdateAvailable(shouldShowUpdateDot(updateAvailable, apkUpdateRequired))
+        updateCheckInProgress = state.optBoolean("checkInProgress", false)
+        button?.setUpdateAvailable(shouldShowUpdateDot(
+            updateAvailable,
+            apkUpdateRequired,
+            updateCheckInProgress
+        ))
     }
 
     private fun statusAnchorParams(): WindowManager.LayoutParams? =
@@ -1153,6 +1151,12 @@ class OverlayController(private val service: BraiAccessibilityService) {
             AppConstants.KEY_ONBOARDING_VOICE_ONLY
         ) + contextActionSettingKeys
     }
+}
+
+internal fun failedAudioCount(snapshot: BraiCmdQueueSnapshot, action: ContextButtonAction? = null): Int = when (action) {
+    null -> snapshot.failedTransport.main + snapshot.failedTransport.unknown
+    ContextButtonAction.ScreenshotInbox -> 0
+    else -> snapshot.failedTransport[action]
 }
 
 internal fun secondaryCloseAlpha(progress: Float): Float =

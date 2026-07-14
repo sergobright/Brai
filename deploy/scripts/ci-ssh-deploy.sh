@@ -87,6 +87,16 @@ env_database_url() {
     printf '%s' "${BRAI_DATABASE_URL:-}"
   )
 }
+env_release_password() {
+  local env_file="$1"
+  (
+    set -a
+    # shellcheck source=/dev/null
+    . "$env_file"
+    set +a
+    printf '%s' "${BRAI_RELEASE_PASSWORD:-}"
+  )
+}
 check_deploy_headroom() {
   local root="$1"
   local min_gb="${BRAI_DEPLOY_MIN_FREE_GB:-4}"
@@ -229,6 +239,8 @@ elif [[ "$ENVIRONMENT" == preview-* || "$ENVIRONMENT" == "dev" ]]; then
   [[ -r "/etc/brai/brai-api.env" ]] || { echo "/etc/brai/brai-api.env is required and must be readable for test data seed" >&2; exit 1; }
   export BRAI_PROD_DATABASE_URL="$(env_database_url /etc/brai/brai-api.env)"
   [[ -n "$BRAI_PROD_DATABASE_URL" ]] || { echo "BRAI_DATABASE_URL is missing in /etc/brai/brai-api.env" >&2; exit 1; }
+  export BRAI_RELEASE_PASSWORD="$(env_release_password /etc/brai/brai-api.env)"
+  [[ -n "$BRAI_RELEASE_PASSWORD" ]] || { echo "BRAI_RELEASE_PASSWORD is missing in /etc/brai/brai-api.env" >&2; exit 1; }
 fi
 if [[ "$ENVIRONMENT" == "prod" ]]; then
   : "${BRAI_DATABASE_URL:?BRAI_DATABASE_URL is required for production deploy}"

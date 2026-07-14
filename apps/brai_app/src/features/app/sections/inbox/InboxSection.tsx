@@ -1,8 +1,11 @@
 "use client";
 
-import type { CSSProperties, FormEvent, KeyboardEvent, MouseEvent, PointerEvent } from "react";
+import type { CSSProperties, FormEvent, HTMLAttributes, KeyboardEvent, MouseEvent, PointerEvent, ReactNode } from "react";
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
-import { BookOpen, FilePenLine, FileText, Inbox, Link2, LoaderCircle, Mail, MessageSquare, Pencil, Plus, Sparkles, Trash2, X } from "lucide-react";
+import { closestCenter, DndContext, KeyboardSensor, MouseSensor, TouchSensor, useSensor, useSensors, type DragEndEvent, type DraggableAttributes, type DraggableSyntheticListeners } from "@dnd-kit/core";
+import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import { BookOpen, FilePenLine, FileText, GripVertical, Inbox, Link2, LoaderCircle, Mail, MessageSquare, Pencil, Plus, Sparkles, Trash2, X } from "lucide-react";
 import { useSwipeable } from "react-swipeable";
 import {
   cleanTitle,
@@ -23,7 +26,7 @@ import { MobileDetailFloatingCloseButton } from "../../chrome/AppChrome";
 import { cx, fitTextareaHeight, focusEditableEnd, plainEditableText, setPlainEditableText } from "../../appUtils";
 import { useMobileSheetDrag } from "../../hooks/useMobileSheetDrag";
 import { useMobileSheetTop } from "../../hooks/useMobileSheetTop";
-import { isMobileNavigationViewport } from "../../navigation/useSectionSwipeNavigation";
+import { isMobileNavigationViewport, useMobileNavigationViewport } from "../../navigation/useSectionSwipeNavigation";
 import {
   DetailAttachments,
   DetailDbReference,
@@ -48,6 +51,7 @@ export function InboxSection({
   onUpdateTitle,
   onAutosaveDetails,
   onDelete,
+  onReorder,
   mobileCreateDraft,
   onMobileCreateDraftChange,
   dockOverflowOpen,
@@ -60,6 +64,7 @@ export function InboxSection({
   onUpdateTitle: (item: InboxItem, title: string) => Promise<void>;
   onAutosaveDetails: (item: InboxItem, title: string, descriptionMd: string) => Promise<void>;
   onDelete: (item: InboxItem) => Promise<void>;
+  onReorder: (orderedIds: string[]) => Promise<void>;
   mobileCreateDraft: MobileCreateDraft;
   onMobileCreateDraftChange: (draft: MobileCreateDraft) => void;
   dockOverflowOpen: boolean;
@@ -287,22 +292,20 @@ export function InboxSection({
                 {localSnapshotReady ? "Входящих нет" : "Загрузка входящих"}
               </div>
             ) : (
-              state.inbox.map((item) => (
-                <InboxRow
-                  key={item.id}
-                  item={item}
-                  titleDraft={titleDrafts[item.id]}
-                  selected={selectedItemId === item.id}
-                  onSelect={(focusDetailTitle) => selectItem(item.id, focusDetailTitle)}
-                  onEditMobile={openMobileEdit}
-                  onUpdateTitle={onUpdateTitle}
-                  onTitleDraftChange={setTitleDraft}
-                  onDelete={onDelete}
-                  deleteOpen={visibleOpenDeleteItemId === item.id}
-                  onOpenDelete={() => setOpenDeleteItemId(item.id)}
-                  onCloseDelete={() => setOpenDeleteItemId(null)}
-                />
-              ))
+              <SortableInboxList
+                items={state.inbox}
+                selectedItemId={selectedItemId}
+                openDeleteItemId={visibleOpenDeleteItemId}
+                titleDrafts={titleDrafts}
+                onSelect={selectItem}
+                onEditMobile={openMobileEdit}
+                onUpdateTitle={onUpdateTitle}
+                onTitleDraftChange={setTitleDraft}
+                onDelete={onDelete}
+                onOpenDelete={setOpenDeleteItemId}
+                onCloseDelete={() => setOpenDeleteItemId(null)}
+                onReorder={onReorder}
+              />
             )}
           </div>
         </ScrollArea>
@@ -391,6 +394,84 @@ export function InboxSection({
   );
 }
 
+function SortableInboxList({ items, selectedItemId, openDeleteItemId, titleDrafts, onSelect, onEditMobile, onUpdateTitle, onTitleDraftChange, onDelete, onOpenDelete, onCloseDelete, onReorder }: {
+  items: InboxItem[];
+  selectedItemId: string | null;
+  openDeleteItemId: string | null;
+  titleDrafts: Record<string, string>;
+  onSelect: (itemId: string, focus?: DetailTitleFocus) => void;
+  onEditMobile: (item: InboxItem) => void;
+  onUpdateTitle: (item: InboxItem, title: string) => Promise<void>;
+  onTitleDraftChange: (itemId: string, title: string | null) => void;
+  onDelete: (item: InboxItem) => Promise<void>;
+  onOpenDelete: (itemId: string) => void;
+  onCloseDelete: () => void;
+  onReorder: (orderedIds: string[]) => Promise<void>;
+}) {
+  const sensors = useSensors(
+    useSensor(MouseSensor, { activationConstraint: { distance: 4 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 260, tolerance: 8 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
+  const ids = items.map((item) => item.id);
+  function onDragEnd(event: DragEndEvent) {
+    const active = String(event.active.id);
+    const over = event.over?.id == null ? null : String(event.over.id);
+    if (!over || active === over) return;
+    const from = ids.indexOf(active);
+    const to = ids.indexOf(over);
+    if (from < 0 || to < 0) return;
+    void onReorder(arrayMove(items, from, to).map((item) => item.id));
+  }
+  return (
+    <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
+      <SortableContext items={ids} strategy={verticalListSortingStrategy}>
+        {items.map((item) => (
+          <SortableInboxRow
+            key={item.id}
+            item={item}
+            titleDraft={titleDrafts[item.id]}
+            selected={selectedItemId === item.id}
+            onSelect={(focus) => onSelect(item.id, focus)}
+            onEditMobile={onEditMobile}
+            onUpdateTitle={onUpdateTitle}
+            onTitleDraftChange={onTitleDraftChange}
+            onDelete={onDelete}
+            deleteOpen={openDeleteItemId === item.id}
+            onOpenDelete={() => onOpenDelete(item.id)}
+            onCloseDelete={onCloseDelete}
+          />
+        ))}
+      </SortableContext>
+    </DndContext>
+  );
+}
+
+type InboxRowProps = Parameters<typeof InboxRow>[0];
+
+function SortableInboxRow(props: InboxRowProps) {
+  const sortable = useSortable({ id: props.item.id });
+  const mobile = useMobileNavigationViewport();
+  return (
+    <InboxRow
+      {...props}
+      sortableRef={sortable.setNodeRef}
+      sortableStyle={{ transform: CSS.Transform.toString(sortable.transform), transition: sortable.transition, zIndex: sortable.isDragging ? 2 : undefined }}
+      sortableDragging={sortable.isDragging}
+      mobileDragProps={mobile ? ({ ...sortable.attributes, ...sortable.listeners } as HTMLAttributes<HTMLDivElement>) : undefined}
+      dragHandle={mobile ? undefined : <InboxDragHandle item={props.item} attributes={sortable.attributes} listeners={sortable.listeners} setActivatorNodeRef={sortable.setActivatorNodeRef} />}
+    />
+  );
+}
+
+function InboxDragHandle({ item, attributes, listeners, setActivatorNodeRef }: { item: InboxItem; attributes: DraggableAttributes; listeners?: DraggableSyntheticListeners; setActivatorNodeRef: (node: HTMLElement | null) => void }) {
+  return (
+    <button type="button" className="action-drag-handle pointer-events-none grid h-8 w-5 cursor-grab place-items-center border-0 bg-transparent text-muted-foreground opacity-0 group-hover:pointer-events-auto group-hover:opacity-45 focus-visible:opacity-75" aria-label={`Переместить: ${item.title}`} title="Переместить" ref={setActivatorNodeRef} onClick={(event) => event.stopPropagation()} {...attributes} {...listeners}>
+      <GripVertical className="size-4" aria-hidden="true" />
+    </button>
+  );
+}
+
 function InboxRow({
   item,
   selected,
@@ -403,6 +484,11 @@ function InboxRow({
   deleteOpen,
   onOpenDelete,
   onCloseDelete,
+  sortableRef,
+  sortableStyle,
+  sortableDragging = false,
+  mobileDragProps,
+  dragHandle,
 }: {
   item: InboxItem;
   selected: boolean;
@@ -415,6 +501,11 @@ function InboxRow({
   deleteOpen: boolean;
   onOpenDelete: () => void;
   onCloseDelete: () => void;
+  sortableRef?: (node: HTMLElement | null) => void;
+  sortableStyle?: CSSProperties;
+  sortableDragging?: boolean;
+  mobileDragProps?: HTMLAttributes<HTMLDivElement>;
+  dragHandle?: ReactNode;
 }) {
   const title = titleDraft ?? item.title;
   const preview = visibleDescriptionPreview(item.description_md);
@@ -493,7 +584,7 @@ function InboxRow({
 
   return (
     <div
-      ref={swipeRef}
+      ref={(node) => { swipeRef(node); sortableRef?.(node); }}
       className={cx(
         "action-row group relative grid min-h-[54px] grid-cols-[minmax(0,1fr)_44px] items-stretch overflow-hidden border-b border-border transition-[max-height,opacity,border-color,box-shadow] duration-150 [&:has(+_.action-row.selected)]:border-b-transparent max-[860px]:grid-cols-[minmax(0,1fr)_46px] max-[860px]:select-none max-[860px]:[touch-action:pan-y]",
         "max-h-[220px]",
@@ -502,13 +593,16 @@ function InboxRow({
         dragging && "dragging",
         removing && "removing pointer-events-none max-h-0 border-b-transparent opacity-0",
         selected && "selected rounded-lg border-b-transparent bg-primary/10",
+        sortableDragging && "sorting overflow-visible shadow-lg",
       )}
       data-nav-swipe-exclusion
       data-action-row
+      style={sortableStyle}
       {...rowSwipeHandlers}
     >
       <div
-        className="action-row-surface grid min-h-[54px] min-w-0 grid-cols-[38px_minmax(0,1fr)] items-center gap-x-1.5 py-2.5 transition-transform duration-150 will-change-transform max-[860px]:min-h-[54px] max-[860px]:py-[9px]"
+        className="action-row-surface grid min-h-[54px] min-w-0 grid-cols-[20px_28px_minmax(0,1fr)] items-center gap-x-1.5 py-2.5 transition-transform duration-150 will-change-transform max-[860px]:min-h-[54px] max-[860px]:grid-cols-[38px_minmax(0,1fr)] max-[860px]:py-[9px]"
+        {...mobileDragProps}
         onClick={openDetailsFromRow}
         onPointerDownCapture={rememberMobileTap}
         onPointerUpCapture={openDetailsFromMobileTap}
@@ -517,7 +611,8 @@ function InboxRow({
           transition: dragging ? "none" : undefined,
         }}
       >
-        <span className="action-checkbox-cell flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted-foreground" data-action-row-service aria-labelledby={typeIconId}>
+        {dragHandle ?? <span className="hidden h-8 w-5 min-[861px]:block" aria-hidden="true" />}
+        <span className="action-checkbox-cell flex h-8 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground" data-action-row-service aria-labelledby={typeIconId}>
           <InboxTypeIcon id={item.id} />
           <span id={typeIconId} className="sr-only">Тип входящего</span>
         </span>

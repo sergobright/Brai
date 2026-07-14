@@ -243,7 +243,7 @@ export async function createTestDatabase(migrations = [
   '0020_inbox_operation_status.sql',
   '0021_activity_raw_normalization_workflows.sql',
   '0022_activity_image_describer_workflow_step.sql',
-  '0025_user_ai_provider_credentials.sql'
+  '0026_user_ai_provider_credentials.sql'
 ]) {
   const baseUrl = process.env.BRAI_TEST_DATABASE_URL?.trim();
   if (!baseUrl) throw new Error('BRAI_TEST_DATABASE_URL is required for API tests');

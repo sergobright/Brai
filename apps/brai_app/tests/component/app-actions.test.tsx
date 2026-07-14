@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
-import { actionsWidgetPlugin, cachedActivitiesState, openProfileMenuItem, setupBraiAppTest, stubAndroidCapacitor } from "./app-test-support";
+import { actionsWidgetPlugin, audioPlay, cachedActivitiesState, openProfileMenuItem, setupBraiAppTest, stubAndroidCapacitor } from "./app-test-support";
 import { BraiApp } from "@/features/app/BraiApp";
 import { ActionRow } from "@/features/app/sections/actions/ActionRow";
 import { ActionsSection } from "@/features/app/sections/actions/ActionsSection";
@@ -27,6 +27,11 @@ describe("BraiApp actions", () => {
 
     await waitFor(() => expect(screen.getByRole("button", { name: /Выполнено 1/ })).toBeInTheDocument());
     expect(screen.getByRole("checkbox", { name: "Фокус" })).toBeChecked();
+    expect(audioPlay).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "Фокус" }));
+    await waitFor(() => expect(screen.getByRole("checkbox", { name: "Фокус" })).not.toBeChecked());
+    expect(audioPlay).toHaveBeenCalledTimes(1);
   });
 
   it("publishes Android widget snapshots for local create and status changes", async () => {
@@ -475,11 +480,11 @@ describe("BraiApp actions", () => {
 
     await openProfileMenuItem("Архив");
     await waitFor(() => expect(screen.getByRole("heading", { name: "Архив" })).toBeInTheDocument());
-    const archiveList = screen.getByLabelText("Удаленные действия");
+    const archiveList = screen.getByRole("region", { name: "Архив: Activities" });
     expect(within(archiveList).getByText("Фокус")).toBeInTheDocument();
     expect(archiveList.querySelector(".action-focus-button")).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Восстановить: Фокус", hidden: true }));
+    fireEvent.click(screen.getByRole("button", { name: "Восстановить: Фокус" }));
     await waitFor(() => expect(within(archiveList).queryByText("Фокус")).not.toBeInTheDocument());
 
     fireEvent.click(screen.getAllByRole("button", { name: "Действия" }).at(-1) as HTMLElement);

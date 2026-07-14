@@ -170,6 +170,7 @@ export function projectInboxState(
         is_normalized: false,
         status: "New",
         completed_at_utc: null,
+        sort_order: null,
         item_roles_id: null,
         initial_event_id: null,
         workflow_execution_id: null,
@@ -184,6 +185,7 @@ export function projectInboxState(
         created_at_utc: occurredAtUtc,
         updated_at_utc: occurredAtUtc,
         deleted_at_utc: null,
+        restored_at_utc: null,
         pending: true,
       });
     } else if (event.type === "update_title" && existing) {
@@ -202,10 +204,27 @@ export function projectInboxState(
         updated_at_utc: occurredAtUtc,
         pending: true,
       });
+    } else if (event.type === "reorder") {
+      for (const [index, id] of (event.payload.ordered_ids ?? []).entries()) {
+        const ordered = items.get(id);
+        if (ordered) items.set(id, { ...ordered, sort_order: index, updated_at_utc: occurredAtUtc, pending: true });
+      }
     } else if (event.type === "delete" && existing) {
       items.set(event.inboxId, {
         ...existing,
         deleted_at_utc: occurredAtUtc,
+        sort_order: null,
+        updated_at_utc: occurredAtUtc,
+        pending: true,
+      });
+    } else if (event.type === "restore" && existing) {
+      items.set(event.inboxId, {
+        ...existing,
+        deleted_at_utc: null,
+        restored_at_utc: occurredAtUtc,
+        status: "New",
+        completed_at_utc: null,
+        sort_order: null,
         updated_at_utc: occurredAtUtc,
         pending: true,
       });
@@ -220,7 +239,11 @@ export function projectInboxState(
 
 export function sortInbox(items: InboxItem[]): InboxItem[] {
   return [...items].sort((left, right) => {
-    const byCreated = right.created_at_utc.localeCompare(left.created_at_utc);
+    const leftManual = Number.isInteger(left.sort_order);
+    const rightManual = Number.isInteger(right.sort_order);
+    if (leftManual !== rightManual) return leftManual ? 1 : -1;
+    if (leftManual && rightManual) return Number(left.sort_order) - Number(right.sort_order) || left.id.localeCompare(right.id);
+    const byCreated = (right.restored_at_utc ?? right.created_at_utc).localeCompare(left.restored_at_utc ?? left.created_at_utc);
     return byCreated || right.updated_at_utc.localeCompare(left.updated_at_utc) || left.id.localeCompare(right.id);
   });
 }
@@ -230,6 +253,7 @@ function normalizedPayload(payload: InboxEventPayload, type: InboxEventType, dev
   const normalized = {
     title,
     description_md: payload.description_md == null ? undefined : normalizeDescription(payload.description_md),
+    ordered_ids: Array.isArray(payload.ordered_ids) ? [...new Set(payload.ordered_ids.filter(Boolean))] : undefined,
   };
   if (type !== "create") return normalized;
   return {
@@ -254,6 +278,7 @@ function normalizeInboxItem(item: InboxItem): InboxItem {
     is_normalized: Boolean(item.is_normalized),
     status: item.status === "Done" ? "Done" : "New",
     completed_at_utc: item.completed_at_utc ?? null,
+    sort_order: Number.isInteger(item.sort_order) ? item.sort_order : null,
     item_roles_id: Number.isInteger(item.item_roles_id) ? item.item_roles_id : null,
     initial_event_id: item.initial_event_id ?? null,
     workflow_execution_id: Number.isInteger(item.workflow_execution_id) ? item.workflow_execution_id : null,
@@ -269,6 +294,7 @@ function normalizeInboxItem(item: InboxItem): InboxItem {
       ? item.ai_processing_status
       : null,
     ai_processing_error: typeof item.ai_processing_error === "string" ? item.ai_processing_error : null,
+    restored_at_utc: item.restored_at_utc ?? null,
   };
 }
 

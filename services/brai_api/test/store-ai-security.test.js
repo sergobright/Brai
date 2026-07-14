@@ -35,7 +35,7 @@ test('user AI migration backfills colliding flow ids by agent domain', async () 
     `);
 
     const migration = fs.readFileSync(
-      path.resolve(import.meta.dirname, '../../../supabase/migrations/0025_user_ai_provider_credentials.sql'),
+      path.resolve(import.meta.dirname, '../../../supabase/migrations/0026_user_ai_provider_credentials.sql'),
       'utf8'
     );
     await pool.query(migration);

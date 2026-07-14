@@ -7,6 +7,7 @@ import android.graphics.Paint
 import java.util.Locale
 
 internal fun braiFloatingButtonMarker(): String =
+    // Preview flavors render their slot letter on both Brai CMD buttons; Production stays unmarked.
     normalizeFloatingButtonMarker(BuildConfig.BRAI_FLOATING_BUTTON_LABEL)
 
 internal fun normalizeFloatingButtonMarker(value: String?): String =

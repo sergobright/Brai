@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { cmdPlugin, openProfileMenuItem, setupBraiAppTest, stubAndroidCapacitor, testVersionState } from "./app-test-support";
 import { BraiApp } from "@/features/app/BraiApp";
@@ -14,8 +15,9 @@ const drawsCanvasSpy = vi.hoisted(() => vi.fn());
 
 vi.mock("@/features/app/sections/draws/DrawsCanvas", () => ({
   DrawsCanvas: (props: Record<string, unknown>) => {
+    const [initialData] = useState(props.initialData as { elements?: unknown[] });
     drawsCanvasSpy(props);
-    return <div data-testid="draws-canvas" />;
+    return <div data-element-count={initialData.elements?.length ?? 0} data-testid="draws-canvas" />;
   },
 }));
 
@@ -24,6 +26,7 @@ describe("BraiApp shell", () => {
 
   it("renders the actions-first shell", async () => {
     render(<BraiApp />);
+    expect(document.querySelector("[data-startup-splash]")).not.toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Действия" })).toBeInTheDocument();
     expect(screen.getAllByLabelText("Действия").length).toBeGreaterThan(0);
     ["Действия", "Входящие", "Фокус"].forEach((title) => {
@@ -52,6 +55,7 @@ describe("BraiApp shell", () => {
     expect(cmdPlugin.syncProviderCredentials.mock.invocationCallOrder[0]).toBeLessThan(
       cmdPlugin.setOverlayEnabled.mock.invocationCallOrder.find((order) => order > cmdPlugin.syncProviderCredentials.mock.invocationCallOrder[0]) ?? 0,
     );
+    expect(document.querySelector("[data-startup-splash]")).not.toBeInTheDocument();
   });
 
   it("keeps account overlays blocked while waiting for device access", async () => {
@@ -493,6 +497,21 @@ describe("BraiApp shell", () => {
     expect(initialData.appState).toEqual({ viewBackgroundColor: "#ffffff" });
   });
 
+  it("mounts Draws canvas with persisted elements after resolving the saved file name", async () => {
+    stubDrawsFetch({
+      type: "excalidraw",
+      version: 2,
+      source: "test",
+      elements: [{ id: "saved-ellipse", type: "ellipse" }],
+      appState: { viewBackgroundColor: "#ffffff" },
+      files: {},
+    });
+
+    render(<BraiApp initialSection="draws" />);
+
+    await waitFor(() => expect(screen.getByTestId("draws-canvas")).toHaveAttribute("data-element-count", "1"));
+  });
+
   it("keeps contextual actions before the rightmost sync status", async () => {
     render(<BraiApp />);
 
@@ -723,6 +742,8 @@ describe("BraiApp shell", () => {
     expect(contextScrollArea).toHaveClass(
       "[--scroll-area-thumb-size:10px]",
       "[--scroll-area-gap:calc(var(--scroll-area-thumb-size)/2)]",
+      "max-[860px]:[--scroll-area-content-gutter:var(--scroll-area-thumb-size)]",
+      "max-[860px]:[--scroll-area-gap:0px]",
       "[&>[data-slot=scroll-area-viewport]]:pr-[var(--scroll-area-content-gutter)]",
     );
     expect(contextScrollArea).not.toHaveClass("[&>[data-slot=scroll-area-scrollbar]]:right-1", "[&>[data-slot=scroll-area-viewport]>div]:pr-5");
@@ -1172,6 +1193,7 @@ describe("BraiApp shell", () => {
     await waitFor(() => expect(screen.getByText("Live действие")).toBeInTheDocument());
     await openProfileMenuItem("Архив");
     await waitFor(() => expect(screen.getByRole("heading", { name: "Архив" })).toBeInTheDocument());
+    expect(screen.queryByRole("button", { name: "Назад к настройкам" })).not.toBeInTheDocument();
     await waitFor(() => expect(screen.getByText("Live архив")).toBeInTheDocument());
   });
 
@@ -1263,7 +1285,7 @@ describe("BraiApp shell", () => {
     await waitFor(() => expect(document.documentElement).toHaveAttribute("data-platform", "android"));
   });
 
-  it("keeps the desktop rail compact and static", async () => {
+  it("keeps the desktop rail compact and opens a separate contextual rail", async () => {
     Object.defineProperty(window, "innerWidth", { configurable: true, writable: true, value: 1200 });
     render(<BraiApp />);
     const shell = document.querySelector(".app-shell");
@@ -1272,7 +1294,8 @@ describe("BraiApp shell", () => {
 
     expect(shell).toBeInstanceOf(HTMLElement);
     expect(rail).toBeInstanceOf(HTMLElement);
-    expect(topbar?.querySelector("[data-screen-icon]")).toBeInTheDocument();
+    expect(topbar?.querySelector("[data-screen-icon]")).not.toBeInTheDocument();
+    expect(topbar?.querySelector('[aria-label="Закрыть контекстную панель"]')).toBeInTheDocument();
     expect(topbar?.querySelector('[aria-label="Свернуть меню"]')).not.toBeInTheDocument();
     expect(shell).not.toHaveClass("is-rail-expanded");
     expect(rail).not.toHaveClass("expanded");
@@ -1289,6 +1312,7 @@ describe("BraiApp shell", () => {
     expect(rail).toContainElement(screen.getByRole("button", { name: "Открыть меню профиля" }));
     expect(rail).not.toContainElement(screen.queryByRole("button", { name: "Настройки" }));
     expect(rail).not.toContainElement(screen.queryByRole("button", { name: "Архив" }));
+    expect(document.querySelector(".contextual-rail")).toBeInTheDocument();
 
     fireEvent.click(screen.getAllByRole("button", { name: "Фокус" }).at(-1) as HTMLElement);
     await waitFor(() => expect(screen.getByRole("heading", { name: "Фокус" })).toBeInTheDocument());
@@ -1388,15 +1412,15 @@ function stubDrawsFetch(scene: Record<string, unknown> = {
     if (url.endsWith("/auth/session")) return authSessionResponse();
     if (url.endsWith("/v1/version")) return jsonResponse(testVersionState("0.0.10"));
     if (url.endsWith("/v1/draws")) {
-      return jsonResponse({
-        draws: [{
-          name: "Рисунок.excalidraw",
-          title: "Рисунок",
-          updated_at_utc: "2026-07-11T12:00:00.000Z",
-          size_bytes: 0,
-        }],
-      });
+      await new Promise((resolve) => window.setTimeout(resolve, 0));
+      return jsonResponse({ draws: [{
+        name: "Рисунок.excalidraw",
+        title: "Рисунок",
+        updated_at_utc: "2026-07-11T12:00:00.000Z",
+        size_bytes: 0,
+      }] });
     }
+    if (url.includes(encodeURIComponent("Новый рисунок.excalidraw"))) return jsonResponse({ error: "not_found" }, 404);
     if (url.includes("/v1/draws/")) {
       return jsonResponse({
         name: "Рисунок.excalidraw",

@@ -23,6 +23,12 @@ CREATE TABLE IF NOT EXISTS "user" (
   "updatedAt" timestamptz NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS user_ui_preferences (
+  user_id text PRIMARY KEY REFERENCES "user" ("id") ON DELETE CASCADE,
+  context_rail_width_px integer NOT NULL DEFAULT 256 CHECK (context_rail_width_px BETWEEN 192 AND 512),
+  updated_at_utc text NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS "session" (
   "id" text PRIMARY KEY,
   "expiresAt" timestamptz NOT NULL,
@@ -232,9 +238,11 @@ CREATE TABLE IF NOT EXISTS inbox (
   is_normalized integer NOT NULL DEFAULT 0 CHECK (is_normalized IN (0, 1)),
   status text NOT NULL DEFAULT 'New' CHECK (status IN ('New', 'Done')),
   completed_at_utc text,
+  sort_order integer,
   created_at_utc text NOT NULL,
   updated_at_utc text NOT NULL,
   deleted_at_utc text,
+  restored_at_utc text,
   last_event_id text,
   user_id text
 );
@@ -267,6 +275,7 @@ CREATE INDEX IF NOT EXISTS idx_inbox_related ON inbox (related_inbox_id);
 CREATE INDEX IF NOT EXISTS idx_inbox_item_date ON inbox (item_date);
 CREATE INDEX IF NOT EXISTS idx_inbox_normalized_updated ON inbox (is_normalized, updated_at_utc);
 CREATE INDEX IF NOT EXISTS idx_inbox_user_created ON inbox (user_id, created_at_utc);
+CREATE INDEX IF NOT EXISTS idx_inbox_new_sort_order ON inbox (status, sort_order) WHERE deleted_at_utc IS NULL AND sort_order IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS items (
   id text PRIMARY KEY,
@@ -749,6 +758,13 @@ ON CONFLICT (version_type_id) DO UPDATE
 SET last_version = GREATEST(build_version_counters.last_version, excluded.last_version);
 
 INSERT INTO table_descriptions (table_name, title, short_description, long_description, updated_at_utc) VALUES
+  (
+    'user_ui_preferences',
+    'User UI preferences',
+    'Синхронизируемые настройки интерфейса пользователя.',
+    'Хранит общую для web-аккаунта ширину contextual rail; локальные open/closed состояния страниц остаются на устройстве.',
+    now()::text
+  ),
   (
     'events',
     'Global events',

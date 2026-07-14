@@ -16,14 +16,44 @@ test("keeps the burger drawer empty and opens the left overflow from the aligned
   await page.locator(".mobile-menu-backdrop").click({ position: { x: 360, y: 120 } });
   await expect(page.locator(".mobile-menu-backdrop")).toHaveCount(0);
 
+  await page.evaluate(() => {
+    const samples: number[] = [];
+    (window as typeof window & { __dockSheetTops?: number[] }).__dockSheetTops = samples;
+    const observer = new MutationObserver(() => {
+      const sheet = document.querySelector(".mobile-dock-overflow-sheet");
+      if (!(sheet instanceof HTMLElement)) return;
+      observer.disconnect();
+      const started = performance.now();
+      const sample = () => {
+        samples.push(sheet.getBoundingClientRect().top);
+        if (performance.now() - started < 240) requestAnimationFrame(sample);
+      };
+      sample();
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+  });
   await page.getByRole("button", { name: "Открыть левое меню" }).click();
   await expect(page.locator(".mobile-dock-overflow-backdrop")).toBeVisible();
-  await expect(page.locator(".mobile-dock-overflow-sheet")).not.toContainText("Workspace");
-  await expect(page.locator(".mobile-dock-overflow-sheet")).not.toContainText("Меню страницы");
-  await expect(page.locator(".mobile-dock-overflow-sheet")).not.toContainText("Действия");
-  await expect(page.locator(".mobile-dock-overflow-sheet")).not.toContainText("Platform");
-  await expect(page.locator(".mobile-dock-overflow-sheet")).not.toContainText("Time");
-  await expect(page.locator(".mobile-dock-overflow-sheet").getByRole("button", { name: /Engine/ })).toBeVisible();
+  const overflowSheet = page.locator(".mobile-dock-overflow-sheet");
+  await expect(page.locator(".mobile-dock-overflow-motion")).toHaveClass(/mobile-detail-sheet-in/);
+  await expect(overflowSheet).not.toContainText("Workspace");
+  await expect(overflowSheet).not.toContainText("Меню страницы");
+  await expect(overflowSheet).not.toContainText("Действия");
+  await expect(overflowSheet).not.toContainText("Platform");
+  await expect(overflowSheet).not.toContainText("Time");
+  await expect(overflowSheet.getByRole("button", { name: /Engine/ })).toBeVisible();
+  expect(await overflowSheet.locator(":scope > div").evaluate((element) => getComputedStyle(element).overflowY)).toBe("visible");
+
+  await page.waitForTimeout(240);
+  const openingTops = await page.evaluate(() => (window as typeof window & { __dockSheetTops?: number[] }).__dockSheetTops ?? []);
+  expect(Math.max(...openingTops) - Math.min(...openingTops)).toBeGreaterThan(100);
+  for (let index = 1; index < openingTops.length; index += 1) {
+    expect(openingTops[index]).toBeLessThanOrEqual(openingTops[index - 1] + 1);
+  }
+  const settledTop = (await page.locator(".mobile-dock-overflow-sheet").boundingBox())?.y;
+  await page.waitForTimeout(300);
+  const stableTop = (await page.locator(".mobile-dock-overflow-sheet").boundingBox())?.y;
+  expect(Math.abs((settledTop ?? 0) - (stableTop ?? 0))).toBeLessThanOrEqual(1);
 
   const sheet = await page.locator(".mobile-dock-overflow-sheet").boundingBox();
   const viewport = page.viewportSize();
@@ -48,7 +78,7 @@ test("opens Settings from the mobile action rail", async ({ page }, testInfo) =>
 
   await expect(page.getByRole("button", { name: "Настройки" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Архив" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Выйти" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Выход" })).toBeVisible();
   await page.getByRole("button", { name: "Настройки" }).click();
 
   await expect(page.locator(".mobile-menu-backdrop")).toHaveCount(0);
@@ -71,13 +101,14 @@ test("opens the right mobile dock overflow with placeholder items", async ({ pag
   const sheet = page.locator(".mobile-dock-overflow-sheet");
   await expect(sheet).toBeVisible();
   await expect(sheet).toHaveAttribute("aria-label", "Правое меню");
-  await expect(sheet.getByRole("button", { name: "Заглушка: Дата" })).toBeVisible();
   await expect(sheet.getByRole("button", { name: "Заглушка: Флаг" })).toBeVisible();
+  await expect(sheet.getByRole("button", { name: "Заглушка: Тег" })).toBeVisible();
   const closeButton = page.getByRole("button", { name: "Скрыть правое меню" });
   await expect(closeButton).toBeVisible();
   const leftButton = page.getByRole("button", { name: "Открыть левое меню" });
   await expect(leftButton).toBeVisible();
   await expect(page.locator(".section-page-current .actions-fab")).toHaveCount(0);
+  await page.waitForTimeout(220);
 
   const viewport = page.viewportSize();
   const sheetBox = await sheet.boundingBox();
@@ -85,7 +116,7 @@ test("opens the right mobile dock overflow with placeholder items", async ({ pag
   const dimBox = await page.locator(".mobile-dock-overflow-dim").boundingBox();
   const rightButtonAfter = await closeButton.boundingBox();
   if (!viewport || !sheetBox || !dockBox || !dimBox || !rightButtonBefore || !rightButtonAfter) throw new Error("Missing dock overflow geometry");
-  const placeholderColor = await sheet.getByRole("button", { name: "Заглушка: Дата" }).evaluate((element) => getComputedStyle(element).color);
+  const placeholderColor = await sheet.getByRole("button", { name: "Заглушка: Флаг" }).evaluate((element) => getComputedStyle(element).color);
   const inactiveDockColor = await page.locator(".mobile-nav .nav-button").nth(1).evaluate((element) => getComputedStyle(element).color);
   expect(placeholderColor).toBe(inactiveDockColor);
   expect(sheetBox.width).toBeGreaterThanOrEqual(viewport.width - 1);
@@ -345,6 +376,15 @@ test("scrolls the mobile Actions page from completed rows", async ({ page }, tes
 
   await expect.poll(() => listViewport.evaluate((element) => element.scrollTop)).toBeGreaterThan(40);
   await expect.poll(() => mainViewport.evaluate((element) => element.scrollTop)).toBe(0);
+
+  const viewport = page.viewportSize();
+  const listPaneBox = await page.locator(".actions-list-pane").boundingBox();
+  const scrollbarBox = await page.locator(".actions-list-pane > [data-slot='scroll-area-scrollbar']").boundingBox();
+  if (!viewport || !listPaneBox || !scrollbarBox) throw new Error("Missing mobile scrollbar geometry");
+  expect(Math.abs(listPaneBox.x + listPaneBox.width - viewport.width)).toBeLessThanOrEqual(1);
+  expect(Math.abs(scrollbarBox.x + scrollbarBox.width - viewport.width)).toBeLessThanOrEqual(1);
+  await expect(page.locator(".actions-list-pane")).toHaveCSS("--scroll-area-gap", "0px");
+  await expect(page.locator(".actions-list-pane")).toHaveCSS("--scroll-area-content-gutter", "10px");
 });
 
 test("reveals and hides the mobile action delete menu by swipe", async ({ page }, testInfo) => {
@@ -389,7 +429,7 @@ test("deletes and restores a mobile action after row swipes", async ({ page }, t
   await expect(page.getByRole("textbox", { name: "Название действия: Мобильный архив" })).toHaveCount(0);
 
   await openProfileMenuItem(page, "Архив");
-  await expect(page.getByRole("heading", { name: "Архив" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Архив", exact: true })).toBeVisible();
   await expect(page.getByText("Мобильный архив")).toBeVisible();
 
   await swipeActionRowLeft(page, page.locator(".action-row").first());
@@ -497,8 +537,7 @@ test("opens the mobile bottom-sheet activity detail editor", async ({ page }, te
   expect(scrollbarBox).not.toBeNull();
   expect(
     Math.abs(
-      ((editorBox?.x ?? 0) + (editorBox?.width ?? 0) - ((scrollbarBox?.x ?? 0) + (scrollbarBox?.width ?? 0))) -
-        ((scrollbarBox?.width ?? 0) / 2),
+      (editorBox?.x ?? 0) + (editorBox?.width ?? 0) - ((scrollbarBox?.x ?? 0) + (scrollbarBox?.width ?? 0)),
     ),
   ).toBeLessThanOrEqual(1);
   const titleTopBeforeScroll = (await detailTitle.boundingBox())?.y ?? 0;
@@ -888,7 +927,7 @@ async function expectMobileSheetScrollbarGeometry(sheet: Locator, contentSelecto
   expect(contentBox).not.toBeNull();
   expect(scrollbarBox).not.toBeNull();
 
-  const expectedGap = (scrollbarBox?.width ?? 0) / 2;
+  const expectedGap = 0;
   const sheetLeft = sheetBox?.x ?? 0;
   const sheetRight = sheetLeft + (sheetBox?.width ?? 0);
   const contentLeft = contentBox?.x ?? 0;

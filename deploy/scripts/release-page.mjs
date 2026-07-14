@@ -1,5 +1,8 @@
-export function renderReleasePage(data) {
-  const cards = Object.values(data.sections ?? {}).map(sectionCard).join("\n");
+export function renderReleasePage(data, { downloadBase = "." } = {}) {
+  const cards = Object.entries(data.sections ?? {})
+    .filter(([, section]) => Boolean(section))
+    .map(([releaseKey, section]) => sectionCard(section, releaseKey, downloadBase))
+    .join("\n");
   return `<!doctype html>
 <html lang="ru">
   <head>
@@ -35,9 +38,11 @@ export function renderReleasePage(data) {
 `;
 }
 
-function sectionCard(section) {
+function sectionCard(section, releaseKey, downloadBase) {
+  const target = downloadBase === "/releases/download" ? releaseKey : section.file;
+  const href = downloadBase === "." ? `./${target}` : `${downloadBase}/${target}`;
   const download = section.file
-    ? `<a class="download" href="./${escapeHtml(section.file)}">Скачать</a>`
+    ? `<a class="download" href="${escapeHtml(href)}">Скачать</a>`
     : `<span class="download" aria-disabled="true">Скачать</span>`;
   const published = formatPublishedAt(section.publishedAt);
   const version = section.apkBuildKind === "preview" && section.previewIteration
@@ -52,8 +57,8 @@ function sectionCard(section) {
 }
 
 function formatFileSize(value) {
-  const megabytes = Number(value) / (1024 * 1024);
-  return `${new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 1 }).format(megabytes)} МБ`;
+  const megabytes = Number(value) / 1_000_000;
+  return `${new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 2 }).format(megabytes)} МБ`;
 }
 
 function formatPublishedAt(value) {

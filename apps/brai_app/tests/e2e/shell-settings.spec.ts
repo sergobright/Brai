@@ -140,10 +140,9 @@ test("opens Engine from the profile menu", async ({ page }) => {
   await openEngineFromProfile(page);
 
   await expect(page.getByRole("heading", { name: "Engine", exact: true })).toBeVisible();
-  await expect(page.getByRole("heading", { name: /Текущая OTA-версия (unknown|0\.\d+\.\d+)/ })).toBeVisible();
-  await expect(page.getByText("Доступна OTA-версия 0.11.52", { exact: true })).toBeVisible();
-  await expect(page.getByText("Перезагрузите страницу, чтобы получить новую версию.")).toBeVisible();
-  await expect(page.getByRole("button", { name: "Проверить обновления" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /Текущая версия (unknown|0\.\d+\.\d+)/ })).toBeVisible();
+  await expect(page.getByText("Доступна новая версия 0.11.52.", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Скачать обновление" })).toBeVisible();
 });
 
 test("keeps Android Engine download progress compact on mobile", async ({ page }, testInfo) => {
@@ -161,9 +160,12 @@ test("keeps Android Engine download progress compact on mobile", async ({ page }
     };
     const state = {
       activeBundleVersion: "0.11.51",
+      activeOperation: "web_download",
+      availableBundleVersion: "0.11.52",
+      updateAvailable: true,
       downloadProgressPercent: 42,
       downloadProgressVersion: "0.11.52",
-      checkInProgress: true,
+      checkInProgress: false,
       lastCheckStatus: "downloading",
     };
     win.androidBridge = {};
@@ -176,6 +178,8 @@ test("keeps Android Engine download progress compact on mobile", async ({ page }
           methods: [
             { name: "getState", rtype: "promise" },
             { name: "checkForUpdates", rtype: "promise" },
+            { name: "downloadUpdate", rtype: "promise" },
+            { name: "downloadApk", rtype: "promise" },
             { name: "markReady", rtype: "promise" },
           ],
         },
@@ -231,7 +235,7 @@ test("keeps Android Engine download progress compact on mobile", async ({ page }
 
   await page.goto("/engine");
 
-  await expect(page.getByText("Загрузка OTA-версии 0.11.52")).toBeVisible();
+  await expect(page.getByText("Скачивается обновление 0.11.52")).toBeVisible();
   const card = page.locator('[aria-label="Engine"] [data-slot="card"]').first();
   const progressBlock = page.locator('[data-slot="field"]').filter({ has: page.locator("#engine-update-progress") });
   await expect

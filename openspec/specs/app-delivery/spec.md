@@ -240,3 +240,58 @@ environment domain instead of a standalone admin subdomain.
 - **WHEN** Brai managed Caddy routes are installed
 - **THEN** retired standalone admin hostnames are removed from unmanaged Brai site blocks
 - **AND** no standalone admin Caddy site remains required
+
+### Requirement: Release catalogues separate public and operational visibility
+
+Brai SHALL permanently publish a public current-Production APK and a protected all-channel developer catalogue.
+
+#### Scenario: Public release page is opened
+- **WHEN** a client requests `GET /releases/`
+- **THEN** the page contains only the current Production APK
+- **AND** it requires no release password
+
+#### Scenario: Developer release page is opened
+- **WHEN** an authenticated release-session requests `GET /dev-releases/`
+- **THEN** the page contains Production, Dev, and Preview A–E artifacts
+- **AND** unauthenticated requests receive the release login flow
+
+#### Scenario: Legacy release login is used
+- **WHEN** a client requests `/releases/login`
+- **THEN** it is redirected to `/dev-releases/`
+
+#### Scenario: Production APK is published
+- **WHEN** a new stable Production APK is accepted
+- **THEN** `/releases/` and its public Production download are updated
+- **AND** a user without Brai installed can always install the current Production APK from the web
+
+#### Scenario: developer catalogue is opened in any environment
+- **WHEN** a client requests `/dev-releases/` on Production, Dev, or Preview A-E
+- **THEN** Caddy routes it to the matching API
+- **AND** the existing release login accepts the same configured standard release password in every environment
+
+### Requirement: Installed apps can download a channel APK directly
+
+Brai SHALL expose integrity metadata with each current channel APK.
+
+#### Scenario: known channel is downloaded
+- **WHEN** `GET /releases/download/:releaseKey` streams an APK
+- **THEN** the response includes content length and the release-index SHA-256 in a stable response header
+- **AND** the streamed file matches both values
+
+#### Scenario: Unknown or hidden file is requested
+- **WHEN** the release key is unknown or a non-Production filename is requested through `/releases/<filename>`
+- **THEN** the API returns `404`
+
+### Requirement: APK download starts are rate limited per client IP
+
+Brai SHALL allow at most ten started APK streams per derived client IP in 3600 seconds in one API process.
+
+#### Scenario: Eleventh download starts within the window
+- **WHEN** the same derived IP has started ten APK downloads in the current window
+- **THEN** the API returns `429` and `Retry-After`
+- **AND** does not open the APK stream
+
+#### Scenario: Request passes through local Caddy
+- **WHEN** the socket peer is loopback and `X-Forwarded-For` is present
+- **THEN** the limiter uses the client address supplied by Caddy
+- **AND** otherwise it uses the socket peer address

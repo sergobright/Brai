@@ -171,7 +171,7 @@ function runCli([command, ...args]) {
         accessContract(args);
         break;
       default:
-        throw new Error("usage: brai-task.mjs start <slug>|follow-up [branch]|recover-follow-up [branch] --from-thread <lost-thread-id>|acceptance-reconcile [branch]|acceptance-repair [branch]|pre-tool-use|pre-commit|pre-push <remote>|stop|classify [--base <ref>] [--head <ref>] [--github-output]|handoff [branch]|preview [branch]|release-notes --short <text> --details <text> --reason <text>|require-delivery [branch] [sha]|require-preview [branch] [sha]|doctor [--strict]|preflight [--strict]|access-contract --local|--server|socraticode-exact-only --reason <text>|socraticode-used --tool <name>|delegate --thread <id> --path <path>|revoke --thread <id>");
+        throw new Error("usage: brai-task.mjs start <slug>|follow-up [branch]|recover-follow-up [branch] --from-thread <lost-thread-id>|acceptance-reconcile [branch]|acceptance-repair [branch]|pre-tool-use|pre-commit|pre-push <remote>|stop|classify [--base <ref>] [--head <ref>] [--github-output]|handoff [branch]|preview [branch]|release-notes --short <text> --details <text> --reason <text> --testing <text>|require-delivery [branch] [sha]|require-preview [branch] [sha]|doctor [--strict]|preflight [--strict]|access-contract --local|--server|socraticode-exact-only --reason <text>|socraticode-used --tool <name>|delegate --thread <id> --path <path>|revoke --thread <id>");
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -552,13 +552,15 @@ function previewHandoff(branchArg) {
   const run = waitForSuccessfulPreviewRun(branch, head, ["public-guard", "checks", "temporal-worker-check", "deploy-preview"]);
   const slot = waitForReadyPreviewSlot(branch, head);
   const url = previewUrlForSlot(slot);
+  const releaseNotes = readReleaseNotes();
+  writePreviewTestingNote(branch, head, releaseNotes);
   const receipt = {
     branch,
     commit: head,
     slot,
     url,
     runId: run.databaseId,
-    releaseNotes: readReleaseNotes(),
+    releaseNotes,
     verifiedAt: new Date().toISOString(),
     verifiedBy: "brai-task-preview-v1",
   };
@@ -569,6 +571,19 @@ function previewHandoff(branchArg) {
   console.log(`Commit: ${head}`);
   console.log(`Preview ${slot}: ${url}`);
   console.log(`GitHub Actions run: ${run.url ?? `https://github.com/sergobright/Brai/actions/runs/${run.databaseId}`}`);
+}
+
+function writePreviewTestingNote(branch, commit, releaseNotes) {
+  const root = git("rev-parse", "--show-toplevel");
+  const encoded = Buffer.from(JSON.stringify(releaseNotes), "utf8").toString("base64");
+  const result = spawnSync(path.join(root, "deploy/scripts/preview-slots.sh"), ["note", branch, commit, encoded], {
+    cwd: root,
+    encoding: "utf8",
+    env: process.env,
+  });
+  if (result.status !== 0 || result.error) {
+    throw new Error(`Failed to store Preview testing note: ${result.error?.message ?? result.stderr ?? result.stdout ?? `exit ${result.status}`}`);
+  }
 }
 
 function deliveryHandoff(branchArg) {
@@ -1177,6 +1192,7 @@ function writeReleaseNotesCli(args) {
     short_changes: values.short,
     detailed_changes: values.details,
     reason: values.reason,
+    testing: values.testing,
   }, "release-notes arguments");
   writeReleaseNotes(notes);
   console.log("Wrote .brai-task/release-notes.json");
@@ -1196,8 +1212,9 @@ function releaseNotesFromEnv() {
     short_changes: process.env.BRAI_RELEASE_SHORT_CHANGES,
     detailed_changes: process.env.BRAI_RELEASE_DETAILED_CHANGES,
     reason: process.env.BRAI_RELEASE_REASON,
+    testing: process.env.BRAI_RELEASE_TESTING,
   };
-  if (!values.short_changes && !values.detailed_changes && !values.reason) return null;
+  if (!values.short_changes && !values.detailed_changes && !values.reason && !values.testing) return null;
   return requireReleaseNotes(values, "BRAI_RELEASE_*");
 }
 
@@ -1212,10 +1229,10 @@ function validateReleaseNotes(notes) {
 
 function requireReleaseNotes(notes, source) {
   if (!notes || typeof notes !== "object") {
-    throw new Error(`${source} missing. Run: node scripts/brai-task.mjs release-notes --short "..." --details "..." --reason "..."`);
+    throw new Error(`${source} missing. Run: node scripts/brai-task.mjs release-notes --short "..." --details "..." --reason "..." --testing "..."`);
   }
   const normalized = { receiptType: RELEASE_NOTES_VERSION };
-  for (const field of ["short_changes", "detailed_changes", "reason"]) {
+  for (const field of ["short_changes", "detailed_changes", "reason", "testing"]) {
     const text = String(notes[field] ?? "").trim();
     if (!text) throw new Error(`${source}: ${field} is required.`);
     if (!/[А-Яа-яЁё]/.test(text)) throw new Error(`${source}: ${field} must be Russian human-readable text.`);

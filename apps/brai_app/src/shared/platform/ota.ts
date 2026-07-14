@@ -18,6 +18,8 @@ export type BraiOtaState = {
   previousStableBundleVersion?: string | null;
   stableBundleVersion?: string | null;
   candidateBundleVersion?: string | null;
+  availableBundleVersion?: string | null;
+  updateAvailable?: boolean;
   lastCheckStatus?: string;
   lastUpdateError?: string | null;
   targetApkVersion?: string | null;
@@ -28,6 +30,14 @@ export type BraiOtaState = {
   targetApkReleaseUrl?: string | null;
   failedBundleVersions?: string;
   checkInProgress?: boolean;
+  activeOperation?: "checking" | "web_download" | "apk_download" | null;
+  apkDownloadStatus?: "idle" | "downloading" | "downloaded" | "failed";
+  apkDownloadError?: string | null;
+  apkDownloadBytes?: number;
+  apkDownloadTotalBytes?: number;
+  apkDownloadPercent?: number | null;
+  apkInstallReady?: boolean;
+  apkInstallPermissionRequired?: boolean;
   downloadProgressVersion?: string | null;
   downloadProgressBytes?: number;
   downloadProgressTotalBytes?: number;
@@ -37,6 +47,9 @@ export type BraiOtaState = {
 type BraiOtaPlugin = {
   getState(): Promise<BraiOtaState>;
   checkForUpdates?(): Promise<BraiOtaState & { started?: boolean }>;
+  downloadUpdate?(): Promise<BraiOtaState & { started?: boolean }>;
+  downloadApk?(): Promise<BraiOtaState & { started?: boolean }>;
+  installApk?(): Promise<BraiOtaState & { opened?: boolean }>;
   markReady(options: { bundleVersion: string }): Promise<BraiOtaState & { promoted?: boolean }>;
 };
 
@@ -68,6 +81,33 @@ export async function checkAndroidOtaUpdates(): Promise<BraiOtaState | null> {
   if (!isNativeShell() || platformName() !== "android") return null;
   try {
     return BraiOta.checkForUpdates ? await BraiOta.checkForUpdates() : await BraiOta.getState();
+  } catch {
+    return null;
+  }
+}
+
+export async function downloadAndroidOtaUpdate(): Promise<BraiOtaState | null> {
+  if (!isNativeShell() || platformName() !== "android" || !BraiOta.downloadUpdate) return null;
+  try {
+    return await BraiOta.downloadUpdate();
+  } catch {
+    return null;
+  }
+}
+
+export async function downloadAndroidApk(): Promise<BraiOtaState | null> {
+  if (!isNativeShell() || platformName() !== "android" || !BraiOta.downloadApk) return null;
+  try {
+    return await BraiOta.downloadApk();
+  } catch {
+    return null;
+  }
+}
+
+export async function installAndroidApk(): Promise<BraiOtaState | null> {
+  if (!isNativeShell() || platformName() !== "android" || !BraiOta.installApk) return null;
+  try {
+    return await BraiOta.installApk();
   } catch {
     return null;
   }

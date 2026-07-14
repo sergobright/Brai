@@ -3,6 +3,7 @@ import { spawn } from 'node:child_process';
 import crypto from 'node:crypto';
 import http from 'node:http';
 import path from 'node:path';
+import { RateLimiterMemory } from 'rate-limiter-flexible';
 import { WebSocketServer } from 'ws';
 import {
   INBOX_BODY_LIMIT_BYTES,
@@ -23,7 +24,13 @@ import {
   isBraiCmdPublicRoute,
   requireBraiCmdAccess
 } from './brai-cmd.js';
-import { sendReleaseLoginPage, serveRelease } from './release-routes.js';
+import {
+  sendReleaseLoginPage,
+  serveDeveloperReleaseFile,
+  serveLegacyProductionFile,
+  serveReleaseDownload,
+  serveReleasePage
+} from './release-routes.js';
 import { BraiStore, formatFocusInterval, formatSession } from './store.js';
 import { scopedUserId, withUserScope } from './user-scope.js';
 import {
@@ -97,6 +104,7 @@ export function createBraiServer({
   const store = new BraiStore(databaseUrl);
   store.logger = logger;
   store.configureUserAiEncryptionKey(userAiEncryptionKey);
+  const releaseDownloadLimiter = new RateLimiterMemory({ points: 10, duration: 3600 });
   const braiCmdRuntime = createBraiCmdRuntime(braiCmd);
   const resolvedVaultRoot =
     typeof vaultRoot === 'string' && vaultRoot.trim()
@@ -677,7 +685,12 @@ export function createBraiServer({
         return;
       }
 
-      if (url.pathname === '/releases/login' && req.method === 'POST') {
+      if (url.pathname === '/releases/login') {
+        redirect(res, '/dev-releases/');
+        return;
+      }
+
+      if (url.pathname === '/dev-releases/login' && req.method === 'POST') {
         const password = await readPassword(req);
         if (!releasePassword || password !== releasePassword) {
           recordRuntimeLog(store, logger, {
@@ -711,11 +724,34 @@ export function createBraiServer({
           message: 'Release login completed',
           jsonData: { route: url.pathname, secure_cookie: shouldUseSecureCookie(req) }
         });
-        redirect(res, '/releases/', { 'set-cookie': cookie });
+        redirect(res, '/dev-releases/', { 'set-cookie': cookie });
         return;
       }
 
-      if (url.pathname.startsWith('/releases')) {
+      if (url.pathname === '/releases' || url.pathname === '/releases/') {
+        serveReleasePage(req, res, releaseDir, sendJson, { publicOnly: true, store });
+        return;
+      }
+
+      const directReleaseMatch = url.pathname.match(/^\/releases\/download\/([^/]+)$/);
+      if (directReleaseMatch && req.method === 'GET') {
+        await serveReleaseDownload(req, res, decodeURIComponent(directReleaseMatch[1]), releaseDir, sendJson, {
+          limiter: releaseDownloadLimiter,
+          store
+        });
+        return;
+      }
+
+      const legacyReleaseMatch = url.pathname.match(/^\/releases\/([^/]+)$/);
+      if (legacyReleaseMatch && req.method === 'GET') {
+        await serveLegacyProductionFile(req, res, decodeURIComponent(legacyReleaseMatch[1]), releaseDir, sendJson, {
+          limiter: releaseDownloadLimiter,
+          store
+        });
+        return;
+      }
+
+      if (url.pathname.startsWith('/dev-releases')) {
         if (!hasValidSession(req, sessionSecret, now(), RELEASE_SESSION_COOKIE)) {
           recordRuntimeLog(store, logger, {
             traceId,
@@ -731,14 +767,26 @@ export function createBraiServer({
               session_cookie_present: Boolean(req.headers.cookie)
             }
           });
-          if (req.method === 'GET' && (url.pathname === '/releases' || url.pathname === '/releases/')) {
+          if (req.method === 'GET' && (url.pathname === '/dev-releases' || url.pathname === '/dev-releases/')) {
             sendReleaseLoginPage(res);
           } else {
-            redirect(res, '/releases/');
+            redirect(res, '/dev-releases/');
           }
           return;
         }
-        serveRelease(req, res, url, releaseDir, sendJson, store);
+        if (url.pathname === '/dev-releases' || url.pathname === '/dev-releases/') {
+          serveReleasePage(req, res, releaseDir, sendJson, { store });
+          return;
+        }
+        const developerReleaseMatch = url.pathname.match(/^\/dev-releases\/([^/]+)$/);
+        if (developerReleaseMatch && req.method === 'GET') {
+          await serveDeveloperReleaseFile(req, res, decodeURIComponent(developerReleaseMatch[1]), releaseDir, sendJson, {
+            limiter: releaseDownloadLimiter,
+            store
+          });
+          return;
+        }
+        sendJson(req, res, 404, { error: 'not_found' });
         return;
       }
 
@@ -1080,6 +1128,25 @@ export function createBraiServer({
         return;
       }
 
+      if (url.pathname === '/v1/preferences') {
+        if (req.method === 'GET') {
+          sendJson(req, res, 200, store.userPreferences());
+          return;
+        }
+        if (req.method === 'PATCH') {
+          const body = await readJson(req, { limit: 4096 });
+          sendJson(req, res, 200, store.setUserPreferences(body, now().toISOString()));
+          return;
+        }
+        sendJson(req, res, 405, { error: 'method_not_allowed' });
+        return;
+      }
+
+      if (req.method === 'GET' && url.pathname === '/v1/archive') {
+        sendJson(req, res, 200, store.listArchive(url.searchParams.get('role') ?? 'activity'));
+        return;
+      }
+
       if (req.method === 'GET' && url.pathname === '/v1/draws') {
         sendJson(req, res, 200, { draws: listDrawScenes(resolvedVaultRoot) });
         return;
@@ -1137,6 +1204,14 @@ export function createBraiServer({
 
       if (req.method === 'GET' && url.pathname === '/v1/events') {
         sendJson(req, res, 200, { events: store.listEvents({ limit: url.searchParams.get('limit') }) });
+        return;
+      }
+
+      const itemEventsMatch = req.method === 'GET' ? url.pathname.match(/^\/v1\/items\/([^/]+)\/events$/) : null;
+      if (itemEventsMatch) {
+        sendJson(req, res, 200, {
+          events: store.listItemEvents(decodeURIComponent(itemEventsMatch[1]), { limit: url.searchParams.get('limit') })
+        });
         return;
       }
 
@@ -1470,19 +1545,30 @@ function latestApkRelease(releaseDir) {
   if (!releaseDir) return null;
   try {
     const releaseIndex = JSON.parse(fs.readFileSync(path.join(releaseDir, 'releases.json'), 'utf8'));
-    const production = releaseIndex.sections?.production;
-    const apkVersion = Number(production?.apkVersion ?? production?.version);
-    if (!production?.file || !Number.isInteger(apkVersion) || apkVersion <= 0) return null;
+    let targetReleaseKey = 'production';
+    try {
+      const manifest = JSON.parse(fs.readFileSync(path.join(path.dirname(releaseDir), 'mobile-update', 'manifest.json'), 'utf8'));
+      if (typeof manifest.targetApkReleaseKey === 'string' && manifest.targetApkReleaseKey) {
+        targetReleaseKey = manifest.targetApkReleaseKey;
+      }
+    } catch {
+      // Production remains the compatibility fallback when no manifest exists.
+    }
+    const target = releaseIndex.sections?.[targetReleaseKey] ?? releaseIndex.sections?.production;
+    const apkVersion = Number(target?.apkVersion ?? target?.version);
+    if (!target?.file || !Number.isInteger(apkVersion) || apkVersion <= 0) return null;
+    const releaseKey = target.releaseKey ?? targetReleaseKey;
     return {
-      file: production.file,
+      file: target.file,
       version: apkVersion,
-      version_code: Number.isInteger(production.versionCode) ? production.versionCode : apkVersion,
-      release_key: production.releaseKey ?? 'production',
-      apk_build_kind: production.apkBuildKind ?? 'stable',
-      preview_iteration: Number.isInteger(production.previewIteration) ? production.previewIteration : null,
+      version_code: Number.isInteger(target.versionCode) ? target.versionCode : apkVersion,
+      release_key: releaseKey,
+      apk_build_kind: target.apkBuildKind ?? 'stable',
+      preview_iteration: Number.isInteger(target.previewIteration) ? target.previewIteration : null,
       release_url: '/releases/',
-      published_at: production.publishedAt ?? null,
-      capabilities: Array.isArray(production.capabilities) ? production.capabilities : []
+      download_url: `/releases/download/${releaseKey}`,
+      published_at: target.publishedAt ?? null,
+      capabilities: Array.isArray(target.capabilities) ? target.capabilities : []
     };
   } catch {
     return null;
@@ -2103,13 +2189,15 @@ export function createUserVaultPreparer({
         `--id=${folderId}`,
         `--label=${label}`,
         `--path=${folderPath}`,
-        '--type=sendreceive'
+        '--type=sendreceive',
+        '--ignore-perms'
       ]);
       return;
     }
 
     await runSyncthingCli([...baseArgs, 'config', 'folders', folderId, 'label', 'set', label]);
     await runSyncthingCli([...baseArgs, 'config', 'folders', folderId, 'path', 'set', folderPath]);
+    await runSyncthingCli([...baseArgs, 'config', 'folders', folderId, 'ignore-perms', 'set', 'true']);
   };
 }
 

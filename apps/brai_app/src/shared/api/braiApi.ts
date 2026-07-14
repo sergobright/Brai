@@ -84,6 +84,7 @@ export type EventLogRow = {
   event_action: string;
   title: string;
   items_id: string | null;
+  item_roles_id: number | null;
   subject_type: string;
   subject_id: string | null;
   actor_type: string;
@@ -94,6 +95,40 @@ export type EventLogRow = {
   ignore_reason: string | null;
   payload_json: Record<string, unknown>;
   trace_id: string | null;
+};
+
+export type UserPreferences = {
+  context_rail_width_px: number;
+};
+
+export type ArchiveRole = {
+  id: number;
+  title_system: string;
+  title: string;
+  description: string;
+  payload_table: string;
+  archived_count: number;
+};
+
+export type ArchivedRoleItem = {
+  id: string;
+  title: string;
+  description: string;
+  author: string;
+  created_at_utc: string;
+  updated_at_utc: string;
+  deleted_at_utc: string | null;
+  item_roles_id: number | null;
+  role_status: string;
+  role_system: string;
+  role_title: string;
+  payload: Record<string, unknown> | null;
+};
+
+export type ArchiveState = {
+  roles: ArchiveRole[];
+  selected_role: string | null;
+  items: ArchivedRoleItem[];
 };
 
 export type TechnicalLog = {
@@ -250,6 +285,22 @@ export class BraiApi {
 
   async events(limit = 100): Promise<{ events: EventLogRow[] }> {
     return this.request(`/v1/events?limit=${encodeURIComponent(String(limit))}`);
+  }
+
+  async itemEvents(itemId: string, limit = 200): Promise<{ events: EventLogRow[] }> {
+    return this.request(`/v1/items/${encodeURIComponent(itemId)}/events?limit=${encodeURIComponent(String(limit))}`);
+  }
+
+  async preferences(): Promise<UserPreferences> {
+    return this.request("/v1/preferences");
+  }
+
+  async updatePreferences(patch: UserPreferences): Promise<UserPreferences> {
+    return this.request("/v1/preferences", { method: "PATCH", json: patch });
+  }
+
+  async archive(role = "activity"): Promise<ArchiveState> {
+    return this.request(`/v1/archive?role=${encodeURIComponent(role)}`);
   }
 
   async logs(limit = 100): Promise<{ logs: TechnicalLog[] }> {
@@ -518,6 +569,7 @@ export type AppTargetApk = {
   apk_build_kind?: string | null;
   preview_iteration?: number | null;
   release_url?: string | null;
+  download_url?: string | null;
   published_at: string | null;
   capabilities?: string[];
 };
