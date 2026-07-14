@@ -227,6 +227,7 @@ describe("BraiApp shell", () => {
 
   it("uses explicit email-only login on Preview Android", async () => {
     stubAndroidCapacitor();
+    await setMeta("currentUserId", null);
     window.__BRAI_RUNTIME_CONFIG__ = {
       environment: "preview-a",
       androidApiBase: "https://a.test.brai.one/api",
@@ -264,6 +265,7 @@ describe("BraiApp shell", () => {
 
   it("keeps Android on the OTP flow", async () => {
     stubAndroidCapacitor();
+    await setMeta("currentUserId", null);
     window.__BRAI_RUNTIME_CONFIG__ = {
       environment: "prod",
       androidApiBase: "https://api.brai.one",
