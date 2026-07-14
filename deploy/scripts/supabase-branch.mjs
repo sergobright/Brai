@@ -416,6 +416,7 @@ export async function copySchemaData(pool, { sourceSchema, targetSchema, postSee
       `);
     }
     await reseedOwnedSequences(client, { schema: targetSchema, tables: copyTables });
+    await client.query("SET CONSTRAINTS ALL IMMEDIATE");
     for (const { sql } of postSeedMigrations) await client.query(sql);
     await reseedOwnedSequences(client, { schema: targetSchema, tables: copyTables });
     await client.query("COMMIT");
