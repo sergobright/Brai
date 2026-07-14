@@ -189,7 +189,7 @@ describe("BraiApp shell", () => {
     expect(cmdPlugin.setOverlayEnabled).toHaveBeenLastCalledWith({ enabled: false });
   });
 
-  it("clears the technical credential and overlays even when server logout is offline", async () => {
+  it("clears the technical credential and restores preliminary voice mode when server logout is offline", async () => {
     stubAndroidCapacitor();
     const defaultFetch = vi.mocked(fetch).getMockImplementation();
     vi.mocked(fetch).mockImplementation(async (input, init) => {
@@ -205,8 +205,10 @@ describe("BraiApp shell", () => {
     await waitFor(() => expect(cmdPlugin.setAccessKey).toHaveBeenCalledWith({ token: "authenticated-device-token", displayName: "Test", userId: "test-user" }));
     await openProfileMenuItem("Выход");
 
+    expect(await screen.findByText("Нужен вход")).toBeInTheDocument();
     await waitFor(() => expect(cmdPlugin.setAccessKey).toHaveBeenLastCalledWith({ token: "", displayName: "", userId: "" }));
-    await waitFor(() => expect(cmdPlugin.setOverlayEnabled).toHaveBeenLastCalledWith({ enabled: false }));
+    await waitFor(() => expect(cmdPlugin.setOverlayEnabled).toHaveBeenCalledWith({ enabled: true }));
+    expect(cmdPlugin.setVoiceOnlyMode).toHaveBeenCalledWith({ enabled: true });
     expect(cmdPlugin.setQueuePausedMode).toHaveBeenCalledWith({ enabled: false });
   });
 
