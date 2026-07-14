@@ -177,6 +177,7 @@ async function withSourceCheckout({ branch, sha }, callback) {
     await runCommand("git", ["clone", "--no-checkout", cloneSourceForRemote(remote), checkout], {
       env: { ...process.env, ...remote.env }
     });
+    await fetchAcceptedBaseFromRoot(checkout);
     await runCommand("git", ["-C", checkout, "remote", "set-url", "origin", remote.url]);
     const directCheckout = await runCommand("git", ["-C", checkout, "checkout", "--detach", sha], { allowFailure: true });
     if (directCheckout.code !== 0) {
@@ -187,6 +188,29 @@ async function withSourceCheckout({ branch, sha }, callback) {
   } finally {
     await rm(tempRoot, { recursive: true, force: true });
   }
+}
+
+async function fetchAcceptedBaseFromRoot(checkout) {
+  for (const refspec of acceptedBaseRefspecs()) {
+    const result = await runCommand("git", [
+      "-C",
+      checkout,
+      "fetch",
+      "--no-tags",
+      ROOT,
+      refspec
+    ], { allowFailure: true });
+    if (result.code === 0) return;
+  }
+}
+
+export function acceptedBaseRefspecs(branch = process.env.BRAI_ACCEPT_BASE || "main") {
+  if (!/^[A-Za-z0-9._-]+$/.test(branch)) throw new Error(`Unsupported accepted base branch: ${branch}`);
+  const target = `refs/remotes/origin/${branch}`;
+  return [
+    `+refs/remotes/origin/${branch}:${target}`,
+    `+refs/heads/${branch}:${target}`
+  ];
 }
 
 export function cloneSourceForRemote(remote) {
