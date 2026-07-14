@@ -5,6 +5,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import {
+  constraintTextValues,
   copyTargetColumns,
   copySourceQuery,
   inspectOwnedSequences,
@@ -180,6 +181,28 @@ test("production copy skips rows that violate target not-null columns", () => {
   assert.equal(
     query,
     'SELECT source_row."id", source_row."role_contract_id", source_row."status" FROM "prod"."workflow_executions" AS source_row WHERE source_row."id" IS NOT NULL AND source_row."role_contract_id" IS NOT NULL'
+  );
+});
+
+test("production copy keeps only event domains accepted by the target preview schema", () => {
+  const query = copySourceQuery({
+    sourceSchema: "prod",
+    targetSchema: "preview",
+    table: "events",
+    columns: ["id", "event_domain", "event_type"],
+    allowedValues: { event_domain: ["timer", "activity", "inbox", "system"] }
+  }).replace(/\s+/g, " ").trim();
+
+  assert.equal(
+    query,
+    'SELECT source_row."id", source_row."event_domain", source_row."event_type" FROM "prod"."events" AS source_row WHERE source_row."event_domain" IN (\'timer\', \'activity\', \'inbox\', \'system\')'
+  );
+});
+
+test("target event domain values are read from Postgres check definitions", () => {
+  assert.deepEqual(
+    constraintTextValues("CHECK ((event_domain = ANY (ARRAY['timer'::text, 'activity'::text, 'user''s'::text])))"),
+    ["timer", "activity", "user's"]
   );
 });
 

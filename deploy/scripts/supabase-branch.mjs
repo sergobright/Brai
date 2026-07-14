@@ -404,7 +404,18 @@ export async function copySchemaData(pool, { sourceSchema, targetSchema, postSee
       if (columns.length === 0) continue;
       const columnList = columns.map(quoteIdentifier).join(", ");
       const requiredColumns = await requiredTargetColumns(client, targetSchema, table, sourceColumns);
-      const sourceQuery = copySourceQuery({ sourceSchema, targetSchema, table, columns, sourceColumns, requiredColumns });
+      const allowedValues = table === "events"
+        ? { event_domain: await targetEventDomains(client, targetSchema) }
+        : {};
+      const sourceQuery = copySourceQuery({
+        sourceSchema,
+        targetSchema,
+        table,
+        columns,
+        sourceColumns,
+        requiredColumns,
+        allowedValues
+      });
       await client.query(`
         INSERT INTO ${qualifiedTable(targetSchema, table)} (${columnList})
         OVERRIDING SYSTEM VALUE
@@ -431,10 +442,23 @@ export function copyTargetColumns({ table, sourceColumns, targetColumns }) {
   return [...sourceColumns, "expires_at_utc"];
 }
 
-export function copySourceQuery({ sourceSchema, targetSchema, table, columns, sourceColumns = columns, requiredColumns = [] }) {
-  const sourcePredicates = requiredColumns
-    .filter((column) => sourceColumns.includes(column))
-    .map((column) => `source_row.${quoteIdentifier(column)} IS NOT NULL`);
+export function copySourceQuery({
+  sourceSchema,
+  targetSchema,
+  table,
+  columns,
+  sourceColumns = columns,
+  requiredColumns = [],
+  allowedValues = {}
+}) {
+  const sourcePredicates = [
+    ...requiredColumns
+      .filter((column) => sourceColumns.includes(column))
+      .map((column) => `source_row.${quoteIdentifier(column)} IS NOT NULL`),
+    ...Object.entries(allowedValues)
+      .filter(([column, values]) => sourceColumns.includes(column) && values.length > 0)
+      .map(([column, values]) => `source_row.${quoteIdentifier(column)} IN (${values.map(quoteLiteral).join(", ")})`)
+  ];
   const sourceFilter = sourcePredicates.length > 0 ? `\n        WHERE ${sourcePredicates.join(" AND ")}` : "";
   if (table === "brai_cmd_access_tokens"
     && columns.includes("expires_at_utc")
@@ -464,6 +488,28 @@ export function copySourceQuery({ sourceSchema, targetSchema, table, columns, so
         )
         ${sourcePredicates.map((predicate) => `AND ${predicate}`).join("\n        ")}
   `;
+}
+
+async function targetEventDomains(queryable, schema) {
+  const result = await queryable.query(`
+    SELECT pg_get_constraintdef(constraint_row.oid) AS definition
+    FROM pg_constraint constraint_row
+    JOIN pg_class table_row ON table_row.oid = constraint_row.conrelid
+    JOIN pg_namespace schema_row ON schema_row.oid = table_row.relnamespace
+    WHERE schema_row.nspname = $1
+      AND table_row.relname = 'events'
+      AND constraint_row.conname = 'events_event_domain_check'
+      AND constraint_row.contype = 'c'
+  `, [schema]);
+  if (result.rows.length === 0) return [];
+  const values = constraintTextValues(result.rows[0].definition);
+  if (values.length === 0) throw new Error(`Cannot read allowed event domains from ${schema}.events_event_domain_check`);
+  return values;
+}
+
+export function constraintTextValues(definition) {
+  return [...String(definition).matchAll(/'((?:''|[^'])*)'/g)]
+    .map((match) => match[1].replaceAll("''", "'"));
 }
 
 export async function inspectOwnedSequences(queryable, { schema, tables = null, lockOwnedTables = false }) {
@@ -855,6 +901,10 @@ function previewSchemaName(branch) {
 
 function quoteIdentifier(value) {
   return `"${String(value).replaceAll('"', '""')}"`;
+}
+
+function quoteLiteral(value) {
+  return `'${String(value).replaceAll("'", "''")}'`;
 }
 
 function shellQuote(value) {
