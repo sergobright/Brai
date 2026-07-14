@@ -920,13 +920,14 @@ export function useBraiAppState(initialSection: SectionId) {
   async function clearAuthenticatedScope(
     epoch: number,
     expectedCurrentUserId: string | null = localOwnerIdRef.current,
+    nextClientUserId: string | null = null,
   ) {
     if (!isSessionEpochCurrent(epoch)) return false;
     bindLocalOwner(null);
     setAuthUser(null);
     setLiveOwnerScope(null);
     setLocalMutationAvailability(false);
-    await ensureClientUser(null, expectedCurrentUserId);
+    await ensureClientUser(nextClientUserId, expectedCurrentUserId);
     if (!isSessionEpochCurrent(epoch)) return false;
     resetUserSnapshots();
     setLocalSnapshotAvailability(true);
@@ -1040,7 +1041,7 @@ export function useBraiAppState(initialSection: SectionId) {
   async function onLogout() {
     const onboarding = loadOnboardingState();
     const preliminaryDisplayName = onboarding.name.trim() || authUser?.name || "Brai";
-    return queueAuthTransition(async (epoch, expectedOwnerId) => {
+    return queueAuthTransition(async (epoch) => {
       sessionRevalidationEnabledRef.current = false;
       try {
         await setBraiCmdAccessKey("", "", "");
@@ -1050,14 +1051,16 @@ export function useBraiAppState(initialSection: SectionId) {
           // Signing out still clears the device and local account boundaries while offline.
         }
         if (!isSessionEpochCurrent(epoch)) return;
-        await restorePreliminaryClientUser(preliminaryDisplayName).catch(() => null);
+        const preliminaryClientUserId = await restorePreliminaryClientUser(preliminaryDisplayName).catch(() => null);
         await Promise.allSettled([
           setBraiCmdOverlayEnabled(true),
           setBraiCmdVoiceOnlyMode(true),
           setBraiCmdQueuePausedMode(false),
         ]);
         if (!isSessionEpochCurrent(epoch)) return;
-        if (await clearAuthenticatedScope(epoch, expectedOwnerId)) setSyncStatus("auth_required");
+        const currentUserId = await getMeta<string>("currentUserId");
+        if (!isSessionEpochCurrent(epoch)) return;
+        if (await clearAuthenticatedScope(epoch, currentUserId, preliminaryClientUserId)) setSyncStatus("auth_required");
       } finally {
         if (isSessionEpochCurrent(epoch)) sessionRevalidationEnabledRef.current = true;
       }
