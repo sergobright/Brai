@@ -721,11 +721,12 @@ test("production client publish also refreshes the public landing", () => {
   assert.match(script, /"\$SCRIPT_DIR\/publish-web\.sh"/);
 });
 
-test("publish permission helper normalizes entire bounded artifact trees", () => {
+test("publish permission helper preserves shared artifact ownership", () => {
   const script = fs.readFileSync(path.resolve(import.meta.dirname, "../deploy/scripts/permissions.sh"), "utf8");
-  assert.doesNotMatch(script, /-user "\$\(id -u\)"/);
-  assert.match(script, /find "\$target" -type d -exec chmod 2775/);
-  assert.match(script, /find "\$target" -type f -exec chmod 0664/);
+  assert.match(script, /find "\$target" -type d -user "\$\(id -u\)" -exec chmod 2775/);
+  assert.match(script, /find "\$target" -type f -user "\$\(id -u\)" -exec chmod 0664/);
+  assert.match(script, /find "\$target" -type d ! -perm -2775/);
+  assert.match(script, /find "\$target" -type f ! -perm -0664/);
 });
 
 test("ADR publishing uses writable cache and output fallbacks", () => {
