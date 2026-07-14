@@ -476,14 +476,18 @@ test("delivery classifier separates infra-docs from runtime preview", () => {
   assert.equal(deliveryClassForFile(".gitignore"), "infra");
   assert.equal(deliveryClassForFile("apps/brai_app/tests/unit/publishScripts.test.ts"), "infra");
   assert.equal(deliveryClassForFile("apps/brai_app/tests/unit/activityStore.test.ts"), "technical");
+  assert.equal(deliveryClassForFile("services/brai_goal_agents/test/deploy.test.mjs"), "technical");
   assert.equal(deliveryClassForFile("apps/brai_app/vitest.config.mts"), "technical");
   assert.equal(deliveryClassForFile("services/brai_api/test/api.auth-migrations.test.js"), "technical");
   assert.equal(deliveryClassForFile("deploy/environments.json"), "infra");
   assert.equal(deliveryClassForFile("deploy/ansible/brai.yml"), "infra");
+  assert.equal(deliveryClassForFile("deploy/chrome-devtools-mcp/caddy-auth.js"), "infra");
   assert.equal(deliveryClassForFile("deploy/systemd/brai-socraticode-watcher.service"), "infra");
   assert.equal(deliveryClassForFile("deploy/systemd/brai-temporal-worker.service"), "infra");
   assert.equal(deliveryClassForFile("deploy/scripts/apk-release-targets.mjs"), "infra");
   assert.equal(deliveryClassForFile("deploy/scripts/build-nonproduction-apks.sh"), "infra");
+  assert.equal(deliveryClassForFile("deploy/scripts/backup-postgres-to-telegram.sh"), "infra");
+  assert.equal(deliveryClassForFile("deploy/scripts/ci-temporal-signal.sh"), "infra");
   assert.equal(deliveryClassForFile("deploy/scripts/resolve-deploy-env.mjs"), "infra");
   assert.equal(deliveryClassForFile("deploy/scripts/classify-delivery.mjs"), "infra");
   assert.equal(deliveryClassForFile("deploy/scripts/preview-slots.mjs"), "infra");
@@ -505,6 +509,7 @@ test("delivery classifier separates infra-docs from runtime preview", () => {
   assert.equal(deliveryClassForFile("scripts/caddy-prune-managed-sites.test.mjs"), "infra");
   assert.equal(deliveryClassForFile("scripts/brai-task.mjs"), "infra");
   assert.equal(deliveryClassForFile("scripts/check-open-openspec-changes.mjs"), "infra");
+  assert.equal(deliveryClassForFile("scripts/check-public-branch.mjs"), "infra");
   assert.equal(deliveryClassForFile("services/brai_temporal/src/state.mjs"), "infra");
   assert.equal(deliveryClassForFile("supabase/migrations/0002_enable_rls_public_tables.sql"), "infra");
   assert.equal(deliveryClassForFile("supabase/migrations/0003_fix_rls_function_search_path.sql"), "infra");

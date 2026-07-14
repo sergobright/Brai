@@ -1987,9 +1987,11 @@ function deliveryClassForFile(file) {
     file.startsWith("optional-skills/") ||
     file.startsWith("admin/deploy/") ||
     file.startsWith("deploy/ansible/") ||
+    file.startsWith("deploy/chrome-devtools-mcp/") ||
     file.startsWith("deploy/systemd/") ||
     file.startsWith(".githooks/") ||
     file.startsWith("scripts/brai-") ||
+    file.startsWith("scripts/check-public-branch") ||
     file.startsWith("scripts/check-open-openspec-changes") ||
     file.startsWith("services/brai_temporal/") ||
     [
@@ -1998,10 +2000,12 @@ function deliveryClassForFile(file) {
       "deploy/scripts/accepted-preview-branches.mjs",
       "deploy/scripts/apply-main-infra.sh",
       "deploy/scripts/apk-release-targets.mjs",
+      "deploy/scripts/backup-postgres-to-telegram.sh",
       "deploy/scripts/build-android-env-apk.sh",
       "deploy/scripts/build-nonproduction-apks.sh",
       "deploy/scripts/ci-ssh-complete-accepted-previews.sh",
       "deploy/scripts/ci-cleanup-accepted-branches.sh",
+      "deploy/scripts/ci-temporal-signal.sh",
       "deploy/scripts/ci-ssh-deploy.sh",
       "deploy/scripts/ci-ssh-promote-deployment.sh",
       "deploy/scripts/ci-ssh-prune-accepted-branches.sh",
@@ -2046,6 +2050,7 @@ function deliveryClassForFile(file) {
     file.startsWith("apps/brai_app/tests/") ||
     file.startsWith("services/brai_api/test/") ||
     file.startsWith("services/brai_api/test-support/") ||
+    file.startsWith("services/brai_goal_agents/test/") ||
     /^apps\/brai_app\/vitest\.config\.[cm]?[jt]s$/.test(file) ||
     /^apps\/brai_app\/playwright\.config\.[cm]?[jt]s$/.test(file) ||
     /^apps\/brai_app\/eslint\.config\.[cm]?[jt]s$/.test(file)
