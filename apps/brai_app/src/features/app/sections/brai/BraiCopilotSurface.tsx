@@ -194,7 +194,18 @@ function BraiChatViewComponent(props: ComponentProps<typeof CopilotChat.View>) {
     props.onRemoveAttachment?.(id);
   }
 
-  return <CopilotChat.View {...props} onSubmitMessage={submit} onRemoveAttachment={removeAttachment} />;
+  return (
+    <CopilotChat.View
+      {...props}
+      input={{
+        textArea: { id: "brai-chat-message", name: "message", "aria-label": "Сообщение Браю" },
+        sendButton: { "aria-label": running ? "Остановить ответ" : "Отправить сообщение" },
+        addMenuButton: { "aria-label": "Добавить изображение" },
+      }}
+      onSubmitMessage={submit}
+      onRemoveAttachment={removeAttachment}
+    />
+  );
 }
 
 const BraiChatView = Object.assign(BraiChatViewComponent, CopilotChat.View);

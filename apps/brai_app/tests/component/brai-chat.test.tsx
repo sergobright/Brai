@@ -66,6 +66,8 @@ describe("Brai chat client", () => {
     await waitFor(() => expect(screen.getByTestId("copilot-chat")).toHaveAttribute("data-thread-id", "thread-1"));
     expect(screen.getByRole("region", { name: "Чат с Браем" })).toBeInTheDocument();
     expect(screen.getByRole("complementary", { name: "Чаты Брая" })).toBeInTheDocument();
+    expect(screen.getByRole("searchbox", { name: "Поиск по чатам" })).toHaveAttribute("id", "brai-chat-search");
+    expect(screen.getByRole("searchbox", { name: "Поиск по чатам" })).toHaveAttribute("name", "query");
     expect(screen.getByText("Только чтение")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Открыть артефакты" })).toBeDisabled();
     fireEvent.click(screen.getByRole("button", { name: "Показать архив чатов" }));

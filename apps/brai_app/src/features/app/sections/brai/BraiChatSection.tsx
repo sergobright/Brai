@@ -412,11 +412,11 @@ export function BraiChatSection({
       <aside className="min-h-0 border-r border-border bg-card max-[860px]:hidden" aria-label="Чаты Брая">{rail}</aside>
       <section className="brai-chat-pane grid min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)] bg-background" aria-label="Чат с Браем">
         <div className="flex min-h-12 flex-wrap items-center gap-2 border-b border-border px-3 py-2">
-          <Select value={activeThread?.model ?? undefined} disabled={!activeThread || models.length === 0} onValueChange={(model) => void updateSettings({ model })}>
+          <Select value={activeThread?.model ?? ""} disabled={!activeThread || models.length === 0} onValueChange={(model) => void updateSettings({ model })}>
             <SelectTrigger size="sm" aria-label="Модель"><SelectValue placeholder="Модель" /></SelectTrigger>
             <SelectContent>{models.map((model) => <SelectItem key={model.id} value={model.id}>{model.display_name || model.id}</SelectItem>)}</SelectContent>
           </Select>
-          <Select value={activeThread?.reasoning_effort ?? undefined} disabled={!activeThread || reasoningEfforts.length === 0} onValueChange={(reasoning_effort) => void updateSettings({ reasoning_effort })}>
+          <Select value={activeThread?.reasoning_effort ?? ""} disabled={!activeThread || reasoningEfforts.length === 0} onValueChange={(reasoning_effort) => void updateSettings({ reasoning_effort })}>
             <SelectTrigger size="sm" aria-label="Глубина рассуждений"><SelectValue placeholder="Рассуждения" /></SelectTrigger>
             <SelectContent>{reasoningEfforts.map((effort) => <SelectItem key={effort} value={effort}>{effort}</SelectItem>)}</SelectContent>
           </Select>
@@ -492,7 +492,7 @@ function BraiThreadRail({ activeThreadId, archived, searchResults, status, threa
         <Button type="button" size="icon-sm" variant={archived ? "secondary" : "ghost"} aria-label={archived ? "Показать активные чаты" : "Показать архив чатов"} onClick={() => onArchived(!archived)}><Archive aria-hidden="true" /></Button>
       </div>
       <form className="grid gap-2 border-b border-border p-3" onSubmit={(event) => { event.preventDefault(); void onSearch(query, includeArchived); }}>
-        <div className="flex gap-1"><Input type="search" value={query} aria-label="Поиск по чатам" placeholder="Поиск" onChange={(event) => setQuery(event.target.value)} /><Button type="submit" size="icon-sm" variant="ghost" aria-label="Найти"><Search aria-hidden="true" /></Button></div>
+        <div className="flex gap-1"><Input id="brai-chat-search" name="query" type="search" value={query} aria-label="Поиск по чатам" placeholder="Поиск" onChange={(event) => setQuery(event.target.value)} /><Button type="submit" size="icon-sm" variant="ghost" aria-label="Найти"><Search aria-hidden="true" /></Button></div>
         <label className="flex items-center gap-2 text-xs text-muted-foreground"><input type="checkbox" checked={includeArchived} onChange={(event) => setIncludeArchived(event.target.checked)} />Искать в архиве</label>
       </form>
       <ScrollArea className="min-h-0" contentInset="none"><div className="grid gap-1 p-2">

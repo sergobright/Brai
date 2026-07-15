@@ -7,6 +7,11 @@ type FakeMessage = { id: string; role: "user" | "assistant"; content: string };
 type FakeAttachment = { id: string; status: "uploading" | "ready"; metadata?: Record<string, unknown> };
 type FakeViewProps = {
   attachments?: FakeAttachment[];
+  input?: {
+    addMenuButton?: Record<string, unknown>;
+    sendButton?: Record<string, unknown>;
+    textArea?: Record<string, unknown>;
+  };
   isRunning?: boolean;
   messages?: FakeMessage[];
   messageView?: { assistantMessage?: ComponentType<FakeAssistantProps> };
@@ -34,12 +39,14 @@ const fake = vi.hoisted(() => ({
   removeAttachment: vi.fn(),
   runAgent: vi.fn(async () => undefined),
   stockSubmit: vi.fn(),
+  viewProps: null as FakeViewProps | null,
 }));
 
 vi.mock("@copilotkit/react-core/v2", async () => {
   const React = await import("react");
 
   function FakeView(props: FakeViewProps) {
+    fake.viewProps = props;
     const Assistant = props.messageView?.assistantMessage;
     return (
       <div>
@@ -107,6 +114,17 @@ describe("BraiCopilotSurface", () => {
     fake.removeAttachment.mockReset();
     fake.runAgent.mockClear();
     fake.stockSubmit.mockReset();
+    fake.viewProps = null;
+  });
+
+  it("names the composer controls and fields for assistive technology", () => {
+    renderSurface();
+
+    expect(fake.viewProps?.input).toMatchObject({
+      addMenuButton: { "aria-label": "Добавить изображение" },
+      sendButton: { "aria-label": "Отправить сообщение" },
+      textArea: { id: "brai-chat-message", name: "message", "aria-label": "Сообщение Браю" },
+    });
   });
 
   it("steers an active run with one stable optimistic user-message id", async () => {
