@@ -236,7 +236,7 @@ Production runtime credentials live in `/etc/brai/brai-api.env`, including `BRAI
 Preview and Dev runtime credentials live in `/srv/projects/brai-envs/<environment>/brai-api.env`
 and are deploy-writable so CI can update schema-scoped DSNs after Supabase schema creation.
 After `BRAI_SUPAVISOR_TENANT_ISOLATION=true` is enabled by the accepted maintenance rollout,
-production DSNs must use `brightos-prod`; Dev and Preview DSNs must use `brightos-nonprod`.
+production DSNs must use `brai-prod`; Dev and Preview DSNs must use `brai-nonprod`.
 Deployment rewrites only the Supavisor tenant suffix in the URL username and preserves the password,
 database, query parameters, and schema `search_path`. Deployment fails before service cutover when
 the target DSN has the wrong tenant.

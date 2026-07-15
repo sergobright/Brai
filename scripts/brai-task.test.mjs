@@ -530,6 +530,9 @@ test("delivery classifier separates infra-docs from runtime preview", () => {
   assert.equal(deliveryClassForFile("deploy/scripts/preview-slots.sh"), "infra");
   assert.equal(deliveryClassForFile("deploy/scripts/permissions.sh"), "infra");
   assert.equal(deliveryClassForFile("deploy/scripts/postgres-smoke.mjs"), "infra");
+  assert.equal(deliveryClassForFile("deploy/scripts/supabase-maintenance.sh"), "infra");
+  assert.equal(deliveryClassForFile("deploy/scripts/supavisor-tenants.mjs"), "infra");
+  assert.equal(deliveryClassForFile("deploy/supabase/pooler.exs"), "infra");
   assert.equal(deliveryClassForFile("deploy/scripts/supabase-branch.test.mjs"), "technical");
   assert.equal(deliveryClassForFile("deploy/scripts/prune-caddy-site-blocks.mjs"), "infra");
   assert.equal(deliveryClassForFile("deploy/scripts/publish-web.sh"), "infra");
@@ -566,6 +569,12 @@ test("delivery classifier separates infra-docs from runtime preview", () => {
   assert.equal(deliveryClassForFile("package.json"), "unknown");
 
   assert.equal(classifyDelivery(["docs/foo.md"]).deliveryClass, "infra-docs");
+  assert.equal(classifyDelivery([
+    "deploy/scripts/supabase-maintenance.sh",
+    "deploy/scripts/supavisor-tenants.mjs",
+    "deploy/supabase/pooler.exs",
+    "docs/operations/branch-preview-environments.md",
+  ]).deliveryClass, "infra-docs");
   assert.equal(classifyDelivery([".github/workflows/brai-delivery.yml"]).deliveryClass, "infra-docs");
   assert.equal(classifyDelivery(["deploy/systemd/brai-socraticode-watcher.service"]).deliveryClass, "infra-docs");
   assert.equal(classifyDelivery(["deploy/scripts/complete-operation-activities.sh"]).deliveryClass, "infra-docs");

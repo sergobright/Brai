@@ -2252,9 +2252,12 @@ function deliveryClassForFile(file) {
       "deploy/scripts/promote-deployment.mjs",
       "deploy/scripts/resolve-deploy-env.mjs",
       "deploy/scripts/resolve-required-apk-version.mjs",
+      "deploy/scripts/supabase-maintenance.sh",
+      "deploy/scripts/supavisor-tenants.mjs",
       "deploy/scripts/sync-local-main-checkout.sh",
       "deploy/scripts/sync-occupied-preview-ota-manifests.sh",
       "deploy/scripts/update-release-index.mjs",
+      "deploy/supabase/pooler.exs",
       "scripts/caddy-prune-managed-sites.test.mjs",
     ].includes(file)
   ) {

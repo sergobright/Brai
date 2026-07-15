@@ -635,7 +635,7 @@ test("self-hosted preview generator switches only to the non-production tenant a
 
   const databaseUrl = fs.readFileSync(envFile, "utf8").match(/^BRAI_DATABASE_URL='([^']+)'$/m)?.[1];
   const parsed = new URL(databaseUrl);
-  assert.equal(parsed.username, "postgres.brightos-nonprod");
+  assert.equal(parsed.username, "postgres.brai-nonprod");
   assert.equal(parsed.password, "p%40ss");
   assert.equal(parsed.searchParams.get("sslmode"), "disable");
   assert.equal(parsed.searchParams.get("options"), "-c search_path=brai_dev,public");

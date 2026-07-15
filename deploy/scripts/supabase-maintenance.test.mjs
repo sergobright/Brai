@@ -64,8 +64,8 @@ test("pooler reconfiguration is repo-managed, bounded, and canaried", () => {
   const deploy = fs.readFileSync(path.join(repoRoot, "deploy/scripts/ci-ssh-deploy.sh"), "utf8");
 
   assert.match(bootstrap, /POOLER_TENANT_ID/);
-  assert.match(bootstrap, /brightos-prod/);
-  assert.match(bootstrap, /brightos-nonprod/);
+  assert.match(bootstrap, /brai-prod/);
+  assert.match(bootstrap, /brai-nonprod/);
   assert.match(script, /systemctl stop "\$\{API_SERVICES\[@\]\}"/);
   assert.match(script, /up -d --force-recreate supavisor/);
   assert.match(script, /wait_for_auth_canary 3020/);

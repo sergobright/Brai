@@ -4,8 +4,8 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 
-export const PROD_SUPAVISOR_TENANT = "brightos-prod";
-export const NONPROD_SUPAVISOR_TENANT = "brightos-nonprod";
+export const PROD_SUPAVISOR_TENANT = "brai-prod";
+export const NONPROD_SUPAVISOR_TENANT = "brai-nonprod";
 const KNOWN_TENANTS = ["brightos", PROD_SUPAVISOR_TENANT, NONPROD_SUPAVISOR_TENANT];
 
 export function tenantIsolationEnabled(env = process.env) {

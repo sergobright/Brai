@@ -114,8 +114,8 @@ Supavisor SHALL provide separate production and non-production circuit-breaker b
 #### Scenario: Runtime DSNs are generated
 
 - **WHEN** production, Dev, or Preview database URLs are written after tenant isolation is enabled
-- **THEN** production uses tenant `brightos-prod`
-- **AND** Dev and Preview use tenant `brightos-nonprod`
+- **THEN** production uses tenant `brai-prod`
+- **AND** Dev and Preview use tenant `brai-nonprod`
 - **AND** password, database, port, query parameters, and schema `search_path` remain unchanged
 
 #### Scenario: Deployment validates a runtime environment
