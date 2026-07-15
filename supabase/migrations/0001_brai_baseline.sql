@@ -157,6 +157,33 @@ CREATE INDEX IF NOT EXISTS idx_activities_type_status_updated ON activities (act
 CREATE INDEX IF NOT EXISTS idx_activities_user_status_created ON activities (user_id, status, created_at_utc);
 CREATE INDEX IF NOT EXISTS idx_activities_new_sort_order ON activities (status, sort_order) WHERE deleted_at_utc IS NULL AND sort_order IS NOT NULL;
 
+CREATE OR REPLACE FUNCTION brai_reject_new_agent_activity_operations()
+RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = ''
+AS $$
+BEGIN
+  IF current_setting('brai.allow_legacy_operation_import', true) = 'on' THEN
+    RETURN NEW;
+  END IF;
+
+  IF NEW.activity_type_id = 'operation'
+     AND (NEW.author = 'Codex' OR NEW.id LIKE 'operation:agent-task:%') THEN
+    RAISE EXCEPTION USING
+      ERRCODE = '23514',
+      MESSAGE = 'agent_operations_belong_to_inbox';
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS brai_reject_new_agent_activity_operations ON activities;
+CREATE TRIGGER brai_reject_new_agent_activity_operations
+  BEFORE INSERT ON activities
+  FOR EACH ROW
+  EXECUTE FUNCTION brai_reject_new_agent_activity_operations();
+
 CREATE TABLE IF NOT EXISTS focus_sessions (
   id text PRIMARY KEY,
   created_at_utc text NOT NULL,
@@ -758,6 +785,13 @@ ON CONFLICT (version_type_id) DO UPDATE
 SET last_version = GREATEST(build_version_counters.last_version, excluded.last_version);
 
 INSERT INTO table_descriptions (table_name, title, short_description, long_description, updated_at_utc) VALUES
+  (
+    'activities',
+    'Activities',
+    'Пользовательские action, goal и product-owned записи.',
+    'Agent operations создаются только во внешнем Inbox; legacy activities.operation доступны лишь для чтения, завершения и мягкого удаления.',
+    now()::text
+  ),
   (
     'user_ui_preferences',
     'User UI preferences',

@@ -166,7 +166,8 @@ test("main sync gives production publish artifacts to the deploy user", () => {
 test("server access contract checks operation helper sudo boundary", () => {
   const script = fs.readFileSync(new URL("./brai-task.mjs", import.meta.url), "utf8");
   const sudoers = fs.readFileSync(new URL("../deploy/ansible/templates/brai-deploy-sudoers.j2", import.meta.url), "utf8");
-  assert.match(script, /commandCheck\("operation create helper host-local sudo"/);
+  assert.match(script, /commandCheck\("Inbox operation create helper host-local sudo"/);
+  assert.match(script, /commandCheck\("deprecated operation create helper host-local sudo"/);
   assert.match(script, /commandCheck\("operation complete helper host-local sudo"/);
   assert.match(script, /commandCheck\("Inbox operation complete helper host-local sudo"/);
   assert.match(script, /commandCheck\("operation list helper host-local sudo"/);
@@ -176,6 +177,7 @@ test("server access contract checks operation helper sudo boundary", () => {
   assert.match(script, /operationHelperRemoteAccessCheck/);
   assert.match(script, /BRAI_DEPLOY_SSH_KEY_FILE/);
   assert.match(sudoers, /ALL=\(\{\{ brai_service_user \}\}\) NOPASSWD:/);
+  assert.match(sudoers, /create-inbox-operation\.sh --local \*/);
   assert.match(sudoers, /create-operation-activity\.sh --local \*/);
   assert.match(sudoers, /complete-operation-activities\.sh --local \*/);
   assert.match(sudoers, /complete-inbox-operations\.sh --local \*/);
@@ -184,6 +186,7 @@ test("server access contract checks operation helper sudo boundary", () => {
 });
 
 test("delivery classifier keeps operation helper changes in infra", () => {
+  assert.equal(deliveryClassForFile("deploy/scripts/create-inbox-operation.sh"), "infra");
   assert.equal(deliveryClassForFile("deploy/scripts/create-operation-activity.sh"), "infra");
   assert.equal(deliveryClassForFile("deploy/scripts/complete-inbox-operations.sh"), "infra");
   assert.equal(deliveryClassForFile("deploy/scripts/list-operation-activities.sh"), "infra");
@@ -338,6 +341,7 @@ test("main checkout lock preserves agent worktrees by default", () => {
   assert.match(script, /sudo chmod 0751 "\$root"/);
   assert.match(script, /sudo chmod u=rwx,g=rx,o=x "\$root\/deploy"/);
   assert.match(script, /complete-operation-activities\.sh/);
+  assert.match(script, /create-inbox-operation\.sh/);
   assert.match(script, /create-operation-activity\.sh/);
   assert.match(script, /list-operation-activities\.sh/);
   assert.match(script, /sync-occupied-preview-ota-manifests\.sh/);
@@ -388,6 +392,7 @@ test("local main sync preserves runtime dirs and hard resets to origin main", ()
   assert.match(script, /BRAI_LOCK_STALE_WORKTREES:-0/);
   assert.match(script, /chmod u=rwx,g=rx,o=x deploy/);
   assert.match(script, /complete-operation-activities\.sh/);
+  assert.match(script, /create-inbox-operation\.sh/);
   assert.match(script, /create-operation-activity\.sh/);
   assert.match(script, /list-operation-activities\.sh/);
   assert.match(script, /sync-occupied-preview-ota-manifests\.sh/);
@@ -732,9 +737,9 @@ test("operation activity list helper has a read-only shell contract", () => {
   assert.match(badLimit.stderr, /Invalid limit/);
 });
 
-test("operation activity creation helper rejects placeholder payloads before DB access", () => {
+test("Inbox operation creation helper rejects placeholder payloads before API access", () => {
   const result = spawnSync("bash", [
-    "deploy/scripts/create-operation-activity.sh",
+    "deploy/scripts/create-inbox-operation.sh",
     "--local",
     "--id",
     "operation:agent-task:short",
@@ -810,13 +815,14 @@ test("operation activity completion helper rejects unsafe ids", () => {
   assert.match(result.stderr, /Invalid operation activity id/);
 });
 
-test("operation activity helper transports remote payload through stdin JSON", () => {
-  const script = fs.readFileSync(new URL("../deploy/scripts/create-operation-activity.sh", import.meta.url), "utf8");
+test("Inbox operation helper transports remote payload through stdin JSON", () => {
+  const script = fs.readFileSync(new URL("../deploy/scripts/create-inbox-operation.sh", import.meta.url), "utf8");
   assert.match(script, /--stdin-json/);
-  assert.match(script, /printf '%s\\n' "\$payload_json" \| ssh/);
+  assert.match(script, /payload_json \| ssh/);
   assert.doesNotMatch(script, /bash -s -- "\$DEPLOY_REPO" "\$SERVICE_USER" "\$OPERATION_ID"/);
+  assert.doesNotMatch(script, /INSERT INTO activities|BRAI_DATABASE_URL|new Pool/);
 
-  const result = spawnSync("bash", ["deploy/scripts/create-operation-activity.sh", "--local", "--stdin-json"], {
+  const result = spawnSync("bash", ["deploy/scripts/create-inbox-operation.sh", "--local", "--stdin-json"], {
     cwd: path.resolve(import.meta.dirname, ".."),
     encoding: "utf8",
     input: `${JSON.stringify({
@@ -825,10 +831,10 @@ test("operation activity helper transports remote payload through stdin JSON", (
       reason: "Пробелы и спецсимволы: $() ; & | ' \"",
       description: "Русский текст и перенос\nстроки доходят до защищённой DB boundary.",
     })}\n`,
-    env: { ...process.env, BRAI_DATABASE_URL: "", BRAI_API_ENV_FILE: "/nonexistent" },
+    env: { ...process.env, BRAI_INBOX_API_KEY: "", BRAI_API_ENV_FILE: "/nonexistent" },
   });
   assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /BRAI_DATABASE_URL is required/);
+  assert.match(result.stderr, /BRAI_INBOX_API_KEY is required/);
   assert.doesNotMatch(result.stderr, /too short|syntax error/);
 });
 

@@ -155,6 +155,7 @@ test("production copy reseeds copied tables before repair migrations and before 
   const copyFunction = script.slice(copyStart, inspectStart);
   const begin = 'client.query("BEGIN ISOLATION LEVEL REPEATABLE READ")';
   const searchPath = "SET LOCAL search_path TO";
+  const legacyImportFlag = "set_config('brai.allow_legacy_operation_import', 'on', true)";
   const constraintsImmediate = 'client.query("SET CONSTRAINTS ALL IMMEDIATE")';
   const reapply = "for (const { sql } of postSeedMigrations) await client.query(sql)";
   const reseed = "await reseedOwnedSequences(client, { schema: targetSchema, tables: copyTables })";
@@ -168,6 +169,8 @@ test("production copy reseeds copied tables before repair migrations and before 
   assert.ok(firstReseed > 0);
   assert.ok(secondReseed > firstReseed);
   assert.ok(copyFunction.indexOf(begin) < copyFunction.indexOf(searchPath));
+  assert.ok(copyFunction.indexOf(legacyImportFlag) > copyFunction.indexOf(searchPath));
+  assert.ok(copyFunction.indexOf(legacyImportFlag) < copyFunction.indexOf("TRUNCATE TABLE"));
   assert.match(copyFunction, /TRUNCATE TABLE .* CONTINUE IDENTITY CASCADE/);
   assert.doesNotMatch(copyFunction, /RESTART IDENTITY/);
   assert.ok(copyFunction.indexOf(searchPath) < copyFunction.indexOf("TRUNCATE TABLE"));
