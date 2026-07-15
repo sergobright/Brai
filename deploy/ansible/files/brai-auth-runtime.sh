@@ -164,9 +164,39 @@ compose() {
     "$DOCKER_BIN" compose --project-name "$COMPOSE_PROJECT" --file "$COMPOSE_FILE" "${@:2}"
 }
 
+pull_image_if_missing() (
+  local image="$1" registry_token='' docker_config=''
+  cleanup_registry_login() {
+    registry_token=''
+    [[ -z "$docker_config" ]] || /bin/rm -rf -- "$docker_config"
+  }
+  trap cleanup_registry_login EXIT
+  trap 'exit 129' HUP
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+  if "$DOCKER_BIN" image inspect "$image" >/dev/null 2>&1; then
+    return 0
+  fi
+
+  IFS= read -r registry_token || die 'A short-lived GHCR token is required on stdin for a missing auth image.'
+  [[ -n "$registry_token" && ${#registry_token} -le 1024 && "$registry_token" != *[[:space:]]* ]] \
+    || die 'The GHCR token supplied on stdin is empty or malformed.'
+  docker_config="$(/usr/bin/mktemp -d "$AUTH_ROOT/.registry-login.XXXXXX")"
+  /bin/chmod 0700 "$docker_config"
+  if ! printf '%s\n' "$registry_token" \
+    | DOCKER_CONFIG="$docker_config" "$DOCKER_BIN" login ghcr.io --username sergobright --password-stdin \
+      >/dev/null 2>&1; then
+    die 'Short-lived GHCR authentication failed.'
+  fi
+  registry_token=''
+  if ! DOCKER_CONFIG="$docker_config" compose "$image" pull auth; then
+    die 'Exact-digest GHCR pull failed.'
+  fi
+)
+
 deploy_image() {
   local image="$1"
-  compose "$image" pull auth
+  pull_image_if_missing "$image"
   compose "$image" up -d --no-build auth
 }
 

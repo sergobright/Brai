@@ -87,7 +87,7 @@
 
       **Описание:** инертная root-owned host boundary для будущего stateless `brai-auth`; bootstrap сам не создаёт schema/secret/env, не запускает container и не включает route.
 
-      **Для чего используется:** fixed Compose и helper ограничивают lifecycle семью известных Brai environments, immutable `ghcr.io/sergobright/brai-auth@sha256:...` image, localhost ports `3050`-`3056`, private Docker network `brai-supabase`, exact Preview lease и атомарные Caddy route transitions.
+      **Для чего используется:** fixed Compose и helper ограничивают lifecycle семью известных Brai environments, immutable `ghcr.io/sergobright/brai-auth@sha256:...` image, localhost ports `3050`-`3056`, private Docker network `brai-supabase`, exact Preview lease и атомарные Caddy route transitions. Отсутствующий image helper pull-ит с короткоживущим GitHub Actions token из stdin через временный root-only `DOCKER_CONFIG`; локальный exact digest запускается без registry credential.
 
       **Как используется:** source of truth — `deploy/ansible/` в Brai repo; check/apply выполняются только из clean synchronized `main`: `deploy/scripts/apply-main-infra.sh --check brai-auth-bootstrap`, затем `--apply brai-auth-bootstrap` и повторный `--check`.
 

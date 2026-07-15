@@ -51,6 +51,8 @@ test("helper syntax and root/test boundary stay fixed", () => {
   assert.match(source, /BRAI_AUTH_TEST_\* overrides are forbidden for root execution/);
   assert.match(source, /Unsupported test override/);
   assert.match(source, /deploy\|route-enable\|route-disable\|rollback\|remove/);
+  assert.match(source, /A short-lived GHCR token is required on stdin/);
+  assert.match(source, /DOCKER_CONFIG=.*login ghcr\.io --username sergobright --password-stdin/);
   assert.doesNotMatch(source, /docker\.sock|groupadd|usermod|set -x/);
 });
 
@@ -106,9 +108,41 @@ test("Preview branch, commit, generation, and slot are checked before the enviro
   assert.equal(deployed.status, 0, deployed.stderr);
   assert.deepEqual(JSON.parse(deployed.stdout), { ok: true, action: "deploy", environment: "preview-a" });
   const log = fixture.readLog();
+  assert.match(log, /docker image inspect ghcr\.io\/sergobright\/brai-auth@sha256:/);
+  assert.match(log, /docker login ghcr\.io --username sergobright --password-stdin/);
   assert.match(log, /docker compose --project-name preview-a-brai .* pull auth/);
   assert.match(log, /docker compose --project-name preview-a-brai .* up -d --no-build auth/);
   assert.doesNotMatch(`${deployed.stdout}${deployed.stderr}${log}`, /fixture-secret/);
+});
+
+test("missing images require an ephemeral stdin token while local exact digests do not", { skip: skipRuntime }, (context) => {
+  const fixture = createFixture(context);
+
+  const missingToken = fixture.runWithoutToken("deploy", "prod", digest);
+  assert.notEqual(missingToken.status, 0);
+  assert.match(missingToken.stderr, /short-lived GHCR token is required on stdin/);
+  assert.doesNotMatch(fixture.readLog(), /login ghcr\.io|pull auth|up -d/);
+
+  fixture.clearLog();
+  const rejectedToken = fixture.runWithInput("wrong-token\n", "deploy", "prod", digest);
+  assert.notEqual(rejectedToken.status, 0);
+  assert.match(rejectedToken.stderr, /Short-lived GHCR authentication failed/);
+  assert.deepEqual(
+    fs.readdirSync(path.join(fixture.root, "srv/opt/brai-auth")).filter((entry) => entry.startsWith(".registry-login.")),
+    [],
+  );
+
+  fixture.clearLog();
+  fixture.markImageLocal();
+  const local = fixture.runWithoutToken("deploy", "prod", digest);
+  assert.equal(local.status, 0, local.stderr);
+  assert.match(fixture.readLog(), /docker image inspect/);
+  assert.match(fixture.readLog(), /up -d --no-build auth/);
+  assert.doesNotMatch(fixture.readLog(), /login ghcr\.io|pull auth/);
+  assert.deepEqual(
+    fs.readdirSync(path.join(fixture.root, "srv/opt/brai-auth")).filter((entry) => entry.startsWith(".registry-login.")),
+    [],
+  );
 });
 
 test("failed Preview leases allow only rollback and cleanup actions", { skip: skipRuntime }, (context) => {
@@ -245,6 +279,7 @@ function createFixture(context) {
   const log = path.join(root, "commands.log");
   const failCaddy = path.join(root, "fail-caddy-once");
   const failSystemctl = path.join(root, "fail-systemctl-once");
+  const localImage = path.join(root, "local-auth-image");
   fs.mkdirSync(bin, { recursive: true });
   fs.mkdirSync(authRoot, { recursive: true });
   fs.mkdirSync(caddyRoot, { recursive: true });
@@ -267,7 +302,7 @@ function createFixture(context) {
   fs.writeFileSync(path.join(envsRoot, "preview-slots.lock"), "");
   fs.writeFileSync(path.join(envsRoot, "preview-slots.json"), JSON.stringify(emptyRegistry()));
 
-  writeExecutable(path.join(bin, "docker"), `#!/usr/bin/env bash\nprintf 'runtime env=%s port=%s\\n' "$BRAI_AUTH_ENV_FILE" "$BRAI_AUTH_PORT" >>"$BRAI_AUTH_FAKE_LOG"\nprintf 'docker %s\\n' "$*" >>"$BRAI_AUTH_FAKE_LOG"\n`);
+  writeExecutable(path.join(bin, "docker"), `#!/usr/bin/env bash\nprintf 'runtime env=%s port=%s\\n' "\${BRAI_AUTH_ENV_FILE:-}" "\${BRAI_AUTH_PORT:-}" >>"$BRAI_AUTH_FAKE_LOG"\nprintf 'docker %s\\n' "$*" >>"$BRAI_AUTH_FAKE_LOG"\nif [[ "$1 $2" == "image inspect" ]]; then [[ -f "$BRAI_AUTH_FAKE_LOCAL_IMAGE" ]]; exit; fi\nif [[ "$1" == "login" ]]; then IFS= read -r token; [[ "$token" == "fixture-token" ]]; exit; fi\n`);
   writeExecutable(path.join(bin, "caddy"), `#!/usr/bin/env bash\nprintf 'caddy %s\\n' "$*" >>"$BRAI_AUTH_FAKE_LOG"\nif [[ -f "$BRAI_AUTH_FAKE_FAIL_CADDY" ]]; then rm -f "$BRAI_AUTH_FAKE_FAIL_CADDY"; exit 1; fi\n`);
   writeExecutable(path.join(bin, "systemctl"), `#!/usr/bin/env bash\nprintf 'systemctl %s\\n' "$*" >>"$BRAI_AUTH_FAKE_LOG"\nif [[ -f "$BRAI_AUTH_FAKE_FAIL_SYSTEMCTL" ]]; then rm -f "$BRAI_AUTH_FAKE_FAIL_SYSTEMCTL"; exit 1; fi\n`);
 
@@ -280,15 +315,19 @@ function createFixture(context) {
     BRAI_AUTH_FAKE_LOG: log,
     BRAI_AUTH_FAKE_FAIL_CADDY: failCaddy,
     BRAI_AUTH_FAKE_FAIL_SYSTEMCTL: failSystemctl,
+    BRAI_AUTH_FAKE_LOCAL_IMAGE: localImage,
   };
   return {
     root,
-    run: (...args) => spawnSync("bash", [helper, ...args], { cwd: repoRoot, env, encoding: "utf8" }),
-    runWithEnv: (extra, ...args) => spawnSync("bash", [helper, ...args], { cwd: repoRoot, env: { ...env, ...extra }, encoding: "utf8" }),
+    run: (...args) => spawnSync("bash", [helper, ...args], { cwd: repoRoot, env, encoding: "utf8", input: "fixture-token\n" }),
+    runWithoutToken: (...args) => spawnSync("bash", [helper, ...args], { cwd: repoRoot, env, encoding: "utf8" }),
+    runWithInput: (input, ...args) => spawnSync("bash", [helper, ...args], { cwd: repoRoot, env, encoding: "utf8", input }),
+    runWithEnv: (extra, ...args) => spawnSync("bash", [helper, ...args], { cwd: repoRoot, env: { ...env, ...extra }, encoding: "utf8", input: "fixture-token\n" }),
     readLog: () => fs.readFileSync(log, "utf8"),
     clearLog: () => fs.writeFileSync(log, ""),
     readRoute: (environment) => fs.readFileSync(path.join(caddyRoot, environment, "route.caddy"), "utf8"),
     authLock: (environment) => path.join(envsRoot, environment, ".auth-operation.lock"),
+    markImageLocal: () => fs.writeFileSync(localImage, "1"),
     failOnce: (command) => fs.writeFileSync(command === "caddy" ? failCaddy : failSystemctl, "1"),
     writeRegistry: (slot, entry) => {
       const registry = emptyRegistry();
