@@ -156,8 +156,41 @@ fi
 for slot in "${OCCUPIED_SLOTS[@]}"; do
   slot_lower="${slot,,}"
   source_root="$ENVS_ROOT/preview-$slot_lower/source"
+  runtime_config="$ENVS_ROOT/preview-$slot_lower/web/brai-runtime-config.js"
   if [[ ! -d "$source_root" ]]; then
     echo "Missing Preview $slot source: $source_root" >&2
+    exit 1
+  fi
+  mapfile -t SLOT_META < <("$NODE_BIN" - "$REGISTRY" "$slot" "$source_root" "$runtime_config" <<'NODE'
+const fs = require("node:fs");
+const [registryPath, slot, sourceRoot, runtimeConfigPath] = process.argv.slice(2);
+const entry = JSON.parse(fs.readFileSync(registryPath, "utf8"))[slot] || {};
+const branch = String(entry.branch || "");
+const commit = String(entry.commit || "").toLowerCase();
+if (!/^codex\/[A-Za-z0-9._-]+$/.test(branch) || !/^[0-9a-f]{40}$/.test(commit)) {
+  throw new Error(`Preview ${slot} registry identity is incomplete`);
+}
+for (const [name, expected] of [["branch", branch], ["commit", commit]]) {
+  const marker = `${sourceRoot}/.brai-deploy-${name}`;
+  const actual = fs.existsSync(marker) ? fs.readFileSync(marker, "utf8").trim() : "";
+  if (actual !== expected) throw new Error(`Preview ${slot} ${name} marker does not match the slot registry`);
+}
+let productVersion = "";
+if (fs.existsSync(runtimeConfigPath)) {
+  const source = fs.readFileSync(runtimeConfigPath, "utf8");
+  const match = source.match(/window\.__BRAI_RUNTIME_CONFIG__\s*=\s*(\{[\s\S]*\})\s*;\s*$/);
+  if (match) {
+    const parsed = Number(JSON.parse(match[1]).productVersion);
+    if (Number.isInteger(parsed) && parsed > 0) productVersion = String(parsed);
+  }
+}
+console.log(branch);
+console.log(commit);
+console.log(productVersion);
+NODE
+  )
+  if [[ "${#SLOT_META[@]}" -lt 3 ]]; then
+    echo "Cannot preserve Preview $slot runtime identity during OTA sync." >&2
     exit 1
   fi
   echo "Syncing Preview $slot OTA manifest to $VERSION from $source_root."
@@ -170,6 +203,9 @@ for slot in "${OCCUPIED_SLOTS[@]}"; do
     BRAI_PROD_DATABASE_URL="$PROD_POSTGRES_URL" \
     BRAI_PROD_WEB_VERSION_JSON="${BRAI_PROD_WEB_VERSION_JSON:-$ROOT/deploy/web/version.json}" \
     BRAI_RELEASE_TARGET="${BRAI_RELEASE_TARGET:-$ROOT/deploy/releases}" \
+    BRAI_BRANCH="${SLOT_META[0]}" \
+    BRAI_COMMIT="${SLOT_META[1]}" \
+    BRAI_PRODUCT_VERSION="${SLOT_META[2]}" \
     BRAI_BUILD_CLIENT=false \
       "$source_root/deploy/scripts/publish-environment-web-layer.sh" "preview-$slot_lower"
   )

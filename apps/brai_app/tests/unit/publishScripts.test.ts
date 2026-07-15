@@ -969,7 +969,10 @@ describe("mobile OTA publish scripts", () => {
     const root = await fixtureRoot("brai-preview-ota-sync-");
     const envsRoot = path.join(root, "envs");
     const sourceRoot = path.join(envsRoot, "preview-b/source");
+    const previewCommit = "c".repeat(40);
     await writeStaticExport(sourceRoot, "preview-b-content");
+    await writeFile(path.join(sourceRoot, ".brai-deploy-branch"), "codex/preview-b\n");
+    await writeFile(path.join(sourceRoot, ".brai-deploy-commit"), `${previewCommit}\n`);
     await mkdir(path.join(sourceRoot, "deploy"), { recursive: true });
     await copyFile(
       path.join(workspaceRoot, "deploy/environments.json"),
@@ -992,7 +995,7 @@ describe("mobile OTA publish scripts", () => {
     await mkdir(path.join(envsRoot, "preview-b/mobile-update"), { recursive: true });
     await writeFile(
       path.join(envsRoot, "preview-slots.json"),
-      JSON.stringify({ B: { status: "ready", branch: "codex/preview-b", commit: "abc" }, queue: [] }),
+      JSON.stringify({ B: { status: "ready", branch: "codex/preview-b", commit: previewCommit }, queue: [] }),
     );
     await writeFile(
       path.join(envsRoot, "preview-b/mobile-update/manifest.json"),
@@ -1015,9 +1018,12 @@ describe("mobile OTA publish scripts", () => {
     });
 
     const manifest = JSON.parse(await readFile(path.join(envsRoot, "preview-b/mobile-update/manifest.json"), "utf8"));
+    const runtimeConfig = await readFile(path.join(envsRoot, "preview-b/web/brai-runtime-config.js"), "utf8");
     const syncScript = await readFile(path.join(workspaceRoot, "deploy/scripts/sync-occupied-preview-ota-manifests.sh"), "utf8");
     await expect(readFile(path.join(envsRoot, "preview-b/web/index.html"), "utf8")).resolves.toContain("preview-b-content");
     expect(syncScript).toContain("BRAI_BUILD_CLIENT=false");
+    expect(runtimeConfig).toContain('"branch": "codex/preview-b"');
+    expect(runtimeConfig).toContain(`"commit": "${previewCommit}"`);
     expect(manifest.otaVersion).toBe("0.0.68");
     expect(manifest.archiveUrl).toBe("https://b.test.brai.one/mobile-update/bundles/0.0.68/bundle.zip");
   });

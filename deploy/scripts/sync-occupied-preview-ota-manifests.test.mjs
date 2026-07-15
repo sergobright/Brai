@@ -15,8 +15,8 @@ test("OTA sync skips failed preview slots without requiring a static export", ()
   mkdirSync(envsRoot, { recursive: true });
 
   writeFileSync(registryPath, JSON.stringify({
-    A: { status: "ready", branch: "codex/active-a" },
-    B: { status: "deploying", branch: "codex/active-b" },
+    A: { status: "ready", branch: "codex/active-a", commit: "a".repeat(40) },
+    B: { status: "deploying", branch: "codex/active-b", commit: "b".repeat(40) },
     C: { status: "free", branch: null },
     D: { status: "free", branch: null },
     E: { status: "failed", branch: "codex/failed-e" },
@@ -26,8 +26,20 @@ test("OTA sync skips failed preview slots without requiring a static export", ()
   for (const slot of ["a", "b"]) {
     const source = path.join(envsRoot, `preview-${slot}`, "source");
     const deployScripts = path.join(source, "deploy", "scripts");
+    const web = path.join(envsRoot, `preview-${slot}`, "web");
     mkdirSync(deployScripts, { recursive: true });
-    writeFileSync(path.join(deployScripts, "publish-environment-web-layer.sh"), "#!/usr/bin/env bash\necho \"published $1\"\n", { mode: 0o755 });
+    mkdirSync(web, { recursive: true });
+    writeFileSync(path.join(source, ".brai-deploy-branch"), `codex/active-${slot}\n`);
+    writeFileSync(path.join(source, ".brai-deploy-commit"), `${slot.repeat(40)}\n`);
+    writeFileSync(
+      path.join(web, "brai-runtime-config.js"),
+      `window.__BRAI_RUNTIME_CONFIG__ = ${JSON.stringify({ productVersion: slot === "a" ? 147 : undefined })};\n`
+    );
+    writeFileSync(
+      path.join(deployScripts, "publish-environment-web-layer.sh"),
+      "#!/usr/bin/env bash\necho \"published $1 branch=$BRAI_BRANCH commit=$BRAI_COMMIT product=${BRAI_PRODUCT_VERSION:-unknown}\"\n",
+      { mode: 0o755 }
+    );
   }
 
   const result = spawnSync("bash", [script, "--local"], {
@@ -48,6 +60,8 @@ test("OTA sync skips failed preview slots without requiring a static export", ()
   assert.equal(result.status, 0, result.stderr || result.stdout);
   assert.match(result.stdout, /Syncing Preview A OTA manifest/);
   assert.match(result.stdout, /Syncing Preview B OTA manifest/);
+  assert.match(result.stdout, new RegExp(`published preview-a branch=codex/active-a commit=${"a".repeat(40)} product=147`));
+  assert.match(result.stdout, new RegExp(`published preview-b branch=codex/active-b commit=${"b".repeat(40)} product=unknown`));
   assert.doesNotMatch(result.stdout, /Syncing Preview E OTA manifest/);
   assert.match(result.stderr, /Skipping failed Preview E OTA sync for codex\/failed-e/);
 });
