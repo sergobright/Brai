@@ -105,54 +105,56 @@ Brai SHALL publish a release APK whenever a change crosses the native Android re
 - **AND** updates and verifies the release page metadata
 
 ### Requirement: Build, APK, and OTA versions are separate
+Brai SHALL track accepted production builds and APK public releases in the server Supabase Postgres `build_versions` table.
 
-Brai SHALL track completed project work and public platform releases as
-separate version types in Supabase Postgres.
+`build_versions.version` SHALL be the integer APK counter for `version_type_id = apk`.
 
-For `version_type_id = build`, `build_versions.version` SHALL be a monotonically
-increasing completed-work counter. A build SHALL include all merged owner and
-support PRs registered to one release work, including product, server, Android,
-CI/CD, infrastructure, documentation, maintenance, and refactoring changes.
+For `version_type_id = build`, `build_versions.version` SHALL be the monotonically increasing accepted production build counter.
 
-`build_versions.version` SHALL NOT be treated as proof that a browser web or
-Android OTA artifact with the same number was published. Browser web and
-Android OTA SHALL continue to use their published `X.Y.Z` artifact version.
+The public APK version SHALL be `vN`. Native-boundary preview APK iteration `M` SHALL be counted per branch and stable APK version `N`. The browser web and Android OTA version SHALL be `X.Y.Z` and SHALL NOT be assembled from the APK counter.
 
-For `version_type_id = apk`, `build_versions.version` SHALL be the stable public
-APK counter `N`. Preview iteration `M` and Android version codes SHALL keep the
-existing native-preview compatibility rules. Future platform types such as
-`macos` and `ios` SHALL follow the same independent platform-version model.
+`short_changes` and `detailed_changes` SHALL contain Russian human-readable notes about the accepted build or APK capabilities.
 
-The public type labels SHALL be `Product` for `build`, `Android APK` for `apk`,
-`macOS` for `macos`, and `iOS` for `ios`. The future types SHALL exist in the
-type registry and filters without fabricated version rows or counters.
+`reason` SHALL be written in Russian and describe the human reason for the accepted build or APK release. Branch names, commit SHAs, target commits, domains, and similar audit metadata SHALL NOT be stored in `reason`; it belongs in `build_version_refs` or deployment records.
 
-Every version SHALL retain Russian human-readable parent summary, detailed
-summary, and reason plus normalized atomic details. Branch names, commit SHAs,
-domains, and similar refs SHALL remain structured audit metadata rather than
-being embedded in the human reason.
+#### Scenario: Fresh or reset database is initialized
+- **WHEN** the runtime database is initialized
+- **THEN** `version_types` contains `build` and `apk`
+- **AND** `build_versions` contains the initial `build` row and the initial `apk` row
 
-#### Scenario: An ordinary work is finalized
-- **WHEN** an owner task and all registered support tasks reach terminal PR states
-- **THEN** the workflow creates or reuses exactly one build row for that work
-- **AND** links every merged PR of the work to that build
-- **AND** creates the build even when the completed work changed only server, CI/CD, infrastructure, documentation, maintenance, or refactoring
+#### Scenario: APK line is reset
+- **WHEN** the APK version line is explicitly reset
+- **THEN** `build_versions` contains exactly one APK row with `version_type_id = apk` and `version = 1`
+- **AND** existing `build` rows remain available
 
-#### Scenario: A work publishes no client artifact
-- **WHEN** a completed work produces a build row but no browser web or Android OTA artifact
-- **THEN** the build remains visible in project history
-- **AND** the published web/OTA artifact version does not advance solely because the build exists
+Accepted preview promotion SHALL take `short_changes`, `detailed_changes`, and `reason` from explicit release-note metadata captured during preview handoff and carried through the acceptance PR. The workflow SHALL fail when this metadata is missing, non-Russian, or generic deployment text; it SHALL NOT derive visible version text from Git commit subjects, branch names, deployment records, or placeholder fallback strings.
 
-#### Scenario: A stable APK is published
-- **WHEN** a work changes the Android native boundary and successfully publishes a stable APK
-- **THEN** the workflow creates or reuses one APK version for that work
-- **AND** links only PRs with proven APK relevance
-- **AND** stores only APK-specific summary, reason, and atomic details
+#### Scenario: Task branch is prepared
+- **WHEN** a `codex/*` task branch is created or updated before acceptance
+- **THEN** it does not write a `build_versions` row by itself
 
-#### Scenario: No native boundary changed
-- **WHEN** work changes only web, OTA, server, CI/CD, infrastructure, documentation, maintenance, or non-native refactoring
-- **THEN** it does not create an APK version
-- **AND** rebuilding an unchanged APK alone does not create an APK version
+#### Scenario: Accepted task lands in main
+- **WHEN** a `codex/*` task branch is accepted and merged into `main`
+- **THEN** the workflow creates or reuses exactly one `build_versions` row for `version_type_id = build` and the target commit
+- **AND** the row stores `short_changes`, `detailed_changes`, and `reason`
+- **AND** the workflow is not considered complete until the row is written
+- **AND** the workflow records deployment metadata separately
+
+#### Scenario: APK release is prepared
+- **WHEN** the project owner asks to make or publish an APK release
+- **THEN** the workflow builds and publishes APK artifacts with the current APK counter `N`
+- **AND** Android `versionName` is `N`
+- **AND** stable Android `versionCode` is `N`
+- **AND** branch preview APK `versionCode` is `N * 10000 + M`
+
+#### Scenario: Release or canon version is requested
+- **WHEN** a request asks to create a `release` or `canon` version row
+- **THEN** the workflow stops with an explicit error because release/canon rows are disabled
+
+#### Scenario: Separate web or OTA version is requested
+- **WHEN** a request asks to publish or update only browser web, only OTA, or different browser web and Android OTA versions
+- **THEN** the workflow stops before changing files or publishing artifacts
+- **AND** reports that Brai forbids separate web/OTA versions until the versioning rules are explicitly changed
 
 ### Requirement: Delivery scripts do not depend on unsupported host Node
 Brai delivery scripts SHALL select the supported Brai Node runtime before running JavaScript build or publication logic.
@@ -293,49 +295,3 @@ Brai SHALL allow at most ten started APK streams per derived client IP in 3600 s
 - **WHEN** the socket peer is loopback and `X-Forwarded-For` is present
 - **THEN** the limiter uses the client address supplied by Caddy
 - **AND** otherwise it uses the socket peer address
-
-### Requirement: Structured release metadata separates work and platforms
-
-Brai SHALL carry version metadata through `brai-release-notes-v2` with immutable
-work identity, owner/support role, atomic build details, and independent
-platform release blocks.
-
-#### Scenario: An owner prepares handoff
-- **WHEN** an owner writes release notes
-- **THEN** the receipt contains the work key, owner role, build parent summary, reason, at least one atomic detail, and testing instructions
-- **AND** finalization aggregates atomic build details from every merged support PR of the same work
-
-#### Scenario: A support PR prepares handoff
-- **WHEN** a support task writes release notes
-- **THEN** it inherits the owner's work key
-- **AND** contributes its own atomic build details without replacing the owner build summary
-
-#### Scenario: Native metadata is missing
-- **WHEN** a native detector reports an APK boundary change but no complete APK platform block exists
-- **THEN** Preview and acceptance fail before stable publication
-- **AND** generic APK fallback text is not written
-
-#### Scenario: A legacy v1 receipt is encountered
-- **WHEN** a non-native PR was already open before v2 deployment
-- **THEN** the workflow may map its v1 detailed text to one build detail
-- **AND** newly created PRs and every native release require v2
-
-#### Scenario: New release notes omit atomic details
-- **WHEN** an owner or support task writes v2 release notes without an explicit atomic detail
-- **THEN** release-note creation fails with a correction message
-- **AND** the parent detailed summary is not copied into a synthetic single detail
-
-#### Scenario: New release notes contain duplicate details
-- **WHEN** a detail repeats the parent summary, duplicates another detail, or uses an automatically numbered title
-- **THEN** release-note creation fails before handoff
-- **AND** every accepted detail retains a meaningful independent title and description
-
-### Requirement: Product history contains accepted work only
-
-Product versions SHALL be allocated only when work is accepted and finalized.
-Preview browser/OTA artifact versions SHALL remain independent runtime facts.
-
-#### Scenario: Preview advances its browser artifact
-- **WHEN** a Preview publishes a new `X.Y.Z` browser or OTA artifact
-- **THEN** no provisional Product version is created
-- **AND** the Preview receives the Product baseline of its frozen accepted base for installed-state comparison
