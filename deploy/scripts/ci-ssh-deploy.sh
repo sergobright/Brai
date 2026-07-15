@@ -31,6 +31,13 @@ fi
 if [[ -z "${BRAI_NATIVE_APK_CHANGE:-}" ]]; then
   BRAI_NATIVE_APK_CHANGE="$(node deploy/scripts/detect-native-apk-change.mjs "$BRAI_BRANCH" "${BRAI_BASE_COMMIT:-}")"
 fi
+if [[ -z "${BRAI_CLIENT_ARTIFACT_CHANGE:-}" ]]; then
+  BRAI_CLIENT_ARTIFACT_CHANGE="$(node --input-type=module - "${BRAI_BASE_COMMIT:-}" <<'NODE'
+import { clientArtifactChanged } from './deploy/scripts/resolve-app-version.mjs';
+console.log(clientArtifactChanged({ baseCommit: process.argv[2] }) ? 'true' : 'false');
+NODE
+)"
+fi
 KEY_FILE="$(mktemp "${TMPDIR:-/tmp}/brai-deploy-key.XXXXXX")"
 cleanup_remote_upload() {
   [[ -f "$KEY_FILE" ]] || return 0
@@ -218,9 +225,9 @@ tar \
 DEPLOY_OUTPUT=""
 REMOTE_DEPLOY_OWNS_STAGING="true"
 REMOTE_UPLOAD_OWNED="false"
-printf -v REMOTE_DEPLOY_COMMAND 'bash -s -- %q %q %q %q %q %q %q %q %q' \
+printf -v REMOTE_DEPLOY_COMMAND 'bash -s -- %q %q %q %q %q %q %q %q %q %q' \
   "$DEPLOY_REPO" "$REMOTE_UPLOAD" "$BRAI_BRANCH" "$BRAI_COMMIT" "$BRAI_NATIVE_APK_CHANGE" \
-  "$BRAI_PREVIEW_LEASE_GENERATION" "$UPLOAD_ROOT" "$UPLOAD_MARKER" "$DEPLOY_MIN_FREE_GB"
+  "$BRAI_PREVIEW_LEASE_GENERATION" "$UPLOAD_ROOT" "$UPLOAD_MARKER" "$DEPLOY_MIN_FREE_GB" "$BRAI_CLIENT_ARTIFACT_CHANGE"
 if ! DEPLOY_OUTPUT="$(ssh -i "$KEY_FILE" -p "$SSH_PORT" -o StrictHostKeyChecking=accept-new "$BRAI_DEPLOY_USER@$BRAI_DEPLOY_HOST" \
   "$REMOTE_DEPLOY_COMMAND" <<'REMOTE'
 set -euo pipefail
@@ -233,6 +240,7 @@ BRAI_PREVIEW_LEASE_GENERATION="${6:-}"
 UPLOAD_ROOT="$7"
 UPLOAD_MARKER="$8"
 DEPLOY_MIN_FREE_GB="$9"
+BRAI_CLIENT_ARTIFACT_CHANGE="${10}"
 ATTEMPT_STAGING="$REMOTE_UPLOAD"
 ENVS_ROOT="${BRAI_ENVS_ROOT:-/srv/projects/brai-envs}"
 NODE_PREFIX="${BRAI_NODE_PREFIX:-/srv/opt/node-v22.16.0/bin}"
@@ -697,7 +705,6 @@ fi
 
 if [[ "$ENVIRONMENT" == "prod" ]]; then
   BRAI_DATABASE_URL="$CURRENT_DATABASE_URL" node deploy/scripts/supabase-branch.mjs migrate
-  BRAI_DATABASE_URL="$CURRENT_DATABASE_URL" node deploy/scripts/postgres-smoke.mjs "$CURRENT_DATABASE_URL"
   TARGET_DATABASE_URL="$CURRENT_DATABASE_URL"
 elif [[ "$ENVIRONMENT" == preview-* ]]; then
   PRESERVE_ARGS=()
@@ -718,6 +725,7 @@ else
 fi
 [[ -n "$TARGET_DATABASE_URL" ]] || { echo "Target BRAI_DATABASE_URL is required after data setup" >&2; exit 1; }
 BRAI_DATABASE_URL="$TARGET_DATABASE_URL" node deploy/scripts/supavisor-tenants.mjs assert-url --environment "$ENVIRONMENT"
+BRAI_DATABASE_URL="$TARGET_DATABASE_URL" node deploy/scripts/version-history-backfill.mjs apply
 if [[ "$ENVIRONMENT" != "prod" ]]; then
   BRAI_DATABASE_URL="$TARGET_DATABASE_URL" node deploy/scripts/postgres-smoke.mjs "$TARGET_DATABASE_URL"
 fi
@@ -761,6 +769,7 @@ fi
 cd "$SOURCE_ROOT"
 export BRAI_BRANCH BRAI_COMMIT
 export BRAI_NATIVE_APK_CHANGE
+export BRAI_CLIENT_ARTIFACT_CHANGE
 export BRAI_ROOT="$SOURCE_ROOT"
 export BRAI_RELEASE_TARGET="$DEPLOY_REPO/deploy/releases"
 export BRAI_PROD_WEB_VERSION_JSON="$DEPLOY_REPO/deploy/web/version.json"

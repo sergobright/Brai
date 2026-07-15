@@ -13,10 +13,10 @@ test("explicit versions resolve without database access", () => {
   assert.equal(resolveAppVersion({ kind: "apk", explicit: "7" }), "7");
 });
 
-test("version resolution fails without Supabase/Postgres ledger URL", async () => {
+test("OTA version resolution fails without published artifact metadata", async () => {
   await assert.rejects(
     () => resolveAppVersionAsync({ environment: "prod", explicit: "" }),
-    /BRAI_DATABASE_URL or BRAI_PROD_DATABASE_URL is required/
+    /provide published web\/mobile metadata/
   );
   await assert.rejects(
     () => resolveAppVersionAsync({ kind: "apk", explicit: "" }),
@@ -24,7 +24,7 @@ test("version resolution fails without Supabase/Postgres ledger URL", async () =
   );
 });
 
-test("OTA version follows the Postgres build ledger before stale deployed manifests", { skip: !process.env.BRAI_TEST_DATABASE_URL }, async () => {
+test("OTA version follows published artifacts instead of the independent build ledger", { skip: !process.env.BRAI_TEST_DATABASE_URL }, async () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "brai-version-"));
   const database = await createTestDatabase();
   const store = new BraiStore(database.url);
@@ -47,8 +47,13 @@ test("OTA version follows the Postgres build ledger before stale deployed manife
     fs.writeFileSync(path.join(mobileTarget, "manifest.json"), `${JSON.stringify({ otaVersion: "0.0.63" })}\n`);
     fs.writeFileSync(path.join(mobileTarget, "bundles", "0.0.63", "metadata.json"), `${JSON.stringify({ otaVersion: "0.0.63" })}\n`);
 
-    assert.equal(await resolveAppVersionAsync({ environment: "prod", postgresUrl: database.url, prodWebVersionJson, mobileTarget }), "0.0.66");
-    assert.equal(await resolveAppVersionAsync({ environment: "preview-a", prodPostgresUrl: database.url, prodWebVersionJson, mobileTarget, nextOta: true }), "0.0.67");
+    assert.equal(await resolveAppVersionAsync({ environment: "prod", postgresUrl: database.url, prodWebVersionJson, mobileTarget }), "0.0.63");
+    assert.equal(await resolveAppVersionAsync({ environment: "prod", prodWebVersionJson, mobileTarget, clientArtifactChanged: "true" }), "0.0.64");
+    await assert.rejects(
+      () => resolveAppVersionAsync({ environment: "prod", prodWebVersionJson, mobileTarget, clientArtifactChanged: "yes" }),
+      /invalid client artifact change hint/,
+    );
+    assert.equal(await resolveAppVersionAsync({ environment: "preview-a", prodPostgresUrl: database.url, prodWebVersionJson, mobileTarget, nextOta: true }), "0.0.64");
     assert.equal(await resolveAppVersionAsync({ kind: "apk", postgresUrl: database.url }), "1");
   } finally {
     store.close();

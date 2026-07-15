@@ -982,7 +982,8 @@ test("remote deploy serializes dependency staging before replacing the active so
 test("production deploy tolerates an omitted preview lease generation", () => {
   const deploy = fs.readFileSync(new URL("../deploy/scripts/ci-ssh-deploy.sh", import.meta.url), "utf8");
   assert.match(deploy, /BRAI_PREVIEW_LEASE_GENERATION="\$\{6:-\}"/);
-  assert.match(deploy, /printf -v REMOTE_DEPLOY_COMMAND 'bash -s -- %q %q %q %q %q %q %q %q %q'/);
+  assert.match(deploy, /printf -v REMOTE_DEPLOY_COMMAND 'bash -s -- %q %q %q %q %q %q %q %q %q %q'/);
+  assert.match(deploy, /BRAI_CLIENT_ARTIFACT_CHANGE="\$\{10\}"/);
   assert.match(deploy, /ssh[^\n]*\\\n\s+"\$REMOTE_DEPLOY_COMMAND" <<'REMOTE'/);
 });
 
@@ -1004,8 +1005,10 @@ test("preview deploy requires Postgres and preserves artifact setgid", () => {
   const unit = fs.readFileSync(new URL("../deploy/ansible/templates/brai-api.service.j2", import.meta.url), "utf8");
   assert.match(script, /umask 0002/);
   assert.match(script, /BRAI_DATABASE_URL is required/);
-  assert.match(ciDeploy, /postgres-smoke\.mjs "\$CURRENT_DATABASE_URL"/);
+  assert.doesNotMatch(ciDeploy, /postgres-smoke\.mjs "\$CURRENT_DATABASE_URL"/);
+  assert.match(ciDeploy, /version-history-backfill\.mjs apply/);
   assert.match(ciDeploy, /postgres-smoke\.mjs "\$TARGET_DATABASE_URL"/);
+  assert.ok(ciDeploy.indexOf("version-history-backfill.mjs apply") < ciDeploy.indexOf('postgres-smoke.mjs "$TARGET_DATABASE_URL"'));
   assert.match(script, /check_api_service_contract/);
   assert.match(script, /BRAI_INBOUND_STORAGE_ROOT/);
   assert.match(script, /BRAI_INBOX_STORAGE_ROOT/);
@@ -1093,6 +1096,9 @@ test("task marker must come from task start or explicit follow-up", () => {
   assert.match(validateTaskMarker({ ...marker, branch: "codex/bar" }, "codex/foo").message, /codex\/bar/);
   assert.match(validateTaskMarker({ ...marker, base: "" }, "codex/foo").message, /base/);
   assert.match(validateTaskMarker({ ...marker, createdAt: "" }, "codex/foo").message, /timestamp/);
+  assert.deepEqual(validateTaskMarker({ ...marker, workKey: "work_12345678-1234-4123-a123-123456789abc", workRole: "owner" }, "codex/foo"), { ok: true });
+  assert.match(validateTaskMarker({ ...marker, workKey: "manual", workRole: "owner" }, "codex/foo").message, /work key/);
+  assert.match(validateTaskMarker({ ...marker, workKey: "work_12345678-1234-4123-a123-123456789abc", workRole: "helper" }, "codex/foo").message, /work role/);
 });
 
 test("task marker is bound to the current Codex thread when one exists", () => {
@@ -1103,6 +1109,13 @@ test("task marker is bound to the current Codex thread when one exists", () => {
   assert.deepEqual(validateTaskThread({ threadId: "thread-b", delegations: [{ threadId: "thread-a", paths: ["docs"] }] }, "thread-a"), { ok: true });
   assert.deepEqual(validateDelegatedPaths({ threadId: "thread-b", delegations: [{ threadId: "thread-a", paths: ["docs"] }] }, "thread-a", ["docs/a.md"]), { ok: true });
   assert.match(validateDelegatedPaths({ threadId: "thread-b", delegations: [{ threadId: "thread-a", paths: ["docs"] }] }, "thread-a", ["services/api.js"]).message, /services\/api\.js/);
+});
+
+test("support starter never adopts or mutates a legacy owner marker", () => {
+  const source = fs.readFileSync(new URL("./brai-task.mjs", import.meta.url), "utf8");
+  const body = source.slice(source.indexOf("function requireSupportOwner"), source.indexOf("function findTaskByBranch"));
+  assert.doesNotMatch(body, /ensureMarkerWorkIdentity/);
+  assert.match(body, /owning thread must run: node scripts\/brai-task\.mjs adopt-work/);
 });
 
 test("follow-up keeps the original task base after origin-main advances", () => {
@@ -1634,6 +1647,28 @@ test("preview receipts must match exact branch and head", () => {
   assert.match(validateReleaseNotes({ ...releaseNotes, short_changes: "Принята сборка Brai." }).message, /generic/);
 });
 
+test("release notes v2 keep owner summary separate from support details", () => {
+  const owner = {
+    receiptType: "brai-release-notes-v2",
+    work: { key: "work_12345678-1234-4123-a123-123456789abc", role: "owner" },
+    build: {
+      short_changes: "Нормализована история версий.",
+      detailed_changes: "История содержит связанные изменения одной работы.",
+      reason: "Нужно сохранять полную историю выполненной работы.",
+      details: [{ title: "Связи PR", description: "Объединённые PR связаны через устойчивый work key." }],
+    },
+    testing: "Проверить историю версии и список связанных PR.",
+  };
+  assert.deepEqual(validateReleaseNotes(owner), { ok: true });
+  const support = {
+    ...owner,
+    work: { ...owner.work, role: "support" },
+    build: { details: [{ title: "Миграция", description: "Поддерживающая миграция применяется отдельно." }] },
+  };
+  assert.deepEqual(validateReleaseNotes(support), { ok: true });
+  assert.match(validateReleaseNotes({ ...support, build: { ...support.build, short_changes: "Подмена summary." } }).message, /cannot replace owner/);
+});
+
 test("delivery receipts must match exact branch, head, and class", () => {
   const receipt = {
     receiptType: "brai-delivery-handoff-v1",
@@ -1916,12 +1951,15 @@ test("infra docs workflow marks handoff passed only from the PR merge job", () =
   assert.match(recordMergeJob, /BRAI_PR_MERGED_AT/);
 });
 
-test("delivery workflow avoids duplicate full checks on PR updates", () => {
+test("delivery workflow records PR updates without duplicate full checks", () => {
   const workflow = fs.readFileSync(new URL("../.github/workflows/brai-delivery.yml", import.meta.url), "utf8");
   const pullRequestTrigger = workflow.slice(workflow.indexOf("  pull_request:"), workflow.indexOf("  delete:"));
 
-  assert.match(pullRequestTrigger, /types:\n\s+- closed/);
-  assert.doesNotMatch(pullRequestTrigger, /\bopened\b|\bsynchronize\b|\breopened\b/);
+  assert.match(pullRequestTrigger, /\bopened\b/);
+  assert.match(pullRequestTrigger, /\bsynchronize\b/);
+  assert.match(pullRequestTrigger, /\bclosed\b/);
+  assert.match(workflow, /public-guard:\n\s+if: github\.event_name != 'delete' && github\.event_name != 'pull_request'/);
+  assert.match(workflow, /record-version-pr:[\s\S]*ci-ssh-record-version-pr\.sh/);
 });
 
 test("delivery workflow dispatches prod deploy through Temporal and bootstraps worker changes", () => {
@@ -2583,6 +2621,16 @@ function setupInfraDocsHandoffFixture({ prState, mergeStateStatus = "CLEAN", aut
       ...(process.env.CODEX_THREAD_ID ? { threadId: process.env.CODEX_THREAD_ID } : {}),
     })}\n`,
   );
+  fs.writeFileSync(
+    path.join(repo, ".brai-task", "release-notes.json"),
+    `${JSON.stringify({
+      receiptType: "brai-release-notes-v1",
+      short_changes: "Обновлена техническая документация.",
+      detailed_changes: "Документация описывает актуальный процесс доставки.",
+      reason: "Нужно сохранить проверяемые инструкции проекта.",
+      testing: "Проверить ссылки и команды в изменённой документации.",
+    })}\n`,
+  );
 
   const pr = {
     number: 7,
@@ -2746,7 +2794,9 @@ NODE
     gh,
     `#!/usr/bin/env bash
 count_file="${runListCountFile}"
-if [ "$1" = "run" ] && [ "$2" = "list" ]; then
+if [ "$1" = "pr" ] && [ "$2" = "list" ]; then
+  printf '%s' '[{}]'
+elif [ "$1" = "run" ] && [ "$2" = "list" ]; then
   count=0
   if [ -f "$count_file" ]; then
     count="$(cat "$count_file")"

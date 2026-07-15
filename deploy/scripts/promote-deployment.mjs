@@ -3,115 +3,83 @@ import { BraiStore } from "../../services/brai_api/src/store.js";
 
 const args = parseArgs(process.argv.slice(2));
 const sourceBranch = required(args, "source-branch");
-const targetEnvironment = required(args, "target-environment");
+required(args, "target-environment");
 const targetBranch = required(args, "target-branch");
 const targetCommit = required(args, "target-commit");
 const deployedAtUtc = args["deployed-at"] || new Date().toISOString();
-const ledgerOnly = args["ledger-only"] === "true";
 const targetDb = databaseTarget(args, "target");
 const target = new BraiStore(targetDb);
-let source = null;
 
 try {
-  source = openSourceStore(args, targetEnvironment);
-  const fallbackRecord = fallbackSourceRecord(args, sourceBranch, targetEnvironment);
-  const sourceRecord = normalizeSourceRecord(
-    source?.listDeploymentRecords().find((record) => record.branch === sourceBranch) ?? fallbackRecord,
-    fallbackRecord,
-  );
-  if (!sourceRecord) throw new Error(`no deployment metadata for ${sourceBranch}`);
-
-  target.db.transaction(() => {
-    const acceptedBuild = target.recordAcceptedBuildVersion({
-      sourceBranch,
-      sourceCommit: args["source-commit"] || sourceRecord.commit_sha,
-      sourceShortChanges: sourceRecord.short_changes,
-      sourceDetails: sourceRecord.detailed_changes,
-      sourceReason: sourceRecord.reason,
-      targetBranch,
-      targetCommit,
-      releasedAtUtc: deployedAtUtc,
-    });
-    if (!ledgerOnly) {
-      target.recordDeployment({
-        environment: targetEnvironment,
-        slot: args["target-slot"] || null,
-        branch: targetBranch,
-        commit: targetCommit,
-        domain: required(args, "target-domain"),
-        webOtaVersion: args["web-ota-version"] || `0.0.${acceptedBuild.version}`,
-        apkVersion: args["apk-version"] || sourceRecord.apk_version,
-        shortChanges: sourceRecord.short_changes,
-        detailedChanges: `Повышено из ${sourceRecord.environment}${sourceRecord.slot ? ` ${sourceRecord.slot}` : ""} (${sourceRecord.branch}@${sourceRecord.commit_sha}). ${sourceRecord.detailed_changes}`,
-        reason: args.reason || sourceRecord.reason,
-        deployedAtUtc,
-      });
-    }
-  })();
+  if (args["work-json"]) {
+    reconcileVersionWork(target, JSON.parse(args["work-json"]), { sourceBranch, targetBranch, targetCommit, deployedAtUtc });
+  } else {
+    throw new Error("accepted promotion requires --work-json; unscoped build creation is disabled");
+  }
 } finally {
-  source?.close();
   target.close();
 }
 
-function openSourceStore(values, targetEnvironment) {
-  const sourceDb = databaseTarget(values, "source");
-  return new BraiStore(sourceDb);
+export function reconcileVersionWork(target, payload, { sourceBranch, targetBranch, targetCommit, deployedAtUtc }) {
+  const workKey = requiredNested(payload?.work?.key, "work.key");
+  const workRole = requiredNested(payload?.work?.role, "work.role");
+  if (!["owner", "support"].includes(workRole)) throw new Error(`invalid work role: ${workRole}`);
+  if (!Array.isArray(payload.pulls) || !payload.pulls.length) throw new Error(`work ${workKey} has no PR snapshots`);
+  for (const pull of payload.pulls) {
+    target.upsertGithubPullRequest({
+      workKey,
+      workRole: pull.workRole,
+      repository: pull.repository,
+      pullNumber: pull.pullNumber,
+      url: pull.url,
+      title: pull.title,
+      body: pull.body,
+      authorLogin: pull.authorLogin,
+      state: pull.state,
+      isDraft: pull.isDraft,
+      headBranch: pull.headBranch,
+      baseBranch: pull.baseBranch,
+      mergeCommitSha: pull.mergeCommitSha,
+      githubCreatedAtUtc: pull.githubCreatedAtUtc,
+      githubUpdatedAtUtc: pull.githubUpdatedAtUtc,
+      githubClosedAtUtc: pull.githubClosedAtUtc,
+      githubMergedAtUtc: pull.githubMergedAtUtc,
+      updatedAtUtc: deployedAtUtc,
+    });
+  }
+  if (workRole === "support") return { workKey, finalized: false };
+  const merged = payload.pulls.filter((pull) => pull.state === "MERGED" || pull.githubMergedAtUtc);
+  const owner = merged.find((pull) => pull.workRole === "owner");
+  if (!owner?.releaseNotes?.build) throw new Error(`work ${workKey} has no merged owner release metadata`);
+  const details = merged
+    .sort(compareMergedPulls)
+    .flatMap((pull) => pull.releaseNotes?.build?.details?.map((detail) => ({ ...detail, pullNumber: pull.pullNumber })) ?? []);
+  const result = target.finalizeVersionWork({
+    workKey,
+    versionTypeId: "build",
+    shortChanges: requiredNested(owner.releaseNotes.build.short_changes, "owner build.short_changes"),
+    detailedChanges: requiredNested(owner.releaseNotes.build.detailed_changes, "owner build.detailed_changes"),
+    reason: requiredNested(owner.releaseNotes.build.reason, "owner build.reason"),
+    details,
+    pullNumbers: merged.map((pull) => pull.pullNumber),
+    sourceBranch: owner.headBranch || sourceBranch,
+    sourceCommit: owner.mergeCommitSha || payload.sha || null,
+    targetBranch,
+    targetCommit,
+    releasedAtUtc: deployedAtUtc,
+  });
+  console.log(`Finalized ${workKey} as build ${result.version}`);
+  return { workKey, finalized: true, ...result };
 }
 
-function fallbackSourceRecord(values, sourceBranch, targetEnvironment) {
-  if (!canUseSourceFallback(values, targetEnvironment)) return null;
-  return {
-    environment: "preview",
-    slot: values["source-slot"] || null,
-    branch: sourceBranch,
-    commit_sha: values["source-commit"],
-    web_ota_version: values["web-ota-version"] || null,
-    apk_version: values["apk-version"] || null,
-    short_changes: values["source-short-changes"] || 'Принята сборка Brai.',
-    reason: values["source-reason"] || values.reason || '',
-    detailed_changes:
-      values["source-details"] || 'Сборка принята; технические branch/commit-данные сохранены отдельно.',
-  };
+function compareMergedPulls(left, right) {
+  return String(left.githubMergedAtUtc ?? "").localeCompare(String(right.githubMergedAtUtc ?? "")) || Number(left.pullNumber) - Number(right.pullNumber);
 }
 
-function normalizeSourceRecord(record, fallbackRecord) {
-  if (!record) return null;
-  const shortChanges = usefulChanges(record.short_changes) || usefulChanges(fallbackRecord?.short_changes);
-  const detailedChanges = usefulChanges(record.detailed_changes) || usefulChanges(fallbackRecord?.detailed_changes) || shortChanges;
-  const reason = usefulChanges(record.reason) || usefulChanges(fallbackRecord?.reason);
-  if (!shortChanges) throw new Error('missing Russian source short_changes for accepted build version');
-  if (!detailedChanges) throw new Error('missing Russian source detailed_changes for accepted build version');
-  if (!reason) throw new Error('missing Russian source reason for accepted build version');
-  return {
-    ...record,
-    short_changes: shortChanges,
-    detailed_changes: detailedChanges,
-    reason,
-  };
-}
-
-function usefulChanges(value) {
-  const text = String(value ?? '').trim();
-  if (!text) return '';
-  const oneLine = text.replace(/\s+/g, ' ');
-  if (oneLine === 'Branch deployment') return '';
-  if (/^Merge branch .+ into codex\/\S+$/i.test(oneLine)) return '';
-  if (/^Merge remote-tracking branch .+ into codex\/\S+$/i.test(oneLine)) return '';
-  if (/^Automated deployment from \S+@\S+ to \S+\.?$/i.test(oneLine)) return '';
-  if (/^Automated dev deployment from \S+@\S+\.?$/i.test(oneLine)) return '';
-  if (/^Accepted preview branch \S+@\S+\.?$/i.test(oneLine)) return '';
-  if (/^Accepted dev build (?:\d|0\.)/i.test(oneLine)) return '';
-  if (/^Accepted codex\/\S+\.?$/i.test(oneLine)) return '';
-  if (/^Accepted \S+@\S+ without preview deployment metadata\.?$/i.test(oneLine)) return '';
-  if (/^Accepted preview changes without authored release notes\.?$/i.test(oneLine)) return '';
-  if (/^No authored preview release notes were available; audit metadata is stored separately\.?$/i.test(oneLine)) return '';
-  if (oneLine === 'Автоматическая доставка ветки') return '';
-  if (!/[А-Яа-яЁё]/.test(oneLine)) return '';
+function requiredNested(value, name) {
+  const text = String(value ?? "").trim();
+  if (!text) throw new Error(`missing ${name}`);
   return text;
-}
-
-function canUseSourceFallback(values, targetEnvironment) {
-  return Boolean(values["source-commit"] && (targetEnvironment === "dev" || (targetEnvironment === "prod" && values["source-branch"]?.startsWith("codex/"))));
 }
 
 function parseArgs(values) {
@@ -134,6 +102,5 @@ function databaseTarget(values, prefix) {
   const arg = values[`${prefix}-postgres-url`];
   if (arg) return arg;
   if (prefix === "target" && process.env.BRAI_DATABASE_URL) return process.env.BRAI_DATABASE_URL;
-  if (prefix === "source" && process.env.BRAI_SOURCE_DATABASE_URL) return process.env.BRAI_SOURCE_DATABASE_URL;
   return required(values, `${prefix}-postgres-url`);
 }

@@ -57,6 +57,79 @@ try {
         )
     `),
     scalar("SELECT COUNT(*)::int FROM build_version_counters WHERE version_type_id IN ('apk', 'build')"),
+    scalar("SELECT COUNT(*)::int FROM schema_migrations WHERE version = 67"),
+    scalar("SELECT COUNT(*)::int FROM supabase_migration_files WHERE version = '0031' AND name = '0031_normalize_version_work_history.sql'"),
+    scalar(`
+      SELECT COUNT(*)::int
+      FROM information_schema.tables
+      WHERE table_schema = current_schema()
+        AND table_name IN (
+          'release_works',
+          'github_pull_requests',
+          'build_version_details',
+          'build_version_pull_requests'
+        )
+    `),
+    scalar(`
+      SELECT COUNT(*)::int
+      FROM information_schema.columns
+      WHERE table_schema = current_schema()
+        AND (table_name, column_name) IN (
+          ('build_versions', 'release_works_id'),
+          ('release_works', 'work_key'),
+          ('github_pull_requests', 'work_role'),
+          ('build_version_details', 'display_order'),
+          ('build_version_pull_requests', 'version_type_id')
+        )
+    `),
+    scalar(`
+      SELECT COUNT(*)::int
+      FROM build_versions AS versions
+      WHERE NOT EXISTS (
+        SELECT 1 FROM build_version_details AS details
+        WHERE details.build_versions_id = versions.id
+      )
+    `),
+    scalar(`
+      SELECT COUNT(*)::int
+      FROM build_versions AS versions
+      WHERE (
+        (versions.version_type_id = 'build' AND versions.version <= 145)
+        OR (versions.version_type_id = 'apk' AND versions.version <= 11)
+      )
+        AND EXISTS (
+          SELECT 1 FROM build_version_details AS details
+          WHERE details.build_versions_id = versions.id
+        )
+    `),
+    scalar("SELECT COUNT(*)::int FROM github_pull_requests WHERE github_merged_at_utc IS NOT NULL"),
+    scalar(`
+      SELECT COUNT(*)::int
+      FROM build_versions AS versions
+      JOIN build_version_pull_requests AS links
+        ON links.build_versions_id = versions.id
+       AND links.version_type_id = versions.version_type_id
+      JOIN github_pull_requests AS pulls ON pulls.id = links.github_pull_requests_id
+      WHERE versions.version_type_id = 'apk'
+        AND versions.version = 11
+        AND pulls.repository = 'sergobright/Brai'
+        AND pulls.pull_number = 279
+        AND EXISTS (
+          SELECT 1 FROM build_version_refs AS refs
+          WHERE refs.version_type_id = versions.version_type_id
+            AND refs.version = versions.version
+            AND refs.target_branch = 'main'
+            AND refs.target_commit = '3e30f42f7d2d35a7865b425dfa116a58d816a92f'
+        )
+        AND NOT EXISTS (
+          SELECT 1
+          FROM build_version_pull_requests AS wrong_links
+          JOIN github_pull_requests AS wrong_pulls ON wrong_pulls.id = wrong_links.github_pull_requests_id
+          WHERE wrong_links.build_versions_id = versions.id
+            AND wrong_pulls.repository = 'sergobright/Brai'
+            AND wrong_pulls.pull_number = 282
+        )
+    `),
     scalar("SELECT COUNT(*)::int FROM pg_event_trigger WHERE evtname = 'brai_enable_rls_for_new_public_tables' AND evtenabled IN ('O', 'R', 'A')"),
     scalar(`
       SELECT EXISTS (
@@ -106,6 +179,14 @@ try {
     workflowObservabilityColumns,
     workflowColumns,
     counters,
+    versionHistoryMigration,
+    versionHistoryMigrationFile,
+    versionHistoryTables,
+    versionHistoryColumns,
+    versionsWithoutDetails,
+    cutoffVersionsWithDetails,
+    importedMergedPulls,
+    apk11Correction,
     rlsAutoTrigger,
     rlsFunctionSearchPath,
     rlsProtectedTables,
@@ -124,6 +205,12 @@ try {
   if (workflowObservabilityColumns !== 4) throw new Error("Workflow observability schema is incomplete");
   if (workflowColumns !== 6) throw new Error("Agent role workflow columns are incomplete");
   if (counters !== 2) throw new Error("build_version_counters seed is incomplete");
+  if (versionHistoryMigration !== 1 || versionHistoryMigrationFile !== 1) throw new Error("Version history migration is incomplete");
+  if (versionHistoryTables !== 4 || versionHistoryColumns !== 5) throw new Error("Version history schema is incomplete");
+  if (versionsWithoutDetails !== 0) throw new Error(`Version history contains ${versionsWithoutDetails} parent versions without details`);
+  if (cutoffVersionsWithDetails !== 156) throw new Error(`Version history cutoff backfill is incomplete: ${cutoffVersionsWithDetails}/156 versions have details`);
+  if (importedMergedPulls < 277) throw new Error(`Version history PR cutoff backfill is incomplete: ${importedMergedPulls}/277 merged PRs imported`);
+  if (apk11Correction !== 1) throw new Error("APK v11 is not linked exclusively to PR #279 and its corrected ref");
   if (runtimeSchema === "public" && rlsAutoTrigger !== 1) {
     throw new Error("public table RLS auto-enable trigger is missing or disabled");
   }
@@ -169,6 +256,14 @@ try {
     workflowObservabilityColumns,
     workflowColumns,
     counters,
+    versionHistoryMigration,
+    versionHistoryMigrationFile,
+    versionHistoryTables,
+    versionHistoryColumns,
+    versionsWithoutDetails,
+    cutoffVersionsWithDetails,
+    importedMergedPulls,
+    apk11Correction,
     rlsAutoTrigger,
     rlsFunctionSearchPath,
     rlsProtectedTables,

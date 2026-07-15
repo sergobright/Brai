@@ -3,10 +3,15 @@ set -euo pipefail
 
 TASK="${1:-}"
 
-/srv/opt/node-v22.16.0/bin/node /srv/opt/brai-codex-plugins/plugins/brai-guard/hooks/brai-guard.mjs start "$@"
+if [[ " $* " == *" --support-of "* ]]; then
+  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  /srv/opt/node-v22.16.0/bin/node "$SCRIPT_DIR/brai-task.mjs" start "$@"
+else
+  /srv/opt/node-v22.16.0/bin/node /srv/opt/brai-codex-plugins/plugins/brai-guard/hooks/brai-guard.mjs start "$@"
+fi
 
 if [ -n "$TASK" ] && [ "${TASK#-}" = "$TASK" ]; then
-  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  SCRIPT_DIR="${SCRIPT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
   ROOT="${BRAI_ROOT:-$(cd "$SCRIPT_DIR/.." && pwd)}"
   WORKTREES="${BRAI_WORKTREE_ROOT:-$ROOT/.codex-worktrees}"
   case "$TASK" in

@@ -13,7 +13,7 @@ ENVS_ROOT="${BRAI_ENVS_ROOT:-/srv/projects/brai-envs}"
 : "${TARGET_COMMIT:?BRAI_TARGET_COMMIT or GITHUB_SHA is required}"
 
 case "$MODE" in
-  all | promote | release) ;;
+  all | validate | promote | release) ;;
   *)
     echo "Unsupported BRAI_ACCEPTED_PREVIEWS_MODE: $MODE" >&2
     exit 1
@@ -114,6 +114,11 @@ filter_cleanup_branches_to_active_previews() {
   fi
 }
 
+if [[ -z "${BRAI_RELEASE_NOTES_V2_CUTOFF:-}" ]]; then
+  BRAI_RELEASE_NOTES_V2_CUTOFF="$("$SCRIPT_DIR/ci-ssh-version-history-cutoff.sh" 2>/dev/null || true)"
+  export BRAI_RELEASE_NOTES_V2_CUTOFF
+fi
+
 REQUIRED_PREVIEWS_JSON="$(
   cd "$ROOT"
   BRAI_TARGET_BRANCH="$TARGET_BRANCH" "$NODE_BIN" "$SCRIPT_DIR/accepted-preview-branches.mjs" --json "$TARGET_COMMIT"
@@ -124,33 +129,32 @@ CLEANUP_BRANCH_LIST="$(
 )"
 
 REQUIRED_BRANCHES=()
-declare -A REQUIRED_SHORT_CHANGES=()
-declare -A REQUIRED_DETAILED_CHANGES=()
-declare -A REQUIRED_REASONS=()
 declare -A REQUIRED_SOURCE_SHAS=()
+declare -A REQUIRED_WORK_ROLES=()
+declare -A REQUIRED_NO_PREVIEW=()
+declare -A REQUIRED_WORK_JSON=()
 declare -A SEEN=()
-while IFS=$'\t' read -r branch source_sha short_b64 detailed_b64 reason_b64; do
+while IFS=$'\t' read -r branch source_sha work_role no_preview work_b64; do
   if [[ -n "$branch" && -z "${SEEN[$branch]:-}" ]]; then
     REQUIRED_BRANCHES+=("$branch")
     SEEN[$branch]=required
     REQUIRED_SOURCE_SHAS[$branch]="$source_sha"
-    REQUIRED_SHORT_CHANGES[$branch]="$(printf '%s' "$short_b64" | base64 -d)"
-    REQUIRED_DETAILED_CHANGES[$branch]="$(printf '%s' "$detailed_b64" | base64 -d)"
-    REQUIRED_REASONS[$branch]="$(printf '%s' "$reason_b64" | base64 -d)"
+    REQUIRED_WORK_ROLES[$branch]="$work_role"
+    REQUIRED_NO_PREVIEW[$branch]="$no_preview"
+    REQUIRED_WORK_JSON[$branch]="$(printf '%s' "$work_b64" | base64 -d)"
   fi
 done < <(printf '%s' "$REQUIRED_PREVIEWS_JSON" | "$NODE_BIN" -e '
 let raw = "";
 process.stdin.on("data", (chunk) => raw += chunk);
 process.stdin.on("end", () => {
-  const previews = JSON.parse(raw || "[]");
-  for (const preview of previews) {
-    const notes = preview.releaseNotes;
+  const works = JSON.parse(raw || "[]");
+  for (const work of works) {
     console.log([
-      preview.branch,
-      preview.sha || "",
-      Buffer.from(notes.short_changes, "utf8").toString("base64"),
-      Buffer.from(notes.detailed_changes, "utf8").toString("base64"),
-      Buffer.from(notes.reason, "utf8").toString("base64"),
+      work.branch,
+      work.sha || "",
+      work.work.role,
+      work.noPreview ? "true" : "false",
+      Buffer.from(JSON.stringify(work), "utf8").toString("base64"),
     ].join("\t"));
   }
 });
@@ -173,28 +177,37 @@ fi
 for index in "${!REQUIRED_BRANCHES[@]}"; do
   branch="${REQUIRED_BRANCHES[$index]}"
   source_sha="${REQUIRED_SOURCE_SHAS[$branch]:-$TARGET_COMMIT}"
-  echo "Completing accepted preview $branch -> $TARGET_BRANCH@$TARGET_COMMIT."
+  work_role="${REQUIRED_WORK_ROLES[$branch]}"
+  no_preview="${REQUIRED_NO_PREVIEW[$branch]}"
+  echo "Reconciling accepted $work_role work PR $branch -> $TARGET_BRANCH@$TARGET_COMMIT."
+  if [[ "$MODE" == "validate" ]]; then
+    continue
+  fi
   if [[ "$MODE" == "all" || "$MODE" == "promote" ]]; then
     RECORD_PRODUCTION_RELEASE=false
-    signal_temporal_preview "$branch" pr_merged "" "$source_sha"
-    signal_temporal_preview "$branch" accepted_preview_started "" "$source_sha"
+    if [[ "$no_preview" != "true" ]]; then
+      signal_temporal_preview "$branch" pr_merged "" "$source_sha"
+      signal_temporal_preview "$branch" accepted_preview_started "" "$source_sha"
+    fi
     if BRAI_SOURCE_BRANCH="$branch" \
       BRAI_TARGET_ENVIRONMENT="$TARGET_ENVIRONMENT" \
       BRAI_TARGET_BRANCH="$TARGET_BRANCH" \
       BRAI_TARGET_COMMIT="$TARGET_COMMIT" \
-      BRAI_SOURCE_SHORT_CHANGES="${REQUIRED_SHORT_CHANGES[$branch]}" \
-      BRAI_SOURCE_DETAILED_CHANGES="${REQUIRED_DETAILED_CHANGES[$branch]}" \
-      BRAI_SOURCE_REASON="${REQUIRED_REASONS[$branch]}" \
+      BRAI_VERSION_WORK_JSON="${REQUIRED_WORK_JSON[$branch]}" \
       BRAI_RECORD_PRODUCTION_RELEASE="$RECORD_PRODUCTION_RELEASE" \
         "$SCRIPT_DIR/ci-ssh-promote-deployment.sh"; then
-      signal_temporal_preview "$branch" accepted_preview_promoted "" "$source_sha"
+      if [[ "$no_preview" != "true" ]]; then
+        signal_temporal_preview "$branch" accepted_preview_promoted "" "$source_sha"
+      fi
     else
-      signal_temporal_preview "$branch" accepted_preview_failed "accepted preview promotion failed" "$source_sha"
+      if [[ "$no_preview" != "true" ]]; then
+        signal_temporal_preview "$branch" accepted_preview_failed "accepted work reconciliation failed" "$source_sha"
+      fi
       exit 1
     fi
   fi
 
-  if [[ "$MODE" == "all" || "$MODE" == "release" ]]; then
+  if [[ "$no_preview" != "true" && ( "$MODE" == "all" || "$MODE" == "release" ) ]]; then
     signal_temporal_preview "$branch" supabase_preview_release_started "" "$source_sha"
     signal_temporal_preview "$branch" slot_release_started "" "$source_sha"
     if BRAI_BRANCH="$branch" \

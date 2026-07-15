@@ -570,7 +570,7 @@ describe("mobile OTA publish scripts", () => {
     expect(deploy).not.toContain("brai.sqlite");
   });
 
-  it("rebuilds APK release rows and records production ledger rows by default", async () => {
+  it("rebuilds APK release rows and defers production ledger rows to work reconciliation", async () => {
     const deploy = await readFile(path.join(workspaceRoot, "deploy/scripts/ci-ssh-deploy.sh"), "utf8");
     const deployBranch = await readFile(path.join(workspaceRoot, "deploy/scripts/deploy-branch.sh"), "utf8");
     const buildApk = await readFile(path.join(workspaceRoot, "deploy/scripts/build-android-env-apk.sh"), "utf8");
@@ -599,7 +599,8 @@ describe("mobile OTA publish scripts", () => {
     expect(buildApk).toContain('BUILD_CLIENT="${BRAI_BUILD_CLIENT:-true}"');
     expect(buildApk).toContain('Missing static export for BRAI_BUILD_CLIENT=$BUILD_CLIENT');
     expect(buildApk).toContain('write-client-runtime-config.mjs');
-    expect(buildApk).toContain('record-shipped-apk-version.mjs');
+    expect(buildApk).not.toContain('record-shipped-apk-version.mjs');
+    expect(buildApk).toContain('ledger recording waits for work reconciliation');
     expect(buildNonproduction).toContain('for flavor in dev previewA previewB previewC previewD previewE; do');
     expect(buildNonproduction).toContain('BRAI_BUILD_CLIENT=false "$SCRIPT_DIR/build-android-env-apk.sh" "$flavor"');
     expect(releaseSlot).toContain('section?.apkBuildKind === "stable"');

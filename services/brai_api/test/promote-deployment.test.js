@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -14,47 +15,48 @@ async function tempStore() {
   return { tmp, dbUrl: database.url, store, drop: () => database.drop() };
 }
 
-test('accepted preview version recording creates idempotent build row with authored notes', async () => {
+function apkPull(pullNumber, workKey, workRole, state, native) {
+  const merged = state === 'MERGED';
+  const marker = { receiptType: 'brai-work-v1', workKey, workRole, nativeBoundary: native };
+  const notes = {
+    receiptType: 'brai-release-notes-v2',
+    work: { key: workKey, role: workRole },
+    build: {
+      ...(workRole === 'owner' ? {
+        short_changes: 'Завершена Android-работа.',
+        detailed_changes: 'Owner завершает общий work.',
+        reason: 'Нужно завершить work после owner merge.',
+      } : {}),
+      details: [{ title: `Изменение PR ${pullNumber}`, description: `Изменение PR ${pullNumber} сохранено отдельно.` }],
+    },
+    testing: 'Проверена Android-доставка.',
+    ...(native ? { platforms: { apk: {
+      short_changes: 'Обновлён стабильный APK.',
+      detailed_changes: 'В APK вошли только нативные изменения support PR.',
+      reason: 'Нативная граница требует публикации нового APK.',
+      details: [{ title: 'Нативный APK', description: 'Опубликованный пакет содержит Android-изменения.' }],
+    } } } : {}),
+  };
+  return {
+    workKey, workRole, repository: 'sergobright/Brai', pullNumber,
+    url: `https://github.com/sergobright/Brai/pull/${pullNumber}`,
+    title: `PR ${pullNumber}`,
+    body: `<!-- brai-work-v1\n${JSON.stringify(marker)}\n-->\n<!-- brai-release-notes-v2\n${JSON.stringify(notes)}\n-->`,
+    authorLogin: 'sergobright', state, isDraft: false,
+    headBranch: `codex/apk-${pullNumber}`, baseBranch: 'main',
+    mergeCommitSha: merged ? `merge-${pullNumber}` : null,
+    githubCreatedAtUtc: '2026-07-14T13:00:00.000Z',
+    githubUpdatedAtUtc: '2026-07-14T14:00:00.000Z',
+    githubClosedAtUtc: merged ? '2026-07-14T14:00:00.000Z' : null,
+    githubMergedAtUtc: merged ? '2026-07-14T14:00:00.000Z' : null,
+  };
+}
+
+test('unscoped accepted-build recording is unavailable', async () => {
   const { tmp, store, drop } = await tempStore();
   try {
-    const accepted = {
-      sourceBranch: 'codex/example',
-      sourceCommit: 'abc123',
-      sourceShortChanges: 'Исправлены описания журнала версий.',
-      sourceDetails: 'Строки сборок теперь хранят человекочитаемые release notes.',
-      sourceReason: 'Нужно сохранить понятные описания принятой сборки.',
-      targetBranch: 'main',
-      targetCommit: 'def456',
-      releasedAtUtc: '2026-06-24T22:10:00.000Z'
-    };
-
-    assert.deepEqual(store.recordAcceptedBuildVersion(accepted), { versionTypeId: 'build', version: 2 });
-    assert.deepEqual(store.recordAcceptedBuildVersion(accepted), { versionTypeId: 'build', version: 2 });
-
-    const versions = store.db
-      .prepare("SELECT version_type_id, version, included_in_version_id, short_changes, detailed_changes, reason FROM build_versions ORDER BY version_type_id, version")
-      .all();
-    assert.deepEqual(
-      versions.map((row) => [row.version_type_id, row.version, row.included_in_version_id, row.short_changes]),
-      [
-        ['apk', 1, null, 'Первичная публичная APK-сборка.'],
-        ['apk', 2, null, 'Актуальная публичная APK-сборка v2.'],
-        ['build', 1, null, 'Первичная публичная web/OTA-сборка.'],
-        ['build', 2, null, accepted.sourceShortChanges],
-      ]
-    );
-    assert.equal(versions.find((row) => row.version_type_id === 'build' && row.version === 2).detailed_changes, accepted.sourceDetails);
-    assert.equal(versions.find((row) => row.version_type_id === 'build' && row.version === 2).reason, accepted.sourceReason);
-    assert.equal(store.db.prepare('SELECT COUNT(*) AS count FROM build_version_refs').get().count, 1);
-    const log = store.db.prepare("SELECT status, json_data FROM logs WHERE operation = 'version.build_recorded'").get();
-    assert.equal(log.status, 'done');
-    assert.deepEqual(JSON.parse(log.json_data), {
-      version: 2,
-      target_branch: 'main',
-      target_commit: 'def456',
-      source_branch: 'codex/example',
-      source_commit: 'abc123'
-    });
+    assert.equal(store.recordAcceptedBuildVersion, undefined);
+    assert.equal(store.db.prepare("SELECT COUNT(*) AS count FROM build_versions WHERE version_type_id = 'build'").get().count, 1);
   } finally {
     store.close();
     await drop();
@@ -88,7 +90,7 @@ test('release and canon version creation remain disabled', async () => {
   }
 });
 
-test('accepted preview promotion records deployment and required build ledger row', () => {
+test('accepted preview promotion finalizes one work-scoped build', () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'brai-promote-apk-only-'));
   let sourceDatabase;
   let targetDatabase;
@@ -111,6 +113,36 @@ test('accepted preview promotion records deployment and required build ledger ro
       deployedAtUtc: '2026-07-02T12:00:00.000Z'
     });
     source.close();
+
+    const workJson = JSON.stringify({
+      work: { key: 'work_11111111-1111-4111-a111-111111111111', role: 'owner' },
+      pulls: [{
+        repository: 'sergobright/Brai',
+        pullNumber: 501,
+        url: 'https://github.com/sergobright/Brai/pull/501',
+        title: 'Work-scoped promotion',
+        body: 'Public PR body.',
+        authorLogin: 'sergobright',
+        state: 'MERGED',
+        isDraft: false,
+        headBranch: 'codex/build-ledger',
+        baseBranch: 'main',
+        mergeCommitSha: 'merge-target-dir',
+        githubCreatedAtUtc: '2026-07-02T11:00:00.000Z',
+        githubUpdatedAtUtc: '2026-07-02T12:00:00.000Z',
+        githubClosedAtUtc: '2026-07-02T12:00:00.000Z',
+        githubMergedAtUtc: '2026-07-02T12:00:00.000Z',
+        workRole: 'owner',
+        releaseNotes: {
+          build: {
+            short_changes: 'Восстановлена запись версий сборок.',
+            detailed_changes: 'Promotion атомарно пишет work-scoped build ledger.',
+            reason: 'Нужно завершать работу только после сохранения всех PR.',
+            details: [{ title: 'Work-scoped build', description: 'Owner PR связан с одной завершённой работой.' }],
+          },
+        },
+      }],
+    });
 
     execFileSync(process.execPath, [
       path.join(repoRoot, 'deploy/scripts/promote-deployment.mjs'),
@@ -137,7 +169,9 @@ test('accepted preview promotion records deployment and required build ledger ro
       '--target-domain',
       'app.brai.one',
       '--reason',
-      'Нужно завершать деплой только после записи версии сборки.'
+      'Нужно завершать деплой только после записи версии сборки.',
+      '--work-json',
+      workJson,
     ], { cwd: repoRoot });
 
     const promoted = new BraiStore(targetDatabase.url);
@@ -153,20 +187,13 @@ test('accepted preview promotion records deployment and required build ledger ro
       );
       const build = promoted.db.prepare("SELECT * FROM build_versions WHERE version_type_id = 'build' AND version = 2").get();
       assert.equal(build.short_changes, 'Восстановлена запись версий сборок.');
-      assert.equal(build.detailed_changes, 'Promotion переносит deployment metadata и обязательно пишет build ledger.');
-      assert.equal(build.reason, 'Нужно завершать деплой только после записи версии сборки.');
+      assert.equal(build.detailed_changes, 'Promotion атомарно пишет work-scoped build ledger.');
+      assert.equal(build.reason, 'Нужно завершать работу только после сохранения всех PR.');
+      assert.notEqual(build.release_works_id, null);
       const records = promoted.listDeploymentRecords({ environment: 'prod' });
-      assert.equal(records.length, 1);
-      assert.equal(records[0].branch, 'main');
-      assert.equal(records[0].commit_sha, 'merge-target-dir');
-      assert.equal(records[0].web_ota_version, '0.0.2');
-      assert.match(records[0].detailed_changes, /codex\/build-ledger@abc-target-dir/);
-      const logs = promoted.db
-        .prepare("SELECT operation, status, json_data FROM logs WHERE operation IN ('deployment.recorded', 'version.build_recorded') ORDER BY operation")
-        .all()
-        .map((row) => ({ ...row, json_data: JSON.parse(row.json_data) }));
-      assert.equal(logs.some((log) => log.operation === 'deployment.recorded' && log.json_data.deployment_record_id === records[0].id), true);
-      assert.equal(logs.some((log) => log.operation === 'version.build_recorded' && log.json_data.version === 2), true);
+      assert.equal(records.length, 0);
+      assert.equal(promoted.db.prepare('SELECT COUNT(*) AS count FROM build_version_details WHERE build_versions_id = ?').get(build.id).count, 1);
+      assert.equal(promoted.db.prepare('SELECT COUNT(*) AS count FROM build_version_pull_requests WHERE build_versions_id = ?').get(build.id).count, 1);
     } finally {
       promoted.close();
     }
@@ -177,71 +204,67 @@ test('accepted preview promotion records deployment and required build ledger ro
   });
 });
 
-test('accepted preview promotion uses release-note reason when source reason is generic', () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'brai-promote-reason-fallback-'));
-  let sourceDatabase;
-  let targetDatabase;
+test('published stable APK is recorded after support work reconciliation and later attaches its build', async () => {
+  const { tmp, dbUrl, store, drop } = await tempStore();
+  const repoRoot = path.resolve(import.meta.dirname, '../../..');
+  const workKey = 'work_22222222-2222-4222-a222-222222222222';
+  const releasedAtUtc = '2026-07-14T14:00:00.000Z';
+  try {
+    store.upsertReleaseWork({ workKey });
+    store.upsertGithubPullRequest(apkPull(601, workKey, 'owner', 'OPEN', false));
+    store.upsertGithubPullRequest(apkPull(602, workKey, 'support', 'MERGED', true));
 
-  return (async () => {
-    const repoRoot = path.resolve(import.meta.dirname, '../../..');
-    sourceDatabase = await createTestDatabase();
-    targetDatabase = await createTestDatabase();
-    const source = new BraiStore(sourceDatabase.url);
-    source.recordDeployment({
-      environment: 'preview-a',
-      slot: 'A',
-      branch: 'codex/reason-fallback',
-      commit: 'abc-reason',
-      domain: 'a.test.brai.one',
-      webOtaVersion: '0.0.42',
-      shortChanges: 'Исправлена причина версии.',
-      detailedChanges: 'Promotion не должен брать generic reason из deployment metadata.',
-      reason: 'Автоматическая доставка ветки',
-      deployedAtUtc: '2026-07-03T07:10:00.000Z'
+    const artifact = Buffer.from('stable-apk-fixture');
+    const artifactName = 'brai-v12.apk';
+    fs.writeFileSync(path.join(tmp, artifactName), artifact);
+    fs.writeFileSync(path.join(tmp, 'releases.json'), JSON.stringify({ sections: { production: {
+      apkBuildKind: 'stable', apkVersion: 12, versionCode: 142, file: artifactName,
+      sha256: crypto.createHash('sha256').update(artifact).digest('hex'),
+      sizeBytes: artifact.length, publishedAt: releasedAtUtc,
+    } } }));
+
+    const runRecorder = () => execFileSync(process.execPath, [
+      path.join(repoRoot, 'deploy/scripts/record-shipped-apk-version.mjs'),
+      '--work-key', workKey,
+      '--version', '12',
+      '--version-code', '142',
+      '--target-branch', 'main',
+      '--target-commit', 'apk-target',
+      '--released-at', releasedAtUtc,
+    ], { cwd: repoRoot, env: { ...process.env, BRAI_DATABASE_URL: dbUrl, BRAI_RELEASE_TARGET: tmp } });
+
+    runRecorder();
+    const apk = store.db.prepare("SELECT * FROM build_versions WHERE release_works_id=(SELECT id FROM release_works WHERE work_key=?) AND version_type_id='apk'").get(workKey);
+    assert.equal(apk.version, 12);
+    assert.equal(apk.included_in_version_id, null);
+    assert.deepEqual(
+      store.db.prepare(`SELECT pulls.pull_number FROM build_version_pull_requests links JOIN github_pull_requests pulls ON pulls.id=links.github_pull_requests_id WHERE links.build_versions_id=?`).all(apk.id),
+      [{ pull_number: 602 }],
+    );
+
+    store.upsertGithubPullRequest(apkPull(601, workKey, 'owner', 'MERGED', false));
+    const build = store.finalizeVersionWork({
+      workKey, versionTypeId: 'build',
+      shortChanges: 'Завершена Android-работа.',
+      detailedChanges: 'Owner и native support доставлены.',
+      reason: 'Нужно завершить весь work после owner merge.',
+      details: [
+        { title: 'Owner', description: 'Owner завершил работу.', pullNumber: 601 },
+        { title: 'APK support', description: 'Support выпустил APK.', pullNumber: 602 },
+      ],
+      pullNumbers: [601, 602], targetBranch: 'main', targetCommit: 'build-target',
+      releasedAtUtc: '2026-07-14T14:05:00.000Z',
     });
-    source.close();
-
-    execFileSync(process.execPath, [
-      path.join(repoRoot, 'deploy/scripts/promote-deployment.mjs'),
-      '--source-postgres-url',
-      sourceDatabase.url,
-      '--target-postgres-url',
-      targetDatabase.url,
-      '--source-branch',
-      'codex/reason-fallback',
-      '--source-commit',
-      'abc-reason',
-      '--source-short-changes',
-      'Исправлена причина версии.',
-      '--source-details',
-      'Promotion не должен брать generic reason из deployment metadata.',
-      '--source-reason',
-      'Нужно сохранить authored reason из release notes.',
-      '--target-environment',
-      'prod',
-      '--target-branch',
-      'main',
-      '--target-commit',
-      'merge-reason',
-      '--target-domain',
-      'app.brai.one',
-    ], { cwd: repoRoot });
-
-    const promoted = new BraiStore(targetDatabase.url);
-    try {
-      const build = promoted.db.prepare("SELECT reason FROM build_versions WHERE version_type_id = 'build' AND version = 2").get();
-      assert.equal(build.reason, 'Нужно сохранить authored reason из release notes.');
-    } finally {
-      promoted.close();
-    }
-  })().finally(async () => {
-    await sourceDatabase?.drop();
-    await targetDatabase?.drop();
+    runRecorder();
+    assert.equal(store.db.prepare('SELECT included_in_version_id FROM build_versions WHERE id=?').get(apk.id).included_in_version_id, build.id);
+  } finally {
+    store.close();
+    await drop();
     fs.rmSync(tmp, { recursive: true, force: true });
-  });
+  }
 });
 
-test('accepted promotion rejects missing authored source notes before deployment record', async () => {
+test('accepted promotion rejects missing work metadata before writing a build', async () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bright-promote-release-disabled-'));
   const sourceDatabase = await createTestDatabase();
   const targetDatabase = await createTestDatabase();
@@ -275,7 +298,7 @@ test('accepted promotion rejects missing authored source notes before deployment
     ], { cwd: repoRoot, encoding: 'utf8' });
 
     assert.notEqual(result.status, 0);
-    assert.match(result.stderr, /missing Russian source short_changes/);
+    assert.match(result.stderr, /accepted promotion requires --work-json/);
     const store = new BraiStore(targetDatabase.url);
     try {
       assert.equal(store.listDeploymentRecords({ environment: 'prod' }).length, 0);
@@ -302,12 +325,15 @@ test('accepted promotion rerun skips missing slot after build ledger was recorde
       E: { status: 'free', branch: null },
       queue: [],
     }));
-    store.recordAcceptedBuildVersion({
+    store.upsertBuildVersion({
+      versionTypeId: 'build',
+      version: 2,
+      includedInVersionId: null,
+      shortChanges: 'Повторный запуск принят.',
+      detailedChanges: 'Повторный promotion видит уже записанную историческую build-версию.',
+      reason: 'Нужно не падать после уже освобождённого preview slot.',
       sourceBranch: 'codex/rerun',
       sourceCommit: 'abc-rerun',
-      sourceShortChanges: 'Повторный запуск принят.',
-      sourceDetails: 'Повторный promotion видит уже записанную build-версию.',
-      sourceReason: 'Нужно не падать после уже освобождённого preview slot.',
       targetBranch: 'main',
       targetCommit: 'merge-rerun',
       releasedAtUtc: '2026-07-03T10:40:00.000Z'
@@ -341,7 +367,7 @@ test('accepted promotion rerun skips missing slot after build ledger was recorde
   }
 });
 
-test('reset script resets APK row without deleting build history', async () => {
+test('retired APK reset script cannot delete normalized version history', async () => {
   const { tmp, dbUrl, store, drop } = await tempStore();
   const repoRoot = path.resolve(import.meta.dirname, '../../..');
   try {
@@ -389,11 +415,11 @@ test('reset script resets APK row without deleting build history', async () => {
     });
     store.close();
 
-    execFileSync(process.execPath, [
+    assert.throws(() => execFileSync(process.execPath, [
       path.join(repoRoot, 'deploy/scripts/reset-apk-only-version-ledger.mjs'),
       '--postgres-url',
       dbUrl
-    ], { cwd: repoRoot });
+    ], { cwd: repoRoot, stdio: 'pipe' }), /retired/);
 
     const reset = new BraiStore(dbUrl);
     try {
@@ -406,14 +432,15 @@ test('reset script resets APK row without deleting build history', async () => {
         [
           { version_type_id: 'apk', version: 1, short_changes: 'Первичная публичная APK-сборка.' },
           { version_type_id: 'apk', version: 2, short_changes: 'Актуальная публичная APK-сборка v2.' },
+          { version_type_id: 'apk', version: 3, short_changes: 'Legacy APK 3.' },
           { version_type_id: 'build', version: 1, short_changes: 'Первичная публичная web/OTA-сборка.' },
           { version_type_id: 'build', version: 2, short_changes: 'Accepted build.' },
           { version_type_id: 'canon', version: 1, short_changes: 'Legacy canon.' },
           { version_type_id: 'release', version: 1, short_changes: 'Legacy release.' },
         ]
       );
-      assert.equal(reset.db.prepare("SELECT COUNT(*) AS count FROM build_version_refs WHERE version_type_id = 'apk'").get().count, 0);
-      assert.equal(reset.db.prepare("SELECT last_version FROM build_version_counters WHERE version_type_id = 'apk'").get().last_version, 2);
+      assert.equal(reset.db.prepare("SELECT COUNT(*) AS count FROM build_version_refs WHERE version_type_id = 'apk'").get().count, 1);
+      assert.equal(reset.db.prepare("SELECT last_version FROM build_version_counters WHERE version_type_id = 'apk'").get().last_version, 3);
       assert.equal(reset.db.prepare("SELECT COUNT(*) AS count FROM build_version_refs WHERE version_type_id = 'build'").get().count, 1);
       assert.equal(reset.db.prepare("SELECT COUNT(*) AS count FROM build_version_refs WHERE version_type_id IN ('canon', 'release')").get().count, 2);
     } finally {

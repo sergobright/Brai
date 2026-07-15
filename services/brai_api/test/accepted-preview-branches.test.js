@@ -36,13 +36,15 @@ test('accepted preview branch lookup skips current and legacy no-preview labels'
 });
 
 test('accepted preview branch lookup requires release notes for JSON promotion metadata', () => {
+  const previousCutoff = process.env.BRAI_RELEASE_NOTES_V2_CUTOFF;
+  process.env.BRAI_RELEASE_NOTES_V2_CUTOFF = '2026-07-15T00:00:00.000Z';
   const body = `Accepted preview.
 
 <!-- brai-release-notes-v1
 {"short_changes":"Исправлены версии.","detailed_changes":"Workflow передаёт release notes через PR.","reason":"Нужно не терять данные версий."}
 -->`;
   const pulls = [
-    { base: { ref: 'main' }, head: { ref: 'codex/one' }, merged_at: '2026-06-25T10:00:00Z', body }
+    { number: 1, base: { ref: 'main' }, head: { ref: 'codex/one' }, created_at: '2026-06-25T09:00:00Z', merged_at: '2026-06-25T10:00:00Z', nativeBoundary: false, body }
   ];
 
   assert.deepEqual(acceptedPreviewReleaseNotes(pulls), [
@@ -55,5 +57,7 @@ test('accepted preview branch lookup requires release notes for JSON promotion m
       }
     }
   ]);
-  assert.throws(() => requiredReleaseNotesFromPull({ body: '' }, 'codex/missing'), /no brai-release-notes-v1/);
+  assert.throws(() => requiredReleaseNotesFromPull({ body: '' }, 'codex/missing'), /no allowed brai-release-notes receipt/);
+  if (previousCutoff === undefined) delete process.env.BRAI_RELEASE_NOTES_V2_CUTOFF;
+  else process.env.BRAI_RELEASE_NOTES_V2_CUTOFF = previousCutoff;
 });

@@ -1018,6 +1018,27 @@ export function createBraiServer({
         return;
       }
 
+      if (url.pathname === '/v1/version-history') {
+        if (req.method !== 'GET') {
+          sendJson(req, res, 405, { error: 'method_not_allowed' });
+          return;
+        }
+        try {
+          const query = versionHistoryQuery(url.searchParams, store);
+          const page = store.listVersionHistory(query);
+          const last = page.items.at(-1);
+          sendJson(req, res, 200, {
+            items: page.items,
+            types: store.listVersionTypes(),
+            next_cursor: page.hasMore && last ? encodeVersionHistoryCursor(last.released_at_utc, last.id) : null
+          });
+        } catch (error) {
+          if (error?.code !== 'invalid_version_history_query') throw error;
+          sendJson(req, res, 400, { error: error.message });
+        }
+        return;
+      }
+
       const authContext = await authenticateRequest(req, token, url, sessionSecret, now, auth, store, authBackendTimeoutMs);
       requestUserId = authContext.userId;
       if (!authContext.authorized) {
@@ -1701,7 +1722,7 @@ function addActivityAiProcessingState(activities) {
 export function versionState(store, nowDate, releaseDir = null) {
   const appVersion = store.currentAppVersion();
   const targetApk = latestApkRelease(releaseDir);
-  const otaVersion = latestOtaVersion(releaseDir) ?? appVersion.version;
+  const otaVersion = latestOtaVersion(releaseDir) ?? '0.0.0';
   return {
     server_time_utc: nowDate.toISOString(),
     ...appVersion,
@@ -2004,16 +2025,23 @@ function sendJson(req, res, status, body, extraHeaders = {}) {
 function jsonHeaders(req) {
   const origin = req?.headers?.origin;
   const pathname = requestPathname(req);
+  const baseHeaders = pathname === '/v1/version-history'
+    ? {
+        'content-type': BASE_JSON_HEADERS['content-type'],
+        'access-control-allow-methods': 'GET,OPTIONS',
+        'access-control-allow-headers': 'content-type'
+      }
+    : BASE_JSON_HEADERS;
   if (typeof origin === 'string' && isAllowedCorsOrigin(origin, pathname)) {
     return {
-      ...BASE_JSON_HEADERS,
+      ...baseHeaders,
       'access-control-allow-origin': origin,
       vary: 'Origin'
     };
   }
-  if (typeof origin === 'string') return BASE_JSON_HEADERS;
+  if (typeof origin === 'string') return baseHeaders;
   return {
-    ...BASE_JSON_HEADERS,
+    ...baseHeaders,
     'access-control-allow-origin': '*'
   };
 }
@@ -2027,9 +2055,48 @@ function requestPathname(req) {
 }
 
 function isAllowedCorsOrigin(origin, pathname = '/') {
-  if (origin === 'https://brai.one') return pathname === '/auth/session';
+  if (origin === 'https://brai.one') return pathname === '/auth/session' || pathname === '/v1/version-history';
   if (isTrustedAppOrigin(origin)) return true;
   return false;
+}
+
+function versionHistoryQuery(searchParams, store) {
+  const type = String(searchParams.get('type') ?? '').trim() || null;
+  if (type && !store.versionTypeExists(type)) throw invalidVersionHistoryQuery('invalid_type');
+  const rawLimit = searchParams.get('limit');
+  const limit = rawLimit == null || rawLimit === '' ? 30 : Number(rawLimit);
+  if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw invalidVersionHistoryQuery('invalid_limit');
+  const rawCursor = searchParams.get('cursor');
+  return {
+    versionTypeId: type,
+    limit,
+    cursor: rawCursor ? decodeVersionHistoryCursor(rawCursor) : null
+  };
+}
+
+function encodeVersionHistoryCursor(releasedAtUtc, id) {
+  return Buffer.from(JSON.stringify([releasedAtUtc, id]), 'utf8').toString('base64url');
+}
+
+function decodeVersionHistoryCursor(value) {
+  try {
+    if (!/^[A-Za-z0-9_-]+$/.test(value)) throw new Error('invalid encoding');
+    const decoded = Buffer.from(value, 'base64url').toString('utf8');
+    if (Buffer.from(decoded, 'utf8').toString('base64url') !== value) throw new Error('non-canonical encoding');
+    const parsed = JSON.parse(decoded);
+    if (!Array.isArray(parsed) || parsed.length !== 2 || !Number.isInteger(parsed[1]) || parsed[1] <= 0) throw new Error('invalid payload');
+    const releasedAtUtc = String(parsed[0] ?? '');
+    if (!/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}(?::?\d{2})?)$/.test(releasedAtUtc) || Number.isNaN(Date.parse(releasedAtUtc))) throw new Error('invalid date');
+    return { releasedAtUtc, id: parsed[1] };
+  } catch {
+    throw invalidVersionHistoryQuery('invalid_cursor');
+  }
+}
+
+function invalidVersionHistoryQuery(message) {
+  const error = new Error(message);
+  error.code = 'invalid_version_history_query';
+  return error;
 }
 
 function isTrustedAppOrigin(origin) {

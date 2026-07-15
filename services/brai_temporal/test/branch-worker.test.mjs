@@ -45,6 +45,18 @@ test("isolated workflow separates generic deploy and Goal-agent verification", (
   assert.doesNotMatch(activities, /ci-ssh-goal-agent-gate\.sh/);
 });
 
+test("production validates metadata before deploy and migrates before work reconciliation", () => {
+  const source = fs.readFileSync(path.join(repo, "services/brai_temporal/src/workflows.mjs"), "utf8");
+  const workflow = source.indexOf("async function runProdPromotion");
+  const validate = source.indexOf('mode: "validate"', workflow);
+  const deploy = source.indexOf("activities.deployBranch", workflow);
+  const migrationPassed = source.indexOf('"supabase_prod_migration_passed"', deploy);
+  const reconcile = source.indexOf('mode: "promote"', migrationPassed);
+  const workReconciled = source.indexOf('"prod_work_reconciled"', reconcile);
+  assert.ok(workflow > 0 && workflow < validate && validate < deploy && deploy < migrationPassed);
+  assert.ok(migrationPassed < reconcile && reconcile < workReconciled);
+});
+
 test("Temporal activities heartbeat and wait for cancellation completion", () => {
   const workflows = fs.readFileSync(path.join(repo, "services/brai_temporal/src/workflows.mjs"), "utf8");
   const worker = fs.readFileSync(path.join(repo, "services/brai_temporal/src/worker.mjs"), "utf8");

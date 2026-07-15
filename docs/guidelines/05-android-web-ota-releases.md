@@ -1,6 +1,6 @@
 # Android, Web, OTA, And Releases
 
-Brai uses separate version lines for APK and OTA/web.
+Brai keeps completed work, APK releases, and OTA/web artifacts as separate version lines.
 
 - APK uses the public integer counter `vN`; the current public baseline is `v2`.
 - Android `versionName` is `N`; Android `versionCode` defaults to the same `N`.
@@ -9,14 +9,16 @@ Brai uses separate version lines for APK and OTA/web.
 - Preview APK filenames are slot-specific `brai-a-vN-previewM.apk` through `brai-e-vN-previewM.apk`; accepted stable filenames remain `brai-vN.apk`, `brai-dev-vN.apk`, and `brai-a-vN.apk` through `brai-e-vN.apk`.
 - Preview APKs are transient separate applications from the stable Preview A-E baseline, so rejected preview APKs cannot update into accepted stable APKs.
 - OTA/web uses `X.Y.Z`; the old fourth public digit is not shown or compared.
-- `build_versions` stores accepted production build rows (`version_type_id='build'`) and a separate APK row (`version_type_id='apk'`).
+- `build_versions` stores one completed-work row per finalized release work (`version_type_id='build'`) and independent published platform rows such as `version_type_id='apk'`.
 - APK reset affects only the APK line: after reset APK rows `version_type_id='apk', version IN (1, 2)` remain, APK rows above `2` are deleted, and existing `build` rows remain.
-- Accepted production promotion must create or reuse one `build_versions` build row before the workflow is considered complete.
-- Each accepted build row must store Russian `short_changes`, `detailed_changes`, and `reason` from explicit preview/release-note metadata.
+- Owner finalization must create or reuse exactly one build row after every registered owner/support PR reaches a terminal state. Merged support PRs join that build; a support merge never creates its own build.
+- A build records completed product, server, CI/CD, infrastructure, documentation, maintenance, or refactoring work even when no client artifact was published.
+- Creating a build does not advance browser web or Android OTA `X.Y.Z`; those versions advance only with their published artifacts.
+- Every build and platform version stores Russian `short_changes`, `detailed_changes`, and `reason` plus at least one normalized atomic detail from structured release metadata.
 - Branch names, commits, domains, and deploy metadata belong in `build_version_refs` or `deployment_records`, not release-note text.
 - Manual `release` and `canon` rows are disabled unless a future explicit requirement restores them.
 
-Build and publish a release APK only when native Android code, Capacitor config, permissions, signing, manifest values, application id, SDK versions, icons, splash assets, native plugins, or native compatibility boundaries change. Changes to APK build/deploy orchestration scripts alone do not require a new APK unless they are paired with a real native-boundary input change or an explicitly forced native APK deploy.
+Build and publish a release APK only when native Android code, Capacitor config, permissions, signing, manifest values, application id, SDK versions, icons, splash assets, native plugins, or native compatibility boundaries change. An APK row is created only after that stable artifact is published and contains only native-relevant PRs and platform release notes. Changes to APK build/deploy orchestration scripts alone do not require a new APK unless they are paired with a real native-boundary input change or an explicitly forced native APK deploy.
 
 ## Release Page
 

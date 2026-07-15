@@ -73,91 +73,6 @@ export const deploymentMethods = {
     return this.db.prepare("SELECT * FROM deployment_records ORDER BY deployed_at_utc DESC, id DESC").all();
   },
 
-  recordAcceptedBuildVersion({
-    sourceBranch = null,
-    sourceCommit = null,
-    sourceShortChanges,
-    sourceDetails,
-    sourceReason,
-    targetBranch,
-    targetCommit,
-    releasedAtUtc,
-  }) {
-    const existing = this.findBuildVersionByTargetCommit({ targetBranch, targetCommit, versionTypeId: 'build' });
-    if (existing) return { versionTypeId: 'build', version: existing.version };
-    const version = this.nextVersion('build');
-    this.upsertBuildVersion({
-      versionTypeId: 'build',
-      version,
-      includedInVersionId: null,
-      shortChanges: requireLedgerText(sourceShortChanges, 'short_changes'),
-      detailedChanges: requireLedgerText(sourceDetails, 'detailed_changes'),
-      reason: requireLedgerText(sourceReason, 'reason'),
-      releasedAtUtc,
-      sourceBranch,
-      sourceCommit,
-      targetBranch,
-      targetCommit,
-    });
-    safeRecordLog(this, {
-      dt: releasedAtUtc,
-      source: 'version',
-      operation: 'version.build_recorded',
-      status: 'done',
-      message: 'Build version recorded',
-      jsonData: {
-        version,
-        target_branch: targetBranch,
-        target_commit: shortSha(targetCommit),
-        source_branch: sourceBranch,
-        source_commit: shortSha(sourceCommit)
-      }
-    });
-    return { versionTypeId: 'build', version };
-  },
-
-  recordShippedApkVersion({
-    version,
-    versionCode,
-    sourceBranch = null,
-    sourceCommit = null,
-    targetBranch,
-    targetCommit,
-    releasedAtUtc,
-  }) {
-    const existing = this.findBuildVersionByTargetCommit({ targetBranch, targetCommit, versionTypeId: 'apk' });
-    if (existing) return { versionTypeId: 'apk', version: existing.version };
-    this.upsertBuildVersion({
-      versionTypeId: 'apk',
-      version,
-      includedInVersionId: null,
-      shortChanges: `APK-сборка ${version}.`,
-      detailedChanges: `Опубликована Android APK-сборка ${version} с versionCode ${versionCode}.`,
-      reason: 'Нужно зафиксировать публичную Android APK-сборку.',
-      releasedAtUtc,
-      sourceBranch,
-      sourceCommit,
-      targetBranch,
-      targetCommit,
-    });
-    safeRecordLog(this, {
-      dt: releasedAtUtc,
-      source: 'version',
-      operation: 'version.apk_recorded',
-      status: 'done',
-      message: 'APK version recorded',
-      jsonData: {
-        version,
-        version_code: versionCode,
-        target_branch: targetBranch,
-        target_commit: shortSha(targetCommit),
-        source_branch: sourceBranch,
-        source_commit: shortSha(sourceCommit)
-      }
-    });
-    return { versionTypeId: 'apk', version };
-  },
-
   recordReleaseVersion() {
     throw new Error('release version rows are disabled');
   },
@@ -234,7 +149,7 @@ export const deploymentMethods = {
     };
 
     return {
-      version: `0.0.${parts.build}`,
+      version: null,
       parts,
       latest,
     };
@@ -244,6 +159,7 @@ export const deploymentMethods = {
     versionTypeId,
     version,
     includedInVersionId,
+    releaseWorkId = null,
     shortChanges,
     detailedChanges,
     reason,
@@ -253,36 +169,43 @@ export const deploymentMethods = {
     targetBranch = null,
     targetCommit = null,
   }) {
-    this.db
+    const saved = this.db
       .prepare(`
         INSERT INTO build_versions (
           version_type_id,
           version,
           included_in_version_id,
+          release_works_id,
           short_changes,
           detailed_changes,
           reason,
           released_at_utc,
           created_at_utc
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(version_type_id, version) DO UPDATE SET
           included_in_version_id = excluded.included_in_version_id,
+          release_works_id = COALESCE(build_versions.release_works_id, excluded.release_works_id),
           short_changes = excluded.short_changes,
           detailed_changes = excluded.detailed_changes,
           reason = excluded.reason,
           released_at_utc = excluded.released_at_utc
+        WHERE build_versions.release_works_id IS NULL
+           OR build_versions.release_works_id = excluded.release_works_id
+        RETURNING id
       `)
-      .run(
+      .get(
         versionTypeId,
         version,
         includedInVersionId,
+        releaseWorkId,
         shortChanges,
         detailedChanges,
         reason,
         releasedAtUtc,
         new Date().toISOString(),
       );
+    if (!saved) throw new Error(`${versionTypeId} ${version} already belongs to another release work`);
     this.db.prepare(`
       INSERT INTO build_version_counters (version_type_id, last_version)
       VALUES (?, ?)
@@ -350,12 +273,6 @@ function formatBuildVersionRow(row) {
     released_at_utc: row.released_at_utc,
     created_at_utc: row.created_at_utc,
   };
-}
-
-function requireLedgerText(value, field) {
-  const text = String(value ?? '').trim();
-  if (!text) throw new Error(`missing accepted build ${field}`);
-  return text;
 }
 
 function shortSha(value) {
