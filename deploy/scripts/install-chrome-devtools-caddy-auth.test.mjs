@@ -44,13 +44,13 @@ test('apply and clear never return credentials', async () => {
   const file = path.join(root, 'credentials.txt');
   fs.writeFileSync(file, 'Domain: admin.brightos.world\nUsername: user\nPassword: secret\n', { mode: 0o600 });
   const calls = [];
-  const page = { url: () => 'https://admin.brightos.world/', authenticate: async (value) => calls.push(value), reload: async () => {} };
+  const page = { url: () => 'https://admin.brightos.world/', setExtraHTTPHeaders: async (value) => calls.push(value), reload: async () => {} };
   const applied = await applyCaddyAuthentication(page, 'apply', file);
   const cleared = await applyCaddyAuthentication(page, 'clear', file);
   assert.deepEqual(applied, { host: 'admin.brightos.world', action: 'apply' });
   assert.deepEqual(cleared, { host: 'admin.brightos.world', action: 'clear' });
-  assert.equal(calls[0].password, 'secret');
-  assert.equal(calls[1], null);
+  assert.equal(calls[0].Authorization, `Basic ${Buffer.from('user:secret').toString('base64')}`);
+  assert.deepEqual(calls[1], {});
   assert.doesNotMatch(JSON.stringify([applied, cleared]), /user|secret/);
 });
 
@@ -66,11 +66,31 @@ test('apply recovers an allowlisted URL from a Chrome error navigation without e
   const page = {
     url: () => 'chrome-error://chromewebdata/',
     createCDPSession: async () => session,
-    authenticate: async (value) => calls.push(value),
+    setExtraHTTPHeaders: async (value) => calls.push(value),
     goto: async (url) => calls.push(url),
   };
   const result = await applyCaddyAuthentication(page, 'apply', file);
   assert.deepEqual(result, { host: 'dev.brai.one', action: 'apply' });
   assert.equal(calls.at(-1), 'https://dev.brai.one/admin');
+  assert.doesNotMatch(JSON.stringify(result), /user|secret/);
+});
+
+test('apply can open an explicit allowlisted URL from a blank isolated page', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'brai-caddy-explicit-'));
+  const file = path.join(root, 'credentials.txt');
+  fs.writeFileSync(file, 'Domain: admin.brightos.world\nUsername: user\nPassword: secret\n', { mode: 0o600 });
+  const calls = [];
+  const page = {
+    url: () => 'about:blank',
+    setExtraHTTPHeaders: async (value) => calls.push(value),
+    goto: async (url) => calls.push(url),
+  };
+  const result = await applyCaddyAuthentication(page, 'apply', file, 'https://d.test.brai.one/auth');
+  assert.deepEqual(result, { host: 'd.test.brai.one', action: 'apply' });
+  assert.equal(calls.at(-1), 'https://d.test.brai.one/auth');
+  await assert.rejects(
+    applyCaddyAuthentication(page, 'apply', file, 'https://example.com/auth'),
+    /not allowed/,
+  );
   assert.doesNotMatch(JSON.stringify(result), /user|secret/);
 });

@@ -104,7 +104,7 @@ export function GoalMembershipPicker({
         <Button type="button" variant="ghost" size="sm" className="justify-self-start" aria-expanded={createOpen} aria-controls={createFieldsId} onClick={() => setCreateOpen((current) => !current)}>Создать цель</Button>
         {createOpen ? (
           <div id={createFieldsId} className="grid gap-2">
-            <Input value={newGoalTitle} maxLength={TITLE_MAX_LENGTH} placeholder="Название новой цели" aria-label="Название новой цели" autoFocus onChange={(event) => setNewGoalTitle(event.target.value)} />
+            <Input id={`${createFieldsId}-title`} name="new-goal-title" value={newGoalTitle} maxLength={TITLE_MAX_LENGTH} placeholder="Название новой цели" aria-label="Название новой цели" autoFocus onChange={(event) => setNewGoalTitle(event.target.value)} />
             <Button type="button" size="sm" disabled={busy || !cleanTitle(newGoalTitle)} onClick={() => void createGoal()}>Создать и добавить</Button>
           </div>
         ) : null}

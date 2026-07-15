@@ -54,7 +54,7 @@ export function ActionsWorkspaceNavigation({
         </header>
         {createOpen ? (
           <form className="flex gap-2 px-2" onSubmit={submitGoal}>
-            <Input value={draft} maxLength={TITLE_MAX_LENGTH} placeholder="Новая цель" aria-label="Название новой цели" autoFocus onChange={(event) => setDraft(event.target.value)} />
+            <Input name="goal-title" value={draft} maxLength={TITLE_MAX_LENGTH} placeholder="Новая цель" aria-label="Название новой цели" autoFocus onChange={(event) => setDraft(event.target.value)} />
             <Button type="submit" size="sm" disabled={!draft.trim()}>Создать</Button>
           </form>
         ) : null}

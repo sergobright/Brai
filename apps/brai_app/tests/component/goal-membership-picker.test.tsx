@@ -50,7 +50,10 @@ describe("GoalMembershipPicker", () => {
     expect(screen.getByText("Нет доступных целей")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Создать цель" }));
     expect(screen.getByRole("button", { name: "Создать цель" })).toHaveAttribute("aria-expanded", "true");
-    fireEvent.change(screen.getByRole("textbox", { name: "Название новой цели" }), { target: { value: "  Новая цель  " } });
+    const title = screen.getByRole("textbox", { name: "Название новой цели" });
+    expect(title).toHaveAttribute("name", "new-goal-title");
+    expect(title).toHaveAttribute("id");
+    fireEvent.change(title, { target: { value: "  Новая цель  " } });
     const create = screen.getByRole("button", { name: "Создать и добавить" });
     fireEvent.click(create);
     fireEvent.click(create);
