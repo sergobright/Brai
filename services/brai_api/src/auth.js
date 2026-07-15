@@ -6,6 +6,7 @@ import { Pool } from 'pg';
 import { isPostgresUrl, postgresPoolMax } from './postgres-sync-db.js';
 
 const DEFAULT_FROM = 'Brai <auth@mail.brai.one>';
+const AUTH_DATABASE_TIMEOUT_MS = 5_000;
 export const OTP_EXPIRES_IN_SECONDS = 5 * 60;
 export const OTP_RESEND_AFTER_SECONDS = 60;
 export const OTP_RESEND_STRATEGY = 'reuse';
@@ -35,7 +36,10 @@ export function createBraiAuth({
   const db = new Pool({
     connectionString: databaseUrl,
     ssl: postgresSsl(databaseUrl),
-    max: postgresPoolMax(process.env.BRAI_PG_POOL_MAX)
+    max: postgresPoolMax(process.env.BRAI_PG_POOL_MAX),
+    connectionTimeoutMillis: AUTH_DATABASE_TIMEOUT_MS,
+    query_timeout: AUTH_DATABASE_TIMEOUT_MS,
+    statement_timeout: AUTH_DATABASE_TIMEOUT_MS
   });
   const resend = resendApiKey ? new Resend(resendApiKey) : null;
   const deliverySender = sendOtp ?? (async ({ email, otp }) => {
@@ -102,6 +106,7 @@ export function createBraiAuth({
 
   return {
     auth,
+    healthCheck: () => db.query('SELECT 1'),
     testEmailLogin: async ({ email, name = email, headers }) => {
       const capture = {};
       const sendResponse = await testOtpCapture.run(capture, () => auth.api.sendVerificationOTP({

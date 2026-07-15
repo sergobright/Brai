@@ -6,13 +6,14 @@ import type {
   TimerSyncResponse,
 } from "@/shared/types/timer";
 import type { ActivitiesState, ActivitiesSyncResponse, PendingActivityEvent } from "@/shared/types/activities";
+import { normalizeContextDecisionsState, type ContextDecisionsState, type ContextDecisionsWireState, type ContextResolutionRequest, type ContextResolutionResponse, type GoalPlanResponse } from "@/shared/types/contextDecisions";
 import type { InboxState, InboxSyncResponse, InboxWorkflowDetails, PendingInboxEvent } from "@/shared/types/inbox";
-
+import { normalizeRelationsState, type PendingRelationEvent, type RelationsState, type RelationsSyncResponse, type RelationsWireState, type RelationsWireSyncResponse } from "@/shared/types/relations";
+import { drainContextReviews, drainRelations } from "./pagination";
 interface RequestOptions extends RequestInit {
   json?: unknown;
   timeoutMs?: number;
 }
-
 const REQUEST_TIMEOUT_MS = 8_000;
 const PROVIDER_READ_TIMEOUT_MS = 20_000;
 const PROVIDER_MUTATION_TIMEOUT_MS = 55_000;
@@ -201,6 +202,15 @@ export type BraiApiError = Error & {
   status?: number;
 };
 
+export class UserScopeChangedError extends Error {
+  status = 409;
+
+  constructor() {
+    super("client_user_scope_changed");
+    this.name = "UserScopeChangedError";
+  }
+}
+
 function authPayload<T extends Record<string, unknown>>(base: T, context?: AuthOnboardingContext): T & Partial<AuthOnboardingContext> {
   const preliminaryUserId = context?.preliminaryUserId || context?.duplicatePreliminaryUserId;
   return {
@@ -216,11 +226,13 @@ function authPayload<T extends Record<string, unknown>>(base: T, context?: AuthO
  * Wraps the Brai HTTP API with typed client methods.
  */
 export class BraiApi {
+  private expectedUserId: string | null = null;
+
   constructor(private readonly baseUrl: string) {}
 
-  async session(): Promise<AuthSession> {
-    return this.request("/auth/session");
-  }
+  setExpectedUserId(userId: string | null): void { this.expectedUserId = userId; }
+
+  async session(): Promise<AuthSession> { return this.request("/auth/session"); }
 
   async requestOtp(email: string): Promise<OtpSendResult> {
     return this.request("/auth/otp/send", {
@@ -243,32 +255,49 @@ export class BraiApi {
     });
   }
 
-  async logout(): Promise<void> {
-    await this.request("/auth/logout", { method: "POST" });
+  async logout(): Promise<void> { await this.request("/auth/logout", { method: "POST" }); }
+  async state(): Promise<TimerState> { return this.request("/v1/timer/state"); }
+  async history(): Promise<HistoryData> { return this.request("/v1/sessions"); }
+  async goal(): Promise<GoalData> { return this.request("/v1/goals/challenge"); }
+  async activities(): Promise<ActivitiesState> { return fromActivitiesState(await this.request<ActivitiesApiState>("/v1/activities")); }
+  async actions(): Promise<ActivitiesState> { return this.activities(); }
+  async inbox(): Promise<InboxState> { return this.request("/v1/inbox"); }
+  async relations(filters: { endpointItemsId?: string; relationTypeId?: string; status?: "active" | "ended"; cursor?: string } = {}): Promise<RelationsState> {
+    if (filters.cursor) return this.relationPage(filters);
+    const first = await this.relationPage(filters);
+    return drainRelations(first, (cursor) => this.relationPage({ ...filters, cursor }));
   }
 
-  async state(): Promise<TimerState> {
-    return this.request("/v1/timer/state");
+  private async relationPage(filters: { endpointItemsId?: string; relationTypeId?: string; status?: "active" | "ended"; cursor?: string }): Promise<RelationsState> {
+    const query = new URLSearchParams();
+    if (filters.endpointItemsId) query.set("endpoint_items_id", filters.endpointItemsId);
+    if (filters.relationTypeId) query.set("relation_type_id", filters.relationTypeId);
+    if (filters.status) query.set("status", filters.status);
+    if (filters.cursor) query.set("cursor", filters.cursor);
+    return normalizeRelationsState(await this.request<RelationsWireState>(`/v1/relations${query.size ? `?${query}` : ""}`));
   }
 
-  async history(): Promise<HistoryData> {
-    return this.request("/v1/sessions");
+  async contextDecisions(status: "pending" | "audit" | "auto_accepted" | "audit_confirmed" = "pending"): Promise<ContextDecisionsState> {
+    const requested = status ?? "pending";
+    return drainContextReviews(await this.contextDecisionPage(requested),
+      (pageStatus, cursor) => this.contextDecisionPage(pageStatus, cursor), requested);
   }
 
-  async goal(): Promise<GoalData> {
-    return this.request("/v1/goals/challenge");
+  private async contextDecisionPage(status: "pending" | "audit" | "auto_accepted" | "audit_confirmed", cursor?: string | null): Promise<ContextDecisionsState> {
+    const query = new URLSearchParams({ status });
+    if (cursor) query.set("cursor", cursor);
+    return normalizeContextDecisionsState(await this.request<ContextDecisionsWireState>(`/v1/context-decisions?${query}`));
   }
-
-  async activities(): Promise<ActivitiesState> {
-    return fromActivitiesState(await this.request<ActivitiesApiState>("/v1/activities"));
+  async resolveContextDecision(id: string, resolution: ContextResolutionRequest): Promise<ContextResolutionResponse> {
+    return this.request(`/v1/context-decisions/${encodeURIComponent(id)}/resolve`, { method: "POST", json: resolution });
   }
-
-  async actions(): Promise<ActivitiesState> {
-    return this.activities();
+  async resolveContextAudit(id: string, resolution: ContextResolutionRequest): Promise<ContextResolutionResponse> {
+    return this.request(`/v1/context-audits/${encodeURIComponent(id)}/resolve`, { method: "POST", json: resolution });
   }
+  async undoContextDecision(id: string, idempotencyKey: string): Promise<ContextResolutionResponse> { return this.request(`/v1/context-decisions/${encodeURIComponent(id)}/undo`, { method: "POST", json: { idempotency_key: idempotencyKey } }); }
 
-  async inbox(): Promise<InboxState> {
-    return this.request("/v1/inbox");
+  async requestGoalPlan(itemsId: string): Promise<GoalPlanResponse> {
+    return this.request(`/v1/goals/${encodeURIComponent(itemsId)}/plan`, { method: "POST" });
   }
 
   async inboxWorkflow(inboxId: string): Promise<InboxWorkflowDetails> {
@@ -364,13 +393,8 @@ export class BraiApi {
     });
   }
 
-  async draws(): Promise<{ draws: DrawSceneSummary[] }> {
-    return this.request("/v1/draws");
-  }
-
-  async draw(name: string): Promise<DrawScene> {
-    return this.request(`/v1/draws/${encodeURIComponent(name)}`);
-  }
+  async draws(): Promise<{ draws: DrawSceneSummary[] }> { return this.request("/v1/draws"); }
+  async draw(name: string): Promise<DrawScene> { return this.request(`/v1/draws/${encodeURIComponent(name)}`); }
 
   async saveDraw(name: string, scene: Record<string, unknown>): Promise<DrawScene> {
     return this.request(`/v1/draws/${encodeURIComponent(name)}`, {
@@ -395,11 +419,7 @@ export class BraiApi {
     return this.request("/v1/timer/events/sync", {
       method: "POST",
       json: {
-        device: {
-          device_id: params.deviceId,
-          platform: params.platform,
-          display_name: params.platform === "android" ? "Brai Android" : "Brai Web",
-        },
+        device: devicePayload(params.deviceId, params.platform),
         last_known_server_time_utc: params.lastKnownServerTimeUtc ?? null,
         events: params.events.map((event) => ({
           event_id: event.eventId,
@@ -424,11 +444,7 @@ export class BraiApi {
     const response = await this.request<ActivitiesApiSyncResponse>("/v1/activities/events/sync", {
       method: "POST",
       json: {
-        device: {
-          device_id: params.deviceId,
-          platform: params.platform,
-          display_name: params.platform === "android" ? "Brai Android" : "Brai Web",
-        },
+        device: devicePayload(params.deviceId, params.platform),
         last_known_server_time_utc: params.lastKnownServerTimeUtc ?? null,
         events: params.events.map((event) => ({
           event_id: event.eventId,
@@ -463,11 +479,7 @@ export class BraiApi {
     return this.request("/v1/inbox/events/sync", {
       method: "POST",
       json: {
-        device: {
-          device_id: params.deviceId,
-          platform: params.platform,
-          display_name: params.platform === "android" ? "Brai Android" : "Brai Web",
-        },
+        device: devicePayload(params.deviceId, params.platform),
         last_known_server_time_utc: params.lastKnownServerTimeUtc ?? null,
         events: params.events.map((event) => ({
           event_id: event.eventId,
@@ -483,9 +495,36 @@ export class BraiApi {
     });
   }
 
+  async syncRelationEvents(params: {
+    deviceId: string;
+    platform: string;
+    events: PendingRelationEvent[];
+    lastKnownServerTimeUtc?: string | null;
+  }): Promise<RelationsSyncResponse> {
+    const response = await this.request<RelationsWireSyncResponse>("/v1/relations/events/sync", {
+      method: "POST",
+      json: {
+        device: devicePayload(params.deviceId, params.platform),
+        last_known_server_time_utc: params.lastKnownServerTimeUtc ?? null,
+        events: params.events.map((event) => ({
+          event_id: event.eventId,
+          client_sequence: event.clientSequence,
+          change_type: event.type,
+          relation_id: event.relationId,
+          occurred_at_utc: event.occurredAtUtc,
+          base_server_revision: event.baseServerRevision,
+          payload_version: event.payloadVersion,
+          payload: event.payload,
+        })),
+      },
+    });
+    return { ...response, deferred_events: response.deferred_events ?? [], state: normalizeRelationsState(response.state) };
+  }
+
   liveUrl(): string {
     const target = new URL(resolvePath(this.baseUrl, "/v1/live"), window.location.href);
     target.protocol = target.protocol === "https:" ? "wss:" : "ws:";
+    if (this.expectedUserId !== null) target.searchParams.set("expected_user_id", this.expectedUserId);
     return target.toString();
   }
 
@@ -493,6 +532,7 @@ export class BraiApi {
     const { json, timeoutMs = REQUEST_TIMEOUT_MS, ...requestOptions } = options;
     const headers = new Headers(requestOptions.headers);
     if (json !== undefined) headers.set("content-type", "application/json");
+    if (this.expectedUserId !== null && path.startsWith("/v1/")) headers.set("x-brai-expected-user-id", this.expectedUserId);
     const controller = new AbortController();
     const abortRequest = () => controller.abort();
     if (requestOptions.signal?.aborted) abortRequest();
@@ -514,6 +554,10 @@ export class BraiApi {
     }
 
     if (!response.ok) {
+      if (response.status === 409) {
+        const payload = await response.clone().json().catch(() => null) as { error?: unknown } | null;
+        if (payload?.error === "user_scope_changed") throw new UserScopeChangedError();
+      }
       const error = new Error(`brai_api_${response.status}`) as BraiApiError;
       try {
         const payload = await response.json() as { error?: unknown };
@@ -537,6 +581,9 @@ interface ActivitiesApiState {
   server_revision: number;
   activities: ActivitiesState["actions"];
   archived_activities?: ActivitiesState["archived_actions"];
+  legacy_operations?: NonNullable<ActivitiesState["legacy_operations"]>;
+  goals?: NonNullable<ActivitiesState["goals"]>;
+  archived_goals?: NonNullable<ActivitiesState["archived_goals"]>;
 }
 
 interface ActivitiesApiSyncResponse {
@@ -588,8 +635,22 @@ function fromActivitiesState(state: ActivitiesApiState): ActivitiesState {
   return {
     server_time_utc: state.server_time_utc,
     server_revision: state.server_revision,
-    actions: state.activities,
+    actions: state.activities.filter((item) => (item.activity_type_id ?? "action") === "action"),
     archived_actions: state.archived_activities ?? [],
+    legacy_operations: [
+      ...state.activities.filter((item) => item.activity_type_id === "operation"),
+      ...(state.legacy_operations ?? []),
+    ],
+    goals: state.goals ?? [],
+    archived_goals: state.archived_goals ?? [],
+  };
+}
+
+function devicePayload(deviceId: string, platform: string) {
+  return {
+    device_id: deviceId,
+    platform,
+    display_name: platform === "android" ? "Brai Android" : "Brai Web",
   };
 }
 

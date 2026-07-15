@@ -56,6 +56,10 @@ for (const filePath of lines(git(["ls-tree", "-r", "--name-only", "HEAD"]))) {
   checkPath("current tree", filePath);
 }
 
+for (const filePath of lines(git(["ls-files", "-co", "--exclude-standard"]))) {
+  checkPath("working tree", filePath);
+}
+
 for (const line of lines(git(["rev-list", "--objects", "HEAD"]))) {
   const firstSpace = line.indexOf(" ");
   if (firstSpace !== -1) checkPath("reachable history", line.slice(firstSpace + 1));
@@ -67,7 +71,7 @@ for (const commit of lines(git(["rev-list", "HEAD"]))) {
     [
       "grep",
       "-I",
-      "-n",
+      "-l",
       "-E",
       contentPattern,
       commit,
@@ -79,7 +83,19 @@ for (const commit of lines(git(["rev-list", "HEAD"]))) {
   );
 
   if (grep.status === 0) {
-    failures.push(`forbidden content in ${commit.slice(0, 12)}:\n${grep.stdout.trim()}`);
+    failures.push(`forbidden content in ${commit.slice(0, 12)}: ${lines(grep.stdout).join(", ")}`);
+  } else if (grep.status !== 1) {
+    failCommand("git grep", grep);
+  }
+}
+
+for (const args of [
+  ["grep", "--cached", "-I", "-l", "-E", contentPattern, "--", ".", ":(exclude)scripts/check-public-branch.mjs"],
+  ["grep", "--untracked", "-I", "-l", "-E", contentPattern, "--", ".", ":(exclude)scripts/check-public-branch.mjs"],
+]) {
+  const grep = spawnSync("git", args, { encoding: "utf8" });
+  if (grep.status === 0) {
+    failures.push(`forbidden content in working tree: ${lines(grep.stdout).join(", ")}`);
   } else if (grep.status !== 1) {
     failCommand("git grep", grep);
   }

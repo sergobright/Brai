@@ -1,6 +1,6 @@
 "use client";
 
-import type { CSSProperties, HTMLAttributes } from "react";
+import type { CSSProperties, HTMLAttributes, ReactNode } from "react";
 import { closestCenter, DndContext, KeyboardSensor, MouseSensor, TouchSensor, useSensor, useSensors, type DragEndEvent, type DraggableAttributes, type DraggableSyntheticListeners } from "@dnd-kit/core";
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
@@ -27,6 +27,7 @@ export function SortableActionList({
   activeActivityElapsedSeconds = 0,
   onStartFocus,
   onStopFocus,
+  renderAfter,
 }: {
   actions: ActivityItem[];
   selectedActionId: string | null;
@@ -43,6 +44,7 @@ export function SortableActionList({
   onReorder: (orderedIds: string[], movedAction: ActivityItem) => Promise<void>;
   onStartFocus?: (action: ActivityItem) => Promise<void>;
   onStopFocus?: (action: ActivityItem) => Promise<void>;
+  renderAfter?: (action: ActivityItem) => ReactNode;
   titleDrafts?: Record<string, string>;
   onTitleDraftChange?: (actionId: string, title: string | null) => void;
 }) {
@@ -70,25 +72,27 @@ export function SortableActionList({
     <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
       <SortableContext items={ids} strategy={verticalListSortingStrategy}>
         {actions.map((action) => (
-          <SortableActionRow
-            key={action.id}
-            action={action}
-            titleDraft={titleDrafts[action.id]}
-            selected={selectedActionId === action.id}
-            onSelect={(focusDetailTitle) => onSelect(action.id, focusDetailTitle)}
-            onEditMobile={onEditMobile}
-            onUpdateTitle={onUpdateTitle}
-            onTitleDraftChange={onTitleDraftChange}
-            onSetStatus={onSetStatus}
-            onDelete={onDelete}
-            activeFocus={activeActivityId === action.id}
-            activeFocusElapsedSeconds={activeActivityId === action.id ? activeActivityElapsedSeconds : 0}
-            onStartFocus={onStartFocus}
-            onStopFocus={onStopFocus}
-            deleteOpen={openDeleteActionId === action.id}
-            onOpenDelete={() => onOpenDelete(action.id)}
-            onCloseDelete={onCloseDelete}
-          />
+          <div key={action.id} className="min-w-0">
+            <SortableActionRow
+              action={action}
+              titleDraft={titleDrafts[action.id]}
+              selected={selectedActionId === action.id}
+              onSelect={(focusDetailTitle) => onSelect(action.id, focusDetailTitle)}
+              onEditMobile={onEditMobile}
+              onUpdateTitle={onUpdateTitle}
+              onTitleDraftChange={onTitleDraftChange}
+              onSetStatus={onSetStatus}
+              onDelete={onDelete}
+              activeFocus={activeActivityId === action.id}
+              activeFocusElapsedSeconds={activeActivityId === action.id ? activeActivityElapsedSeconds : 0}
+              onStartFocus={onStartFocus}
+              onStopFocus={onStopFocus}
+              deleteOpen={openDeleteActionId === action.id}
+              onOpenDelete={() => onOpenDelete(action.id)}
+              onCloseDelete={onCloseDelete}
+            />
+            {renderAfter?.(action)}
+          </div>
         ))}
       </SortableContext>
     </DndContext>

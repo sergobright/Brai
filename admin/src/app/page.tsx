@@ -1,8 +1,9 @@
 import Link from "next/link";
 import { headers } from "next/headers";
 import type { ReactNode } from "react";
-import { ArrowDownUp, CalendarClock, ChevronDown, ChevronFirst, ChevronLast, ChevronLeft, ChevronRight, CloudCog, Command, Database, FileKey2, Table2, Webhook, Workflow } from "lucide-react";
+import { ArrowDownUp, CalendarClock, ChevronDown, ChevronFirst, ChevronLast, ChevronLeft, ChevronRight, CloudCog, Command, Database, FileKey2, Network, Table2, Webhook, Workflow } from "lucide-react";
 import { RoleContractsRail, RoleContractsWorkspace, WorkflowsRail, WorkflowsWorkspace, type RoleFilters, type WorkflowFilters } from "@/app/admin-observability";
+import { ContextObservabilityRail, ContextObservabilityWorkspace, type ContextFilters } from "@/app/ContextObservabilitySection";
 import { AdminInteractionFeedback } from "@/app/admin-observability-client";
 import { AnimatedThemeToggler } from "@/shared/ui/animated-theme-toggler";
 import { BraiCmdAdminSection } from "@/app/BraiCmdAdminSection";
@@ -15,6 +16,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { formatBytes, formatCell } from "@/lib/format";
 import { PAGE_SIZE, readDatabaseView, readPrimaryUserId, readRoleContractsAdmin, readWorkflowAdminSummary } from "@/lib/database";
 import { readBraiCmdAdminSummary } from "@/lib/braiCmdSummary";
+import { readContextObservability } from "@/lib/contextObservability";
 import type { DbForeignKey, DbIncomingForeignKey, DbSortDirection, DbTable, DbView } from "@/lib/database";
 import { readPreviewSlots, type PreviewSlot, type PreviewSlotsSummary } from "@/lib/previewSlots";
 
@@ -25,7 +27,7 @@ type SearchParams = Promise<Record<string, string | string[] | undefined>>;
 type AdminAccess = { status: "allowed" | "forbidden" | "not_configured" | "signed_out" | "unavailable" };
 type AdminSessionResponse = { authenticated?: boolean; user?: { id?: unknown } | null };
 type RequestHeaders = { get(name: string): string | null };
-type SectionName = "database" | "handlers" | "schedules" | "workflows" | "role-contracts" | "brai-cmd" | "previews";
+type SectionName = "database" | "handlers" | "schedules" | "workflows" | "role-contracts" | "context" | "brai-cmd" | "previews";
 type TabName = "rows" | "relations" | "columns" | "indexes";
 
 export default async function Home({ searchParams }: { searchParams: SearchParams }) {
@@ -75,6 +77,10 @@ export default async function Home({ searchParams }: { searchParams: SearchParam
     tab: first(params.tab),
     workflowFilter: first(params.workflowFilter),
   };
+  const contextFilters: ContextFilters = {
+    tab: first(params.tab),
+    relationPage: first(params.relationPage),
+  };
   const workflowSummary = activeSection === "workflows" ? await readWorkflowAdminSummary({
     cursor: workflowFilters.cursor,
     dateFrom: workflowFilters.dateFrom,
@@ -90,6 +96,9 @@ export default async function Home({ searchParams }: { searchParams: SearchParam
     workflowId: workflowFilters.workflow,
   }) : null;
   const roleContracts = activeSection === "role-contracts" ? await readRoleContractsAdmin({ roleId: roleFilters.role }) : null;
+  const contextSummary = activeSection === "context" ? await readContextObservability({
+    relationPage: Number(contextFilters.relationPage),
+  }) : null;
   const selectedName = view.selectedTable?.name ?? "";
 
   return (
@@ -102,6 +111,8 @@ export default async function Home({ searchParams }: { searchParams: SearchParam
         <WorkflowsRail filters={workflowFilters} summary={workflowSummary} />
       ) : activeSection === "role-contracts" && roleContracts ? (
         <RoleContractsRail filters={roleFilters} summary={roleContracts} />
+      ) : activeSection === "context" && contextSummary ? (
+        <ContextObservabilityRail filters={contextFilters} summary={contextSummary} />
       ) : activeSection === "schedules" ? (
         <SchedulesRail count={view.selectedTable?.name === "handler_schedules" ? view.rowCount : 0} />
       ) : activeSection === "brai-cmd" && braiCmdSummary ? (
@@ -120,6 +131,8 @@ export default async function Home({ searchParams }: { searchParams: SearchParam
               <WorkflowsWorkspace filters={workflowFilters} summary={workflowSummary} />
             ) : activeSection === "role-contracts" && roleContracts ? (
               <RoleContractsWorkspace filters={roleFilters} summary={roleContracts} />
+            ) : activeSection === "context" && contextSummary ? (
+              <ContextObservabilityWorkspace filters={contextFilters} summary={contextSummary} />
             ) : activeSection === "schedules" ? (
               <SchedulesSection sortDirection={sortDirection} view={view} />
             ) : activeSection === "brai-cmd" && braiCmdSummary ? (
@@ -359,6 +372,15 @@ function PrimaryRail({ activeSection }: { activeSection: SectionName }) {
         >
           <FileKey2 className="size-5" />
           <span className="sr-only">Role contracts</span>
+        </ButtonLink>
+        <ButtonLink
+          aria-current={activeSection === "context" ? "page" : undefined}
+          href="/?section=context"
+          size="icon-lg"
+          variant={activeSection === "context" ? "default" : "outline"}
+        >
+          <Network className="size-5" />
+          <span className="sr-only">Relations and context agents</span>
         </ButtonLink>
         <ButtonLink
           aria-current={activeSection === "brai-cmd" ? "page" : undefined}
@@ -1164,6 +1186,7 @@ function parseSection(value: string | undefined): SectionName {
   if (value === "handlers") return "handlers";
   if (value === "workflows") return "workflows";
   if (value === "role-contracts") return "role-contracts";
+  if (value === "context") return "context";
   if (value === "previews") return "previews";
   return value === "brai-cmd" ? "brai-cmd" : "database";
 }

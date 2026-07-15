@@ -49,6 +49,39 @@ describe("preview Activity cache recovery", () => {
     expect(await clientDb().actions_cache.count()).toBe(0);
     expect(await pendingActivityEvents()).toHaveLength(0);
   });
+
+  it("clears ownerless cache and outbox before binding the first authenticated user", async () => {
+    await saveActivitiesState(state(20, "Данные без владельца"));
+    await enqueueActivityEvent({
+      type: "create",
+      payload: { title: "Не присваивать первому пользователю" },
+      baseServerRevision: 20,
+    });
+
+    expect(await clientDb().meta.get("currentUserId")).toBeUndefined();
+    expect(await clientDb().actions_cache.count()).toBe(1);
+    expect(await pendingActivityEvents()).toHaveLength(1);
+
+    await ensureClientUser("user-1");
+
+    expect(await getMeta<string>("currentUserId")).toBe("user-1");
+    expect(await getMeta<number>("lastActionServerRevision")).toBeNull();
+    expect(await clientDb().actions_cache.count()).toBe(0);
+    expect(await pendingActivityEvents()).toHaveLength(0);
+  });
+
+  it("does not let a stale tab clear the newly bound owner's data", async () => {
+    await ensureClientUser("user-1");
+    await ensureClientUser("user-2");
+    await saveActivitiesState(state(30, "Данные второго пользователя"), "user-2");
+
+    await expect(ensureClientUser(null, "user-1")).rejects.toMatchObject({
+      name: "ClientUserScopeChangedError",
+    });
+
+    expect(await getMeta<string>("currentUserId")).toBe("user-2");
+    expect((await loadActivitiesState("user-2"))?.actions[0].title).toBe("Данные второго пользователя");
+  });
 });
 
 function state(serverRevision: number, title: string): ActivitiesState {

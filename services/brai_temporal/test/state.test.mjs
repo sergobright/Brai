@@ -1,6 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { applyPreviewEvent, applyPromotionEvent, createPreviewState, createPromotionState } from "../src/state.mjs";
+import {
+  applyPreviewEvent,
+  applyPromotionEvent,
+  createPreviewState,
+  createPromotionState,
+  previewDeployWorkflowId,
+  previewReadyForSha
+} from "../src/state.mjs";
 
 test("preview deploy failure is retained as waiting_for_fix", () => {
   const state = createPreviewState({ branch: "codex/fake", sha: "a1" });
@@ -65,8 +72,53 @@ test("new preview push resets checks and deploy gates for the new sha", () => {
   assert.equal(state.previewDeploy, "not_started");
   assert.equal(state.tasks.checks.status, "pending");
   assert.equal(state.tasks.supabase_preview.status, "pending");
+  assert.equal(state.tasks.goal_agents_deploy.status, "pending");
   assert.equal(state.tasks.preview_deploy.status, "pending");
   assert.equal(state.gates.complete, false);
+});
+
+test("late events from A cannot overwrite authoritative preview head B", () => {
+  const state = createPreviewState({ branch: "codex/race", sha: "a1" });
+  for (const type of ["checks_passed", "supabase_preview_passed", "goal_agents_deploy_passed", "preview_deploy_passed"]) {
+    applyPreviewEvent(state, { type, sha: "a1", slot: "A" });
+  }
+  assert.equal(previewReadyForSha(state, "a1"), true);
+
+  applyPreviewEvent(state, { type: "branch_pushed", sha: "b2" });
+  const afterB = structuredClone(state);
+  for (const type of ["checks_failed", "supabase_preview_passed", "goal_agents_deploy_passed", "preview_deploy_passed", "branch_pushed"]) {
+    applyPreviewEvent(state, { type, sha: "a1", slot: "A", reason: "late A" });
+  }
+
+  assert.deepEqual(state, afterB);
+  assert.equal(state.lastSha, "b2");
+  assert.equal(previewReadyForSha(state, "a1"), false);
+  assert.equal(previewReadyForSha(state, "b2"), false);
+
+  for (const type of ["checks_passed", "supabase_preview_passed", "goal_agents_deploy_passed", "preview_deploy_passed"]) {
+    applyPreviewEvent(state, { type, sha: "b2", slot: "B" });
+  }
+  assert.equal(state.status, "ready_for_review");
+  assert.equal(previewReadyForSha(state, "b2"), true);
+});
+
+test("new-SHA classification may arrive before branch_pushed without allowing an old SHA to return", () => {
+  const state = createPreviewState({ branch: "codex/classification-race", sha: "a1" });
+  applyPreviewEvent(state, { type: "delivery_classified", sha: "b2", deliveryClass: "runtime-preview" });
+  assert.equal(state.lastSha, "b2");
+  assert.equal(state.tasks.delivery_classification.sha, "b2");
+  assert.equal(state.tasks.delivery_classification.status, "passed");
+
+  applyPreviewEvent(state, { type: "branch_pushed", sha: "a1" });
+  assert.equal(state.lastSha, "b2");
+  assert.equal(state.tasks.delivery_classification.status, "passed");
+});
+
+test("SHA-isolated preview deploy workflow ids include the full requested head", () => {
+  assert.equal(
+    previewDeployWorkflowId("codex/relations", "0123456789abcdef"),
+    "brai:preview-deploy:codex/relations:0123456789abcdef"
+  );
 });
 
 test("late branch_pushed for the same sha preserves classification", () => {
@@ -78,6 +130,7 @@ test("late branch_pushed for the same sha preserves classification", () => {
   assert.equal(state.deliveryClass, "infra-docs");
   assert.equal(state.tasks.delivery_classification.status, "passed");
   assert.equal(state.tasks.supabase_preview.status, "not_applicable");
+  assert.equal(state.tasks.goal_agents_deploy.status, "not_applicable");
   assert.equal(state.tasks.preview_deploy.status, "not_applicable");
 });
 
@@ -96,6 +149,7 @@ test("accepted preview release is not terminal before promotion metadata passed"
   applyPreviewEvent(state, { type: "delivery_classified", sha: "a1", deliveryClass: "runtime-preview" });
   applyPreviewEvent(state, { type: "checks_passed", sha: "a1" });
   applyPreviewEvent(state, { type: "supabase_preview_passed", sha: "a1" });
+  applyPreviewEvent(state, { type: "goal_agents_deploy_passed", sha: "a1" });
   applyPreviewEvent(state, { type: "preview_deploy_passed", sha: "a1", slot: "A" });
   applyPreviewEvent(state, { type: "pr_merged", sha: "a1" });
   applyPreviewEvent(state, { type: "supabase_preview_release_started", sha: "a1", source: "complete-accepted-previews" });
@@ -127,15 +181,17 @@ test("preview deploy retry clears stale task blocker", () => {
 test("preview deploy request clears stale deploy blockers before activity starts", () => {
   const state = createPreviewState({ branch: "codex/fake", sha: "a1" });
   applyPreviewEvent(state, { type: "supabase_preview_failed", sha: "a1" });
+  applyPreviewEvent(state, { type: "goal_agents_deploy_failed", sha: "a1" });
   applyPreviewEvent(state, { type: "preview_deploy_failed", sha: "a1" });
 
   assert.equal(state.status, "waiting_for_fix");
-  assert.equal(state.blockers.length, 2);
+  assert.equal(state.blockers.length, 3);
 
   applyPreviewEvent(state, { type: "preview_deploy_requested", sha: "a1" });
 
   assert.equal(state.status, "preview_deploy_requested");
   assert.equal(state.tasks.supabase_preview.status, "pending");
+  assert.equal(state.tasks.goal_agents_deploy.status, "pending");
   assert.equal(state.tasks.preview_deploy.status, "pending");
   assert.equal(state.blocker, null);
 });
@@ -181,6 +237,7 @@ test("infra docs delivery completes without preview slot release", () => {
   assert.equal(state.previewDeploy, "not_applicable");
   assert.equal(state.slot, "");
   assert.equal(state.tasks.preview_deploy.status, "not_applicable");
+  assert.equal(state.tasks.goal_agents_deploy.status, "not_applicable");
   assert.equal(state.tasks.accepted_preview_promotion.status, "not_applicable");
   assert.equal(state.tasks.supabase_preview.status, "not_applicable");
   assert.equal(state.tasks.supabase_preview_release.status, "not_applicable");
@@ -206,6 +263,7 @@ test("technical no-preview delivery completes without preview slot release", () 
   assert.equal(state.deliveryClass, "technical-no-preview");
   assert.equal(state.previewDeploy, "not_applicable");
   assert.equal(state.tasks.preview_deploy.status, "not_applicable");
+  assert.equal(state.tasks.goal_agents_deploy.status, "not_applicable");
   assert.equal(state.tasks.accepted_preview_promotion.status, "not_applicable");
   assert.equal(state.tasks.supabase_preview.status, "not_applicable");
   assert.equal(state.tasks.supabase_preview_release.status, "not_applicable");
@@ -255,11 +313,13 @@ test("dev promotion completes after Supabase migration, version record, and depl
   applyPromotionEvent(state, { type: "dev_deploy_started", sha: "b1" });
   applyPromotionEvent(state, { type: "dev_supabase_migration_started", sha: "b1" });
   applyPromotionEvent(state, { type: "dev_supabase_migration_passed", sha: "b1" });
+  applyPromotionEvent(state, { type: "goal_agents_deploy_passed", sha: "b1" });
   applyPromotionEvent(state, { type: "dev_version_recorded", sha: "b1" });
   applyPromotionEvent(state, { type: "dev_deploy_passed", sha: "b1" });
 
   assert.equal(state.status, "dev_deploy_passed");
   assert.equal(state.tasks.supabase_migration.status, "passed");
+  assert.equal(state.tasks.goal_agents_deploy.status, "passed");
   assert.equal(state.tasks.version_recorded.status, "passed");
   assert.equal(state.tasks.accepted_previews.status, "not_applicable");
   assert.equal(state.terminal, true);
@@ -270,6 +330,7 @@ test("prod promotion completes after accepted previews, version record, and depl
   applyPromotionEvent(state, { type: "prod_deploy_started", sha: "c1" });
   applyPromotionEvent(state, { type: "supabase_prod_migration_started", sha: "c1" });
   applyPromotionEvent(state, { type: "supabase_prod_migration_passed", sha: "c1" });
+  applyPromotionEvent(state, { type: "goal_agents_deploy_passed", sha: "c1" });
   applyPromotionEvent(state, { type: "accepted_previews_started", sha: "c1" });
   applyPromotionEvent(state, { type: "prod_version_recorded", sha: "c1" });
   applyPromotionEvent(state, { type: "accepted_previews_passed", sha: "c1" });
@@ -278,13 +339,14 @@ test("prod promotion completes after accepted previews, version record, and depl
   assert.equal(state.status, "prod_deploy_passed");
   assert.equal(state.tasks.deploy.status, "passed");
   assert.equal(state.tasks.supabase_migration.status, "passed");
+  assert.equal(state.tasks.goal_agents_deploy.status, "passed");
   assert.equal(state.tasks.version_recorded.status, "passed");
   assert.equal(state.tasks.accepted_previews.status, "passed");
   assert.equal(state.terminal, true);
   assert.equal(state.gates.complete, true);
 });
 
-test("runtime preview is ready only after checks, Supabase branch, and deploy pass", () => {
+test("runtime preview is ready only after checks, Supabase, Goal agents, and deploy pass", () => {
   const state = createPreviewState({ branch: "codex/runtime", sha: "r1" });
   applyPreviewEvent(state, { type: "checks_passed", sha: "r1" });
   applyPreviewEvent(state, { type: "preview_deploy_passed", sha: "r1", slot: "C" });
@@ -293,9 +355,13 @@ test("runtime preview is ready only after checks, Supabase branch, and deploy pa
 
   applyPreviewEvent(state, { type: "supabase_preview_started", sha: "r1" });
   applyPreviewEvent(state, { type: "supabase_preview_passed", sha: "r1" });
+  assert.equal(state.status, "supabase_preview_passed");
+
+  applyPreviewEvent(state, { type: "goal_agents_deploy_passed", sha: "r1" });
 
   assert.equal(state.status, "ready_for_review");
   assert.equal(state.tasks.supabase_preview.status, "passed");
+  assert.equal(state.tasks.goal_agents_deploy.status, "passed");
 });
 
 test("Supabase preview release failure blocks slot release completion", () => {
@@ -326,17 +392,33 @@ test("promotion request clears stale promotion blockers before activity starts",
   applyPromotionEvent(state, { type: "prod_deploy_started", sha: "c4" });
   applyPromotionEvent(state, { type: "accepted_previews_started", sha: "c4" });
   applyPromotionEvent(state, { type: "accepted_previews_failed", sha: "c4" });
+  applyPromotionEvent(state, { type: "goal_agents_deploy_failed", sha: "c4" });
   applyPromotionEvent(state, { type: "prod_deploy_failed", sha: "c4" });
 
   assert.equal(state.status, "waiting_for_fix");
-  assert.equal(state.blockers.length, 2);
+  assert.equal(state.blockers.length, 3);
 
   applyPromotionEvent(state, { type: "promotion_requested", sha: "c4" });
 
   assert.equal(state.status, "promotion_requested");
   assert.equal(state.tasks.accepted_previews.status, "pending");
+  assert.equal(state.tasks.goal_agents_deploy.status, "pending");
   assert.equal(state.tasks.deploy.status, "pending");
   assert.equal(state.blocker, null);
+});
+
+test("Goal agent deploy failure blocks delivery independently", () => {
+  const preview = createPreviewState({ branch: "codex/runtime", sha: "g1" });
+  applyPreviewEvent(preview, { type: "goal_agents_deploy_started", sha: "g1" });
+  applyPreviewEvent(preview, { type: "goal_agents_deploy_failed", sha: "g1", reason: "poller missing" });
+  assert.equal(preview.status, "waiting_for_fix");
+  assert.equal(preview.blocker.task, "goal_agents_deploy");
+
+  const promotion = createPromotionState({ target: "dev", sha: "g2" });
+  applyPromotionEvent(promotion, { type: "goal_agents_deploy_started", sha: "g2" });
+  applyPromotionEvent(promotion, { type: "goal_agents_deploy_failed", sha: "g2", reason: "build mismatch" });
+  assert.equal(promotion.status, "waiting_for_fix");
+  assert.equal(promotion.blocker.task, "goal_agents_deploy");
 });
 
 test("explicit terminal preview outcomes close stale lifecycles", () => {

@@ -1,4 +1,13 @@
-import { condition, defineQuery, defineSignal, proxyActivities, setHandler } from "@temporalio/workflow";
+import {
+  ActivityCancellationType,
+  condition,
+  defineQuery,
+  defineSignal,
+  isCancellation,
+  proxyActivities,
+  setHandler,
+  workflowInfo
+} from "@temporalio/workflow";
 import {
   EVENT_SIGNAL,
   STATE_QUERY,
@@ -10,6 +19,8 @@ import {
 
 const activities = proxyActivities({
   startToCloseTimeout: "8 hours",
+  heartbeatTimeout: "15 seconds",
+  cancellationType: ActivityCancellationType.WAIT_CANCELLATION_COMPLETED,
   retry: { maximumAttempts: 1 }
 });
 
@@ -30,6 +41,7 @@ export async function BranchPreviewWorkflow(input) {
 
   setHandler(eventSignal, (event) => {
     if (PREVIEW_REQUESTS.has(event?.type)) {
+      if (event?.sha && state.lastSha && event.sha !== state.lastSha) return;
       applyPreviewEvent(state, event);
       requests.push(event);
       return;
@@ -45,6 +57,35 @@ export async function BranchPreviewWorkflow(input) {
     }
   }
 
+  return state;
+}
+
+export async function BranchPreviewDeployWorkflow(input) {
+  const state = createPreviewState(input);
+  const info = workflowInfo();
+  state.workflowId = info.workflowId;
+  state.taskQueue = info.taskQueue;
+  setHandler(stateQuery, () => state);
+  applyPreviewEvent(state, {
+    type: "delivery_classified",
+    deliveryClass: "preview",
+    sha: input.sha,
+    at: input.at,
+    source: input.source || "exact-sha-preview-deploy"
+  });
+  applyPreviewEvent(state, {
+    type: "checks_passed",
+    sha: input.sha,
+    at: input.at,
+    source: input.source || "exact-sha-preview-deploy"
+  });
+  await runPreviewDeploy(state, {
+    type: "preview_deploy_requested",
+    sha: input.sha,
+    baseSha: input.baseSha || "",
+    at: input.at,
+    source: input.source || "exact-sha-preview-deploy"
+  });
   return state;
 }
 
@@ -88,18 +129,39 @@ async function runPreviewDeploy(state, request) {
   applyPreviewEvent(state, eventLike(request, "preview_deploy_started"));
   applyPreviewEvent(state, eventLike(request, "supabase_preview_started"));
 
+  let result;
   try {
-    const result = await activities.deployBranch({
+    result = await activities.deployBranch({
       branch: state.branch,
       sha: request.sha || state.lastSha,
       baseSha: request.baseSha || ""
     });
     const passed = { slot: result.previewSlot || request.slot || "" };
     applyPreviewEvent(state, eventLike(request, "supabase_preview_passed", passed));
-    applyPreviewEvent(state, eventLike(request, "preview_deploy_passed", passed));
   } catch (error) {
+    if (isCancellation(error)) throw error;
     const failed = { reason: reasonFromError(error), slot: request.slot || "" };
     applyPreviewEvent(state, eventLike(request, "supabase_preview_failed", failed));
+    applyPreviewEvent(state, eventLike(request, "preview_deploy_failed", failed));
+    return;
+  }
+
+  applyPreviewEvent(state, eventLike(request, "goal_agents_deploy_started", {
+    slot: result.previewSlot || request.slot || ""
+  }));
+  try {
+    const verified = await activities.verifyGoalAgentDeployment({
+      branch: state.branch,
+      sha: request.sha || state.lastSha,
+      baseSha: request.baseSha || ""
+    });
+    const passed = { slot: verified.previewSlot || result.previewSlot || request.slot || "" };
+    applyPreviewEvent(state, eventLike(request, "goal_agents_deploy_passed", passed));
+    applyPreviewEvent(state, eventLike(request, "preview_deploy_passed", passed));
+  } catch (error) {
+    if (isCancellation(error)) throw error;
+    const failed = { reason: reasonFromError(error), slot: result.previewSlot || request.slot || "" };
+    applyPreviewEvent(state, eventLike(request, "goal_agents_deploy_failed", failed));
     applyPreviewEvent(state, eventLike(request, "preview_deploy_failed", failed));
   }
 }
@@ -115,6 +177,7 @@ async function runNoPreviewHandoff(state, request) {
     });
     applyPreviewEvent(state, eventLike(request, "auto_merge_enabled"));
   } catch (error) {
+    if (isCancellation(error)) throw error;
     const failed = { reason: reasonFromError(error) };
     applyPreviewEvent(state, eventLike(request, "delivery_handoff_failed", failed));
     applyPreviewEvent(state, eventLike(request, "auto_merge_failed", failed));
@@ -126,6 +189,7 @@ async function runNoPreviewMerged(state, request) {
   try {
     await activities.cleanupAcceptedBranches({ branch: state.branch });
   } catch (error) {
+    if (isCancellation(error)) throw error;
     applyPreviewEvent(state, eventLike(request, "delivery_handoff_failed", { reason: reasonFromError(error) }));
     return;
   }
@@ -155,6 +219,7 @@ async function runSlotRelease(state, request) {
       applyPreviewEvent(state, eventLike(request, request.closeOutcome || "abandoned_closed"));
     }
   } catch (error) {
+    if (isCancellation(error)) throw error;
     const failed = { reason: reasonFromError(error) };
     applyPreviewEvent(state, eventLike(request, "supabase_preview_release_failed", failed));
     applyPreviewEvent(state, eventLike(request, "slot_release_failed", failed));
@@ -183,6 +248,7 @@ async function runProdPromotion(state, request) {
     });
     applyPromotionEvent(state, eventLike(request, "prod_version_recorded"));
   } catch (error) {
+    if (isCancellation(error)) throw error;
     applyPromotionEvent(state, eventLike(request, "accepted_previews_failed", { reason: reasonFromError(error) }));
     return;
   }
@@ -195,8 +261,21 @@ async function runProdPromotion(state, request) {
     });
     applyPromotionEvent(state, eventLike(request, "supabase_prod_migration_passed"));
   } catch (error) {
+    if (isCancellation(error)) throw error;
     const failed = { reason: reasonFromError(error) };
     applyPromotionEvent(state, eventLike(request, "supabase_prod_migration_failed", failed));
+    applyPromotionEvent(state, eventLike(request, "prod_deploy_failed", failed));
+    return;
+  }
+
+  applyPromotionEvent(state, eventLike(request, "goal_agents_deploy_started"));
+  try {
+    await activities.verifyGoalAgentDeployment({ branch: "main", sha: state.sha });
+    applyPromotionEvent(state, eventLike(request, "goal_agents_deploy_passed"));
+  } catch (error) {
+    if (isCancellation(error)) throw error;
+    const failed = { reason: reasonFromError(error) };
+    applyPromotionEvent(state, eventLike(request, "goal_agents_deploy_failed", failed));
     applyPromotionEvent(state, eventLike(request, "prod_deploy_failed", failed));
     return;
   }
@@ -210,17 +289,22 @@ async function runProdPromotion(state, request) {
     });
     applyPromotionEvent(state, eventLike(request, "accepted_previews_passed"));
   } catch (error) {
+    if (isCancellation(error)) throw error;
     applyPromotionEvent(state, eventLike(request, "accepted_previews_failed", { reason: reasonFromError(error) }));
     return;
   }
 
   try {
-    await activities.cleanupAcceptedBranches({ recentMerged: true });
     await activities.syncMainCheckout({
       sha: state.sha,
-      restartTemporalWorker: request.restartTemporalWorker === true || request.restartTemporalWorker === "true"
+      restartTemporalWorker: false
     });
+    await activities.cleanupAcceptedBranches({ recentMerged: true });
+    if (request.restartTemporalWorker === true || request.restartTemporalWorker === "true") {
+      await activities.syncMainCheckout({ sha: state.sha, restartTemporalWorker: true });
+    }
   } catch (error) {
+    if (isCancellation(error)) throw error;
     applyPromotionEvent(state, eventLike(request, "prod_deploy_failed", { reason: reasonFromError(error) }));
     return;
   }
@@ -240,12 +324,25 @@ async function runDevPromotion(state, request) {
       baseSha: request.baseSha || ""
     });
     applyPromotionEvent(state, eventLike(request, "dev_supabase_migration_passed"));
+  } catch (error) {
+    if (isCancellation(error)) throw error;
+    const failed = { reason: reasonFromError(error) };
+    applyPromotionEvent(state, eventLike(request, "dev_supabase_migration_failed", failed));
+    applyPromotionEvent(state, eventLike(request, "dev_deploy_failed", failed));
+    return;
+  }
+
+  applyPromotionEvent(state, eventLike(request, "goal_agents_deploy_started"));
+  try {
+    await activities.verifyGoalAgentDeployment({ branch: "dev", sha: state.sha });
+    applyPromotionEvent(state, eventLike(request, "goal_agents_deploy_passed"));
     applyPromotionEvent(state, eventLike(request, "dev_version_recorded"));
     applyPromotionEvent(state, eventLike(request, "dev_deploy_passed"));
     applyPromotionEvent(state, eventLike(request, "released"));
   } catch (error) {
+    if (isCancellation(error)) throw error;
     const failed = { reason: reasonFromError(error) };
-    applyPromotionEvent(state, eventLike(request, "dev_supabase_migration_failed", failed));
+    applyPromotionEvent(state, eventLike(request, "goal_agents_deploy_failed", failed));
     applyPromotionEvent(state, eventLike(request, "dev_deploy_failed", failed));
   }
 }

@@ -41,6 +41,7 @@ export function useMobileSheetDrag({
   onClose: () => void;
   onCloseStart?: () => void;
 }) {
+  const reduceMotion = prefersReducedMotion();
   const onCloseRef = useRef(onClose);
   const onCloseStartRef = useRef(onCloseStart);
   const dragRef = useRef<DragState | null>(null);
@@ -279,7 +280,10 @@ export function useMobileSheetDrag({
 
   return {
     backdropRef: setBackdropRef,
-    backdropStyle: { opacity: `var(${BACKDROP_OPACITY_VAR}, 1)` } as CSSProperties,
+    backdropStyle: {
+      opacity: `var(${BACKDROP_OPACITY_VAR}, 1)`,
+      transition: reduceMotion ? "none" : undefined,
+    } as CSSProperties,
     closeWithAnimation: finishClose,
     gestureRef: setGestureRef,
     resetOpen,
@@ -290,7 +294,10 @@ export function useMobileSheetDrag({
       onPointerCancel: onPointerEnd,
     },
     sheetRef: setSheetRef,
-    sheetStyle: { transform: sheetTransform(axis) } as CSSProperties,
+    sheetStyle: {
+      transform: sheetTransform(axis),
+      transition: reduceMotion ? "none" : undefined,
+    } as CSSProperties,
   };
 }
 
@@ -336,5 +343,5 @@ function backdropOpacity(offset: number, size = window.innerHeight) {
 }
 
 function prefersReducedMotion() {
-  return window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+  return typeof window !== "undefined" && typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 }

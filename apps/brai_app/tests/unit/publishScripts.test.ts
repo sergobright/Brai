@@ -31,6 +31,15 @@ function makeWritable(root: string) {
   }
 }
 
+async function waitForPath(filePath: string, timeoutMs = 5_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (fs.existsSync(filePath)) return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error(`Timed out waiting for ${filePath}`);
+}
+
 describe("mobile OTA publish scripts", () => {
   it("publishes browser web and Android OTA from one web-layer command", async () => {
     const root = await fixtureRoot("brai-client-web-layer-");
@@ -176,6 +185,7 @@ describe("mobile OTA publish scripts", () => {
         BRAI_ROOT: root,
         BRAI_BUILD_CLIENT: "false",
         BRAI_ENVS_ROOT: path.join(root, "envs"),
+        BRAI_SKIP_DEPLOY_USER_REENTRY: "true",
         BRAI_APP_VERSION: "9.9.9",
         BRAI_TARGET_APK_VERSION: "2999",
         BRAI_PUBLISHED_AT: "2026-06-15T00:00:00Z",
@@ -267,6 +277,93 @@ describe("mobile OTA publish scripts", () => {
     expect(manifest.targetApkVersion).toBe(8);
   });
 
+  it("fails closed before non-native Preview OTA publication without a matching stable slot APK", async () => {
+    const deployBranch = await readFile(path.join(workspaceRoot, "deploy/scripts/deploy-branch.sh"), "utf8");
+    const guardIndex = deployBranch.indexOf("Cannot publish Preview");
+    expect(guardIndex).toBeGreaterThan(0);
+    expect(guardIndex).toBeLessThan(deployBranch.indexOf('"$SCRIPT_DIR/publish-client-web-layer.sh"'));
+
+    const cases = [
+      {
+        name: "missing-slot",
+        slot: undefined,
+        artifact: false,
+        error: "stable slot APK release is missing",
+      },
+      {
+        name: "preview-slot",
+        slot: { file: "brai-c-v10-preview1.apk", apkVersion: 10, versionCode: 100001, apkBuildKind: "preview" },
+        artifact: true,
+        error: "slot APK release is preview, expected stable",
+      },
+      {
+        name: "stale-slot",
+        slot: { file: "brai-c-v9.apk", apkVersion: 9, versionCode: 9, apkBuildKind: "stable" },
+        artifact: true,
+        error: "stable slot APK baseline 9/9 does not match Production 10/10",
+      },
+      {
+        name: "missing-artifact",
+        slot: { file: "brai-c-v10.apk", apkVersion: 10, versionCode: 10, apkBuildKind: "stable" },
+        artifact: false,
+        error: "stable slot APK artifact is missing: brai-c-v10.apk",
+      },
+      {
+        name: "matching-slot",
+        slot: { file: "brai-c-v10.apk", apkVersion: 10, versionCode: 10, apkBuildKind: "stable" },
+        artifact: true,
+        error: "Missing static export for BRAI_BUILD_CLIENT=false",
+      },
+    ];
+
+    for (const testCase of cases) {
+      const root = await fixtureRoot(`brai-deploy-slot-apk-${testCase.name}-`);
+      await mkdir(path.join(root, "deploy"), { recursive: true });
+      await copyFile(
+        path.join(workspaceRoot, "deploy/environments.json"),
+        path.join(root, "deploy/environments.json"),
+      );
+      const releaseDir = path.join(root, "releases");
+      await mkdir(releaseDir, { recursive: true });
+      const production = { file: "brai-v10.apk", apkVersion: 10, versionCode: 10, apkBuildKind: "stable" };
+      await writeFile(path.join(releaseDir, production.file), "production-apk");
+      if (testCase.slot && testCase.artifact) {
+        await writeFile(path.join(releaseDir, testCase.slot.file), "slot-apk");
+      }
+      await writeFile(
+        path.join(releaseDir, "releases.json"),
+        JSON.stringify({ schemaVersion: 2, sections: { production, ...(testCase.slot ? { c: testCase.slot } : {}) } }),
+      );
+
+      let stderr = "";
+      try {
+        await execFileAsync("bash", [path.join(workspaceRoot, "deploy/scripts/deploy-branch.sh")], {
+          env: {
+            ...process.env,
+            BRAI_ROOT: root,
+            BRAI_BRANCH: "codex/slot-apk-guard",
+            BRAI_COMMIT: "guard-commit",
+            BRAI_PREVIEW_SLOT: "C",
+            BRAI_NATIVE_APK_CHANGE: "false",
+            BRAI_DATABASE_URL: "postgresql://unused",
+            BRAI_APP_VERSION: "9.9.9",
+            BRAI_RELEASE_TARGET: releaseDir,
+            BRAI_ENV_ROOT: path.join(root, "envs/preview-c"),
+            BRAI_ENVS_ROOT: path.join(root, "envs"),
+            BRAI_BUILD_CLIENT: "false",
+            BRAI_RESTART_SERVICE: "false",
+            NODE_BIN: process.execPath,
+          },
+        });
+      } catch (error) {
+        stderr = String((error as { stderr?: string }).stderr ?? error);
+      }
+
+      expect(stderr).toContain(testCase.error);
+      expect(fs.existsSync(path.join(root, "envs/preview-c/mobile-update/manifest.json"))).toBe(false);
+    }
+  });
+
   it("keeps production app public and protects only preview web shells in Caddy", async () => {
     const template = await readFile(path.join(workspaceRoot, "deploy/ansible/templates/Caddyfile.j2"), "utf8");
     const playbook = await readFile(path.join(workspaceRoot, "deploy/ansible/brai.yml"), "utf8");
@@ -343,7 +440,7 @@ describe("mobile OTA publish scripts", () => {
     expect(buildApk).toContain('SIGNING_ENV="${BRAI_ANDROID_SIGNING_ENV:-/srv/projects/brai-envs/android-signing/signing.env}"');
     expect(buildApk).toContain('/srv/opt/android-build-env/build-android.sh "$ROOT/apps/brai_app/android" "$GRADLE_TASK"');
     expect(buildApk).toContain("fs.writeFileSync(outVersionFile");
-    expect(buildApk.indexOf('(cd "$ROOT" && "$NPM_BIN" run app:build)')).toBeLessThan(buildApk.indexOf('(cd "$ROOT" && "$NPM_BIN" run app:cap:sync)'));
+    expect(buildApk.indexOf('(cd "$ROOT" && "$NPM_BIN" run app:build)')).toBeLessThan(buildApk.indexOf('\nrun_capacitor_sync\n'));
     expect(gradle).toContain('throw new GradleException("BRAI_APP_VERSION is required for Android builds")');
     expect(gradle).toContain("tasks.register('validateBraiAndroidApiBundle')");
     expect(gradle).toContain("brai-runtime-config.js");
@@ -369,16 +466,20 @@ describe("mobile OTA publish scripts", () => {
     expect(ansible).toContain("- e.test.brightos.world");
   });
 
-  it("marks preview ready only after the service restart succeeds", async () => {
+  it("keeps generic deploy pending and marks Preview ready only after the independent Goal-agent gate", async () => {
     const deployBranch = await readFile(path.join(workspaceRoot, "deploy/scripts/deploy-branch.sh"), "utf8");
+    const goalAgentGate = await readFile(path.join(workspaceRoot, "deploy/scripts/deploy-goal-agents.sh"), "utf8");
     const restartIndex = deployBranch.indexOf('"${BRAI_SUDO:-sudo}" systemctl restart "$SERVICE_NAME"');
     const adminRestartIndex = deployBranch.indexOf('"${BRAI_SUDO:-sudo}" systemctl restart "$ADMIN_SERVICE_NAME"');
-    const readyIndex = deployBranch.indexOf('"$SCRIPT_DIR/preview-slots.sh" ready "$BRANCH" "$COMMIT"');
+    const smokeIndex = goalAgentGate.indexOf("context-smoke-cli.mjs");
+    const readyIndex = goalAgentGate.indexOf('"$SCRIPT_DIR/preview-slots.sh" ready "$BRANCH" "$COMMIT"');
 
     expect(restartIndex).toBeGreaterThan(0);
     expect(adminRestartIndex).toBeGreaterThan(restartIndex);
-    expect(readyIndex).toBeGreaterThan(restartIndex);
-    expect(readyIndex).toBeGreaterThan(adminRestartIndex);
+    expect(deployBranch).not.toContain('preview-slots.sh" ready');
+    expect(deployBranch).toContain("Goal-agent gate remains pending");
+    expect(smokeIndex).toBeGreaterThan(0);
+    expect(readyIndex).toBeGreaterThan(smokeIndex);
   });
 
   it("resolves OTA app versions from the build ledger before deployed files", async () => {
@@ -398,7 +499,8 @@ describe("mobile OTA publish scripts", () => {
     expect(buildApk).toContain('MOBILE_TARGET="${BRAI_MOBILE_TARGET:-}"');
     expect(buildApk).toContain('if [[ -z "$MOBILE_TARGET" && -n "$ENV_PATH" ]]; then');
     expect(buildApk).toContain('--mobile-target "$MOBILE_TARGET"');
-    expect(ciDeploy).toContain(': "${BRAI_DATABASE_URL:?BRAI_DATABASE_URL is required for production deploy}"');
+    expect(ciDeploy).toContain('[[ -r "/etc/brai/brai-api.env" ]]');
+    expect(ciDeploy).toContain('BRAI_PROD_DATABASE_URL="$(env_database_url /etc/brai/brai-api.env)"');
     expect(ciDeploy).not.toContain("BRAI_PROD_DB");
     expect(ciDeploy).toContain('export BRAI_PUBLIC_SITE_TARGET="$DEPLOY_REPO/deploy/site"');
   });
@@ -429,11 +531,11 @@ describe("mobile OTA publish scripts", () => {
     expect(script.indexOf('npm --prefix services/brai_api ci')).toBeLessThan(script.indexOf(sourceChmod));
     expect(script.indexOf(sourceChmod)).toBeLessThan(script.indexOf('mv "$SOURCE_ROOT" "$PREVIOUS_SOURCE"'));
     expect(script).toContain('check_deploy_headroom "$ENVS_ROOT"');
-    expect(script).toContain('BRAI_DEPLOY_MIN_FREE_GB:-4');
-    expect(script).toContain('cleanup_stale_preview_previous_sources "${PREVIOUS_SOURCE:-}"');
+    expect(script).toContain('BRAI_DEPLOY_MIN_FREE_GB:-12');
+    expect(script).not.toContain('cleanup_stale_preview_previous_sources');
     expect(script.indexOf('check_deploy_headroom "$ENVS_ROOT"')).toBeLessThan(script.indexOf('npm ci'));
-    expect(script.indexOf('deploy/scripts/deploy-branch.sh')).toBeLessThan(script.indexOf('rm -rf "$PREVIOUS_SOURCE"', script.indexOf('deploy/scripts/deploy-branch.sh')));
-    expect(script).toContain('"$ENVS_ROOT"/preview-[a-e]');
+    expect(script.indexOf('remove_owned_previous_source', script.indexOf('deploy/scripts/deploy-branch.sh'))).toBe(-1);
+    expect(script).not.toContain('source.previous-*');
   });
 
   it("keeps preview runtime Supabase env mandatory and artifacts writable by the deploy group", async () => {
@@ -479,7 +581,8 @@ describe("mobile OTA publish scripts", () => {
     expect(deploy).toContain("export BRAI_NATIVE_APK_CHANGE");
     expect(deployBranch).toContain("BRAI_NATIVE_APK_CHANGE:-false");
     expect(deployBranch).toContain('resolve-required-apk-version.mjs" prod apkVersion');
-    expect(deployBranch).toContain('export BRAI_TARGET_APK_VERSION="$("$NODE_BIN" "$SCRIPT_DIR/resolve-required-apk-version.mjs" prod apkVersion)"');
+    expect(deployBranch).toContain('BRAI_TARGET_APK_VERSION="$("$NODE_BIN" "$SCRIPT_DIR/resolve-required-apk-version.mjs" prod apkVersion)"');
+    expect(deployBranch).toContain("export BRAI_TARGET_APK_VERSION");
     expect(deployBranch).toContain('export BRAI_TARGET_APK_BUILD_KIND="stable"');
     expect(deployBranch).not.toContain("BRAI_TARGET_APK_VERSION:-");
     expect(deployBranch).not.toContain("BRAI_TARGET_APK_BUILD_KIND:-stable");
@@ -611,6 +714,61 @@ describe("mobile OTA publish scripts", () => {
     });
 
     await expect(readFile(path.join(root, "deploy/releases/brai-v1.apk"), "utf8")).resolves.toBe("apk");
+  });
+
+  it("waits for the shared release lock before swapping an APK and its metadata", async () => {
+    const root = await fixtureRoot("brai-apk-release-lock-");
+    await writeStaticExport(root, "apk-lock");
+    await mkdir(path.join(root, "deploy"), { recursive: true });
+    await copyFile(
+      path.join(workspaceRoot, "deploy/environments.json"),
+      path.join(root, "deploy/environments.json"),
+    );
+    const apkPath = path.join(root, "app-release.apk");
+    const releaseDir = path.join(root, "deploy/releases");
+    const readyPath = path.join(root, "lock-ready");
+    await writeFile(apkPath, "apk-under-lock");
+    await mkdir(releaseDir, { recursive: true });
+
+    const holder = execFile("bash", ["-c", 'exec 9<"$1"; flock 9; touch "$2"; IFS= read -r _', "holder", releaseDir, readyPath]);
+    const holderDone = new Promise<void>((resolve, reject) => {
+      holder.once("error", reject);
+      holder.once("close", (code) => code === 0 ? resolve() : reject(new Error(`lock holder exited ${code}`)));
+    });
+    await waitForPath(readyPath);
+
+    const publisher = execFile("bash", [path.join(workspaceRoot, "deploy/scripts/publish-capacitor-apk.sh")], {
+      env: {
+        ...process.env,
+        BRAI_ROOT: root,
+        BRAI_APK_SOURCE: apkPath,
+        BRAI_APK_VERSION: "1",
+        BRAI_ANDROID_VERSION_CODE: "2999",
+        BRAI_PUBLISHED_AT: "2026-06-15T00:00:00Z",
+      },
+    });
+    const publisherDone = new Promise<void>((resolve, reject) => {
+      let stderr = "";
+      publisher.stderr?.on("data", (chunk) => { stderr += chunk; });
+      publisher.once("error", reject);
+      publisher.once("close", (code) => code === 0 ? resolve() : reject(new Error(`publisher exited ${code}: ${stderr}`)));
+    });
+
+    try {
+      await waitForPath(path.join(releaseDir, `.brai-v1.apk.${publisher.pid}.tmp`));
+      expect(fs.existsSync(path.join(releaseDir, "brai-v1.apk"))).toBe(false);
+      expect(fs.existsSync(path.join(releaseDir, "releases.json"))).toBe(false);
+      holder.stdin?.end("release\n");
+      await holderDone;
+      await publisherDone;
+    } finally {
+      holder.stdin?.end("release\n");
+      holder.kill();
+    }
+
+    await expect(readFile(path.join(releaseDir, "brai-v1.apk"), "utf8")).resolves.toBe("apk-under-lock");
+    const releases = JSON.parse(await readFile(path.join(releaseDir, "releases.json"), "utf8"));
+    expect(releases.sections.production.file).toBe("brai-v1.apk");
   });
 
   it("publishes a Dev APK card without restoring a Dev server path", async () => {

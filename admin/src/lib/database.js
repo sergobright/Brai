@@ -10,8 +10,8 @@ export const DEFAULT_SORT_DIRECTION = "desc";
 const CREATED_COLUMN_NAMES = ["created_at_utc", "created_at", "createdAt", "created_on", "creation_date"];
 const USER_TABLE_NAMES = new Set(["activities", "app_settings", "inbox"]);
 const USER_TABLE_PREFIXES = ["activity_", "focus_", "timer_"];
-const SYSTEM_TABLE_NAMES = new Set(["events", "item_roles", "item_role_types", "items", "logs"]);
-const SYSTEM_TABLE_PREFIXES = ["schema_", "table_", "build_", "deployment_", "version_", "agent_", "ai_", "role_", "workflow_", "brai_cmd_"];
+const SYSTEM_TABLE_NAMES = new Set(["events", "item_roles", "item_role_types", "items", "logs", "relations"]);
+const SYSTEM_TABLE_PREFIXES = ["schema_", "table_", "build_", "deployment_", "version_", "agent_", "ai_", "role_", "workflow_", "brai_cmd_", "relation_", "context_"];
 const POSTGRES_PROTOCOLS = new Set(["postgres:", "postgresql:"]);
 const WORKFLOW_DIAGRAM_CACHE = new Map();
 const WORKFLOW_STUCK_MINUTES = 5;
@@ -456,6 +456,8 @@ async function readWorkflowRuns(client, workflow, options) {
   const result = await client.query(`
     SELECT e.id, e.workflow_id, e.run_id, e.workflow_definition_id,
       e.workflow_definition_version, e.role_contract_id, e.raw_record_id,
+      e.subject_kind, e.subject_id, e.trigger_kind, e.trigger_revision,
+      e.watermark_from, e.watermark_to,
       e.status, e.current_step, e.attempt_count, e.last_error,
       e.started_at_utc, e.completed_at_utc, e.created_at_utc, e.updated_at_utc,
       e.trace_status,
@@ -491,7 +493,13 @@ function formatWorkflowRun(row) {
     workflowDefinitionId: row.workflow_definition_id,
     workflowDefinitionVersion: Number(row.workflow_definition_version),
     roleContractId: row.role_contract_id,
-    rawRecordId: row.raw_record_id,
+    rawRecordId: row.raw_record_id ?? "",
+    subjectKind: row.subject_kind ?? (row.raw_record_id ? "raw" : ""),
+    subjectId: row.subject_id ?? row.raw_record_id ?? "",
+    triggerKind: row.trigger_kind ?? "",
+    triggerRevision: row.trigger_revision == null ? null : Number(row.trigger_revision),
+    watermarkFrom: row.watermark_from == null ? null : Number(row.watermark_from),
+    watermarkTo: row.watermark_to == null ? null : Number(row.watermark_to),
     status: row.status,
     currentStep: row.current_step,
     attemptCount: Number(row.attempt_count ?? 0),
@@ -514,6 +522,8 @@ async function readSelectedExecution(client, workflow, runId, fallbackRun) {
     const result = await client.query(`
       SELECT e.id, e.workflow_id, e.run_id, e.workflow_definition_id,
         e.workflow_definition_version, e.role_contract_id, e.raw_record_id,
+        e.subject_kind, e.subject_id, e.trigger_kind, e.trigger_revision,
+        e.watermark_from, e.watermark_to,
         e.status, e.current_step, e.attempt_count, e.last_error,
         e.started_at_utc, e.completed_at_utc, e.created_at_utc, e.updated_at_utc,
         e.trace_status,
@@ -557,15 +567,13 @@ async function readSelectedExecution(client, workflow, runId, fallbackRun) {
       SELECT id, event_type, event_action, status, occurred_at_utc, item_roles_id
       FROM events
       WHERE subject_id = $1
-         OR id = $2
       ORDER BY occurred_at_utc ASC, id ASC
       LIMIT 50
-    `, [summary.rawRecordId, `inbox:${summary.workflowId}:normalized`]);
+    `, [summary.subjectId || summary.rawRecordId]);
   const logs = await client.query(`
       SELECT id, dt, operation, status, reason
       FROM logs
-      WHERE operation LIKE 'inbox.%'
-        AND json_data::text LIKE $1
+      WHERE json_data::text LIKE $1
       ORDER BY dt ASC, id ASC
       LIMIT 50
     `, [`%${summary.workflowId}%`]);

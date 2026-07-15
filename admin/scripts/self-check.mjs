@@ -203,8 +203,14 @@ try {
       run_id text,
       workflow_definition_id text NOT NULL,
       workflow_definition_version integer NOT NULL,
-      role_contract_id text NOT NULL,
-      raw_record_id text NOT NULL,
+      role_contract_id text,
+      raw_record_id text,
+      subject_kind text,
+      subject_id text,
+      trigger_kind text,
+      trigger_revision integer,
+      watermark_from bigint,
+      watermark_to bigint,
       status text NOT NULL,
       current_step text NOT NULL,
       attempt_count integer NOT NULL,
@@ -336,7 +342,15 @@ try {
       1, 'brai:inbox:test', 'run-test', 'inbox.raw-normalization', 1,
       'inbox', 'inbox-test', 'running', 'raw_normalizer', 1,
       '2026-01-03T00:00:00.000Z', '2026-01-03T00:00:00.000Z', 'recording'
-    )
+    ), (
+      2, 'brai:goal:test', 'run-generic', 'inbox.raw-normalization', 1,
+      NULL, NULL, 'completed', 'done', 1,
+      '2026-01-02T00:00:00.000Z', '2026-01-02T00:00:00.000Z', 'complete'
+    );
+    UPDATE workflow_executions
+    SET subject_kind = 'goal', subject_id = 'goal-test', trigger_kind = 'manual',
+      trigger_revision = 7, watermark_from = 10, watermark_to = 14
+    WHERE id = 2
   `);
   await db.query(`
     INSERT INTO workflow_execution_steps (
@@ -419,7 +433,13 @@ try {
   const workflowSummary = await readWorkflowAdminSummary(databaseUrl);
   assert.equal(workflowSummary.workflows[0].id, "inbox.raw-normalization", "workflow definition read model is readable");
   assert.equal(workflowSummary.runs.rows[0].currentStep, "raw_normalizer", "workflow execution read model is readable");
+  assert.equal(workflowSummary.runs.rows[0].subjectKind, "raw", "legacy Inbox execution receives a generic raw subject");
+  assert.equal(workflowSummary.runs.rows[0].subjectId, "inbox-test", "legacy raw record remains the generic subject id");
   assert.equal(workflowSummary.selectedExecution.steps.length, 2, "workflow execution timeline is readable");
+  const genericWorkflow = await readWorkflowAdminSummary({ databaseUrl, runId: "run-generic" });
+  assert.equal(genericWorkflow.selectedExecution.subjectKind, "goal", "typed workflow subject is readable without raw Inbox record");
+  assert.equal(genericWorkflow.selectedExecution.triggerRevision, 7, "typed trigger revision remains observable");
+  assert.equal(genericWorkflow.selectedExecution.watermarkTo, 14, "discovery watermark remains observable");
   const roleContracts = await readRoleContractsAdmin(databaseUrl);
   assert.equal(roleContracts.roles[0].roleKey, "inbox", "role contract joins its role type");
   assert.equal(roleContracts.roles[0].workflowTitle, "Inbox normalization", "role contract joins its workflow definition");
@@ -433,6 +453,9 @@ try {
   assert.equal(classifyTableGroup("item_role_types"), "system", "item role types are system data");
   assert.equal(classifyTableGroup("events"), "system", "global events are system data");
   assert.equal(classifyTableGroup("logs"), "system", "runtime logs are system data");
+  assert.equal(classifyTableGroup("relation_types"), "system", "relation tables are system data");
+  assert.equal(classifyTableGroup("relations"), "system", "canonical relation facts are system data");
+  assert.equal(classifyTableGroup("context_decisions"), "system", "context tables are system data");
 } finally {
   await db.end().catch(() => {});
   await setupPool.query(`DROP SCHEMA IF EXISTS ${quoteIdentifier(schemaName)} CASCADE`).catch(() => {});

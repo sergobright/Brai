@@ -1,6 +1,7 @@
 import {
   ACTIVITY_EVENT_PAYLOAD_VERSION,
   ACTIVITY_EVENT_TYPES,
+  ACTIVITY_MUTABLE_TYPES,
   ACTIVITY_STATUSES,
   ACTIVITY_TYPES,
   EVENT_PAYLOAD_VERSION,
@@ -18,59 +19,27 @@ import { scopeSql, scopedUserId } from './user-scope.js';
 
 export const activityEventMethods = {
   listActivities() {
-    const scope = scopeSql('a');
-    return this.db
-      .prepare(
-        `
-          SELECT a.*,
-            w.status AS workflow_status,
-            w.current_step AS workflow_step,
-            w.attempt_count AS workflow_attempt_count,
-            w.last_error AS workflow_last_error,
-            w.workflow_id AS temporal_workflow_id,
-            w.run_id AS temporal_run_id
-          FROM activities a
-          LEFT JOIN workflow_executions w ON w.id = a.workflow_execution_id
-          WHERE a.activity_type_id IN ('action', 'operation')
-            AND a.deleted_at_utc IS NULL
-            ${scope.clause}
-          ORDER BY
-            CASE a.status WHEN 'New' THEN 0 ELSE 1 END ASC,
-            CASE a.status WHEN 'New' THEN CASE WHEN a.sort_order IS NULL THEN 0 ELSE 1 END END ASC,
-            CASE WHEN a.status = 'New' AND a.sort_order IS NULL THEN COALESCE(a.restored_at_utc, a.created_at_utc) END DESC,
-            CASE a.status WHEN 'New' THEN a.sort_order END ASC,
-            CASE a.status WHEN 'Done' THEN a.completed_at_utc END DESC,
-            a.updated_at_utc DESC,
-            a.id ASC
-        `
-      )
-      .all(...scope.params)
-      .map(formatActivity);
+    return listActivityRows(this, 'action', false);
   }
 ,
 
   listArchivedActivities() {
-    const scope = scopeSql('a');
-    return this.db
-      .prepare(
-        `
-          SELECT a.*,
-            w.status AS workflow_status,
-            w.current_step AS workflow_step,
-            w.attempt_count AS workflow_attempt_count,
-            w.last_error AS workflow_last_error,
-            w.workflow_id AS temporal_workflow_id,
-            w.run_id AS temporal_run_id
-          FROM activities a
-          LEFT JOIN workflow_executions w ON w.id = a.workflow_execution_id
-          WHERE a.activity_type_id IN ('action', 'operation')
-            AND a.deleted_at_utc IS NOT NULL
-            ${scope.clause}
-          ORDER BY a.deleted_at_utc DESC, a.updated_at_utc DESC, a.id ASC
-        `
-      )
-      .all(...scope.params)
-      .map(formatActivity);
+    return listActivityRows(this, 'action', true);
+  }
+,
+
+  listGoals() {
+    return listActivityRows(this, 'goal', false);
+  }
+,
+
+  listArchivedGoals() {
+    return listActivityRows(this, 'goal', true);
+  }
+,
+
+  listLegacyOperations() {
+    return listActivityRows(this, 'operation', false);
   }
 ,
 
@@ -78,20 +47,18 @@ export const activityEventMethods = {
     const id = sanitizeText(activityId);
     if (!id) return null;
     const scope = scopeSql('a');
-    return formatActivity(this.db
-      .prepare(`
-        SELECT a.*,
-          w.status AS workflow_status,
-          w.current_step AS workflow_step,
-          w.attempt_count AS workflow_attempt_count,
-          w.last_error AS workflow_last_error,
-          w.workflow_id AS temporal_workflow_id,
-          w.run_id AS temporal_run_id
-        FROM activities a
-        LEFT JOIN workflow_executions w ON w.id = a.workflow_execution_id
-        WHERE a.id = ? ${scope.clause}
-      `)
-      .get(id, ...scope.params));
+    return formatActivity(this.db.prepare(`
+      SELECT a.*,
+        w.status AS workflow_status,
+        w.current_step AS workflow_step,
+        w.attempt_count AS workflow_attempt_count,
+        w.last_error AS workflow_last_error,
+        w.workflow_id AS temporal_workflow_id,
+        w.run_id AS temporal_run_id
+      FROM activities a
+      LEFT JOIN workflow_executions w ON w.id = a.workflow_execution_id
+      WHERE a.id = ? ${scope.clause}
+    `).get(id, ...scope.params));
   }
 ,
 
@@ -114,6 +81,7 @@ export const activityEventMethods = {
     const serverClockOffsetMs = Number.isFinite(Date.parse(lastKnownServerTimeUtc))
       ? Date.parse(receivedAt) - Date.parse(lastKnownServerTimeUtc)
       : null;
+    const uploaded = Array.isArray(events) ? events : [];
     const acknowledged = [];
     const ignored = [];
     const acceptedEvents = [];
@@ -129,15 +97,42 @@ export const activityEventMethods = {
         { lastSyncAtUtc: receivedAt, lastServerClockOffsetMs: serverClockOffsetMs }
       );
 
-      for (const rawEvent of Array.isArray(events) ? events : []) {
+      const invariantItemsIds = invariantMutationItems(uploaded);
+      this.lockGoalInvariantLists({ memberItemsIds: invariantItemsIds, goalItemsIds: invariantItemsIds });
+      for (const rawEvent of uploaded) {
         const result = this.ingestActivityEvent(deviceId, rawEvent, receivedAt);
         if (result.event_id) acknowledged.push(result.event_id);
         if (result.ignored) ignored.push(result.ignored);
-        if (result.accepted_event) acceptedEvents.push(result.accepted_event);
+        if (result.accepted_event) {
+          acceptedEvents.push(result.accepted_event);
+          this.projectAcceptedActivityEvents([result.accepted_event], receivedAt);
+          this.reconcileActivityRelations([result.accepted_event], receivedAt);
+        }
       }
-
-      this.projectAcceptedActivityEvents(acceptedEvents, receivedAt);
       this.stopDeletedActiveActivityFocus(acceptedEvents, receivedAt);
+      if (scopedUserId() && this.getAgent('goal.discovery')) {
+        const meaningful = acceptedEvents.filter((event) =>
+          ['update_title', 'update_description'].includes(event.change_type));
+        const revision = this.getActivityServerRevision();
+        for (const event of meaningful) this.scheduleGoalAgentForActivity({
+          itemsId: event.activity_id,
+          triggerKind: 'activity_meaningful_text_changed',
+          triggerRevision: revision,
+          nowIso: receivedAt
+        });
+        for (const event of acceptedEvents.filter((entry) => entry.change_type === 'set_type')) {
+          this.scheduleGoalMatcherForCurrent({
+            itemsId: event.activity_id,
+            triggerKind: 'activity_type_changed',
+            triggerRevision: revision,
+            nowIso: receivedAt
+          });
+        }
+        const relevantCount = acceptedEvents.filter((event) =>
+          ['update_title', 'update_description', 'set_status', 'delete', 'restore'].includes(event.change_type)
+          && this.getActivityItem(event.activity_id)?.activity_type_id !== 'operation').length;
+        if (relevantCount > 0) this.noteGoalDiscoveryChanges({ count: relevantCount, nowIso: receivedAt });
+      }
     });
     run();
 
@@ -270,10 +265,6 @@ export const activityEventMethods = {
       status = 'ignored';
       ignoreReason = 'title_required';
       occurredAt = new Date(occurredMs).toISOString();
-    } else if (rawType === 'create' && payload.activity_type_id !== undefined && !ACTIVITY_TYPES.has(payload.activity_type_id)) {
-      status = 'ignored';
-      ignoreReason = 'invalid_activity_type';
-      occurredAt = new Date(occurredMs).toISOString();
     } else if (rawType === 'update_description' && typeof payload.description_md !== 'string') {
       status = 'ignored';
       ignoreReason = 'description_required';
@@ -281,6 +272,30 @@ export const activityEventMethods = {
     } else if (rawType === 'set_status' && !ACTIVITY_STATUSES.has(payload.status)) {
       status = 'ignored';
       ignoreReason = 'invalid_status';
+      occurredAt = new Date(occurredMs).toISOString();
+    } else if (rawType === 'create' && payload.activity_type_id != null && !ACTIVITY_MUTABLE_TYPES.has(payload.activity_type_id)) {
+      status = 'ignored';
+      ignoreReason = 'invalid_activity_type';
+      occurredAt = new Date(occurredMs).toISOString();
+    } else if (rawType === 'set_type' && !validTypeChangePayload(payload)) {
+      status = 'ignored';
+      ignoreReason = 'invalid_activity_type';
+      occurredAt = new Date(occurredMs).toISOString();
+    } else if (
+      rawType === 'set_type'
+      && this.currentActivityType(activityId) !== payload.from_activity_type_id
+    ) {
+      status = 'ignored';
+      ignoreReason = 'stale_activity_type';
+      occurredAt = new Date(occurredMs).toISOString();
+    } else if (
+      rawType === 'set_status'
+      && payload.status === 'Done'
+      && this.currentActivityType(activityId) === 'goal'
+      && !goalCompletionEligible(this, activityId)
+    ) {
+      status = 'ignored';
+      ignoreReason = 'goal_completion_invariant';
       occurredAt = new Date(occurredMs).toISOString();
     } else if (rawType === 'reorder' && !Array.isArray(payload.ordered_ids)) {
       status = 'ignored';
@@ -292,14 +307,12 @@ export const activityEventMethods = {
       if (typeof payload.description_md === 'string') {
         payload.description_md = normalizeMarkdownSource(payload.description_md);
       }
-      if (payload.activity_type_id !== undefined) {
-        payload.activity_type_id = ACTIVITY_TYPES.has(payload.activity_type_id) ? payload.activity_type_id : 'action';
-      }
       if (typeof payload.author === 'string') payload.author = sanitizeText(payload.author) ?? '';
       if (typeof payload.reason === 'string') payload.reason = normalizeMarkdownSource(payload.reason);
       if (Array.isArray(payload.ordered_ids)) {
         payload.ordered_ids = normalizeOrderedIds(payload.ordered_ids);
       }
+      if (rawType === 'create') payload.activity_type_id ??= 'action';
     }
 
     const serverSequence = this.insertActivityEvent({
@@ -363,15 +376,13 @@ export const activityEventMethods = {
         rawEvent: parseJsonObject(event.payload_json).raw_event ?? event
       });
     }
-    const linked = event.activity_id ? this.getActivityItem(event.activity_id) : null;
     return this.insertEventRecord({
       eventId: event.event_id,
       eventDomain: 'activity',
       eventType: event.change_type,
       eventAction: `activity.${event.change_type}`,
       title: `Activity ${event.change_type}`,
-      itemsId: event.change_type === 'reorder' || !linked?.item_roles_id ? null : event.activity_id,
-      itemRolesId: event.change_type === 'reorder' ? null : linked?.item_roles_id ?? null,
+      itemsId: event.change_type === 'reorder' ? null : event.activity_id,
       subjectType: event.change_type === 'reorder' ? 'activity_list' : 'activity',
       subjectId: event.change_type === 'reorder' ? null : event.activity_id,
       actorType: 'user',
@@ -395,6 +406,14 @@ export const activityEventMethods = {
 
   nextInvalidActivityClientSequence(deviceId) {
     return -this.nextPostgresCounter(`events.invalid_client_sequence.${deviceId}`);
+  }
+,
+
+  currentActivityType(activityId) {
+    const scope = scopeSql();
+    return this.db
+      .prepare(`SELECT activity_type_id FROM activities WHERE id = ?${scope.clause}`)
+      .get(activityId, ...scope.params)?.activity_type_id ?? null;
   }
 ,
 
@@ -456,7 +475,9 @@ export const activityEventMethods = {
         if (!activity) sortResetEvent = event;
         activity = {
           id: activityId,
-          activity_type_id: normalizeActivityType(payload.activity_type_id, activity?.activity_type_id ?? 'action'),
+          activity_type_id: ACTIVITY_TYPES.has(payload.activity_type_id)
+            ? payload.activity_type_id
+            : activity?.activity_type_id ?? 'action',
           title,
           description_md: normalizeMarkdownSource(payload.description_md ?? activity?.description_md ?? ''),
           author: typeof payload.author === 'string' ? sanitizeText(payload.author) ?? '' : activity?.author ?? '',
@@ -491,9 +512,7 @@ export const activityEventMethods = {
         if (typeof payload.description_md === 'string') {
           activity.description_md = normalizeMarkdownSource(payload.description_md);
         }
-        if (typeof payload.reason === 'string') {
-          activity.reason = normalizeMarkdownSource(payload.reason);
-        }
+        if (typeof payload.reason === 'string') activity.reason = normalizeMarkdownSource(payload.reason);
         activity.normalized = true;
         activity.updated_at_utc = event.occurred_at_utc;
         activity.last_event_id = event.event_id;
@@ -505,6 +524,22 @@ export const activityEventMethods = {
         activity.sort_order = null;
         activity.last_event_id = event.event_id;
         sortResetEvent = event;
+        lastOwnEvent = event;
+      } else if (event.change_type === 'set_type' && activity && validTypeChangePayload(payload)) {
+        if (activity.activity_type_id !== payload.from_activity_type_id) continue;
+        activity.activity_type_id = payload.to_activity_type_id;
+        activity.status = 'New';
+        activity.completed_at_utc = null;
+        activity.updated_at_utc = event.occurred_at_utc;
+        activity.sort_order = null;
+        activity.last_event_id = event.event_id;
+        sortResetEvent = event;
+        lastOwnEvent = event;
+      } else if (event.change_type === 'goal_reopened' && activity.activity_type_id === 'goal') {
+        activity.status = 'New';
+        activity.completed_at_utc = null;
+        activity.updated_at_utc = event.occurred_at_utc;
+        activity.last_event_id = event.event_id;
         lastOwnEvent = event;
       } else if (event.change_type === 'delete' && activity) {
         activity.deleted_at_utc = event.occurred_at_utc;
@@ -528,7 +563,7 @@ export const activityEventMethods = {
 
     if (!activity) {
       this.db
-        .prepare(`DELETE FROM activities WHERE id = ? AND activity_type_id IN ('action', 'operation')${scope.clause}`)
+        .prepare(`DELETE FROM activities WHERE id = ? AND activity_type_id IN ('action', 'goal')${scope.clause}`)
         .run(activityId, ...scope.params);
       return;
     }
@@ -586,18 +621,15 @@ export const activityEventMethods = {
         activity.deleted_at_utc ?? null,
         activity.restored_at_utc ?? null,
         activity.last_event_id ?? null,
-        normalizeActivityType(activity.activity_type_id),
+        activity.activity_type_id,
         activity.author ?? '',
         activity.reason ?? '',
         activity.initial_event_id ?? null,
         scopedUserId()
       );
     const stored = this.getActivityItem(activity.id);
-    if (stored?.item_roles_id) {
-      this.ensureActivityRoleLink(stored);
-    } else if (stored) {
-      this.ensureActivityWorkflowExecution({ activityId: activity.id, nowIso });
-    }
+    if (stored?.item_roles_id) this.ensureActivityRoleLink(stored);
+    else if (stored) this.ensureActivityWorkflowExecution({ activityId: activity.id, nowIso });
   }
 ,
 
@@ -624,7 +656,7 @@ export const activityEventMethods = {
     return this.db
       .prepare(
         `
-          SELECT id, event_id, subject_id AS activity_id, event_type AS change_type,
+          SELECT event_id, subject_id AS activity_id, event_type AS change_type,
             occurred_at_utc, received_at_utc, domain_sequence AS server_sequence, payload_json, user_id
           FROM events
           WHERE event_domain = 'activity'
@@ -655,6 +687,7 @@ export const activityEventMethods = {
           UPDATE activities
           SET sort_order = NULL
           WHERE deleted_at_utc IS NULL
+            AND activity_type_id = 'action'
             AND status = 'New'
             AND sort_order IS NOT NULL
             ${idFilter}
@@ -694,7 +727,9 @@ export const activityEventMethods = {
         if (!title) continue;
         activities.set(activityId, {
           id: activityId,
-          activity_type_id: normalizeActivityType(payload.activity_type_id, existing?.activity_type_id ?? 'action'),
+          activity_type_id: ACTIVITY_TYPES.has(payload.activity_type_id)
+            ? payload.activity_type_id
+            : existing?.activity_type_id ?? 'action',
           title,
           description_md: normalizeMarkdownSource(payload.description_md ?? existing?.description_md ?? ''),
           author: typeof payload.author === 'string' ? sanitizeText(payload.author) ?? '' : existing?.author ?? '',
@@ -723,12 +758,8 @@ export const activityEventMethods = {
       } else if (event.change_type === 'normalized' && existing) {
         const title = sanitizeText(payload.title);
         if (title) existing.title = title;
-        if (typeof payload.description_md === 'string') {
-          existing.description_md = normalizeMarkdownSource(payload.description_md);
-        }
-        if (typeof payload.reason === 'string') {
-          existing.reason = normalizeMarkdownSource(payload.reason);
-        }
+        if (typeof payload.description_md === 'string') existing.description_md = normalizeMarkdownSource(payload.description_md);
+        if (typeof payload.reason === 'string') existing.reason = normalizeMarkdownSource(payload.reason);
         existing.normalized = true;
         existing.updated_at_utc = event.occurred_at_utc;
         existing.last_event_id = event.event_id;
@@ -738,15 +769,28 @@ export const activityEventMethods = {
         existing.completed_at_utc = payload.status === 'Done' ? event.occurred_at_utc : null;
         existing.sort_order = null;
         existing.last_event_id = event.event_id;
+      } else if (event.change_type === 'set_type' && existing && validTypeChangePayload(payload)) {
+        if (existing.activity_type_id !== payload.from_activity_type_id) continue;
+        existing.activity_type_id = payload.to_activity_type_id;
+        existing.status = 'New';
+        existing.completed_at_utc = null;
+        existing.updated_at_utc = event.occurred_at_utc;
+        existing.sort_order = null;
+        existing.last_event_id = event.event_id;
+      } else if (event.change_type === 'goal_reopened' && existing?.activity_type_id === 'goal') {
+        existing.status = 'New';
+        existing.completed_at_utc = null;
+        existing.updated_at_utc = event.occurred_at_utc;
+        existing.last_event_id = event.event_id;
       } else if (event.change_type === 'reorder') {
         const orderedIds = normalizeOrderedIds(payload.ordered_ids);
         const ordered = new Set(orderedIds);
         for (const activity of activities.values()) {
-          if (activity.status === 'New' && ordered.has(activity.id)) {
+          if (activity.activity_type_id === 'action' && activity.status === 'New' && ordered.has(activity.id)) {
             activity.sort_order = orderedIds.indexOf(activity.id);
             activity.updated_at_utc = event.occurred_at_utc;
             activity.last_event_id = event.event_id;
-          } else if (activity.status === 'New') {
+          } else if (activity.activity_type_id === 'action' && activity.status === 'New') {
             activity.sort_order = null;
           }
         }
@@ -769,7 +813,7 @@ export const activityEventMethods = {
     }
 
     this.db
-      .prepare(`DELETE FROM activities WHERE activity_type_id IN ('action', 'operation')${scope.clause}`)
+      .prepare(`DELETE FROM activities WHERE activity_type_id IN ('action', 'goal')${scope.clause}`)
       .run(...scope.params);
     const insertActivity = this.db.prepare(`
       INSERT INTO activities (
@@ -792,22 +836,45 @@ export const activityEventMethods = {
         activity.deleted_at_utc ?? null,
         activity.restored_at_utc ?? null,
         activity.last_event_id ?? null,
-        normalizeActivityType(activity.activity_type_id),
+        activity.activity_type_id,
         activity.author ?? '',
         activity.reason ?? '',
         activity.initial_event_id ?? null,
         scopedUserId()
       );
       const stored = this.getActivityItem(activity.id);
-      if (stored && activity.normalized) {
-        this.ensureActivityRoleLink(stored);
-      } else if (stored) {
-        this.ensureActivityWorkflowExecution({ activityId: activity.id, nowIso });
-      }
+      if (stored && activity.normalized) this.ensureActivityRoleLink(stored);
+      else if (stored) this.ensureActivityWorkflowExecution({ activityId: activity.id, nowIso });
     }
   }
 
 };
+
+function listActivityRows(store, activityType, archived) {
+  const scope = scopeSql('a');
+  return store.db.prepare(`
+    SELECT a.*,
+      w.status AS workflow_status,
+      w.current_step AS workflow_step,
+      w.attempt_count AS workflow_attempt_count,
+      w.last_error AS workflow_last_error,
+      w.workflow_id AS temporal_workflow_id,
+      w.run_id AS temporal_run_id
+    FROM activities a
+    LEFT JOIN workflow_executions w ON w.id = a.workflow_execution_id
+    WHERE a.activity_type_id = ?
+      AND a.deleted_at_utc IS ${archived ? 'NOT NULL' : 'NULL'}
+      ${scope.clause}
+    ORDER BY
+      CASE a.status WHEN 'New' THEN 0 ELSE 1 END,
+      CASE a.status WHEN 'New' THEN CASE WHEN a.sort_order IS NULL THEN 0 ELSE 1 END END,
+      CASE WHEN a.status = 'New' AND a.sort_order IS NULL THEN COALESCE(a.restored_at_utc, a.created_at_utc) END DESC,
+      CASE a.status WHEN 'New' THEN a.sort_order END,
+      CASE a.status WHEN 'Done' THEN a.completed_at_utc END DESC,
+      a.updated_at_utc DESC,
+      a.id
+  `).all(activityType, ...scope.params).map(formatActivity);
+}
 
 function isEventAfter(left, right) {
   if (!right) return true;
@@ -817,7 +884,22 @@ function isEventAfter(left, right) {
   );
 }
 
-function normalizeActivityType(value, fallback = 'action') {
-  const type = sanitizeText(value);
-  return ACTIVITY_TYPES.has(type) ? type : fallback;
+function validTypeChangePayload(payload) {
+  return ACTIVITY_MUTABLE_TYPES.has(payload.from_activity_type_id)
+    && ACTIVITY_MUTABLE_TYPES.has(payload.to_activity_type_id)
+    && payload.from_activity_type_id !== payload.to_activity_type_id;
+}
+
+function goalCompletionEligible(store, activityId) {
+  try {
+    return store.goalCompletionState(activityId).eligible;
+  } catch {
+    return false;
+  }
+}
+
+function invariantMutationItems(events) {
+  return [...new Set(events.filter((event) => ['create', 'set_status', 'delete', 'restore', 'set_type'].includes(
+    sanitizeText(event?.change_type) ?? sanitizeText(event?.type)
+  )).map((event) => sanitizeText(event?.activity_id) ?? sanitizeText(event?.action_id)).filter(Boolean))];
 }

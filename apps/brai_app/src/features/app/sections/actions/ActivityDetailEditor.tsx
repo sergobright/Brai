@@ -350,7 +350,7 @@ export function ActivityDetailEditor({
     </>
   );
   const panelRows = activeTab === "info" ? "grid-rows-[auto_auto_minmax(0,1fr)]" : "grid-rows-[auto_auto_auto_auto_minmax(0,1fr)]";
-  const panelPadding = activeTab === "info" ? "px-0" : mode === "mobile" ? "px-[18px]" : "pl-7 pr-7";
+  const panelPadding = activeTab === "info" ? "px-0" : mode === "mobile" ? "pl-[18px] pr-5" : "pl-7 pr-7";
 
   if (mode === "mobile") {
     return (

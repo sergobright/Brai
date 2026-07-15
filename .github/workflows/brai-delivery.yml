@@ -22,6 +22,10 @@ on:
 env:
   BRAI_TEMPORAL_REQUIRED: 'true'
 
+concurrency:
+  group: brai-delivery-${{ github.event_name }}-${{ github.ref || github.event.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'push' }}
+
 jobs:
   public-guard:
     if: github.event_name != 'delete' && !(github.event_name == 'pull_request' && github.event.action == 'closed')
@@ -142,6 +146,7 @@ jobs:
       - run: npm ci
       - run: npm --prefix apps/brai_app ci
       - run: npm --prefix services/brai_api ci
+      - run: npm --prefix services/brai_goal_agents ci
       - run: npm --prefix admin ci
       - run: node --test scripts/*.test.mjs deploy/scripts/*.test.mjs
       - run: npm --prefix apps/brai_app run lint
@@ -149,6 +154,7 @@ jobs:
       - run: scripts/brai-api-test.sh
         env:
           BRAI_TEST_DATABASE_URL: postgres://brai:brai@127.0.0.1:5432/brai_test
+      - run: npm --prefix services/brai_goal_agents test
       - run: npm run email:images:check
       - run: npm --prefix admin run lint
       - run: npm --prefix admin run self-check

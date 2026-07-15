@@ -1,6 +1,6 @@
 export type ActivityStatus = "New" | "Done";
-export type ActivityType = "action" | "operation";
-export type ActivityEventType = "create" | "update_title" | "update_description" | "set_status" | "reorder" | "delete" | "restore";
+export type ActivityType = "action" | "goal" | "operation";
+export type ActivityEventType = "create" | "update_title" | "update_description" | "set_status" | "set_type" | "reorder" | "delete" | "restore";
 
 export interface ActivityItem {
   id: string;
@@ -31,12 +31,12 @@ export interface ActivityItem {
 }
 
 export interface ActivityEventPayload {
-  activity_type_id?: ActivityType;
   title?: string;
   description_md?: string;
-  author?: string;
-  reason?: string;
   status?: ActivityStatus;
+  activity_type_id?: ActivityType;
+  from_activity_type_id?: ActivityType;
+  to_activity_type_id?: ActivityType;
   ordered_ids?: string[];
 }
 
@@ -63,6 +63,12 @@ export interface ActivitiesState {
   server_revision: number;
   actions: ActivityItem[];
   archived_actions: ActivityItem[];
+  /** Legacy compatibility rows only; new Operations are owned by Inbox. */
+  legacy_operations?: ActivityItem[];
+  /** Optional only for cached responses produced by clients predating semantic Goals. */
+  goals?: ActivityItem[];
+  /** Optional only for cached responses produced by clients predating semantic Goals. */
+  archived_goals?: ActivityItem[];
 }
 
 export interface ActivitiesSyncResponse {
@@ -79,6 +85,9 @@ export function emptyActivitiesState(now = new Date()): ActivitiesState {
     server_revision: 0,
     actions: [],
     archived_actions: [],
+    legacy_operations: [],
+    goals: [],
+    archived_goals: [],
   };
 }
 

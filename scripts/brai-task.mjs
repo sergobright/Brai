@@ -13,6 +13,7 @@ const DEPENDENCY_DIRS = [
   "admin/node_modules",
   "apps/brai_app/node_modules",
   "services/brai_api/node_modules",
+  "services/brai_goal_agents/node_modules",
   "services/brai_temporal/node_modules",
 ];
 const WORKSPACE_WRITABLE_DIRS = [
@@ -87,6 +88,7 @@ export {
   linkDependencyDirs,
   findOpenTaskForThread,
   parseHookInput,
+  readPreviewSlot,
   taskStartGuidance,
   taskWorktreeParent,
   validateSocraticodeRequirement,
@@ -479,6 +481,9 @@ function preCommit() {
   if (blocked.length) {
     throw new Error(`Refusing to commit generated/runtime/secret-like files:\n${blocked.map((file) => `- ${file}`).join("\n")}`);
   }
+  const hasImplementationFiles = staged.some((file) => !file.endsWith(".md") && !file.startsWith("docs/") && !file.startsWith("memory-bank/"));
+  const socraticode = validateSocraticodeRequirement(readTaskMarker(), hasImplementationFiles);
+  if (!socraticode.ok) throw new Error(socraticode.message);
   markWriteIntent();
 }
 
@@ -509,6 +514,9 @@ function prePush(remoteName) {
   const changed = diffFromAcceptedBase();
   if (changed.some((file) => file.startsWith("scripts/brai-") || file.startsWith(".codex/") || file.startsWith(".githooks/"))) {
     runRequired(["npm", "run", "task:test"], "Brai task guard changes require passing npm run task:test before push.");
+  }
+  if (changed.some((file) => /^(scripts|deploy\/scripts)\/[^/]+\.sh$/.test(file))) {
+    runRequired(["scripts/brai-shellcheck.sh"], "Changed first-party shell scripts must pass ShellCheck before push.");
   }
   if (changed.some((file) => file.startsWith("services/brai_temporal/") || file === ".github/workflows/brai-delivery.yml")) {
     runRequired(["npm", "run", "temporal:test"], "Temporal-sensitive changes require passing npm run temporal:test before push.");
@@ -542,10 +550,8 @@ function previewHandoff(branchArg) {
   if (branch !== currentBranch()) throw new Error(`Current branch is ${currentBranch()}, not ${branch}`);
   const head = git("rev-parse", "HEAD");
 
-  fetchTaskBranch(branch);
-  const remoteSha = git("rev-parse", `origin/${branch}`);
-  if (remoteSha !== head) throw new Error(`HEAD ${head} is not pushed to origin/${branch} (${remoteSha}). Push before handoff.`);
   if (git("status", "--porcelain").trim()) throw new Error("Working tree is not clean. Commit or remove local changes before handoff.");
+  ensureTaskBranchPushed(branch, head);
   const baseRef = taskBaseRefForBranch(branch);
   if (!isAncestor(baseRef, head)) throw new Error(`Task base ${baseRef} is not an ancestor of ${head}.`);
 
@@ -587,6 +593,7 @@ function writePreviewTestingNote(branch, commit, releaseNotes) {
 }
 
 function deliveryHandoff(branchArg) {
+  const taskRoot = git("rev-parse", "--show-toplevel");
   const branch = branchArg ?? currentBranch();
   if (!CODEX_BRANCH_RE.test(branch)) throw new Error(`Delivery handoff requires codex/* branch, got: ${branch}`);
   if (branch !== currentBranch()) throw new Error(`Current branch is ${currentBranch()}, not ${branch}`);
@@ -608,10 +615,8 @@ function deliveryHandoff(branchArg) {
   }
   requireSocraticodeForHandoff(changedFiles);
 
-  fetchTaskBranch(branch);
-  const remoteSha = git("rev-parse", `origin/${branch}`);
-  if (remoteSha !== head) throw new Error(`HEAD ${head} is not pushed to origin/${branch} (${remoteSha}). Push before handoff.`);
   if (git("status", "--porcelain").trim()) throw new Error("Working tree is not clean. Commit or remove local changes before handoff.");
+  ensureTaskBranchPushed(branch, head);
   const marker = readTaskMarker();
   if (marker?.base && !isAncestor(marker.base, head)) {
     throw new Error(`Task base ${marker.base} is not an ancestor of ${head}. Start a fresh task branch from ${acceptedBaseRef()}.`);
@@ -639,7 +644,7 @@ function deliveryHandoff(branchArg) {
     verifiedAt: new Date().toISOString(),
     verifiedBy: "brai-task-delivery-v1",
   };
-  writeDeliveryReceipt(receipt);
+  writeDeliveryReceipt(receipt, taskRoot);
 
   console.log("No-preview delivery");
   console.log(`Branch: ${branch}`);
@@ -757,6 +762,7 @@ function serverAccessContract(root = process.env.BRAI_ROOT ?? "/srv/projects/bra
   const supabaseDeployEnvFile = process.env.BRAI_SUPABASE_DEPLOY_ENV_FILE ?? path.join(protectedEnvDir, "supabase-deploy.env");
   const localCreateOperationHelper = path.join(root, "deploy/scripts/create-operation-activity.sh");
   const localCompleteOperationHelper = path.join(root, "deploy/scripts/complete-operation-activities.sh");
+  const localCompleteInboxHelper = path.join(root, "deploy/scripts/complete-inbox-operations.sh");
   const localListOperationHelper = path.join(root, "deploy/scripts/list-operation-activities.sh");
   const acceptedPreviewOtaHelper = path.join(root, "deploy/scripts/sync-occupied-preview-ota-manifests.sh");
   const checks = [
@@ -787,8 +793,8 @@ function serverAccessContract(root = process.env.BRAI_ROOT ?? "/srv/projects/bra
       owner: "root",
       group: deployGroup,
       expectDirectory: true,
-      requiredModeBits: 0o750,
-      forbiddenModeBits: 0o007,
+      requiredModeBits: 0o751,
+      forbiddenModeBits: 0o006,
     }),
     contractPathCheck("runtime api env", apiEnvFile, {
       sudoStat: true,
@@ -806,6 +812,7 @@ function serverAccessContract(root = process.env.BRAI_ROOT ?? "/srv/projects/bra
     }),
     commandCheck("operation create helper host-local sudo", [localCreateOperationHelper, "--host-local", "--check-access"], { cwd: root }),
     commandCheck("operation complete helper host-local sudo", [localCompleteOperationHelper, "--host-local", "--check-access"], { cwd: root }),
+    commandCheck("Inbox operation complete helper host-local sudo", [localCompleteInboxHelper, "--host-local", "--check-access"], { cwd: root }),
     commandCheck("operation list helper host-local sudo", [localListOperationHelper, "--host-local", "--check-access"], { cwd: root }),
     commandCheck("accepted preview OTA sync access", [acceptedPreviewOtaHelper, "--check-access"], {
       cwd: root,
@@ -840,10 +847,24 @@ function serverAccessContract(root = process.env.BRAI_ROOT ?? "/srv/projects/bra
       deploySshPort,
       deployUser,
       deployHost,
+      localOperationHelper: localCompleteInboxHelper,
+      checkName: "Inbox operation complete helper remote ssh",
+      root,
+    }),
+    operationHelperRemoteAccessCheck({
+      deployIdentityFile,
+      deploySshPort,
+      deployUser,
+      deployHost,
       localOperationHelper: localListOperationHelper,
       checkName: "operation list helper remote ssh",
       root,
     }),
+    treeOwnershipCheck("production publish artifacts", [
+      path.join(deployRepo, "deploy/web"),
+      path.join(deployRepo, "deploy/mobile-update"),
+      path.join(deployRepo, "deploy/releases"),
+    ], { owner: deployOwner, group: deployGroup }),
     pathCheck("deploy artifacts", path.join(deployRepo, "deploy"), { requireRead: true, expectDirectory: true }),
     pathCheck("main sync script", mainSyncScript, { requireRead: true }),
     commandCheck("node", ["node", "--version"], { cwd: root }),
@@ -971,6 +992,35 @@ function contractPathCheck(name, target, { owner, group, requiredModeBits = 0, f
     }
   }
   return check;
+}
+
+function treeOwnershipCheck(name, targets, { owner, group }) {
+  const user = resolveUserId(owner);
+  const resolvedGroup = resolveGroupId(group);
+  if (!user.ok || !resolvedGroup.ok) {
+    return { name, ok: false, reason: user.reason ?? resolvedGroup.reason };
+  }
+  const result = spawnSync("find", [
+    ...targets,
+    "-xdev",
+    "(",
+    "!", "-uid", String(user.id),
+    "-o",
+    "!", "-gid", String(resolvedGroup.id),
+    ")",
+    "-print",
+    "-quit",
+  ], { encoding: "utf8" });
+  const mismatch = String(result.stdout ?? "").trim();
+  return {
+    name,
+    ok: result.status === 0 && mismatch === "",
+    paths: targets,
+    expectedOwner: owner,
+    expectedGroup: group,
+    mismatch: mismatch || undefined,
+    stderr: String(result.stderr ?? "").trim(),
+  };
 }
 
 function resolveUserId(name) {
@@ -1806,8 +1856,9 @@ function sandboxCheckMode(commandText) {
     /\bnode scripts\/brai-task\.mjs access-contract --server\b/.test(text) ||
     /\bscripts\/brai-preview-handoff\.sh\b/.test(text) ||
     /\bdeploy\/scripts\/accept-preview\.sh\b/.test(text) ||
+    /\bdeploy\/scripts\/apply-main-infra\.sh\b/.test(text) ||
     /\bnode scripts\/brai-task\.mjs (acceptance-reconcile|acceptance-repair|handoff|preview)\b/.test(text) ||
-    /\bdeploy\/scripts\/(complete-operation-activities|create-operation-activity|list-operation-activities)\.sh\b/.test(text)
+    /\bdeploy\/scripts\/(complete-inbox-operations|complete-operation-activities|create-operation-activity|list-operation-activities)\.sh\b/.test(text)
   ) {
     return { mode: "require_escalated", reason: "Brai host/Git/runtime boundaries for this command are not authoritative inside the Codex sandbox." };
   }
@@ -1933,20 +1984,25 @@ function deliveryClassForFile(file) {
     file.startsWith("optional-skills/") ||
     file.startsWith("admin/deploy/") ||
     file.startsWith("deploy/ansible/") ||
+    file.startsWith("deploy/chrome-devtools-mcp/") ||
     file.startsWith("deploy/systemd/") ||
     file.startsWith(".githooks/") ||
     file.startsWith("scripts/brai-") ||
+    file.startsWith("scripts/check-public-branch") ||
     file.startsWith("scripts/check-open-openspec-changes") ||
     file.startsWith("services/brai_temporal/") ||
     [
       "deploy/scripts/classify-delivery.mjs",
       "deploy/scripts/accept-preview.sh",
       "deploy/scripts/accepted-preview-branches.mjs",
+      "deploy/scripts/apply-main-infra.sh",
       "deploy/scripts/apk-release-targets.mjs",
+      "deploy/scripts/backup-postgres-to-telegram.sh",
       "deploy/scripts/build-android-env-apk.sh",
       "deploy/scripts/build-nonproduction-apks.sh",
       "deploy/scripts/ci-ssh-complete-accepted-previews.sh",
       "deploy/scripts/ci-cleanup-accepted-branches.sh",
+      "deploy/scripts/ci-temporal-signal.sh",
       "deploy/scripts/ci-ssh-deploy.sh",
       "deploy/scripts/ci-ssh-promote-deployment.sh",
       "deploy/scripts/ci-ssh-prune-accepted-branches.sh",
@@ -1955,12 +2011,14 @@ function deliveryClassForFile(file) {
       "deploy/scripts/cleanup-accepted-branches.mjs",
       "deploy/scripts/cleanup-test-schemas.mjs",
       "deploy/scripts/complete-operation-activities.sh",
+      "deploy/scripts/complete-inbox-operations.sh",
       "deploy/scripts/codex-cli-smoke.sh",
       "deploy/scripts/create-operation-activity.sh",
       "deploy/scripts/list-operation-activities.sh",
       "deploy/scripts/deploy-branch.sh",
       "deploy/scripts/detect-native-apk-change.mjs",
       "deploy/scripts/generate-android-preview-icons.sh",
+      "deploy/scripts/install-chrome-devtools-caddy-auth.mjs",
       "deploy/scripts/preview-slots.mjs",
       "deploy/scripts/preview-slots.sh",
       "deploy/scripts/permissions.sh",
@@ -1989,6 +2047,7 @@ function deliveryClassForFile(file) {
     file.startsWith("apps/brai_app/tests/") ||
     file.startsWith("services/brai_api/test/") ||
     file.startsWith("services/brai_api/test-support/") ||
+    file.startsWith("services/brai_goal_agents/test/") ||
     /^apps\/brai_app\/vitest\.config\.[cm]?[jt]s$/.test(file) ||
     /^apps\/brai_app\/playwright\.config\.[cm]?[jt]s$/.test(file) ||
     /^apps\/brai_app\/eslint\.config\.[cm]?[jt]s$/.test(file)
@@ -2113,31 +2172,57 @@ function findSuccessfulDeliveryRun(branch, sha, requiredJobs = ["public-guard", 
 
 function readPreviewSlot(branch, sha) {
   const registryPath = process.env.BRAI_PREVIEW_REGISTRY ?? "/srv/projects/brai-envs/preview-slots.json";
+  let registrySlot = null;
   if (fs.existsSync(registryPath)) {
     const registry = JSON.parse(fs.readFileSync(registryPath, "utf8"));
     for (const slot of ["A", "B", "C", "D", "E"]) {
       const entry = registry[slot] ?? {};
-      if (entry.branch === branch && entry.commit === sha && entry.status === "ready") return slot;
+      if (entry.branch !== branch) continue;
+      if (entry.commit !== sha) throw new Error(`${branch} preview slot ${slot} belongs to ${entry.commit || "(missing)"}, not ${sha}.`);
+      if (entry.status === "ready") {
+        registrySlot = slot;
+        break;
+      }
+      throw new Error(`${branch}@${sha} preview slot ${slot} is ${entry.status || "unknown"}, not ready.`);
     }
-    const queuedIndex = Array.isArray(registry.queue) ? registry.queue.findIndex((entry) => entry?.branch === branch && entry?.commit === sha) : -1;
-    if (queuedIndex >= 0) throw new Error(`${branch}@${sha} is queued for preview at position ${queuedIndex + 1}.`);
+    const queuedIndex = Array.isArray(registry.queue) ? registry.queue.findIndex((entry) => entry?.branch === branch) : -1;
+    if (queuedIndex >= 0) {
+      const queued = registry.queue[queuedIndex];
+      if (queued.commit !== sha) throw new Error(`${branch} preview queue entry belongs to ${queued.commit || "(missing)"}, not ${sha}.`);
+      throw new Error(`${branch}@${sha} is queued for preview at position ${queuedIndex + 1}.`);
+    }
   }
 
-  const temporal = queryTemporalPreview(branch);
-  const slot = temporal.slot ?? temporal.tasks?.slot?.slot ?? temporal.previewSlot;
-  const status = temporal.status ?? temporal.state?.status;
-  const blocker = temporal.blocker ?? temporal.state?.blocker;
+  const queried = queryTemporalPreview(branch, sha);
+  const temporal = queried.state ?? queried;
+  const slot = temporal.slot ?? temporal.previewSlot;
+  const status = temporal.status;
+  const blocker = temporal.blocker;
+  if (temporal.lastSha !== sha) throw new Error(`Temporal preview state is for ${temporal.lastSha || "(missing)"}, not ${branch}@${sha}.`);
   if (!slot || !/^[A-E]$/.test(slot)) throw new Error(`Temporal did not report a preview slot for ${branch}@${sha}.`);
+  if (registrySlot && registrySlot !== slot) {
+    throw new Error(`${branch}@${sha} registry slot ${registrySlot} does not match Temporal slot ${slot}.`);
+  }
   if (blocker) throw new Error(`Temporal preview blocker: ${typeof blocker === "string" ? blocker : JSON.stringify(blocker)}`);
-  if (status && !["ready_for_review", "ready"].includes(status)) throw new Error(`Temporal preview state is ${status}, not ready_for_review.`);
-  return slot;
+  if (!["ready_for_review", "ready"].includes(status)) throw new Error(`Temporal preview state is ${status || "(missing)"}, not ready_for_review.`);
+  for (const task of ["checks", "supabase_preview", "goal_agents_deploy", "preview_deploy"]) {
+    if (temporal.tasks?.[task]?.status !== "passed" || temporal.tasks[task].sha !== sha) {
+      throw new Error(`Temporal preview task ${task} is not passed for ${branch}@${sha}.`);
+    }
+  }
+  return registrySlot ?? slot;
 }
 
-function queryTemporalPreview(branch) {
-  const result = spawnSync("deploy/scripts/ci-temporal-signal.sh", ["query-preview", "--branch", branch], {
+function queryTemporalPreview(branch, sha) {
+  const localRegistry = process.env.BRAI_PREVIEW_REGISTRY ?? "/srv/projects/brai-envs/preview-slots.json";
+  const result = spawnSync("deploy/scripts/ci-temporal-signal.sh", ["query-preview-deploy", "--branch", branch, "--sha", sha], {
     cwd: git("rev-parse", "--show-toplevel"),
     encoding: "utf8",
-    env: { ...process.env, BRAI_TEMPORAL_REQUIRED: "true" },
+    env: {
+      ...gitEnv(),
+      BRAI_TEMPORAL_REQUIRED: "true",
+      ...(fs.existsSync(localRegistry) ? { BRAI_TEMPORAL_DIRECT: "true" } : {}),
+    },
   });
   if (result.status !== 0) {
     throw new Error(`Temporal query failed:\n${result.stderr || result.stdout || "(no output)"}`);
@@ -2193,6 +2278,18 @@ function fetchAcceptedBase() {
 
 function fetchTaskBranch(branch) {
   git("fetch", "origin", `+refs/heads/${branch}:refs/remotes/origin/${branch}`);
+}
+
+function ensureTaskBranchPushed(branch, head) {
+  if (!remoteBranchExists(branch)) {
+    runRequired(
+      ["git", "push", "-u", "origin", `HEAD:refs/heads/${branch}`],
+      `Initial push failed for ${branch}.`,
+    );
+  }
+  fetchTaskBranch(branch);
+  const remoteSha = git("rev-parse", `origin/${branch}`);
+  if (remoteSha !== head) throw new Error(`HEAD ${head} is not pushed to origin/${branch} (${remoteSha}). Push before handoff.`);
 }
 
 function remoteBranchExists(branch) {
@@ -2315,8 +2412,7 @@ function writePreviewReceipt(receipt) {
   fs.writeFileSync(path.join(dir, "preview-handoff.json"), `${JSON.stringify(receipt, null, 2)}\n`);
 }
 
-function writeDeliveryReceipt(receipt) {
-  const root = git("rev-parse", "--show-toplevel");
+function writeDeliveryReceipt(receipt, root) {
   const dir = path.join(root, ".brai-task");
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, "delivery-handoff.json"), `${JSON.stringify(receipt, null, 2)}\n`);

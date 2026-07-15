@@ -49,3 +49,18 @@ test("schema copy rejects foreign-key cycles instead of choosing an invalid orde
     /cyclic foreign keys: first -> second -> first/
   );
 });
+
+test("schema copy orders a cycle through its initially deferred foreign key", () => {
+  assert.deepEqual(
+    orderTablesByDependencies(
+      ["relations", "context_decisions"],
+      {
+        dependencies: [
+          { table: "context_decisions", referencedTable: "relations", deferred: false },
+          { table: "relations", referencedTable: "context_decisions", deferred: true }
+        ]
+      }
+    ),
+    ["relations", "context_decisions"]
+  );
+});

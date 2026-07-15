@@ -1,6 +1,15 @@
-import { beforeEach, describe, expect, it } from "vitest";
-import { enqueueInboxEvent, loadInboxState, pendingInboxEvents, projectInboxState, saveInboxState } from "@/shared/storage/inboxStore";
-import { clientDb, getMeta } from "@/shared/storage/db";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  acknowledgeInboxSyncEvents,
+  enqueueInboxEvent,
+  loadInboxState,
+  markInboxAttempt,
+  markInboxFailure,
+  pendingInboxEvents,
+  projectInboxState,
+  saveInboxState,
+} from "@/shared/storage/inboxStore";
+import { ClientUserScopeChangedError, clientDb, getMeta, setMeta } from "@/shared/storage/db";
 import type { InboxState } from "@/shared/types/inbox";
 
 describe("inbox store", () => {
@@ -88,6 +97,93 @@ describe("inbox store", () => {
     expect((await loadInboxState())?.inbox[0].title).toBe("Свежее");
     expect(await getMeta<number>("lastInboxServerRevision")).toBe(5);
   });
+
+  it("keeps the new owner's Inbox cache and outbox untouched by a stale tab", async () => {
+    await setMeta("currentUserId", "user-a");
+    await setMeta("currentUserId", "user-b");
+    const event = await enqueueInboxEvent({
+      type: "create",
+      payload: { title: "B event" },
+      baseServerRevision: 1,
+      expectedUserId: "user-b",
+    });
+    await saveInboxState(state(1, "inbox-b", "B snapshot"), "user-b");
+    const beforeOutbox = await clientDb().inbox_outbox_events.toArray();
+    const beforeSequence = await getMeta<number>("nextClientSequence");
+
+    await expect(enqueueInboxEvent({
+      type: "create",
+      payload: { title: "stale A event" },
+      baseServerRevision: 1,
+      expectedUserId: "user-a",
+    })).rejects.toBeInstanceOf(ClientUserScopeChangedError);
+    await expect(markInboxAttempt([event], "user-a")).rejects.toBeInstanceOf(ClientUserScopeChangedError);
+    await expect(markInboxFailure([event], "stale failure", "user-a"))
+      .rejects.toBeInstanceOf(ClientUserScopeChangedError);
+    await expect(saveInboxState(state(2, "inbox-a", "stale A snapshot"), "user-a"))
+      .rejects.toBeInstanceOf(ClientUserScopeChangedError);
+    await expect(acknowledgeInboxSyncEvents({
+      acknowledgedEventIds: [event.eventId],
+      ignoredEvents: [],
+      state: state(2, "inbox-a", "stale A acknowledgement"),
+      expectedUserId: "user-a",
+    })).rejects.toBeInstanceOf(ClientUserScopeChangedError);
+    await expect(pendingInboxEvents("user-a")).rejects.toBeInstanceOf(ClientUserScopeChangedError);
+
+    expect(await pendingInboxEvents("user-b")).toEqual(beforeOutbox);
+    expect(await getMeta<number>("nextClientSequence")).toBe(beforeSequence);
+    expect(await loadInboxState("user-b")).toMatchObject({
+      server_revision: 1,
+      inbox: [{ id: "inbox-b", title: "B snapshot" }],
+    });
+  });
+
+  it("cannot lose an acknowledged Inbox item between outbox removal and canonical snapshot", async () => {
+    const event = await enqueueInboxEvent({
+      type: "create",
+      payload: { title: "Нормализуемая операция" },
+      baseServerRevision: 0,
+    });
+    await markInboxAttempt([event]);
+    const canonical = state(1, event.inboxId, "Нормализованная операция");
+    const failure = vi.spyOn(clientDb().inbox_outbox_events, "bulkDelete")
+      .mockRejectedValueOnce(new Error("injected_ack_failure"));
+
+    await expect(acknowledgeInboxSyncEvents({
+      acknowledgedEventIds: [event.eventId],
+      ignoredEvents: [],
+      state: canonical,
+    })).rejects.toThrow("injected_ack_failure");
+    failure.mockRestore();
+
+    clientDb().close();
+    await clientDb().open();
+    expect(await clientDb().inbox_outbox_events.get(event.eventId)).toBeDefined();
+    expect(await loadInboxState()).toBeNull();
+
+    await acknowledgeInboxSyncEvents({
+      acknowledgedEventIds: [event.eventId],
+      ignoredEvents: [],
+      state: canonical,
+    });
+    clientDb().close();
+    await clientDb().open();
+    expect(await clientDb().inbox_outbox_events.get(event.eventId)).toBeUndefined();
+    expect((await loadInboxState())?.inbox).toMatchObject([{ id: event.inboxId, title: "Нормализованная операция" }]);
+  });
+
+  it("persists ignored Inbox rows in the acknowledgement transaction", async () => {
+    const event = await enqueueInboxEvent({ type: "create", payload: { title: "Повтор" }, baseServerRevision: 0 });
+
+    await acknowledgeInboxSyncEvents({
+      acknowledgedEventIds: [],
+      ignoredEvents: [{ event_id: event.eventId, reason: "duplicate_event" }],
+      state: { ...state(1, event.inboxId, "Повтор"), inbox: [] },
+    });
+
+    expect(await clientDb().inbox_outbox_events.get(event.eventId)).toBeUndefined();
+    expect(await clientDb().ignored_events.get(event.eventId)).toMatchObject({ reason: "duplicate_event" });
+  });
 });
 
 function state(serverRevision: number, id: string, title: string, descriptionMd = ""): InboxState {
@@ -100,6 +196,10 @@ function state(serverRevision: number, id: string, title: string, descriptionMd 
         title,
         description_md: descriptionMd,
         source: "",
+        source_key: "",
+        response_required: false,
+        related_inbox_id: null,
+        record_type_id: 4,
         item_date: null,
         author: "",
         preliminary_section: "",

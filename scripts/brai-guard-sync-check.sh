@@ -1,9 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-REPO_TASK="$ROOT/scripts/brai-task.mjs"
+REPO_TASK="${BRAI_GUARD_SOURCE_TASK:-/srv/projects/brai/scripts/brai-task.mjs}"
 INSTALLED_TASK="${BRAI_INSTALLED_GUARD_TASK:-/srv/opt/brai-codex-plugins/plugins/brai-guard/hooks/brai-task.mjs}"
+
+if [[ ! -f "$REPO_TASK" ]]; then
+  echo "Canonical Brai guard source is missing: $REPO_TASK" >&2
+  exit 1
+fi
 
 case "${1:---check}" in
   --check)

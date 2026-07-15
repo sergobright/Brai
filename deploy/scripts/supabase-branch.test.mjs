@@ -5,6 +5,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import {
+  assertSameDatabaseTarget,
   constraintTextValues,
   copyTargetColumns,
   copySourceQuery,
@@ -19,6 +20,17 @@ import {
 } from "./supabase-branch.mjs";
 
 const repoRoot = path.resolve(import.meta.dirname, "../..");
+
+test("preserve-existing accepts only the exact current database target", () => {
+  const current = "postgres://branch_user:old-secret@127.0.0.1:5432/postgres?options=-c%20search_path%3Dbrai_preview_branch%2Cpublic";
+  const rotatedPassword = "postgres://branch_user:new-secret@127.0.0.1:5432/postgres?options=-c%20search_path%3Dbrai_preview_branch%2Cpublic";
+  assert.doesNotThrow(() => assertSameDatabaseTarget(current, rotatedPassword));
+  assert.throws(() => assertSameDatabaseTarget(
+    current,
+    "postgres://branch_user:new-secret@127.0.0.1:5432/postgres?options=-c%20search_path%3Dbrai_preview_other%2Cpublic"
+  ), /preserve-existing target does not match/);
+  assert.throws(() => assertSameDatabaseTarget("", rotatedPassword), /requires the current BRAI_DATABASE_URL/);
+});
 
 test("Supabase migration versions are unique and duplicate prefixes fail closed", () => {
   const migrationsDir = path.join(repoRoot, "supabase/migrations");
@@ -62,6 +74,15 @@ test("production seed loads only explicitly marked idempotent migrations into th
   assert.doesNotMatch(script, /reapplyPostProductionSeedMigrations/);
 });
 
+test("production copy exposes initially deferred foreign keys to dependency ordering", () => {
+  const script = fs.readFileSync(path.join(repoRoot, "deploy/scripts/supabase-branch.mjs"), "utf8");
+  const start = script.indexOf("async function foreignKeyDependencies");
+  const body = script.slice(start, script.indexOf("function migrationTableOrder", start));
+
+  assert.match(body, /fk\.condeferred AS deferred/);
+  assert.match(body, /deferred: row\.deferred/);
+});
+
 test("production seed never copies account AI credentials, routing, or device links", () => {
   const script = fs.readFileSync(path.join(repoRoot, "deploy/scripts/supabase-branch.mjs"), "utf8");
   const exclusionStart = script.indexOf("const TEST_DATA_COPY_EXCLUDED_TABLES");
@@ -83,6 +104,8 @@ test("preview and dev sanitize cloned account AI data after all seeding", () => 
 
   assert.ok(preview.indexOf("await sanitizeClonedAccountAiData(databaseUrl)") > preview.indexOf("await applyPreviewSeed(databaseUrl)"));
   assert.ok(dev.indexOf("await sanitizeClonedAccountAiData(databaseUrl)") > dev.indexOf("await seedTestDataFromProduction(databaseUrl)"));
+  assert.match(preview, /if \(!preserveExisting\) await sanitizeClonedAccountAiData\(databaseUrl\)/);
+  assert.match(dev, /if \(!preserveExisting\) await sanitizeClonedAccountAiData\(databaseUrl\)/);
 });
 
 test("cloned account AI reset removes sensitive rows and recreates internal settings atomically", async () => {
@@ -132,6 +155,7 @@ test("production copy reseeds copied tables before repair migrations and before 
   const copyFunction = script.slice(copyStart, inspectStart);
   const begin = 'client.query("BEGIN ISOLATION LEVEL REPEATABLE READ")';
   const searchPath = "SET LOCAL search_path TO";
+  const constraintsImmediate = 'client.query("SET CONSTRAINTS ALL IMMEDIATE")';
   const reapply = "for (const { sql } of postSeedMigrations) await client.query(sql)";
   const reseed = "await reseedOwnedSequences(client, { schema: targetSchema, tables: copyTables })";
   const firstReseed = copyFunction.indexOf(reseed);
@@ -149,6 +173,8 @@ test("production copy reseeds copied tables before repair migrations and before 
   assert.ok(copyFunction.indexOf(searchPath) < copyFunction.indexOf("TRUNCATE TABLE"));
   assert.ok(copyFunction.indexOf(reapply) > copyFunction.indexOf("OVERRIDING SYSTEM VALUE"));
   assert.ok(firstReseed > copyFunction.indexOf("OVERRIDING SYSTEM VALUE"));
+  assert.ok(copyFunction.indexOf(constraintsImmediate) > firstReseed);
+  assert.ok(copyFunction.indexOf(constraintsImmediate) < copyFunction.indexOf(reapply));
   assert.ok(firstReseed < copyFunction.indexOf(reapply));
   assert.ok(secondReseed > copyFunction.indexOf(reapply));
   assert.ok(secondReseed < copyFunction.indexOf('client.query("COMMIT")'));
@@ -524,6 +550,8 @@ test("preview env setup rewrites existing shell-unsafe values safely", () => {
     "preview-env",
     "--branch",
     "codex/supabase-only-runtime",
+    "--commit",
+    "test-commit",
     "--runtime-env",
     envFile
   ], {
@@ -580,6 +608,36 @@ test("dev env setup enables explicit test email login", () => {
   assert.equal(fs.statSync(envFile).mode & 0o777, 0o660);
 });
 
+test("self-hosted preview generator switches only to the non-production tenant after cutover", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "brai-supabase-tenant-env-"));
+  const envFile = path.join(dir, "brai-api.env");
+  const result = spawnSync("node", [
+    path.join(repoRoot, "deploy/scripts/supabase-branch.mjs"),
+    "dev-env",
+    "--runtime-env",
+    envFile,
+  ], {
+    cwd: repoRoot,
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      BRAI_SUPABASE_DRY_RUN: "true",
+      BRAI_SUPAVISOR_TENANT_ISOLATION: "true",
+      BRAI_RELEASE_PASSWORD: "shared-release-password",
+      SUPABASE_SELF_HOSTED: "true",
+      SUPABASE_SELF_HOSTED_DATABASE_URL: "postgres://postgres.brightos:p%40ss@127.0.0.1:55432/postgres?sslmode=disable",
+    },
+  });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+
+  const databaseUrl = fs.readFileSync(envFile, "utf8").match(/^BRAI_DATABASE_URL='([^']+)'$/m)?.[1];
+  const parsed = new URL(databaseUrl);
+  assert.equal(parsed.username, "postgres.brightos-nonprod");
+  assert.equal(parsed.password, "p%40ss");
+  assert.equal(parsed.searchParams.get("sslmode"), "disable");
+  assert.equal(parsed.searchParams.get("options"), "-c search_path=brai_dev,public");
+});
+
 test("preview environment preserves its user-provider encryption key", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "brai-supabase-key-env-"));
   const envFile = path.join(dir, "brai-api.env");
@@ -599,6 +657,8 @@ test("preview environment preserves its user-provider encryption key", () => {
     "preview-env",
     "--branch",
     "codex/provider-key-persistence",
+    "--commit",
+    "test-commit",
     "--runtime-env",
     envFile
   ];
@@ -644,6 +704,8 @@ test("branch database URL override requires explicit preview marker", () => {
     "preview-env",
     "--branch",
     "codex/supabase-only-runtime",
+    "--commit",
+    "test-commit",
     "--runtime-env",
     envFile
   ], {
@@ -659,6 +721,8 @@ test("branch database URL override requires explicit preview marker", () => {
     "preview-env",
     "--branch",
     "codex/supabase-only-runtime",
+    "--commit",
+    "test-commit",
     "--runtime-env",
     envFile
   ], {
@@ -685,6 +749,8 @@ test("branch database URL override requires explicit preview marker", () => {
     "preview-env",
     "--branch",
     "codex/supabase-only-runtime",
+    "--commit",
+    "test-commit",
     "--runtime-env",
     envFile
   ], {

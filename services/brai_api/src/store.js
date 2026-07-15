@@ -4,11 +4,16 @@ import { activityWorkflowStoreMethods } from './store-activity-workflows.js';
 import { appSettingsMethods } from './store-app-settings.js';
 import { authUserMethods } from './store-auth-users.js';
 import { braiCmdStoreMethods } from './store-brai-cmd.js';
+import { contextApplyMethods } from './store-context-apply.js';
+import { contextDecisionMethods } from './store-context-decisions.js';
 import { aiLogMethods } from './store-ai-logs.js';
 import { inboxEventMethods } from './store-inbox-events.js';
 import { deploymentMethods } from './store-deployments.js';
 import { eventsLogsMethods } from './store-events-logs.js';
+import { goalRelationMethods } from './store-goal-relations.js';
+import { goalAgentWorkflowMethods } from './store-goal-agent-workflows.js';
 import { readModelMethods } from './store-read-models.js';
+import { relationMethods } from './store-relations.js';
 import { roleLinkMethods } from './store-role-links.js';
 import { timerEventMethods } from './store-timer-events.js';
 import { userAiStoreMethods } from './store-user-ai.js';
@@ -30,9 +35,14 @@ Object.assign(
   appSettingsMethods,
   authUserMethods,
   braiCmdStoreMethods,
+  contextApplyMethods,
+  contextDecisionMethods,
   aiLogMethods,
   deploymentMethods,
   eventsLogsMethods,
+  goalRelationMethods,
+  goalAgentWorkflowMethods,
+  relationMethods,
   roleLinkMethods,
   timerEventMethods,
   activityEventMethods,

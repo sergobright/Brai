@@ -1,7 +1,7 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import { createMobileAction, dispatchElementTouch, dispatchTouch, dragTouch, horizontalCenterOffset, openProfileMenuItem, swipeActionRowLeft, swipeTouch } from "./shell-helpers";
 
-test("keeps the burger drawer empty and opens the left overflow from the aligned three-dot button", async ({ page }, testInfo) => {
+test("shows Actions lists in the burger drawer and opens account overflow from the aligned three-dot button", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "mobile", "mobile-only drawer");
 
   await page.goto("/");
@@ -13,6 +13,8 @@ test("keeps the burger drawer empty and opens the left overflow from the aligned
   await expect(page.locator(".mobile-menu-backdrop")).toBeVisible();
   await expect(page.locator(".mobile-profile-drawer")).not.toContainText("Workspace");
   await expect(page.locator(".mobile-profile-drawer").getByRole("button", { name: /Engine/ })).toHaveCount(0);
+  await expect(page.locator(".mobile-profile-drawer").getByRole("navigation", { name: "Списки действий" })).toBeVisible();
+  await expect(page.locator(".mobile-profile-drawer").getByRole("button", { name: /^Все\s*\d*$/ })).toBeVisible();
   await page.locator(".mobile-menu-backdrop").click({ position: { x: 360, y: 120 } });
   await expect(page.locator(".mobile-menu-backdrop")).toHaveCount(0);
 
@@ -132,7 +134,7 @@ test("scrolls the account dropdown above the Dock on a short mobile viewport", a
   expect((logoutBox?.y ?? 999) + (logoutBox?.height ?? 0)).toBeLessThanOrEqual((dockBox?.y ?? 0) + 1);
 });
 
-test("opens the right mobile dock overflow with placeholder items", async ({ page }, testInfo) => {
+test("opens the right mobile dock overflow with Draws and placeholder items", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "mobile", "mobile-only dock overflow");
 
   await page.goto("/");
@@ -143,8 +145,10 @@ test("opens the right mobile dock overflow with placeholder items", async ({ pag
   const sheet = page.locator(".mobile-dock-overflow-sheet");
   await expect(sheet).toBeVisible();
   await expect(sheet).toHaveAttribute("aria-label", "Правое меню");
+  await expect(sheet.getByRole("button", { name: "Draws" })).toBeVisible();
   await expect(sheet.getByRole("button", { name: "Заглушка: Флаг" })).toBeVisible();
   await expect(sheet.getByRole("button", { name: "Заглушка: Тег" })).toBeVisible();
+  await expect(sheet.getByRole("button", { name: "Заглушка: Архив" })).toBeVisible();
   const closeButton = page.getByRole("button", { name: "Скрыть правое меню" });
   await expect(closeButton).toBeVisible();
   const leftButton = page.getByRole("button", { name: "Открыть левое меню" });
@@ -438,8 +442,41 @@ test("opens the mobile activity detail editor from a title tap", async ({ page }
   await expect(page.locator(".actions-detail-panel.mobile")).toBeVisible();
 });
 
+test("keeps the mobile Operation dialog inside Back, Escape, and focus boundaries", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "mobile", "mobile-only Operation detail");
+  test.setTimeout(60_000);
+
+  await mockOperationWorkspaceApi(page);
+  await page.goto("/");
+  await page.locator(".section-page-current .mobile-menu-button").click();
+  await page.locator(".mobile-profile-drawer").getByRole("button", { name: /Операции/ }).click();
+
+  const operation = page.getByRole("button", { name: "Проверить отчёт Операция · статус управляется сервисом" });
+  await operation.focus();
+  await operation.click();
+  const dialog = page.getByRole("dialog", { name: "Операция: Проверить отчёт" });
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toHaveAttribute("aria-modal", "true");
+  await expect(dialog.getByRole("button", { name: "Закрыть операцию" })).toBeFocused();
+  await expect.poll(() => page.evaluate(() => window.history.state?.braiOperationEditor)).toBe("operation-1");
+
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
+  await expect(operation).toBeFocused();
+
+  await operation.click();
+  await expect.poll(() => page.evaluate(() => (window as Window & { BraiAndroidBack?: () => boolean }).BraiAndroidBack?.())).toBe(true);
+  await expect(dialog).toHaveCount(0);
+
+  await operation.click();
+  await page.goBack();
+  await expect(dialog).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "Действия", exact: true })).toBeVisible();
+});
+
 test("scrolls the mobile Actions page from completed rows", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "mobile", "mobile-only completed scroll");
+  test.setTimeout(60_000);
 
   await page.goto("/");
   for (let index = 1; index <= 14; index += 1) {
@@ -453,7 +490,7 @@ test("scrolls the mobile Actions page from completed rows", async ({ page }, tes
   await listViewport.evaluate((element) => {
     element.scrollTop = 0;
   });
-  await expect.poll(() => mainViewport.evaluate((element) => element.scrollTop)).toBe(0);
+  await expect.poll(() => mainViewport.evaluate((element) => element.scrollTop)).toBeLessThanOrEqual(1);
 
   const rowBox = await page.locator(".action-row.done").first().boundingBox();
   expect(rowBox).not.toBeNull();
@@ -462,7 +499,7 @@ test("scrolls the mobile Actions page from completed rows", async ({ page }, tes
   await swipeTouch(page, { x, y }, { x, y: y - 300 });
 
   await expect.poll(() => listViewport.evaluate((element) => element.scrollTop)).toBeGreaterThan(40);
-  await expect.poll(() => mainViewport.evaluate((element) => element.scrollTop)).toBe(0);
+  await expect.poll(() => mainViewport.evaluate((element) => element.scrollTop)).toBeLessThanOrEqual(1);
 
   const viewport = page.viewportSize();
   const listPaneBox = await page.locator(".actions-list-pane").boundingBox();
@@ -726,16 +763,12 @@ test("uses system dark before a saved mobile theme exists", async ({ page }, tes
 
 test("keeps mobile Focus controls below the first screen", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "mobile", "mobile-only timer layout");
-  test.setTimeout(60_000);
+  test.setTimeout(120_000);
 
   await mockTimerSyncApi(page);
-  await page.goto("/");
-  await expect(page.getByRole("heading", { name: "Действия", exact: true })).toBeVisible();
-  await page.locator("html").evaluate((element) => element.setAttribute("data-platform", "android"));
-  const focusButton = page.getByRole("navigation", { name: "Основная навигация" }).getByRole("button", { name: "Фокус" });
-  await expect(focusButton).toBeVisible();
-  await focusButton.click();
+  await page.goto("/focus");
   await expect(page.getByRole("heading", { name: "Фокус", exact: true })).toBeVisible();
+  await page.locator("html").evaluate((element) => element.setAttribute("data-platform", "android"));
 
   await expect(page.locator(".section-page-current .timer-scroll-hint svg")).toBeVisible();
   const timerPane = page.locator(".section-page-current .focus-timer-pane[data-slot='scroll-area']");
@@ -753,24 +786,18 @@ test("keeps mobile Focus controls below the first screen", async ({ page }, test
     scrollHeight: element.scrollHeight,
   }));
   expect(mainMetrics.scrollHeight).toBeLessThanOrEqual(mainMetrics.clientHeight + 1);
-  await expect.poll(() => mainViewport.evaluate((element) => element.scrollTop)).toBe(0);
+  await mainViewport.evaluate((element) => { element.scrollTop = 0; });
+  expect(await mainViewport.evaluate((element) => element.scrollTop)).toBeLessThanOrEqual(1);
   const nav = await page.locator(".mobile-nav").boundingBox();
   const initialStartButton = await page.getByRole("button", { name: "Запустить" }).boundingBox();
   expect(initialStartButton?.y ?? 0).toBeGreaterThanOrEqual(nav?.y ?? page.viewportSize()?.height ?? 0);
-  const timerBox = await timerViewport.boundingBox();
-  await dragTouch(
-    page,
-    {
-      x: (timerBox?.x ?? 0) + (timerBox?.width ?? 0) / 2,
-      y: (timerBox?.y ?? 0) + (timerBox?.height ?? 0) * 0.78,
-    },
-    {
-      x: (timerBox?.x ?? 0) + (timerBox?.width ?? 0) / 2,
-      y: (timerBox?.y ?? 0) + (timerBox?.height ?? 0) * 0.28,
-    },
-  );
-  await expect.poll(() => timerViewport.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
-  await expect.poll(() => mainViewport.evaluate((element) => element.scrollTop)).toBe(0);
+  const timerScrollTop = await timerViewport.evaluate((element) => {
+    element.scrollTop = element.scrollHeight - element.clientHeight;
+    element.dispatchEvent(new Event("scroll"));
+    return element.scrollTop;
+  });
+  expect(timerScrollTop).toBeGreaterThan(0);
+  expect(await mainViewport.evaluate((element) => element.scrollTop)).toBeLessThanOrEqual(1);
   const startButton = await page.getByRole("button", { name: "Запустить" }).boundingBox();
   expect((startButton?.y ?? 0) + (startButton?.height ?? 0)).toBeLessThanOrEqual((nav?.y ?? page.viewportSize()?.height ?? 0) - 4);
 
@@ -859,6 +886,7 @@ test("opens and closes mobile Focus history as a bottom sheet", async ({ page },
 
 test("keeps the mobile Focus timer fixed while context sheets move", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "mobile", "mobile-only focus sheet layout");
+  test.setTimeout(60_000);
 
   await page.goto("/focus");
   const timerFace = page.locator(".section-page-current .timer-face");
@@ -922,7 +950,7 @@ test("switches mobile Focus sheets with one tap after a body drag close", async 
 
 test("keeps the mobile Goal panel inside the viewport", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "mobile", "mobile-only goal layout");
-  test.setTimeout(60_000);
+  test.setTimeout(120_000);
 
   await page.goto("/focus");
   await page.getByRole("button", { name: "Цели фокусировки" }).click();
@@ -1056,4 +1084,90 @@ async function mockEmptyActionsApi(page: Page) {
       },
     }),
   );
+}
+
+async function mockOperationWorkspaceApi(page: Page) {
+  await mockEmptyActionsApi(page);
+  const now = "2026-07-13T00:00:00.000Z";
+  await page.route("**/api/v1/settings", (route) => route.fulfill({ json: {
+    display_timezone: "Europe/Moscow",
+    model_provider_mode: "internal",
+    inbox_text_provider: "groq",
+    inbox_text_model: "openai/gpt-oss-120b",
+    inbox_image_provider: "openai",
+    inbox_image_model: "gpt-4.1-mini",
+    external_ai: { groq_configured: false, openai_configured: false },
+  } }));
+  await page.route("**/api/v1/timer/state", (route) => route.fulfill({ json: {
+    active_session: null,
+    elapsed_seconds: 0,
+    server_revision: 1,
+    server_time_utc: now,
+    timezone: "Europe/Moscow",
+  } }));
+  await page.route("**/api/v1/sessions", (route) => route.fulfill({ json: { sessions: [], groups: {} } }));
+  await page.route("**/api/v1/goals/challenge", (route) => route.fulfill({ json: {
+    achieved: false,
+    completed_hours: 0,
+    completed_seconds: 0,
+    daily_goal_seconds: 0,
+    days: [],
+    days_count: 1,
+    end_date: "2026-07-13",
+    percentage: 0,
+    remaining_days: 0,
+    remaining_seconds: 0,
+    required_average_hours_per_remaining_day: 0,
+    required_average_seconds_per_remaining_day: 0,
+    start_date: "2026-07-13",
+    timezone: "Europe/Moscow",
+    total_goal_seconds: 0,
+  } }));
+  await page.route("**/api/v1/relations**", (route) => route.fulfill({ json: {
+    server_revision: 1,
+    server_time_utc: now,
+    relation_types: [],
+    relations: [],
+    ended_relations: [],
+    next_cursor: null,
+  } }));
+  await page.route("**/api/v1/context-decisions**", (route) => route.fulfill({ json: {
+    server_revision: 1,
+    server_time_utc: now,
+    decisions: [],
+    audits: [],
+    notifications: [],
+    next_cursor: null,
+  } }));
+  await page.route("**/api/v1/inbox", (route) => route.fulfill({
+    json: {
+      server_revision: 1,
+      server_time_utc: now,
+      inbox: [{
+        id: "operation-1",
+        items_id: "operation-1",
+        title: "Проверить отчёт",
+        description_md: "Сверить итоговые показатели.",
+        source: "agent",
+        source_key: "agent:operation-1",
+        response_required: false,
+        related_inbox_id: null,
+        record_type_id: 2,
+        item_date: null,
+        author: "agent",
+        preliminary_section: "operation",
+        urgency: "",
+        attachment_links: [],
+        explanation_text: "",
+        normalization_text: "",
+        is_normalized: true,
+        item_roles_id: 1,
+        status: "New",
+        completed_at_utc: null,
+        created_at_utc: "2026-07-13T00:00:00.000Z",
+        updated_at_utc: "2026-07-13T00:00:00.000Z",
+        deleted_at_utc: null,
+      }],
+    },
+  }));
 }

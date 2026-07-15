@@ -63,6 +63,13 @@ const audioPlay = vi.hoisted(() => vi.fn());
 
 export { actionsWidgetPlugin, androidCapabilitiesPlugin, audioPlay, cmdPlugin, otaPlugin };
 
+export async function clearBraiAppTestDatabase() {
+  const db = clientDb();
+  await db.transaction("rw", db.tables, async () => {
+    for (const table of db.tables) await table.clear();
+  });
+}
+
 vi.mock("@capacitor/core", () => ({
   registerPlugin: vi.fn((name: string) => {
     if (name === "BraiCmd") return cmdPlugin;
@@ -145,8 +152,7 @@ export function setupBraiAppTest() {
     });
     cleanup();
     Element.prototype.scrollIntoView = vi.fn();
-    const db = clientDb();
-    await Promise.all(db.tables.map((table) => table.clear()));
+    await clearBraiAppTestDatabase();
     await setMeta("currentUserId", "test-user");
     otaPlugin.getState.mockReset();
     otaPlugin.checkForUpdates.mockReset();

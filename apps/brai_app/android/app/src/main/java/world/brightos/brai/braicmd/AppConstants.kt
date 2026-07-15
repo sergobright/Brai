@@ -4,7 +4,6 @@ import world.brightos.brai.BuildConfig
 
 object AppConstants {
     const val PREFS = "brai_cmd"
-    const val LEGACY_PREFS = "airwhisper"
     const val KEY_SERVER_URL = "server_url"
     const val KEY_AUTH_TOKEN = "auth_token"
     const val KEY_ACCOUNT_USER_ID = "account_user_id"

@@ -218,3 +218,21 @@ Brai repository commands and runtime services SHALL use the supported Node.js ru
 - **WHEN** maintainers consider removing or disabling the system Node.js package
 - **THEN** they first verify registered services and installed tools outside Brai do not depend on it
 - **AND** they update the runtime/service registry outside the repository in the same change if Node.js installation or usage changes
+
+### Requirement: Stateful Supabase maintenance is coordinated and fail closed
+
+Brai SHALL prohibit direct broad recreation of stateful Supabase services outside the repo-managed maintenance procedure.
+
+#### Scenario: Supavisor must be reconfigured or recreated
+
+- **WHEN** a maintainer applies a pooler reconfiguration
+- **THEN** the maintenance command takes production, Dev, Preview, staging, release, and slot locks in canonical order
+- **AND** it stops dependent API clients before recreation
+- **AND** it recreates only the explicitly targeted Supavisor service
+- **AND** it starts production first and requires health and auth canaries before returning non-production environments one at a time
+
+#### Scenario: A broad recreation is attempted
+
+- **WHEN** automation attempts an unguarded stateful Supabase `docker compose --force-recreate`
+- **THEN** repository guards and deployment tests reject the path
+- **AND** the documented maintenance command is the only allowed entrypoint

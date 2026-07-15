@@ -7,6 +7,7 @@ const envsRoot = process.env.BRAI_ENVS_ROOT ?? "/srv/projects/brai-envs";
 const registryPath = process.env.BRAI_PREVIEW_REGISTRY ?? path.join(envsRoot, "preview-slots.json");
 const environments = JSON.parse(fs.readFileSync(path.join(root, "deploy/environments.json"), "utf8")).environments;
 const slots = ["A", "B", "C", "D", "E"];
+const readCommands = new Set(["status", "assert-owned"]);
 const [command, ...args] = process.argv.slice(2);
 
 try {
@@ -19,7 +20,10 @@ try {
       result = { ok: true, registry };
       break;
     case "allocate":
-      result = allocate(registry, args[0], args[1], now);
+      result = allocate(registry, args[0], args[1], args[2], now);
+      break;
+    case "assert-owned":
+      result = assertOwned(registry, args[0], args[1]);
       break;
     case "ready":
       result = updateOwnedSlot(registry, args[0], args[1], now, "ready");
@@ -34,10 +38,10 @@ try {
       result = clearOwnedApk(registry, args[0], args[1], now);
       break;
     case "supabase":
-      result = updateOwnedSupabaseBranch(registry, args[0], {
-        name: args[1] || null,
-        id: args[2] || null,
-        status: args[3] || null
+      result = updateOwnedSupabaseBranch(registry, args[0], args[1], {
+        name: args[2] || null,
+        id: args[3] || null,
+        status: args[4] || null
       }, now);
       break;
     case "note":
@@ -56,10 +60,10 @@ try {
       result = { ok: true, registry };
       break;
     default:
-      throw new Error("usage: preview-slots.sh init|status|allocate <branch> <commit>|ready <branch> <commit>|failed <branch> <commit>|note <branch> <commit> <base64-json>|apk <branch> <commit> <versionCode> <file> <version> [previewIteration] [buildKind]|clear-apk <branch> <commit>|supabase <branch> <name> [id] [status]|next-apk-preview <branch> <commit> <stableVersion>|release <branch-or-slot>|dequeue <branch>");
+      throw new Error("usage: preview-slots.sh init|status|allocate <branch> <commit> [generation]|assert-owned <branch> <commit>|ready <branch> <commit>|failed <branch> <commit>|note <branch> <commit> <base64-json>|apk <branch> <commit> <versionCode> <file> <version> [previewIteration] [buildKind]|clear-apk <branch> <commit>|supabase <branch> <commit> <name> [id] [status]|next-apk-preview <branch> <commit> <stableVersion>|release <branch-or-slot>|dequeue <branch>");
   }
 
-  if (command !== "status") {
+  if (!readCommands.has(command)) {
     writeRegistry(registry);
   }
   console.log(JSON.stringify(result, null, 2));
@@ -68,15 +72,18 @@ try {
   process.exit(1);
 }
 
-function allocate(registry, branch, commit, now) {
+function allocate(registry, branch, commit, rawGeneration, now) {
   requireBranch(branch);
+  const generation = optionalLeaseGeneration(rawGeneration);
   const existing = findByBranch(registry, branch);
   if (existing) {
+    assertLeaseAdvance(existing.entry, commit, generation);
     removeQueuedBranch(registry, branch);
     const commitChanged = Boolean(existing.entry.commit && commit && existing.entry.commit !== commit);
     Object.assign(existing.entry, {
       status: "deploying",
       commit: commit ?? null,
+      lease_generation: generation ?? existing.entry.lease_generation,
       updated_at: now,
       ...(commitChanged ? { review_note: null } : {}),
     });
@@ -84,7 +91,7 @@ function allocate(registry, branch, commit, now) {
   }
 
   const slot = slots.find((candidate) => registry[candidate].status === "free");
-  const queued = upsertQueuedBranch(registry, branch, commit, now);
+  const queued = upsertQueuedBranch(registry, branch, commit, generation, now);
   if (!slot || registry.queue[0]?.branch !== branch) {
     return { ok: true, queued: true, position: queued.position, entry: queued.entry };
   }
@@ -94,11 +101,20 @@ function allocate(registry, branch, commit, now) {
   Object.assign(entry, {
     status: "deploying",
     branch,
-    commit: commit ?? null,
+    commit: queued.entry.commit,
+    lease_generation: queued.entry.lease_generation,
     assigned_at: now,
     updated_at: now,
   });
   return { ok: true, queued: false, allocatedNew: true, slot, entry };
+}
+
+function assertOwned(registry, branch, commit) {
+  const existing = ownedCommit(registry, branch, commit);
+  if (!["deploying", "ready"].includes(existing.entry.status)) {
+    throw new Error(`preview slot lease for ${branch}@${commit} is ${existing.entry.status}, not deploying or ready`);
+  }
+  return { ok: true, slot: existing.slot, entry: existing.entry };
 }
 
 function updateOwnedReviewNote(registry, branch, commit, encoded, now) {
@@ -131,29 +147,23 @@ function updateOwnedReviewNote(registry, branch, commit, encoded, now) {
 }
 
 function updateOwnedSlot(registry, branch, commit, now, status) {
-  requireBranch(branch);
-  const existing = findByBranch(registry, branch);
-  if (!existing) throw new Error(`branch has no preview slot: ${branch}`);
+  const existing = ownedCommit(registry, branch, commit);
   if (status === "ready" && existing.entry.apk_build_kind === "preview" && existing.entry.apk_preview_iteration) {
     commitPreviewCounter(registry, branch, existing.entry.apk_version, existing.entry.apk_preview_iteration);
   }
   Object.assign(existing.entry, {
     status,
-    commit: commit ?? existing.entry.commit,
     updated_at: now,
   });
   return { ok: true, slot: existing.slot, entry: existing.entry };
 }
 
 function nextApkPreview(registry, branch, commit, stableVersion, now) {
-  requireBranch(branch);
-  const existing = findByBranch(registry, branch);
-  if (!existing) throw new Error(`branch has no preview slot: ${branch}`);
+  const existing = ownedCommit(registry, branch, commit);
   const version = positiveInteger(stableVersion, "stable APK version");
   const iteration = positiveInteger(committedPreviewCounter(registry, version, branch) + 1, "APK preview iteration");
   const versionCode = version * 10000 + iteration;
   Object.assign(existing.entry, {
-    commit: commit ?? existing.entry.commit,
     apk_version: String(version),
     apk_preview_iteration: iteration,
     apk_version_code: versionCode,
@@ -165,13 +175,10 @@ function nextApkPreview(registry, branch, commit, stableVersion, now) {
 }
 
 function updateOwnedApk(registry, branch, commit, versionCode, file, version, previewIteration, buildKind, now) {
-  requireBranch(branch);
-  const existing = findByBranch(registry, branch);
-  if (!existing) throw new Error(`branch has no preview slot: ${branch}`);
+  const existing = ownedCommit(registry, branch, commit);
   const numericVersionCode = positiveInteger(versionCode, "APK versionCode");
   const iteration = previewIteration ? positiveInteger(previewIteration, "APK preview iteration") : null;
   Object.assign(existing.entry, {
-    commit: commit ?? existing.entry.commit,
     apk_version_code: numericVersionCode,
     apk_file: file ?? null,
     apk_version: version ?? null,
@@ -184,11 +191,8 @@ function updateOwnedApk(registry, branch, commit, versionCode, file, version, pr
 }
 
 function clearOwnedApk(registry, branch, commit, now) {
-  requireBranch(branch);
-  const existing = findByBranch(registry, branch);
-  if (!existing) throw new Error(`branch has no preview slot: ${branch}`);
+  const existing = ownedCommit(registry, branch, commit);
   Object.assign(existing.entry, {
-    commit: commit ?? existing.entry.commit,
     apk_version_code: null,
     apk_file: null,
     apk_version: null,
@@ -200,10 +204,8 @@ function clearOwnedApk(registry, branch, commit, now) {
   return { ok: true, slot: existing.slot, entry: existing.entry };
 }
 
-function updateOwnedSupabaseBranch(registry, branch, metadata, now) {
-  requireBranch(branch);
-  const existing = findByBranch(registry, branch);
-  if (!existing) throw new Error(`branch has no preview slot: ${branch}`);
+function updateOwnedSupabaseBranch(registry, branch, commit, metadata, now) {
+  const existing = ownedCommit(registry, branch, commit);
   Object.assign(existing.entry, {
     supabase_branch_name: metadata.name,
     supabase_branch_id: metadata.id,
@@ -243,6 +245,17 @@ function findByBranch(registry, branch) {
   return null;
 }
 
+function ownedCommit(registry, branch, commit) {
+  requireBranch(branch);
+  if (!commit) throw new Error("commit is required");
+  const existing = findByBranch(registry, branch);
+  if (!existing) throw new Error(`branch has no preview slot: ${branch}`);
+  if (existing.entry.commit !== commit) {
+    throw new Error(`preview slot lease for ${branch} belongs to ${existing.entry.commit ?? "<none>"}, not ${commit}`);
+  }
+  return existing;
+}
+
 function readRegistry() {
   const initial = {
     ...Object.fromEntries(slots.map((slot) => [slot, defaultSlot(slot)])),
@@ -255,6 +268,7 @@ function readRegistry() {
   const parsed = JSON.parse(fs.readFileSync(registryPath, "utf8"));
   for (const slot of slots) {
     parsed[slot] = { ...defaultSlot(slot), ...(parsed[slot] ?? {}) };
+    parsed[slot].lease_generation = normalizedLeaseGeneration(parsed[slot].lease_generation);
   }
   const registry = {
     ...Object.fromEntries(slots.map((slot) => [slot, parsed[slot]])),
@@ -366,6 +380,7 @@ function defaultSlot(slot) {
     status: "free",
     branch: null,
     commit: null,
+    lease_generation: null,
     url: `https://${env.domain}`,
     android_app: env.androidApp,
     display_label: slot,
@@ -405,13 +420,18 @@ function positiveInteger(value, label) {
   return number;
 }
 
-function upsertQueuedBranch(registry, branch, commit, now) {
+function upsertQueuedBranch(registry, branch, commit, generation, now) {
   const existing = registry.queue.find((entry) => entry.branch === branch);
   if (existing) {
-    Object.assign(existing, { commit: commit ?? null, updated_at: now });
+    assertLeaseAdvance(existing, commit, generation);
+    Object.assign(existing, {
+      commit: commit ?? null,
+      lease_generation: generation ?? existing.lease_generation,
+      updated_at: now
+    });
     return { entry: existing, position: registry.queue.indexOf(existing) + 1 };
   }
-  const entry = { branch, commit: commit ?? null, queued_at: now, updated_at: now };
+  const entry = { branch, commit: commit ?? null, lease_generation: generation, queued_at: now, updated_at: now };
   registry.queue.push(entry);
   return { entry, position: registry.queue.length };
 }
@@ -435,7 +455,32 @@ function normalizeQueue(queue) {
     .map((entry) => ({
       branch: entry.branch,
       commit: entry.commit ?? null,
+      lease_generation: normalizedLeaseGeneration(entry.lease_generation),
       queued_at: entry.queued_at ?? null,
       updated_at: entry.updated_at ?? entry.queued_at ?? null,
     }));
+}
+
+function assertLeaseAdvance(entry, commit, generation) {
+  const current = normalizedLeaseGeneration(entry.lease_generation);
+  if (current == null) return;
+  if (generation == null) {
+    if (entry.commit !== commit) throw new Error("a versioned preview lease can only be superseded by the official workflow generation");
+    return;
+  }
+  if (generation < current) throw new Error(`stale preview lease generation ${generation}; current generation is ${current}`);
+  if (generation === current && entry.commit !== commit) {
+    throw new Error(`preview lease generation ${generation} already belongs to ${entry.commit ?? "<none>"}`);
+  }
+}
+
+function optionalLeaseGeneration(value) {
+  if (value == null || value === "") return null;
+  const generation = Number(value);
+  if (!Number.isSafeInteger(generation) || generation <= 0) throw new Error(`invalid preview lease generation: ${value}`);
+  return generation;
+}
+
+function normalizedLeaseGeneration(value) {
+  return optionalLeaseGeneration(value);
 }

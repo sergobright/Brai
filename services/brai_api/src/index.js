@@ -1,6 +1,8 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { braiCmdConfigFromEnv } from './brai-cmd.js';
+import { goalAgentsEnabledFromEnv } from './goal-agent-switch.js';
+import { createGoalAgentWorkflowRuntime } from './goal-agent-workflow-runtime.js';
 import { createInboxWorkflowRuntime } from './inbox-workflow-runtime.js';
 import { isPostgresUrl } from './postgres-sync-db.js';
 import { createBraiServer } from './server.js';
@@ -49,6 +51,8 @@ const releaseDir =
 const databaseBranch = process.env.BRAI_SUPABASE_BRANCH ?? '';
 const testEmailLogin = /^(1|true|yes)$/i.test(process.env.BRAI_TEST_EMAIL_LOGIN ?? '')
   && /^brai[-_]((preview[-_])|dev(?:$|[-_]))/i.test(databaseBranch);
+const goalAgentsEnabled = goalAgentsEnabledFromEnv();
+const environment = process.env.BRAI_ENVIRONMENT?.trim() || 'prod';
 
 if (!token) {
   console.error('BRAI_TOKEN is required');
@@ -84,6 +88,13 @@ const inboxWorkflow = await createInboxWorkflowRuntime({
 });
 await inboxWorkflow.recoverQueued();
 inboxWorkflow.startQueuedReconciler();
+const goalAgentWorkflow = await createGoalAgentWorkflowRuntime({
+  databaseUrl,
+  enabled: goalAgentsEnabled,
+  environment
+});
+await goalAgentWorkflow.recoverQueued();
+goalAgentWorkflow.startReconciler();
 const runtime = createBraiServer({
   databaseUrl,
   dataRoot,
@@ -110,6 +121,8 @@ const runtime = createBraiServer({
   inboxExternalAi: legacyInboxExternalAi,
   inboxWorkflowStarter: inboxWorkflow.start,
   activityWorkflowStarter: inboxWorkflow.startActivity,
+  goalAgentsEnabled,
+  goalAgentEnvironment: environment,
   testEmailLogin,
   braiCmd: {
     config: braiCmdConfigFromEnv(process.env)
@@ -127,7 +140,7 @@ for (const signal of ['SIGINT', 'SIGTERM']) {
     try {
       await runtime.close();
     } finally {
-      await inboxWorkflow.close();
+      await Promise.all([inboxWorkflow.close(), goalAgentWorkflow.close()]);
     }
     process.exit(0);
   });

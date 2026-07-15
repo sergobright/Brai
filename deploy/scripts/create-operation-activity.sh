@@ -199,7 +199,7 @@ load_runtime_env() {
 }
 
 node_pg() {
-  "$NODE_BIN" --input-type=module - "$ROOT" "$@"
+  "$NODE_BIN" --input-type=module - "$ROOT"
 }
 
 check_local_access() {
@@ -408,7 +408,7 @@ NODE
     "$NODE_BIN" "$ROOT/deploy/scripts/record-runtime-log.mjs" \
       --source deploy \
       --operation operation_activity.create \
-      --status done \
+      --status "done" \
       --message "Created Codex operation activity" \
       --json "$log_json" >/dev/null 2>&1 || true
   fi

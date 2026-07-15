@@ -30,8 +30,8 @@ export function orderTablesByDependencies(tables, { dependencies = [], fallbackO
   };
   const referencedTables = new Map(uniqueTables.map((table) => [table, new Set()]));
 
-  for (const { table, referencedTable } of dependencies) {
-    if (table !== referencedTable && tableSet.has(table) && tableSet.has(referencedTable)) {
+  for (const { table, referencedTable, deferred = false } of dependencies) {
+    if (!deferred && table !== referencedTable && tableSet.has(table) && tableSet.has(referencedTable)) {
       referencedTables.get(table).add(referencedTable);
     }
   }

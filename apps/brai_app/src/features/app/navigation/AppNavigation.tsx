@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, type ReactNode, type TouchEventHandler } from "react";
+import { useCallback, useEffect, useRef, type TouchEventHandler } from "react";
 import { Archive, Blocks, Brain, ChevronDown, ChevronUp, CircleDot, Compass, Cpu, Download, Ellipsis, Flag, Gauge, Layers3, Menu, Network, Pencil, Shapes, Sparkles, SunMedium, Tag, Telescope, Waves, Zap, type LucideIcon } from "lucide-react";
 import { BraiUserAvatar, BraiUserDropdownMenu, BraiUserMenuPanel } from "@/components/shadcn-space/dropdown-menu/dropdown-menu-01";
 import type { AppVersionState, AuthUser } from "@/shared/api/braiApi";
@@ -187,67 +187,6 @@ export function MobileDockOverflowButton({
       {side === "left" ? <Ellipsis className="h-5 w-5" aria-hidden="true" /> : open ? <ChevronDown className="h-5 w-5" aria-hidden="true" /> : <ChevronUp className="h-5 w-5" aria-hidden="true" />}
       {side === "left" && hasUpdate ? <NavigationIndicator position="bottom-center"><UpdateNavigationDot /></NavigationIndicator> : null}
     </button>
-  );
-}
-
-export function MobileProfileDrawer({
-  onClose,
-  children,
-}: {
-  onClose: () => void;
-  children?: ReactNode;
-}) {
-  const suppressPopRef = useRef(false);
-  const { backdropRef, backdropStyle, closeWithAnimation, gestureRef, resetOpen, sheetDragHandlers, sheetRef, sheetStyle } = useMobileSheetDrag({
-    axis: "x",
-    excludeControls: true,
-    onClose,
-  });
-
-  const closeMenu = useCallback(() => {
-    if (window.history.state?.braiMobileMenu) {
-      suppressPopRef.current = true;
-      window.history.back();
-    }
-    closeWithAnimation();
-  }, [closeWithAnimation]);
-
-  useEffect(() => {
-    resetOpen();
-    if (window.history.state?.braiMobileMenu) {
-      window.history.replaceState({ ...window.history.state, braiMobileMenu: true }, "", window.location.href);
-    } else {
-      window.history.pushState({ ...window.history.state, braiMobileMenu: true }, "", window.location.href);
-    }
-
-    function onPopState() {
-      if (suppressPopRef.current) {
-        suppressPopRef.current = false;
-        return;
-      }
-      closeWithAnimation();
-    }
-
-    window.addEventListener("popstate", onPopState);
-    return () => window.removeEventListener("popstate", onPopState);
-  }, [closeWithAnimation, resetOpen]);
-
-  useEffect(() => installAndroidBackHandler(() => {
-    closeMenu();
-    return true;
-  }), [closeMenu]);
-
-  return (
-    <div ref={gestureRef} className="mobile-menu-backdrop fixed inset-0 z-[90]" data-nav-swipe-exclusion onClick={() => closeMenu()} {...sheetDragHandlers}>
-      <div ref={backdropRef} className="absolute inset-0 bg-foreground/15 dark:bg-background/80" style={backdropStyle} aria-hidden="true" />
-      <aside
-        ref={sheetRef}
-        className="mobile-profile-drawer flex h-full w-64 max-w-[85vw] flex-col overflow-hidden border-r border-border bg-card pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] shadow-xl [touch-action:pan-y] will-change-transform"
-        style={sheetStyle}
-        aria-label="Левый рейл"
-        onClick={(event) => event.stopPropagation()}
-      >{children}</aside>
-    </div>
   );
 }
 

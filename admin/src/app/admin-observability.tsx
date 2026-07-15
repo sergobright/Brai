@@ -118,6 +118,12 @@ type WorkflowRun = {
   workflowId: string;
   runId: string;
   rawRecordId: string;
+  subjectKind: string;
+  subjectId: string;
+  triggerKind: string;
+  triggerRevision: number | null;
+  watermarkFrom: number | null;
+  watermarkTo: number | null;
   status: string;
   currentStep: string;
   attemptCount: number;
@@ -605,9 +611,11 @@ function WorkflowRuns({
 function WorkflowRunsTable({ filters, runs, workflow }: { filters: WorkflowFilters; runs: WorkflowRun[]; workflow: WorkflowSummary }) {
   return (
     <SimpleTable
-      columns={["Status", "Created", "Started", "Completed", "Duration", "Current step", "Attempt", "Last progress", "Workflow ID", "Run ID", "Trace", "Stuck", "Error"]}
+      columns={["Status", "Subject", "Trigger", "Created", "Started", "Completed", "Duration", "Current step", "Attempt", "Last progress", "Workflow ID", "Run ID", "Trace", "Stuck", "Error"]}
       rows={runs.map((run) => [
         linkCell(run.status, adminHref({ section: "workflows", workflow: workflow.id, version: workflow.version, tab: "runs", run: run.runId, status: filters.status })),
+        `${run.subjectKind}:${run.subjectId}`,
+        run.triggerKind ? `${run.triggerKind}:${run.triggerRevision ?? ""}` : "",
         run.createdAtUtc,
         run.startedAtUtc,
         run.completedAtUtc,
@@ -639,7 +647,11 @@ function ExecutionDetail({ execution }: { execution: WorkflowExecution }) {
             {execution.stuck ? <Badge variant="destructive">stuck</Badge> : null}
           </div>
           <h2 className="m-0 break-all text-lg font-semibold">{execution.workflowId}</h2>
-          <p className="m-0 text-sm text-muted-foreground">run <code>{execution.runId || "без run_id"}</code> · raw <code>{execution.rawRecordId}</code></p>
+          <p className="m-0 text-sm text-muted-foreground">
+            run <code>{execution.runId || "без run_id"}</code> · subject <code>{execution.subjectKind || "unknown"}:{execution.subjectId || "не задан"}</code>
+            {execution.triggerKind ? <> · trigger <code>{execution.triggerKind}:{execution.triggerRevision ?? ""}</code></> : null}
+            {execution.watermarkFrom != null ? <> · watermark <code>{execution.watermarkFrom}..{execution.watermarkTo ?? ""}</code></> : null}
+          </p>
           {execution.traceStatus === "unavailable" ? <p className="m-0 text-sm text-muted-foreground">Детальный trace недоступен для запусков до версии телеметрии.</p> : null}
           {execution.traceStatus === "partial" ? <p className="m-0 text-sm text-destructive">Trace частичный: часть telemetry steps не записалась или была потеряна.</p> : null}
         </CardHeader>
@@ -678,6 +690,11 @@ function ExecutionDetail({ execution }: { execution: WorkflowExecution }) {
         columns={["Entity", "Event/action", "Status", "Time", "Role link"]}
         rows={execution.events.map((event) => [String(event.id ?? ""), `${String(event.event_type ?? "")} / ${String(event.event_action ?? "")}`, String(event.status ?? ""), String(event.occurred_at_utc ?? ""), String(event.item_roles_id ?? "")])}
         empty="Связанные events не найдены."
+      />
+      <SimpleTable
+        columns={["Runtime log", "Operation", "Status", "Reason", "Time"]}
+        rows={execution.logs.map((log) => [String(log.id ?? ""), String(log.operation ?? ""), String(log.status ?? ""), String(log.reason ?? ""), String(log.dt ?? "")])}
+        empty="Связанные bounded runtime logs не найдены."
       />
     </section>
   );

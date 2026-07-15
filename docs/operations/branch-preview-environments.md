@@ -35,7 +35,7 @@ database state before the slot is reused.
 
 If the preview branch changes the Android native boundary, deploy also builds a slot-specific preview APK and records `brai-<slot>-vN-previewM.apk`, APK `vN`, branch-local preview `M`, and `versionCode=N*10000+M` in the preview slot registry. Preview OTA manifests then target the same release key, build kind, stable `N`, and preview `M`, so stale slot APKs block with an APK update screen instead of silently running an incompatible web bundle.
 
-Infrastructure/documentation-only branches can use the Temporal no-preview path when the delivery class is `infra-docs`. Strict technical-only branches can use the same no-preview path as `technical-no-preview` when the changed files are limited to tests, test configuration, or narrowly allowed agent-operation bookkeeping that is proven by CI rather than browser review. That path records `delivery_classified` and `no_preview_required`, then dispatches Temporal handoff/merge activities instead of allocating a slot. Temporal marks `supabase_preview`, `preview_deploy`, `accepted_preview_promotion`, `supabase_preview_release`, and `slot_release` as `not_applicable`; after `no_preview_merged`, the branch lifecycle is complete without a slot.
+Infrastructure/documentation-only branches can use the Temporal no-preview path when the delivery class is `infra-docs`. Strict technical-only branches can use the same no-preview path as `technical-no-preview` when the changed files are limited to tests, test configuration, or narrowly allowed agent-operation bookkeeping that is proven by CI rather than browser review. That path records `delivery_classified` and `no_preview_required`, then dispatches Temporal handoff/merge activities instead of allocating a slot. Temporal marks `supabase_preview`, `goal_agents_deploy`, `preview_deploy`, `accepted_preview_promotion`, `supabase_preview_release`, and `slot_release` as `not_applicable`; after `no_preview_merged`, the branch lifecycle is complete without a slot.
 
 Local dev server URLs are agent-only verification aids. The user-facing handoff for preview-class project changes is the preview slot URL after `deploy-preview` succeeds; if CI/deploy is not complete, report that blocker instead of asking the project owner to open `localhost` or `127.0.0.1`.
 
@@ -183,12 +183,19 @@ sudo -u brai /srv/projects/brai-envs/prod/source/deploy/scripts/codex-cli-smoke.
 systemctl restart brai-temporal-worker.service
 systemd-run --unit=brai-temporal-worker-delayed-restart --on-active=* --collect /bin/systemctl restart brai-temporal-worker.service
 sudo -u brai /srv/projects/brai-envs/prod/source/deploy/scripts/complete-operation-activities.sh --local operation:agent-task:*
+systemctl stop brai-api.service
 systemctl restart brai-api.service
+systemctl stop brai-api-dev.service
 systemctl restart brai-api-dev.service
+systemctl stop brai-api-preview-a.service
 systemctl restart brai-api-preview-a.service
+systemctl stop brai-api-preview-b.service
 systemctl restart brai-api-preview-b.service
+systemctl stop brai-api-preview-c.service
 systemctl restart brai-api-preview-c.service
+systemctl stop brai-api-preview-d.service
 systemctl restart brai-api-preview-d.service
+systemctl stop brai-api-preview-e.service
 systemctl restart brai-api-preview-e.service
 systemctl restart brai-admin.service
 systemctl restart brai-admin-dev.service
@@ -212,19 +219,46 @@ and deploy/preview artifact roots stay `2775` so future files inherit `brai-depl
 
 ### Supabase Runtime Maintenance
 
-Supabase lifecycle configuration lives outside Git on the VPS. The brai.one server runs
-self-hosted Supabase, so preview and Dev isolation use separate Postgres schemas with connection
-URLs carrying an explicit `search_path`:
+Supabase secrets and the upstream base Compose stay outside Git on the VPS. Brai-owned non-secret
+overlay/bootstrap and the maintenance entrypoint are repo-managed and installed by Ansible. The
+brai.one server runs self-hosted Supabase, so preview and Dev isolation uses both a separate
+Supavisor tenant and separate Postgres schemas with connection URLs carrying an explicit
+`search_path`:
 
 ```text
 /etc/brai/supabase-deploy.env
 SUPABASE_SELF_HOSTED=true
 SUPABASE_SELF_HOSTED_DATABASE_URL
+BRAI_SUPAVISOR_TENANT_ISOLATION=true
 ```
 
 Production runtime credentials live in `/etc/brai/brai-api.env`, including `BRAI_DATABASE_URL`.
 Preview and Dev runtime credentials live in `/srv/projects/brai-envs/<environment>/brai-api.env`
 and are deploy-writable so CI can update schema-scoped DSNs after Supabase schema creation.
+After `BRAI_SUPAVISOR_TENANT_ISOLATION=true` is enabled by the accepted maintenance rollout,
+production DSNs must use `brightos-prod`; Dev and Preview DSNs must use `brightos-nonprod`.
+Deployment rewrites only the Supavisor tenant suffix in the URL username and preserves the password,
+database, query parameters, and schema `search_path`. Deployment fails before service cutover when
+the target DSN has the wrong tenant.
+
+Do not run direct `docker compose --force-recreate` against the stateful Supabase stack. Install and
+use the exact maintenance boundary instead:
+
+Dry-run обязателен перед apply:
+
+```bash
+sudo /srv/opt/brai-supabase-maintenance.sh reconfigure-pooler
+sudo /srv/opt/brai-supabase-maintenance.sh --apply reconfigure-pooler
+```
+
+The command takes production, Dev, Preview A-E, staging, release, and preview-slot locks in canonical
+order; stops dependent API services; recreates only Supavisor; starts production first; and returns
+previously active non-production services one by one only after health/auth canaries. The wrapper
+must create both tenants before any runtime DSN is switched. Failed Preview slots remain stopped and
+are restored only by their normal deploy workflow. If a canary fails, leave the offending
+non-production service stopped, reset only Supavisor, and repeat the production canary. Never widen
+the recovery into a whole-stack or database recreation.
+
 Dev and Preview rebuilds copy current production data into their schema after migrations, excluding
 production Better Auth session, account, and verification rows. Those test env files set
 `BRAI_TEST_EMAIL_LOGIN=true`. Preview/Dev web and Android still start on the login screen and
@@ -274,12 +308,24 @@ Apply after check mode passes and secrets/env files exist on the VPS:
 ansible-playbook -i deploy/ansible/inventory.example.ini deploy/ansible/brai.yml
 ```
 
+The first deployment containing Goal agents requires this Ansible apply before any branch
+deploy. It creates the isolated Unix identity and protected EnvironmentFile, installs all 35
+systemd units (five service families across Production, Dev, and Preview A-E), and installs the
+narrow deploy sudo rules plus the fixed root-owned Codex runtime preparation helper. Every later
+Goal-agent deploy gate invokes that helper without arguments immediately before the five exact
+systemd restarts, restoring only the `brai-codex-exec` traversal/read contract and proving
+`codex --version` as `brai-goal-agent`. Ansible also appends the same fixed helper to the managed
+Codex release sync, after its ordinary package/symlink update, so the daily CLI timer cannot restore
+the old `brai-deploy`-only package access after a successful Preview. A branch deploy intentionally
+fails instead of fabricating missing units, accepting an unusable Codex runtime, or widening permissions.
+
 The current local VPS setup keeps the existing production service name `brai-api.service`.
 Production and preview API services run from the source checkout uploaded into
 `/srv/projects/brai-envs/<environment>/source/services/brai_api`; Admin services run from the
 matching `/srv/projects/brai-envs/<environment>/source/admin` checkout as the configured service user/group.
 The limited `brai-deploy` user owns `/srv/projects/brai-envs`, publishes only the deployment
-artifacts above, and uses sudo only for Caddy validation, Caddy reload, and matching Brai API/Admin service restarts.
+artifacts above, and uses sudo only for Caddy validation/reload, the Temporal maintenance commands,
+matching Brai API/Admin restarts, and exact restart/enable/stop commands for those 35 Goal-agent units.
 The Brai runtime user also belongs to the `brai-deploy` group and API units run with
 `SupplementaryGroups=brai-deploy` for deploy artifact coordination without broadening the sudo
 boundary. Runtime DB access uses protected Supabase Postgres env values.

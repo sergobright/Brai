@@ -31,6 +31,28 @@ test('Brai Cmd access tokens, health, admin summary, and migrations work in Brai
     );
     assert.equal(fixture.store.db.prepare("SELECT 1 FROM agents WHERE id = 'brai-cmd.dictate.transcription'").get(), undefined);
 
+    for (const [method, path] of [
+      ['GET', '/v1/airwhisper/health'],
+      ['POST', '/v1/airwhisper/preliminary-profile'],
+      ['POST', '/v1/airwhisper/access/request'],
+      ['POST', '/v1/airwhisper/dictate'],
+      ['GET', '/v1/airwhisper/admin/summary'],
+      ['PUT', '/v1/airwhisper/admin/settings'],
+      ['POST', '/v1/airwhisper/admin/tokens/retired/revoke']
+    ]) {
+      const retired = await fetch(`${fixture.url}${path}`, {
+        method,
+        headers: { authorization: `Bearer ${TOKEN}` }
+      });
+      assert.equal(retired.status, 404, `${method} ${path}`);
+    }
+
+    const preflight = await fetch(`${fixture.url}/v1/health`, { method: 'OPTIONS' });
+    const allowedHeaders = preflight.headers.get('access-control-allow-headers') ?? '';
+    assert.equal(preflight.status, 204);
+    assert.match(allowedHeaders, /x-brai-cmd-device-id/);
+    assert.doesNotMatch(allowedHeaders, /x-airwhisper/i);
+
     const denied = await fetch(`${fixture.url}/v1/health`);
     assert.equal(denied.status, 401);
 
@@ -116,6 +138,14 @@ test('Brai Cmd access tokens, health, admin summary, and migrations work in Brai
     });
     assert.equal(health.status, 200);
     assert.deepEqual(await health.json(), { status: 'ok' });
+
+    const retiredDeviceHeader = await fetch(`${fixture.url}/v1/health`, {
+      headers: {
+        authorization: `Bearer ${access.body.token}`,
+        'x-airwhisper-device-id': 'device-1'
+      }
+    });
+    assert.equal(retiredDeviceHeader.status, 400);
 
     const adminDenied = await fetch(`${fixture.url}/v1/brai-cmd/admin/summary`);
     assert.equal(adminDenied.status, 401);

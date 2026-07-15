@@ -15,6 +15,7 @@ export const ACTIVITY_EVENT_TYPES = new Set([
   'update_title',
   'update_description',
   'set_status',
+  'set_type',
   'reorder',
   'delete',
   'restore'
@@ -29,7 +30,8 @@ export const INBOX_EVENT_TYPES = new Set([
   'restore'
 ]);
 export const ACTIVITY_STATUSES = new Set(['New', 'Done']);
-export const ACTIVITY_TYPES = new Set(['action', 'operation']);
+export const ACTIVITY_TYPES = new Set(['action', 'goal', 'operation']);
+export const ACTIVITY_MUTABLE_TYPES = new Set(['action', 'goal']);
 export const POSTGRES_INTEGER_MIN = -2_147_483_648;
 export const POSTGRES_INTEGER_MAX = 2_147_483_647;
 export const INBOX_STATUSES = new Set(['New', 'Done']);
@@ -141,6 +143,7 @@ export function formatInboxItem(item) {
     is_normalized: item.is_normalized === 1,
     status: INBOX_STATUSES.has(item.status) ? item.status : 'New',
     completed_at_utc: item.completed_at_utc ?? null,
+    items_id: item.items_id ?? null,
     sort_order: Number.isInteger(item.sort_order) ? item.sort_order : null,
     item_roles_id: Number.isInteger(item.item_roles_id) ? item.item_roles_id : null,
     initial_event_id: item.initial_event_id ?? null,

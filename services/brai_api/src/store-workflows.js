@@ -483,6 +483,17 @@ export const workflowStoreMethods = {
           AND run_id IS NOT DISTINCT FROM ?
       `).run(localStatus, completedAt, now, execution.id, operationId, temporalRunId);
       if (updatedExecution.changes !== 1) throw businessError('workflow_execution_changed');
+      if (scopedUserId() && this.getAgent('goal.discovery')) {
+        this.scheduleGoalAgentForInbox({
+          inboxId: id,
+          triggerKind: 'inbox_normalized',
+          triggerRevision: this.getInboxServerRevision(),
+          nowIso: now
+        });
+        if (finalNormalized.classKey === 'operation') {
+          this.noteGoalDiscoveryChanges({ nowIso: now });
+        }
+      }
       return { ok: true, idempotent: false, items_id: id, item_roles_id: role.id, workflow_execution_id: execution.id, class_key: finalNormalized.classKey };
     });
     const result = run();

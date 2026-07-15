@@ -31,6 +31,7 @@ import {
   serveReleaseDownload,
   serveReleasePage
 } from './release-routes.js';
+import { goalAgentsEnabledFromEnv } from './goal-agent-switch.js';
 import { BraiStore, formatFocusInterval, formatSession } from './store.js';
 import { scopedUserId, withUserScope } from './user-scope.js';
 import {
@@ -43,7 +44,7 @@ import {
 const BASE_JSON_HEADERS = {
   'content-type': 'application/json; charset=utf-8',
   'access-control-allow-methods': 'GET,POST,PUT,PATCH,DELETE,OPTIONS',
-  'access-control-allow-headers': 'authorization,content-type,x-api-key,x-brai-api-key,x-brai-target,x-brai-destination,x-brai-cmd-device-id,x-brai-cmd-client-version,x-airwhisper-device-id,x-airwhisper-client-version',
+  'access-control-allow-headers': 'authorization,content-type,x-api-key,x-brai-api-key,x-brai-target,x-brai-destination,x-brai-cmd-device-id,x-brai-cmd-client-version,x-brai-expected-user-id',
   'access-control-allow-credentials': 'true'
 };
 const SESSION_COOKIE = 'brai_session';
@@ -91,18 +92,25 @@ export function createBraiServer({
   activityNormalizer = null,
   activityWorkflowStarter = null,
   activityAutoProcess = true,
+  goalAgentsEnabled = goalAgentsEnabledFromEnv(),
+  goalAgentEnvironment = process.env.BRAI_ENVIRONMENT || 'prod',
   braiCmd = {},
   branch = process.env.BRAI_BRANCH || null,
   commit = process.env.BRAI_COMMIT || null,
   databaseBranch = process.env.BRAI_SUPABASE_BRANCH || null,
   testEmailLogin = false,
   shutdownGraceMs = 5000,
+  contextAuditReconcileIntervalMs = 60_000,
+  authBackendTimeoutMs = 5_000,
   now = () => new Date(),
-  logger = console
+  logger = console,
+  createAuth = createBraiAuth
 }) {
   fs.mkdirSync(dataRoot, { recursive: true });
   const store = new BraiStore(databaseUrl);
   store.logger = logger;
+  store.goalAgentsEnabled = goalAgentsEnabled !== false;
+  store.configureGoalAgentEnvironment(goalAgentEnvironment);
   store.configureUserAiEncryptionKey(userAiEncryptionKey);
   const releaseDownloadLimiter = new RateLimiterMemory({ points: 10, duration: 3600 });
   const braiCmdRuntime = createBraiCmdRuntime(braiCmd);
@@ -117,7 +125,7 @@ export function createBraiServer({
     syncthingFolderIdPrefix,
     logger
   });
-  const authRuntime = createBraiAuth({
+  const authRuntime = createAuth({
     databaseUrl,
     secret: betterAuthSecret ?? sessionSecret ?? 'brai-local-auth-secret-for-local-development-only',
     baseURL: betterAuthUrl,
@@ -319,13 +327,23 @@ export function createBraiServer({
           : terminalReconcilePending
             ? 'Activity workflow completion observer failed; durable reconciliation remains active'
             : 'Activity AI processing failed';
-        logger.error?.(message, {
-          error: errorMessage,
-          activityId
-        });
+        logger.error?.(message, { error: errorMessage, activityId });
       });
     }, 0);
   };
+
+  const contextAuditInterval = Number(contextAuditReconcileIntervalMs) > 0
+    ? setInterval(() => {
+        try {
+          store.reconcileContextAudits({ nowIso: now().toISOString() });
+        } catch (error) {
+          logger.error?.('Context audit reconciliation failed', {
+            error: error instanceof Error ? error.message : String(error)
+          });
+        }
+      }, Number(contextAuditReconcileIntervalMs))
+    : null;
+  contextAuditInterval?.unref?.();
 
   const server = http.createServer(async (req, res) => {
     const requestStartedAt = Date.now();
@@ -364,7 +382,18 @@ export function createBraiServer({
         }
       });
       if (req.method === 'GET' && url.pathname === '/health') {
-        store.db.prepare('SELECT 1 AS ok').get();
+        const healthChecks = await Promise.allSettled([
+          Promise.resolve().then(() => store.db.prepare('SELECT 1 AS ok').get()),
+          authBackendCall(() => authRuntime.healthCheck(), authBackendTimeoutMs)
+        ]);
+        if (healthChecks[0].status === 'rejected') {
+          sendJson(req, res, 503, { ok: false, error: 'database_unavailable' });
+          return;
+        }
+        if (healthChecks[1].status === 'rejected') {
+          sendJson(req, res, 503, { ok: false, error: 'auth_backend_unavailable' });
+          return;
+        }
         sendJson(req, res, 200, {
           ok: true,
           service: 'brai-api',
@@ -376,7 +405,7 @@ export function createBraiServer({
       }
 
       if (url.pathname === '/auth/session' && req.method === 'GET') {
-        const session = await betterAuthSession(req, auth);
+        const session = await betterAuthSession(req, auth, authBackendTimeoutMs);
         if (session?.user) {
           sendJson(req, res, 200, { authenticated: true, user: publicAuthUser(session.user) });
           return;
@@ -882,6 +911,14 @@ export function createBraiServer({
         }));
         const state = await withUserScope(ownerUserId, () => inboxState(store, requestNow));
         broadcast(sockets, { type: 'inbox_synced', inbox_state: state }, ownerUserId);
+        if (result.reopened_goal_ids?.length > 0) {
+          const activityState = await withUserScope(ownerUserId, () => activitiesState(store, requestNow));
+          broadcast(sockets, {
+            type: 'activities_synced',
+            activities_state: activityState,
+            actions_state: actionsCompatState(activityState)
+          }, ownerUserId);
+        }
         sendJson(req, res, 200, { ok: true, target: 'inbox', ...result, state });
         return;
       }
@@ -981,7 +1018,7 @@ export function createBraiServer({
         return;
       }
 
-      const authContext = await authenticateRequest(req, token, url, sessionSecret, now, auth, store);
+      const authContext = await authenticateRequest(req, token, url, sessionSecret, now, auth, store, authBackendTimeoutMs);
       requestUserId = authContext.userId;
       if (!authContext.authorized) {
         recordRuntimeLog(store, logger, {
@@ -1020,6 +1057,10 @@ export function createBraiServer({
           }
         });
         sendJson(req, res, 403, { error: 'forbidden_origin' });
+        return;
+      }
+      if (expectedUserScopeChanged(req.headers['x-brai-expected-user-id'], authContext.userId)) {
+        sendJson(req, res, 409, { error: 'user_scope_changed' });
         return;
       }
 
@@ -1116,6 +1157,106 @@ export function createBraiServer({
       if (req.method === 'GET' && (url.pathname === '/v1/activities' || url.pathname === '/v1/actions')) {
         const state = activitiesState(store, now());
         sendJson(req, res, 200, url.pathname === '/v1/actions' ? actionsCompatState(state) : state);
+        return;
+      }
+
+      if (req.method === 'GET' && url.pathname === '/v1/relations') {
+        const requestNow = now();
+        const endpointItemsId = url.searchParams.get('endpoint_items_id');
+        const relationTypeId = url.searchParams.get('relation_type_id');
+        const requestedStatus = url.searchParams.get('status');
+        const status = requestedStatus === 'ended' ? 'ended' : 'active';
+        const relationLimit = Math.max(1, Math.min(Number(url.searchParams.get('limit')) || 500, 500));
+        const state = store.relationState(requestNow.toISOString(), {
+          endpointItemsId,
+          relationTypeId,
+          status,
+          cursor: url.searchParams.get('cursor'),
+          limit: relationLimit
+        });
+        sendJson(req, res, 200, state);
+        return;
+      }
+
+      if (req.method === 'GET' && url.pathname === '/v1/context-decisions') {
+        const requestedStatus = url.searchParams.get('status') ?? 'pending';
+        const page = requestedStatus === 'audit' ? 'audits' : 'decisions';
+        const status = requestedStatus === 'audit' ? 'pending' : requestedStatus;
+        sendJson(req, res, 200, store.contextDecisionState({
+          status,
+          page,
+          cursor: url.searchParams.get('cursor'),
+          limit: url.searchParams.get('limit') ?? 100,
+          nowIso: now().toISOString()
+        }));
+        return;
+      }
+
+      const decisionResolutionMatch = url.pathname.match(/^\/v1\/context-decisions\/([^/]+)\/resolve$/);
+      if (req.method === 'POST' && decisionResolutionMatch) {
+        const body = await readJson(req, { limit: 128 * 1024 });
+        const result = store.resolveContextDecision({
+          decisionId: decodeURIComponent(decisionResolutionMatch[1]),
+          action: body.resolution,
+          resolutionKey: body.idempotency_key,
+          editedPayload: body.edited_payload,
+          nowIso: now().toISOString()
+        });
+        const state = store.contextDecisionState({ nowIso: now().toISOString() });
+        broadcast(sockets, { type: 'context_decisions_synced', context_decisions_state: state }, scopedUserId());
+        sendJson(req, res, 200, { ...result, operation_id: result.decision?.operation_id ?? null });
+        return;
+      }
+
+      const auditResolutionMatch = url.pathname.match(/^\/v1\/context-audits\/([^/]+)\/resolve$/);
+      if (req.method === 'POST' && auditResolutionMatch) {
+        const body = await readJson(req, { limit: 32 * 1024 });
+        const result = store.resolveContextAuditItem({
+          auditItemId: decodeURIComponent(auditResolutionMatch[1]),
+          action: body.resolution === 'accept' ? 'confirm' : body.resolution,
+          resolutionKey: body.idempotency_key,
+          nowIso: now().toISOString()
+        });
+        const state = store.contextDecisionState({ nowIso: now().toISOString() });
+        broadcast(sockets, { type: 'context_decisions_synced', context_decisions_state: state }, scopedUserId());
+        sendJson(req, res, 200, { ...result, state });
+        return;
+      }
+
+      const decisionUndoMatch = url.pathname.match(/^\/v1\/context-decisions\/([^/]+)\/undo$/);
+      if (req.method === 'POST' && decisionUndoMatch) {
+        const body = await readJson(req, { limit: 16 * 1024 });
+        const result = store.undoContextDecision({
+          decisionId: decodeURIComponent(decisionUndoMatch[1]),
+          operationId: body.idempotency_key,
+          nowIso: now().toISOString()
+        });
+        const state = store.contextDecisionState({ nowIso: now().toISOString() });
+        broadcast(sockets, { type: 'context_decisions_synced', context_decisions_state: state }, scopedUserId());
+        sendJson(req, res, 200, { ...result, state });
+        return;
+      }
+
+      const notificationReadMatch = url.pathname.match(/^\/v1\/context-notifications\/([^/]+)\/read$/);
+      if (req.method === 'POST' && notificationReadMatch) {
+        const changed = store.markContextNotificationRead(decodeURIComponent(notificationReadMatch[1]), now().toISOString());
+        sendJson(req, res, changed ? 200 : 404, changed ? { ok: true } : { error: 'not_found' });
+        return;
+      }
+
+      const goalPlanMatch = url.pathname.match(/^\/v1\/goals\/([^/]+)\/plan$/);
+      if (req.method === 'POST' && goalPlanMatch) {
+        const itemsId = decodeURIComponent(goalPlanMatch[1]);
+        const execution = store.requestGoalPlan({
+          itemsId,
+          triggerRevision: store.getActivityServerRevision(),
+          nowIso: now().toISOString()
+        });
+        sendJson(req, res, execution.status === 'completed' ? 200 : 202, {
+          status: execution.status,
+          execution_id: execution.id,
+          workflow_id: execution.workflow_id
+        });
         return;
       }
 
@@ -1254,6 +1395,30 @@ export function createBraiServer({
         return;
       }
 
+      if (req.method === 'POST' && url.pathname === '/v1/relations/events/sync') {
+        const requestNow = now();
+        const body = await readJson(req, { limit: 256 * 1024 });
+        const result = store.syncRelationEvents({
+          device: body.device,
+          events: body.events,
+          lastKnownServerTimeUtc: body.last_known_server_time_utc,
+          nowIso: requestNow.toISOString()
+        });
+        const reopenedGoalIds = new Set(result.reopened_goal_ids);
+        const state = store.relationState(requestNow.toISOString());
+        broadcast(sockets, { type: 'relations_synced', relations_state: state }, scopedUserId());
+        if (reopenedGoalIds.size > 0) {
+          const activityState = activitiesState(store, requestNow);
+          broadcast(sockets, {
+            type: 'activities_synced',
+            activities_state: activityState,
+            actions_state: actionsCompatState(activityState)
+          }, scopedUserId());
+        }
+        sendJson(req, res, 200, { ...result, server_revision: state.server_revision, state });
+        return;
+      }
+
       if (req.method === 'POST' && url.pathname === '/v1/inbox/events/sync') {
         const requestNow = now();
         const ownerUserId = scopedUserId();
@@ -1365,7 +1530,7 @@ export function createBraiServer({
     void (async () => {
       const traceId = crypto.randomUUID();
       const url = new URL(req.url ?? '/', 'http://localhost');
-      const authContext = await authenticateRequest(req, token, url, sessionSecret, now, auth, store);
+      const authContext = await authenticateRequest(req, token, url, sessionSecret, now, auth, store, authBackendTimeoutMs);
       if (url.pathname !== '/v1/live' || !authContext.authorized) {
         recordRuntimeLog(store, logger, {
           traceId,
@@ -1378,6 +1543,22 @@ export function createBraiServer({
           jsonData: { path: url.pathname, authorized: Boolean(authContext.authorized) }
         });
         socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+        socket.destroy();
+        return;
+      }
+      if (expectedUserScopeChanged(url.searchParams.getAll('expected_user_id'), authContext.userId)) {
+        recordRuntimeLog(store, logger, {
+          traceId,
+          source: 'auth',
+          operation: 'auth.websocket',
+          status: 'failed',
+          severityText: 'WARN',
+          userId: authContext.userId,
+          reason: 'user_scope_changed',
+          message: 'WebSocket upgrade rejected',
+          jsonData: { path: url.pathname }
+        });
+        socket.write('HTTP/1.1 409 Conflict\r\n\r\n');
         socket.destroy();
         return;
       }
@@ -1407,16 +1588,19 @@ export function createBraiServer({
         ws.on('close', () => sockets.delete(ws));
         ws.on('error', () => sockets.delete(ws));
       });
-    })().catch(() => {
+    })().catch((error) => {
+      const authUnavailable = error?.status === 503;
       recordRuntimeLog(store, logger, {
         source: 'auth',
         operation: 'auth.websocket',
         status: 'failed',
         severityText: 'WARN',
-        reason: 'upgrade_error',
+        reason: authUnavailable ? 'auth_backend_unavailable' : 'upgrade_error',
         message: 'WebSocket upgrade failed'
       });
-      socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+      socket.write(authUnavailable
+        ? 'HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\n\r\n'
+        : 'HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n');
       socket.destroy();
     });
   });
@@ -1428,6 +1612,7 @@ export function createBraiServer({
     close() {
       if (closePromise) return closePromise;
       closePromise = (async () => {
+        if (contextAuditInterval) clearInterval(contextAuditInterval);
         for (const socket of sockets) socket.terminate();
         wss.close();
         await new Promise((resolve) => {
@@ -1486,13 +1671,14 @@ export function settingsState(store, inboxExternalAi = {}) {
 }
 
 export function activitiesState(store, nowDate) {
-  const activities = store.listActivities();
-  const archivedActivities = store.listArchivedActivities();
   return {
     server_time_utc: nowDate.toISOString(),
     server_revision: store.getActivityServerRevision(),
-    activities: addActivityAiProcessingState(activities),
-    archived_activities: addActivityAiProcessingState(archivedActivities)
+    activities: addActivityAiProcessingState(store.listActivities()),
+    goals: addActivityAiProcessingState(store.listGoals()),
+    legacy_operations: addActivityAiProcessingState(store.listLegacyOperations()),
+    archived_activities: addActivityAiProcessingState(store.listArchivedActivities()),
+    archived_goals: addActivityAiProcessingState(store.listArchivedGoals())
   };
 }
 
@@ -1508,11 +1694,7 @@ function addActivityAiProcessingState(activities) {
     if (item.workflow_status === 'queued' || item.workflow_status === 'running') {
       return { ...item, ai_processing_status: 'running', ai_processing_error: null };
     }
-    return {
-      ...item,
-      ai_processing_status: null,
-      ai_processing_error: null
-    };
+    return { ...item, ai_processing_status: null, ai_processing_error: null };
   });
 }
 
@@ -1617,8 +1799,8 @@ function actionsCompatState(state) {
   };
 }
 
-async function authenticateRequest(req, token, parsedUrl, sessionSecret, now, auth, store) {
-  const session = await betterAuthSession(req, auth);
+async function authenticateRequest(req, token, parsedUrl, sessionSecret, now, auth, store, authBackendTimeoutMs) {
+  const session = await betterAuthSession(req, auth, authBackendTimeoutMs);
   if (session?.user?.id) {
     return { authorized: true, sessionBased: true, userId: session.user.id, user: publicAuthUser(session.user) };
   }
@@ -1636,17 +1818,56 @@ async function authenticateRequest(req, token, parsedUrl, sessionSecret, now, au
   return { authorized: false, sessionBased: false, userId: null, user: null };
 }
 
-async function betterAuthSession(req, auth) {
+function expectedUserScopeChanged(values, authenticatedUserId) {
+  return [values].flat().some((value) =>
+    typeof value === 'string' && value.trim() && value.trim() !== authenticatedUserId
+  );
+}
+
+async function betterAuthSession(req, auth, authBackendTimeoutMs) {
   try {
-    const response = await auth.api.getSession({
+    const response = await authBackendCall(() => auth.api.getSession({
       headers: requestHeaders(req),
       asResponse: true
-    });
-    if (!response.ok) return null;
-    return parseJson(await response.text());
-  } catch {
-    return null;
+    }), authBackendTimeoutMs);
+    if (!response.ok) throw authBackendUnavailable();
+    const text = await response.text();
+    if (!text.trim()) throw authBackendUnavailable();
+    const session = JSON.parse(text);
+    if (session === null) return null;
+    if (!session || typeof session !== 'object' || Array.isArray(session)
+      || !session.session || typeof session.session !== 'object' || Array.isArray(session.session)
+      || !session.user || typeof session.user !== 'object' || Array.isArray(session.user)
+      || typeof session.user.id !== 'string' || !session.user.id.trim()) {
+      throw authBackendUnavailable();
+    }
+    return session;
+  } catch (error) {
+    if (error?.status === 503) throw error;
+    throw authBackendUnavailable();
   }
+}
+
+async function authBackendCall(call, timeoutMs) {
+  const boundedTimeoutMs = Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : 5_000;
+  let timer;
+  try {
+    return await Promise.race([
+      Promise.resolve().then(call),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(authBackendUnavailable()), boundedTimeoutMs);
+        timer.unref?.();
+      })
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function authBackendUnavailable() {
+  const error = new Error('auth_backend_unavailable');
+  error.status = 503;
+  return error;
 }
 
 async function prepareSignedInAuthUser({ store, logger, traceId, route, operation, payload, preliminaryContext = {}, ensureUserVault, now }) {

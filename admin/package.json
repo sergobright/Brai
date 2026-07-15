@@ -12,7 +12,7 @@
     "start": "next start -H 127.0.0.1 -p ${PORT:-3040}",
     "lint": "eslint .",
     "sync-table-descriptions": "node scripts/sync-table-descriptions.mjs",
-    "self-check": "node scripts/self-check.mjs",
+    "self-check": "node scripts/self-check.mjs && node scripts/context-self-check.mjs",
     "visual-check": "node scripts/visual-check.mjs"
   },
   "dependencies": {

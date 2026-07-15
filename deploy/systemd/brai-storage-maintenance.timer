@@ -1,0 +1,11 @@
+[Unit]
+Description=Run Brai storage maintenance daily at 03:30 UTC
+
+[Timer]
+OnCalendar=*-*-* 03:30:00 UTC
+Persistent=true
+AccuracySec=1min
+Unit=brai-storage-maintenance.service
+
+[Install]
+WantedBy=timers.target

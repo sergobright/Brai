@@ -1,4 +1,10 @@
-import { clientDb, ensureClientMeta, getMeta, randomId, setMeta } from "./db";
+import {
+  assertClientUserInCurrentTransaction,
+  clientDb,
+  ensureClientMeta,
+  randomId,
+  setMeta,
+} from "./db";
 import { migrateBraiLocalStoragePrefix, removeBraiLocalStorageItem, setBraiLocalStorageItem } from "./localStorageKeys";
 import type {
   ActivitiesState,
@@ -22,9 +28,13 @@ export async function enqueueActivityEvent(params: {
   actionId?: string;
   payload: ActivityEventPayload;
   baseServerRevision: number;
+  expectedUserId?: string;
 }): Promise<PendingActivityEvent> {
   const db = clientDb();
   return db.transaction("rw", db.meta, db.action_outbox_events, async () => {
+    if (params.expectedUserId !== undefined) {
+      await assertClientUserInCurrentTransaction(params.expectedUserId);
+    }
     const meta = await ensureClientMeta();
     const sequence = meta.nextClientSequence;
     const now = new Date().toISOString();
@@ -63,16 +73,26 @@ export async function enqueueActivityEvent(params: {
   });
 }
 
-export async function pendingActivityEvents(): Promise<PendingActivityEvent[]> {
-  return clientDb().action_outbox_events.orderBy("clientSequence").toArray();
+export async function pendingActivityEvents(expectedUserId?: string): Promise<PendingActivityEvent[]> {
+  const db = clientDb();
+  return db.transaction("r", db.meta, db.action_outbox_events, async () => {
+    if (expectedUserId !== undefined) await assertClientUserInCurrentTransaction(expectedUserId);
+    return db.action_outbox_events.orderBy("clientSequence").toArray();
+  });
 }
 
-export async function markActivityAttempt(events: PendingActivityEvent[]): Promise<void> {
+/** Marks Activity events as being attempted within the optional expected owner scope. */
+export async function markActivityAttempt(
+  events: PendingActivityEvent[],
+  expectedUserId?: string,
+): Promise<void> {
+  const db = clientDb();
   const now = new Date().toISOString();
-  await clientDb().transaction("rw", clientDb().action_outbox_events, async () => {
+  await db.transaction("rw", db.meta, db.action_outbox_events, async () => {
+    if (expectedUserId !== undefined) await assertClientUserInCurrentTransaction(expectedUserId);
     await Promise.all(
       events.map((event) =>
-        clientDb().action_outbox_events.update(event.eventId, {
+        db.action_outbox_events.update(event.eventId, {
           status: "syncing",
           attemptCount: event.attemptCount + 1,
           lastSyncAttemptAtUtc: now,
@@ -83,11 +103,17 @@ export async function markActivityAttempt(events: PendingActivityEvent[]): Promi
   });
 }
 
-export async function markActivityFailure(events: PendingActivityEvent[], message: string): Promise<void> {
-  await clientDb().transaction("rw", clientDb().action_outbox_events, async () => {
+export async function markActivityFailure(
+  events: PendingActivityEvent[],
+  message: string,
+  expectedUserId?: string,
+): Promise<void> {
+  const db = clientDb();
+  await db.transaction("rw", db.meta, db.action_outbox_events, async () => {
+    if (expectedUserId !== undefined) await assertClientUserInCurrentTransaction(expectedUserId);
     await Promise.all(
       events.map((event) =>
-        clientDb().action_outbox_events.update(event.eventId, {
+        db.action_outbox_events.update(event.eventId, {
           status: "failed",
           lastError: message,
         }),
@@ -96,31 +122,62 @@ export async function markActivityFailure(events: PendingActivityEvent[], messag
   });
 }
 
-export async function acknowledgeActivityEvents(ids: string[]): Promise<void> {
-  await clientDb().action_outbox_events.bulkDelete(ids);
+export async function acknowledgeActivityEvents(ids: string[], expectedUserId?: string): Promise<void> {
+  const db = clientDb();
+  await db.transaction("rw", db.meta, db.action_outbox_events, async () => {
+    if (expectedUserId !== undefined) await assertClientUserInCurrentTransaction(expectedUserId);
+    await db.action_outbox_events.bulkDelete(ids);
+  });
 }
 
-export async function saveActivitiesState(state: ActivitiesState): Promise<boolean> {
-  const currentRevision = await lastActivityServerRevision();
+/** Persists typed Action, Goal, and legacy Operation projections at a monotonic revision. */
+export async function saveActivitiesState(
+  state: ActivitiesState,
+  expectedUserId?: string,
+): Promise<boolean> {
+  const db = clientDb();
+  return db.transaction(
+    "rw",
+    db.actions_cache,
+    db.meta,
+    () => saveActivitiesSnapshotInCurrentTransaction(state, expectedUserId),
+  );
+}
+
+/** Writes an Activity snapshot inside the caller's Dexie transaction. */
+export async function saveActivitiesSnapshotInCurrentTransaction(
+  state: ActivitiesState,
+  expectedUserId?: string,
+): Promise<boolean> {
+  const db = clientDb();
+  if (expectedUserId !== undefined) await assertClientUserInCurrentTransaction(expectedUserId);
+  const currentRevision = Number((await db.meta.get("lastActionServerRevision"))?.value ?? 0);
   if (state.server_revision < currentRevision || (currentRevision > 0 && state.server_revision === currentRevision)) return false;
 
-  await clientDb().transaction("rw", clientDb().actions_cache, clientDb().meta, async () => {
-    await clientDb().actions_cache.clear();
-    const allActivities = [...state.actions, ...state.archived_actions].map(normalizeActivityItem);
-    if (allActivities.length > 0) await clientDb().actions_cache.bulkPut(allActivities);
-    await setMeta("lastActionServerRevision", state.server_revision);
-    await setMeta("lastActionServerTimeUtc", state.server_time_utc);
-    await setMeta("lastSuccessfulActionsSyncAtUtc", new Date().toISOString());
-  });
+  await db.actions_cache.clear();
+  const allActivities = [
+    ...state.actions,
+    ...state.archived_actions,
+    ...(state.legacy_operations ?? []),
+    ...(state.goals ?? []),
+    ...(state.archived_goals ?? []),
+  ].map(normalizeActivityItem);
+  if (allActivities.length > 0) await db.actions_cache.bulkPut(allActivities);
+  await db.meta.bulkPut([
+    { key: "lastActionServerRevision", value: state.server_revision },
+    { key: "lastActionServerTimeUtc", value: state.server_time_utc },
+    { key: "lastSuccessfulActionsSyncAtUtc", value: new Date().toISOString() },
+  ]);
   return true;
 }
 
 /**
  * Loads the activities snapshot and its revision from one IndexedDB read transaction.
  */
-export async function loadActivitiesState(): Promise<ActivitiesState | null> {
+export async function loadActivitiesState(expectedUserId?: string): Promise<ActivitiesState | null> {
   const db = clientDb();
   const { actions, revision, serverTimeUtc } = await db.transaction("r", db.actions_cache, db.meta, async () => {
+    if (expectedUserId !== undefined) await assertClientUserInCurrentTransaction(expectedUserId);
     const [cachedActions, revisionRow, serverTimeRow] = await Promise.all([
       db.actions_cache.toArray(),
       db.meta.get("lastActionServerRevision"),
@@ -133,16 +190,24 @@ export async function loadActivitiesState(): Promise<ActivitiesState | null> {
     };
   });
   if (actions.length === 0 && revision == null) return null;
+  const normalized = actions.map(normalizeActivityItem);
   return {
     server_time_utc: serverTimeUtc ?? new Date().toISOString(),
     server_revision: revision ?? 0,
-    actions: sortActivities(actions.map(normalizeActivityItem).filter((action) => !action.deleted_at_utc)),
-    archived_actions: sortArchivedActivities(actions.map(normalizeActivityItem).filter((action) => action.deleted_at_utc)),
+    actions: sortActivities(normalized.filter((item) => item.activity_type_id === "action" && !item.deleted_at_utc)),
+    archived_actions: sortArchivedActivities(normalized.filter((item) => item.activity_type_id === "action" && item.deleted_at_utc)),
+    legacy_operations: sortActivities(normalized.filter((item) => item.activity_type_id === "operation" && !item.deleted_at_utc)),
+    goals: sortActivities(normalized.filter((item) => item.activity_type_id === "goal" && !item.deleted_at_utc)),
+    archived_goals: sortArchivedActivities(normalized.filter((item) => item.activity_type_id === "goal" && item.deleted_at_utc)),
   };
 }
 
-export async function lastActivityServerRevision(): Promise<number> {
-  return (await getMeta<number>("lastActionServerRevision")) ?? 0;
+export async function lastActivityServerRevision(expectedUserId?: string): Promise<number> {
+  const db = clientDb();
+  return db.transaction("r", db.meta, async () => {
+    if (expectedUserId !== undefined) await assertClientUserInCurrentTransaction(expectedUserId);
+    return Number((await db.meta.get("lastActionServerRevision"))?.value ?? 0);
+  });
 }
 
 /**
@@ -160,6 +225,15 @@ export function projectActivitiesState(
   for (const action of base.archived_actions) {
     actions.set(action.id, { ...normalizeActivityItem(action), pending: false });
   }
+  for (const operation of base.legacy_operations ?? []) {
+    actions.set(operation.id, { ...normalizeActivityItem(operation), pending: false });
+  }
+  for (const goal of base.goals ?? []) {
+    actions.set(goal.id, { ...normalizeActivityItem(goal), pending: false });
+  }
+  for (const goal of base.archived_goals ?? []) {
+    actions.set(goal.id, { ...normalizeActivityItem(goal), pending: false });
+  }
 
   for (const event of [...pending].sort(compareActivityEvents)) {
     const existing = actions.get(event.actionId);
@@ -169,11 +243,11 @@ export function projectActivitiesState(
       if (!title) continue;
       actions.set(event.actionId, {
         id: event.actionId,
-        activity_type_id: isActivityType(event.payload.activity_type_id) ? event.payload.activity_type_id : "action",
+        activity_type_id: activityType(event.payload.activity_type_id),
         title,
         description_md: normalizeDescription(event.payload.description_md),
-        author: typeof event.payload.author === "string" ? event.payload.author.trim() : "",
-        reason: normalizeDescription(event.payload.reason),
+        author: "",
+        reason: "",
         status: "New",
         created_at_utc: occurredAtUtc,
         updated_at_utc: occurredAtUtc,
@@ -181,17 +255,6 @@ export function projectActivitiesState(
         sort_order: null,
         deleted_at_utc: null,
         restored_at_utc: null,
-        item_roles_id: null,
-        initial_event_id: null,
-        workflow_execution_id: null,
-        workflow_status: "queued",
-        workflow_step: "ingest",
-        workflow_attempt_count: 0,
-        workflow_last_error: null,
-        temporal_workflow_id: null,
-        temporal_run_id: null,
-        ai_processing_status: "running",
-        ai_processing_error: null,
         pending: true,
       });
     } else if (event.type === "update_title" && existing) {
@@ -217,6 +280,22 @@ export function projectActivitiesState(
         updated_at_utc: occurredAtUtc,
         completed_at_utc: event.payload.status === "Done" ? occurredAtUtc : null,
         sort_order: null,
+        pending: true,
+      });
+    } else if (
+      event.type === "set_type" &&
+      existing &&
+      isActivityType(event.payload.from_activity_type_id) &&
+      isActivityType(event.payload.to_activity_type_id) &&
+      existing.activity_type_id === event.payload.from_activity_type_id
+    ) {
+      actions.set(event.actionId, {
+        ...existing,
+        activity_type_id: event.payload.to_activity_type_id,
+        status: "New",
+        completed_at_utc: null,
+        sort_order: null,
+        updated_at_utc: occurredAtUtc,
         pending: true,
       });
     } else if (event.type === "reorder") {
@@ -246,10 +325,15 @@ export function projectActivitiesState(
   }
 
   const allActivities = [...actions.values()];
+  const activeActions = allActivities.filter((item) => item.activity_type_id === "action" && !item.deleted_at_utc);
+  const activeGoals = allActivities.filter((item) => item.activity_type_id === "goal" && !item.deleted_at_utc);
   return {
     ...base,
-    actions: sortActivities(allActivities.filter((action) => !action.deleted_at_utc)),
-    archived_actions: sortArchivedActivities(allActivities.filter((action) => action.deleted_at_utc)),
+    actions: sortActivities(activeActions),
+    archived_actions: sortArchivedActivities(allActivities.filter((item) => item.activity_type_id === "action" && item.deleted_at_utc)),
+    legacy_operations: sortActivities(allActivities.filter((item) => item.activity_type_id === "operation" && !item.deleted_at_utc)),
+    goals: sortActivities(activeGoals),
+    archived_goals: sortArchivedActivities(allActivities.filter((item) => item.activity_type_id === "goal" && item.deleted_at_utc)),
   };
 }
 
@@ -347,13 +431,13 @@ export function loadActivityEditDrafts(): Array<{ actionId: string; title: strin
 
 function normalizedPayload(payload: ActivityEventPayload): ActivityEventPayload {
   return {
-    activity_type_id: isActivityType(payload.activity_type_id) ? payload.activity_type_id : undefined,
-    title: payload.title == null ? undefined : cleanTitle(payload.title),
-    description_md: payload.description_md == null ? undefined : normalizeDescription(payload.description_md),
-    author: typeof payload.author === "string" ? payload.author.trim() : undefined,
-    reason: payload.reason == null ? undefined : normalizeDescription(payload.reason),
-    status: payload.status,
-    ordered_ids: payload.ordered_ids == null ? undefined : normalizeOrderedIds(payload.ordered_ids),
+    ...(payload.title == null ? {} : { title: cleanTitle(payload.title) }),
+    ...(payload.description_md == null ? {} : { description_md: normalizeDescription(payload.description_md) }),
+    ...(payload.status == null ? {} : { status: payload.status }),
+    ...(payload.activity_type_id == null ? {} : { activity_type_id: payload.activity_type_id }),
+    ...(payload.from_activity_type_id == null ? {} : { from_activity_type_id: payload.from_activity_type_id }),
+    ...(payload.to_activity_type_id == null ? {} : { to_activity_type_id: payload.to_activity_type_id }),
+    ...(payload.ordered_ids == null ? {} : { ordered_ids: normalizeOrderedIds(payload.ordered_ids) }),
   };
 }
 
@@ -367,17 +451,6 @@ function normalizeActivityItem(action: ActivityItem): ActivityItem {
     sort_order: Number.isInteger(action.sort_order) ? action.sort_order : null,
     deleted_at_utc: action.deleted_at_utc ?? null,
     restored_at_utc: action.restored_at_utc ?? null,
-    item_roles_id: Number.isInteger(action.item_roles_id) ? action.item_roles_id : action.item_roles_id === null ? null : undefined,
-    initial_event_id: action.initial_event_id ?? null,
-    workflow_execution_id: Number.isInteger(action.workflow_execution_id) ? action.workflow_execution_id : action.workflow_execution_id === null ? null : undefined,
-    workflow_status: action.workflow_status ?? null,
-    workflow_step: action.workflow_step ?? null,
-    workflow_attempt_count: Number.isInteger(action.workflow_attempt_count) ? action.workflow_attempt_count : 0,
-    workflow_last_error: action.workflow_last_error ?? null,
-    temporal_workflow_id: action.temporal_workflow_id ?? null,
-    temporal_run_id: action.temporal_run_id ?? null,
-    ai_processing_status: action.ai_processing_status ?? null,
-    ai_processing_error: action.ai_processing_error ?? null,
   };
 }
 
@@ -386,7 +459,11 @@ function isActivityStatus(value: unknown): value is ActivityStatus {
 }
 
 function isActivityType(value: unknown): value is ActivityType {
-  return value === "action" || value === "operation";
+  return value === "action" || value === "goal" || value === "operation";
+}
+
+function activityType(value: unknown): ActivityType {
+  return isActivityType(value) ? value : "action";
 }
 
 function compareActivityEvents(left: PendingActivityEvent, right: PendingActivityEvent): number {

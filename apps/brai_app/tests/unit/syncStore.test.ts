@@ -1,18 +1,21 @@
-import { beforeEach, describe, expect, it } from "vitest";
-import { clientDb, getMeta } from "@/shared/storage/db";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { ClientUserScopeChangedError, clientDb, getMeta, setMeta } from "@/shared/storage/db";
 import {
+  acknowledgeTimerSyncEvents,
   enqueueTimerEvent,
   enqueueFocusIntervalEdit,
   enqueueFocusSessionDelete,
   enqueueFocusSessionEdit,
   enqueueStartActionFocus,
   loadCanonicalState,
+  loadGoalCache,
   loadHistoryCache,
   pendingEvents,
   saveCanonicalState,
+  saveHistoryAndGoalCache,
   saveHistoryCache,
 } from "@/shared/storage/syncStore";
-import type { TimerState } from "@/shared/types/timer";
+import { emptyGoal, type HistoryData, type TimerState } from "@/shared/types/timer";
 
 describe("sync store guards", () => {
   beforeEach(async () => {
@@ -125,6 +128,84 @@ describe("sync store guards", () => {
       duration_seconds: 1800,
     });
   });
+
+  it("rejects old-owner timer enqueue and response apply without touching user B data", async () => {
+    await setMeta("currentUserId", "user-a");
+    const expectedUserId = "user-a";
+    await setMeta("currentUserId", "user-b");
+    await saveCanonicalState(state(5), "user-b");
+    const userBEvent = await enqueueTimerEvent({
+      type: "start",
+      baseServerRevision: 5,
+      expectedUserId: "user-b",
+    });
+    const nextClientSequence = await getMeta<number>("nextClientSequence");
+
+    await expect(enqueueTimerEvent({
+      type: "stop",
+      baseServerRevision: 5,
+      expectedUserId,
+    })).rejects.toBeInstanceOf(ClientUserScopeChangedError);
+    await expect(acknowledgeTimerSyncEvents({
+      acknowledgedEventIds: [userBEvent.eventId],
+      ignoredEvents: [{ event_id: userBEvent.eventId, reason: "old_owner" }],
+      state: state(9),
+      expectedUserId,
+    })).rejects.toBeInstanceOf(ClientUserScopeChangedError);
+
+    expect(await pendingEvents("user-b")).toEqual([userBEvent]);
+    expect((await loadCanonicalState("user-b"))?.server_revision).toBe(5);
+    expect(await clientDb().ignored_events.toArray()).toEqual([]);
+    expect(await getMeta<number>("nextClientSequence")).toBe(nextClientSequence);
+  });
+
+  it("rolls back timer acknowledgement, ignored audit, and canonical snapshot together", async () => {
+    await setMeta("currentUserId", "user-b");
+    const event = await enqueueTimerEvent({
+      type: "start",
+      baseServerRevision: 0,
+      expectedUserId: "user-b",
+    });
+    const failure = vi.spyOn(clientDb().outbox_events, "bulkDelete")
+      .mockRejectedValueOnce(new Error("injected_ack_failure"));
+
+    await expect(acknowledgeTimerSyncEvents({
+      acknowledgedEventIds: [],
+      ignoredEvents: [{ event_id: event.eventId, reason: "ignored" }],
+      state: state(5),
+      expectedUserId: "user-b",
+    })).rejects.toThrow("injected_ack_failure");
+    failure.mockRestore();
+
+    expect(await pendingEvents("user-b")).toEqual([event]);
+    expect(await loadCanonicalState("user-b")).toBeNull();
+    expect(await clientDb().ignored_events.get(event.eventId)).toBeUndefined();
+  });
+
+  it("rejects an old-owner History and Goal pair without replacing user B cache", async () => {
+    await setMeta("currentUserId", "user-a");
+    const expectedUserId = "user-a";
+    await setMeta("currentUserId", "user-b");
+    const userBGoal = { ...emptyGoal(), completed_seconds: 5 };
+    await saveHistoryAndGoalCache({
+      history: history("user-b-session"),
+      goal: userBGoal,
+      serverRevision: 5,
+      expectedUserId: "user-b",
+    });
+
+    await expect(saveHistoryAndGoalCache({
+      history: history("user-a-session"),
+      goal: { ...emptyGoal(), completed_seconds: 9 },
+      serverRevision: 9,
+      expectedUserId,
+    })).rejects.toBeInstanceOf(ClientUserScopeChangedError);
+
+    expect((await loadHistoryCache("user-b")).sessions.map((session) => session.id)).toEqual([
+      "user-b-session",
+    ]);
+    expect(await loadGoalCache("user-b")).toEqual(userBGoal);
+  });
 });
 
 function state(serverRevision: number): TimerState {
@@ -134,5 +215,17 @@ function state(serverRevision: number): TimerState {
     timezone: "Europe/Moscow",
     active_session: null,
     elapsed_seconds: 0,
+  };
+}
+
+function history(sessionId: string): HistoryData {
+  return {
+    sessions: [{
+      id: sessionId,
+      started_at_utc: "2026-06-14T10:00:00.000Z",
+      ended_at_utc: "2026-06-14T11:00:00.000Z",
+      duration_seconds: 3600,
+    }],
+    groups: {},
   };
 }

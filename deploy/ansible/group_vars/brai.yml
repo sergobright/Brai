@@ -29,6 +29,16 @@ brai_operation_maintainers:
 brai_source_group: mark
 brai_service_user: brai
 brai_service_group: brai
+brai_goal_agent_user: brai-goal-agent
+brai_goal_agent_group: brai-goal-agent
+brai_codex_exec_group: brai-codex-exec
+brai_codex_auth_group: brai-codex-auth
+brai_codex_auth_root: /srv/opt/codex-home
+brai_goal_agent_codex_home: /srv/opt/codex-runtime/brai-goal-agent
+brai_codex_bin: /srv/opt/codex-cli/bin/codex
+brai_goal_agent_runtime_prepare: /srv/opt/brai-goal-agent-runtime-prepare.sh
+brai_codex_maintenance_sync: /srv/opt/codex-maintenance/sync-managed-release.sh
+brai_codex_maintenance_user: mark
 brai_protected_env_dir: /etc/brai
 brai_api_env_source: /etc/brai/brai-api.env
 brai_db_telegram_backup_env_source: /etc/brai/brai-db-telegram-backup.env
@@ -37,6 +47,9 @@ brai_api_domain: api.brai.one
 brai_api_legacy_domains:
   - api.brightos.world
 brai_supabase_deploy_env_source: /etc/brai/supabase-deploy.env
+brai_supavisor_managed_config: /srv/opt/brai-supavisor-pooler.exs
+brai_supavisor_tenant_tool: /srv/opt/brai-supavisor-tenants.mjs
+brai_supabase_maintenance: /srv/opt/brai-supabase-maintenance.sh
 brai_temporal_worker_env_source: /etc/brai/brai-temporal-worker.env
 brai_temporal_ui_domain: temporal.brai.one
 brai_temporal_ui_legacy_domains:
@@ -47,6 +60,33 @@ brai_temporal_deploy_ssh_port: 22
 brai_temporal_local_port: 17233
 brai_temporal_deploy_ssh_key_path: /etc/brai/brai-temporal-deploy-ssh-key
 brai_temporal_github_token_path: /etc/brai/brai-temporal-github-token
+brai_goal_agents_env_source: /etc/brai/brai-goal-agents.env
+brai_goal_agents:
+  activity-classifier:
+    id: activity.classifier
+    unit_base: brai-agent-activity-classifier
+    queue_base: brai-agent-activity-classifier
+    entrypoint: activity-classifier.mjs
+  goal-item-matcher:
+    id: goal.item-matcher
+    unit_base: brai-agent-goal-item-matcher
+    queue_base: brai-agent-goal-item-matcher
+    entrypoint: goal-item-matcher.mjs
+  goal-member-finder:
+    id: goal.member-finder
+    unit_base: brai-agent-goal-member-finder
+    queue_base: brai-agent-goal-member-finder
+    entrypoint: goal-member-finder.mjs
+  goal-discovery:
+    id: goal.discovery
+    unit_base: brai-agent-goal-discovery
+    queue_base: brai-agent-goal-discovery
+    entrypoint: goal-discovery.mjs
+  goal-planner:
+    id: goal.planner
+    unit_base: brai-agent-goal-planner
+    queue_base: brai-agent-goal-planner
+    entrypoint: goal-planner.mjs
 brai_basic_auth_directive: "import brai_unified_basic_auth"
 brai_envs:
   prod:
@@ -58,6 +98,8 @@ brai_envs:
     admin_port: 3040
     service: brai-api.service
     admin_service: brai-admin.service
+    goal_agent_service_suffix: ""
+    goal_agent_queue_environment: prod
   dev:
     domain: dev.brai.one
     legacy_domains:
@@ -67,6 +109,8 @@ brai_envs:
     admin_port: 3041
     service: brai-api-dev.service
     admin_service: brai-admin-dev.service
+    goal_agent_service_suffix: "-dev"
+    goal_agent_queue_environment: dev
   preview-a:
     domain: a.test.brai.one
     legacy_domains:
@@ -76,6 +120,8 @@ brai_envs:
     admin_port: 3042
     service: brai-api-preview-a.service
     admin_service: brai-admin-preview-a.service
+    goal_agent_service_suffix: "-preview-a"
+    goal_agent_queue_environment: preview-a
   preview-b:
     domain: b.test.brai.one
     legacy_domains:
@@ -85,6 +131,8 @@ brai_envs:
     admin_port: 3043
     service: brai-api-preview-b.service
     admin_service: brai-admin-preview-b.service
+    goal_agent_service_suffix: "-preview-b"
+    goal_agent_queue_environment: preview-b
   preview-c:
     domain: c.test.brai.one
     legacy_domains:
@@ -94,6 +142,8 @@ brai_envs:
     admin_port: 3044
     service: brai-api-preview-c.service
     admin_service: brai-admin-preview-c.service
+    goal_agent_service_suffix: "-preview-c"
+    goal_agent_queue_environment: preview-c
   preview-d:
     domain: d.test.brai.one
     legacy_domains:
@@ -103,6 +153,8 @@ brai_envs:
     admin_port: 3045
     service: brai-api-preview-d.service
     admin_service: brai-admin-preview-d.service
+    goal_agent_service_suffix: "-preview-d"
+    goal_agent_queue_environment: preview-d
   preview-e:
     domain: e.test.brai.one
     legacy_domains:
@@ -112,3 +164,5 @@ brai_envs:
     admin_port: 3046
     service: brai-api-preview-e.service
     admin_service: brai-admin-preview-e.service
+    goal_agent_service_suffix: "-preview-e"
+    goal_agent_queue_environment: preview-e

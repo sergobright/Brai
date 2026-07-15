@@ -183,6 +183,12 @@ export type WorkflowExecutionAdminSummary = {
   workflowId: string;
   runId: string;
   rawRecordId: string;
+  subjectKind: string;
+  subjectId: string;
+  triggerKind: string;
+  triggerRevision: number | null;
+  watermarkFrom: number | null;
+  watermarkTo: number | null;
   status: string;
   currentStep: string;
   attemptCount: number;

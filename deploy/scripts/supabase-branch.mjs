@@ -7,6 +7,12 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { expandPreservedTables, orderTablesByDependencies, tablesToReset } from "./copy-table-order.mjs";
+import {
+  databaseUrlForSupavisorTenant,
+  databaseUsernameWithoutKnownTenant,
+  NONPROD_SUPAVISOR_TENANT,
+  tenantIsolationEnabled,
+} from "./supavisor-tenants.mjs";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(scriptDir, "../..");
@@ -47,12 +53,15 @@ async function main() {
   const args = parseArgs(argv);
   if (command === "preview-env") {
     const branch = required(args, "branch");
+    const commit = required(args, "commit");
     const envFile = required(args, "runtime-env");
+    const preserveExisting = args["preserve-existing"] === "true";
     const name = args.name || (isSelfHosted() ? previewSchemaName(branch) : previewBranchName(branch));
     const { databaseUrl, details } = isSelfHosted()
       ? await ensureSelfHostedSchema(name)
       : ensureCloudBranch(name, { persistent: false, withData: false });
     assertBranchReady(name, details, databaseUrl);
+    if (preserveExisting) assertSameDatabaseTarget(process.env.BRAI_DATABASE_URL, databaseUrl);
     upsertEnvFile(envFile, {
       BRAI_DATABASE_URL: databaseUrl,
       BRAI_SUPABASE_BRANCH: name,
@@ -62,18 +71,20 @@ async function main() {
       ...rotatedSessionSecret(envFile)
     });
     await applyMigrations(databaseUrl);
-    const seededFromProduction = await seedTestDataFromProduction(databaseUrl);
-    if (!seededFromProduction) await applyPreviewSeed(databaseUrl);
-    await sanitizeClonedAccountAiData(databaseUrl);
-    updatePreviewRegistry(branch, name, details);
+    const seededFromProduction = preserveExisting ? false : await seedTestDataFromProduction(databaseUrl);
+    if (!preserveExisting && !seededFromProduction) await applyPreviewSeed(databaseUrl);
+    if (!preserveExisting) await sanitizeClonedAccountAiData(databaseUrl);
+    updatePreviewRegistry(branch, commit, name, details);
     console.log(JSON.stringify({ ok: true, branch: name, id: branchId(details), status: branchStatus(details), envFile, seededFromProduction }, null, 2));
   } else if (command === "dev-env") {
     const envFile = required(args, "runtime-env");
+    const preserveExisting = args["preserve-existing"] === "true";
     const name = args.name || (isSelfHosted() ? "brai_dev" : "brai-dev");
     const { databaseUrl, details } = isSelfHosted()
       ? await ensureSelfHostedSchema(name)
       : ensureCloudBranch(name, { persistent: true, withData: true });
     assertBranchReady(name, details, databaseUrl);
+    if (preserveExisting) assertSameDatabaseTarget(process.env.BRAI_DATABASE_URL, databaseUrl);
     upsertEnvFile(envFile, {
       BRAI_DATABASE_URL: databaseUrl,
       BRAI_SUPABASE_BRANCH: name,
@@ -83,8 +94,8 @@ async function main() {
       ...rotatedSessionSecret(envFile)
     });
     await applyMigrations(databaseUrl);
-    const seededFromProduction = await seedTestDataFromProduction(databaseUrl);
-    await sanitizeClonedAccountAiData(databaseUrl);
+    const seededFromProduction = preserveExisting ? false : await seedTestDataFromProduction(databaseUrl);
+    if (!preserveExisting) await sanitizeClonedAccountAiData(databaseUrl);
     console.log(JSON.stringify({ ok: true, branch: name, envFile, seededFromProduction }, null, 2));
   } else if (command === "delete-preview") {
     const branch = required(args, "branch");
@@ -108,7 +119,7 @@ async function main() {
     await applyMigrations(databaseUrl);
     console.log(JSON.stringify({ ok: true, migrated: true }, null, 2));
   } else {
-    throw new Error("usage: supabase-branch.mjs preview-env --branch <codex/...> --runtime-env <path> | dev-env --runtime-env <path> | delete-preview --branch <codex/...> | migrate --postgres-url <url>");
+    throw new Error("usage: supabase-branch.mjs preview-env --branch <codex/...> --commit <sha> --runtime-env <path> | dev-env --runtime-env <path> | delete-preview --branch <codex/...> | migrate --postgres-url <url>");
   }
 }
 
@@ -131,7 +142,10 @@ function ensureBranch(name, { projectRef, persistent, withData }) {
 }
 
 async function ensureSelfHostedSchema(name) {
-  const adminUrl = selfHostedDatabaseUrl();
+  const sourceUrl = selfHostedDatabaseUrl();
+  const adminUrl = tenantIsolationEnabled()
+    ? databaseUrlForSupavisorTenant(sourceUrl, NONPROD_SUPAVISOR_TENANT)
+    : sourceUrl;
   const databaseUrl = databaseUrlWithSearchPath(adminUrl, name);
   if (process.env.BRAI_SUPABASE_DRY_RUN === "true") {
     return { databaseUrl, details: { id: name, status: "ready" } };
@@ -423,6 +437,7 @@ export async function copySchemaData(pool, { sourceSchema, targetSchema, postSee
       `);
     }
     await reseedOwnedSequences(client, { schema: targetSchema, tables: copyTables });
+    await client.query("SET CONSTRAINTS ALL IMMEDIATE");
     for (const { sql } of postSeedMigrations) await client.query(sql);
     await reseedOwnedSequences(client, { schema: targetSchema, tables: copyTables });
     await client.query("COMMIT");
@@ -690,7 +705,8 @@ async function foreignKeyDependencies(pool, schema) {
   const result = await pool.query(`
     SELECT DISTINCT
       child.relname AS table_name,
-      parent.relname AS referenced_table
+      parent.relname AS referenced_table,
+      fk.condeferred AS deferred
     FROM pg_constraint fk
     JOIN pg_class child ON child.oid = fk.conrelid
     JOIN pg_namespace child_namespace ON child_namespace.oid = child.relnamespace
@@ -702,7 +718,8 @@ async function foreignKeyDependencies(pool, schema) {
   `, [schema]);
   return result.rows.map((row) => ({
     table: row.table_name,
-    referencedTable: row.referenced_table
+    referencedTable: row.referenced_table,
+    deferred: row.deferred
   }));
 }
 
@@ -722,6 +739,17 @@ function searchPathSchema(databaseUrl) {
   const options = new URL(databaseUrl).searchParams.get("options") || "";
   const match = options.match(/search_path=([^,\s]+)/);
   return match?.[1] || "public";
+}
+
+export function assertSameDatabaseTarget(currentDatabaseUrl, resolvedDatabaseUrl) {
+  if (!currentDatabaseUrl || !resolvedDatabaseUrl) throw new Error("preserve-existing requires the current BRAI_DATABASE_URL");
+  const current = new URL(currentDatabaseUrl);
+  const resolved = new URL(resolvedDatabaseUrl);
+  const currentTarget = [current.protocol, databaseUsernameWithoutKnownTenant(current.username), current.hostname, current.port, current.pathname, searchPathSchema(currentDatabaseUrl)];
+  const resolvedTarget = [resolved.protocol, databaseUsernameWithoutKnownTenant(resolved.username), resolved.hostname, resolved.port, resolved.pathname, searchPathSchema(resolvedDatabaseUrl)];
+  if (currentTarget.some((value, index) => value !== resolvedTarget[index])) {
+    throw new Error("preserve-existing target does not match the current runtime database");
+  }
 }
 
 function qualifiedTable(schema, table) {
@@ -800,10 +828,10 @@ function findDatabaseUrl(value) {
   return "";
 }
 
-function updatePreviewRegistry(branch, name, details) {
+function updatePreviewRegistry(branch, commit, name, details) {
   const script = path.join(import.meta.dirname, "preview-slots.sh");
   if (!fs.existsSync(script)) return;
-  const result = spawnSync(script, ["supabase", branch, name, branchId(details), branchStatus(details)], {
+  const result = spawnSync(script, ["supabase", branch, commit, name, branchId(details), branchStatus(details)], {
     encoding: "utf8",
     env: process.env
   });

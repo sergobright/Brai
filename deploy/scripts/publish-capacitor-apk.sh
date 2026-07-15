@@ -57,6 +57,10 @@ cleanup() {
 trap cleanup EXIT
 cp "$SOURCE" "$TMP"
 normalize_public_file "$TMP"
+
+# Serialize the APK swap and its metadata with storage maintenance and HTML re-rendering.
+exec 6<"$TARGET_DIR"
+flock 6
 mv -f "$TMP" "$PRIMARY"
 trap - EXIT
 

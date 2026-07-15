@@ -50,7 +50,6 @@ generate_icons() {
   local density="$3"
   local icon_size="$4"
   local foreground_size="$5"
-  local source_dir="$APP_SRC/main/res/mipmap-$density"
   local dir="$APP_SRC/$flavor/res/mipmap-$density"
   mkdir -p "$dir"
 

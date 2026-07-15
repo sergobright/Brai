@@ -159,7 +159,9 @@ Agents and maintainers MUST use SocratiCode for semantic code search after confi
 #### Scenario: SocratiCode watcher is managed as runtime support
 - **WHEN** the Brai host boots or SocratiCode watcher process exits
 - **THEN** `brai-socraticode-watcher.service` restarts the watcher daemon for `/srv/projects/brai`
-- **AND** the daemon runs safe catch-up on startup and every 60 seconds while file watching remains the primary freshness mechanism
+- **AND** the daemon runs one safe catch-up at startup while file watching remains the primary freshness mechanism
+- **AND** every 60 seconds it runs a read-only preflight that records failures without starting an automatic index or graph rebuild
+- **AND** a failed preflight requires diagnosis and an explicit `npm run socraticode:ensure` repair
 
 #### Scenario: Implementation work is handed off
 - **WHEN** an agent has implementation work to hand off
