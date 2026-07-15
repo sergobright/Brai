@@ -188,6 +188,45 @@ async function waitFor(predicate) {
   throw new Error('condition_not_reached');
 }
 
+test('run waits for its subscriber so AG-UI starts with RUN_STARTED', async () => {
+  const broker = new FakeBroker();
+  const store = fakeStore();
+  const coordinator = new BraiChatTurnCoordinator({ broker, turnTimeoutMs: 10_000 });
+  const observable = coordinator.run({
+    store,
+    userId: 'user-a',
+    publicThreadId: 'public-thread',
+    input: {
+      threadId: 'scoped-thread',
+      runId: 'public-run',
+      messages: [{ id: 'user-message', role: 'user', content: 'Привет' }]
+    }
+  });
+
+  await new Promise((resolve) => setImmediate(resolve));
+  const streamed = [];
+  observable.subscribe((event) => streamed.push(event));
+  await waitFor(() => broker.requests.some((request) => request.method === 'startTurn'));
+  broker.notify('item/agentMessage/delta', {
+    threadId: 'internal-thread-secret',
+    turnId: 'internal-turn-secret',
+    itemId: 'internal-message-secret',
+    delta: 'Готово'
+  });
+  broker.notify('item/completed', {
+    threadId: 'internal-thread-secret',
+    turnId: 'internal-turn-secret',
+    item: { type: 'agentMessage', id: 'internal-message-secret', text: 'Готово' }
+  });
+  broker.notify('turn/completed', {
+    threadId: 'internal-thread-secret',
+    turn: { id: 'internal-turn-secret', status: 'completed' }
+  });
+  await waitFor(() => store.events.some((event) => event.type === EventType.RUN_FINISHED));
+
+  assert.equal(streamed[0]?.type, EventType.RUN_STARTED);
+});
+
 test('turn continues and persists after the HTTP subscriber detaches', async () => {
   const broker = new FakeBroker();
   const store = fakeStore();

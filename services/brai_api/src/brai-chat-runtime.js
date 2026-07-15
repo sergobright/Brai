@@ -71,12 +71,20 @@ function publicRuntimeError(error) {
   return Object.assign(new Error(safe.code), { code: safe.code, status: 503 });
 }
 
-function publicEvents(subject) {
-  return new Observable((subscriber) => subject.subscribe({
-    next: (record) => subscriber.next(record.event),
-    error: (error) => subscriber.error(publicRuntimeError(error)),
-    complete: () => subscriber.complete()
-  }));
+function publicEvents(subject, onFirstSubscribe) {
+  let started = false;
+  return new Observable((subscriber) => {
+    const subscription = subject.subscribe({
+      next: (record) => subscriber.next(record.event),
+      error: (error) => subscriber.error(publicRuntimeError(error)),
+      complete: () => subscriber.complete()
+    });
+    if (!started) {
+      started = true;
+      onFirstSubscribe();
+    }
+    return () => subscription.unsubscribe();
+  });
 }
 
 function delay(ms) {
@@ -261,8 +269,8 @@ export class BraiChatTurnCoordinator {
       key, store, userId, publicThreadId, runId: input.runId, input, subject
     });
     this.active.set(key, state);
-    queueMicrotask(() => this.#launch(state).catch(() => undefined));
-    return publicEvents(subject);
+    return publicEvents(subject,
+      () => queueMicrotask(() => this.#launch(state).catch(() => undefined)));
   }
 
   async steer({ store, userId, publicThreadId, messageId, text }) {
