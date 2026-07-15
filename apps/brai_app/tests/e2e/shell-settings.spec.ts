@@ -6,6 +6,10 @@ test("shows Settings without update state", async ({ page }, testInfo) => {
   await openSettingsFromProfile(page);
 
   await expect(page.getByRole("heading", { name: "Настройки" })).toBeVisible();
+  const pageMain = page.locator(".section-page-current .page-main");
+  await expect(pageMain).toHaveAttribute("data-slot", "scroll-area");
+  await expect(pageMain.locator("> [data-slot='scroll-area-scrollbar']")).toHaveCount(1);
+  await expect(pageMain).not.toHaveClass(/overflow-auto/);
   await expect(page.getByRole("button", { name: "Включить темную тему" })).toBeVisible();
   await page.getByRole("button", { name: "Включить темную тему" }).click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");

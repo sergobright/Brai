@@ -67,6 +67,7 @@
 - `deploy/scripts/preview-slots.sh` - lock-protected preview slot registry commands.
 - `deploy/scripts/accept-preview.sh <codex-branch>` - deterministic acceptance entrypoint when the project owner accepts a preview; creates/reuses PR into `main` and enables merge/auto-merge.
 - Agent operation records are now created through the external Inbox API with `record_type_id=2`, `preliminary_section=operation`, and stable `idempotency_key=operation:...`; close them through `POST /v1/inbox/status`.
+- `deploy/scripts/create-inbox-operation.sh --id ... --title ... --reason ... --description ...` is the canonical authenticated helper; `create-operation-activity.sh` is a deprecated compatibility alias that writes to Inbox too.
 - `deploy/scripts/complete-operation-activities.sh` and `deploy/scripts/list-operation-activities.sh` are legacy helpers for old `activities.operation` rows.
 - `deploy/scripts/postgres-diagnostics.mjs` - read-only Postgres connection and pool diagnostics using `BRAI_DATABASE_URL` from the protected host environment.
 - `deploy/scripts/supavisor-auth-diagnostics.sh [since]` - read-only bounded Supavisor SCRAM/circuit-breaker diagnostics from `supabase-pooler` logs and current pooler sockets.

@@ -6,8 +6,8 @@ TARGET="${2:-}"
 ROOT="${BRAI_MAIN_ROOT:-/srv/projects/brai}"
 INVENTORY="${BRAI_ANSIBLE_INVENTORY:-}"
 
-if [[ "$MODE" != "--check" && "$MODE" != "--apply" ]] || [[ "$TARGET" != "brai-caddy" && "$TARGET" != "brai-vault" ]]; then
-  echo "usage: apply-main-infra.sh --check|--apply brai-caddy|brai-vault" >&2
+if [[ "$MODE" != "--check" && "$MODE" != "--apply" ]] || [[ ! "$TARGET" =~ ^(brai-caddy|brai-vault|brai-auth-bootstrap)$ ]]; then
+  echo "usage: apply-main-infra.sh --check|--apply brai-caddy|brai-vault|brai-auth-bootstrap" >&2
   exit 2
 fi
 GIT=(git -c "safe.directory=$ROOT" -C "$ROOT")

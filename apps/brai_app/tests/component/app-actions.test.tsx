@@ -785,12 +785,8 @@ describe("BraiApp actions", () => {
     expect(screen.getByText("status")).toBeInTheDocument();
     expect(screen.getByText("New")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("tab", { name: "Инфо" }));
-    const splitSlider = screen.getByRole("slider", { name: "Изменить ширину панелей" });
-    expect(splitSlider).toHaveAttribute("aria-valuenow", "50");
-    fireEvent.keyDown(splitSlider, { key: "End" });
-    expect(splitSlider).toHaveAttribute("aria-valuenow", "70");
-    fireEvent.keyDown(splitSlider, { key: "Home" });
-    expect(splitSlider).toHaveAttribute("aria-valuenow", "30");
+    expect(screen.queryByRole("slider", { name: "Изменить ширину панелей" })).not.toBeInTheDocument();
+    expect(document.querySelector(".page-workspace.has-panel")).toHaveClass("grid-cols-2");
     const storageKeys = Array.from({ length: window.localStorage.length }, (_, index) => window.localStorage.key(index) ?? "");
     expect(storageKeys.join(" ")).not.toMatch(/split|ratio|pane/i);
 
@@ -1337,7 +1333,7 @@ describe("BraiApp actions", () => {
     });
   });
 
-  it("opens the desktop side panel only for a selected Action", async () => {
+  it("centers Actions and opens the desktop side panel only for a selected Action", async () => {
     vi.stubGlobal(
       "matchMedia",
       vi.fn(() => ({
@@ -1358,15 +1354,19 @@ describe("BraiApp actions", () => {
 
     expect(screen.queryByRole("button", { name: "Информация о действиях" })).not.toBeInTheDocument();
     expect(document.querySelector(".actions-info-panel.desktop")).not.toBeInTheDocument();
+    expect(document.querySelector(".page-panel")).not.toBeInTheDocument();
+    expect(document.querySelector(".page-main")).toHaveClass("max-w-3xl");
 
     await waitFor(() => expect(screen.getByText("Информационная замена")).toBeInTheDocument());
     fireEvent.click(screen.getByRole("textbox", { name: "Название действия: Информационная замена" }));
-    expect(document.querySelector(".actions-info-panel.desktop")).not.toBeInTheDocument();
+    expect(document.querySelector(".page-workspace.has-panel")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Закрыть редактор" })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Закрыть редактор" }));
     expect(document.querySelector(".actions-info-panel.desktop")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Закрыть редактор" })).not.toBeInTheDocument();
+    expect(document.querySelector(".page-panel")).not.toBeInTheDocument();
+    expect(document.querySelector(".page-main")).toHaveClass("max-w-3xl");
   }, 10_000);
 
   it("opens the mobile full-screen detail editor and flushes through the Android back bridge", async () => {

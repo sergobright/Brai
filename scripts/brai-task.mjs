@@ -6,6 +6,7 @@ import process from "node:process";
 import { pathToFileURL } from "node:url";
 
 const CODEX_BRANCH_RE = /^codex\/[a-z0-9][a-z0-9._-]*$/;
+const OPENSPEC_CHANGE_RE = /^[a-z0-9][a-z0-9._-]*$/;
 const PROTECTED_PATH_RE =
   /(^|\/)(\.env(\.|$)|.*\.(sqlite|sqlite3|db|jks|keystore|pem|key|p12|pfx|apk|aab|zip)$|google-services\.json|.*(service-account|credentials|secrets).*\.json$)|^(data\/|deploy\/(site|web|mobile-update|releases)\/)/;
 const DEPENDENCY_DIRS = [
@@ -86,6 +87,7 @@ export {
   isSocraticodeTool,
   isWriteLikeCommand,
   linkDependencyDirs,
+  parseOpenSpecChangeArgs,
   findOpenTaskForThread,
   parseHookInput,
   readPreviewSlot,
@@ -100,6 +102,8 @@ export {
   validatePushUpdate,
   validatePreviewReceipt,
   accessContract,
+  archiveOpenSpecChange,
+  preserveLinkedOpenSpecChanges,
   workspacePreflight,
 };
 
@@ -107,10 +111,19 @@ function runCli([command, ...args]) {
   try {
     switch (command) {
       case "start":
-        startTask(args[0]);
+        startTask(args);
         break;
       case "follow-up":
-        markFollowUp(args[0]);
+        markFollowUp(args);
+        break;
+      case "link-openspec":
+        linkOpenSpecChanges(args);
+        break;
+      case "archive-accepted-openspec":
+        archiveAcceptedOpenSpecChanges();
+        break;
+      case "archive-openspec":
+        archiveHistoricalOpenSpecChange(args);
         break;
       case "recover-follow-up":
         recoverFollowUp(args);
@@ -173,7 +186,7 @@ function runCli([command, ...args]) {
         accessContract(args);
         break;
       default:
-        throw new Error("usage: brai-task.mjs start <slug>|follow-up [branch]|recover-follow-up [branch] --from-thread <lost-thread-id>|acceptance-reconcile [branch]|acceptance-repair [branch]|pre-tool-use|pre-commit|pre-push <remote>|stop|classify [--base <ref>] [--head <ref>] [--github-output]|handoff [branch]|preview [branch]|release-notes --short <text> --details <text> --reason <text> --testing <text>|require-delivery [branch] [sha]|require-preview [branch] [sha]|doctor [--strict]|preflight [--strict]|access-contract --local|--server|socraticode-exact-only --reason <text>|socraticode-used --tool <name>|delegate --thread <id> --path <path>|revoke --thread <id>");
+        throw new Error("usage: brai-task.mjs start <slug> [--openspec-change <id>...]|follow-up [branch] [--openspec-change <id>...]|link-openspec <id>...|archive-accepted-openspec|archive-openspec --change <id> --accepted-pr <number>|recover-follow-up [branch] --from-thread <lost-thread-id>|acceptance-reconcile [branch]|acceptance-repair [branch]|pre-tool-use|pre-commit|pre-push <remote>|stop|classify [--base <ref>] [--head <ref>] [--github-output]|handoff [branch]|preview [branch]|release-notes --short <text> --details <text> --reason <text> --testing <text>|require-delivery [branch] [sha]|require-preview [branch] [sha]|doctor [--strict]|preflight [--strict]|access-contract --local|--server|socraticode-exact-only --reason <text>|socraticode-used --tool <name>|delegate --thread <id> --path <path>|revoke --thread <id>");
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -186,7 +199,10 @@ function runCli([command, ...args]) {
   }
 }
 
-function startTask(slug) {
+function startTask(args) {
+  const { positional, openspecChanges } = parseOpenSpecChangeArgs(args);
+  const [slug] = positional;
+  if (positional.length !== 1) throw new Error("Task start requires exactly one task slug.");
   if (!slug || !/^[a-z0-9][a-z0-9._-]*$/.test(slug)) {
     throw new Error("Task slug must match [a-z0-9][a-z0-9._-]*");
   }
@@ -222,7 +238,7 @@ function startTask(slug) {
     fs.mkdirSync(parent, { recursive: true });
     git("worktree", "add", "--no-track", "-b", branch, target, acceptedBaseRef());
     enableGitHooks(target);
-    writeTaskMarker(target, withThreadId({ branch, mode: "new", base: git("rev-parse", acceptedBaseRef()), createdAt: new Date().toISOString() }));
+    writeTaskMarker(target, withThreadId({ branch, mode: "new", base: git("rev-parse", acceptedBaseRef()), createdAt: new Date().toISOString(), openspecChanges }));
     const linked = linkDependencyDirs(dependencySourceRoot(root), target);
     if (linked.length) console.log(`Linked dependency dirs: ${linked.join(", ")}`);
   } catch (error) {
@@ -234,7 +250,10 @@ function startTask(slug) {
   console.log(`Created ${branch} at ${target}`);
 }
 
-function markFollowUp(branchArg) {
+function markFollowUp(args) {
+  const { positional, openspecChanges } = parseOpenSpecChangeArgs(args);
+  if (positional.length > 1) throw new Error("Follow-up accepts at most one branch name.");
+  const branchArg = positional[0];
   const branch = branchArg ?? currentBranch();
   if (!CODEX_BRANCH_RE.test(branch)) throw new Error(`Follow-up marker requires codex/* branch, got: ${branch}`);
   if (branch !== currentBranch()) throw new Error(`Current branch is ${currentBranch()}, not ${branch}`);
@@ -250,12 +269,183 @@ function markFollowUp(branchArg) {
     throw new Error(`${threadValidation.message}\n\n${taskStartGuidance()}`);
   }
   writeTaskMarker(git("rev-parse", "--show-toplevel"), withThreadId({
+    ...marker,
     branch,
     mode: "follow-up",
     base: marker.base,
     createdAt: new Date().toISOString(),
+    openspecChanges: mergeOpenSpecChanges(marker.openspecChanges, openspecChanges),
   }));
   console.log(`Marked explicit follow-up for ${branch}`);
+}
+
+function parseOpenSpecChangeArgs(args) {
+  const positional = [];
+  const openspecChanges = [];
+  for (let index = 0; index < args.length; index += 1) {
+    const value = args[index];
+    if (value === "--openspec-change") {
+      const change = String(args[index + 1] ?? "");
+      if (!OPENSPEC_CHANGE_RE.test(change)) throw new Error(`Invalid OpenSpec change id: ${change || "(missing)"}`);
+      openspecChanges.push(change);
+      index += 1;
+      continue;
+    }
+    if (value.startsWith("--")) throw new Error(`Unknown task option: ${value}`);
+    positional.push(value);
+  }
+  return { positional, openspecChanges: [...new Set(openspecChanges)].sort() };
+}
+
+function mergeOpenSpecChanges(current, additional) {
+  return [...new Set([...(Array.isArray(current) ? current : []), ...additional])].sort();
+}
+
+function linkOpenSpecChanges(changes) {
+  if (!changes.length || changes.some((change) => !OPENSPEC_CHANGE_RE.test(change))) {
+    throw new Error("Usage: node scripts/brai-task.mjs link-openspec <change-id>...");
+  }
+  const branch = currentBranch();
+  const marker = readTaskMarker();
+  const markerValidation = validateTaskMarker(marker, branch);
+  if (!markerValidation.ok) throw new Error(markerValidation.message);
+  const root = git("rev-parse", "--show-toplevel");
+  preserveLinkedOpenSpecChanges(changes, root);
+  const openspecChanges = mergeOpenSpecChanges(marker.openspecChanges, changes);
+  writeTaskMarker(root, withThreadId({ ...marker, openspecChanges }));
+  console.log(`Linked OpenSpec changes: ${openspecChanges.join(", ")}`);
+}
+
+function preserveLinkedOpenSpecChanges(changes, root) {
+  const canonicalRoot = dependencySourceRoot(root);
+  if (canonicalRoot === root) return;
+  for (const change of changes) {
+    const local = path.join(root, "openspec", "changes", change);
+    const durable = path.join(canonicalRoot, "openspec", "changes", change);
+    if (fs.existsSync(local) && !fs.existsSync(durable)) {
+      fs.mkdirSync(path.dirname(durable), { recursive: true });
+      fs.renameSync(local, durable);
+      fs.symlinkSync(path.relative(path.dirname(local), durable), local, "dir");
+      continue;
+    }
+    if (!fs.existsSync(local) && fs.existsSync(durable)) {
+      fs.mkdirSync(path.dirname(local), { recursive: true });
+      fs.symlinkSync(path.relative(path.dirname(local), durable), local, "dir");
+      continue;
+    }
+    if (fs.existsSync(local) && fs.existsSync(durable) && fs.realpathSync(local) !== fs.realpathSync(durable)) {
+      throw new Error(`OpenSpec change ${change} exists in both task and canonical checkouts.`);
+    }
+  }
+}
+
+function archiveAcceptedOpenSpecChanges() {
+  const root = git("rev-parse", "--show-toplevel");
+  const branch = currentBranch();
+  const marker = readTaskMarker();
+  const markerValidation = validateTaskMarker(marker, branch);
+  if (!markerValidation.ok) throw new Error(markerValidation.message);
+  const changes = Array.isArray(marker.openspecChanges) ? marker.openspecChanges : [];
+  if (!changes.length) {
+    console.log("No OpenSpec changes are linked to this accepted task.");
+    return;
+  }
+  const acceptance = readAcceptanceReceipt();
+  const head = git("rev-parse", "HEAD");
+  if (
+    acceptance?.receiptType !== ACCEPTANCE_RECEIPT_VERSION ||
+    acceptance.status !== "merged" ||
+    acceptance.branch !== branch ||
+    acceptance.commit !== head
+  ) {
+    throw new Error("OpenSpec archive requires the merged acceptance receipt for this exact branch head.");
+  }
+  const receiptValidation = acceptance.deliveryClass === DELIVERY_CLASS.RUNTIME_PREVIEW
+    ? validatePreviewReceipt(readPreviewReceipt(), branch, head)
+    : validateDeliveryReceipt(readDeliveryReceipt(), branch, head, acceptance.deliveryClass);
+  if (!receiptValidation.ok) throw new Error(`OpenSpec archive requires verified delivery: ${receiptValidation.message}`);
+
+  for (const change of changes) archiveOpenSpecChange(change, root);
+}
+
+function archiveHistoricalOpenSpecChange(args) {
+  let change = "";
+  let acceptedPr = "";
+  for (let index = 0; index < args.length; index += 2) {
+    const option = args[index];
+    const value = String(args[index + 1] ?? "");
+    if (option === "--change") change = value;
+    else if (option === "--accepted-pr") acceptedPr = value;
+    else throw new Error(`Unknown archive option: ${option || "(missing)"}`);
+  }
+  if (!OPENSPEC_CHANGE_RE.test(change) || !/^\d+$/.test(acceptedPr)) {
+    throw new Error("Usage: node scripts/brai-task.mjs archive-openspec --change <id> --accepted-pr <number>");
+  }
+  if (!isMergedPullRequest(acceptedPr)) throw new Error(`Pull request #${acceptedPr} is not merged.`);
+  archiveOpenSpecChange(change, git("rev-parse", "--show-toplevel"));
+}
+
+function isMergedPullRequest(number) {
+  if (process.env.BRAI_TEST_MERGED_PRS_JSON) {
+    const prs = JSON.parse(process.env.BRAI_TEST_MERGED_PRS_JSON);
+    return Array.isArray(prs) && prs.some((pr) => String(pr.number) === number && (pr.state === "MERGED" || pr.mergedAt));
+  }
+  const result = spawnSync("gh", ["pr", "view", number, "--json", "state", "--jq", ".state"], {
+    cwd: git("rev-parse", "--show-toplevel"),
+    encoding: "utf8",
+    env: process.env,
+  });
+  return result.status === 0 && result.stdout.trim() === "MERGED";
+}
+
+function archiveOpenSpecChange(change, root) {
+  if (!OPENSPEC_CHANGE_RE.test(change)) throw new Error(`Invalid OpenSpec change id: ${change}`);
+  const canonicalRoot = dependencySourceRoot(root);
+  const archiveRoot = path.join(canonicalRoot, "openspec", "changes", "archive");
+  const existing = fs.existsSync(archiveRoot)
+    ? fs.readdirSync(archiveRoot, { withFileTypes: true }).find((entry) => entry.isDirectory() && entry.name.endsWith(`-${change}`))
+    : null;
+  const sourceCandidates = [...new Set([
+    path.join(root, "openspec", "changes", change),
+    path.join(canonicalRoot, "openspec", "changes", change),
+  ])];
+  const source = sourceCandidates.find((candidate) => fs.existsSync(candidate));
+  if (existing && !source) {
+    console.log(`OpenSpec change already archived: ${existing.name}`);
+    return;
+  }
+  if (existing) throw new Error(`OpenSpec archive already exists for ${change}, but the active change is still present.`);
+  if (!source) throw new Error(`Active OpenSpec change is missing: ${change}`);
+
+  completeTerminalOpenSpecTasks(path.join(source, "tasks.md"), change);
+  fs.mkdirSync(archiveRoot, { recursive: true });
+  const destination = path.join(archiveRoot, `${new Date().toISOString().slice(0, 10)}-${change}`);
+  fs.renameSync(source, destination);
+  console.log(`Archived OpenSpec change locally: ${destination}`);
+}
+
+function completeTerminalOpenSpecTasks(tasksPath, change) {
+  if (!fs.existsSync(tasksPath)) throw new Error(`OpenSpec change ${change} has no tasks.md.`);
+  const lines = fs.readFileSync(tasksPath, "utf8").split(/\r?\n/);
+  const openTasks = lines
+    .map((line, index) => ({ index, text: line.replace(/^\s*[-*]\s+\[\s\]\s+/, "") }))
+    .filter(({ text }, index) => /^\s*[-*]\s+\[\s\]\s+/.test(lines[index]));
+  const incomplete = openTasks.filter(({ text }) => !isTerminalOpenSpecTask(text));
+  if (incomplete.length) {
+    throw new Error(
+      `OpenSpec change ${change} still has non-terminal tasks:\n${incomplete.map(({ text }) => `- ${text}`).join("\n")}`,
+    );
+  }
+  if (!openTasks.length) return;
+  for (const { index } of openTasks) lines[index] = lines[index].replace(/\[\s\]/, "[x]");
+  fs.writeFileSync(tasksPath, `${lines.join("\n").replace(/\n*$/, "")}\n`);
+}
+
+function isTerminalOpenSpecTask(text) {
+  const normalized = text.toLowerCase();
+  if (normalized.includes("archive")) return true;
+  if (!normalized.includes("handoff")) return false;
+  return !/\b(?:verify|parity|remove|migration|schema|runtime|production)\b/.test(normalized);
 }
 
 function recoverFollowUp(args) {
@@ -645,6 +835,7 @@ function deliveryHandoff(branchArg) {
     verifiedBy: "brai-task-delivery-v1",
   };
   writeDeliveryReceipt(receipt, taskRoot);
+  finalizeMergedNoPreviewAcceptance(branch, taskRoot);
 
   console.log("No-preview delivery");
   console.log(`Branch: ${branch}`);
@@ -654,6 +845,21 @@ function deliveryHandoff(branchArg) {
   console.log(`PR state: ${receipt.prState}`);
   console.log(`Merged at: ${receipt.mergedAt}`);
   console.log(`GitHub Actions run: ${receipt.runUrl}`);
+}
+
+function finalizeMergedNoPreviewAcceptance(branch, taskRoot) {
+  const result = spawnSync("bash", [path.join(taskRoot, "deploy/scripts/accept-preview.sh"), branch], {
+    cwd: taskRoot,
+    stdio: "inherit",
+    env: {
+      ...process.env,
+      BRAI_ACCEPT_BASE: acceptedBaseBranch(),
+      BRAI_ACCEPT_NO_PREVIEW_ONLY: "true",
+    },
+  });
+  if (result.status !== 0 || result.error) {
+    throw new Error(`Failed to finalize merged no-preview acceptance for ${branch}: ${result.error?.message ?? `exit ${result.status}`}.`);
+  }
 }
 
 function infraDocsPrPendingMessage(pr, branch, head, run) {
@@ -760,6 +966,7 @@ function serverAccessContract(root = process.env.BRAI_ROOT ?? "/srv/projects/bra
   const protectedEnvDir = process.env.BRAI_PROTECTED_ENV_DIR ?? "/etc/brai";
   const apiEnvFile = process.env.BRAI_API_ENV_FILE ?? path.join(protectedEnvDir, "brai-api.env");
   const supabaseDeployEnvFile = process.env.BRAI_SUPABASE_DEPLOY_ENV_FILE ?? path.join(protectedEnvDir, "supabase-deploy.env");
+  const localCreateInboxOperationHelper = path.join(root, "deploy/scripts/create-inbox-operation.sh");
   const localCreateOperationHelper = path.join(root, "deploy/scripts/create-operation-activity.sh");
   const localCompleteOperationHelper = path.join(root, "deploy/scripts/complete-operation-activities.sh");
   const localCompleteInboxHelper = path.join(root, "deploy/scripts/complete-inbox-operations.sh");
@@ -810,7 +1017,8 @@ function serverAccessContract(root = process.env.BRAI_ROOT ?? "/srv/projects/bra
       requiredModeBits: 0o640,
       forbiddenModeBits: 0o137,
     }),
-    commandCheck("operation create helper host-local sudo", [localCreateOperationHelper, "--host-local", "--check-access"], { cwd: root }),
+    commandCheck("Inbox operation create helper host-local sudo", [localCreateInboxOperationHelper, "--host-local", "--check-access"], { cwd: root }),
+    commandCheck("deprecated operation create helper host-local sudo", [localCreateOperationHelper, "--host-local", "--check-access"], { cwd: root }),
     commandCheck("operation complete helper host-local sudo", [localCompleteOperationHelper, "--host-local", "--check-access"], { cwd: root }),
     commandCheck("Inbox operation complete helper host-local sudo", [localCompleteInboxHelper, "--host-local", "--check-access"], { cwd: root }),
     commandCheck("operation list helper host-local sudo", [localListOperationHelper, "--host-local", "--check-access"], { cwd: root }),
@@ -829,8 +1037,17 @@ function serverAccessContract(root = process.env.BRAI_ROOT ?? "/srv/projects/bra
       deploySshPort,
       deployUser,
       deployHost,
+      localOperationHelper: localCreateInboxOperationHelper,
+      checkName: "Inbox operation create helper remote ssh",
+      root,
+    }),
+    operationHelperRemoteAccessCheck({
+      deployIdentityFile,
+      deploySshPort,
+      deployUser,
+      deployHost,
       localOperationHelper: localCreateOperationHelper,
-      checkName: "operation create helper remote ssh",
+      checkName: "deprecated operation create helper remote ssh",
       root,
     }),
     operationHelperRemoteAccessCheck({
@@ -1858,7 +2075,7 @@ function sandboxCheckMode(commandText) {
     /\bdeploy\/scripts\/accept-preview\.sh\b/.test(text) ||
     /\bdeploy\/scripts\/apply-main-infra\.sh\b/.test(text) ||
     /\bnode scripts\/brai-task\.mjs (acceptance-reconcile|acceptance-repair|handoff|preview)\b/.test(text) ||
-    /\bdeploy\/scripts\/(complete-inbox-operations|complete-operation-activities|create-operation-activity|list-operation-activities)\.sh\b/.test(text)
+    /\bdeploy\/scripts\/(complete-inbox-operations|complete-operation-activities|create-inbox-operation|create-operation-activity|list-operation-activities)\.sh\b/.test(text)
   ) {
     return { mode: "require_escalated", reason: "Brai host/Git/runtime boundaries for this command are not authoritative inside the Codex sandbox." };
   }
@@ -2013,6 +2230,7 @@ function deliveryClassForFile(file) {
       "deploy/scripts/complete-operation-activities.sh",
       "deploy/scripts/complete-inbox-operations.sh",
       "deploy/scripts/codex-cli-smoke.sh",
+      "deploy/scripts/create-inbox-operation.sh",
       "deploy/scripts/create-operation-activity.sh",
       "deploy/scripts/list-operation-activities.sh",
       "deploy/scripts/deploy-branch.sh",

@@ -106,7 +106,7 @@ test('Preview planning does not reuse a cloned queued Production execution', asy
   }
 });
 
-test('0031 keeps the newest pending Goal plan and protects the invariant', async () => {
+test('0032 keeps the newest pending Goal plan and protects the invariant', async () => {
   const fixture = await createFixture([NOW]);
   const pool = fixture.openDatabasePool();
   try {
@@ -123,7 +123,7 @@ test('0031 keeps the newest pending Goal plan and protects the invariant', async
     `).run(execution.id, execution.workflow_id, older.id, newest.id);
     const orphan = owner(fixture, () => recordPlan(fixture, 3, plusHours(2)));
     const migration = fs.readFileSync(path.resolve(
-      import.meta.dirname, '../../../supabase/migrations/0031_pending_goal_plan_invariant.sql'
+      import.meta.dirname, '../../../supabase/migrations/0032_pending_goal_plan_invariant.sql'
     ), 'utf8');
     await pool.query(migration);
     assert.deepEqual(fixture.store.db.prepare(`

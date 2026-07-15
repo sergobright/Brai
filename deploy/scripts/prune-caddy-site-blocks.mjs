@@ -31,7 +31,9 @@ export function pruneCaddySiteBlocks(source, { managedMarker, sites }) {
     }
   }
 
-  const output = compactBlankRuns(lines.filter((_, index) => keep[index]).join('\n'));
+  const output = removed.length === 0
+    ? source
+    : compactBlankRuns(lines.filter((_, index) => keep[index]).join('\n'));
   return { changed: output !== source, removed, output };
 }
 

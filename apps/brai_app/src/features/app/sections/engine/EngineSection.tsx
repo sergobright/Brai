@@ -67,7 +67,7 @@ export function EngineSection({
   const ButtonIcon = button.icon;
 
   return (
-    <section className={cx(SECTION_GRID_CLASS, "content-start items-start xl:w-1/2")} aria-label="Engine">
+    <section className={cx(SECTION_GRID_CLASS, "w-full content-start items-start")} aria-label="Engine">
       <Card className="grid w-full content-start gap-3 self-start p-4 sm:gap-4 sm:p-5">
         <div className="grid gap-1.5">
           <h2 className="m-0 text-lg leading-tight tracking-normal sm:text-xl">Текущая версия {view.installedVersion}</h2>

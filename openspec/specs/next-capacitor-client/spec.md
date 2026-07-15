@@ -44,13 +44,14 @@ The Next.js client SHALL treat narrow Android phone viewports as a primary suppo
 - **THEN** it shows `Действия` and `Фокус`
 - **AND** it does not show `Цель` as a primary navigation item
 - **AND** Android-sized viewports use a bottom navigation pattern with icon-only visible items
-- **AND** desktop-sized web viewports use the left rail for the same primary items
+- **AND** desktop-sized web viewports use the narrow global navigation rail
 - **AND** `Действия` is the first primary navigation item
 
-#### Scenario: Mobile left menu is opened from the header
+#### Scenario: Mobile left page rail is opened from the header
 - **WHEN** the client is shown on an Android-sized viewport
-- **AND** the user opens the menu from the Actions page header
-- **THEN** a left drawer opens over the content with a backdrop
+- **AND** the Actions page has `mobileRail` enabled in the page registry
+- **AND** the user opens the burger menu from the page header
+- **THEN** the page rail opens as a temporary drawer with a backdrop
 - **AND** it shows `Все`, `Действия`, `Операции`, `Без цели`, active Goals, and collapsed `Завершённые`
 - **AND** no navigation or review content appears after `Завершённые`
 - **AND** the drawer does not show a visible close button or empty header row
@@ -58,56 +59,49 @@ The Next.js client SHALL treat narrow Android phone viewports as a primary suppo
 - **AND** Back, Escape, and selecting a navigation item close it
 - **AND** horizontal tab swipes are disabled while the drawer is open
 
-#### Scenario: Mobile left rail menu is opened
+#### Scenario: Mobile Drop menu is opened
 - **WHEN** the client is shown on an Android-sized viewport
 - **AND** the user taps the bottom-left three-dot menu button
-- **THEN** a left rail drawer opens over the content with a backdrop
-- **AND** the drawer only shows real action items: `Настройки`, `Архив`, `Выйти`, and `Engine`
-- **AND** the drawer does not show profile text, page-menu labels, or placeholder groups
-- **AND** access to settings and the other drawer actions is available outside the primary bottom tabs
-- **AND** tapping outside the drawer closes it
-- **AND** horizontal tab swipes are disabled while the drawer is open
+- **THEN** the Drop menu opens over the content with a backdrop
+- **AND** it exposes the existing account and application actions
+- **AND** tapping outside closes it
+- **AND** horizontal tab swipes are disabled while it is open
 
 #### Scenario: Mobile tabs are changed by horizontal swipe
 - **WHEN** the client is shown on Android-sized viewports
 - **AND** the user swipes horizontally across a non-excluded content area
 - **THEN** the active bottom-navigation tab changes to the adjacent tab in the swipe direction
-- **AND** the mobile tab order is `Действия`, then `Фокус`
 - **AND** the active and adjacent tab screens visually track the finger during the horizontal swipe
 - **AND** the transition settles with a short transform animation after release
 - **AND** vertically dominant gestures are treated as normal page scrolling
 - **AND** content areas can opt out of tab-swipe navigation for their own horizontal gestures or scrolling
 
-#### Scenario: Desktop rail is compact and static
+#### Scenario: Desktop global rail is compact and static
 - **WHEN** the client is shown on a desktop-sized web viewport
-- **THEN** the desktop rail is always rendered as a narrow static icon rail
+- **THEN** the global navigation rail is rendered as a narrow static icon rail
 - **AND** the rail has no expand/collapse control
-- **AND** the rail width is not restored from or persisted to a sidebar cookie
-- **AND** the rail exposes the same action items on all primary dock pages
 - **AND** the rail keeps the sync status icon and preview environment badge
 - **AND** the page header continues to show the current section icon
 
 #### Scenario: Desktop Actions contextual rail is rendered
 - **WHEN** the client shows `Действия` on a desktop-sized viewport
-- **THEN** the contextual rail uses the same navigation content as the mobile Actions drawer
+- **THEN** the page registry renders the contextual rail with the same navigation content as the mobile Actions drawer
 - **AND** it shows `Все`, `Действия`, `Операции`, `Без цели`, active Goals, and collapsed `Завершённые`
 - **AND** it contains no Goal archive or AI review cards
 - **AND** the user can collapse and reopen the contextual rail from the shared header control
 
-#### Scenario: Desktop screens use the full workspace
-- **WHEN** the client is shown on a desktop-sized web viewport
-- **THEN** the main content shell uses the full available area beside the desktop rail
-- **AND** page content starts from the left edge of the main content area
-- **AND** the shell does not center pages inside an artificial max-width column
-- **AND** individual compact modules may center their own bounded controls inside that full-width shell
+#### Scenario: Desktop page has no panel
+- **WHEN** a desktop product page renders without an open panel
+- **THEN** its shared page workspace spans the available shell
+- **AND** its main content is centered with a maximum width of 768px
+- **AND** compact modules may apply narrower limits inside that main content
 
-#### Scenario: Desktop split panels expand inside the full workspace
-- **WHEN** an existing activity is opened for desktop detail editing
-- **THEN** the activity list and detail panel divide the full available Actions workspace 50/50 by default
-- **AND** the detail panel stretches vertically within the active desktop content area
-- **AND** a visible vertical divider can be dragged to resize the list/detail ratio
-- **AND** each side remains at least 30% of the Actions workspace width
-- **AND** the resized ratio is not persisted and resets to the default when details are opened again
+#### Scenario: Desktop item details are opened
+- **WHEN** an existing Action, Inbox item, or Factory log is explicitly selected
+- **THEN** main and detail panel divide the available workspace 50/50
+- **AND** the detail panel stretches vertically below the fixed header
+- **AND** no resize control changes the split
+- **AND** closing the detail removes the split when no persistent panel is active
 
 #### Scenario: Markdown preview hides source markers
 - **WHEN** an activity description preview is shown in the list
@@ -628,6 +622,147 @@ Navigation controls SHALL accept an arbitrary supplementary React node positione
 - **WHEN** Engine in the mobile overflow menu has an update
 - **THEN** the three-dot button displays an aggregate yellow indicator at bottom-center
 - **AND** the three-dot icon does not move
+
+### Requirement: Product sections use one page shell
+Brai SHALL render authenticated product sections through one shared responsive page-shell contract.
+
+#### Scenario: A page has no open panel
+- **WHEN** a product section renders without a persistent or transient panel
+- **THEN** its main content is centered in the available workspace
+- **AND** its desktop maximum width is 768px
+- **AND** its opaque fixed header remains visible above independently scrolling content
+- **AND** exactly one shared `ScrollArea` renders the standard scrollbar instead of a raw browser overflow scrollbar or a nested duplicate scroll viewport
+
+#### Scenario: A page has an open panel
+- **WHEN** a persistent panel or explicitly selected item detail is open on desktop
+- **THEN** main and panel use equal halves of the workspace
+- **AND** the panel does not overlay the main area
+- **AND** no page-specific resize control changes the split
+
+#### Scenario: A page panel opens on mobile
+- **WHEN** a panel is opened on an Android-sized viewport
+- **THEN** the shared bottom sheet starts below the fixed page header
+- **AND** the header remains visible
+
+#### Scenario: A fullscreen page override is active
+- **WHEN** Draws enters fullscreen mode
+- **THEN** the page workspace removes its centered maximum width and insets
+- **AND** Draws fills all available width and height while product chrome is hidden
+
+### Requirement: Page panels distinguish persistent and transient state
+Brai SHALL restore persistent page panels and SHALL NOT restore transient item details.
+
+#### Scenario: Focus panel is selected
+- **WHEN** the user selects Goal or History in Focus
+- **THEN** the selection is stored locally per account
+- **AND** selecting the active icon closes it
+- **AND** the stored selection can be restored after restart
+
+#### Scenario: Item details are opened
+- **WHEN** the user explicitly selects an Action, Inbox item, or Factory log
+- **THEN** its details temporarily occupy the panel area
+- **AND** closing details restores the previous persistent panel or the centered main area
+- **AND** no item detail opens automatically after page load or restart
+
+### Requirement: Page rails follow the page registry
+Brai SHALL define desktop and mobile rail availability centrally for every product section.
+
+#### Scenario: A standard rail page has no rail content
+- **WHEN** Actions, Inbox, Factory, Draws, Archive, or Settings has no registered rail content
+- **THEN** the rail displays `В разработке`
+
+#### Scenario: A rail-free page is shown
+- **WHEN** Focus, Engine, or Profile is shown
+- **THEN** no desktop rail or mobile rail trigger is rendered
+
+#### Scenario: Brai CMD is shown in browser web
+- **WHEN** Brai CMD runs without the Android native settings surface
+- **THEN** it remains informational
+- **AND** it has no page rail
+
+#### Scenario: Brai CMD is shown in Android
+- **WHEN** Brai CMD runs with the Android native settings surface
+- **THEN** its mobile rail offers Основное, Разрешения, Контекстные кнопки, Внешний вид, Распознавание, Постобработка, and Аудио
+- **AND** choosing a group changes the main settings content and closes the drawer
+
+#### Scenario: A persisted closed rail page is opened
+- **WHEN** the user navigates to a page whose desktop rail preference is closed
+- **THEN** no frame renders that rail as open
+- **AND** the main workspace does not shift after the page appears
+
+### Requirement: Global context items are consistent
+Brai SHALL render the same twelve future-context placeholders in desktop and mobile chrome.
+
+#### Scenario: Desktop context menu is rendered
+- **WHEN** the desktop app shell is visible
+- **THEN** its narrow global menu shows twelve inactive Lucide controls
+- **AND** every control reacts to pointer/focus state, exposes `В разработке`, and performs no navigation
+
+#### Scenario: Mobile context menu is opened
+- **WHEN** the user opens the second Dock level and activates its context trigger
+- **THEN** a separate sheet opens above that level
+- **AND** it shows the same items in a 3×4 grid
+- **AND** closing it returns to the still-open second Dock level
+
+### Requirement: Mobile overlays use one dismissible motion contract
+Brai SHALL animate dismissible mobile overlays through one shared transform-and-opacity motion contract.
+
+#### Scenario: A mobile overlay opens or closes
+- **WHEN** a page sheet, drawer, Dock level, or context grid changes visibility
+- **THEN** one transform owner performs a symmetric 200ms transition
+- **AND** no competing keyframe changes the same transform
+- **AND** reduced-motion preference removes the transition
+
+#### Scenario: A dismissal swipe starts outside the surface
+- **WHEN** the user starts a directional closing swipe on the active overlay backdrop
+- **THEN** the active surface tracks the gesture and closes after the shared threshold
+- **AND** unrelated horizontal page navigation does not run
+
+### Requirement: Mobile Dock levels form one visual stack
+Brai SHALL render the mobile Dock, its overflow sheets, second level, and context grid as contiguous clipped layers with persistent edge controls.
+
+#### Scenario: The account dropdown is opened
+- **WHEN** the user activates the left three-dot control
+- **THEN** the dropdown reserves the main Dock and Android safe area below its content
+- **AND** every account action including `Выход` is visible without scrolling on a standard portrait Android viewport
+- **AND** a shorter viewport can scroll the menu without placing content behind the Dock
+- **AND** the three-dot and arrow controls remain visible in their original positions
+
+#### Scenario: The account dropdown is toggled or replaced
+- **WHEN** the user activates the three-dot control again
+- **THEN** the dropdown closes through the shared mobile-sheet motion
+- **WHEN** the user activates the right arrow while the dropdown is open
+- **THEN** the dropdown closes through the same motion and the second Dock level opens
+
+#### Scenario: The second Dock level is opened
+- **WHEN** the user activates the right Dock arrow
+- **THEN** the level slides from behind the main Dock without a gap or internal divider
+- **AND** its four action controls use the same centers, 44px control size, and 8px gaps as the four main Dock controls
+- **AND** equal 68px edge lanes are reserved on both sides
+- **AND** a separate `SunMedium` control is vertically centered in the second row and horizontally centered directly above the right arrow
+- **AND** `SunMedium` is a descendant of the second level's transform owner and exits in the same motion
+
+#### Scenario: The context grid is opened
+- **WHEN** the user activates the separate `SunMedium` control
+- **THEN** the 3x4 grid opens above the still-visible second level
+- **AND** its closing motion is clipped behind that level and the main Dock
+- **AND** Back, backdrop tap, backdrop swipe, or a repeated trigger closes only the context grid
+
+### Requirement: Mobile page headers use compact action controls
+Brai SHALL keep the fixed mobile page header compact while preserving accessible touch targets.
+
+#### Scenario: Mobile panel actions are rendered
+- **WHEN** a mobile page header shows panel, environment, or status controls
+- **THEN** each visible control occupies a consistent 32px box with a 20px icon
+- **AND** interactive controls retain at least a 44px touch target
+
+### Requirement: Evil Eye is not a product section
+Brai SHALL retain Evil Eye only as a Focus background option.
+
+#### Scenario: Static product routes are built
+- **WHEN** the Next.js client is exported
+- **THEN** no `/evil-eye` page or section identifier exists
+- **AND** the Focus Evil Eye background remains available
 
 ### Requirement: Transient authentication outages preserve local account scope
 
