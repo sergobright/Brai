@@ -6,6 +6,7 @@ import { pendingActivityEvents, projectActivitiesState } from "@/shared/storage/
 import { ClientUserScopeChangedError, ensureClientMeta, type ClientOwnerScope } from "@/shared/storage/db";
 import {
   enqueueActionWithGoalRelation,
+  enqueueGoalForItemRelation,
   enqueueRelationEvent,
   loadRelationSyncIssues,
   loadRelationsState,
@@ -313,6 +314,27 @@ export function useBraiRelations({
     void flushRelationPending().catch(() => undefined);
   }
 
+  async function onCreateGoalForItem(itemsId: string, title: string) {
+    const ownerId = beforeLocalMutation?.();
+    await enqueueGoalForItemRelation({
+      title,
+      sourceItemsId: itemsId,
+      activityBaseServerRevision: getActions().server_revision,
+      relationBaseServerRevision: stateRef.current.server_revision,
+      expectedUserId: ownerId,
+    });
+    const [activityPending, relationPending] = await Promise.all([pendingActivityEvents(ownerId), pendingRelationEvents(ownerId)]);
+    setActions(projectActivitiesState(getActions(), activityPending));
+    setActionPendingCount(activityPending.length);
+    const projected = projectRelationsState(canonicalRef.current, relationPending);
+    stateRef.current = projected;
+    setRelations(projected);
+    setRelationPendingCount(relationPending.length);
+    setSyncStatus("pending_sync");
+    await flushActionPending();
+    void flushRelationPending().catch(() => undefined);
+  }
+
   function resetRelations() {
     revisionRef.current = 0;
     canonicalRef.current = emptyRelationsState();
@@ -329,6 +351,7 @@ export function useBraiRelations({
     loadLocalRelations,
     onAddToGoals,
     onCreateActionInGoal,
+    onCreateGoalForItem,
     onRemoveFromGoal,
     onReorderGoal,
     onPlanGoal,

@@ -156,7 +156,7 @@ describe("BraiApp gestures", () => {
     fireEvent.click(trigger);
     const drawer = await screen.findByRole("dialog", { name: "Списки действий" });
     expect(drawer).toHaveAttribute("aria-modal", "true");
-    expect(within(drawer).getByRole("button", { name: "Закрыть меню" })).toHaveClass("size-11");
+    expect(within(drawer).queryByRole("button", { name: "Закрыть меню" })).not.toBeInTheDocument();
     await waitFor(() => expect(drawer).toContainElement(document.activeElement as HTMLElement));
 
     fireEvent.keyDown(document, { key: "Escape", code: "Escape" });

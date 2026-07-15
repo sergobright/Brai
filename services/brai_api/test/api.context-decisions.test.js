@@ -429,6 +429,7 @@ test('25 labels activate one exact policy and audit rejection compensates and de
     assert.equal(auditState.status, 200);
     assert.deepEqual(auditState.body.audits.map((entry) => entry.id), ['audit-calibration']);
     assert.deepEqual(auditState.body.audits[0].decision_ids, [automatic.decision.id]);
+    assert.equal(auditState.body.audits[0].items[0].trigger_items_id, 'calibration-action');
     const audit = await request(fixture.url, `/v1/context-audits/${item.id}/resolve`, {
       method: 'POST', body: JSON.stringify({ resolution: 'reject', idempotency_key: 'audit:reject' })
     });

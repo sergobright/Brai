@@ -49,11 +49,14 @@ The Next.js client SHALL treat narrow Android phone viewports as a primary suppo
 
 #### Scenario: Mobile left page rail is opened from the header
 - **WHEN** the client is shown on an Android-sized viewport
-- **AND** the current page has `mobileRail` enabled in the page registry
+- **AND** the Actions page has `mobileRail` enabled in the page registry
 - **AND** the user opens the burger menu from the page header
 - **THEN** the page rail opens as a temporary drawer with a backdrop
-- **AND** an otherwise empty rail displays `В разработке`
+- **AND** it shows `Все`, `Действия`, `Операции`, `Без цели`, active Goals, and collapsed `Завершённые`
+- **AND** no navigation or review content appears after `Завершённые`
+- **AND** the drawer does not show a visible close button or empty header row
 - **AND** tapping outside the drawer closes it
+- **AND** Back, Escape, and selecting a navigation item close it
 - **AND** horizontal tab swipes are disabled while the drawer is open
 
 #### Scenario: Mobile Drop menu is opened
@@ -79,6 +82,13 @@ The Next.js client SHALL treat narrow Android phone viewports as a primary suppo
 - **AND** the rail has no expand/collapse control
 - **AND** the rail keeps the sync status icon and preview environment badge
 - **AND** the page header continues to show the current section icon
+
+#### Scenario: Desktop Actions contextual rail is rendered
+- **WHEN** the client shows `Действия` on a desktop-sized viewport
+- **THEN** the page registry renders the contextual rail with the same navigation content as the mobile Actions drawer
+- **AND** it shows `Все`, `Действия`, `Операции`, `Без цели`, active Goals, and collapsed `Завершённые`
+- **AND** it contains no Goal archive or AI review cards
+- **AND** the user can collapse and reopen the contextual rail from the shared header control
 
 #### Scenario: Desktop page has no panel
 - **WHEN** a desktop product page renders without an open panel
@@ -412,6 +422,29 @@ The Focus section SHALL own Goal and History as mutually exclusive contextual pa
 - **AND** the sheet does not require a visible close button
 - **AND** tab swipe navigation is disabled while the sheet is open
 
+### Requirement: Actions uses inline context and details-only right panels
+The Actions section SHALL keep navigation in the contextual rail/drawer, render AI reviews inline, and reserve the desktop right panel for selected Item details.
+
+#### Scenario: No Action or Operation is selected on desktop
+- **WHEN** the client shows `Действия` on a desktop-sized viewport
+- **AND** no Action or Operation is selected
+- **THEN** no permanent right info panel is rendered
+- **AND** the work list uses the available workspace beside the contextual rail
+
+#### Scenario: An Action or Operation is selected on desktop
+- **WHEN** the user selects an Action or Operation
+- **THEN** the corresponding detail panel opens on the right
+- **AND** closing details removes the right panel instead of restoring an info panel
+
+#### Scenario: Context reviews are placed inline exactly once
+- **WHEN** context decisions, audits, undo cards, or notifications are available
+- **THEN** `goal_plan` renders below the open Goal title
+- **AND** `relation_add` and `activity_type_change` render below their Action or Operation
+- **AND** `goal_discovery` and global notifications render at the top of `Все`
+- **AND** reviews whose subject is unavailable fall back to the top of `Все`
+- **AND** audit and undo cards follow the same subject placement
+- **AND** none of these reviews also render in navigation, a permanent right panel, or a mobile info-sheet
+
 ### Requirement: Focus has a canonical route
 The Next.js/Capacitor client SHALL expose `Фокус` at `/focus`.
 
@@ -558,6 +591,17 @@ The client SHALL describe discovery, web download, and APK download without user
 #### Scenario: Native APK bridge is unavailable
 - **WHEN** an APK is required and `downloadApk()` is unavailable
 - **THEN** the client opens the installed channel's direct public download URL externally
+
+#### Scenario: Browser web update is available
+- **WHEN** Engine detects a newer browser web version outside the mounted Android shell
+- **THEN** the action uses the `RefreshCw` icon and text `Обновить страницу`
+- **AND** activating it calls `window.location.reload()`
+- **AND** the browser does not show an APK or web-bundle download action
+
+#### Scenario: Android update is available
+- **WHEN** Engine runs inside the mounted Android shell
+- **THEN** existing user-initiated web-bundle and APK download/install actions remain available
+- **AND** browser reload behavior does not replace those Android flows
 
 ### Requirement: Navigation supports supplementary status indicators
 

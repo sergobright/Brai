@@ -210,6 +210,25 @@ test("opens the right mobile dock overflow with Draws and placeholder items", as
   await expect(page.locator(".mobile-dock-overflow-sheet")).toHaveCount(0);
 });
 
+test("opens the dock overflow above an existing Focus mobile sheet", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "mobile", "mobile-only dock overflow layering");
+
+  await page.goto("/focus");
+  await page.getByRole("button", { name: "Цели фокусировки" }).click();
+  await expect(page.locator(".mobile-context-sheet")).toBeVisible();
+
+  await page.getByRole("button", { name: "Открыть правое меню" }).click();
+
+  await expect(page.locator(".mobile-context-sheet")).toBeVisible();
+  await expect(page.locator(".mobile-dock-overflow-sheet")).toBeVisible();
+  const sheetBox = await page.locator(".mobile-dock-overflow-sheet").boundingBox();
+  if (!sheetBox) throw new Error("Missing dock overflow geometry");
+  await expect.poll(async () => page.evaluate(({ x, y }) => Boolean(document.elementFromPoint(x, y)?.closest(".mobile-dock-overflow-sheet")), {
+    x: sheetBox.x + sheetBox.width / 2,
+    y: sheetBox.y + sheetBox.height / 2,
+  })).toBe(true);
+});
+
 test("opens the 3x4 context grid above the second Dock level", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "mobile", "mobile-only context menu");
 
@@ -314,6 +333,19 @@ test("keeps the mobile Actions FAB vertically stable when a dock swipe starts", 
   expect(Math.abs((during?.y ?? 0) - (before?.y ?? 0))).toBeLessThanOrEqual(1);
 
   await dispatchElementTouch(page, ".main-dock", "touchend", { x: start.x - 36, y: start.y + 1 });
+});
+
+test("opens Actions lists in the mobile drawer without an info sheet or close button", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "mobile", "mobile-only Actions drawer");
+
+  await page.goto("/");
+  await expect(page.getByRole("button", { name: "Информация о действиях" })).toHaveCount(0);
+  await page.getByRole("button", { name: "Открыть меню" }).click();
+  const drawer = page.locator(".mobile-profile-drawer");
+  await expect(drawer.getByRole("navigation", { name: "Списки действий" })).toBeVisible();
+  await expect(drawer.getByRole("button", { name: "Закрыть меню" })).toHaveCount(0);
+  await drawer.getByRole("button", { name: /^Операции\d*$/ }).click();
+  await expect(drawer).toHaveCount(0);
 });
 
 test("opens and closes mobile Action details as a bottom sheet", async ({ page }, testInfo) => {

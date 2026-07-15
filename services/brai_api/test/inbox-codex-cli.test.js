@@ -129,7 +129,7 @@ test('Inbox Codex timeout kills the process and removes its temporary directory'
       runId: 'run-1',
       attempt: 1,
       codexBin,
-      codexTimeoutMs: 100
+      codexTimeoutMs: 500
     });
 
     assert.equal(result.ok, false);

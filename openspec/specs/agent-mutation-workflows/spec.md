@@ -72,3 +72,24 @@ Brai mutation scripts SHALL be safe to repeat with the same operation input.
 #### Scenario: A repeated mutation conflicts
 - **WHEN** the same operation identity is reused with a different payload
 - **THEN** Brai fails explicitly with a conflict instead of silently changing the prior result
+
+### Requirement: Goal planning has one unresolved proposal per Goal
+Brai SHALL keep at most one queued, running, or pending review-only Goal plan for one user and Goal.
+
+#### Scenario: Goal plan request is repeated
+- **WHEN** the user requests a plan while the same Goal already has queued, running, or pending plan work
+- **THEN** the API returns the existing workflow execution using the current response shape
+- **AND** a changed Activity revision does not create another plan
+
+#### Scenario: Concurrent Goal plan requests arrive
+- **WHEN** multiple plan requests for the same user and Goal race
+- **THEN** transaction locking and a partial unique pending-decision index preserve one unresolved plan
+
+#### Scenario: Historical pending plans are reconciled
+- **WHEN** a migration finds multiple pending `goal_plan` decisions for one user and Goal
+- **THEN** the newest remains `pending`
+- **AND** older decisions become `stale_context`
+
+#### Scenario: Previous Goal plan is resolved
+- **WHEN** the user accepts or rejects the pending Goal plan
+- **THEN** a later explicit request may create a new workflow execution

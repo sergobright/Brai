@@ -78,7 +78,7 @@ describe("Actions workspace accessibility", () => {
     const activities = emptyActivitiesState();
     activities.goals = [goal()];
     const workspace = buildActionsWorkspace({ activities, inbox: emptyInboxState(), relations: emptyRelationsState(), filter: "all" });
-    const { unmount } = render(<ActionsWorkspaceNavigation workspace={workspace} onSelect={vi.fn()} onCreateGoal={vi.fn()} onRestoreGoal={vi.fn()} />);
+    const { unmount } = render(<ActionsWorkspaceNavigation workspace={workspace} onSelect={vi.fn()} onCreateGoal={vi.fn()} />);
 
     expect(screen.getByRole("navigation", { name: "Списки действий" })).toHaveClass(
       "max-[860px]:[&_button]:min-h-11",

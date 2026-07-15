@@ -1333,7 +1333,7 @@ describe("BraiApp actions", () => {
     });
   });
 
-  it("centers Actions until an explicit detail click", async () => {
+  it("centers Actions and opens the desktop side panel only for a selected Action", async () => {
     vi.stubGlobal(
       "matchMedia",
       vi.fn(() => ({
@@ -1353,6 +1353,7 @@ describe("BraiApp actions", () => {
     render(<BraiApp />);
 
     expect(screen.queryByRole("button", { name: "Информация о действиях" })).not.toBeInTheDocument();
+    expect(document.querySelector(".actions-info-panel.desktop")).not.toBeInTheDocument();
     expect(document.querySelector(".page-panel")).not.toBeInTheDocument();
     expect(document.querySelector(".page-main")).toHaveClass("max-w-3xl");
 
@@ -1362,6 +1363,8 @@ describe("BraiApp actions", () => {
     expect(screen.getByRole("button", { name: "Закрыть редактор" })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Закрыть редактор" }));
+    expect(document.querySelector(".actions-info-panel.desktop")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Закрыть редактор" })).not.toBeInTheDocument();
     expect(document.querySelector(".page-panel")).not.toBeInTheDocument();
     expect(document.querySelector(".page-main")).toHaveClass("max-w-3xl");
   }, 10_000);

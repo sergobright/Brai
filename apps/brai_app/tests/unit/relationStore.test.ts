@@ -4,6 +4,7 @@ import { acknowledgeActivitySyncEvents, enqueueActivityDeleteWithRelationEnds } 
 import { ClientUserScopeChangedError, clientDb, getMeta, setMeta } from "@/shared/storage/db";
 import {
   enqueueActionWithGoalRelation,
+  enqueueGoalForItemRelation,
   enqueueRelationEvent,
   loadRelationsState,
   markRelationAttempt,
@@ -52,6 +53,38 @@ describe("relation store", () => {
       acknowledgedEventIds: [result.activityEvent.eventId],
       ignoredEvents: [],
       state: activitiesState(1, result.activityEvent.actionId, "Первый шаг"),
+    });
+    expect((await readyRelationEvents()).map((event) => event.eventId)).toEqual([result.relationEvent.eventId]);
+  });
+
+  it("atomically enqueues a Goal and links the current item to it", async () => {
+    const result = await enqueueGoalForItemRelation({
+      title: " Новая цель ",
+      sourceItemsId: "operation-1",
+      activityBaseServerRevision: 4,
+      relationBaseServerRevision: 7,
+    });
+
+    expect(await clientDb().action_outbox_events.toArray()).toEqual([result.activityEvent]);
+    expect(await pendingRelationEvents()).toEqual([result.relationEvent]);
+    expect(result.activityEvent.payload).toMatchObject({ title: "Новая цель", activity_type_id: "goal" });
+    expect(result.relationEvent.payload).toMatchObject({
+      relation_type_id: "part_of",
+      source_items_id: "operation-1",
+      target_items_id: result.activityEvent.actionId,
+      dependency_event_ids: [result.activityEvent.eventId],
+    });
+    expect(projectRelationsState(null, [result.relationEvent]).relations).toMatchObject([{
+      source_items_id: "operation-1",
+      target_items_id: result.activityEvent.actionId,
+      pending: true,
+    }]);
+    expect(await readyRelationEvents()).toEqual([]);
+
+    await acknowledgeActivitySyncEvents({
+      acknowledgedEventIds: [result.activityEvent.eventId],
+      ignoredEvents: [],
+      state: activitiesStateWithGoal(1, result.activityEvent.actionId, "Новая цель"),
     });
     expect((await readyRelationEvents()).map((event) => event.eventId)).toEqual([result.relationEvent.eventId]);
   });
@@ -464,6 +497,26 @@ function activitiesState(serverRevision: number, actionId?: string, title = "Д�
     legacy_operations: [],
     goals: [],
     archived_goals: [],
+  };
+}
+
+function activitiesStateWithGoal(serverRevision: number, goalId: string, title: string): ActivitiesState {
+  return {
+    ...activitiesState(serverRevision),
+    goals: [{
+      id: goalId,
+      activity_type_id: "goal",
+      title,
+      description_md: "",
+      status: "New",
+      item_roles_id: 84,
+      created_at_utc: "2026-07-13T00:00:00.000Z",
+      updated_at_utc: "2026-07-13T00:00:00.000Z",
+      completed_at_utc: null,
+      sort_order: null,
+      deleted_at_utc: null,
+      restored_at_utc: null,
+    }],
   };
 }
 

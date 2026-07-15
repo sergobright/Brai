@@ -408,6 +408,7 @@ export async function copySchemaData(pool, { sourceSchema, targetSchema, postSee
   try {
     await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ");
     await client.query(`SET LOCAL search_path TO ${quoteIdentifier(targetSchema)}, public`);
+    await client.query(`DROP INDEX IF EXISTS ${qualifiedTable(targetSchema, "idx_context_decisions_pending_goal_plan")}`);
     await client.query("SELECT set_config('brai.allow_legacy_operation_import', 'on', true)");
     await client.query(`TRUNCATE TABLE ${truncatableTables.map((table) => qualifiedTable(targetSchema, table)).join(", ")} CONTINUE IDENTITY CASCADE`);
     for (const table of copyTables) {

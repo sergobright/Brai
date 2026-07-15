@@ -6,7 +6,7 @@ import { cleanTitle, TITLE_MAX_LENGTH } from "@/shared/activities/text";
 import type { ActivityItem, ActivitiesState, ActivityStatus } from "@/shared/types/activities";
 import { emptyInboxState } from "@/shared/types/inbox";
 import { emptyRelationsState, type RelationItem, type RelationSyncIssue } from "@/shared/types/relations";
-import type { ContextDecision, ContextDecisionsState, ContextResolution, GoalPlanResponse } from "@/shared/types/contextDecisions";
+import { emptyContextDecisionsState, type ContextDecision, type ContextDecisionsState, type ContextResolution, type GoalPlanResponse } from "@/shared/types/contextDecisions";
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/shared/ui/input-group";
 import { ScrollArea } from "@/shared/ui/scroll-area";
 import { cx } from "../../appUtils";
@@ -16,12 +16,13 @@ import { useMobileNavigationViewport } from "../../navigation/useSectionSwipeNav
 import type { DetailTitleFocus } from "./ActionRow";
 import { SortableActionList } from "./ActionList";
 import { ActivityDetailEditor } from "./ActivityDetailEditor";
+import { ContextReviewPanel } from "./ContextReviewPanel";
 import { GoalBadges, GoalMembershipPicker } from "./GoalMembershipControls";
 import { GoalWorkspaceHeader } from "./GoalWorkspaceHeader";
 import { OperationDetailPanel } from "./OperationWorkspaceItem";
 import { RelationSyncAlert } from "./RelationSyncAlert";
 import { WorkspaceWorkList } from "./WorkspaceWorkList";
-import { buildActionsWorkspace, type ActionsWorkspaceView, type WorkspaceFilterId, type WorkspaceWorkItem } from "./actionsWorkspaceModel";
+import { buildActionsWorkspace, partitionContextReviews, type ActionsWorkspaceView, type WorkspaceFilterId, type WorkspaceWorkItem } from "./actionsWorkspaceModel";
 import { useRestoreActionEditDrafts } from "./actionsModel";
 export function ActionsSection({
   state,
@@ -48,10 +49,14 @@ export function ActionsSection({
   onDeleteGoal = async () => undefined,
   onPlanGoal = async () => ({ status: "queued", execution_id: "local", workflow_id: "local" }),
   onAddToGoals = async () => undefined,
+  onCreateGoalForItem = async () => undefined,
   onRemoveFromGoal = async () => undefined,
   onReorderGoal = async () => undefined,
   onCreateActionInGoal = async () => undefined,
+  contextReviews = emptyContextDecisionsState(),
   relationSyncIssues = [],
+  onResolveContextDecision = async () => undefined,
+  onUndoContextDecision = async () => undefined,
 }: {
   state: ActivitiesState;
   localSnapshotReady: boolean;
@@ -72,13 +77,12 @@ export function ActionsSection({
   onMobileOverlayChange: (open: boolean) => void;
   workspace?: ActionsWorkspaceView;
   onSelectWorkspaceFilter?: (filter: WorkspaceFilterId) => void;
-  onCreateGoal?: (title: string, descriptionMd?: string) => Promise<void>;
-  onRestoreGoal?: (goal: ActivityItem) => Promise<void>;
   onAutosaveGoalDetails?: (goal: ActivityItem, title: string, descriptionMd: string) => Promise<void>;
   onSetGoalStatus?: (goal: ActivityItem, status: ActivityStatus) => Promise<void>;
   onDeleteGoal?: (goal: ActivityItem) => Promise<void>;
   onPlanGoal?: (goal: ActivityItem) => Promise<GoalPlanResponse>;
   onAddToGoals?: (itemsId: string, goalIds: string[]) => Promise<void>;
+  onCreateGoalForItem?: (itemsId: string, title: string) => Promise<void>;
   onRemoveFromGoal?: (relation: RelationItem) => Promise<void>;
   onReorderGoal?: (goalId: string, orderedRelationIds: string[]) => Promise<void>;
   onCreateActionInGoal?: (title: string, descriptionMd: string, goalItemsId: string) => Promise<void>;
@@ -89,6 +93,7 @@ export function ActionsSection({
 }) {
   const fallbackWorkspace = useMemo(() => buildActionsWorkspace({ activities: state, inbox: emptyInboxState(), relations: emptyRelationsState(), filter: "actions" }), [state]);
   const workspace = providedWorkspace ?? fallbackWorkspace;
+  const inlineReviews = useMemo(() => partitionContextReviews(contextReviews, workspace), [contextReviews, workspace]);
   const [draft, setDraft] = useState("");
   const [mobileCreateOpen, setMobileCreateOpen] = useState(false);
   const [selectedActionId, setSelectedActionId] = useState<string | null>(null);
@@ -147,13 +152,11 @@ export function ActionsSection({
     setOpenDeleteActionId(null);
     setMobileCreateOpen(true);
   }
-
   function openMobileEdit(action: ActivityItem) {
     setOpenDeleteActionId(null);
     setSelectedActionId(action.id);
     setMobileEditActionId(action.id);
   }
-
   function setTitleDraft(actionId: string, title: string | null) {
     setTitleDrafts((current) => {
       if (title == null) {
@@ -166,12 +169,10 @@ export function ActionsSection({
       return { ...current, [actionId]: title };
     });
   }
-
   function selectAction(actionId: string, focusDetailTitle: DetailTitleFocus = "end") {
     setSelectedActionId(actionId);
     if (focusDetailTitle === "end") setDetailTitleFocusRequest((current) => current + 1);
   }
-
   function selectWorkItem(item: WorkspaceWorkItem, focusDetailTitle: DetailTitleFocus = "end") {
     if (item.kind === "action" && item.activity) {
       selectAction(item.activity.id, focusDetailTitle);
@@ -179,7 +180,6 @@ export function ActionsSection({
     }
     setSelectedActionId(item.id);
   }
-
   async function submitMobile(title: string, descriptionMd: string) {
     if (mobileCreateSubmitInFlightRef.current) return;
     mobileCreateSubmitInFlightRef.current = true;
@@ -196,9 +196,14 @@ export function ActionsSection({
     return (
       <div className="flex min-w-0 items-center justify-between gap-2">
         <GoalBadges item={item} onSelect={onSelectWorkspaceFilter} />
-        <GoalMembershipPicker item={item} goals={[...workspace.activeGoals, ...workspace.completedGoals]} onAdd={onAddToGoals} onRemove={onRemoveFromGoal} />
+        <GoalMembershipPicker item={item} goals={workspace.activeGoals} onAdd={onAddToGoals} onCreateGoal={onCreateGoalForItem} />
       </div>
     );
+  }
+
+  function renderContextReviews(item: WorkspaceWorkItem) {
+    const reviews = inlineReviews.byItem.get(item.id);
+    return reviews ? <ContextReviewPanel compact state={reviews} onResolve={onResolveContextDecision} onUndo={onUndoContextDecision} /> : null;
   }
 
   async function reorderGoalGroup(status: ActivityStatus, orderedIds: string[]) {
@@ -229,7 +234,9 @@ export function ActionsSection({
     onStopFocus: (action: ActivityItem) => onStopActionFocus(action.id),
     onSelectFilter: onSelectWorkspaceFilter,
     onAddToGoals,
+    onCreateGoalForItem,
     onRemoveFromGoal,
+    renderAfter: renderContextReviews,
   };
   return (
     <section
@@ -244,14 +251,19 @@ export function ActionsSection({
         main={<ScrollArea className="actions-list-pane h-full min-h-0 min-w-0 max-[860px]:[&>[data-slot=scroll-area-viewport]>div]:pb-24">
           {workspace.selectedGoal && workspace.selectedGoalProgress ? (
             <GoalWorkspaceHeader
-              key={`${workspace.selectedGoal.id}:${workspace.selectedGoal.updated_at_utc}`}
+              key={`${workspace.selectedGoal.id}:${workspace.selectedGoal.updated_at_utc}:${inlineReviews.byGoal.has(workspace.selectedGoal.id)}`}
               goal={workspace.selectedGoal}
               progress={workspace.selectedGoalProgress}
               onSave={onAutosaveGoalDetails}
               onSetStatus={onSetGoalStatus}
               onDelete={onDeleteGoal}
               onPlan={onPlanGoal}
-            />
+              planPending={inlineReviews.byGoal.get(workspace.selectedGoal.id)?.decisions.some((decision) => decision.decision_kind === "goal_plan" && decision.status === "pending")}
+            >
+              {inlineReviews.byGoal.get(workspace.selectedGoal.id) ? (
+                <ContextReviewPanel compact state={inlineReviews.byGoal.get(workspace.selectedGoal.id)!} onResolve={onResolveContextDecision} onUndo={onUndoContextDecision} />
+              ) : null}
+            </GoalWorkspaceHeader>
           ) : null}
           {relationSyncIssues[0] ? <RelationSyncAlert issue={relationSyncIssues[0]} /> : null}
           <form className="sticky top-0 z-[4] mb-[18px] max-[860px]:hidden" onSubmit={submitDesktop}>
@@ -271,6 +283,10 @@ export function ActionsSection({
               </InputGroupAddon>
             </InputGroup>
           </form>
+
+          {workspace.filter === "all" ? (
+            <ContextReviewPanel state={inlineReviews.global} onResolve={onResolveContextDecision} onUndo={onUndoContextDecision} />
+          ) : null}
 
           <div className="actions-list grid self-start" aria-label="Новые пункты">
             {newItems.length === 0 ? (
@@ -298,7 +314,7 @@ export function ActionsSection({
                 onStopFocus={(action) => onStopActionFocus(action.id)}
                 renderAfter={(action) => {
                   const item = newItems.find((entry) => entry.id === action.id);
-                  return item ? renderMemberships(item) : null;
+                  return item ? <>{renderMemberships(item)}{renderContextReviews(item)}</> : null;
                 }}
               />
             ) : (

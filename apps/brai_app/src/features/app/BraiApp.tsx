@@ -28,7 +28,7 @@ import { ContextualRail, PageRailPlaceholder, useContextualRail } from "./naviga
 import { isMobileNavigationViewport, sectionSwipePageStyle, useLeftEdgeMenuSwipe } from "./navigation/useSectionSwipeNavigation";
 import { ActionsSection } from "./sections/actions/ActionsSection";
 import { ArchiveSection } from "./sections/actions/ArchiveSection";
-import { ActionsSidebarContent } from "./sections/actions/ActionsSidebarContent";
+import { ActionsWorkspaceNavigation } from "./sections/actions/ActionsWorkspaceNavigation";
 import { BraiCmdSection } from "./sections/brai-cmd/BraiCmdSection";
 import { DrawsSection } from "./sections/draws/DrawsSection";
 import { EngineSection } from "./sections/engine/EngineSection";
@@ -413,13 +413,12 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
             onStopActionFocus={app.onStopActionFocus}
             workspace={actionsWorkspace}
             onSelectWorkspaceFilter={selectActionsWorkspaceFilter}
-            onCreateGoal={app.onCreateGoal}
-            onRestoreGoal={app.onRestoreGoal}
             onAutosaveGoalDetails={app.onAutosaveGoalDetails}
             onSetGoalStatus={app.onSetGoalStatus}
             onDeleteGoal={app.onDeleteGoal}
             onPlanGoal={app.onPlanGoal}
             onAddToGoals={app.onAddToGoals}
+            onCreateGoalForItem={app.onCreateGoalForItem}
             onRemoveFromGoal={app.onRemoveFromGoal}
             onReorderGoal={app.onReorderGoal}
             onCreateActionInGoal={app.onCreateActionInGoal}
@@ -481,6 +480,7 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
           />} />
         ) : screenSection === "engine" ? (
           <PageWorkspace main={<EngineSection
+            nativeAndroid={nativeAndroid}
             appVersionState={app.versionState}
             otaState={app.otaState}
             otaCheckedAt={app.otaCheckedAt}
@@ -547,6 +547,7 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
             <div className="pb-6">
               {unauthEngineActive ? (
                 <EngineSection
+                  nativeAndroid={nativeAndroid}
                   appVersionState={app.versionState}
                   bundlePublishedAt={app.bundlePublishedAt}
                   otaCheckedAt={app.otaCheckedAt}
@@ -596,10 +597,14 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
           onLogout={app.onLogout}
         />
       ) : null}
-      {!drawsFullscreenActive && contextualRail.supported ? (
+      {!drawsFullscreenActive && !mobileViewport && contextualRail.supported ? (
         <ContextualRail open={contextualRail.open} width={contextualRail.width} onWidth={contextualRail.setWidth}>
           {visibleSection === "actions" ? (
-            <ActionsSidebarContent workspace={actionsWorkspace} contextReviews={app.contextReviews} onSelect={selectActionsWorkspaceFilter} onCreateGoal={app.onCreateGoal} onRestoreGoal={app.onRestoreGoal} onResolve={app.onResolveContextDecision} onUndo={app.onUndoContextDecision} />
+            <ScrollArea className="h-full">
+              <div className="p-3">
+                <ActionsWorkspaceNavigation workspace={actionsWorkspace} onSelect={selectActionsWorkspaceFilter} onCreateGoal={app.onCreateGoal} />
+              </div>
+            </ScrollArea>
           ) : activeContextualContent ?? <PageRailPlaceholder />}
         </ContextualRail>
       ) : null}
@@ -658,7 +663,7 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
           onClose={() => app.setMobileMenuOpen(false)}
         >
           {visibleSection === "actions" ? (
-            <ActionsSidebarContent workspace={actionsWorkspace} contextReviews={app.contextReviews} onSelect={(filter) => { selectActionsWorkspaceFilter(filter); requestMobileProfileDrawerClose(); }} onCreateGoal={app.onCreateGoal} onRestoreGoal={app.onRestoreGoal} onResolve={app.onResolveContextDecision} onUndo={app.onUndoContextDecision} />
+            <ActionsWorkspaceNavigation workspace={actionsWorkspace} onSelect={(filter) => { selectActionsWorkspaceFilter(filter); requestMobileProfileDrawerClose(); }} onCreateGoal={app.onCreateGoal} />
           ) : activeContextualContent ?? <PageRailPlaceholder />}
         </MobileProfileDrawer>
       ) : null}
