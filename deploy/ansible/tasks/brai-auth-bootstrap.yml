@@ -1,0 +1,85 @@
+- name: Create fixed Brai auth runtime root
+  ansible.builtin.file:
+    path: "{{ brai_auth_root }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Install fixed secret-free Brai auth Compose definition
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/files/brai-auth-compose.yml"
+    dest: "{{ brai_auth_compose }}"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Install fixed Brai auth runtime helper
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/files/brai-auth-runtime.sh"
+    dest: "{{ brai_auth_runtime_helper }}"
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Provision deploy-owned auth operation locks
+  ansible.builtin.file:
+    path: "{{ brai_env_root }}/{{ item.value.path }}/.auth-operation.lock"
+    state: touch
+    owner: "{{ brai_deploy_user }}"
+    group: "{{ brai_deploy_user }}"
+    mode: "0664"
+    access_time: preserve
+    modification_time: preserve
+  loop: "{{ brai_envs | dict2items | list }}"
+  loop_control:
+    label: "{{ item.key }}"
+
+- name: Create root-owned Brai auth Caddy route directories
+  ansible.builtin.file:
+    path: "{{ brai_auth_caddy_root }}/{{ item.key }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop: "{{ brai_envs | dict2items | list }}"
+  loop_control:
+    label: "{{ item.key }}"
+
+- name: Seed disabled Brai auth Caddy route fragments
+  ansible.builtin.copy:
+    content: "# Brai auth route is disabled until an exact-digest runtime deployment.\n"
+    dest: "{{ brai_auth_caddy_root }}/{{ item.key }}/route.caddy"
+    force: false
+    owner: root
+    group: root
+    mode: "0644"
+  loop: "{{ brai_envs | dict2items | list }}"
+  loop_control:
+    label: "{{ item.key }}"
+
+- name: Provision root-owned global Brai auth Caddy lock
+  ansible.builtin.file:
+    path: "{{ brai_auth_caddy_lock }}"
+    state: touch
+    owner: root
+    group: root
+    mode: "0600"
+    access_time: preserve
+    modification_time: preserve
+
+- name: Register inert Brai auth host bootstrap
+  ansible.builtin.blockinfile:
+    path: "/home/{{ brai_codex_maintenance_user }}/DEPLOYMENT.md"
+    marker: "<!-- {mark} BRAI AUTH HOST BOOTSTRAP -->"
+    insertafter: EOF
+    block: |
+      ## Brai auth host bootstrap
+
+      **Описание:** инертная root-owned host boundary для будущего stateless `brai-auth`; bootstrap сам не создаёт schema/secret/env, не запускает container и не включает route.
+
+      **Для чего используется:** fixed Compose и helper ограничивают lifecycle семью известных Brai environments, immutable `ghcr.io/sergobright/brai-auth@sha256:...` image, localhost ports `3050`-`3056`, private Docker network `brai-supabase`, exact Preview lease и атомарные Caddy route transitions.
+
+      **Как используется:** source of truth — `deploy/ansible/` в Brai repo; check/apply выполняются только из clean synchronized `main`: `deploy/scripts/apply-main-infra.sh --check brai-auth-bootstrap`, затем `--apply brai-auth-bootstrap` и повторный `--check`.
+
+      **Где находится:** `/srv/opt/brai-auth/compose.yml`, `/srv/opt/brai-auth-runtime.sh`, `/etc/caddy/brai-auth/<environment>/route.caddy`, `/srv/projects/brai-envs/<environment>/.auth-operation.lock`, `/srv/opt/brai-auth/caddy.lock`.
