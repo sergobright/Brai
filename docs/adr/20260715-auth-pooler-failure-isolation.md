@@ -16,7 +16,7 @@
 - У session resolution три результата: действующая сессия, достоверно отсутствующая сессия и недоступный auth backend. Последний всегда становится `503 auth_backend_unavailable` для `/auth/session`, session-protected `/v1/*` и WebSocket upgrade.
 - `/health` независимо проверяет product pool и Better Auth pool и возвращает `503`, если любой из них не готов.
 - Клиент сохраняет user id, IndexedDB snapshots, outbox и текущий экран при network/`5xx`; account scope очищается только после достоверного anonymous или настоящего `401`.
-- Supavisor получает tenant `brai-prod` для production и `brai-nonprod` для Dev/Preview. Первый rollout сохраняет legacy tenant `brightos` для безопасного отката.
+- Supavisor получает только tenant `brai-prod` для production и `brai-nonprod` для Dev/Preview. Maintenance удаляет persistent metadata legacy tenants `brightos`, `brightos-prod` и `brightos-nonprod` перед пересозданием pooler и после запуска fail-closed проверяет точное множество Brai targets.
 - Любая reconfiguration/recreation pooler проходит через repo-managed maintenance wrapper: единый порядок deploy-lock, остановка клиентов, точечный Supavisor recreate, production-first health/auth canary и последовательный возврат non-production.
 
 ## Рассмотренные альтернативы

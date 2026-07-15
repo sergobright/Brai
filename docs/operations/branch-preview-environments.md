@@ -254,8 +254,10 @@ sudo /srv/opt/brai-supabase-maintenance.sh --apply reconfigure-pooler
 The command takes production, Dev, Preview A-E, staging, release, and preview-slot locks in canonical
 order; stops dependent API services; recreates only Supavisor; starts production first; and returns
 previously active non-production services one by one only after health/auth canaries. The wrapper
-must create both tenants before any runtime DSN is switched. Failed Preview slots remain stopped and
-are restored only by their normal deploy workflow. If a canary fails, leave the offending
+must delete persistent metadata for legacy `brightos`, `brightos-prod`, and `brightos-nonprod`
+tenants, recreate only `brai-prod` and `brai-nonprod`, and verify that exact target set before any
+runtime DSN is switched or API client is restarted. Failed Preview slots remain stopped and are
+restored only by their normal deploy workflow. If a canary fails, leave the offending
 non-production service stopped, reset only Supavisor, and repeat the production canary. Never widen
 the recovery into a whole-stack or database recreation.
 

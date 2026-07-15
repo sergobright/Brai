@@ -11,6 +11,7 @@ NODE_BIN="${BRAI_NODE_BIN:-/srv/opt/node-v22.16.0/bin/node}"
 PROD_ENV="${BRAI_PROD_ENV_FILE:-/etc/brai/brai-api.env}"
 DEPLOY_ENV="${BRAI_SUPABASE_DEPLOY_ENV_FILE:-/etc/brai/supabase-deploy.env}"
 POOLER_CONTAINER="${BRAI_SUPAVISOR_CONTAINER:-supabase-pooler}"
+DATABASE_CONTAINER="${BRAI_SUPABASE_DATABASE_CONTAINER:-supabase-db}"
 PROD_MONITOR_SECONDS="${BRAI_SUPAVISOR_PROD_MONITOR_SECONDS:-300}"
 NONPROD_MONITOR_SECONDS="${BRAI_SUPAVISOR_NONPROD_MONITOR_SECONDS:-75}"
 LOCKS_HELD_ENV="BRAI_SUPABASE_MAINTENANCE_LOCKS_HELD"
@@ -106,6 +107,48 @@ wait_for_pooler_connections_to_close() {
   done
   echo "Supavisor still has established API connections" >&2
   return 1
+}
+
+delete_legacy_tenant_metadata() {
+  /usr/bin/docker exec -i "$DATABASE_CONTAINER" psql --no-psqlrc --quiet --set ON_ERROR_STOP=1 \
+    --username supabase_admin --dbname _supabase >/dev/null <<'SQL'
+BEGIN;
+DELETE FROM _supavisor.cluster_tenants
+WHERE tenant_external_id IN ('brightos', 'brightos-prod', 'brightos-nonprod');
+DELETE FROM _supavisor.tenants
+WHERE external_id IN ('brightos', 'brightos-prod', 'brightos-nonprod');
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM _supavisor.tenants
+    WHERE external_id IN ('brightos', 'brightos-prod', 'brightos-nonprod')
+  ) THEN
+    RAISE EXCEPTION 'Legacy Supavisor tenant metadata remains';
+  END IF;
+END
+$$;
+COMMIT;
+SQL
+}
+
+assert_target_tenant_metadata() {
+  /usr/bin/docker exec -i "$DATABASE_CONTAINER" psql --no-psqlrc --quiet --set ON_ERROR_STOP=1 \
+    --username supabase_admin --dbname _supabase >/dev/null <<'SQL'
+DO $$
+DECLARE
+  actual_tenants text[];
+BEGIN
+  SELECT COALESCE(array_agg(external_id ORDER BY external_id), ARRAY[]::text[])
+  INTO actual_tenants
+  FROM _supavisor.tenants;
+
+  IF actual_tenants IS DISTINCT FROM ARRAY['brai-nonprod', 'brai-prod']::text[] THEN
+    RAISE EXCEPTION 'Supavisor tenant metadata is not restricted to Brai targets';
+  END IF;
+END
+$$;
+SQL
 }
 
 wait_for_auth_canary() {
@@ -225,10 +268,12 @@ reconfigure_pooler() {
   /bin/systemctl stop "${API_SERVICES[@]}"
   wait_for_pooler_connections_to_close
   /usr/bin/install -o root -g root -m 0644 "$MANAGED_POOLER_CONFIG" "$LIVE_POOLER_CONFIG"
+  delete_legacy_tenant_metadata
   local started_at
   started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   compose_recreate_pooler
   wait_for_pooler
+  assert_target_tenant_metadata
   rewrite_runtime_tenants
 
   /bin/systemctl start brai-api.service
@@ -247,7 +292,7 @@ reconfigure_pooler() {
   trap - EXIT INT TERM HUP
   rm -rf -- "$BACKUP_ROOT"
   BACKUP_ROOT=""
-  echo '{"ok":true,"operation":"reconfigure-pooler","tenantIsolation":true}'
+  echo '{"ok":true,"operation":"reconfigure-pooler","tenantIsolation":true,"legacyTenantsRemoved":true}'
 }
 
 main() {

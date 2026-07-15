@@ -24,9 +24,7 @@ base_params = %{
   }]
 }
 
-[System.get_env("POOLER_TENANT_ID"), "brai-prod", "brai-nonprod"]
-|> Enum.reject(&(&1 in [nil, ""]))
-|> Enum.uniq()
+["brai-prod", "brai-nonprod"]
 |> Enum.each(fn external_id ->
   if !Supavisor.Tenants.get_tenant_by_external_id(external_id) do
     {:ok, _} = Supavisor.Tenants.create_tenant(Map.put(base_params, "external_id", external_id))
