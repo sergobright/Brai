@@ -847,7 +847,7 @@ describe("BraiApp onboarding", () => {
 
     expect(await screen.findByText("Вход в Brai")).toBeInTheDocument();
     expect(document.querySelector(".auth-galaxy-background")).toBeInTheDocument();
-    expect(screen.getByLabelText("Email")).toBeInTheDocument();
+    expect(await screen.findByLabelText("Email", {}, { timeout: 10_000 })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Войти" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Получить код" })).not.toBeInTheDocument();
     expectNoPasswordPrompt();

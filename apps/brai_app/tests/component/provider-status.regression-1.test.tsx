@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { openProfileMenuItem, setupBraiAppTest, stubAndroidCapacitor } from "./app-test-support";
+import { openProfileMenuItem, selectBraiCmdGroup, setupBraiAppTest, stubAndroidCapacitor } from "./app-test-support";
 import { BraiApp } from "@/features/app/BraiApp";
 
 // Regression: ISSUE-007 — успешная проверка ключа ошибочно называлась завершённым подключением.
@@ -14,6 +14,7 @@ describe("Brai CMD provider status", () => {
     render(<BraiApp />);
 
     await openProfileMenuItem("Brai Cmd");
+    await selectBraiCmdGroup("Распознавание");
     const speechCard = (await screen.findByText("Распознавание речи")).closest("[data-slot=card]") as HTMLElement;
     fireEvent.click(speechCard.querySelector("button")!);
     fireEvent.click(screen.getByText("Свой API-ключ"));

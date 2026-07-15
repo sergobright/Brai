@@ -1,32 +1,28 @@
 "use client";
-import type { CSSProperties, FormEvent, MouseEvent } from "react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { FormEvent, MouseEvent } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, FilePenLine, Plus } from "lucide-react";
-import { installAndroidBackHandler } from "@/shared/platform/platform";
 import { cleanTitle, TITLE_MAX_LENGTH } from "@/shared/activities/text";
 import type { ActivityItem, ActivitiesState, ActivityStatus } from "@/shared/types/activities";
 import { emptyInboxState } from "@/shared/types/inbox";
 import { emptyRelationsState, type RelationItem, type RelationSyncIssue } from "@/shared/types/relations";
-import { emptyContextDecisionsState, type ContextDecision, type ContextDecisionsState, type ContextResolution, type GoalPlanResponse } from "@/shared/types/contextDecisions";
+import type { ContextDecision, ContextDecisionsState, ContextResolution, GoalPlanResponse } from "@/shared/types/contextDecisions";
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/shared/ui/input-group";
 import { ScrollArea } from "@/shared/ui/scroll-area";
 import { cx } from "../../appUtils";
+import { PageWorkspace } from "../../chrome/PageWorkspace";
 import { MobileCreateComposer, mobileCreateDraftHasText, type MobileCreateDraft } from "../MobileCreateComposer";
-import { useMobileSheetTop } from "../../hooks/useMobileSheetTop";
 import { useMobileNavigationViewport } from "../../navigation/useSectionSwipeNavigation";
 import type { DetailTitleFocus } from "./ActionRow";
 import { SortableActionList } from "./ActionList";
-import { ActionsInfoPanel } from "./ActionsInfoPanel";
 import { ActivityDetailEditor } from "./ActivityDetailEditor";
 import { GoalBadges, GoalMembershipPicker } from "./GoalMembershipControls";
 import { GoalWorkspaceHeader } from "./GoalWorkspaceHeader";
-import { ActionsSidebarContent } from "./ActionsSidebarContent";
 import { OperationDetailPanel } from "./OperationWorkspaceItem";
 import { RelationSyncAlert } from "./RelationSyncAlert";
 import { WorkspaceWorkList } from "./WorkspaceWorkList";
 import { buildActionsWorkspace, type ActionsWorkspaceView, type WorkspaceFilterId, type WorkspaceWorkItem } from "./actionsWorkspaceModel";
-import { useActionsSplit, useRestoreActionEditDrafts } from "./actionsModel";
-import { ACTIONS_SPLIT_MIN_PERCENT } from "./constants";
+import { useRestoreActionEditDrafts } from "./actionsModel";
 export function ActionsSection({
   state,
   localSnapshotReady,
@@ -47,8 +43,6 @@ export function ActionsSection({
   onStopActionFocus,
   workspace: providedWorkspace,
   onSelectWorkspaceFilter = () => undefined,
-  onCreateGoal = async () => undefined,
-  onRestoreGoal = async () => undefined,
   onAutosaveGoalDetails = async () => undefined,
   onSetGoalStatus = async () => undefined,
   onDeleteGoal = async () => undefined,
@@ -57,10 +51,7 @@ export function ActionsSection({
   onRemoveFromGoal = async () => undefined,
   onReorderGoal = async () => undefined,
   onCreateActionInGoal = async () => undefined,
-  contextReviews = emptyContextDecisionsState(),
   relationSyncIssues = [],
-  onResolveContextDecision = async () => undefined,
-  onUndoContextDecision = async () => undefined,
 }: {
   state: ActivitiesState;
   localSnapshotReady: boolean;
@@ -106,11 +97,8 @@ export function ActionsSection({
   const [openDeleteActionId, setOpenDeleteActionId] = useState<string | null>(null);
   const [titleDrafts, setTitleDrafts] = useState<Record<string, string>>({});
   const [detailTitleFocusRequest, setDetailTitleFocusRequest] = useState(0);
-  const suppressMobileCreatePopRef = useRef(false);
   const mobileCreateSubmitInFlightRef = useRef(false);
-  const workspaceRef = useRef<HTMLDivElement | null>(null);
   const desktopInputRef = useRef<HTMLInputElement | null>(null);
-  const { onSplitKeyDown, onSplitPointerDown, onSplitPointerEnd, onSplitPointerMove, resetSplit, splitPercent } = useActionsSplit(workspaceRef);
   const newItems = workspace.newItems;
   const doneItems = workspace.doneItems;
   const selectedItem = selectedActionId ? workspace.allItems.find((item) => item.id === selectedActionId) : null;
@@ -122,8 +110,6 @@ export function ActionsSection({
   const mobileViewport = useMobileNavigationViewport();
   const mobileOperationOpen = mobileViewport && selectedOperation != null;
   const mobileOverlayOpen = mobileCreateOpen || mobileEditAction != null || mobileOperationOpen;
-  const desktopSidePanelOpen = true;
-  const mobileSheetTop = useMobileSheetTop();
   const mobileCreateHasDraft = mobileCreateDraftHasText(mobileCreateDraft);
   const MobileCreateFabIcon = mobileCreateHasDraft ? FilePenLine : Plus;
   const mobileCreateFabLabel = mobileCreateHasDraft ? "Продолжить черновик действия" : workspace.selectedGoal ? `Добавить действие в цель ${workspace.selectedGoal.title}` : "Добавить действие";
@@ -162,17 +148,8 @@ export function ActionsSection({
     setMobileCreateOpen(true);
   }
 
-  const closeMobileCreate = useCallback(() => {
-    if (window.history.state?.braiMobileActionCreate) {
-      suppressMobileCreatePopRef.current = true;
-      window.history.back();
-    }
-    setMobileCreateOpen(false);
-  }, []);
-
   function openMobileEdit(action: ActivityItem) {
     setOpenDeleteActionId(null);
-    resetSplit();
     setSelectedActionId(action.id);
     setMobileEditActionId(action.id);
   }
@@ -191,7 +168,6 @@ export function ActionsSection({
   }
 
   function selectAction(actionId: string, focusDetailTitle: DetailTitleFocus = "end") {
-    if (selectedActionId !== actionId) resetSplit();
     setSelectedActionId(actionId);
     if (focusDetailTitle === "end") setDetailTitleFocusRequest((current) => current + 1);
   }
@@ -208,7 +184,6 @@ export function ActionsSection({
     if (mobileCreateSubmitInFlightRef.current) return;
     mobileCreateSubmitInFlightRef.current = true;
     onMobileCreateDraftChange({ title: "", descriptionMd: "" });
-    closeMobileCreate();
     try {
       if (workspace.selectedGoal) await onCreateActionInGoal(title, descriptionMd, workspace.selectedGoal.id);
       else await onCreate(title, descriptionMd);
@@ -216,34 +191,6 @@ export function ActionsSection({
       mobileCreateSubmitInFlightRef.current = false;
     }
   }
-
-  useEffect(() => {
-    if (!mobileCreateOpen) return undefined;
-    if (window.history.state?.braiMobileActionCreate) {
-      window.history.replaceState({ ...window.history.state, braiMobileActionCreate: true }, "", window.location.href);
-    } else {
-      window.history.pushState({ ...window.history.state, braiMobileActionCreate: true }, "", window.location.href);
-    }
-
-    function onPopState() {
-      if (suppressMobileCreatePopRef.current) {
-        suppressMobileCreatePopRef.current = false;
-        return;
-      }
-      setMobileCreateOpen(false);
-    }
-
-    window.addEventListener("popstate", onPopState);
-    return () => window.removeEventListener("popstate", onPopState);
-  }, [mobileCreateOpen]);
-
-  useEffect(() => {
-    if (!mobileCreateOpen) return undefined;
-    return installAndroidBackHandler(() => {
-      closeMobileCreate();
-      return true;
-    });
-  }, [closeMobileCreate, mobileCreateOpen]);
 
   function renderMemberships(item: WorkspaceWorkItem) {
     return (
@@ -284,29 +231,17 @@ export function ActionsSection({
     onAddToGoals,
     onRemoveFromGoal,
   };
-
   return (
     <section
       className="actions-section relative grid h-full min-h-0 grid-rows-[minmax(0,1fr)] gap-3.5 max-[860px]:gap-0 max-[860px]:pb-0"
       aria-label="Действия"
       onClickCapture={closeOpenDeleteFromOutside}
     >
-      <div
-        ref={workspaceRef}
-        className={cx(
-          "actions-workspace relative grid h-full min-h-0 min-w-0 items-stretch gap-[18px] max-[860px]:block",
-          desktopSidePanelOpen ? "has-detail grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-0 overflow-hidden" : "grid-cols-[minmax(0,1fr)]",
-        )}
-        style={
-          desktopSidePanelOpen
-            ? ({
-                "--actions-list-percent": `${splitPercent}%`,
-                gridTemplateColumns: "minmax(0,var(--actions-list-percent)) minmax(0,calc(100% - var(--actions-list-percent)))",
-              } as CSSProperties)
-            : undefined
-        }
-      >
-        <ScrollArea className="actions-list-pane h-full min-h-0 min-w-0 max-[860px]:[&>[data-slot=scroll-area-viewport]>div]:pb-24">
+      <PageWorkspace
+        className="actions-workspace relative"
+        mainScroll={false}
+        panelScroll={false}
+        main={<ScrollArea className="actions-list-pane h-full min-h-0 min-w-0 max-[860px]:[&>[data-slot=scroll-area-viewport]>div]:pb-24">
           {workspace.selectedGoal && workspace.selectedGoalProgress ? (
             <GoalWorkspaceHeader
               key={`${workspace.selectedGoal.id}:${workspace.selectedGoal.updated_at_utc}`}
@@ -404,48 +339,22 @@ export function ActionsSection({
               ) : null}
             </section>
           ) : null}
-        </ScrollArea>
-
-        {desktopSidePanelOpen ? (
-          <>
-            <button
-              type="button"
-              className="actions-split-resizer group absolute inset-y-0 z-[5] hidden w-6 -translate-x-1/2 touch-none !cursor-ew-resize place-items-stretch justify-center border-0 bg-transparent px-[11px] py-0 max-[860px]:hidden min-[861px]:grid [&_*]:!cursor-ew-resize"
-              style={{ left: `${splitPercent}%` }}
-              aria-label="Изменить ширину панелей"
-              aria-valuemin={ACTIONS_SPLIT_MIN_PERCENT}
-              aria-valuemax={100 - ACTIONS_SPLIT_MIN_PERCENT}
-              aria-valuenow={Math.round(splitPercent)}
-              role="slider"
-              onPointerDown={onSplitPointerDown}
-              onPointerMove={onSplitPointerMove}
-              onPointerUp={onSplitPointerEnd}
-              onPointerCancel={onSplitPointerEnd}
-              onKeyDown={onSplitKeyDown}
-            >
-              <span className="block h-full w-px bg-border transition-colors group-hover:bg-primary" aria-hidden="true" />
-            </button>
-            {selectedAction && !mobileEditAction ? (
-              <ActivityDetailEditor
-                key={selectedAction.id}
-                action={selectedAction}
-                titleDraft={titleDrafts[selectedAction.id]}
-                mode="desktop"
-                focusTitleRequest={detailTitleFocusRequest}
-                onClose={() => setSelectedActionId(null)}
-                onTitleDraftChange={setTitleDraft}
-                onAutosaveDetails={onAutosaveDetails}
-              />
-            ) : selectedOperation && !mobileOperationOpen ? (
-              <OperationDetailPanel item={selectedOperation} mode="desktop" onClose={() => setSelectedActionId(null)} />
-            ) : (
-              <ActionsInfoPanel>
-                <ActionsSidebarContent workspace={workspace} contextReviews={contextReviews} onSelect={onSelectWorkspaceFilter} onCreateGoal={onCreateGoal} onRestoreGoal={onRestoreGoal} onResolve={onResolveContextDecision} onUndo={onUndoContextDecision} />
-              </ActionsInfoPanel>
-            )}
-          </>
-        ) : null}
-      </div>
+        </ScrollArea>}
+        temporaryPanel={selectedAction && !mobileEditAction ? (
+          <ActivityDetailEditor
+            key={selectedAction.id}
+            action={selectedAction}
+            titleDraft={titleDrafts[selectedAction.id]}
+            mode="desktop"
+            focusTitleRequest={detailTitleFocusRequest}
+            onClose={() => setSelectedActionId(null)}
+            onTitleDraftChange={setTitleDraft}
+            onAutosaveDetails={onAutosaveDetails}
+          />
+        ) : selectedOperation && !mobileOperationOpen ? (
+          <OperationDetailPanel item={selectedOperation} mode="desktop" onClose={() => setSelectedActionId(null)} />
+        ) : undefined}
+      />
 
       {!mobileOverlayOpen && !dockOverflowOpen ? (
         <button
@@ -460,22 +369,16 @@ export function ActionsSection({
       ) : null}
 
       {mobileCreateOpen ? (
-        <div
-          className="actions-mobile-overlay fixed inset-0 z-[80] hidden items-end bg-foreground/25 pb-[env(safe-area-inset-bottom)] max-[860px]:flex dark:bg-background/80"
-          style={{ top: mobileSheetTop } as CSSProperties}
-          data-nav-swipe-exclusion
-          onClick={closeMobileCreate}
-        >
           <MobileCreateComposer
             draft={mobileCreateDraft}
             titleLabel="Добавить действие"
             descriptionLabel="Описание действия"
             submitLabel="Добавить действие"
-            onCancel={closeMobileCreate}
+            historyStateKey="braiMobileActionCreate"
+            onCancel={() => setMobileCreateOpen(false)}
             onDraftChange={onMobileCreateDraftChange}
             onSubmit={submitMobile}
           />
-        </div>
       ) : null}
 
       {mobileEditAction ? (
