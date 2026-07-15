@@ -9,7 +9,10 @@ test('targeted infra apply is allowlisted, main-bound, and checks before applyin
   assert.match(script, /status --porcelain/);
   assert.match(script, /rev-parse origin\/main/);
   assert.match(script, /safe\.directory=\$ROOT/);
-  assert.match(script, /BRAI_ANSIBLE_INVENTORY:-localhost,/);
+  assert.match(script, /BRAI_ANSIBLE_INVENTORY:-brai,/);
+  assert.match(script, /--list-hosts/);
+  assert.ok(script.includes("'hosts \\([1-9][0-9]*\\):'"));
+  assert.match(script, /matched no Ansible hosts/);
   assert.match(script, /\/srv\/opt\/ansible\/bin\/ansible-playbook/);
   const check = script.indexOf('--check --diff');
   const apply = script.indexOf('if [[ "$MODE" == "--apply" ]]');

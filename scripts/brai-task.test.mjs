@@ -1968,6 +1968,19 @@ test("delivery handoff writes infra-docs receipt only for merged PRs", () => {
   assert.equal(receipt.runId, 42);
 });
 
+test("delivery handoff keeps the original task root after accepted cleanup", () => {
+  const fixture = setupInfraDocsHandoffFixture({
+    prState: "MERGED",
+    mergedAt: "2026-06-26T00:00:00Z",
+    cleanupAfterMerge: true,
+  });
+  const result = runDeliveryHandoffFixture(fixture);
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  const receipt = JSON.parse(fs.readFileSync(path.join(fixture.repo, ".brai-task", "delivery-handoff.json"), "utf8"));
+  assert.equal(receipt.prState, "MERGED");
+});
+
 test("delivery handoff performs one safe initial push before fetching a missing remote branch", () => {
   const script = fs.readFileSync(new URL("./brai-task.mjs", import.meta.url), "utf8");
   const helper = script.slice(script.indexOf("function ensureTaskBranchPushed"), script.indexOf("function remoteBranchExists"));
@@ -2525,11 +2538,12 @@ test("accepted preview branch lookup skips no-preview delivery PRs", () => {
   ]), ["codex/runtime"]);
 });
 
-function setupInfraDocsHandoffFixture({ prState, mergeStateStatus = "CLEAN", autoMerge = false, mergedAt = null, jobConclusions = {}, label = "brai-delivery:infra-docs" }) {
+function setupInfraDocsHandoffFixture({ prState, mergeStateStatus = "CLEAN", autoMerge = false, mergedAt = null, jobConclusions = {}, label = "brai-delivery:infra-docs", cleanupAfterMerge = false }) {
   const root = tempRoot("brai-task-handoff-");
   const remote = path.join(root, "origin.git");
   const repo = path.join(root, "repo");
   const bin = path.join(root, "bin");
+  const prListCountFile = path.join(root, "gh-pr-list-count.txt");
 
   git(["init", "--bare", remote], root);
   fs.mkdirSync(repo);
@@ -2594,6 +2608,11 @@ function setupInfraDocsHandoffFixture({ prState, mergeStateStatus = "CLEAN", aut
     gh,
     `#!/usr/bin/env bash
 if [ "$1" = "pr" ] && [ "$2" = "list" ]; then
+  count=0
+  if [ -f "${prListCountFile}" ]; then count="$(cat "${prListCountFile}")"; fi
+  count="$((count + 1))"
+  printf '%s' "$count" > "${prListCountFile}"
+  ${cleanupAfterMerge ? `if [ "$count" -ge 2 ]; then rm -rf -- "${path.join(repo, ".git")}" "${path.join(repo, ".brai-task")}"; fi` : ""}
   printf '%s' '${JSON.stringify([pr])}'
 elif [ "$1" = "run" ] && [ "$2" = "list" ]; then
   printf '%s' '${JSON.stringify([run])}'

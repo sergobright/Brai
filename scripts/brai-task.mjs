@@ -593,6 +593,7 @@ function writePreviewTestingNote(branch, commit, releaseNotes) {
 }
 
 function deliveryHandoff(branchArg) {
+  const taskRoot = git("rev-parse", "--show-toplevel");
   const branch = branchArg ?? currentBranch();
   if (!CODEX_BRANCH_RE.test(branch)) throw new Error(`Delivery handoff requires codex/* branch, got: ${branch}`);
   if (branch !== currentBranch()) throw new Error(`Current branch is ${currentBranch()}, not ${branch}`);
@@ -643,7 +644,7 @@ function deliveryHandoff(branchArg) {
     verifiedAt: new Date().toISOString(),
     verifiedBy: "brai-task-delivery-v1",
   };
-  writeDeliveryReceipt(receipt);
+  writeDeliveryReceipt(receipt, taskRoot);
 
   console.log("No-preview delivery");
   console.log(`Branch: ${branch}`);
@@ -2411,8 +2412,7 @@ function writePreviewReceipt(receipt) {
   fs.writeFileSync(path.join(dir, "preview-handoff.json"), `${JSON.stringify(receipt, null, 2)}\n`);
 }
 
-function writeDeliveryReceipt(receipt) {
-  const root = git("rev-parse", "--show-toplevel");
+function writeDeliveryReceipt(receipt, root) {
   const dir = path.join(root, ".brai-task");
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, "delivery-handoff.json"), `${JSON.stringify(receipt, null, 2)}\n`);
