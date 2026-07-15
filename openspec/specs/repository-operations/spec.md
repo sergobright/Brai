@@ -236,3 +236,58 @@ Brai SHALL prohibit direct broad recreation of stateful Supabase services outsid
 - **WHEN** automation attempts an unguarded stateful Supabase `docker compose --force-recreate`
 - **THEN** repository guards and deployment tests reject the path
 - **AND** the documented maintenance command is the only allowed entrypoint
+
+### Requirement: Repository work has a stable owner identity
+
+Every tracked Brai task SHALL belong to one immutable release work with exactly
+one owner unless ownership is explicitly transferred.
+
+#### Scenario: An ordinary task starts
+- **WHEN** the official task starter creates a new owner worktree
+- **THEN** it generates a stable work key
+- **AND** records owner role and work key in ignored task state
+- **AND** the key is carried into release notes and the acceptance PR marker
+
+#### Scenario: Concurrent tasks run
+- **WHEN** multiple agents work and merge PRs in parallel
+- **THEN** each owner task has a different work key
+- **AND** no finalizer groups PRs by merge time, nearby PR number, or a global Git commit range
+
+### Requirement: Support tasks inherit work identity safely
+
+The official starter SHALL support a separate blocker-fix task through
+`scripts/brai-task-start.sh <support-slug> --support-of <owner-branch>`.
+
+#### Scenario: Preview requires a separately merged fix
+- **WHEN** an owner task discovers a delivery, migration, or infrastructure blocker
+- **THEN** the support starter verifies the owner task and inherits its work key
+- **AND** creates the support branch from current `origin/main`
+- **AND** records support role without modifying the owner's frozen base
+- **AND** manual branch, worktree, and task-marker fallback remains forbidden
+
+#### Scenario: A support PR merges
+- **WHEN** a support PR completes its own delivery guard and merges
+- **THEN** its GitHub metadata and work membership are registered
+- **AND** it does not create a separate build
+- **AND** the owner may use the existing acceptance-reconcile path to incorporate the accepted fix
+
+### Requirement: Work finalization cannot lose support PRs
+
+Owner finalization SHALL include every merged PR registered to its work and
+shall fail while registered work remains unresolved.
+
+#### Scenario: Owner work is ready to finalize
+- **WHEN** the owner reaches successful handoff and every registered PR is terminal
+- **THEN** all merged owner/support PRs are linked to one build
+- **AND** closed-unmerged PRs remain PR history but are not linked to the build
+- **AND** finalization is idempotent
+
+#### Scenario: Registered support work is unresolved
+- **WHEN** any support PR is open, queued, failing, or otherwise non-terminal
+- **THEN** owner finalization stops with the exact blocker
+- **AND** it does not publish a partial build
+
+#### Scenario: Owner is abandoned after support merged
+- **WHEN** an owner PR is closed or abandoned after one or more support PRs merged
+- **THEN** the work requires ownership transfer or explicit support-only finalization
+- **AND** the work cannot be cancelled while merged support changes remain unversioned
