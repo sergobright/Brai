@@ -440,7 +440,7 @@ describe("mobile OTA publish scripts", () => {
     expect(buildApk).toContain('SIGNING_ENV="${BRAI_ANDROID_SIGNING_ENV:-/srv/projects/brai-envs/android-signing/signing.env}"');
     expect(buildApk).toContain('/srv/opt/android-build-env/build-android.sh "$ROOT/apps/brai_app/android" "$GRADLE_TASK"');
     expect(buildApk).toContain("fs.writeFileSync(outVersionFile");
-    expect(buildApk.indexOf('(cd "$ROOT" && "$NPM_BIN" run app:build)')).toBeLessThan(buildApk.indexOf('(cd "$ROOT" && "$NPM_BIN" run app:cap:sync)'));
+    expect(buildApk.indexOf('(cd "$ROOT" && "$NPM_BIN" run app:build)')).toBeLessThan(buildApk.indexOf('\nrun_capacitor_sync\n'));
     expect(gradle).toContain('throw new GradleException("BRAI_APP_VERSION is required for Android builds")');
     expect(gradle).toContain("tasks.register('validateBraiAndroidApiBundle')");
     expect(gradle).toContain("brai-runtime-config.js");
