@@ -941,6 +941,7 @@ function serverAccessContract(root = process.env.BRAI_ROOT ?? "/srv/projects/bra
   const protectedEnvDir = process.env.BRAI_PROTECTED_ENV_DIR ?? "/etc/brai";
   const apiEnvFile = process.env.BRAI_API_ENV_FILE ?? path.join(protectedEnvDir, "brai-api.env");
   const supabaseDeployEnvFile = process.env.BRAI_SUPABASE_DEPLOY_ENV_FILE ?? path.join(protectedEnvDir, "supabase-deploy.env");
+  const localCreateInboxOperationHelper = path.join(root, "deploy/scripts/create-inbox-operation.sh");
   const localCreateOperationHelper = path.join(root, "deploy/scripts/create-operation-activity.sh");
   const localCompleteOperationHelper = path.join(root, "deploy/scripts/complete-operation-activities.sh");
   const localCompleteInboxHelper = path.join(root, "deploy/scripts/complete-inbox-operations.sh");
@@ -991,7 +992,8 @@ function serverAccessContract(root = process.env.BRAI_ROOT ?? "/srv/projects/bra
       requiredModeBits: 0o640,
       forbiddenModeBits: 0o137,
     }),
-    commandCheck("operation create helper host-local sudo", [localCreateOperationHelper, "--host-local", "--check-access"], { cwd: root }),
+    commandCheck("Inbox operation create helper host-local sudo", [localCreateInboxOperationHelper, "--host-local", "--check-access"], { cwd: root }),
+    commandCheck("deprecated operation create helper host-local sudo", [localCreateOperationHelper, "--host-local", "--check-access"], { cwd: root }),
     commandCheck("operation complete helper host-local sudo", [localCompleteOperationHelper, "--host-local", "--check-access"], { cwd: root }),
     commandCheck("Inbox operation complete helper host-local sudo", [localCompleteInboxHelper, "--host-local", "--check-access"], { cwd: root }),
     commandCheck("operation list helper host-local sudo", [localListOperationHelper, "--host-local", "--check-access"], { cwd: root }),
@@ -1010,8 +1012,17 @@ function serverAccessContract(root = process.env.BRAI_ROOT ?? "/srv/projects/bra
       deploySshPort,
       deployUser,
       deployHost,
+      localOperationHelper: localCreateInboxOperationHelper,
+      checkName: "Inbox operation create helper remote ssh",
+      root,
+    }),
+    operationHelperRemoteAccessCheck({
+      deployIdentityFile,
+      deploySshPort,
+      deployUser,
+      deployHost,
       localOperationHelper: localCreateOperationHelper,
-      checkName: "operation create helper remote ssh",
+      checkName: "deprecated operation create helper remote ssh",
       root,
     }),
     operationHelperRemoteAccessCheck({
@@ -2039,7 +2050,7 @@ function sandboxCheckMode(commandText) {
     /\bdeploy\/scripts\/accept-preview\.sh\b/.test(text) ||
     /\bdeploy\/scripts\/apply-main-infra\.sh\b/.test(text) ||
     /\bnode scripts\/brai-task\.mjs (acceptance-reconcile|acceptance-repair|handoff|preview)\b/.test(text) ||
-    /\bdeploy\/scripts\/(complete-inbox-operations|complete-operation-activities|create-operation-activity|list-operation-activities)\.sh\b/.test(text)
+    /\bdeploy\/scripts\/(complete-inbox-operations|complete-operation-activities|create-inbox-operation|create-operation-activity|list-operation-activities)\.sh\b/.test(text)
   ) {
     return { mode: "require_escalated", reason: "Brai host/Git/runtime boundaries for this command are not authoritative inside the Codex sandbox." };
   }
@@ -2194,6 +2205,7 @@ function deliveryClassForFile(file) {
       "deploy/scripts/complete-operation-activities.sh",
       "deploy/scripts/complete-inbox-operations.sh",
       "deploy/scripts/codex-cli-smoke.sh",
+      "deploy/scripts/create-inbox-operation.sh",
       "deploy/scripts/create-operation-activity.sh",
       "deploy/scripts/list-operation-activities.sh",
       "deploy/scripts/deploy-branch.sh",

@@ -13,7 +13,7 @@ INSERT INTO activities (
   'operation',
   'Preview Supabase seed',
   'Deterministic marker row proving this preview database was seeded after branch creation.',
-  'Codex',
+  'System',
   'Preview environments must have their own Supabase branch and test seed data.',
   'New',
   '2026-07-06T00:00:00.000Z',

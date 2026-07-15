@@ -25,6 +25,8 @@ test('entity role repair backfills payload links, event links, flags, and stale 
   const pool = new Pool({ connectionString: database.url });
   try {
     await pool.query(`
+      SELECT set_config('brai.allow_legacy_operation_import', 'on', true);
+
       INSERT INTO activities (
         id, activity_type_id, title, description_md, author, reason, status,
         created_at_utc, updated_at_utc
