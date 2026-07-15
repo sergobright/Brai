@@ -796,7 +796,7 @@ test("independent agent gate restarts exact units, promotes builds, smokes cross
   assert.ok(gate.indexOf('preview-slots.sh" ready') < readyMarkerIndex);
   assert.ok(readyMarkerIndex < sourceUnlockIndex && sourceUnlockIndex < maintenanceTriggerIndex);
   assert.match(sudoers, /NOPASSWD: \/bin\/systemctl --no-block start brai-storage-maintenance\.service/);
-  assert.match(playbook, /name: Install deploy user sudoers boundary[\s\S]*?tags:\n\s+- brai-caddy\n\s+- brai-goal-agents\n\s+- brai-storage-maintenance\n\s+- brai-supavisor-maintenance\n\s+- targeted-infra-apply/);
+  assert.match(playbook, /name: Install deploy user sudoers boundary[\s\S]*?tags:\n\s+- brai-caddy\n\s+- brai-auth-bootstrap\n\s+- brai-goal-agents\n\s+- brai-storage-maintenance\n\s+- brai-supavisor-maintenance\n\s+- targeted-infra-apply/);
   assert.match(ciGate, /registry\[key\]\?\.branch === branch && registry\[key\]\?\.commit === commit/);
   assert.match(ciGate, /deploy-goal-agents\.sh/);
 });
