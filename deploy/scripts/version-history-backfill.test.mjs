@@ -145,6 +145,7 @@ test("full 156-version/277-PR cutoff backfill is identical on its second run", {
         ]);
       }
     }
+    await seedVersion(pool, 146, "2026-07-14T23:59:00.000Z");
 
     const firstReport = await applyVersionHistoryBackfill(pool, manifest);
     const firstIdentity = await identityDigest(pool);
@@ -153,13 +154,24 @@ test("full 156-version/277-PR cutoff backfill is identical on its second run", {
     assert.deepEqual(secondReport, firstReport);
     assert.deepEqual(secondIdentity, firstIdentity);
     assert.deepEqual(firstIdentity.counts, {
-      details: 240,
+      details: 241,
       links: 132,
       pulls: 277,
       refs: 133,
-      versions: 156,
+      versions: 157,
       works: 277
     });
+    const postCutoff = await pool.query(`
+      SELECT details.title, details.description, details.github_pull_requests_id
+      FROM build_version_details AS details
+      JOIN build_versions AS versions ON versions.id=details.build_versions_id
+      WHERE versions.version_type_id='build' AND versions.version=146
+    `);
+    assert.deepEqual(postCutoff.rows, [{
+      title: "Short 146",
+      description: "Detailed 146",
+      github_pull_requests_id: null
+    }]);
     const apk11 = await pool.query(`
       SELECT pulls.pull_number, refs.target_commit
       FROM build_versions AS versions
@@ -259,7 +271,14 @@ async function normalizedRows(pool) {
     pool.query("SELECT id, work_key, status, finalized_at_utc FROM release_works ORDER BY id"),
     pool.query("SELECT id, release_works_id, pull_number, merge_commit_sha FROM github_pull_requests ORDER BY id"),
     pool.query("SELECT id, release_works_id, version_type_id, version, short_changes FROM build_versions WHERE version=901 ORDER BY id"),
-    pool.query("SELECT id, build_versions_id, github_pull_requests_id, title, description, display_order FROM build_version_details ORDER BY id"),
+    pool.query(`
+      SELECT details.id, details.build_versions_id, details.github_pull_requests_id,
+        details.title, details.description, details.display_order
+      FROM build_version_details AS details
+      JOIN build_versions AS versions ON versions.id=details.build_versions_id
+      WHERE versions.version_type_id='build' AND versions.version=901
+      ORDER BY details.id
+    `),
     pool.query("SELECT build_versions_id, version_type_id, github_pull_requests_id FROM build_version_pull_requests ORDER BY build_versions_id"),
     pool.query("SELECT id, version_type_id, version, source_branch, source_commit, target_branch, target_commit FROM build_version_refs ORDER BY id")
   ]);

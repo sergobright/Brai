@@ -479,6 +479,37 @@ async function applyInTransaction(client, manifest) {
     versionIds.push(parent.id);
   }
 
+  const legacyWithoutEvidence = await client.query(`
+    SELECT version_type_id, version
+    FROM build_versions AS versions
+    WHERE NOT EXISTS (
+      SELECT 1 FROM build_version_details AS details
+      WHERE details.build_versions_id=versions.id
+    )
+      AND (
+        length(btrim(COALESCE(versions.short_changes, ''))) = 0
+        OR length(btrim(COALESCE(versions.detailed_changes, ''))) = 0
+      )
+    ORDER BY version_type_id, version
+  `);
+  if (legacyWithoutEvidence.rowCount) {
+    throw new Error(`legacy versions lack detail evidence: ${legacyWithoutEvidence.rows.map((row) => versionKey(row.version_type_id, row.version)).join(", ")}`);
+  }
+  await client.query(`
+    INSERT INTO build_version_details (
+      build_versions_id, github_pull_requests_id, title, description,
+      display_order, created_at_utc, updated_at_utc
+    )
+    SELECT versions.id, NULL, btrim(versions.short_changes), btrim(versions.detailed_changes),
+      1, versions.released_at_utc, versions.released_at_utc
+    FROM build_versions AS versions
+    WHERE NOT EXISTS (
+      SELECT 1 FROM build_version_details AS details
+      WHERE details.build_versions_id=versions.id
+    )
+    ON CONFLICT (build_versions_id, display_order) DO NOTHING
+  `);
+
   for (const [versionTypeId, maximum] of Object.entries(maxVersionByType(manifest.versions))) {
     await client.query(`
       INSERT INTO build_version_counters (version_type_id, last_version) VALUES ($1,$2)
@@ -523,9 +554,8 @@ async function syncRefs(client, buildVersionId, version) {
 async function validateAppliedRows(client, versionIds) {
   const missingDetails = await client.query(`
     SELECT versions.id FROM build_versions AS versions
-    WHERE versions.id=ANY($1::int[])
-      AND NOT EXISTS (SELECT 1 FROM build_version_details AS details WHERE details.build_versions_id=versions.id)
-  `, [versionIds]);
+    WHERE NOT EXISTS (SELECT 1 FROM build_version_details AS details WHERE details.build_versions_id=versions.id)
+  `);
   if (missingDetails.rowCount) throw new Error(`versions without details: ${missingDetails.rows.map((row) => row.id).join(", ")}`);
   const inconsistent = await client.query(`
     SELECT details.id
