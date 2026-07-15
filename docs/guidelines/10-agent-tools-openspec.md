@@ -3,6 +3,8 @@
 - Use OpenSpec for planned requirement changes before implementation.
 - Accepted requirements live in `openspec/specs/`.
 - Proposed changes live in `openspec/changes/<change-id>/`.
+- `openspec/changes/` intentionally stays local and ignored. A task that owns a change records its id in `.brai-task/task.json` through `--openspec-change` at starter/follow-up or `node scripts/brai-task.mjs link-openspec <id>` before implementation.
+- After the linked branch is accepted and merged, rerun `deploy/scripts/accept-preview.sh <codex-branch>` while its worktree exists. The idempotent post-merge step moves only linked, terminal-ready changes into the canonical local `openspec/changes/archive/`; it refuses changes with unfinished substantive tasks.
 - Architecture Decision Records live in `docs/adr/` and record decision rationale, alternatives, consequences, and confirmation checks.
 - Create or update an ADR when a change affects architecture, data, security, deployment, dependencies, public contracts, or multiple modules.
 - Link OpenSpec design/proposal files to related ADRs instead of duplicating long rationale.

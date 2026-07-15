@@ -23,6 +23,7 @@ import { hasMarkdownSyntax, MarkdownContent } from "@/shared/ui/markdown-content
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/shared/ui/input-group";
 import { ScrollArea } from "@/shared/ui/scroll-area";
 import { MobileDetailFloatingCloseButton } from "../../chrome/AppChrome";
+import { PageWorkspace } from "../../chrome/PageWorkspace";
 import { cx, fitTextareaHeight, focusEditableEnd, plainEditableText, setPlainEditableText } from "../../appUtils";
 import { useMobileSheetDrag } from "../../hooks/useMobileSheetDrag";
 import { useMobileSheetTop } from "../../hooks/useMobileSheetTop";
@@ -37,8 +38,7 @@ import {
   type DetailPanelTab,
 } from "../DetailPanelTabs";
 import { MobileCreateComposer, mobileCreateDraftHasText, type MobileCreateDraft } from "../MobileCreateComposer";
-import { ActionsInfoPanel } from "../actions/ActionsInfoPanel";
-import { ACTION_DELETE_REVEAL_WIDTH, ACTION_ROW_SERVICE_SELECTOR, ACTIONS_SPLIT_DEFAULT_PERCENT, ACTIONS_SPLIT_MIN_PERCENT, clampActionsSplitPercent, loadActivityMarkdownPreviewMode, saveActivityMarkdownPreviewMode } from "../actions/constants";
+import { ACTION_DELETE_REVEAL_WIDTH, ACTION_ROW_SERVICE_SELECTOR, loadActivityMarkdownPreviewMode, saveActivityMarkdownPreviewMode } from "../actions/constants";
 import { WorkflowAiProcessPanel } from "../WorkflowAiProcessPanel";
 
 type DetailTitleFocus = "end" | null;
@@ -75,20 +75,14 @@ export function InboxSection({
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
   const [mobileEditItemId, setMobileEditItemId] = useState<string | null>(null);
   const [openDeleteItemId, setOpenDeleteItemId] = useState<string | null>(null);
-  const [splitPercent, setSplitPercent] = useState(ACTIONS_SPLIT_DEFAULT_PERCENT);
   const [titleDrafts, setTitleDrafts] = useState<Record<string, string>>({});
   const [detailTitleFocusRequest, setDetailTitleFocusRequest] = useState(0);
-  const workspaceRef = useRef<HTMLDivElement | null>(null);
-  const splitDragStyleRef = useRef<{ userSelect: string } | null>(null);
   const desktopInputRef = useRef<HTMLInputElement | null>(null);
-  const suppressMobileCreatePopRef = useRef(false);
   const selectedItem = selectedItemId ? state.inbox.find((item) => item.id === selectedItemId) : null;
   const mobileEditItem = mobileEditItemId ? state.inbox.find((item) => item.id === mobileEditItemId) : null;
   const visibleOpenDeleteItemId =
     openDeleteItemId && state.inbox.some((item) => item.id === openDeleteItemId) ? openDeleteItemId : null;
   const mobileOverlayOpen = mobileCreateOpen || mobileEditItem != null;
-  const desktopSidePanelOpen = true;
-  const mobileSheetTop = useMobileSheetTop();
   const mobileCreateHasDraft = mobileCreateDraftHasText(mobileCreateDraft);
   const MobileCreateFabIcon = mobileCreateHasDraft ? FilePenLine : Plus;
   const mobileCreateFabLabel = mobileCreateHasDraft ? "Продолжить черновик входящего" : "Добавить входящее";
@@ -130,17 +124,8 @@ export function InboxSection({
     setMobileCreateOpen(true);
   }
 
-  const closeMobileCreate = useCallback(() => {
-    if (window.history.state?.braiMobileInboxCreate) {
-      suppressMobileCreatePopRef.current = true;
-      window.history.back();
-    }
-    setMobileCreateOpen(false);
-  }, []);
-
   function openMobileEdit(item: InboxItem) {
     setOpenDeleteItemId(null);
-    setSplitPercent(ACTIONS_SPLIT_DEFAULT_PERCENT);
     setSelectedItemId(item.id);
     setMobileEditItemId(item.id);
   }
@@ -159,7 +144,11 @@ export function InboxSection({
   }
 
   function selectItem(itemId: string, focusDetailTitle: DetailTitleFocus = "end") {
-    if (selectedItemId !== itemId) setSplitPercent(ACTIONS_SPLIT_DEFAULT_PERCENT);
+    if (isMobileNavigationViewport()) {
+      const item = state.inbox.find((candidate) => candidate.id === itemId);
+      if (item) openMobileEdit(item);
+      return;
+    }
     setSelectedItemId(itemId);
     if (focusDetailTitle === "end") setDetailTitleFocusRequest((current) => current + 1);
   }
@@ -167,84 +156,6 @@ export function InboxSection({
   async function submitMobile(title: string, descriptionMd: string) {
     await onCreate(title, descriptionMd);
     onMobileCreateDraftChange({ title: "", descriptionMd: "" });
-    closeMobileCreate();
-  }
-
-  useEffect(() => {
-    if (!mobileCreateOpen) return undefined;
-    if (window.history.state?.braiMobileInboxCreate) {
-      window.history.replaceState({ ...window.history.state, braiMobileInboxCreate: true }, "", window.location.href);
-    } else {
-      window.history.pushState({ ...window.history.state, braiMobileInboxCreate: true }, "", window.location.href);
-    }
-
-    function onPopState() {
-      if (suppressMobileCreatePopRef.current) {
-        suppressMobileCreatePopRef.current = false;
-        return;
-      }
-      setMobileCreateOpen(false);
-    }
-
-    window.addEventListener("popstate", onPopState);
-    return () => window.removeEventListener("popstate", onPopState);
-  }, [mobileCreateOpen]);
-
-  useEffect(() => {
-    if (!mobileCreateOpen) return undefined;
-    return installAndroidBackHandler(() => {
-      closeMobileCreate();
-      return true;
-    });
-  }, [closeMobileCreate, mobileCreateOpen]);
-
-  function onSplitPointerDown(event: PointerEvent<HTMLButtonElement>) {
-    const workspace = workspaceRef.current;
-    if (!workspace) return;
-    event.preventDefault();
-    splitDragStyleRef.current = {
-      userSelect: document.body.style.userSelect,
-    };
-    document.body.style.userSelect = "none";
-    event.currentTarget.setPointerCapture(event.pointerId);
-  }
-
-  function onSplitPointerMove(event: PointerEvent<HTMLButtonElement>) {
-    if (!event.currentTarget.hasPointerCapture(event.pointerId)) return;
-    const workspace = workspaceRef.current;
-    if (!workspace) return;
-    const bounds = workspace.getBoundingClientRect();
-    const rawPercent = ((event.clientX - bounds.left) / bounds.width) * 100;
-    setSplitPercent(clampActionsSplitPercent(rawPercent));
-  }
-
-  function onSplitPointerEnd(event: PointerEvent<HTMLButtonElement>) {
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId);
-    }
-    const previous = splitDragStyleRef.current;
-    if (!previous) return;
-    document.body.style.userSelect = previous.userSelect;
-    splitDragStyleRef.current = null;
-  }
-
-  function onSplitKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
-    if (event.key === "ArrowLeft") {
-      event.preventDefault();
-      setSplitPercent((current) => clampActionsSplitPercent(current - 2));
-    }
-    if (event.key === "ArrowRight") {
-      event.preventDefault();
-      setSplitPercent((current) => clampActionsSplitPercent(current + 2));
-    }
-    if (event.key === "Home") {
-      event.preventDefault();
-      setSplitPercent(ACTIONS_SPLIT_MIN_PERCENT);
-    }
-    if (event.key === "End") {
-      event.preventDefault();
-      setSplitPercent(100 - ACTIONS_SPLIT_MIN_PERCENT);
-    }
   }
 
   return (
@@ -253,22 +164,11 @@ export function InboxSection({
       aria-label="Входящие"
       onClickCapture={closeOpenDeleteFromOutside}
     >
-      <div
-        ref={workspaceRef}
-        className={cx(
-          "actions-workspace relative grid h-full min-h-0 min-w-0 items-stretch gap-[18px] max-[860px]:block",
-          desktopSidePanelOpen ? "has-detail grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-0 overflow-hidden" : "grid-cols-[minmax(0,1fr)]",
-        )}
-        style={
-          desktopSidePanelOpen
-            ? ({
-                "--actions-list-percent": `${splitPercent}%`,
-                gridTemplateColumns: "minmax(0,var(--actions-list-percent)) minmax(0,calc(100% - var(--actions-list-percent)))",
-              } as CSSProperties)
-            : undefined
-        }
-      >
-        <ScrollArea className="actions-list-pane h-full min-h-0 min-w-0 max-[860px]:[&>[data-slot=scroll-area-viewport]>div]:pb-24">
+      <PageWorkspace
+        className="actions-workspace relative"
+        mainScroll={false}
+        panelScroll={false}
+        main={<ScrollArea className="actions-list-pane h-full min-h-0 min-w-0 max-[860px]:[&>[data-slot=scroll-area-viewport]>div]:pb-24">
           <form className="sticky top-0 z-[4] mb-[18px] max-[860px]:hidden" onSubmit={submitDesktop}>
             <InputGroup className="actions-add-form">
               <InputGroupInput
@@ -308,45 +208,20 @@ export function InboxSection({
               />
             )}
           </div>
-        </ScrollArea>
-
-        {desktopSidePanelOpen ? (
-          <>
-            <button
-              type="button"
-              className="actions-split-resizer group absolute inset-y-0 z-[5] hidden w-6 -translate-x-1/2 touch-none !cursor-ew-resize place-items-stretch justify-center border-0 bg-transparent px-[11px] py-0 max-[860px]:hidden min-[861px]:grid [&_*]:!cursor-ew-resize"
-              style={{ left: `${splitPercent}%` }}
-              aria-label="Изменить ширину панелей"
-              aria-valuemin={ACTIONS_SPLIT_MIN_PERCENT}
-              aria-valuemax={100 - ACTIONS_SPLIT_MIN_PERCENT}
-              aria-valuenow={Math.round(splitPercent)}
-              role="slider"
-              onPointerDown={onSplitPointerDown}
-              onPointerMove={onSplitPointerMove}
-              onPointerUp={onSplitPointerEnd}
-              onPointerCancel={onSplitPointerEnd}
-              onKeyDown={onSplitKeyDown}
-              data-inbox-split-divider
-            >
-              <span className="block h-full w-px bg-border transition-colors group-hover:bg-primary" aria-hidden="true" />
-            </button>
-            {selectedItem && !mobileEditItem ? (
-              <InboxDetailEditor
-                key={selectedItem.id}
-                item={selectedItem}
-                titleDraft={titleDrafts[selectedItem.id]}
-                mode="desktop"
-                focusTitleRequest={detailTitleFocusRequest}
-                onClose={() => setSelectedItemId(null)}
-                onTitleDraftChange={setTitleDraft}
-                onAutosaveDetails={onAutosaveDetails}
-              />
-            ) : (
-              <ActionsInfoPanel label="Информация о входящих" />
-            )}
-          </>
-        ) : null}
-      </div>
+        </ScrollArea>}
+        temporaryPanel={selectedItem && !mobileEditItem ? (
+          <InboxDetailEditor
+            key={selectedItem.id}
+            item={selectedItem}
+            titleDraft={titleDrafts[selectedItem.id]}
+            mode="desktop"
+            focusTitleRequest={detailTitleFocusRequest}
+            onClose={() => setSelectedItemId(null)}
+            onTitleDraftChange={setTitleDraft}
+            onAutosaveDetails={onAutosaveDetails}
+          />
+        ) : undefined}
+      />
 
       {!mobileOverlayOpen && !dockOverflowOpen ? (
         <button
@@ -361,22 +236,16 @@ export function InboxSection({
       ) : null}
 
       {mobileCreateOpen ? (
-        <div
-          className="actions-mobile-overlay fixed inset-0 z-[80] hidden items-end bg-foreground/25 pb-[env(safe-area-inset-bottom)] max-[860px]:flex dark:bg-background/80"
-          style={{ top: mobileSheetTop } as CSSProperties}
-          data-nav-swipe-exclusion
-          onClick={closeMobileCreate}
-        >
           <MobileCreateComposer
             draft={mobileCreateDraft}
             titleLabel="Добавить входящее"
             descriptionLabel="Описание входящего"
             submitLabel="Добавить входящее"
-            onCancel={closeMobileCreate}
+            historyStateKey="braiMobileInboxCreate"
+            onCancel={() => setMobileCreateOpen(false)}
             onDraftChange={onMobileCreateDraftChange}
             onSubmit={submitMobile}
           />
-        </div>
       ) : null}
 
       {mobileEditItem ? (
@@ -793,6 +662,7 @@ function InboxDetailEditor({
     backdropRef,
     backdropStyle,
     closeWithAnimation,
+    gestureRef,
     resetOpen,
     sheetDragHandlers,
     sheetRef,
@@ -1084,7 +954,7 @@ function InboxDetailEditor({
       <div className={infoChromeInset}>
         <DetailPanelTabBar activeTab={activeTab} className="mt-0" onChange={setActiveTab} />
       </div>
-      <ScrollArea className="actions-detail-description-scroll min-h-0 w-full min-w-0" role="tabpanel">
+      <ScrollArea className="actions-detail-description-scroll min-h-0 w-full min-w-0" contentInset="none" role="tabpanel">
         <div className={cx("min-h-full w-full min-w-0", infoScrollInset)}>
           {detailTitle}
           <div className="h-px bg-border" aria-hidden="true" />
@@ -1106,15 +976,14 @@ function InboxDetailEditor({
 
   if (mode === "mobile") {
     return (
-      <div className="actions-detail-backdrop fixed inset-0 z-[84] hidden max-[860px]:block" data-nav-swipe-exclusion>
+      <div ref={gestureRef} className="actions-detail-backdrop fixed inset-0 z-[84] hidden max-[860px]:block" style={{ top: mobileSheetTop } as CSSProperties} data-nav-swipe-exclusion {...sheetDragHandlers}>
         <div ref={backdropRef} className="absolute inset-0 bg-foreground/20 dark:bg-background/80" style={backdropStyle} aria-hidden="true" />
         <aside
           ref={sheetRef}
-          className={cx("actions-detail-panel mobile absolute inset-x-0 bottom-0 top-[env(safe-area-inset-top)] z-[1] grid min-h-0 min-w-0 gap-0 overflow-hidden rounded-t-2xl border-t border-border bg-card pb-[env(safe-area-inset-bottom)] pt-1 shadow-xl animate-[mobile-detail-sheet-in_180ms_ease-out] will-change-transform", panelRows, panelPadding)}
-          style={{ ...mobileSheetStyle, top: mobileSheetTop } as CSSProperties}
+          className={cx("actions-detail-panel mobile absolute inset-x-0 bottom-0 top-[env(safe-area-inset-top)] z-[1] grid min-h-0 min-w-0 gap-0 overflow-hidden rounded-t-2xl border-t border-border bg-card pb-[env(safe-area-inset-bottom)] pt-1 shadow-xl will-change-transform", panelRows, panelPadding)}
+          style={{ ...mobileSheetStyle, top: 0 } as CSSProperties}
           aria-label="Редактирование входящего"
           onKeyDown={onKeyDown}
-          {...sheetDragHandlers}
         >
           {editorBody}
         </aside>

@@ -316,6 +316,7 @@ if [[ -n "$MERGED_PR_NUMBER" ]]; then
   MERGED_PR_URL="$(gh pr view "$MERGED_PR_NUMBER" --json url --jq ".url")"
   echo "Preview branch already accepted: $MERGED_PR_URL"
   write_acceptance_marker "merged" "$MERGED_PR_NUMBER" "$MERGED_PR_URL"
+  run_brai_node "$ROOT/scripts/brai-task.mjs" archive-accepted-openspec
   exit 0
 fi
 
@@ -353,6 +354,7 @@ fi
 if [[ "$PR_STATE" == "MERGED" ]]; then
   echo "Preview branch already accepted: $PR_URL"
   write_acceptance_marker "merged" "$PR_NUMBER" "$PR_URL"
+  run_brai_node "$ROOT/scripts/brai-task.mjs" archive-accepted-openspec
   exit 0
 fi
 

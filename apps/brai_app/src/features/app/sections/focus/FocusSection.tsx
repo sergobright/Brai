@@ -18,6 +18,7 @@ import type { FocusBackgroundMode, FocusContextPanel } from "../../appModel";
 import { SECTION_GRID_CLASS } from "../../appModel";
 import { cx } from "../../appUtils";
 import { EmptyState, MobileContextSheet } from "../../chrome/AppChrome";
+import { PageWorkspace } from "../../chrome/PageWorkspace";
 import { GoalSection } from "../goal/GoalSection";
 import { historyGroupsView, timerClockParts } from "./focusModel";
 import { FocusHistoryTable } from "./FocusHistoryTable";
@@ -76,21 +77,13 @@ export function FocusSection({
     </ScrollArea>
   );
 
-  return (
-    <section
-      className={cx(
-        "focus-section relative isolate grid h-full min-h-0 gap-7 max-[860px]:block",
-        contextPanel === "none"
-          ? "grid-cols-[minmax(0,1fr)] place-items-center overflow-hidden max-[860px]:overflow-visible"
-          : "grid-cols-[minmax(0,1fr)_minmax(0,1fr)] overflow-hidden max-[860px]:overflow-visible",
-      )}
-      aria-label="Фокус"
-    >
-      {timerPane}
-      {contextPanel === "history" ? <FocusDesktopPanel label={FOCUS_HISTORY_LABEL}><HistorySection history={history} goal={goal} onDeleteSession={onDeleteSession} onEditInterval={onEditInterval} onEditSession={onEditSession} /></FocusDesktopPanel> : null}
-      {contextPanel === "goal" ? <FocusDesktopPanel label={FOCUS_GOAL_LABEL}><GoalSection goal={goal} todayKey={todayKey} /></FocusDesktopPanel> : null}
-    </section>
-  );
+  const panel = contextPanel === "history"
+    ? <FocusDesktopPanel label={FOCUS_HISTORY_LABEL}><HistorySection history={history} goal={goal} onDeleteSession={onDeleteSession} onEditInterval={onEditInterval} onEditSession={onEditSession} /></FocusDesktopPanel>
+    : contextPanel === "goal"
+      ? <FocusDesktopPanel label={FOCUS_GOAL_LABEL}><GoalSection goal={goal} todayKey={todayKey} /></FocusDesktopPanel>
+      : null;
+
+  return <PageWorkspace className="focus-section relative isolate" main={timerPane} mainScroll={false} panelScroll={false} persistentPanel={panel} />;
 }
 
 export function FocusContextPanelSheet({
@@ -124,10 +117,10 @@ export function FocusContextPanelSheet({
 
 function FocusDesktopPanel({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <aside className="focus-context-pane relative z-10 grid h-full min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)] max-[860px]:hidden" aria-label={label} data-galaxy-interaction-block>
+    <div className="focus-context-pane relative z-10 grid h-full min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)] pl-7 max-[860px]:hidden" aria-label={label} data-galaxy-interaction-block>
       <h2 className="mb-3 mt-0 text-xl font-semibold leading-tight">{label}</h2>
       <ScrollArea className="min-h-0">{children}</ScrollArea>
-    </aside>
+    </div>
   );
 }
 

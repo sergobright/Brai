@@ -13,12 +13,23 @@
 
 ## Layout и navigation
 
-- Основная навигация: `Действия`, `Фокус`, `Цель`.
+- Док-меню — центральная основная навигация; Дроп-меню — меню аватара на desktop и три точки слева на mobile; Контекст-меню — крайняя узкая desktop-панель и мобильная сетка 3×4.
+- Элементы страницы называются: левый рейл, верхний блок, главная область и панель. Не называть левый рейл контекст-меню или панелью страницы.
+- Основная навигация строится из единого массива разделов для desktop и mobile.
 - `Настройки` открываются как full app section из profile dropdown.
 - `/focus` является canonical route для таймера и History.
 - `/timer*` и `/history*` retired live URLs и не должны возвращаться без отдельного принятого решения.
 - Mobile использует bottom navigation и horizontal tab swipe.
-- Desktop использует left rail/dock и full workspace beside rail, без искусственного centered max-width shell.
+- Desktop shell uses the full workspace beside navigation rails; the shared page workspace, not each section, centers panel-less content at the accepted maximum width.
+- Authenticated product sections use the shared page workspace defined by `openspec/specs/next-capacitor-client/spec.md`; do not copy header, main/panel split, or mobile sheet shells into individual sections.
+- Visible page-main and page-panel scrolling is owned by exactly one shared local `ScrollArea`: normally by `PageWorkspace`, or by an explicit content-owned `ScrollArea` when a specialized list/canvas already owns the viewport. Raw `overflow-auto`/`overflow-y-auto` scroll owners and nested scrolling viewports in the page-shell are forbidden because they bypass or duplicate the standard scrollbar geometry and behavior.
+- Without a panel, page content is centered at a 768px maximum; with a panel, desktop uses the shared 50/50 region and mobile uses the shared sheet below the fixed opaque header.
+- Page-specific behavior is supplied through the central desktop/mobile rail and panel registry. Exceptions wrap the shared shell instead of modifying or copying its internals.
+- Fullscreen product modes use the shared page workspace's explicit full-bleed override; local width or inset bypasses are forbidden.
+- Dismissible mobile sheets and drawers use the shared gesture primitive as the only transform owner for enter, drag, settle, and exit. Do not combine it with component keyframes.
+- Backdrop taps and directional backdrop swipes dismiss the active mobile layer. Upper Dock layers remain clipped behind the visible lower layer during motion.
+- Mobile Dock edge controls remain fixed and visible while overflow layers are open. The two Dock rows reserve equal edge lanes and share the same centered four-button geometry; account content must stay above the main Dock and use the local `ScrollArea` only when the viewport is too short.
+- The second-level Dock owns its `SunMedium` control inside the same transformed sheet; the control must enter and leave with that row rather than waiting for a separately positioned overlay to unmount.
 - В разделе Goal/`Цели фокусировки` длительности показывай компактно: `Hч Mм`; часы без ведущего нуля, минуты не показываются при `0`.
 
 ## Styling

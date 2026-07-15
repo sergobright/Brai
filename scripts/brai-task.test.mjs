@@ -7,6 +7,7 @@ import path from "node:path";
 
 import {
   CODEX_BRANCH_RE,
+  archiveOpenSpecChange,
   analyzeHookInput,
   classifyDelivery,
   deliveryHandoff,
@@ -25,6 +26,7 @@ import {
   isWriteLikeCommand,
   linkDependencyDirs,
   parseHookInput,
+  parseOpenSpecChangeArgs,
   readPreviewSlot,
   taskStartGuidance,
   taskWorktreeParent,
@@ -62,6 +64,14 @@ test("valid codex task branch names are strict", () => {
   assert.equal(CODEX_BRANCH_RE.test("codex/Focus"), false);
   assert.equal(CODEX_BRANCH_RE.test("dev"), false);
   assert.equal(CODEX_BRANCH_RE.test("codex/"), false);
+});
+
+test("task OpenSpec options are repeatable and deduplicated", () => {
+  assert.deepEqual(
+    parseOpenSpecChangeArgs(["close-openspec", "--openspec-change", "one", "--openspec-change", "two", "--openspec-change", "one"]),
+    { positional: ["close-openspec"], openspecChanges: ["one", "two"] },
+  );
+  assert.throws(() => parseOpenSpecChangeArgs(["--openspec-change", "../unsafe"]), /Invalid OpenSpec change id/);
 });
 
 test("write-like shell commands are detected", () => {
@@ -1142,7 +1152,7 @@ test("follow-up keeps the original task base after origin-main advances", () => 
   git(["update-ref", "refs/remotes/origin/main", "HEAD"], repo);
   git(["checkout", "codex/foo"], repo);
 
-  const result = spawnSync(process.execPath, [script, "follow-up"], {
+  const result = spawnSync(process.execPath, [script, "follow-up", "--openspec-change", "change-a"], {
     cwd: repo,
     encoding: "utf8",
     env: { ...process.env, CODEX_THREAD_ID: "" },
@@ -1151,6 +1161,34 @@ test("follow-up keeps the original task base after origin-main advances", () => 
   const marker = JSON.parse(fs.readFileSync(path.join(repo, ".brai-task", "task.json"), "utf8"));
   assert.equal(marker.mode, "follow-up");
   assert.equal(marker.base, base);
+  assert.deepEqual(marker.openspecChanges, ["change-a"]);
+});
+
+test("local OpenSpec archive closes terminal handoff tasks and is idempotent", () => {
+  const root = tempRoot("brai-openspec-archive-");
+  const canonical = path.join(root, "brai");
+  const worktree = path.join(canonical, ".codex-worktrees", "task");
+  fs.mkdirSync(canonical, { recursive: true });
+  fs.writeFileSync(path.join(canonical, "package.json"), "{}\n");
+  const tasks = path.join(worktree, "openspec", "changes", "ready", "tasks.md");
+  fs.mkdirSync(path.dirname(tasks), { recursive: true });
+  fs.writeFileSync(tasks, "- [x] Implement.\n- [ ] Run verified preview handoff.\n- [ ] Archive this OpenSpec change.\n");
+
+  archiveOpenSpecChange("ready", worktree);
+  const archived = path.join(canonical, "openspec", "changes", "archive", "2026-07-15-ready", "tasks.md");
+  assert.equal(fs.existsSync(archived), true);
+  assert.match(fs.readFileSync(archived, "utf8"), /\[x\] Run verified preview handoff/);
+  assert.doesNotThrow(() => archiveOpenSpecChange("ready", worktree));
+});
+
+test("local OpenSpec archive refuses unfinished substantive work", () => {
+  const root = tempRoot("brai-openspec-archive-blocked-");
+  const tasks = path.join(root, "openspec", "changes", "blocked", "tasks.md");
+  fs.mkdirSync(path.dirname(tasks), { recursive: true });
+  fs.writeFileSync(tasks, "- [x] Draft.\n- [ ] Verify live runtime schema.\n- [ ] Archive this OpenSpec change.\n");
+
+  assert.throws(() => archiveOpenSpecChange("blocked", root), /Verify live runtime schema/);
+  assert.equal(fs.existsSync(path.join(root, "openspec", "changes", "blocked")), true);
 });
 
 test("recover-follow-up transfers a lost-thread marker and keeps its frozen base", () => {
@@ -1961,6 +1999,8 @@ test("delivery workflow releases preview slots for unmerged closed codex PRs", (
 });
 
 test("delivery handoff writes infra-docs receipt only for merged PRs", () => {
+  const script = fs.readFileSync(new URL("./brai-task.mjs", import.meta.url), "utf8");
+  assert.ok(script.indexOf("writeDeliveryReceipt(receipt, taskRoot)") < script.indexOf("finalizeMergedNoPreviewAcceptance(branch, taskRoot)"));
   const fixture = setupInfraDocsHandoffFixture({ prState: "MERGED", mergedAt: "2026-06-26T00:00:00Z" });
   const result = runDeliveryHandoffFixture(fixture);
 
@@ -2436,6 +2476,8 @@ test("accept preview checks verified preview before PR actions", () => {
   assert.match(script, /Brai task state must not be a symlink/);
   assert.match(script, /mktemp "\$dir\/\.acceptance-write\.XXXXXX"/);
   assert.match(script, /write_acceptance_marker/);
+  assert.match(script, /archive-accepted-openspec/);
+  assert.ok(script.indexOf('if [[ -n "$MERGED_PR_NUMBER" ]]') < script.indexOf("archive-accepted-openspec"));
   assert.match(script, /acceptance\.json/);
   assert.match(script, /--cancel/);
   assert.match(script, /gh pr merge "\$pr_number" --disable-auto/);
