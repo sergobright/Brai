@@ -7,6 +7,11 @@
 {{ brai_deploy_user }} ALL=(root) NOPASSWD: /bin/systemctl restart brai-temporal-worker.service
 {{ brai_deploy_user }} ALL=(root) NOPASSWD: /usr/bin/systemd-run --unit=brai-temporal-worker-delayed-restart --on-active=* --collect /bin/systemctl restart brai-temporal-worker.service
 {{ brai_deploy_user }} ALL=(root) NOPASSWD: {{ brai_goal_agent_runtime_prepare }} ""
+{{ brai_deploy_user }} ALL=(root) NOPASSWD: {{ brai_auth_runtime_helper }} deploy *
+{{ brai_deploy_user }} ALL=(root) NOPASSWD: {{ brai_auth_runtime_helper }} route-enable *
+{{ brai_deploy_user }} ALL=(root) NOPASSWD: {{ brai_auth_runtime_helper }} route-disable *
+{{ brai_deploy_user }} ALL=(root) NOPASSWD: {{ brai_auth_runtime_helper }} rollback *
+{{ brai_deploy_user }} ALL=(root) NOPASSWD: {{ brai_auth_runtime_helper }} remove *
 {{ brai_codex_maintenance_user }} ALL=(root) NOPASSWD: {{ brai_goal_agent_runtime_prepare }} ""
 {{ brai_deploy_user }} ALL=({{ brai_service_user }}) NOPASSWD: {{ brai_env_root }}/{{ brai_envs.prod.path }}/source/deploy/scripts/create-inbox-operation.sh --local *
 {{ brai_deploy_user }} ALL=({{ brai_service_user }}) NOPASSWD: {{ brai_env_root }}/{{ brai_envs.prod.path }}/source/deploy/scripts/create-operation-activity.sh --local *
@@ -17,6 +22,8 @@
 {{ brai_deploy_user }} ALL=(root) NOPASSWD: {{ brai_repo }}/deploy/scripts/apply-main-infra.sh --apply brai-caddy
 {{ brai_deploy_user }} ALL=(root) NOPASSWD: {{ brai_repo }}/deploy/scripts/apply-main-infra.sh --check brai-vault
 {{ brai_deploy_user }} ALL=(root) NOPASSWD: {{ brai_repo }}/deploy/scripts/apply-main-infra.sh --apply brai-vault
+{{ brai_deploy_user }} ALL=(root) NOPASSWD: {{ brai_repo }}/deploy/scripts/apply-main-infra.sh --check brai-auth-bootstrap
+{{ brai_deploy_user }} ALL=(root) NOPASSWD: {{ brai_repo }}/deploy/scripts/apply-main-infra.sh --apply brai-auth-bootstrap
 {% for maintainer in brai_operation_maintainers %}
 {{ maintainer }} ALL=({{ brai_service_user }}) NOPASSWD: {{ brai_env_root }}/{{ brai_envs.prod.path }}/source/deploy/scripts/create-inbox-operation.sh --local *
 {{ maintainer }} ALL=({{ brai_service_user }}) NOPASSWD: {{ brai_env_root }}/{{ brai_envs.prod.path }}/source/deploy/scripts/create-operation-activity.sh --local *
@@ -28,6 +35,8 @@
 {{ maintainer }} ALL=(root) NOPASSWD: {{ brai_repo }}/deploy/scripts/apply-main-infra.sh --apply brai-caddy
 {{ maintainer }} ALL=(root) NOPASSWD: {{ brai_repo }}/deploy/scripts/apply-main-infra.sh --check brai-vault
 {{ maintainer }} ALL=(root) NOPASSWD: {{ brai_repo }}/deploy/scripts/apply-main-infra.sh --apply brai-vault
+{{ maintainer }} ALL=(root) NOPASSWD: {{ brai_repo }}/deploy/scripts/apply-main-infra.sh --check brai-auth-bootstrap
+{{ maintainer }} ALL=(root) NOPASSWD: {{ brai_repo }}/deploy/scripts/apply-main-infra.sh --apply brai-auth-bootstrap
 {% endfor %}
 {% for name, env in brai_envs.items() %}
 {{ brai_deploy_user }} ALL=(root) NOPASSWD: /bin/systemctl restart {{ env.service }}

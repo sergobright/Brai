@@ -663,6 +663,10 @@
         - brai-storage-maintenance
         - targeted-infra-apply
 
+    - name: Install inert Brai auth host bootstrap
+      ansible.builtin.import_tasks: tasks/brai-auth-bootstrap.yml
+      tags: [brai-auth-bootstrap]
+
     - name: Create CI upload root
       ansible.builtin.file:
         path: "{{ brai_env_root }}/ci-uploads"
@@ -1314,7 +1318,9 @@
           changed_when: false
           when: brai_caddy_validate_file.path is defined
       check_mode: false
-      tags: [brai-caddy]
+      tags:
+        - brai-caddy
+        - brai-auth-bootstrap
 
     - name: Check unmanaged Brai production Caddy routes before managed install
       ansible.builtin.command:
@@ -1366,7 +1372,9 @@
       changed_when: (brai_caddy_prune_check.stdout | from_json).changed
       check_mode: false
       when: ansible_check_mode
-      tags: [brai-caddy]
+      tags:
+        - brai-caddy
+        - brai-auth-bootstrap
 
     - name: Remove unmanaged Brai production Caddy routes before managed install
       ansible.builtin.command:
@@ -1420,7 +1428,9 @@
       notify:
         - Validate Caddy
         - Reload Caddy
-      tags: [brai-caddy]
+      tags:
+        - brai-caddy
+        - brai-auth-bootstrap
 
     - name: Install Brai Caddy routes
       ansible.builtin.blockinfile:
@@ -1431,7 +1441,9 @@
       notify:
         - Validate Caddy
         - Reload Caddy
-      tags: [brai-caddy]
+      tags:
+        - brai-caddy
+        - brai-auth-bootstrap
 
     - name: Install deploy user sudoers boundary
       ansible.builtin.template:
@@ -1446,6 +1458,7 @@
         - brai-goal-agents
         - brai-storage-maintenance
         - brai-supavisor-maintenance
+        - brai-auth-bootstrap
         - targeted-infra-apply
 
   handlers:
