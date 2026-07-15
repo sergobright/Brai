@@ -29,7 +29,7 @@ Each procedural rule must have one canonical home. Other files may only route to
 | Android, web, OTA, releases | [05-android-web-ota-releases.md](guidelines/05-android-web-ota-releases.md) |
 | Tests, security, QA | [06-testing-security-qa.md](guidelines/06-testing-security-qa.md) |
 | Git, versions, repository sync | [07-git-versioning-repository-sync.md](guidelines/07-git-versioning-repository-sync.md) |
-| Refactoring | [08-refactoring-ponytail.md](guidelines/08-refactoring-ponytail.md) |
+| Ponytail (только по явному запросу владельца проекта) | [08-refactoring-ponytail.md](guidelines/08-refactoring-ponytail.md) |
 | Local services and ops | [09-local-services-ops.md](guidelines/09-local-services-ops.md) |
 | Agent tools and OpenSpec | [10-agent-tools-openspec.md](guidelines/10-agent-tools-openspec.md) |
 | UI registry/component policy | [11-ui-registry-component-policy.md](guidelines/11-ui-registry-component-policy.md) |
