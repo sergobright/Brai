@@ -103,6 +103,7 @@ export {
   validatePreviewReceipt,
   accessContract,
   archiveOpenSpecChange,
+  preserveLinkedOpenSpecChanges,
   workspacePreflight,
 };
 

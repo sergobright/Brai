@@ -27,6 +27,7 @@ import {
   linkDependencyDirs,
   parseHookInput,
   parseOpenSpecChangeArgs,
+  preserveLinkedOpenSpecChanges,
   readPreviewSlot,
   taskStartGuidance,
   taskWorktreeParent,
@@ -72,6 +73,23 @@ test("task OpenSpec options are repeatable and deduplicated", () => {
     { positional: ["close-openspec"], openspecChanges: ["one", "two"] },
   );
   assert.throws(() => parseOpenSpecChangeArgs(["--openspec-change", "../unsafe"]), /Invalid OpenSpec change id/);
+});
+
+test("linked OpenSpec change survives task worktree cleanup", () => {
+  const canonical = tempRoot("brai-openspec-canonical-");
+  const worktree = path.join(canonical, ".codex-worktrees", "task");
+  fs.writeFileSync(path.join(canonical, "package.json"), "{}\n");
+  const local = path.join(worktree, "openspec", "changes", "ready");
+  fs.mkdirSync(local, { recursive: true });
+  fs.writeFileSync(path.join(local, "tasks.md"), "- [ ] Archive this OpenSpec change.\n");
+
+  preserveLinkedOpenSpecChanges(["ready"], worktree);
+
+  const durable = path.join(canonical, "openspec", "changes", "ready");
+  assert.equal(fs.existsSync(durable), true);
+  assert.equal(fs.lstatSync(local).isSymbolicLink(), true);
+  fs.rmSync(worktree, { recursive: true, force: true });
+  assert.equal(fs.existsSync(durable), true);
 });
 
 test("write-like shell commands are detected", () => {
