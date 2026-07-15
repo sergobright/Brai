@@ -1,11 +1,13 @@
 "use client";
 
-import type { FormEvent, KeyboardEvent } from "react";
+import type { CSSProperties, FormEvent, KeyboardEvent } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Archive, CalendarDays, Ellipsis, Flag, Maximize2, Plus, Tag } from "lucide-react";
 import { cleanTitle, limitTitle, normalizeDescription, TITLE_MAX_LENGTH } from "@/shared/activities/text";
 import { Button } from "@/shared/ui/button";
+import { installAndroidBackHandler } from "@/shared/platform/platform";
 import { useMobileSheetDrag } from "../hooks/useMobileSheetDrag";
+import { useMobileSheetTop } from "../hooks/useMobileSheetTop";
 import { cx, fitTextareaHeight } from "../appUtils";
 
 export interface MobileCreateDraft {
@@ -31,6 +33,7 @@ export function mobileCreateDraftHasText(draft: MobileCreateDraft) {
 export function MobileCreateComposer({
   draft,
   descriptionLabel,
+  historyStateKey,
   submitLabel,
   titleLabel,
   onCancel,
@@ -39,6 +42,7 @@ export function MobileCreateComposer({
 }: {
   draft: MobileCreateDraft;
   descriptionLabel: string;
+  historyStateKey: "braiMobileActionCreate" | "braiMobileInboxCreate";
   submitLabel: string;
   titleLabel: string;
   onCancel: () => void;
@@ -48,16 +52,49 @@ export function MobileCreateComposer({
   const [descriptionActive, setDescriptionActive] = useState(false);
   const formRef = useRef<HTMLFormElement | null>(null);
   const submitInFlightRef = useRef(false);
+  const suppressPopRef = useRef(false);
   const textScrollRef = useRef<HTMLDivElement | null>(null);
   const titleRef = useRef<HTMLTextAreaElement | null>(null);
   const descriptionRef = useRef<HTMLTextAreaElement | null>(null);
-  const { sheetDragHandlers, sheetRef, sheetStyle } = useMobileSheetDrag({ onClose: onCancel });
+  const mobileSheetTop = useMobileSheetTop();
+  const { backdropRef, backdropStyle, closeWithAnimation, gestureRef, resetOpen, sheetDragHandlers, sheetRef, sheetStyle } = useMobileSheetDrag({ onClose: onCancel });
   const canSubmit = Boolean(cleanTitle(draft.title));
 
   const setFormRef = useCallback((node: HTMLFormElement | null) => {
     formRef.current = node;
     sheetRef(node);
   }, [sheetRef]);
+
+  const closeComposer = useCallback(() => {
+    if (window.history.state?.[historyStateKey]) {
+      suppressPopRef.current = true;
+      window.history.back();
+    }
+    closeWithAnimation();
+  }, [closeWithAnimation, historyStateKey]);
+
+  useEffect(() => {
+    resetOpen();
+    if (window.history.state?.[historyStateKey]) {
+      window.history.replaceState({ ...window.history.state, [historyStateKey]: true }, "", window.location.href);
+    } else {
+      window.history.pushState({ ...window.history.state, [historyStateKey]: true }, "", window.location.href);
+    }
+    function onPopState() {
+      if (suppressPopRef.current) {
+        suppressPopRef.current = false;
+        return;
+      }
+      closeWithAnimation();
+    }
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, [closeWithAnimation, historyStateKey, resetOpen]);
+
+  useEffect(() => installAndroidBackHandler(() => {
+    closeComposer();
+    return true;
+  }), [closeComposer]);
 
   useEffect(() => {
     const delay = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ? 0 : MOBILE_CREATE_AUTOFOCUS_DELAY_MS;
@@ -85,7 +122,9 @@ export function MobileCreateComposer({
     if (!trimmed) return;
     submitInFlightRef.current = true;
     try {
-      await onSubmit(trimmed, normalizeDescription(draft.descriptionMd));
+      const submission = onSubmit(trimmed, normalizeDescription(draft.descriptionMd));
+      closeComposer();
+      await submission;
     } finally {
       submitInFlightRef.current = false;
     }
@@ -94,7 +133,7 @@ export function MobileCreateComposer({
   function onTitleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (event.key === "Escape") {
       event.preventDefault();
-      onCancel();
+      closeComposer();
       return;
     }
     if (event.key === "Enter") {
@@ -106,17 +145,25 @@ export function MobileCreateComposer({
   function onDescriptionKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (event.key !== "Escape") return;
     event.preventDefault();
-    onCancel();
+      closeComposer();
   }
 
   return (
+    <div
+      ref={gestureRef}
+      className="actions-mobile-overlay fixed inset-0 z-[80] hidden items-end pb-[env(safe-area-inset-bottom)] max-[860px]:flex"
+      style={{ top: mobileSheetTop } as CSSProperties}
+      data-nav-swipe-exclusion
+      onClick={closeComposer}
+      {...sheetDragHandlers}
+    >
+      <div ref={backdropRef} className="absolute inset-0 bg-foreground/25 dark:bg-background/80" style={backdropStyle} aria-hidden="true" />
     <form
       ref={setFormRef}
-      className="actions-mobile-editor flex max-h-full w-full flex-col overflow-hidden rounded-t-2xl bg-card px-5 pb-1 pt-2 shadow-xl motion-safe:animate-[mobile-detail-sheet-in_180ms_ease-out] motion-safe:will-change-transform"
+      className="actions-mobile-editor relative z-[1] flex max-h-full w-full flex-col overflow-hidden rounded-t-2xl bg-card px-5 pb-1 pt-2 shadow-xl will-change-transform"
       style={sheetStyle}
       onClick={(event) => event.stopPropagation()}
       onSubmit={submit}
-      {...sheetDragHandlers}
     >
       <div className="mobile-create-drag-zone flex h-6 shrink-0 touch-none cursor-grab items-start justify-center pt-1.5 active:cursor-grabbing">
         <span className="mobile-create-grabber h-1 w-11 rounded-full bg-muted-foreground/30" aria-hidden="true" />
@@ -182,6 +229,7 @@ export function MobileCreateComposer({
         </Button>
       </div>
     </form>
+    </div>
   );
 }
 

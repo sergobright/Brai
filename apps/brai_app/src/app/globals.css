@@ -187,36 +187,6 @@ nextjs-portal {
   pointer-events: none !important;
 }
 
-@keyframes mobile-drawer-in {
-  from {
-    transform: translateX(-100%);
-  }
-
-  to {
-    transform: translateX(0);
-  }
-}
-
-@keyframes mobile-detail-sheet-in {
-  from {
-    transform: translateY(100%);
-  }
-
-  to {
-    transform: translateY(0);
-  }
-}
-
-@keyframes mobile-dock-dim-in {
-  from {
-    opacity: 0;
-  }
-
-  to {
-    opacity: var(--mobile-sheet-backdrop-opacity, 1);
-  }
-}
-
 ::view-transition-old(root),
 ::view-transition-new(root) {
   animation: none;

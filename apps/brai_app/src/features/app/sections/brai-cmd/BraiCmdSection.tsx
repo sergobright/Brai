@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ArrowLeft, Check, CheckCircle2, CircleHelp, Download, LoaderCircle, Trash2, X, XCircle } from "lucide-react";
 import {
   deleteBraiCmdAudio,
@@ -67,6 +67,16 @@ const CONTEXT_ACTIONS: Array<{ id: keyof BraiCmdContextActions; title: string; t
 ];
 
 type CmdPage = "main" | "provider" | "audio";
+export type BraiCmdGroup = "main" | "permissions" | "context" | "appearance" | "speech" | "post-processing" | "audio";
+export const BRAI_CMD_GROUPS: Array<{ id: BraiCmdGroup; label: string }> = [
+  { id: "main", label: "Основное" },
+  { id: "permissions", label: "Разрешения" },
+  { id: "context", label: "Контекстные кнопки" },
+  { id: "appearance", label: "Внешний вид" },
+  { id: "speech", label: "Распознавание" },
+  { id: "post-processing", label: "Постобработка" },
+  { id: "audio", label: "Аудио" },
+];
 type ConnectionStatus = "idle" | "testing" | "ok" | "error";
 type ConnectionState = { status: ConnectionStatus; message: string; stages?: NonNullable<Awaited<ReturnType<typeof testBraiCmdConnection>>>["stages"] };
 
@@ -74,15 +84,34 @@ const initialConnection: ConnectionState = { status: "idle", message: "Прот�
 const CMD_SECTION_CLASS = "max-w-3xl content-start gap-4 [&_[data-slot=card]]:rounded-xl [&_[data-slot=card-header]]:p-4 [&_[data-slot=card-panel]]:px-4 [&_[data-slot=card-panel]]:pb-4 [&_[data-slot=field-content]]:gap-1 [&_[data-slot=field-content]>[data-slot=field-label]]:text-base [&_[data-slot=field-content]>[data-slot=field-label]]:font-semibold [&_[data-slot=field-description]]:text-muted-foreground/75";
 const PROVIDER_RECONNECT_NOTICE_KEY = "brai_cmd_provider_reconnect_notice_dismissed";
 
-export function BraiCmdSection() {
+export function BraiCmdSection({
+  onRailContent,
+  onRailNavigate,
+}: {
+  onRailContent?: (content: ReactNode | null) => void;
+  onRailNavigate?: () => void;
+} = {}) {
   const [snapshot, setSnapshot] = useState<BraiCmdSnapshot | null>(null);
   const [page, setPage] = useState<CmdPage>("main");
+  const [group, setGroup] = useState<BraiCmdGroup>("main");
   const [providerCapability, setProviderCapability] = useState<BraiCmdProviderCapability>("text");
   const [loading, setLoading] = useState(true);
   const [connection, setConnection] = useState<ConnectionState>(initialConnection);
   const [settingsError, setSettingsError] = useState("");
   const [providerReconnectNoticeDismissed, setProviderReconnectNoticeDismissed] = useState(() =>
     typeof window !== "undefined" && getBraiLocalStorageItem(PROVIDER_RECONNECT_NOTICE_KEY) === "true");
+
+  const selectGroup = useCallback((nextGroup: BraiCmdGroup) => {
+    setGroup(nextGroup);
+    setPage("main");
+    onRailNavigate?.();
+  }, [onRailNavigate]);
+
+  useEffect(() => {
+    if (!onRailContent) return undefined;
+    onRailContent(<BraiCmdRail activeGroup={group} onGroup={selectGroup} />);
+    return () => onRailContent(null);
+  }, [group, onRailContent, selectGroup]);
 
   useEffect(() => {
     let active = true;
@@ -185,13 +214,14 @@ export function BraiCmdSection() {
       ) : null}
       {page === "main" ? (
         <MainPage
+          group={group}
           snapshot={snapshot}
           connection={connection}
-          onAudio={() => { setPage("audio"); void getBraiCmdSettings().then((next) => { if (next) setSnapshot(next); }); }}
+          onAudio={() => { setGroup("audio"); setPage("audio"); void getBraiCmdSettings().then((next) => { if (next) setSnapshot(next); }); }}
           onConnectionTest={() => void testConnection()}
           onPatch={(patch) => void patchSettings(patch)}
           onPermission={(permission) => void openBraiCmdPermission(permission).then((next) => { if (next) setSnapshot(next); })}
-          onProvider={(capability) => { setProviderCapability(capability); setPage("provider"); }}
+          onProvider={(capability) => { setGroup(capability === "speech" ? "speech" : "post-processing"); setProviderCapability(capability); setPage("provider"); }}
         />
       ) : page === "provider" ? (
         <ProviderPage capability={providerCapability} snapshot={snapshot} onBack={() => setPage("main")} onSnapshot={setSnapshot} />
@@ -203,6 +233,7 @@ export function BraiCmdSection() {
 }
 
 function MainPage({
+  group,
   snapshot,
   connection,
   onAudio,
@@ -211,6 +242,7 @@ function MainPage({
   onPermission,
   onProvider,
 }: {
+  group: BraiCmdGroup;
   snapshot: BraiCmdSnapshot;
   connection: ConnectionState;
   onAudio: () => void;
@@ -222,7 +254,7 @@ function MainPage({
   const { settings } = snapshot;
   return (
     <>
-      <Card>
+      {group === "main" ? <><Card>
         <CardHeader>
           <CardTitle>Главная кнопка диктовки</CardTitle>
           <CardDescription>Превращает голос в текст и вставляет его в активное поле.</CardDescription>
@@ -238,6 +270,19 @@ function MainPage({
       </Card>
 
       <Card>
+        <CardHeader>
+          <CardTitle>Подключение к Brai</CardTitle>
+          <CardDescription>Проверяет серверы Brai, доступ устройства и доставку контекста. Пользовательский AI-провайдер проверяется отдельно.</CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-4">
+          <ConnectionAlert connection={connection} />
+          <Button className="w-full sm:w-fit" disabled={connection.status === "testing"} type="button" onClick={onConnectionTest}>
+            {connection.status === "testing" ? "Проверка" : "Проверить подключение к Brai"}
+          </Button>
+        </CardContent>
+      </Card></> : null}
+
+      {group === "permissions" ? <Card>
         <CardHeader>
           <CardTitle>Разрешения</CardTitle>
         </CardHeader>
@@ -262,22 +307,9 @@ function MainPage({
             })}
           </FieldGroup>
         </CardContent>
-      </Card>
+      </Card> : null}
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Подключение к Brai</CardTitle>
-          <CardDescription>Проверяет серверы Brai, доступ устройства и доставку контекста. Пользовательский AI-провайдер проверяется отдельно.</CardDescription>
-        </CardHeader>
-        <CardContent className="grid gap-4">
-          <ConnectionAlert connection={connection} />
-          <Button className="w-full sm:w-fit" disabled={connection.status === "testing"} type="button" onClick={onConnectionTest}>
-            {connection.status === "testing" ? "Проверка" : "Проверить подключение к Brai"}
-          </Button>
-        </CardContent>
-      </Card>
-
-      <Card>
+      {group === "context" ? <Card>
         <CardHeader>
           <CardTitle>Кнопки контекста</CardTitle>
           <CardDescription>Вы можете включать и выключать набор кнопок</CardDescription>
@@ -297,9 +329,9 @@ function MainPage({
             ))}
           </FieldGroup>
         </CardContent>
-      </Card>
+      </Card> : null}
 
-      <Card>
+      {group === "appearance" ? <Card>
         <CardHeader>
           <CardTitle>Настройки кнопок</CardTitle>
         </CardHeader>
@@ -312,9 +344,9 @@ function MainPage({
             <RangeRow title="Контекст: размер" value={settings.contextIconSizePercent} min={70} max={130} onChange={(value) => onPatch({ contextIconSizePercent: value })} />
           </FieldGroup>
         </CardContent>
-      </Card>
+      </Card> : null}
 
-      <Card>
+      {group === "speech" ? <Card>
         <CardHeader>
           <CardTitle>Распознавание речи</CardTitle>
           <CardDescription>Выберите, куда приложение отправляет голос для получения текста.</CardDescription>
@@ -334,9 +366,9 @@ function MainPage({
             <Button className="w-full sm:w-auto" type="button" variant="outline" onClick={() => onProvider("speech")}>Настроить</Button>
           </Field>
         </CardContent>
-      </Card>
+      </Card> : null}
 
-      <Card>
+      {group === "post-processing" ? <Card>
         <CardHeader>
           <CardTitle>Постобработка</CardTitle>
           <CardDescription>Улучшаем с ИИ текст полученный после расшифровки.</CardDescription>
@@ -375,9 +407,9 @@ function MainPage({
             ) : null}
           </FieldGroup>
         </CardContent>
-      </Card>
+      </Card> : null}
 
-      <Card>
+      {group === "audio" ? <><Card>
         <CardHeader>
           <CardTitle>Статистика Транскриптов</CardTitle>
         </CardHeader>
@@ -394,8 +426,29 @@ function MainPage({
         <CardContent>
           <Button className="w-full sm:w-fit" type="button" variant="outline" onClick={onAudio}>Аудиозаписи</Button>
         </CardContent>
-      </Card>
+      </Card></> : null}
     </>
+  );
+}
+
+function BraiCmdRail({ activeGroup, onGroup }: { activeGroup: BraiCmdGroup; onGroup: (group: BraiCmdGroup) => void }) {
+  return (
+    <nav className="grid gap-1 p-3" aria-label="Разделы настроек Brai CMD">
+      {BRAI_CMD_GROUPS.map((item) => (
+        <button
+          key={item.id}
+          type="button"
+          className={cx(
+            "min-h-10 rounded-md border-0 px-3 text-left text-sm transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+            activeGroup === item.id ? "bg-accent text-accent-foreground" : "bg-transparent text-muted-foreground",
+          )}
+          aria-current={activeGroup === item.id ? "page" : undefined}
+          onClick={() => onGroup(item.id)}
+        >
+          {item.label}
+        </button>
+      ))}
+    </nav>
   );
 }
 

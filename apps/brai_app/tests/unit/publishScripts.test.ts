@@ -11,7 +11,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 const execFileAsync = promisify(execFile);
 const workspaceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
-const appStaticRoutes = ["brai-cmd", "draws", "engine", "evil-eye", "factory", "focus", "inbox"];
+const appStaticRoutes = ["brai-cmd", "draws", "engine", "factory", "focus", "inbox"];
 const fixtureRoots: string[] = [];
 
 afterEach(async () => {

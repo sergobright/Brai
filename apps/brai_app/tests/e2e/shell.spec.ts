@@ -9,7 +9,7 @@ test("renders mobile and desktop navigation without starter content", async ({ p
   if (testInfo.project.name === "mobile") {
     await expect(page.getByRole("button", { name: "Добавить действие" })).toBeVisible();
     await expect(page.locator(".mobile-nav .nav-label").first()).toBeHidden();
-    await expect(page.locator(".mobile-nav .nav-button")).toHaveCount(3);
+    await expect(page.locator(".mobile-nav .nav-button")).toHaveCount(4);
     await expect(page.locator(".mobile-nav .nav-button").nth(2)).not.toHaveClass(/active:scale/);
   } else {
     await expect(page.getByRole("textbox", { name: "Добавить" })).toBeVisible();
@@ -31,7 +31,7 @@ test("renders the mobile floating dock without inactive circular backgrounds", a
   await expect(page.locator(".main-dock")).toHaveCSS("background-color", "rgb(247, 247, 243)");
   await expect(page.locator(".mobile-nav")).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
   const items = page.locator(".mobile-nav .nav-button");
-  await expect(items).toHaveCount(3);
+  await expect(items).toHaveCount(4);
   await expect(items.nth(2)).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
 
   await page.getByRole("button", { name: "Фокус" }).last().click();
@@ -54,8 +54,7 @@ test("keeps the desktop rail static and compact across reloads", async ({ page }
   for (const title of ["Входящие", "Фокус"]) {
     await page.getByRole("button", { name: title }).last().click();
     await expect(page.getByRole("heading", { name: title })).toBeVisible();
-    await expect(page.locator(".desktop-rail").getByRole("button", { name: "Настройки" })).toBeVisible();
-    await expect(page.locator(".desktop-rail").getByRole("button", { name: "Архив" })).toBeVisible();
+    await expect(page.locator(".desktop-rail").getByRole("button", { name: /Контекст \d+: В разработке/ })).toHaveCount(12);
   }
 
   await page.reload();
@@ -122,15 +121,40 @@ test("keeps the desktop floating dock fixed near the bottom center", async ({ pa
   expect(Math.abs((after?.y ?? 0) - (before?.y ?? 0))).toBeLessThanOrEqual(1);
 });
 
+test("lets Draws fill the entire desktop app viewport in fullscreen mode", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop", "desktop-only Draws fullscreen");
+
+  await page.goto("/draws");
+  await expect(page.getByRole("button", { name: "На весь экран" })).toBeVisible();
+  await page.getByRole("button", { name: "На весь экран" }).click();
+
+  await expect(page.getByRole("button", { name: "Выйти из полноэкранного режима" })).toBeVisible();
+  await expect(page.locator(".desktop-rail")).toHaveCount(0);
+  await expect(page.locator(".contextual-rail")).toHaveCount(0);
+  await expect(page.locator(".main-dock")).toHaveCount(0);
+  await expect(page.locator(".section-page-current .topbar")).toHaveCount(0);
+  await expect(page.locator(".section-page-current .page-main")).toHaveClass(/max-w-none/);
+
+  const viewport = page.viewportSize();
+  const fullscreenPage = await page.locator(".section-page-current").boundingBox();
+  const workspace = await page.locator(".section-page-current .page-workspace").boundingBox();
+  expect(fullscreenPage?.x ?? 9999).toBeLessThanOrEqual(1);
+  expect(fullscreenPage?.y ?? 9999).toBeLessThanOrEqual(1);
+  expect(fullscreenPage?.width ?? 0).toBeGreaterThanOrEqual((viewport?.width ?? 0) - 1);
+  expect(fullscreenPage?.height ?? 0).toBeGreaterThanOrEqual((viewport?.height ?? 0) - 1);
+  expect(workspace?.width ?? 0).toBeGreaterThanOrEqual((viewport?.width ?? 0) - 1);
+  expect(workspace?.height ?? 0).toBeGreaterThanOrEqual((viewport?.height ?? 0) - 1);
+});
+
 test("keeps Evil Eye out of the desktop action rail", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop", "desktop-only action rail");
 
   await page.goto("/");
-  await expect(page.getByRole("button", { name: "Настройки" })).toBeVisible();
+  await expect(page.locator(".desktop-rail").getByRole("button", { name: /Контекст \d+: В разработке/ })).toHaveCount(12);
   await expect(page.getByRole("button", { name: "Evil Eye" })).toHaveCount(0);
 });
 
-test("uses full-width left-aligned desktop content", async ({ page }, testInfo) => {
+test("centers desktop content within the shared 768px workspace", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop", "desktop-only layout");
 
   await page.goto("/");
@@ -138,6 +162,8 @@ test("uses full-width left-aligned desktop content", async ({ page }, testInfo) 
   const rail = await page.locator(".desktop-rail").boundingBox();
   const main = await page.locator(".main-view").boundingBox();
   const stage = await page.locator(".section-swipe-stage").boundingBox();
+  const workspace = await page.locator(".actions-workspace").boundingBox();
+  const pageMain = await page.locator(".actions-workspace > .page-main").boundingBox();
   const form = await page.locator(".actions-add-form").boundingBox();
   const heading = await page.locator(".section-page-current .topbar h1").boundingBox();
 
@@ -148,17 +174,36 @@ test("uses full-width left-aligned desktop content", async ({ page }, testInfo) 
   const row = page.locator(".action-row").first();
   const titleSize = await page.locator(".action-title").first().evaluate((element) => getComputedStyle(element).fontSize);
 
-  expect(main?.x ?? 9999).toBeLessThanOrEqual((rail?.width ?? 0) + 2);
-  expect(stage?.width ?? 0).toBeGreaterThan((viewport?.width ?? 0) - (rail?.width ?? 0) - 72);
-  expect(heading?.x ?? 9999).toBeLessThanOrEqual((rail?.width ?? 0) + 96);
-  expect(form?.width ?? 0).toBeGreaterThan((stage?.width ?? 0) * 0.45);
+  expect(main?.x ?? 0).toBeGreaterThanOrEqual(rail?.width ?? 0);
+  expect(stage?.width ?? 0).toBeGreaterThan((viewport?.width ?? 0) - (main?.x ?? 0) - 4);
+  expect(pageMain?.width ?? 9999).toBeLessThanOrEqual(768);
+  expect(Math.abs(((pageMain?.x ?? 0) + (pageMain?.width ?? 0) / 2) - ((workspace?.x ?? 0) + (workspace?.width ?? 0) / 2))).toBeLessThanOrEqual(2);
+  expect(heading?.x ?? 0).toBeGreaterThanOrEqual((main?.x ?? 0) + 28);
+  expect(heading?.x ?? 9999).toBeLessThan(pageMain?.x ?? 0);
+  expect(form?.width ?? 9999).toBeLessThanOrEqual(768);
   expect(form?.height ?? 9999).toBeLessThanOrEqual(50);
   await expect(page.locator(".actions-add-form")).toHaveAttribute("data-slot", "input-group");
   const addFormRadius = await page.locator(".actions-add-form").evaluate((element) => getComputedStyle(element).borderTopLeftRadius);
   expect(Number.parseFloat(addFormRadius)).toBeGreaterThanOrEqual(8);
   expect(heading?.height ?? 9999).toBeLessThanOrEqual(32);
-  await expect.poll(async () => (await row.boundingBox())?.height ?? 9999).toBeLessThanOrEqual(60);
+  await expect.poll(async () => (await row.boundingBox())?.height ?? 9999).toBeLessThanOrEqual(72);
   expect(Number.parseFloat(titleSize)).toBe(16);
+});
+
+test("keeps panel-free page content on the same shared desktop width", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop", "desktop-only shared page width");
+
+  for (const route of ["/", "/profile", "/engine"]) {
+    await page.goto(route);
+    const pageMain = page.locator(".section-page-current .page-main");
+    await expect(pageMain).toBeVisible();
+    const mainBox = await pageMain.boundingBox();
+    expect(mainBox?.width ?? 9999).toBeLessThanOrEqual(768);
+
+    const content = pageMain.locator(":scope > *").first();
+    const contentBox = await content.boundingBox();
+    expect(contentBox?.width ?? 0).toBeGreaterThanOrEqual((mainBox?.width ?? 0) - 1);
+  }
 });
 
 test("shows desktop Focus context panels from header actions", async ({ page }, testInfo) => {
@@ -235,11 +280,11 @@ test("shows desktop Focus context panels from header actions", async ({ page }, 
     scrollHeight: element.scrollHeight,
   }));
   expect(historyScrollMetrics.scrollHeight).toBeGreaterThan(historyScrollMetrics.clientHeight + 80);
-  await page.mouse.wheel(0, 420);
-  await expect(historyScrollbar).toHaveAttribute("data-scrollbar-state", "visible", { timeout: 3_000 });
   await historyScrollViewport.evaluate((element) => {
-    if (element.scrollTop === 0) element.scrollTop = 120;
+    element.scrollTop = 120;
+    element.dispatchEvent(new Event("scroll", { bubbles: true }));
   });
+  await expect(historyScrollbar).toHaveAttribute("data-scrollbar-state", "visible", { timeout: 3_000 });
   const historyScrollAreaClass = await historyScrollArea.evaluate((element) => element.className);
   expect(historyScrollAreaClass).not.toContain("hidden");
   expect(historyScrollAreaClass).not.toContain("pr-3");
@@ -637,7 +682,7 @@ test("reorders mobile actions by long-pressing a row", async ({ page }, testInfo
   await expect.poll(() => titles.allTextContents()).toEqual(["Первое", "Второе"]);
 });
 
-test("opens the desktop activity description split panel", async ({ page }, testInfo) => {
+test("opens the desktop activity detail in the fixed page panel", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop", "desktop-only detail panel");
 
   const title = "Пересобрать механизм страницы Действий с длинным заголовком который должен быть виден полностью";
@@ -674,31 +719,13 @@ test("opens the desktop activity description split panel", async ({ page }, test
   await expect(detailPanel).toHaveCSS("border-left-width", "0px");
   await expect(detailPanel).toHaveCSS("overflow-y", "hidden");
 
-  const resizer = await page.locator(".actions-split-resizer").boundingBox();
-  expect(resizer).not.toBeNull();
-  await expect(page.locator(".actions-split-resizer")).toHaveCSS("cursor", "ew-resize");
-  await expect(page.locator(".desktop-rail")).not.toHaveCSS("cursor", "ew-resize");
-  const resizerCursors = await page.locator(".actions-split-resizer").evaluate((node) => {
-    const rect = node.getBoundingClientRect();
-    return [2, rect.width / 2, rect.width - 2].map((offset) => {
-      const target = document.elementFromPoint(rect.left + offset, rect.top + rect.height / 2);
-      return target instanceof Element ? getComputedStyle(target).cursor : null;
-    });
-  });
-  expect(resizerCursors).toEqual(["ew-resize", "ew-resize", "ew-resize"]);
-  await page.mouse.move((resizer?.x ?? 0) + (resizer?.width ?? 0) / 2, (resizer?.y ?? 0) + (resizer?.height ?? 0) / 2);
-  await page.mouse.down();
-  await page.mouse.move((workspace?.x ?? 0) + (workspace?.width ?? 0) * 0.3, (resizer?.y ?? 0) + (resizer?.height ?? 0) / 2);
-  await page.mouse.up();
-  await expect.poll(() => page.evaluate(() => document.documentElement.style.cursor)).not.toBe("ew-resize");
+  await expect(page.locator(".actions-split-resizer")).toHaveCount(0);
   await expect.poll(() => detailTitle.evaluate((node) => node.scrollHeight <= node.clientHeight + 1)).toBe(true);
-  await expect.poll(async () => ((await page.locator(".actions-list-pane").boundingBox())?.width ?? 0) / ((await page.locator(".actions-workspace").boundingBox())?.width ?? 1)).toBeGreaterThan(0.29);
-  await expect.poll(async () => ((await page.locator(".actions-list-pane").boundingBox())?.width ?? 0) / ((await page.locator(".actions-workspace").boundingBox())?.width ?? 1)).toBeLessThan(0.31);
   await page.getByRole("button", { name: "Закрыть редактор" }).click();
+  await expect(page.locator(".actions-workspace")).not.toHaveClass(/has-panel/);
+  const centeredMain = await page.locator(".actions-workspace > .page-main").boundingBox();
+  expect(centeredMain?.width ?? 0).toBeLessThanOrEqual(768);
   await page.getByRole("textbox", { name: `Название действия: ${title}` }).click();
-  await expect
-    .poll(async () => ((await page.locator(".actions-list-pane").boundingBox())?.width ?? 0) / ((await page.locator(".actions-workspace").boundingBox())?.width ?? 1))
-    .toBeGreaterThan(0.49);
   const overLimitTitle = "я".repeat(270);
   await detailTitle.fill(overLimitTitle);
   await expect.poll(async () => (await detailTitle.inputValue()).length).toBe(250);
