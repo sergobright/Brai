@@ -50,8 +50,12 @@ The Next.js client SHALL treat narrow Android phone viewports as a primary suppo
 #### Scenario: Mobile left menu is opened from the header
 - **WHEN** the client is shown on an Android-sized viewport
 - **AND** the user opens the menu from the Actions page header
-- **THEN** an empty left drawer opens over the content with a backdrop
+- **THEN** a left drawer opens over the content with a backdrop
+- **AND** it shows `Все`, `Действия`, `Операции`, `Без цели`, active Goals, and collapsed `Завершённые`
+- **AND** no navigation or review content appears after `Завершённые`
+- **AND** the drawer does not show a visible close button or empty header row
 - **AND** tapping outside the drawer closes it
+- **AND** Back, Escape, and selecting a navigation item close it
 - **AND** horizontal tab swipes are disabled while the drawer is open
 
 #### Scenario: Mobile left rail menu is opened
@@ -82,6 +86,13 @@ The Next.js client SHALL treat narrow Android phone viewports as a primary suppo
 - **AND** the rail exposes the same action items on all primary dock pages
 - **AND** the rail keeps the sync status icon and preview environment badge
 - **AND** the page header continues to show the current section icon
+
+#### Scenario: Desktop Actions contextual rail is rendered
+- **WHEN** the client shows `Действия` on a desktop-sized viewport
+- **THEN** the contextual rail uses the same navigation content as the mobile Actions drawer
+- **AND** it shows `Все`, `Действия`, `Операции`, `Без цели`, active Goals, and collapsed `Завершённые`
+- **AND** it contains no Goal archive or AI review cards
+- **AND** the user can collapse and reopen the contextual rail from the shared header control
 
 #### Scenario: Desktop screens use the full workspace
 - **WHEN** the client is shown on a desktop-sized web viewport
@@ -417,32 +428,28 @@ The Focus section SHALL own Goal and History as mutually exclusive contextual pa
 - **AND** the sheet does not require a visible close button
 - **AND** tab swipe navigation is disabled while the sheet is open
 
-### Requirement: Actions has a contextual info panel
-The Actions section SHALL expose an empty contextual info panel that can later hold section-specific supporting information.
+### Requirement: Actions uses inline context and details-only right panels
+The Actions section SHALL keep navigation in the contextual rail/drawer, render AI reviews inline, and reserve the desktop right panel for selected Item details.
 
-#### Scenario: Actions header exposes an info icon
-- **WHEN** the client renders the `Действия` header
-- **THEN** it shows an `Info` icon before the sync status
-- **AND** activating the icon opens the Actions info panel
-- **AND** activating the icon again closes the Actions info panel
-- **AND** the icon is marked active while the info panel is open
+#### Scenario: No Action or Operation is selected on desktop
+- **WHEN** the client shows `Действия` on a desktop-sized viewport
+- **AND** no Action or Operation is selected
+- **THEN** no permanent right info panel is rendered
+- **AND** the work list uses the available workspace beside the contextual rail
 
-#### Scenario: Desktop Actions detail replaces the info panel
-- **WHEN** the client is shown on a desktop-sized viewport
-- **AND** the Actions info panel is open
-- **AND** the user opens Activity details
-- **THEN** the Activity detail editor occupies the same right-panel slot as the info panel
-- **AND** the Activity list width does not jump while the panel is replaced
-- **WHEN** the user closes the Activity detail editor
-- **THEN** the Actions info panel returns if it was open before the detail editor opened
+#### Scenario: An Action or Operation is selected on desktop
+- **WHEN** the user selects an Action or Operation
+- **THEN** the corresponding detail panel opens on the right
+- **AND** closing details removes the right panel instead of restoring an info panel
 
-#### Scenario: Mobile Actions info uses a bottom sheet
-- **WHEN** the client is shown on an Android-sized viewport
-- **AND** the user opens the Actions info icon
-- **THEN** the info panel opens as a bottom sheet with a grabber
-- **AND** the sheet closes by downward swipe
-- **AND** the sheet does not require a visible close button
-- **AND** tab swipe navigation is disabled while the sheet is open
+#### Scenario: Context reviews are placed inline exactly once
+- **WHEN** context decisions, audits, undo cards, or notifications are available
+- **THEN** `goal_plan` renders below the open Goal title
+- **AND** `relation_add` and `activity_type_change` render below their Action or Operation
+- **AND** `goal_discovery` and global notifications render at the top of `Все`
+- **AND** reviews whose subject is unavailable fall back to the top of `Все`
+- **AND** audit and undo cards follow the same subject placement
+- **AND** none of these reviews also render in navigation, a permanent right panel, or a mobile info-sheet
 
 ### Requirement: Focus has a canonical route
 The Next.js/Capacitor client SHALL expose `Фокус` at `/focus`.
@@ -590,6 +597,17 @@ The client SHALL describe discovery, web download, and APK download without user
 #### Scenario: Native APK bridge is unavailable
 - **WHEN** an APK is required and `downloadApk()` is unavailable
 - **THEN** the client opens the installed channel's direct public download URL externally
+
+#### Scenario: Browser web update is available
+- **WHEN** Engine detects a newer browser web version outside the mounted Android shell
+- **THEN** the action uses the `RefreshCw` icon and text `Обновить страницу`
+- **AND** activating it calls `window.location.reload()`
+- **AND** the browser does not show an APK or web-bundle download action
+
+#### Scenario: Android update is available
+- **WHEN** Engine runs inside the mounted Android shell
+- **THEN** existing user-initiated web-bundle and APK download/install actions remain available
+- **AND** browser reload behavior does not replace those Android flows
 
 ### Requirement: Navigation supports supplementary status indicators
 

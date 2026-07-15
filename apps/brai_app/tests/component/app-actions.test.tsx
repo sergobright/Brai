@@ -1337,7 +1337,7 @@ describe("BraiApp actions", () => {
     });
   });
 
-  it("keeps the desktop Actions info panel open by default", async () => {
+  it("opens the desktop side panel only for a selected Action", async () => {
     vi.stubGlobal(
       "matchMedia",
       vi.fn(() => ({
@@ -1357,8 +1357,7 @@ describe("BraiApp actions", () => {
     render(<BraiApp />);
 
     expect(screen.queryByRole("button", { name: "Информация о действиях" })).not.toBeInTheDocument();
-    expect(document.querySelector(".actions-info-panel.desktop")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Закрыть информацию о действиях" })).not.toBeInTheDocument();
+    expect(document.querySelector(".actions-info-panel.desktop")).not.toBeInTheDocument();
 
     await waitFor(() => expect(screen.getByText("Информационная замена")).toBeInTheDocument());
     fireEvent.click(screen.getByRole("textbox", { name: "Название действия: Информационная замена" }));
@@ -1366,7 +1365,8 @@ describe("BraiApp actions", () => {
     expect(screen.getByRole("button", { name: "Закрыть редактор" })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Закрыть редактор" }));
-    expect(document.querySelector(".actions-info-panel.desktop")).toBeInTheDocument();
+    expect(document.querySelector(".actions-info-panel.desktop")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Закрыть редактор" })).not.toBeInTheDocument();
   }, 10_000);
 
   it("opens the mobile full-screen detail editor and flushes through the Android back bridge", async () => {

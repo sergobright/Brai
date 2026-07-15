@@ -36,8 +36,8 @@ describe("BraiApp shell", () => {
     expect(screen.queryByRole("button", { name: "Настройки" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Открыть меню" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Открыть левое меню" })).toBeInTheDocument();
-    await waitFor(() => expect(screen.getByRole("button", { name: "Информация о действиях" })).toBeInTheDocument());
-    expect(screen.getAllByLabelText("Информация о действиях").length).toBeGreaterThan(0);
+    expect(screen.queryByRole("button", { name: "Информация о действиях" })).not.toBeInTheDocument();
+    expect(document.querySelector(".actions-info-panel.desktop")).not.toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "Добавить" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Открыть правое меню" })).toBeInTheDocument();
   });
@@ -408,9 +408,9 @@ describe("BraiApp shell", () => {
   });
 
   it("opens the mobile dock overflow over an existing mobile sheet", async () => {
-    render(<BraiApp />);
+    render(<BraiApp initialSection="inbox" />);
 
-    const infoButton = await screen.findByRole("button", { name: "Информация о действиях" });
+    const infoButton = await screen.findByRole("button", { name: "Информация о входящих" });
     fireEvent.click(infoButton);
     expect(document.querySelector(".mobile-context-sheet")).toBeInTheDocument();
 
@@ -1354,7 +1354,8 @@ describe("BraiApp shell", () => {
     expect(within(document.querySelector(".mobile-profile-drawer") as HTMLElement).getByRole("navigation", { name: "Списки действий" })).toBeInTheDocument();
     expect(within(document.querySelector(".mobile-profile-drawer") as HTMLElement).getByRole("button", { name: /^Все\d*$/ })).toBeInTheDocument();
 
-    fireEvent.click(within(document.querySelector(".mobile-profile-drawer") as HTMLElement).getByRole("button", { name: "Закрыть меню" }));
+    expect(within(document.querySelector(".mobile-profile-drawer") as HTMLElement).queryByRole("button", { name: "Закрыть меню" })).not.toBeInTheDocument();
+    fireEvent.click(within(document.querySelector(".mobile-profile-drawer") as HTMLElement).getByRole("button", { name: /^Все\d*$/ }));
     await waitFor(() => expect(document.querySelector(".mobile-menu-backdrop")).not.toBeInTheDocument());
 
     fireEvent.click(screen.getByRole("button", { name: "Открыть левое меню" }));

@@ -255,6 +255,7 @@ export async function createTestDatabase(migrations = [
   '0028_context_decision_calibration.sql',
   '0029_goal_agent_workflows.sql',
   '0030_authenticated_brai_cmd_tokens_compat.sql',
+  '0031_pending_goal_plan_invariant.sql',
   '0026_user_ai_provider_credentials.sql'
 ]) {
   const baseUrl = process.env.BRAI_TEST_DATABASE_URL?.trim();

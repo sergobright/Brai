@@ -30,7 +30,7 @@ describe("BraiApp settings", () => {
 
     expect(screen.getByRole("heading", { name: "Engine" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Текущая версия unknown" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Скачать обновление" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Обновить страницу" })).toBeInTheDocument();
   });
 
   it("keeps Engine available in the mobile profile drawer outside Actions", async () => {

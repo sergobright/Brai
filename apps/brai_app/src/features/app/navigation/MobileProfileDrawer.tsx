@@ -1,11 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useRef, type ReactNode } from "react";
-import { X } from "lucide-react";
 import { installAndroidBackHandler } from "@/shared/platform/platform";
-import { Button } from "@/shared/ui/button";
 import { ScrollArea } from "@/shared/ui/scroll-area";
-import { Sheet, SheetClose, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/shared/ui/sheet";
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/shared/ui/sheet";
 import { cx } from "../appUtils";
 
 export function MobileProfileDrawer({ children, onClose }: { children?: ReactNode; onClose: () => void }) {
@@ -67,13 +65,6 @@ export function MobileProfileDrawer({ children, onClose }: { children?: ReactNod
           <SheetTitle>{label}</SheetTitle>
           <SheetDescription>Навигация по разделу</SheetDescription>
         </SheetHeader>
-        <div className="flex min-h-11 shrink-0 justify-end px-2">
-          <SheetClose asChild>
-            <Button type="button" variant="ghost" size="icon-sm" className="size-11" aria-label="Закрыть меню">
-              <X aria-hidden="true" />
-            </Button>
-          </SheetClose>
-        </div>
         <ScrollArea className="min-h-0 flex-1">
           <div className={children ? "px-3 pb-3" : "px-2 pb-3"}>{children}</div>
         </ScrollArea>

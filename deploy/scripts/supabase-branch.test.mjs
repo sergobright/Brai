@@ -154,6 +154,7 @@ test("production copy reseeds copied tables before repair migrations and before 
   const copyFunction = script.slice(copyStart, inspectStart);
   const begin = 'client.query("BEGIN ISOLATION LEVEL REPEATABLE READ")';
   const searchPath = "SET LOCAL search_path TO";
+  const dropPostSeedIndex = "DROP INDEX IF EXISTS";
   const constraintsImmediate = 'client.query("SET CONSTRAINTS ALL IMMEDIATE")';
   const reapply = "for (const { sql } of postSeedMigrations) await client.query(sql)";
   const reseed = "await reseedOwnedSequences(client, { schema: targetSchema, tables: copyTables })";
@@ -163,13 +164,14 @@ test("production copy reseeds copied tables before repair migrations and before 
   assert.match(copyFunction, /const client = await pool\.connect\(\)/);
   assert.ok(copyFunction.indexOf(begin) > 0);
   assert.ok(copyFunction.indexOf(searchPath) > 0);
+  assert.ok(copyFunction.indexOf(dropPostSeedIndex) > copyFunction.indexOf(searchPath));
   assert.ok(copyFunction.indexOf(reapply) > 0);
   assert.ok(firstReseed > 0);
   assert.ok(secondReseed > firstReseed);
   assert.ok(copyFunction.indexOf(begin) < copyFunction.indexOf(searchPath));
   assert.match(copyFunction, /TRUNCATE TABLE .* CONTINUE IDENTITY CASCADE/);
   assert.doesNotMatch(copyFunction, /RESTART IDENTITY/);
-  assert.ok(copyFunction.indexOf(searchPath) < copyFunction.indexOf("TRUNCATE TABLE"));
+  assert.ok(copyFunction.indexOf(dropPostSeedIndex) < copyFunction.indexOf("TRUNCATE TABLE"));
   assert.ok(copyFunction.indexOf(reapply) > copyFunction.indexOf("OVERRIDING SYSTEM VALUE"));
   assert.ok(firstReseed > copyFunction.indexOf("OVERRIDING SYSTEM VALUE"));
   assert.ok(copyFunction.indexOf(constraintsImmediate) > firstReseed);

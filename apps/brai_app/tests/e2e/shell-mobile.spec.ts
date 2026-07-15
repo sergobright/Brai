@@ -146,8 +146,8 @@ test("opens the right mobile dock overflow with Draws and placeholder items", as
 test("opens the dock overflow above an existing mobile sheet", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "mobile", "mobile-only dock overflow layering");
 
-  await page.goto("/");
-  await page.getByRole("button", { name: "Информация о действиях" }).click();
+  await page.goto("/inbox");
+  await page.getByRole("button", { name: "Информация о входящих" }).click();
   await expect(page.locator(".mobile-context-sheet")).toBeVisible();
 
   await page.getByRole("button", { name: "Открыть правое меню" }).click();
@@ -235,35 +235,17 @@ test("keeps the mobile Actions FAB vertically stable when a dock swipe starts", 
   await dispatchElementTouch(page, ".main-dock", "touchend", { x: start.x - 36, y: start.y + 1 });
 });
 
-test("opens and closes mobile Actions info as a bottom sheet", async ({ page }, testInfo) => {
-  test.skip(testInfo.project.name !== "mobile", "mobile-only actions info");
+test("opens Actions lists in the mobile drawer without an info sheet or close button", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "mobile", "mobile-only Actions drawer");
 
   await page.goto("/");
-  await page.getByRole("button", { name: "Информация о действиях" }).click();
-  const sheet = page.locator(".mobile-context-sheet");
-  const visualBackdrop = page.locator(".mobile-context-backdrop > div").first();
-  await expect(sheet).toBeVisible();
-  await expect(sheet.locator(".mobile-context-grabber")).toBeVisible();
-  await expect(page.getByRole("navigation", { name: "Основная навигация" })).toHaveCount(0);
-
-  const backdropBox = await visualBackdrop.boundingBox();
-  const topbar = await page.locator(".section-page-current .topbar").boundingBox();
-  const topbarBottom = (topbar?.y ?? 0) + (topbar?.height ?? 0);
-  expect(Math.abs((backdropBox?.y ?? 0) - topbarBottom)).toBeLessThanOrEqual(1);
-
-  await dispatchTouch(page, "touchstart", { x: 320, y: 220 });
-  await dispatchTouch(page, "touchend", { x: 180, y: 224 });
-  await expect(page.getByRole("heading", { name: "Действия", exact: true })).toBeVisible();
-  await expect(sheet).toBeVisible();
-
-  const dragZone = await sheet.locator(".mobile-context-drag-zone").boundingBox();
-  const viewport = page.viewportSize();
-  const dragX = (dragZone?.x ?? 0) + (dragZone?.width ?? 0) / 2;
-  await page.mouse.move(dragX, (dragZone?.y ?? 0) + 8);
-  await page.mouse.down();
-  await page.mouse.move(dragX, (viewport?.height ?? 640) - 12, { steps: 6 });
-  await page.mouse.up();
-  await expect(page.locator(".mobile-context-sheet")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Информация о действиях" })).toHaveCount(0);
+  await page.getByRole("button", { name: "Открыть меню" }).click();
+  const drawer = page.locator(".mobile-profile-drawer");
+  await expect(drawer.getByRole("navigation", { name: "Списки действий" })).toBeVisible();
+  await expect(drawer.getByRole("button", { name: "Закрыть меню" })).toHaveCount(0);
+  await drawer.getByRole("button", { name: /^Операции\d*$/ }).click();
+  await expect(drawer).toHaveCount(0);
 });
 
 test("opens and closes mobile Inbox info as a bottom sheet", async ({ page }, testInfo) => {

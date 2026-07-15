@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { ArrowDown, ArrowUp, Check, Sparkles, Undo2, X } from "lucide-react";
 import { markContextNotificationRead } from "@/features/app/hooks/useBraiContextReviews";
 import { getBraiLocalStorageItem, setBraiLocalStorageItem } from "@/shared/storage/localStorageKeys";
@@ -16,15 +16,17 @@ import { Button } from "@/shared/ui/button";
 import { Input } from "@/shared/ui/input";
 import { Textarea } from "@/shared/ui/textarea";
 
-export function ContextReviewPanel({ state, onResolve, onUndo = async () => undefined }: {
+export function ContextReviewPanel({ state, onResolve, onUndo = async () => undefined, compact = false }: {
   state: ContextDecisionsState;
   onResolve: (decision: ContextDecision, resolution: ContextResolution, editedPayload?: Record<string, unknown>) => Promise<void>;
   onUndo?: (decision: ContextDecision) => Promise<void>;
+  compact?: boolean;
 }) {
+  const titleId = useId();
   const [busyId, setBusyId] = useState<string | null>(null);
   const pending = state.decisions.filter((decision) => decision.status === "pending");
   const automatic = state.decisions.filter((decision) => decision.status === "auto_accepted" || decision.status === "audit_confirmed");
-  if (state.decisions.length === 0 && state.audits.length === 0 && state.notifications.length === 0) return null;
+  if (pending.length === 0 && automatic.length === 0 && state.audits.length === 0 && state.notifications.length === 0) return null;
 
   async function resolve(decision: ContextDecision, resolution: ContextResolution, editedPayload?: Record<string, unknown>) {
     setBusyId(reviewKey(decision));
@@ -41,10 +43,13 @@ export function ContextReviewPanel({ state, onResolve, onUndo = async () => unde
   }
 
   return (
-    <section className="mt-4 grid gap-3 border-t border-border pt-4 max-[860px]:[&_button]:min-h-11 max-[860px]:[&_button]:min-w-11 max-[860px]:[&_[data-slot=input]]:min-h-11" aria-labelledby="context-review-title">
-      <header className="flex items-center gap-2 px-2">
+    <section className={compact
+      ? "my-2 grid gap-2 max-[860px]:[&_button]:min-h-11 max-[860px]:[&_button]:min-w-11 max-[860px]:[&_[data-slot=input]]:min-h-11"
+      : "mt-4 grid gap-3 border-t border-border pt-4 max-[860px]:[&_button]:min-h-11 max-[860px]:[&_button]:min-w-11 max-[860px]:[&_[data-slot=input]]:min-h-11"
+    } aria-labelledby={titleId}>
+      <header className={compact ? "sr-only" : "flex items-center gap-2 px-2"}>
         <Sparkles className="size-4 text-primary" aria-hidden="true" />
-        <h2 id="context-review-title" className="m-0 text-sm font-semibold">Предложения</h2>
+        <h2 id={titleId} className="m-0 text-sm font-semibold">Предложения</h2>
         <span className="ml-auto text-xs tabular-nums text-muted-foreground">{pending.length}</span>
       </header>
       {state.notifications.map((notification) => <PolicyNotification key={notification.id} notification={notification} />)}

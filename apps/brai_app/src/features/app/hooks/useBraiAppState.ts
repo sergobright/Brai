@@ -1480,11 +1480,6 @@ export function useBraiAppState(initialSection: SectionId) {
     saveFocusContextPanelPreference(nextPanel);
   }
 
-  function toggleActionsInfoPanel() {
-    setMobileContextPanelClosing(false);
-    setMobileContextPanel((current) => (current === "actions-info" ? null : "actions-info"));
-  }
-
   function toggleInboxInfoPanel() {
     setMobileContextPanelClosing(false);
     setMobileContextPanel((current) => (current === "inbox-info" ? null : "inbox-info"));
@@ -1519,7 +1514,6 @@ export function useBraiAppState(initialSection: SectionId) {
   }
 
   const mobileContextPanelActive = !mobileContextPanelClosing;
-  const actionsInfoActive = mobileContextPanelActive && mobileContextPanel === "actions-info";
   const inboxInfoActive = mobileContextPanelActive && mobileContextPanel === "inbox-info";
   const focusGoalActive = mobileViewport ? mobileContextPanelActive && mobileContextPanel === "focus-goal" : focusContextPanel === "goal";
   const focusHistoryActive = mobileViewport ? mobileContextPanelActive && mobileContextPanel === "focus-history" : focusContextPanel === "history";
@@ -1547,7 +1541,7 @@ export function useBraiAppState(initialSection: SectionId) {
     setSyncStatus,
   });
 
-  return { actionOverlayOpen, actions, actionsInfoActive, active, api, appSettings, authDisplayName: authUser?.name ?? "", authMode, authUser, bundlePublishedAt, busy, displaySyncStatus, downloadApkOnce, downloadWebUpdateOnce, focusBackground, focusContextPanel, focusGoalActive, focusHistoryActive, goal, history, inbox, inboxInfoActive, installApkOnce, localDatabaseBlocked, localMutationReady, localSnapshotReady, markMobileContextPanelClosing, mobileContextPanel, mobileMenuOpen, ...actionCommands, ...inboxCommands, ...relationWorkspace, ...contextReviewWorkspace, onDeleteFocusSession, onEditFocusInterval, onEditFocusSession, onEmailLogin, onLogout, onRequestOtp, onStart, onStartActionFocus, onStop, onStopActionFocus, onSwitchActionFocus, onUpdateAppSettings: updateAppSettings, onVerifyOtp, openSettingsPage, otaCheckedAt, otaRefreshing, otaState, provisionBraiCmdDeviceToken, refreshEngineOnce, refreshOtaStateOnce, section, selectSection, setActionOverlayOpen, setFocusBackground, setMobileContextPanel: setMobileContextPanelState, setMobileMenuOpen, setTheme, swipeNavigation, theme, timer, timerBusy, todayKey, toggleActionsInfoPanel, toggleFocusContextPanel, toggleInboxInfoPanel, totalPendingCount, versionCheckedAt, versionError, versionRefreshing, versionState };
+  return { actionOverlayOpen, actions, active, api, appSettings, authDisplayName: authUser?.name ?? "", authMode, authUser, bundlePublishedAt, busy, displaySyncStatus, downloadApkOnce, downloadWebUpdateOnce, focusBackground, focusContextPanel, focusGoalActive, focusHistoryActive, goal, history, inbox, inboxInfoActive, installApkOnce, localDatabaseBlocked, localMutationReady, localSnapshotReady, markMobileContextPanelClosing, mobileContextPanel, mobileMenuOpen, ...actionCommands, ...inboxCommands, ...relationWorkspace, ...contextReviewWorkspace, onDeleteFocusSession, onEditFocusInterval, onEditFocusSession, onEmailLogin, onLogout, onRequestOtp, onStart, onStartActionFocus, onStop, onStopActionFocus, onSwitchActionFocus, onUpdateAppSettings: updateAppSettings, onVerifyOtp, openSettingsPage, otaCheckedAt, otaRefreshing, otaState, provisionBraiCmdDeviceToken, refreshEngineOnce, refreshOtaStateOnce, section, selectSection, setActionOverlayOpen, setFocusBackground, setMobileContextPanel: setMobileContextPanelState, setMobileMenuOpen, setTheme, swipeNavigation, theme, timer, timerBusy, todayKey, toggleFocusContextPanel, toggleInboxInfoPanel, totalPendingCount, versionCheckedAt, versionError, versionRefreshing, versionState };
 }
 
 function loadAppSettingsPreference(): AppSettings {

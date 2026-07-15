@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useState, type FormEvent, type ReactNode } from "react";
 import { Archive, CheckCircle2, Pencil, RotateCcw, Sparkles } from "lucide-react";
 import { cleanTitle, normalizeDescription, TITLE_MAX_LENGTH } from "@/shared/activities/text";
 import type { ActivityItem, ActivityStatus } from "@/shared/types/activities";
@@ -18,6 +18,8 @@ export function GoalWorkspaceHeader({
   onSetStatus,
   onDelete,
   onPlan,
+  planPending = false,
+  children,
 }: {
   goal: ActivityItem;
   progress: GoalProgress;
@@ -25,12 +27,16 @@ export function GoalWorkspaceHeader({
   onSetStatus: (goal: ActivityItem, status: ActivityStatus) => Promise<void>;
   onDelete: (goal: ActivityItem) => Promise<void>;
   onPlan: (goal: ActivityItem) => Promise<GoalPlanResponse>;
+  planPending?: boolean;
+  children?: ReactNode;
 }) {
   const [editing, setEditing] = useState(false);
   const [title, setTitle] = useState(goal.title);
   const [description, setDescription] = useState(goal.description_md);
   const [message, setMessage] = useState<string | null>(null);
   const [planBusy, setPlanBusy] = useState(false);
+  const [planRequested, setPlanRequested] = useState(false);
+  const planAvailable = planPending || planRequested;
 
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -42,18 +48,24 @@ export function GoalWorkspaceHeader({
 
   async function requestPlan() {
     if (planBusy) return;
+    setPlanRequested(false);
     setPlanBusy(true);
     try {
       const response = await onPlan(goal);
       if (response.decision || response.status === "completed") {
+        setPlanRequested(true);
         setMessage("Предложение плана готово к проверке.");
       } else if (response.status === "running") {
+        setPlanRequested(true);
         setMessage("План уже формируется. Предложение появится здесь после обработки.");
       } else if (response.status === "failed") {
+        setPlanRequested(false);
         setMessage("Не удалось подготовить план. Попробуйте ещё раз.");
       } else if (response.status === "needs_review") {
+        setPlanRequested(false);
         setMessage("Не удалось подготовить корректный план. Запросите его повторно.");
       } else {
+        setPlanRequested(true);
         setMessage("План поставлен в очередь. Предложение появится здесь после обработки.");
       }
     } catch {
@@ -99,13 +111,14 @@ export function GoalWorkspaceHeader({
             </div>
             <Button type="button" variant="ghost" size="icon-sm" aria-label="Изменить цель" onClick={() => setEditing(true)}><Pencil aria-hidden="true" /></Button>
           </header>
+          {children}
           <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3">
             <Progress value={progress.total === 0 ? 0 : progress.done / progress.total * 100} aria-label={`Прогресс цели: ${progress.done} из ${progress.total}`} />
             <strong className="text-sm tabular-nums">{progress.done}/{progress.total}</strong>
           </div>
           <div className="flex flex-wrap gap-2">
             {goal.status !== "Done" ? (
-              <Button type="button" variant="outline" size="sm" disabled={planBusy} onClick={() => void requestPlan()}><Sparkles aria-hidden="true" />{planBusy ? "Формируем…" : "Предложить план"}</Button>
+              <Button type="button" variant="outline" size="sm" disabled={planBusy || planAvailable} onClick={() => void requestPlan()}><Sparkles aria-hidden="true" />{planBusy ? "Формируем…" : planAvailable ? "План предложен" : "Предложить план"}</Button>
             ) : null}
             {goal.status === "Done" ? (
               <Button type="button" variant="outline" size="sm" onClick={() => void onSetStatus(goal, "New")}><RotateCcw aria-hidden="true" />Вернуть в работу</Button>
