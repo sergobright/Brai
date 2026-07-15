@@ -4,6 +4,7 @@ import test from 'node:test';
 
 test('targeted infra apply is allowlisted, main-bound, and checks before applying', () => {
   const script = fs.readFileSync(new URL('./apply-main-infra.sh', import.meta.url), 'utf8');
+  assert.match(script, /brai-supavisor-maintenance/);
   assert.match(script, /brai-caddy\|brai-vault\|brai-auth-bootstrap/);
   assert.match(script, /branch --show-current/);
   assert.match(script, /status --porcelain/);
