@@ -27,7 +27,9 @@ test("Codex image and broker unit are pinned, non-public and least-privileged", 
   assert.match(unit, /BRAI_CODEX_SECCOMP_FILE=\{\{ brai_codex_broker_seccomp \}\}/);
   assert.match(unit, /BRAI_CODEX_APPARMOR_PROFILE=\{\{ brai_codex_broker_apparmor_profile \}\}/);
   assert.match(unit, /User=\{\{ brai_codex_broker_user \}\}/);
-  assert.match(unit, /SupplementaryGroups=docker \{\{ brai_codex_auth_group \}\} \{\{ brai_source_group \}\} \{\{ brai_deploy_user \}\}/);
+  assert.match(unit, /Group=\{\{ brai_deploy_user \}\}/);
+  assert.match(unit, /SupplementaryGroups=docker \{\{ brai_service_group \}\} \{\{ brai_codex_auth_group \}\} \{\{ brai_source_group \}\}/);
+  assert.match(unit, /RuntimeDirectoryMode=0750/);
   assert.match(unit, /ProtectSystem=strict/);
   assert.match(unit, /RestrictAddressFamilies=AF_UNIX/);
   assert.doesNotMatch(unit, /ListenStream|0\.0\.0\.0|:[0-9]{2,5}/);
