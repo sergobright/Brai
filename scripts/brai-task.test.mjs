@@ -530,6 +530,9 @@ test("delivery classifier separates infra-docs from runtime preview", () => {
   assert.equal(deliveryClassForFile("deploy/scripts/preview-slots.sh"), "infra");
   assert.equal(deliveryClassForFile("deploy/scripts/permissions.sh"), "infra");
   assert.equal(deliveryClassForFile("deploy/scripts/postgres-smoke.mjs"), "infra");
+  assert.equal(deliveryClassForFile("deploy/scripts/supabase-maintenance.sh"), "infra");
+  assert.equal(deliveryClassForFile("deploy/scripts/supavisor-tenants.mjs"), "infra");
+  assert.equal(deliveryClassForFile("deploy/supabase/pooler.exs"), "infra");
   assert.equal(deliveryClassForFile("deploy/scripts/supabase-branch.test.mjs"), "technical");
   assert.equal(deliveryClassForFile("deploy/scripts/prune-caddy-site-blocks.mjs"), "infra");
   assert.equal(deliveryClassForFile("deploy/scripts/publish-web.sh"), "infra");
@@ -566,6 +569,12 @@ test("delivery classifier separates infra-docs from runtime preview", () => {
   assert.equal(deliveryClassForFile("package.json"), "unknown");
 
   assert.equal(classifyDelivery(["docs/foo.md"]).deliveryClass, "infra-docs");
+  assert.equal(classifyDelivery([
+    "deploy/scripts/supabase-maintenance.sh",
+    "deploy/scripts/supavisor-tenants.mjs",
+    "deploy/supabase/pooler.exs",
+    "docs/operations/branch-preview-environments.md",
+  ]).deliveryClass, "infra-docs");
   assert.equal(classifyDelivery([".github/workflows/brai-delivery.yml"]).deliveryClass, "infra-docs");
   assert.equal(classifyDelivery(["deploy/systemd/brai-socraticode-watcher.service"]).deliveryClass, "infra-docs");
   assert.equal(classifyDelivery(["deploy/scripts/complete-operation-activities.sh"]).deliveryClass, "infra-docs");
@@ -2419,6 +2428,92 @@ test("acceptance reconcile merges current main into the same accepted branch", (
     } finally {
       process.chdir(previousCwd);
     }
+  } finally {
+    if (previousPrs == null) delete process.env.BRAI_TEST_ACCEPTANCE_PRS_JSON;
+    else process.env.BRAI_TEST_ACCEPTANCE_PRS_JSON = previousPrs;
+  }
+});
+
+test("queued no-preview acceptance repair permits only no-preview follow-up files", () => {
+  const root = tempRoot("brai-task-queued-repair-");
+  const remote = path.join(root, "origin.git");
+  const repo = path.join(root, "repo");
+  const script = path.join(process.cwd(), "scripts/brai-task.mjs");
+  const previousPrs = process.env.BRAI_TEST_ACCEPTANCE_PRS_JSON;
+  try {
+    git(["init", "--bare", remote], root);
+    fs.mkdirSync(repo);
+    git(["init"], repo);
+    git(["config", "user.email", "test@example.invalid"], repo);
+    git(["config", "user.name", "Brai Test"], repo);
+    fs.writeFileSync(path.join(repo, ".gitignore"), ".brai-task/\n");
+    fs.mkdirSync(path.join(repo, "docs"));
+    fs.writeFileSync(path.join(repo, "docs/branch.md"), "base\n");
+    git(["add", ".gitignore", "docs/branch.md"], repo);
+    git(["commit", "-m", "base"], repo);
+    git(["branch", "-M", "main"], repo);
+    const base = git(["rev-parse", "HEAD"], repo).stdout.trim();
+    git(["remote", "add", "origin", remote], repo);
+    git(["push", "origin", "HEAD:main"], repo);
+    git(["checkout", "-b", "codex/foo"], repo);
+    fs.writeFileSync(path.join(repo, "docs/branch.md"), "branch\n");
+    git(["add", "docs/branch.md"], repo);
+    git(["commit", "-m", "branch"], repo);
+    const head = git(["rev-parse", "HEAD"], repo).stdout.trim();
+    git(["push", "origin", "HEAD:codex/foo"], repo);
+
+    fs.mkdirSync(path.join(repo, ".brai-task"));
+    fs.writeFileSync(path.join(repo, ".brai-task/task.json"), `${JSON.stringify({
+      branch: "codex/foo",
+      mode: "follow-up",
+      base,
+      createdAt: "2026-07-15T00:00:00.000Z",
+      socraticodeUsedAt: "2026-07-15T00:00:01.000Z",
+      ...(process.env.CODEX_THREAD_ID ? { threadId: process.env.CODEX_THREAD_ID } : {}),
+    })}\n`);
+    const acceptancePath = path.join(repo, ".brai-task/acceptance.json");
+    const acceptance = {
+      receiptType: "brai-acceptance-v1",
+      branch: "codex/foo",
+      commit: head,
+      baseBranch: "main",
+      prNumber: 8,
+      prUrl: "https://github.example/pr/8",
+      status: "waiting_for_turn",
+      deliveryClass: "technical-no-preview",
+      acceptedAt: "2026-07-15T00:00:00.000Z",
+    };
+    fs.writeFileSync(acceptancePath, `${JSON.stringify(acceptance)}\n`);
+    process.env.BRAI_TEST_ACCEPTANCE_PRS_JSON = JSON.stringify([{
+      number: 8,
+      url: "https://github.example/pr/8",
+      state: "OPEN",
+      headRefOid: head,
+      mergeStateStatus: "UNSTABLE",
+      autoMergeRequest: null,
+    }]);
+
+    fs.writeFileSync(path.join(repo, "docs/branch.md"), "repair\n");
+    const repair = spawnSync(process.execPath, [script, "acceptance-repair", "codex/foo"], {
+      cwd: repo,
+      encoding: "utf8",
+      env: process.env,
+    });
+    assert.equal(repair.status, 0, repair.stderr || repair.stdout);
+    assert.equal(JSON.parse(fs.readFileSync(acceptancePath, "utf8")).status, "repair_started");
+
+    git(["restore", "docs/branch.md"], repo);
+    fs.writeFileSync(acceptancePath, `${JSON.stringify(acceptance)}\n`);
+    fs.mkdirSync(path.join(repo, "apps/brai_app/src"), { recursive: true });
+    fs.writeFileSync(path.join(repo, "apps/brai_app/src/page.tsx"), "runtime\n");
+    const runtimeRepair = spawnSync(process.execPath, [script, "acceptance-repair", "codex/foo"], {
+      cwd: repo,
+      encoding: "utf8",
+      env: process.env,
+    });
+    assert.notEqual(runtimeRepair.status, 0);
+    assert.match(runtimeRepair.stderr, /only no-preview files/);
+    assert.equal(JSON.parse(fs.readFileSync(acceptancePath, "utf8")).status, "waiting_for_turn");
   } finally {
     if (previousPrs == null) delete process.env.BRAI_TEST_ACCEPTANCE_PRS_JSON;
     else process.env.BRAI_TEST_ACCEPTANCE_PRS_JSON = previousPrs;

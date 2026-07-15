@@ -4,9 +4,10 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 
-export const PROD_SUPAVISOR_TENANT = "brightos-prod";
-export const NONPROD_SUPAVISOR_TENANT = "brightos-nonprod";
-const KNOWN_TENANTS = ["brightos", PROD_SUPAVISOR_TENANT, NONPROD_SUPAVISOR_TENANT];
+export const PROD_SUPAVISOR_TENANT = "brai-prod";
+export const NONPROD_SUPAVISOR_TENANT = "brai-nonprod";
+const TARGET_TENANTS = [PROD_SUPAVISOR_TENANT, NONPROD_SUPAVISOR_TENANT];
+const STRIPPABLE_TENANTS = ["brightos", "brightos-prod", "brightos-nonprod", ...TARGET_TENANTS];
 
 export function tenantIsolationEnabled(env = process.env) {
   return /^(1|true|yes)$/i.test(String(env.BRAI_SUPAVISOR_TENANT_ISOLATION ?? ""));
@@ -19,12 +20,12 @@ export function expectedSupavisorTenant(environment) {
 }
 
 export function databaseUsernameWithoutKnownTenant(username) {
-  const suffix = KNOWN_TENANTS.find((tenant) => username.endsWith(`.${tenant}`));
+  const suffix = STRIPPABLE_TENANTS.find((tenant) => username.endsWith(`.${tenant}`));
   return suffix ? username.slice(0, -(suffix.length + 1)) : username;
 }
 
 export function databaseUrlForSupavisorTenant(databaseUrl, tenant) {
-  if (!KNOWN_TENANTS.includes(tenant)) throw new Error(`Unsupported Supavisor tenant: ${tenant}`);
+  if (!TARGET_TENANTS.includes(tenant)) throw new Error(`Unsupported Supavisor tenant: ${tenant}`);
   const url = postgresUrl(databaseUrl);
   const databaseUser = databaseUsernameWithoutKnownTenant(url.username);
   if (!databaseUser) throw new Error("Postgres URL username is required");

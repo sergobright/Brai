@@ -12,9 +12,9 @@ import {
 
 test("tenant rewrite changes only the Supavisor tenant", () => {
   const source = new URL("postgres://postgres.brightos:p%40ss@127.0.0.1:55432/postgres?sslmode=disable&options=-c%20search_path%3Dbrai_preview_x%2Cpublic");
-  const rewritten = new URL(databaseUrlForSupavisorTenant(source.toString(), "brightos-nonprod"));
+  const rewritten = new URL(databaseUrlForSupavisorTenant(source.toString(), "brai-nonprod"));
 
-  assert.equal(rewritten.username, "postgres.brightos-nonprod");
+  assert.equal(rewritten.username, "postgres.brai-nonprod");
   assert.equal(rewritten.password, source.password);
   assert.equal(rewritten.host, source.host);
   assert.equal(rewritten.pathname, source.pathname);
@@ -22,25 +22,38 @@ test("tenant rewrite changes only the Supavisor tenant", () => {
   assert.equal(rewritten.searchParams.get("sslmode"), source.searchParams.get("sslmode"));
 });
 
+test("tenant rewrite replaces every legacy BrightOS suffix and rejects it as a target", () => {
+  for (const legacyTenant of ["brightos", "brightos-prod", "brightos-nonprod"]) {
+    const source = `postgres://postgres.${legacyTenant}:secret@127.0.0.1:55432/postgres`;
+    const rewritten = new URL(databaseUrlForSupavisorTenant(source, "brai-nonprod"));
+    assert.equal(rewritten.username, "postgres.brai-nonprod");
+  }
+
+  assert.throws(
+    () => databaseUrlForSupavisorTenant("postgres://postgres:secret@127.0.0.1:55432/postgres", "brightos-prod"),
+    /Unsupported Supavisor tenant/,
+  );
+});
+
 test("tenant assertion is staged and then fail-closed by environment", () => {
   const legacy = "postgres://postgres.brightos:secret@127.0.0.1:55432/postgres";
   assert.doesNotThrow(() => assertDatabaseUrlTenant(legacy, "prod", {}));
   assert.throws(
     () => assertDatabaseUrlTenant(legacy, "prod", { BRAI_SUPAVISOR_TENANT_ISOLATION: "true" }),
-    /brightos-prod/,
+    /brai-prod/,
   );
   assert.doesNotThrow(() => assertDatabaseUrlTenant(
-    "postgres://postgres.brightos-prod:secret@127.0.0.1:55432/postgres",
+    "postgres://postgres.brai-prod:secret@127.0.0.1:55432/postgres",
     "prod",
     { BRAI_SUPAVISOR_TENANT_ISOLATION: "true" },
   ));
   assert.throws(
     () => assertDatabaseUrlTenant(
-      "postgres://postgres.brightos-prod:secret@127.0.0.1:55432/postgres",
+      "postgres://postgres.brai-prod:secret@127.0.0.1:55432/postgres",
       "preview-a",
       { BRAI_SUPAVISOR_TENANT_ISOLATION: "true" },
     ),
-    /brightos-nonprod/,
+    /brai-nonprod/,
   );
 });
 
@@ -54,10 +67,10 @@ test("environment rewrite preserves unrelated settings and file ownership mode",
   ].join("\n"), { mode: 0o660 });
   const originalMode = fs.statSync(envFile).mode & 0o777;
 
-  assert.equal(rewriteEnvDatabaseUrl(envFile, { tenant: "brightos-nonprod" }), true);
+  assert.equal(rewriteEnvDatabaseUrl(envFile, { tenant: "brai-nonprod" }), true);
   const contents = fs.readFileSync(envFile, "utf8");
   assert.match(contents, /^KEEP_ME='yes'$/m);
-  assert.match(contents, /postgres\.brightos-nonprod/);
+  assert.match(contents, /postgres\.brai-nonprod/);
   assert.match(contents, /search_path%3Dbrai_dev%2Cpublic/);
   assert.equal(fs.statSync(envFile).mode & 0o777, originalMode);
 

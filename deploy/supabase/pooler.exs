@@ -24,7 +24,7 @@ base_params = %{
   }]
 }
 
-[System.get_env("POOLER_TENANT_ID"), "brightos-prod", "brightos-nonprod"]
+[System.get_env("POOLER_TENANT_ID"), "brai-prod", "brai-nonprod"]
 |> Enum.reject(&(&1 in [nil, ""]))
 |> Enum.uniq()
 |> Enum.each(fn external_id ->

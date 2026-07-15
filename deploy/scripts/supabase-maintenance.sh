@@ -186,13 +186,13 @@ rollback() {
 }
 
 rewrite_runtime_tenants() {
-  "$NODE_BIN" "$TENANT_TOOL" rewrite-env --file "$PROD_ENV" --tenant brightos-prod
-  "$NODE_BIN" "$TENANT_TOOL" rewrite-env --file "$DEPLOY_ENV" --key SUPABASE_SELF_HOSTED_DATABASE_URL --tenant brightos-nonprod
+  "$NODE_BIN" "$TENANT_TOOL" rewrite-env --file "$PROD_ENV" --tenant brai-prod
+  "$NODE_BIN" "$TENANT_TOOL" rewrite-env --file "$DEPLOY_ENV" --key SUPABASE_SELF_HOSTED_DATABASE_URL --tenant brai-nonprod
   "$NODE_BIN" "$TENANT_TOOL" set-env --file "$DEPLOY_ENV" --key BRAI_SUPAVISOR_TENANT_ISOLATION --value true
   local environment env_file
   for environment in "${ENVIRONMENTS[@]:1}"; do
     env_file="$ENVS_ROOT/$environment/brai-api.env"
-    [[ ! -f "$env_file" ]] || "$NODE_BIN" "$TENANT_TOOL" rewrite-env --file "$env_file" --tenant brightos-nonprod --if-present
+    [[ ! -f "$env_file" ]] || "$NODE_BIN" "$TENANT_TOOL" rewrite-env --file "$env_file" --tenant brai-nonprod --if-present
   done
 }
 

@@ -546,25 +546,36 @@ function acceptanceRepair(branchArg) {
   if (!markerValidation.ok) throw new Error(`${markerValidation.message}\n\n${taskStartGuidance()}`);
   const threadValidation = validateTaskThread(readTaskMarker(), currentThreadId());
   if (!threadValidation.ok) throw new Error(`${threadValidation.message}\n\n${taskStartGuidance()}`);
-  if (git("status", "--porcelain").trim()) throw new Error("Working tree must be clean before acceptance repair.");
+  const receipt = readAcceptanceReceipt();
+  const queuedNoPreview = receipt?.status === "waiting_for_turn" && isNoPreviewDeliveryClass(receipt.deliveryClass);
+  const repairFiles = [...new Set([
+    ...diffNames("HEAD"),
+    ...(gitMaybe("diff", "--cached", "--name-only") ?? "").split("\n").filter(Boolean),
+    ...(gitMaybe("ls-files", "--others", "--exclude-standard") ?? "").split("\n").filter(Boolean),
+  ])];
+  if (repairFiles.length && !queuedNoPreview) throw new Error("Working tree must be clean before acceptance repair.");
+  if (repairFiles.length && !isNoPreviewDeliveryClass(classifyDelivery(repairFiles).deliveryClass)) {
+    throw new Error("Queued no-preview acceptance repair may contain only no-preview files.");
+  }
 
   fetchTaskBranch(branch);
   const head = git("rev-parse", "HEAD");
   const remoteHead = git("rev-parse", `origin/${branch}`);
   if (head !== remoteHead) throw new Error(`HEAD ${head} is not origin/${branch} (${remoteHead}). Push before acceptance repair.`);
-  const receipt = readAcceptanceReceipt();
   if (receipt?.receiptType !== ACCEPTANCE_RECEIPT_VERSION || receipt.branch !== branch || receipt.commit !== head) {
     throw new Error("Acceptance repair requires an exact local acceptance receipt for the current branch head.");
   }
-  if (receipt.status !== "acceptance_started") {
-    throw new Error(`Acceptance receipt status is ${receipt.status || "(missing)"}, not acceptance_started.`);
+  if (receipt.status !== "acceptance_started" && !queuedNoPreview) {
+    throw new Error(`Acceptance receipt status is ${receipt.status || "(missing)"}, not repairable.`);
   }
   const pr = findAcceptancePr(branch, head);
   if (!pr) throw new Error(`No open acceptance PR into ${acceptedBaseBranch()} found for ${branch}@${head}.`);
-  if (pr.mergeStateStatus !== "BLOCKED") {
+  if (!queuedNoPreview && pr.mergeStateStatus !== "BLOCKED") {
     throw new Error(`Acceptance PR #${pr.number} mergeStateStatus is ${pr.mergeStateStatus || "(missing)"}, not BLOCKED.`);
   }
-  runRequired(["gh", "pr", "merge", String(pr.number), "--disable-auto"], `Failed to disable auto-merge for PR #${pr.number}.`);
+  if (pr.autoMergeRequest) {
+    runRequired(["gh", "pr", "merge", String(pr.number), "--disable-auto"], `Failed to disable auto-merge for PR #${pr.number}.`);
+  }
   writeAcceptanceReceipt({
     ...receipt,
     prNumber: pr.number,
@@ -2252,9 +2263,12 @@ function deliveryClassForFile(file) {
       "deploy/scripts/promote-deployment.mjs",
       "deploy/scripts/resolve-deploy-env.mjs",
       "deploy/scripts/resolve-required-apk-version.mjs",
+      "deploy/scripts/supabase-maintenance.sh",
+      "deploy/scripts/supavisor-tenants.mjs",
       "deploy/scripts/sync-local-main-checkout.sh",
       "deploy/scripts/sync-occupied-preview-ota-manifests.sh",
       "deploy/scripts/update-release-index.mjs",
+      "deploy/supabase/pooler.exs",
       "scripts/caddy-prune-managed-sites.test.mjs",
     ].includes(file)
   ) {
