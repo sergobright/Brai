@@ -2,6 +2,8 @@
 set -euo pipefail
 
 readonly AUTH_IMAGE_PATTERN='^ghcr\.io/sergobright/brai-auth@sha256:[0-9a-f]{64}$'
+readonly SOURCE_SHA_PATTERN='^[0-9a-f]{40}$'
+readonly AUTH_IMAGE_SOURCE='https://github.com/sergobright/Brai'
 readonly ABSENT_IMAGE='absent'
 
 die() {
@@ -12,7 +14,8 @@ die() {
 usage() {
   cat >&2 <<'EOF'
 usage:
-  brai-auth-runtime.sh deploy <environment> <digest> [<branch> <commit> <lease>]
+  brai-auth-runtime.sh pull-only <digest> <source-sha>
+  brai-auth-runtime.sh deploy <environment> <digest> <source-sha> [<branch> <commit> <lease>]
   brai-auth-runtime.sh route-enable <environment> [<branch> <commit> <lease>]
   brai-auth-runtime.sh route-disable <environment> [<branch> <commit> <lease>]
   brai-auth-runtime.sh preflight-rollback <environment> <digest|absent> <enabled|disabled> [<branch> <commit> <lease>]
@@ -165,8 +168,20 @@ compose() {
     "$DOCKER_BIN" compose --project-name "$COMPOSE_PROJECT" --file "$COMPOSE_FILE" "${@:2}"
 }
 
-pull_image_if_missing() (
-  local image="$1" registry_token='' docker_config=''
+verify_image_identity() {
+  local image="$1" expected_sha="$2" revision='' source=''
+  if ! revision="$("$DOCKER_BIN" image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$image")"; then
+    die 'Could not inspect auth image revision label.'
+  fi
+  if ! source="$("$DOCKER_BIN" image inspect --format '{{ index .Config.Labels "org.opencontainers.image.source" }}' "$image")"; then
+    die 'Could not inspect auth image source label.'
+  fi
+  [[ "$revision" == "$expected_sha" ]] || die 'Auth image revision label does not match the exact expected source SHA.'
+  [[ "$source" == "$AUTH_IMAGE_SOURCE" ]] || die 'Auth image source label does not match the canonical Brai repository.'
+}
+
+pull_only() (
+  local image="$1" expected_sha="$2" registry_token='' docker_config=''
   # Invoked indirectly by the EXIT trap below.
   # shellcheck disable=SC2329
   cleanup_registry_login() {
@@ -177,11 +192,9 @@ pull_image_if_missing() (
   trap 'exit 129' HUP
   trap 'exit 130' INT
   trap 'exit 143' TERM
-  if "$DOCKER_BIN" image inspect "$image" >/dev/null 2>&1; then
-    return 0
-  fi
-
-  IFS= read -r registry_token || die 'A short-lived GHCR token is required on stdin for a missing auth image.'
+  require_safe_dir "$AUTH_ROOT"
+  require_executable "$DOCKER_BIN"
+  IFS= read -r registry_token || die 'A short-lived GHCR token is required on stdin for pull-only.'
   [[ -n "$registry_token" && ${#registry_token} -le 1024 && "$registry_token" != *[[:space:]]* ]] \
     || die 'The GHCR token supplied on stdin is empty or malformed.'
   docker_config="$(/usr/bin/mktemp -d "$AUTH_ROOT/.registry-login.XXXXXX")"
@@ -192,15 +205,27 @@ pull_image_if_missing() (
     die 'Short-lived GHCR authentication failed.'
   fi
   registry_token=''
-  if ! DOCKER_CONFIG="$docker_config" compose "$image" pull auth; then
+  if ! DOCKER_CONFIG="$docker_config" "$DOCKER_BIN" pull "$image" >/dev/null; then
     die 'Exact-digest GHCR pull failed.'
   fi
+  verify_image_identity "$image" "$expected_sha"
 )
 
-deploy_image() {
+start_local_image() {
   local image="$1"
-  pull_image_if_missing "$image"
+  require_executable "$DOCKER_BIN"
+  "$DOCKER_BIN" image inspect "$image" >/dev/null 2>&1 \
+    || die 'Auth image is not local; trusted CI must run pull-only before deploy.'
   compose "$image" up -d --no-build auth
+}
+
+deploy_image() {
+  local image="$1" expected_sha="$2"
+  require_executable "$DOCKER_BIN"
+  "$DOCKER_BIN" image inspect "$image" >/dev/null 2>&1 \
+    || die 'Auth image is not local; trusted CI must run pull-only before deploy.'
+  verify_image_identity "$image" "$expected_sha"
+  start_local_image "$image"
 }
 
 remove_container() {
@@ -321,22 +346,22 @@ set_route_state() {
 }
 
 run_action() {
-  local action="$1" image="${2:-}" prior_route="${3:-}"
+  local action="$1" image="${2:-}" prior_route="${3:-}" source_sha="${4:-}"
   assert_preview_lease "$action"
   acquire_environment_lock
   case "$action" in
-    deploy) deploy_image "$image" ;;
+    deploy) deploy_image "$image" "$source_sha" ;;
     route-enable) set_route_state enabled ;;
     route-disable) set_route_state disabled ;;
     preflight-rollback) preflight_rollback "$image" "$prior_route" ;;
     rollback)
       if set_route_state disabled; then
-        if [[ "$image" == "$ABSENT_IMAGE" ]]; then remove_container; else deploy_image "$image"; fi
+        if [[ "$image" == "$ABSENT_IMAGE" ]]; then remove_container; else start_local_image "$image"; fi
         [[ "$prior_route" != 'enabled' ]] || set_route_state enabled
       else
         printf 'Caddy route disable failed; restoring the prior served runtime or removing the incoming container.\n' >&2
         if [[ "$image" != "$ABSENT_IMAGE" ]]; then
-          if ! deploy_image "$image"; then
+          if ! start_local_image "$image"; then
             remove_container || die 'Could not restore the prior auth image or remove the incoming container.'
             die 'Prior auth image restore failed; incoming container was removed fail-closed.'
           fi
@@ -358,18 +383,35 @@ run_action() {
 
 main() {
   configure_paths
-  [[ $# -ge 2 ]] || usage
-  local action="$1" environment="$2" image='' prior_route=''
-  shift 2
+  [[ $# -ge 1 ]] || usage
+  local action="$1" environment='' image='' prior_route='' source_sha=''
+  shift
+  if [[ "$action" == pull-only ]]; then
+    [[ $# -eq 2 ]] || usage
+    image="$1"
+    source_sha="$2"
+    require_image "$image"
+    [[ "$source_sha" =~ $SOURCE_SHA_PATTERN ]] || die 'Auth image source SHA must be an exact lowercase 40-character SHA.' 2
+    pull_only "$image" "$source_sha"
+    printf '{"ok":true,"action":"pull-only"}\n'
+    return 0
+  fi
+  [[ $# -ge 1 ]] || usage
+  environment="$1"
+  shift
   case "$action" in deploy|route-enable|route-disable|preflight-rollback|rollback|remove) ;; *) usage ;; esac
   load_environment "$environment"
   case "$action" in
     deploy)
-      [[ $# -ge 1 ]] || usage
+      [[ $# -ge 2 ]] || usage
       image="$1"
-      shift
+      source_sha="$2"
+      shift 2
       require_image "$image"
+      [[ "$source_sha" =~ $SOURCE_SHA_PATTERN ]] || die 'Auth image source SHA must be an exact lowercase 40-character SHA.' 2
       parse_lease "$@"
+      [[ -z "$PREVIEW_SLOT" || "$source_sha" == "$LEASE_COMMIT" ]] \
+        || die 'Preview auth image source SHA must match the exact Preview lease commit.' 2
       ;;
     route-enable|route-disable|remove) parse_lease "$@" ;;
     preflight-rollback|rollback)
@@ -384,7 +426,7 @@ main() {
       parse_lease "$@"
       ;;
   esac
-  run_action "$action" "$image" "$prior_route"
+  run_action "$action" "$image" "$prior_route" "$source_sha"
 }
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
