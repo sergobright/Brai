@@ -1,7 +1,7 @@
 "use client";
 
 import type { CSSProperties, FormEvent, ReactNode } from "react";
-import { useEffect, useId, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { CheckCircle2, KeyRound, Loader2, Lock, Mail, TriangleAlert, WifiOff, X, type LucideIcon } from "lucide-react";
 import { useEnvironmentBadgeLabel } from "@/shared/config/runtime";
 import { installAndroidBackHandler } from "@/shared/platform/platform";
@@ -148,15 +148,19 @@ export function MobileContextSheet({
   className,
   children,
   contentInset = "balanced",
+  inactive = false,
   onClose,
   onCloseStart,
   scroll = true,
   variant = "context",
+  floatingClose = variant === "detail",
 }: {
   label: string;
   className?: string;
   children: ReactNode;
   contentInset?: "balanced" | "end" | "none";
+  floatingClose?: boolean;
+  inactive?: boolean;
   onClose: () => void;
   onCloseStart?: () => void;
   scroll?: boolean;
@@ -165,7 +169,14 @@ export function MobileContextSheet({
   const suppressPopRef = useRef(false);
   const onCloseRef = useRef(onClose);
   const sheetTop = useMobileSheetTop();
-  const { backdropRef, backdropStyle, closeWithAnimation, gestureRef, resetOpen, sheetDragHandlers, sheetRef, sheetStyle } = useMobileSheetDrag({ onClose, onCloseStart });
+  const closeFromGesture = useCallback(() => {
+    if (window.history.state?.braiMobileSheet === label) {
+      suppressPopRef.current = true;
+      window.history.back();
+    }
+    onCloseRef.current();
+  }, [label]);
+  const { backdropRef, backdropStyle, closeWithAnimation, gestureRef, resetOpen, sheetDragHandlers, sheetRef, sheetStyle } = useMobileSheetDrag({ onClose: closeFromGesture, onCloseStart });
 
   useEffect(() => {
     onCloseRef.current = onClose;
@@ -173,7 +184,7 @@ export function MobileContextSheet({
 
   useEffect(() => {
     resetOpen();
-    if (window.history.state?.braiMobileSheet) {
+    if (window.history.state?.braiMobileSheet === label) {
       window.history.replaceState({ ...window.history.state, braiMobileSheet: label }, "", window.location.href);
     } else {
       window.history.pushState({ ...window.history.state, braiMobileSheet: label }, "", window.location.href);
@@ -184,6 +195,7 @@ export function MobileContextSheet({
         suppressPopRef.current = false;
         return;
       }
+      if (window.history.state?.braiMobileSheet === label) return;
       closeWithAnimation();
     }
 
@@ -214,6 +226,8 @@ export function MobileContextSheet({
       className={cx("mobile-context-backdrop fixed inset-0 z-[84] hidden items-end max-[860px]:flex", className)}
       style={{ top: sheetTop } as CSSProperties}
       data-nav-swipe-exclusion
+      aria-hidden={inactive || undefined}
+      inert={inactive || undefined}
       onClick={closeSheet}
       {...sheetDragHandlers}
     >
@@ -250,7 +264,7 @@ export function MobileContextSheet({
           {variant === "context" ? <h2 className="m-0 text-lg font-semibold leading-tight">{label}</h2> : null}
         </header>
         {scroll ? <ScrollArea className="min-h-0" contentInset={contentInset}>{children}</ScrollArea> : children}
-        {variant === "detail" ? <MobileDetailFloatingCloseButton ariaLabel={`Закрыть панель: ${label}`} onClick={closeSheet} /> : null}
+        {variant === "detail" && floatingClose ? <MobileDetailFloatingCloseButton ariaLabel={`Закрыть панель: ${label}`} onClick={closeSheet} /> : null}
       </aside>
     </div>
   );

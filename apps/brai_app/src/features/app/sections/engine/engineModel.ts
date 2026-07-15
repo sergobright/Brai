@@ -85,6 +85,7 @@ export type EngineSectionView = {
   downloadProgressVersion: string | null;
   downloadProgressPercent: number | null;
   hasUpdate: boolean;
+  installedApkVersion: number | null;
   installedVersion: string;
   isChecking: boolean;
   apkUpdateAvailable: boolean;
@@ -161,6 +162,7 @@ export function engineSectionView({
     downloadProgressVersion: otaVersion(visibleState?.downloadProgressVersion),
     downloadProgressPercent: progressPercent(visibleState),
     hasUpdate,
+    installedApkVersion: nativeApk.version,
     installedVersion,
     isChecking,
     latestVersion,

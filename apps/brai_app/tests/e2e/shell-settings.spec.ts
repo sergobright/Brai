@@ -149,7 +149,7 @@ test("opens Engine from the profile menu", async ({ page }) => {
   await expect(page.getByRole("button", { name: "Скачать обновление" })).toBeVisible();
 });
 
-test("opens one Engine version history through the shared desktop panel and mobile sheet", async ({ page }, testInfo) => {
+test("opens compact Engine version cards and returns from version details", async ({ page }, testInfo) => {
   await mockEngineShellApi(page);
   await page.route("**/v1/version-history**", (route) => {
     const url = new URL(route.request().url());
@@ -172,7 +172,10 @@ test("opens one Engine version history through the shared desktop panel and mobi
   const historyButton = page.getByRole("button", { name: "История версий", exact: true });
   await historyButton.click();
   await expect(historyButton).toHaveAttribute("aria-pressed", "true");
-  await expect(page.getByRole("heading", { name: "История work 142" })).toBeVisible();
+  const version142 = page.getByRole("button", { name: "Новая версия 142: История work 142" });
+  await expect(version142).toBeVisible();
+  await expect(version142).toContainText("Версия 142");
+  await expect(page.getByRole("heading", { name: "История work 142" })).toHaveCount(0);
   await expect(page.getByRole("heading", { name: /Текущая версия/ })).toBeVisible();
 
   if (testInfo.project.name === "desktop") {
@@ -184,29 +187,57 @@ test("opens one Engine version history through the shared desktop panel and mobi
     const panelBox = await workspace.locator(".page-panel").boundingBox();
     expect(Math.abs((mainBox?.width ?? 0) - (panelBox?.width ?? 0))).toBeLessThanOrEqual(2);
 
+    await version142.click();
+    await expect(page.getByRole("heading", { name: "История work 142" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Закрыть подробности версии" })).toBeVisible();
+    await expect(version142).toHaveCount(0);
+    await page.getByRole("button", { name: "Закрыть подробности версии" }).click();
+    await expect(version142).toBeVisible();
+
     await page.getByRole("button", { name: "Показать более ранние" }).click();
-    await expect(page.getByRole("heading", { name: "История work 141" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Новая версия 141: История work 141" })).toBeVisible();
     await page.getByRole("button", { name: "APK" }).click();
-    await expect(page.getByRole("heading", { name: "История work 11" })).toBeVisible();
-    await expect(page.getByRole("heading", { name: "История work 142" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Новая версия 11: История work 11" })).toBeVisible();
+    await expect(version142).toHaveCount(0);
   } else {
-    const sheet = page.locator(".mobile-context-sheet");
-    await expect(sheet).toBeVisible();
-    await expect(sheet.locator(".mobile-context-grabber")).toBeVisible();
+    const historySheet = page.locator(".mobile-context-sheet");
+    await expect(historySheet).toBeVisible();
+    await expect(historySheet.locator(".mobile-context-grabber")).toBeVisible();
     const headerBox = await page.locator(".section-page-current .topbar").boundingBox();
-    const sheetBox = await sheet.boundingBox();
+    const sheetBox = await historySheet.boundingBox();
     expect(sheetBox?.y ?? 0).toBeGreaterThanOrEqual((headerBox?.y ?? 0) + (headerBox?.height ?? 0) - 1);
 
+    await version142.click();
+    const detailSheet = page.locator(".version-history-detail-backdrop");
+    await expect(page.locator(".mobile-context-backdrop")).toHaveCount(2);
+    await expect(detailSheet.getByRole("heading", { name: "История work 142" })).toBeVisible();
+    await expect(detailSheet.locator(".actions-detail-close")).toHaveCount(0);
+    await expect(historySheet).toBeAttached();
+
     await page.goBack();
-    await expect(sheet).toHaveCount(0);
+    await expect(detailSheet).toHaveCount(0);
+    await expect(historySheet).toBeVisible();
+    await expect(historyButton).toHaveAttribute("aria-pressed", "true");
+
+    await version142.click();
+    await expect(detailSheet).toBeVisible();
+    const detailDragZone = await detailSheet.locator(".actions-detail-drag-zone").boundingBox();
+    const detailStart = { x: (detailDragZone?.x ?? 0) + (detailDragZone?.width ?? 0) / 2, y: (detailDragZone?.y ?? 0) + 4 };
+    await swipeTouch(page, detailStart, { x: detailStart.x, y: detailStart.y + 420 });
+    await expect(detailSheet).toHaveCount(0);
+    await expect(historySheet).toBeVisible();
+    await expect(historyButton).toHaveAttribute("aria-pressed", "true");
+
+    await page.goBack();
+    await expect(historySheet).toHaveCount(0);
     await expect(historyButton).toHaveAttribute("aria-pressed", "false");
 
     await historyButton.click();
-    await expect(sheet).toBeVisible();
-    const dragZone = await sheet.locator(".mobile-context-drag-zone").boundingBox();
+    await expect(historySheet).toBeVisible();
+    const dragZone = await historySheet.locator(".mobile-context-drag-zone").boundingBox();
     const start = { x: (dragZone?.x ?? 0) + (dragZone?.width ?? 0) / 2, y: (dragZone?.y ?? 0) + 8 };
     await swipeTouch(page, start, { x: start.x, y: start.y + 420 });
-    await expect(sheet).toHaveCount(0);
+    await expect(historySheet).toHaveCount(0);
     await expect(historyButton).toHaveAttribute("aria-pressed", "false");
   }
 });

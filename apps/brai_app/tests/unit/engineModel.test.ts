@@ -108,6 +108,7 @@ describe("engineSectionView", () => {
 
     expect(view.hasUpdate).toBe(true);
     expect(view.apkUpdateAvailable).toBe(true);
+    expect(view.installedApkVersion).toBe(1);
     expect(view.updateStatus.label).toBe("нужен APK");
   });
 
