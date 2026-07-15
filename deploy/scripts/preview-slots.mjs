@@ -77,6 +77,7 @@ function allocate(registry, branch, commit, rawGeneration, now) {
   const generation = optionalLeaseGeneration(rawGeneration);
   const existing = findByBranch(registry, branch);
   if (existing) {
+    const recoveringFailed = existing.entry.status === "failed";
     assertLeaseAdvance(existing.entry, commit, generation);
     removeQueuedBranch(registry, branch);
     const commitChanged = Boolean(existing.entry.commit && commit && existing.entry.commit !== commit);
@@ -87,7 +88,7 @@ function allocate(registry, branch, commit, rawGeneration, now) {
       updated_at: now,
       ...(commitChanged ? { review_note: null } : {}),
     });
-    return { ok: true, queued: false, allocatedNew: false, slot: existing.slot, entry: existing.entry };
+    return { ok: true, queued: false, allocatedNew: false, recoveringFailed, slot: existing.slot, entry: existing.entry };
   }
 
   const slot = slots.find((candidate) => registry[candidate].status === "free");
@@ -106,7 +107,7 @@ function allocate(registry, branch, commit, rawGeneration, now) {
     assigned_at: now,
     updated_at: now,
   });
-  return { ok: true, queued: false, allocatedNew: true, slot, entry };
+  return { ok: true, queued: false, allocatedNew: true, recoveringFailed: false, slot, entry };
 }
 
 function assertOwned(registry, branch, commit) {

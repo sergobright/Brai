@@ -72,6 +72,32 @@ test("queued preview lease also rejects a lower generation", (context) => {
   assert.equal(queued.lease_generation, 20);
 });
 
+test("allocation distinguishes exact failed-deploy recovery from a missing ready source", (context) => {
+  const { run } = runner(context);
+
+  const initial = JSON.parse(run("allocate", "codex/retry", "commit-a", "10").stdout);
+  assert.equal(initial.allocatedNew, true);
+  assert.equal(initial.recoveringFailed, false);
+
+  assert.equal(run("failed", "codex/retry", "commit-a").status, 0);
+  const retry = JSON.parse(run("allocate", "codex/retry", "commit-b", "20").stdout);
+  assert.equal(retry.allocatedNew, false);
+  assert.equal(retry.recoveringFailed, true);
+
+  assert.equal(run("ready", "codex/retry", "commit-b").status, 0);
+  const readyUpdate = JSON.parse(run("allocate", "codex/retry", "commit-c", "30").stdout);
+  assert.equal(readyUpdate.allocatedNew, false);
+  assert.equal(readyUpdate.recoveringFailed, false);
+});
+
+test("deploy permits missing source only for a new slot or exact failed recovery", () => {
+  const root = path.resolve(import.meta.dirname, "../..");
+  const deploy = fs.readFileSync(path.join(root, "deploy/scripts/ci-ssh-deploy.sh"), "utf8");
+  assert.match(deploy, /BRAI_PREVIEW_RECOVERING_FAILED=.*allocation_field recoveringFailed/);
+  assert.match(deploy, /SOURCE_PRESENT.*preview-\*[\s\S]*BRAI_PREVIEW_ALLOCATED_NEW[\s\S]*BRAI_PREVIEW_RECOVERING_FAILED/);
+  assert.match(deploy, /Missing Preview source is safe only for a new slot or exact failed-deploy recovery/);
+});
+
 function runner(context) {
   const envsRoot = fs.mkdtempSync(path.join(os.tmpdir(), "brai-preview-cas-"));
   context.after(() => fs.rmSync(envsRoot, { recursive: true, force: true }));

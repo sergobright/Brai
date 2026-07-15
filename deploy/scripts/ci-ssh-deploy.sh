@@ -587,7 +587,8 @@ if [[ "$BRAI_BRANCH" == codex/* ]]; then
   BRAI_PREVIEW_QUEUED="false"
   BRAI_PREVIEW_SLOT="$(printf '%s' "$ALLOCATION_JSON" | allocation_field slot)"
   BRAI_PREVIEW_ALLOCATED_NEW="$(printf '%s' "$ALLOCATION_JSON" | allocation_field allocatedNew)"
-  export BRAI_PREVIEW_SLOT BRAI_PREVIEW_ALLOCATED_NEW
+  BRAI_PREVIEW_RECOVERING_FAILED="$(printf '%s' "$ALLOCATION_JSON" | allocation_field recoveringFailed)"
+  export BRAI_PREVIEW_SLOT BRAI_PREVIEW_ALLOCATED_NEW BRAI_PREVIEW_RECOVERING_FAILED
   printf 'BRAI_PREVIEW_SLOT_OUTPUT=%s\n' "$BRAI_PREVIEW_SLOT"
 fi
 
@@ -716,8 +717,9 @@ fi
 API_QUIESCED="true"
 assert_api_quiesced
 if [[ "$SOURCE_PRESENT" != "true" && "$ENVIRONMENT" == preview-* \
-  && "${BRAI_PREVIEW_ALLOCATED_NEW:-false}" != "true" ]]; then
-  echo "Missing Preview source is first-install-safe only for a newly allocated slot" >&2
+  && "${BRAI_PREVIEW_ALLOCATED_NEW:-false}" != "true" \
+  && "${BRAI_PREVIEW_RECOVERING_FAILED:-false}" != "true" ]]; then
+  echo "Missing Preview source is safe only for a new slot or exact failed-deploy recovery" >&2
   exit 1
 fi
 
