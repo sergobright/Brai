@@ -111,7 +111,7 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
   const handleStartupIntroComplete = useCallback(() => setStartupIntroComplete(true), []);
   const mobileMenuSwipe = useLeftEdgeMenuSwipe(
     () => {
-      if (hasMobilePageRail(visibleSection, nativeAndroid)) app.setMobileMenuOpen(true);
+      if (hasMobilePageRail(visibleSection, nativeAndroid === true)) app.setMobileMenuOpen(true);
       else setMobileDockLayer("left");
     },
     !app.mobileMenuOpen && !mobileDockLayer && !app.mobilePanelOpen && !app.actionOverlayOpen,
@@ -355,7 +355,7 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
             icon={sectionIcon(screenSection)}
             syncStatus={app.displaySyncStatus}
             pendingCount={app.totalPendingCount}
-            leading={hasMobilePageRail(screenSection, nativeAndroid) ? <MobileMenuButton onClick={openMobileMenu} /> : null}
+            leading={hasMobilePageRail(screenSection, nativeAndroid === true) ? <MobileMenuButton onClick={openMobileMenu} /> : null}
             desktopLeading={hasDesktopPageRail(screenSection) ? (
               <button
                 type="button"
@@ -478,7 +478,7 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
           />} />
         ) : screenSection === "engine" ? (
           <PageWorkspace main={<EngineSection
-            nativeAndroid={nativeAndroid}
+            nativeAndroid={nativeAndroid === true}
             appVersionState={app.versionState}
             otaState={app.otaState}
             otaCheckedAt={app.otaCheckedAt}
@@ -545,7 +545,7 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
             <div className="pb-6">
               {unauthEngineActive ? (
                 <EngineSection
-                  nativeAndroid={nativeAndroid}
+                  nativeAndroid={nativeAndroid === true}
                   appVersionState={app.versionState}
                   bundlePublishedAt={app.bundlePublishedAt}
                   otaCheckedAt={app.otaCheckedAt}
