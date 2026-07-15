@@ -78,8 +78,10 @@ export async function createFixture(times, options = {}) {
       testEmailLogin: options.testEmailLogin,
       goalAgentsEnabled: options.goalAgentsEnabled ?? true,
       shutdownGraceMs: options.shutdownGraceMs,
+      authBackendTimeoutMs: options.authBackendTimeoutMs,
       now: () => new Date(times[Math.min(index++, times.length - 1)]),
-      logger: options.logger ?? { error: () => {} }
+      logger: options.logger ?? { error: () => {} },
+      createAuth: options.createAuth
     });
     runtime.store.configureGoalAgentEnvironment(options.goalAgentEnvironment ?? 'prod');
     runtime.store.syncGoalAgentCatalog(await loadGoalAgentManifests(), times[0]);
@@ -253,6 +255,7 @@ export async function createTestDatabase(migrations = [
   '0028_context_decision_calibration.sql',
   '0029_goal_agent_workflows.sql',
   '0030_authenticated_brai_cmd_tokens_compat.sql',
+  '0032_pending_goal_plan_invariant.sql',
   '0026_user_ai_provider_credentials.sql'
 ]) {
   const baseUrl = process.env.BRAI_TEST_DATABASE_URL?.trim();

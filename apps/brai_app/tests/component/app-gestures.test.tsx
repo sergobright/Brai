@@ -156,13 +156,47 @@ describe("BraiApp gestures", () => {
     fireEvent.click(trigger);
     const drawer = await screen.findByRole("dialog", { name: "Списки действий" });
     expect(drawer).toHaveAttribute("aria-modal", "true");
-    expect(within(drawer).getByRole("button", { name: "Закрыть меню" })).toHaveClass("size-11");
+    expect(within(drawer).queryByRole("button", { name: "Закрыть меню" })).not.toBeInTheDocument();
     await waitFor(() => expect(drawer).toContainElement(document.activeElement as HTMLElement));
 
     fireEvent.keyDown(document, { key: "Escape", code: "Escape" });
 
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "Списки действий" })).not.toBeInTheDocument());
     await waitFor(() => expect(trigger).toHaveFocus());
+  });
+
+  it("closes the mobile profile drawer from a swipe that starts on its backdrop", async () => {
+    render(<BraiApp />);
+    fireEvent.click(screen.getByRole("button", { name: "Открыть меню" }));
+    const overlay = document.querySelector(".mobile-menu-backdrop") as HTMLElement;
+    const drawer = document.querySelector(".mobile-profile-drawer") as HTMLElement;
+    Object.defineProperty(drawer, "getBoundingClientRect", {
+      configurable: true,
+      value: () => ({ bottom: 640, height: 640, left: 0, right: 300, top: 0, width: 300, x: 0, y: 0 }),
+    });
+
+    fireEvent.touchStart(overlay, { changedTouches: [{ identifier: 1, clientX: 340, clientY: 140 }] });
+    fireEvent.touchMove(overlay, { changedTouches: [{ identifier: 1, clientX: 120, clientY: 140 }] });
+    fireEvent.touchEnd(overlay, { changedTouches: [{ identifier: 1, clientX: 120, clientY: 140 }] });
+
+    await waitFor(() => expect(document.querySelector(".mobile-menu-backdrop")).not.toBeInTheDocument());
+  });
+
+  it("closes the second Dock level from a downward backdrop swipe", async () => {
+    render(<BraiApp />);
+    fireEvent.click(screen.getByRole("button", { name: "Открыть правое меню" }));
+    const overlay = document.querySelector(".mobile-dock-overflow-backdrop") as HTMLElement;
+    const sheet = document.querySelector(".mobile-dock-overflow-sheet") as HTMLElement;
+    Object.defineProperty(sheet, "getBoundingClientRect", {
+      configurable: true,
+      value: () => ({ bottom: 640, height: 64, left: 0, right: 360, top: 576, width: 360, x: 0, y: 576 }),
+    });
+
+    fireEvent.touchStart(overlay, { changedTouches: [{ identifier: 1, clientX: 180, clientY: 160 }] });
+    fireEvent.touchMove(overlay, { changedTouches: [{ identifier: 1, clientX: 180, clientY: 220 }] });
+    fireEvent.touchEnd(overlay, { changedTouches: [{ identifier: 1, clientX: 180, clientY: 220 }] });
+
+    await waitFor(() => expect(document.querySelector(".mobile-dock-overflow-sheet")).not.toBeInTheDocument());
   });
 
   it("keeps vertical gestures as page scroll instead of tab navigation", () => {

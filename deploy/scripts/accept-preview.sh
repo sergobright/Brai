@@ -7,6 +7,11 @@ if [[ "${1:-}" == "--cancel" ]]; then
   MODE="cancel"
   shift
 fi
+SUPERSEDE_BRANCH=""
+if [[ "${1:-}" == "--supersede" ]]; then
+  SUPERSEDE_BRANCH="${2:-}"
+  shift 2
+fi
 BRANCH="${1:-}"
 INFRA_DOCS_LABEL="brai-delivery:infra-docs"
 TECHNICAL_NO_PREVIEW_LABEL="brai-delivery:technical-no-preview"
@@ -14,13 +19,16 @@ MERGE_METHOD="${BRAI_ACCEPT_MERGE_METHOD:-squash}"
 
 usage() {
   cat <<'USAGE'
-usage: deploy/scripts/accept-preview.sh [--cancel] [codex/<task-branch>]
+usage: deploy/scripts/accept-preview.sh [--cancel] [--supersede codex/<older-branch>] [codex/<task-branch>]
 
 Creates or reuses a GitHub PR from a Brai preview branch into the accepted base, then
 enables GitHub merge/auto-merge for the exact pushed head commit.
 
 With --cancel, disables auto-merge for the branch's open acceptance PR and records an
 idempotent local cancellation receipt.
+
+With --supersede, explicitly closes the named earlier acceptance PR and releases its
+Preview slot before continuing with the current branch.
 USAGE
 }
 
@@ -218,10 +226,22 @@ wait_for_earlier_acceptance() {
     return 1
   fi
   IFS=$'\t' read -r earlier_number earlier_branch earlier_url <<<"$earlier_pr"
+  if [[ -n "$SUPERSEDE_BRANCH" ]]; then
+    if [[ "$SUPERSEDE_BRANCH" != "$earlier_branch" ]]; then
+      echo "--supersede targets $SUPERSEDE_BRANCH, but the blocking branch is $earlier_branch." >&2
+      exit 1
+    fi
+    gh pr merge "$earlier_number" --disable-auto >/dev/null 2>&1 || true
+    gh pr close "$earlier_number" --comment "Superseded explicitly by $BRANCH." >/dev/null
+    BRAI_BRANCH="$earlier_branch" BRAI_ACCEPTED_PREVIEW=true "$ROOT/deploy/scripts/ci-ssh-release-slot.sh" >/dev/null
+    echo "Superseded earlier acceptance PR #$earlier_number ($earlier_branch)"
+    return 1
+  fi
   write_acceptance_marker "waiting_for_turn" "$PR_NUMBER" "$PR_URL"
   echo "Acceptance is waiting for earlier PR #$earlier_number ($earlier_branch)"
   echo "Earlier PR: $earlier_url"
   echo "Current PR: $PR_URL"
+  echo "To supersede explicitly: deploy/scripts/accept-preview.sh --supersede $earlier_branch $BRANCH"
   return 0
 }
 
@@ -247,19 +267,22 @@ fi
 
 ensure_acceptance_marker_writable
 
-git fetch origin "$BASE_BRANCH:refs/remotes/origin/$BASE_BRANCH" "$BRANCH:refs/remotes/origin/$BRANCH"
-HEAD_SHA="$(git rev-parse "origin/$BRANCH")"
-
-if [[ "$MODE" == "cancel" ]]; then
-  cancel_acceptance
-  exit 0
-fi
+HEAD_SHA="$(git rev-parse "$BRANCH")"
+git fetch origin "$BASE_BRANCH:refs/remotes/origin/$BASE_BRANCH"
 
 if git merge-base --is-ancestor "$HEAD_SHA" "origin/$BASE_BRANCH"; then
   echo "Preview branch already accepted: $HEAD_SHA is included in origin/$BASE_BRANCH"
   write_acceptance_marker "already_in_base"
   exit 0
 fi
+
+if [[ "$MODE" == "cancel" ]]; then
+  cancel_acceptance
+  exit 0
+fi
+
+git fetch origin "$BRANCH:refs/remotes/origin/$BRANCH"
+HEAD_SHA="$(git rev-parse "origin/$BRANCH")"
 
 DELIVERY_CLASS=""
 REQUIRES_PREVIEW=""
@@ -293,6 +316,7 @@ if [[ -n "$MERGED_PR_NUMBER" ]]; then
   MERGED_PR_URL="$(gh pr view "$MERGED_PR_NUMBER" --json url --jq ".url")"
   echo "Preview branch already accepted: $MERGED_PR_URL"
   write_acceptance_marker "merged" "$MERGED_PR_NUMBER" "$MERGED_PR_URL"
+  run_brai_node "$ROOT/scripts/brai-task.mjs" archive-accepted-openspec
   exit 0
 fi
 
@@ -330,6 +354,7 @@ fi
 if [[ "$PR_STATE" == "MERGED" ]]; then
   echo "Preview branch already accepted: $PR_URL"
   write_acceptance_marker "merged" "$PR_NUMBER" "$PR_URL"
+  run_brai_node "$ROOT/scripts/brai-task.mjs" archive-accepted-openspec
   exit 0
 fi
 

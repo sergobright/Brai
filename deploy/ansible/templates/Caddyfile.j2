@@ -109,6 +109,8 @@ http://{{ domain }}, {{ domain }} {
     }
   }
 
+  import {{ brai_auth_caddy_root }}/prod/*.caddy /auth/login /auth/session /auth/logout /auth/otp/send /auth/otp/verify /auth/test-email-login /__brai_auth_no_prefix__ /api/auth/* {{ brai_envs.prod.api_port }} {{ brai_envs.prod.auth_port }} {{ brai_api_domain }} /dev-releases*
+
   reverse_proxy 127.0.0.1:{{ brai_envs.prod.api_port }}
 }
 
@@ -151,6 +153,8 @@ http://{{ domain }}, {{ domain }} {
       disable_http_challenge
     }
   }
+
+  import {{ brai_auth_caddy_root }}/prod/*.caddy /api/auth/login /api/auth/session /api/auth/logout /api/auth/otp/send /api/auth/otp/verify /api/auth/test-email-login /api /api/auth/* {{ brai_envs.prod.api_port }} {{ brai_envs.prod.auth_port }} {{ brai_envs.prod.domain }} /dev-releases*
 
   handle /releases* {
     reverse_proxy 127.0.0.1:{{ brai_envs.prod.api_port }}
@@ -218,6 +222,8 @@ http://{{ domain }}, {{ domain }} {
       disable_http_challenge
     }
   }
+
+  import {{ brai_auth_caddy_root }}/{{ name }}/*.caddy /api/auth/login /api/auth/session /api/auth/logout /api/auth/otp/send /api/auth/otp/verify /api/auth/test-email-login /api /api/auth/* {{ env.api_port }} {{ env.auth_port }} {{ env.domain }} /dev-releases*
 
   handle_path /api/* {
     reverse_proxy 127.0.0.1:{{ env.api_port }}

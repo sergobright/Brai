@@ -89,3 +89,43 @@ subsequent default inserts cannot collide with copied rows.
 - **AND** required post-seed migrations run inside that same transaction before commit
 - **AND** concurrent writes cannot observe or modify partial copied state
 - **AND** the API moves to the new source through the existing deploy cutover after migrations and database smoke checks pass
+
+### Requirement: Authentication readiness fails closed
+
+Brai API SHALL expose authentication backend outages as unavailable service state instead of anonymous user state.
+
+#### Scenario: Better Auth is unavailable
+
+- **WHEN** Better Auth throws, times out, returns a non-OK response, or returns a malformed success while resolving a session
+- **THEN** `/auth/session` and session-protected `/v1/*` return `503` with `auth_backend_unavailable`
+- **AND** WebSocket upgrade returns Service Unavailable rather than Unauthorized
+- **AND** no connection details or credentials are exposed
+
+#### Scenario: API readiness is checked
+
+- **WHEN** either the product Postgres pool or the Better Auth Postgres pool cannot execute its health query
+- **THEN** `/health` returns `503`
+- **AND** deployment readiness does not report success
+
+### Requirement: Production and non-production use isolated Supavisor tenants
+
+Supavisor SHALL provide separate production and non-production circuit-breaker boundaries.
+
+#### Scenario: Runtime DSNs are generated
+
+- **WHEN** production, Dev, or Preview database URLs are written after tenant isolation is enabled
+- **THEN** production uses tenant `brai-prod`
+- **AND** Dev and Preview use tenant `brai-nonprod`
+- **AND** password, database, port, query parameters, and schema `search_path` remain unchanged
+
+#### Scenario: Maintenance removes legacy tenant metadata
+
+- **WHEN** guarded Supavisor maintenance recreates the pooler
+- **THEN** persistent tenant metadata contains exactly `brai-prod` and `brai-nonprod`
+- **AND** legacy `brightos`, `brightos-prod`, and `brightos-nonprod` tenants and their dependent metadata are removed
+- **AND** any unexpected remaining tenant makes maintenance fail closed before API clients restart
+
+#### Scenario: Deployment validates a runtime environment
+
+- **WHEN** an API environment is deployed after tenant isolation is enabled
+- **THEN** deployment fails before service cutover if its DSN does not use the expected tenant

@@ -106,6 +106,7 @@ export function sandboxCheckMode(command, env = process.env) {
   if (
     /\bscripts\/brai-preview-handoff\.sh\b/.test(text) ||
     /\bdeploy\/scripts\/accept-preview\.sh\b/.test(text) ||
+    /\bdeploy\/scripts\/apply-main-infra\.sh\b/.test(text) ||
     /\bnode scripts\/brai-task\.mjs (acceptance-reconcile|handoff|preview)\b/.test(text)
   ) {
     return {
@@ -114,7 +115,7 @@ export function sandboxCheckMode(command, env = process.env) {
     };
   }
 
-  if (/\bdeploy\/scripts\/(complete-operation-activities|create-operation-activity|list-operation-activities)\.sh\b/.test(text)) {
+  if (/\bdeploy\/scripts\/(complete-inbox-operations|complete-operation-activities|create-inbox-operation|create-operation-activity|list-operation-activities)\.sh\b/.test(text)) {
     return {
       mode: "require_escalated",
       reason: "Operation activity helpers enter the protected host deploy/runtime DB boundary.",
@@ -125,6 +126,13 @@ export function sandboxCheckMode(command, env = process.env) {
     return {
       mode: "require_escalated",
       reason: "PostgreSQL/Supavisor diagnostics use the protected host runtime boundary.",
+    };
+  }
+
+  if (/(?:^| )(?:deploy\/scripts\/supabase-maintenance\.sh|\/srv\/opt\/brai-supabase-maintenance\.sh)\b/.test(text)) {
+    return {
+      mode: "require_escalated",
+      reason: "Supabase maintenance holds host deploy locks and controls production services and Supavisor.",
     };
   }
 

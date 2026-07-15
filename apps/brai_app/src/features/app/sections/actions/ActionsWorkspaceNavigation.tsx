@@ -1,9 +1,8 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
-import { ArchiveRestore, CheckCircle2, ChevronDown, Circle, List, Plus, Target, type LucideIcon } from "lucide-react";
+import { CheckCircle2, ChevronDown, Circle, List, Plus, Target, type LucideIcon } from "lucide-react";
 import { cleanTitle, TITLE_MAX_LENGTH } from "@/shared/activities/text";
-import type { ActivityItem } from "@/shared/types/activities";
 import { Button } from "@/shared/ui/button";
 import { Input } from "@/shared/ui/input";
 import { cx } from "../../appUtils";
@@ -13,17 +12,14 @@ export function ActionsWorkspaceNavigation({
   workspace,
   onSelect,
   onCreateGoal,
-  onRestoreGoal,
 }: {
   workspace: ActionsWorkspaceView;
   onSelect: (filter: WorkspaceFilterId) => void;
   onCreateGoal: (title: string) => Promise<void>;
-  onRestoreGoal: (goal: ActivityItem) => Promise<void>;
 }) {
   const [createOpen, setCreateOpen] = useState(false);
   const [draft, setDraft] = useState("");
   const [completedOpen, setCompletedOpen] = useState(false);
-  const [archiveOpen, setArchiveOpen] = useState(false);
 
   async function submitGoal(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -58,7 +54,7 @@ export function ActionsWorkspaceNavigation({
         </header>
         {createOpen ? (
           <form className="flex gap-2 px-2" onSubmit={submitGoal}>
-            <Input value={draft} maxLength={TITLE_MAX_LENGTH} placeholder="Новая цель" aria-label="Название новой цели" autoFocus onChange={(event) => setDraft(event.target.value)} />
+            <Input name="goal-title" value={draft} maxLength={TITLE_MAX_LENGTH} placeholder="Новая цель" aria-label="Название новой цели" autoFocus onChange={(event) => setDraft(event.target.value)} />
             <Button type="submit" size="sm" disabled={!draft.trim()}>Создать</Button>
           </form>
         ) : null}
@@ -76,24 +72,6 @@ export function ActionsWorkspaceNavigation({
               <NavigationButton key={goal.id} active={workspace.filter === goalFilterId(goal.id)} icon={CheckCircle2} label={goal.title} onClick={() => onSelect(goalFilterId(goal.id))} />
             ))}
           </div>
-        ) : null}
-
-        {workspace.archivedGoals.length > 0 ? (
-          <>
-            <GoalGroupToggle label="Архив целей" count={workspace.archivedGoals.length} open={archiveOpen} onToggle={() => setArchiveOpen((current) => !current)} />
-            {archiveOpen ? (
-              <div className="grid gap-1 pl-2">
-                {workspace.archivedGoals.map((goal) => (
-                  <div key={goal.id} className="flex min-w-0 items-center gap-1 rounded-lg px-2 py-1.5 text-sm text-muted-foreground">
-                    <span className="min-w-0 flex-1 truncate">{goal.title}</span>
-                    <Button type="button" variant="ghost" size="icon-sm" aria-label={`Восстановить цель: ${goal.title}`} onClick={() => void onRestoreGoal(goal)}>
-                      <ArchiveRestore aria-hidden="true" />
-                    </Button>
-                  </div>
-                ))}
-              </div>
-            ) : null}
-          </>
         ) : null}
       </section>
     </nav>

@@ -7,6 +7,12 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { expandPreservedTables, orderTablesByDependencies, tablesToReset } from "./copy-table-order.mjs";
+import {
+  databaseUrlForSupavisorTenant,
+  databaseUsernameWithoutKnownTenant,
+  NONPROD_SUPAVISOR_TENANT,
+  tenantIsolationEnabled,
+} from "./supavisor-tenants.mjs";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(scriptDir, "../..");
@@ -136,7 +142,10 @@ function ensureBranch(name, { projectRef, persistent, withData }) {
 }
 
 async function ensureSelfHostedSchema(name) {
-  const adminUrl = selfHostedDatabaseUrl();
+  const sourceUrl = selfHostedDatabaseUrl();
+  const adminUrl = tenantIsolationEnabled()
+    ? databaseUrlForSupavisorTenant(sourceUrl, NONPROD_SUPAVISOR_TENANT)
+    : sourceUrl;
   const databaseUrl = databaseUrlWithSearchPath(adminUrl, name);
   if (process.env.BRAI_SUPABASE_DRY_RUN === "true") {
     return { databaseUrl, details: { id: name, status: "ready" } };
@@ -399,6 +408,8 @@ export async function copySchemaData(pool, { sourceSchema, targetSchema, postSee
   try {
     await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ");
     await client.query(`SET LOCAL search_path TO ${quoteIdentifier(targetSchema)}, public`);
+    await client.query(`DROP INDEX IF EXISTS ${qualifiedTable(targetSchema, "idx_context_decisions_pending_goal_plan")}`);
+    await client.query("SELECT set_config('brai.allow_legacy_operation_import', 'on', true)");
     await client.query(`TRUNCATE TABLE ${truncatableTables.map((table) => qualifiedTable(targetSchema, table)).join(", ")} CONTINUE IDENTITY CASCADE`);
     for (const table of copyTables) {
       const sourceColumns = await commonColumns(client, sourceSchema, targetSchema, table);
@@ -408,7 +419,19 @@ export async function copySchemaData(pool, { sourceSchema, targetSchema, postSee
       const columns = copyTargetColumns({ table, sourceColumns, targetColumns });
       if (columns.length === 0) continue;
       const columnList = columns.map(quoteIdentifier).join(", ");
-      const sourceQuery = copySourceQuery({ sourceSchema, targetSchema, table, columns, sourceColumns });
+      const requiredColumns = await requiredTargetColumns(client, targetSchema, table, sourceColumns);
+      const allowedValues = table === "events"
+        ? { event_domain: await targetEventDomains(client, targetSchema) }
+        : {};
+      const sourceQuery = copySourceQuery({
+        sourceSchema,
+        targetSchema,
+        table,
+        columns,
+        sourceColumns,
+        requiredColumns,
+        allowedValues
+      });
       await client.query(`
         INSERT INTO ${qualifiedTable(targetSchema, table)} (${columnList})
         OVERRIDING SYSTEM VALUE
@@ -436,7 +459,24 @@ export function copyTargetColumns({ table, sourceColumns, targetColumns }) {
   return [...sourceColumns, "expires_at_utc"];
 }
 
-export function copySourceQuery({ sourceSchema, targetSchema, table, columns, sourceColumns = columns }) {
+export function copySourceQuery({
+  sourceSchema,
+  targetSchema,
+  table,
+  columns,
+  sourceColumns = columns,
+  requiredColumns = [],
+  allowedValues = {}
+}) {
+  const sourcePredicates = [
+    ...requiredColumns
+      .filter((column) => sourceColumns.includes(column))
+      .map((column) => `source_row.${quoteIdentifier(column)} IS NOT NULL`),
+    ...Object.entries(allowedValues)
+      .filter(([column, values]) => sourceColumns.includes(column) && values.length > 0)
+      .map(([column, values]) => `source_row.${quoteIdentifier(column)} IN (${values.map(quoteLiteral).join(", ")})`)
+  ];
+  const sourceFilter = sourcePredicates.length > 0 ? `\n        WHERE ${sourcePredicates.join(" AND ")}` : "";
   if (table === "brai_cmd_access_tokens"
     && columns.includes("expires_at_utc")
     && sourceColumns.includes("created_at_utc")) {
@@ -445,12 +485,14 @@ export function copySourceQuery({ sourceSchema, targetSchema, table, columns, so
           ? `${sourceColumns.includes(column) ? `COALESCE(source_row.${quoteIdentifier(column)}, ` : ""}(source_row.${quoteIdentifier("created_at_utc")}::timestamptz + interval '30 days')::text${sourceColumns.includes(column) ? ")" : ""} AS ${quoteIdentifier(column)}`
           : `source_row.${quoteIdentifier(column)}`).join(", ")}
         FROM ${qualifiedTable(sourceSchema, table)} AS source_row
+        ${sourceFilter}
     `;
   }
   if (table !== "ai_logs" || !columns.includes("agent_id")) {
     return `
-        SELECT ${columns.map(quoteIdentifier).join(", ")}
-        FROM ${qualifiedTable(sourceSchema, table)}
+        SELECT ${columns.map((column) => `source_row.${quoteIdentifier(column)}`).join(", ")}
+        FROM ${qualifiedTable(sourceSchema, table)} AS source_row
+        ${sourceFilter}
     `;
   }
   return `
@@ -461,7 +503,30 @@ export function copySourceQuery({ sourceSchema, targetSchema, table, columns, so
           FROM ${qualifiedTable(targetSchema, "agents")} AS target_agent
           WHERE target_agent.id = source_row.agent_id
         )
+        ${sourcePredicates.map((predicate) => `AND ${predicate}`).join("\n        ")}
   `;
+}
+
+async function targetEventDomains(queryable, schema) {
+  const result = await queryable.query(`
+    SELECT pg_get_constraintdef(constraint_row.oid) AS definition
+    FROM pg_constraint constraint_row
+    JOIN pg_class table_row ON table_row.oid = constraint_row.conrelid
+    JOIN pg_namespace schema_row ON schema_row.oid = table_row.relnamespace
+    WHERE schema_row.nspname = $1
+      AND table_row.relname = 'events'
+      AND constraint_row.conname = 'events_event_domain_check'
+      AND constraint_row.contype = 'c'
+  `, [schema]);
+  if (result.rows.length === 0) return [];
+  const values = constraintTextValues(result.rows[0].definition);
+  if (values.length === 0) throw new Error(`Cannot read allowed event domains from ${schema}.events_event_domain_check`);
+  return values;
+}
+
+export function constraintTextValues(definition) {
+  return [...String(definition).matchAll(/'((?:''|[^'])*)'/g)]
+    .map((match) => match[1].replaceAll("''", "'"));
 }
 
 export async function inspectOwnedSequences(queryable, { schema, tables = null, lockOwnedTables = false }) {
@@ -610,6 +675,19 @@ async function schemaColumns(pool, schema, table) {
   return result.rows.map((row) => row.column_name);
 }
 
+async function requiredTargetColumns(pool, schema, table, columns) {
+  const result = await pool.query(`
+    SELECT column_name
+    FROM information_schema.columns
+    WHERE table_schema = $1
+      AND table_name = $2
+      AND is_nullable = 'NO'
+      AND column_name = ANY($3::text[])
+    ORDER BY ordinal_position
+  `, [schema, table, columns]);
+  return result.rows.map((row) => row.column_name);
+}
+
 async function commonColumns(pool, sourceSchema, targetSchema, table) {
   const result = await pool.query(`
     SELECT target.column_name
@@ -669,8 +747,8 @@ export function assertSameDatabaseTarget(currentDatabaseUrl, resolvedDatabaseUrl
   if (!currentDatabaseUrl || !resolvedDatabaseUrl) throw new Error("preserve-existing requires the current BRAI_DATABASE_URL");
   const current = new URL(currentDatabaseUrl);
   const resolved = new URL(resolvedDatabaseUrl);
-  const currentTarget = [current.protocol, current.username, current.hostname, current.port, current.pathname, searchPathSchema(currentDatabaseUrl)];
-  const resolvedTarget = [resolved.protocol, resolved.username, resolved.hostname, resolved.port, resolved.pathname, searchPathSchema(resolvedDatabaseUrl)];
+  const currentTarget = [current.protocol, databaseUsernameWithoutKnownTenant(current.username), current.hostname, current.port, current.pathname, searchPathSchema(currentDatabaseUrl)];
+  const resolvedTarget = [resolved.protocol, databaseUsernameWithoutKnownTenant(resolved.username), resolved.hostname, resolved.port, resolved.pathname, searchPathSchema(resolvedDatabaseUrl)];
   if (currentTarget.some((value, index) => value !== resolvedTarget[index])) {
     throw new Error("preserve-existing target does not match the current runtime database");
   }
@@ -853,6 +931,10 @@ function previewSchemaName(branch) {
 
 function quoteIdentifier(value) {
   return `"${String(value).replaceAll('"', '""')}"`;
+}
+
+function quoteLiteral(value) {
+  return `'${String(value).replaceAll("'", "''")}'`;
 }
 
 function shellQuote(value) {

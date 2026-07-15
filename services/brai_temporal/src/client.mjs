@@ -11,7 +11,11 @@ import {
   previewWorkflowId,
   promotionWorkflowId
 } from "./state.mjs";
-import { signalWithClosedWorkflowRetry } from "./workflow-signal.mjs";
+import {
+  cancelWorkflowAndWaitWithTimeout,
+  cancelWorkflowWithTimeout,
+  signalWithClosedWorkflowRetry
+} from "./workflow-signal.mjs";
 
 const argv = process.argv.slice(2);
 const command = argv.shift();
@@ -63,7 +67,7 @@ try {
   }
 } catch (error) {
   console.error(error?.stack ?? error);
-  process.exit(1);
+  process.exit(Number.isInteger(error?.exitCode) ? error.exitCode : 1);
 }
 
 async function dispatchPreviewDeploy(client, options) {
@@ -94,7 +98,7 @@ async function cancelPreviewDeploy(client, options) {
   const branch = required(options, "branch");
   const sha = required(options, "sha");
   const workflowId = previewDeployWorkflowId(branch, sha);
-  await client.workflow.getHandle(workflowId).cancel();
+  await cancelWorkflowAndWaitWithTimeout(client.workflow.getHandle(workflowId));
   console.log(`cancelled ${workflowId}`);
 }
 
@@ -123,13 +127,79 @@ async function dispatchNoPreviewMerged(client, options) {
 async function dispatchPromotion(client, options) {
   const target = required(options, "target");
   const sha = required(options, "sha");
-  const event = buildEvent("promotion_requested", options, sha);
-  const handle = await startAndSignalPromotion(client, target, sha, event);
-  const state = await waitForState(handle, (current) => current.terminal);
-  if (target === "prod" && state.status === "released") {
-    await supersedeOlderProdPromotions(client, sha, event);
+  const workflowId = promotionWorkflowId(target, sha);
+  let handle = client.workflow.getHandle(workflowId);
+  let requestedSignal;
+  let rejectOnSignal;
+  let cancellationPromise;
+  const signalFailure = new Promise((_, reject) => { rejectOnSignal = reject; });
+  const interruptionError = () => {
+    const error = new Error(`Promotion dispatch interrupted by ${requestedSignal.name}`);
+    error.exitCode = requestedSignal.exitCode;
+    return error;
+  };
+  const cancelAndReject = () => {
+    if (!handle || cancellationPromise) return;
+    cancellationPromise = cancelWorkflowWithTimeout(handle);
+    void cancellationPromise.then(
+      () => rejectOnSignal(interruptionError()),
+      (error) => {
+        console.error(`BLOCKER: Temporal cancellation was not confirmed for ${handle.workflowId}: ${error?.message ?? error}. Inspect Temporal inventory before retrying delivery.`);
+        rejectOnSignal(interruptionError());
+      }
+    );
+  };
+  const forwardCancellation = (name, exitCode) => {
+    if (requestedSignal) process.exit(exitCode);
+    requestedSignal = { name, exitCode };
+    cancelAndReject();
+  };
+  const onSigterm = () => forwardCancellation("SIGTERM", 143);
+  const onSigint = () => forwardCancellation("SIGINT", 130);
+  const onSighup = () => forwardCancellation("SIGHUP", 129);
+  process.on("SIGTERM", onSigterm);
+  process.on("SIGINT", onSigint);
+  process.on("SIGHUP", onSighup);
+  try {
+    const event = buildEvent("promotion_requested", options, sha);
+    if (!PROMOTION_EVENTS.has(event.type)) throw new Error(`Unsupported promotion event: ${event.type}`);
+    let result;
+    try {
+      result = await Promise.race([startOrGet(client, "PromotionWorkflow", {
+        args: [{ target, sha, at: event.at, source: event.source }],
+        taskQueue: process.env.BRAI_TEMPORAL_PROMOTION_TASK_QUEUE ?? PROMOTION_TASK_QUEUE,
+        workflowId
+      }), signalFailure]);
+    } catch (error) {
+      if (!requestedSignal) throw error;
+      await signalFailure;
+    }
+    handle = result.handle;
+    const { started } = result;
+    if (requestedSignal) {
+      cancelAndReject();
+      await signalFailure;
+    }
+    try {
+      await Promise.race([handle.signal(EVENT_SIGNAL, event), signalFailure]);
+    } catch (error) {
+      if (!requestedSignal) throw error;
+      await signalFailure;
+    }
+    if (requestedSignal) await signalFailure;
+    console.log(`${started ? "started" : "signaled"} ${handle.workflowId} ${event.type}`);
+    await Promise.race([(async () => {
+      const state = await waitForState(handle, (current) => current.terminal);
+      if (target === "prod" && state.status === "released") {
+        await supersedeOlderProdPromotions(client, sha, event);
+      }
+      printState(state);
+    })(), signalFailure]);
+  } finally {
+    process.off("SIGTERM", onSigterm);
+    process.off("SIGINT", onSigint);
+    process.off("SIGHUP", onSighup);
   }
-  printState(state);
 }
 
 async function dispatchReleasePreview(client, options) {
@@ -152,18 +222,6 @@ async function startAndSignalPreview(client, branch, sha, event) {
     EVENT_SIGNAL,
     event
   );
-  console.log(`${started ? "started" : "signaled"} ${handle.workflowId} ${event.type}`);
-  return handle;
-}
-
-async function startAndSignalPromotion(client, target, sha, event) {
-  if (!PROMOTION_EVENTS.has(event.type)) throw new Error(`Unsupported promotion event: ${event.type}`);
-  const { handle, started } = await startOrGet(client, "PromotionWorkflow", {
-    args: [{ target, sha, at: event.at, source: event.source }],
-    taskQueue: process.env.BRAI_TEMPORAL_PROMOTION_TASK_QUEUE ?? PROMOTION_TASK_QUEUE,
-    workflowId: promotionWorkflowId(target, sha)
-  });
-  await handle.signal(EVENT_SIGNAL, event);
   console.log(`${started ? "started" : "signaled"} ${handle.workflowId} ${event.type}`);
   return handle;
 }

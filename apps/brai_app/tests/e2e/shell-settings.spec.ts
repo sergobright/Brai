@@ -6,6 +6,10 @@ test("shows Settings without update state", async ({ page }, testInfo) => {
   await openSettingsFromProfile(page);
 
   await expect(page.getByRole("heading", { name: "Настройки" })).toBeVisible();
+  const pageMain = page.locator(".section-page-current .page-main");
+  await expect(pageMain).toHaveAttribute("data-slot", "scroll-area");
+  await expect(pageMain.locator("> [data-slot='scroll-area-scrollbar']")).toHaveCount(1);
+  await expect(pageMain).not.toHaveClass(/overflow-auto/);
   await expect(page.getByRole("button", { name: "Включить темную тему" })).toBeVisible();
   await page.getByRole("button", { name: "Включить темную тему" }).click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
@@ -142,7 +146,7 @@ test("opens Engine from the profile menu", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "Engine", exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: /Текущая версия (unknown|0\.\d+\.\d+)/ })).toBeVisible();
   await expect(page.getByText("Доступна новая версия 0.11.52.", { exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Скачать обновление" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Обновить страницу" })).toBeVisible();
 });
 
 test("keeps Android Engine download progress compact on mobile", async ({ page }, testInfo) => {

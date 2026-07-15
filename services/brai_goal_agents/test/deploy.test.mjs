@@ -1,3 +1,4 @@
+// File-size exception: destructive deploy scenarios share one shell fixture so safety mocks cannot drift between separate suites.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
@@ -165,7 +166,7 @@ test("generic deploy fails early on missing agent infrastructure and leaves the 
 test("API drain, data checks, source swap, and one provisional restart stay ordered", () => {
   const ci = read("deploy/scripts/ci-ssh-deploy.sh");
   const deploy = read("deploy/scripts/deploy-branch.sh");
-  const stop = ci.indexOf('API_WAS_ACTIVE="true"\n  "${BRAI_SUDO:-sudo}" systemctl stop "$SERVICE_NAME"');
+  const stop = ci.indexOf('API_TRANSITION_STARTED="true"\n  "${BRAI_SUDO:-sudo}" systemctl stop "$SERVICE_NAME"');
   const precheck = ci.indexOf('run_goal_agent_drain_check "$CURRENT_DATABASE_URL" "before-data-setup"');
   const emptyTemporalPrecheck = ci.indexOf('run_goal_agent_temporal_empty_check "before-data-setup"');
   const dataSetup = ci.indexOf("node deploy/scripts/supabase-branch.mjs preview-env");
@@ -195,11 +196,16 @@ test("API drain, data checks, source swap, and one provisional restart stay orde
 test("failed incoming API health restores old source and proves old API healthy", (t) => {
   const ci = read("deploy/scripts/ci-ssh-deploy.sh");
   const functionNames = [
+    "is_deploy_attempt_suffix",
+    "assert_attempt_staging_path",
+    "write_attempt_terminal_marker",
+    "remove_attempt_staging",
     "restore_previous_source",
     "assert_api_quiesced",
     "wait_for_api_health",
     "rollback_before_new_api_health",
-    "deploy_failed"
+    "reconcile_source_swap_state",
+    "deploy_cleanup"
   ];
   const functions = functionNames.map((name) => {
     const source = ci.match(new RegExp(`${name}\\(\\) \\{[\\s\\S]*?\\n\\}`))?.[0];
@@ -210,10 +216,14 @@ test("failed incoming API health restores old source and proves old API healthy"
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), "brai-api-rollback-test-"));
   t.after(() => fs.rmSync(temp, { recursive: true, force: true }));
   const sourceRoot = path.join(temp, "source");
-  const previousSource = path.join(temp, "source.previous");
-  const remoteUpload = path.join(temp, "upload");
+  const uploadRoot = path.join(temp, "ci-uploads");
+  const commit = "a".repeat(40);
+  const attemptSuffix = "local-0-deploy-100-200";
+  const remoteUpload = path.join(uploadRoot, `branch-${commit}.attempt-${attemptSuffix}`);
+  const previousSource = `${sourceRoot}.previous-${attemptSuffix}`;
   const state = path.join(temp, "state");
   const trace = path.join(temp, "trace");
+  fs.mkdirSync(uploadRoot);
   fs.mkdirSync(sourceRoot);
   fs.mkdirSync(previousSource);
   fs.writeFileSync(path.join(sourceRoot, "version"), "incoming\n");
@@ -247,6 +257,11 @@ sleep() { :; }
 export SOURCE_ROOT=${shellQuote(sourceRoot)}
 export PREVIOUS_SOURCE=${shellQuote(previousSource)}
 export REMOTE_UPLOAD=${shellQuote(remoteUpload)}
+export ATTEMPT_STAGING=${shellQuote(remoteUpload)}
+export UPLOAD_ROOT=${shellQuote(uploadRoot)}
+export UPLOAD_MARKER=.brai-upload-terminal.json
+export BRAI_COMMIT=${commit}
+export DEPLOY_ATTEMPT_SUFFIX=${attemptSuffix}
 export STATE=${shellQuote(state)}
 export TRACE=${shellQuote(trace)}
 export SERVICE_NAME=brai-api-preview-b.service
@@ -255,11 +270,15 @@ export ENVIRONMENT=preview-b
 PREVIOUS_SOURCE_READY=true
 SOURCE_SWAPPED=true
 API_WAS_ACTIVE=true
+API_TRANSITION_STARTED=true
+API_QUIESCED=false
 NEW_API_HEALTHY=false
+DEPLOY_CLEANUP_RUNNING=false
 BRAI_SUDO=sudo
 mark_preview_failed() { :; }
-cleanup_stale_preview_previous_sources() { :; }
-trap deploy_failed ERR
+cleanup_preview_queue() { :; }
+trap 'deploy_cleanup $?' EXIT
+trap 'deploy_cleanup $?' ERR
 wait_for_api_health "New API"
 printf 'continued\n' >${shellQuote(path.join(temp, "continued"))}
 `], {
@@ -269,10 +288,462 @@ printf 'continued\n' >${shellQuote(path.join(temp, "continued"))}
   assert.match(result.stderr, /New API health check failed/);
   assert.match(result.stdout, /Restored brai-api-preview-b\.service is healthy after rollback/);
   assert.equal(fs.readFileSync(path.join(sourceRoot, "version"), "utf8"), "old\n");
-  assert.equal(fs.readFileSync(path.join(remoteUpload, "version"), "utf8"), "incoming\n");
+  assert.equal(fs.existsSync(remoteUpload), false);
+  assert.equal(fs.existsSync(previousSource), false);
   assert.equal(fs.existsSync(path.join(temp, "continued")), false);
   const rollbackTrace = fs.readFileSync(trace, "utf8");
   assert.match(rollbackTrace, /sudo systemctl stop brai-api-preview-b\.service[\s\S]*?sudo systemctl restart brai-api-preview-b\.service[\s\S]*?node health/);
+});
+
+test("pre-cutover failure removes only its exact attempt staging", (t) => {
+  const ci = read("deploy/scripts/ci-ssh-deploy.sh");
+  const functionNames = [
+    "is_deploy_attempt_suffix",
+    "assert_attempt_staging_path",
+    "write_attempt_terminal_marker",
+    "remove_attempt_staging",
+    "reconcile_source_swap_state",
+    "deploy_cleanup"
+  ];
+  const functions = functionNames.map((name) => {
+    const source = ci.match(new RegExp(`${name}\\(\\) \\{[\\s\\S]*?\\n\\}`))?.[0];
+    assert.ok(source, `missing ${name}`);
+    return source;
+  }).join("\n");
+
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), "brai-pre-cutover-cleanup-test-"));
+  t.after(() => fs.rmSync(temp, { recursive: true, force: true }));
+  const sourceRoot = path.join(temp, "source");
+  const uploadRoot = path.join(temp, "ci-uploads");
+  const commit = "b".repeat(40);
+  const attemptSuffix = "local-0-deploy-101-201";
+  const attempt = path.join(uploadRoot, `branch-${commit}.attempt-${attemptSuffix}`);
+  const collision = `${sourceRoot}.previous-${attemptSuffix}`;
+  const otherAttempt = path.join(uploadRoot, `branch-${commit}.attempt-other`);
+  const orphan = path.join(temp, "source.orphan-keep");
+  const cutover = path.join(temp, "source.cutover-backup-keep");
+  const markerCapture = path.join(temp, "terminal-marker.json");
+  for (const directory of [sourceRoot, uploadRoot, attempt, otherAttempt, collision, orphan, cutover]) fs.mkdirSync(directory);
+  fs.writeFileSync(path.join(sourceRoot, "version"), "old\n");
+  fs.writeFileSync(path.join(collision, "keep"), "foreign\n");
+
+  const result = spawnSync("bash", ["-c", `set -euo pipefail
+${functions}
+SOURCE_ROOT=${shellQuote(sourceRoot)}
+PREVIOUS_SOURCE=${shellQuote(collision)}
+ATTEMPT_STAGING=${shellQuote(attempt)}
+UPLOAD_ROOT=${shellQuote(uploadRoot)}
+UPLOAD_MARKER=.brai-upload-terminal.json
+BRAI_COMMIT=${commit}
+MARKER_CAPTURE=${shellQuote(markerCapture)}
+DEPLOY_ATTEMPT_SUFFIX=${attemptSuffix}
+SOURCE_SWAPPED=false
+PREVIOUS_SOURCE_READY=false
+API_WAS_ACTIVE=false
+API_TRANSITION_STARTED=false
+API_QUIESCED=false
+NEW_API_HEALTHY=false
+DEPLOY_CLEANUP_RUNNING=false
+mark_preview_failed() { :; }
+cleanup_preview_queue() { :; }
+rm() {
+  if [[ "\${!#}" == "$ATTEMPT_STAGING" ]]; then
+    cp "$ATTEMPT_STAGING/$UPLOAD_MARKER" "$MARKER_CAPTURE"
+  fi
+  command rm "$@"
+}
+trap 'deploy_cleanup $?' EXIT
+trap 'deploy_cleanup $?' ERR
+false
+`], { encoding: "utf8" });
+
+  assert.equal(result.status, 1, result.stderr);
+  assert.equal(fs.existsSync(attempt), false);
+  const marker = JSON.parse(fs.readFileSync(markerCapture, "utf8"));
+  assert.deepEqual({ status: marker.status, commit: marker.commit }, { status: "failed", commit });
+  assert.ok(Number.isFinite(Date.parse(marker.finishedAt)));
+  for (const directory of [sourceRoot, otherAttempt, collision, orphan, cutover]) assert.equal(fs.existsSync(directory), true);
+  assert.equal(fs.readFileSync(path.join(collision, "keep"), "utf8"), "foreign\n");
+  assert.equal(fs.readFileSync(path.join(sourceRoot, "version"), "utf8"), "old\n");
+});
+
+test("attempt cleanup removes only the exact SHA staging when terminal marker rename runs out of space", (t) => {
+  const ci = read("deploy/scripts/ci-ssh-deploy.sh");
+  const functionNames = [
+    "is_deploy_attempt_suffix",
+    "assert_attempt_staging_path",
+    "write_attempt_terminal_marker",
+    "remove_attempt_staging"
+  ];
+  const functions = functionNames.map((name) => {
+    const source = ci.match(new RegExp(`${name}\\(\\) \\{[\\s\\S]*?\\n\\}`))?.[0];
+    assert.ok(source, `missing ${name}`);
+    return source;
+  }).join("\n");
+  const cleanupStartToken = "<<'REMOTE' || true\n";
+  const cleanupStart = ci.indexOf(cleanupStartToken, ci.indexOf("cleanup_remote_upload()"));
+  const cleanupEnd = ci.indexOf("\nREMOTE\n}", cleanupStart);
+  assert.ok(cleanupStart > 0 && cleanupEnd > cleanupStart);
+  const cleanupRemoteScript = ci.slice(cleanupStart + cleanupStartToken.length, cleanupEnd);
+
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), "brai-marker-enospc-cleanup-test-"));
+  t.after(() => fs.rmSync(temp, { recursive: true, force: true }));
+  const uploadRoot = path.join(temp, "ci-uploads");
+  const fakeBin = path.join(temp, "bin");
+  const commit = "7".repeat(40);
+  const otherCommit = "8".repeat(40);
+  const innerSuffix = "local-0-deploy-102-202";
+  const outerSuffix = "local-0-deploy-103-203";
+  const mismatchSuffix = "local-0-deploy-104-204";
+  const symlinkSuffix = "local-0-deploy-105-205";
+  const siblingSuffix = "local-0-deploy-106-206";
+  const innerAttempt = path.join(uploadRoot, `branch-${commit}.attempt-${innerSuffix}`);
+  const outerAttempt = path.join(uploadRoot, `branch-${commit}.attempt-${outerSuffix}`);
+  const mismatchedAttempt = path.join(uploadRoot, `branch-${otherCommit}.attempt-${mismatchSuffix}`);
+  const siblingAttempt = path.join(uploadRoot, `branch-${commit}.attempt-${siblingSuffix}`);
+  const symlinkAttempt = path.join(uploadRoot, `branch-${commit}.attempt-${symlinkSuffix}`);
+  const symlinkTarget = path.join(temp, "outside-attempt");
+  for (const directory of [fakeBin, innerAttempt, outerAttempt, mismatchedAttempt, siblingAttempt, symlinkTarget]) {
+    fs.mkdirSync(directory, { recursive: true });
+  }
+  fs.writeFileSync(path.join(uploadRoot, ".staging-operation.lock"), "");
+  fs.writeFileSync(path.join(symlinkTarget, "keep"), "outside\n");
+  fs.symlinkSync(symlinkTarget, symlinkAttempt);
+  fs.writeFileSync(path.join(fakeBin, "mv"), "#!/bin/sh\necho 'No space left on device' >&2\nexit 1\n", { mode: 0o755 });
+  const env = { ...process.env, PATH: `${fakeBin}:${process.env.PATH}` };
+
+  const inner = spawnSync("bash", ["-c", `set -euo pipefail
+${functions}
+ATTEMPT_STAGING=${shellQuote(innerAttempt)}
+UPLOAD_ROOT=${shellQuote(uploadRoot)}
+UPLOAD_MARKER=.brai-upload-terminal.json
+BRAI_COMMIT=${commit}
+DEPLOY_ATTEMPT_SUFFIX=${innerSuffix}
+remove_attempt_staging failed
+`], { env, encoding: "utf8" });
+  assert.equal(inner.status, 0, inner.stderr);
+  assert.match(inner.stderr, /No space left on device/);
+  assert.equal(fs.existsSync(innerAttempt), false);
+
+  const cleanupScriptPath = path.join(temp, "cleanup-remote.sh");
+  fs.writeFileSync(cleanupScriptPath, cleanupRemoteScript, { mode: 0o755 });
+  const outer = spawnSync("bash", [cleanupScriptPath, outerAttempt, uploadRoot, path.basename(outerAttempt), commit, ".brai-upload-terminal.json", "failed"], {
+    env,
+    encoding: "utf8"
+  });
+  assert.equal(outer.status, 0, outer.stderr);
+  assert.match(outer.stderr, /No space left on device/);
+  assert.equal(fs.existsSync(outerAttempt), false);
+
+  const mismatched = spawnSync("bash", ["-c", `set -euo pipefail
+${functions}
+ATTEMPT_STAGING=${shellQuote(mismatchedAttempt)}
+UPLOAD_ROOT=${shellQuote(uploadRoot)}
+UPLOAD_MARKER=.brai-upload-terminal.json
+BRAI_COMMIT=${commit}
+DEPLOY_ATTEMPT_SUFFIX=${mismatchSuffix}
+remove_attempt_staging failed
+`], { env, encoding: "utf8" });
+  assert.equal(mismatched.status, 1, mismatched.stderr);
+  assert.equal(fs.existsSync(mismatchedAttempt), true);
+
+  const symlink = spawnSync("bash", ["-c", `set -euo pipefail
+${functions}
+ATTEMPT_STAGING=${shellQuote(symlinkAttempt)}
+UPLOAD_ROOT=${shellQuote(uploadRoot)}
+UPLOAD_MARKER=.brai-upload-terminal.json
+BRAI_COMMIT=${commit}
+DEPLOY_ATTEMPT_SUFFIX=${symlinkSuffix}
+remove_attempt_staging failed
+`], { encoding: "utf8" });
+  assert.equal(symlink.status, 0, symlink.stderr);
+  assert.equal(fs.existsSync(symlinkAttempt), false);
+  assert.equal(fs.existsSync(path.join(symlinkTarget, ".brai-upload-terminal.json")), false);
+  assert.equal(fs.readFileSync(path.join(symlinkTarget, "keep"), "utf8"), "outside\n");
+  assert.equal(fs.existsSync(siblingAttempt), true);
+});
+
+test("CI rejects symlink source and lock boundaries without touching external targets", (t) => {
+  const ci = read("deploy/scripts/ci-ssh-deploy.sh");
+  assert.match(ci, /\[\[ -f "\$SOURCE_OPERATION_LOCK" && ! -L "\$SOURCE_OPERATION_LOCK" \]\]/);
+  assert.match(ci, /exec 8<>"\$SOURCE_OPERATION_LOCK"/);
+  assert.match(ci, /\[\[ -f "\$STAGING_OPERATION_LOCK" && ! -L "\$STAGING_OPERATION_LOCK" \]\]/);
+  assert.match(ci, /exec 7<>"\$STAGING_OPERATION_LOCK"/);
+  const validationStart = ci.indexOf('SOURCE_PRESENT="false"\nif [[ -e "$SOURCE_ROOT" || -L "$SOURCE_ROOT" ]]');
+  const validationEnd = ci.indexOf('\nPREVIOUS_SOURCE="${SOURCE_ROOT}.previous-', validationStart);
+  assert.ok(validationStart > 0 && validationEnd > validationStart);
+  const validation = ci.slice(validationStart, validationEnd);
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "brai-source-symlink-test-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const outside = path.join(root, "outside");
+  const source = path.join(root, "source");
+  fs.mkdirSync(outside);
+  fs.writeFileSync(path.join(outside, "keep"), "unchanged\n");
+  fs.symlinkSync(outside, source);
+  const result = spawnSync("bash", ["-c", `set -euo pipefail
+SOURCE_ROOT=${shellQuote(source)}
+${validation}
+`], { encoding: "utf8" });
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /not a plain directory/);
+  assert.equal(fs.readFileSync(path.join(outside, "keep"), "utf8"), "unchanged\n");
+  assert.equal(fs.existsSync(path.join(outside, ".brai-previous-source.json")), false);
+});
+
+test("local EXIT cleanup deletes staging only while the local phase owns it", (t) => {
+  const ci = read("deploy/scripts/ci-ssh-deploy.sh");
+  const cleanup = ci.match(/cleanup\(\) \{[\s\S]*?\n\}/)?.[0];
+  assert.ok(cleanup);
+  const setupOwnership = ci.indexOf('REMOTE_UPLOAD_OWNED="true"');
+  const deployOwnership = ci.indexOf('REMOTE_DEPLOY_OWNS_STAGING="true"');
+  const localRelease = ci.indexOf('REMOTE_UPLOAD_OWNED="false"', setupOwnership);
+  assert.ok(setupOwnership > 0 && setupOwnership < deployOwnership && deployOwnership < localRelease);
+
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "brai-local-cleanup-owner-test-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  for (const [name, locallyOwned, remotelyOwned, expectedCall] of [
+    ["before-setup", "false", "false", false],
+    ["after-setup", "true", "false", true],
+    ["remote-deploy", "false", "true", false],
+  ]) {
+    const caseRoot = path.join(root, name);
+    fs.mkdirSync(caseRoot);
+    const key = path.join(caseRoot, "key");
+    const called = path.join(caseRoot, "called");
+    fs.writeFileSync(key, "key");
+    const result = spawnSync("bash", ["-c", `${cleanup}
+KEY_FILE=${shellQuote(key)}
+CLEANUP_TERMINAL_STATUS=failed
+REMOTE_UPLOAD_OWNED=${locallyOwned}
+REMOTE_DEPLOY_OWNS_STAGING=${remotelyOwned}
+cleanup_remote_upload() { printf called >${shellQuote(called)}; }
+false
+cleanup
+`], { encoding: "utf8" });
+    assert.equal(result.status, 1);
+    assert.equal(fs.existsSync(called), expectedCall);
+  }
+});
+
+test("truncated remote tar upload writes a failed terminal marker", (t) => {
+  const ci = read("deploy/scripts/ci-ssh-deploy.sh");
+  const uploadStartToken = "read -r -d '' REMOTE_EXTRACT_SCRIPT <<'REMOTE_EXTRACT' || true\n";
+  const uploadStart = ci.indexOf(uploadStartToken);
+  const uploadEnd = ci.indexOf("\nREMOTE_EXTRACT\n", uploadStart);
+  assert.ok(uploadStart > 0 && uploadEnd > uploadStart);
+  const uploadScript = ci.slice(uploadStart + uploadStartToken.length, uploadEnd);
+  assert.match(uploadScript, /-d "\$REMOTE_UPLOAD" && ! -L "\$REMOTE_UPLOAD"/);
+  assert.match(ci, /printf -v REMOTE_EXTRACT_COMMAND 'bash -c %q bash %q %q %q %q %q'/);
+  assert.match(ci, /ssh[^\n]*\\\n\s+"\$REMOTE_EXTRACT_COMMAND"/);
+
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), "brai-truncated-upload-test-"));
+  t.after(() => fs.rmSync(temp, { recursive: true, force: true }));
+  const commit = "d".repeat(40);
+  const uploadRoot = path.join(temp, "ci uploads");
+  const uploadName = `branch-${commit}.attempt-truncated`;
+  const attempt = path.join(uploadRoot, uploadName);
+  const archive = path.join(temp, "truncated.tar.gz");
+  fs.mkdirSync(attempt, { recursive: true });
+  fs.writeFileSync(path.join(uploadRoot, ".staging-operation.lock"), "");
+  fs.writeFileSync(archive, "not-a-gzip-stream");
+  fs.writeFileSync(path.join(attempt, ".brai-upload-terminal.json"), JSON.stringify({
+    status: "active", commit, finishedAt: null
+  }));
+
+  const archiveFd = fs.openSync(archive, "r");
+  const quote = (value) => {
+    const result = spawnSync("bash", ["-c", 'printf "%q" "$1"', "quote-upload-value", value], { encoding: "utf8" });
+    assert.equal(result.status, 0, result.stderr);
+    return result.stdout;
+  };
+  const openSshCommand = [
+    "bash", "-c", quote(uploadScript), "bash",
+    ...[attempt, uploadRoot, uploadName, commit, ".brai-upload-terminal.json"].map(quote)
+  ].join(" ");
+  const result = spawnSync("bash", ["-c", openSshCommand], {
+    stdio: [archiveFd, "pipe", "pipe"], encoding: "utf8"
+  });
+  fs.closeSync(archiveFd);
+  assert.notEqual(result.status, 0);
+  const marker = JSON.parse(fs.readFileSync(path.join(attempt, ".brai-upload-terminal.json"), "utf8"));
+  assert.deepEqual({ status: marker.status, commit: marker.commit }, { status: "failed", commit });
+  assert.ok(Number.isFinite(Date.parse(marker.finishedAt)));
+});
+
+test("remote deploy command preserves an empty preview lease generation", () => {
+  const values = [
+    "/srv/projects/brai",
+    "/srv/projects/brai-envs/ci uploads/main-attempt",
+    "main",
+    "a".repeat(40),
+    "false",
+    "",
+    "/srv/projects/brai-envs/ci uploads",
+    ".brai-upload-terminal.json",
+    "12",
+  ];
+  const openSshCommand = ["bash", "-s", "--", ...values].map(shellQuote).join(" ");
+  const result = spawnSync("bash", ["-c", openSshCommand], {
+    input: 'set -euo pipefail\nprintf "%s|%s|%s\\n" "$#" "${6-missing}" "$9"\n',
+    encoding: "utf8",
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout, "9||12\n");
+});
+
+test("signal between source renames restores the old source and marks cancellation", (t) => {
+  const ci = read("deploy/scripts/ci-ssh-deploy.sh");
+  const functionNames = [
+    "is_deploy_attempt_suffix",
+    "assert_attempt_staging_path",
+    "write_attempt_terminal_marker",
+    "remove_attempt_staging",
+    "restore_previous_source",
+    "rollback_before_new_api_health",
+    "reconcile_source_swap_state",
+    "deploy_cleanup"
+  ];
+  const functions = functionNames.map((name) => {
+    const source = ci.match(new RegExp(`${name}\\(\\) \\{[\\s\\S]*?\\n\\}`))?.[0];
+    assert.ok(source, `missing ${name}`);
+    return source;
+  }).join("\n");
+
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), "brai-source-rename-signal-test-"));
+  t.after(() => fs.rmSync(temp, { recursive: true, force: true }));
+  const sourceRoot = path.join(temp, "source");
+  const previousSource = `${sourceRoot}.previous-cancel`;
+  const uploadRoot = path.join(temp, "ci-uploads");
+  const commit = "c".repeat(40);
+  const attemptSuffix = "local-0-deploy-107-207";
+  const attempt = path.join(uploadRoot, `branch-${commit}.attempt-${attemptSuffix}`);
+  const markerCapture = path.join(temp, "terminal-marker.json");
+  fs.mkdirSync(previousSource, { recursive: true });
+  fs.mkdirSync(attempt, { recursive: true });
+  fs.writeFileSync(path.join(previousSource, "version"), "old\n");
+  fs.writeFileSync(path.join(attempt, "version"), "incoming\n");
+
+  const result = spawnSync("bash", ["-c", `set -euo pipefail
+${functions}
+SOURCE_ROOT=${shellQuote(sourceRoot)}
+PREVIOUS_SOURCE=${shellQuote(previousSource)}
+ATTEMPT_STAGING=${shellQuote(attempt)}
+UPLOAD_ROOT=${shellQuote(uploadRoot)}
+UPLOAD_MARKER=.brai-upload-terminal.json
+BRAI_COMMIT=${commit}
+MARKER_CAPTURE=${shellQuote(markerCapture)}
+DEPLOY_ATTEMPT_SUFFIX=${attemptSuffix}
+SOURCE_PRESENT=true
+SOURCE_SWAPPED=false
+PREVIOUS_SOURCE_READY=false
+API_WAS_ACTIVE=false
+API_TRANSITION_STARTED=true
+API_QUIESCED=true
+NEW_API_HEALTHY=false
+DEPLOY_CLEANUP_RUNNING=false
+SERVICE_NAME=""
+mark_preview_failed() { :; }
+cleanup_preview_queue() { :; }
+rm() {
+  if [[ "\${!#}" == "$ATTEMPT_STAGING" ]]; then
+    cp "$ATTEMPT_STAGING/$UPLOAD_MARKER" "$MARKER_CAPTURE"
+  fi
+  command rm "$@"
+}
+deploy_cleanup 143
+`], { encoding: "utf8" });
+
+  assert.equal(result.status, 143, result.stderr);
+  assert.equal(fs.readFileSync(path.join(sourceRoot, "version"), "utf8"), "old\n");
+  assert.equal(fs.existsSync(previousSource), false);
+  assert.equal(fs.existsSync(attempt), false);
+  const marker = JSON.parse(fs.readFileSync(markerCapture, "utf8"));
+  assert.deepEqual({ status: marker.status, commit: marker.commit }, { status: "cancelled", commit });
+  assert.ok(Number.isFinite(Date.parse(marker.finishedAt)));
+});
+
+
+test("post-health completion, failure, and cancellation preserve the exact previous source", (t) => {
+  const ci = read("deploy/scripts/ci-ssh-deploy.sh");
+  const functionNames = [
+    "is_deploy_attempt_suffix",
+    "assert_attempt_staging_path",
+    "write_attempt_terminal_marker",
+    "remove_attempt_staging",
+    "reconcile_source_swap_state",
+    "deploy_cleanup"
+  ];
+  const functions = functionNames.map((name) => {
+    const source = ci.match(new RegExp(`${name}\\(\\) \\{[\\s\\S]*?\\n\\}`))?.[0];
+    assert.ok(source, `missing ${name}`);
+    return source;
+  }).join("\n");
+
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), "brai-post-health-failure-test-"));
+  t.after(() => fs.rmSync(temp, { recursive: true, force: true }));
+  for (const [label, status, markerStatus, shaCharacter, attemptSuffix] of [
+    ["failure", 1, "failed", "e", "local-0-deploy-108-208"],
+    ["cancellation", 143, "cancelled", "f", "local-0-deploy-109-209"],
+    ["success", 0, "succeeded", "9", "local-0-deploy-110-210"]
+  ]) {
+    const caseRoot = path.join(temp, label);
+    const sourceRoot = path.join(caseRoot, "source");
+    const previousSource = `${sourceRoot}.previous-${attemptSuffix}`;
+    const uploadRoot = path.join(caseRoot, "ci-uploads");
+    const commit = shaCharacter.repeat(40);
+    const attempt = path.join(uploadRoot, `branch-${commit}.attempt-${attemptSuffix}`);
+    const markerCapture = path.join(caseRoot, "terminal-marker.json");
+    for (const directory of [sourceRoot, previousSource, attempt]) fs.mkdirSync(directory, { recursive: true });
+    fs.writeFileSync(path.join(sourceRoot, "version"), "healthy-incoming\n");
+    fs.writeFileSync(path.join(previousSource, "version"), "previous\n");
+
+    const result = spawnSync("bash", ["-c", `set -euo pipefail
+${functions}
+SOURCE_ROOT=${shellQuote(sourceRoot)}
+PREVIOUS_SOURCE=${shellQuote(previousSource)}
+ATTEMPT_STAGING=${shellQuote(attempt)}
+UPLOAD_ROOT=${shellQuote(uploadRoot)}
+UPLOAD_MARKER=.brai-upload-terminal.json
+BRAI_COMMIT=${commit}
+MARKER_CAPTURE=${shellQuote(markerCapture)}
+DEPLOY_ATTEMPT_SUFFIX=${attemptSuffix}
+SOURCE_PRESENT=true
+SOURCE_SWAPPED=true
+PREVIOUS_SOURCE_READY=true
+API_WAS_ACTIVE=true
+API_TRANSITION_STARTED=true
+API_QUIESCED=false
+NEW_API_HEALTHY=true
+DEPLOY_CLEANUP_RUNNING=false
+mark_preview_failed() { :; }
+cleanup_preview_queue() { :; }
+rm() {
+  if [[ "\${!#}" == "$ATTEMPT_STAGING" ]]; then
+    cp "$ATTEMPT_STAGING/$UPLOAD_MARKER" "$MARKER_CAPTURE"
+  fi
+  command rm "$@"
+}
+deploy_cleanup ${status}
+`], { encoding: "utf8" });
+
+    assert.equal(result.status, status, result.stderr);
+    assert.equal(fs.readFileSync(path.join(sourceRoot, "version"), "utf8"), "healthy-incoming\n");
+    assert.equal(fs.readFileSync(path.join(previousSource, "version"), "utf8"), "previous\n");
+    assert.equal(fs.existsSync(attempt), false);
+    const marker = JSON.parse(fs.readFileSync(markerCapture, "utf8"));
+    assert.deepEqual({ status: marker.status, commit: marker.commit }, { status: markerStatus, commit });
+  }
+});
+
+test("deploy headroom cannot be lowered below 12 GiB", () => {
+  const ci = read("deploy/scripts/ci-ssh-deploy.sh");
+  const functionSource = ci.match(/check_deploy_headroom\(\) \{[\s\S]*?\n\}/)?.[0];
+  assert.ok(functionSource);
+  const result = spawnSync("bash", ["-c", `${functionSource}
+DEPLOY_MIN_FREE_GB=11 check_deploy_headroom /tmp
+`], { encoding: "utf8" });
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /at least 12 GiB/);
 });
 
 test("source swap is exact-SHA and atomic with the Preview lease check", () => {
@@ -280,19 +751,29 @@ test("source swap is exact-SHA and atomic with the Preview lease check", () => {
   const lockIndex = ci.indexOf('flock 9');
   const assertIndex = ci.indexOf('preview-slots.mjs assert-owned');
   const previousIndex = ci.indexOf('mv "$SOURCE_ROOT" "$PREVIOUS_SOURCE"');
+  const previousMarkerIndex = ci.indexOf('mv -f -- "$previous_marker_tmp" "$PREVIOUS_SOURCE/.brai-previous-source.json"', previousIndex);
   const swapIndex = ci.indexOf('mv "$REMOTE_UPLOAD" "$SOURCE_ROOT"');
+  const markerRemovalIndex = ci.indexOf('rm -f -- "$SOURCE_ROOT/$UPLOAD_MARKER"', swapIndex);
+  const attemptMarkerIndex = ci.indexOf('>"$SOURCE_ROOT/.brai-deploy-attempt"', markerRemovalIndex);
+  const commitMarkerIndex = ci.indexOf('>"$SOURCE_ROOT/.brai-deploy-commit"', attemptMarkerIndex);
+  const branchMarkerIndex = ci.indexOf('>"$SOURCE_ROOT/.brai-deploy-branch"', commitMarkerIndex);
   const unlockIndex = ci.indexOf('exec 9>&-', swapIndex);
-  assert.match(ci, /REMOTE_UPLOAD="\$UPLOAD_ROOT\/\$SAFE_BRANCH-\$BRAI_COMMIT"/);
+  assert.match(ci, /REMOTE_UPLOAD="\$UPLOAD_ROOT\/\$SAFE_BRANCH-\$BRAI_COMMIT\.attempt-\$SAFE_ATTEMPT_ID"/);
   assert.match(ci, /preview-slots\.sh allocate "\$BRAI_BRANCH" "\$BRAI_COMMIT" "\$BRAI_PREVIEW_LEASE_GENERATION"/);
   assert.ok(lockIndex > 0 && lockIndex < assertIndex);
-  assert.ok(assertIndex < previousIndex && previousIndex < swapIndex && swapIndex < unlockIndex);
+  assert.ok(assertIndex < previousIndex && previousIndex < previousMarkerIndex && previousMarkerIndex < swapIndex);
+  assert.ok(swapIndex < markerRemovalIndex && markerRemovalIndex < attemptMarkerIndex);
+  assert.ok(attemptMarkerIndex < commitMarkerIndex && commitMarkerIndex < branchMarkerIndex && branchMarkerIndex < unlockIndex);
   assert.match(ci, /\.brai-deploy-commit/);
   assert.match(ci, /\.brai-deploy-branch/);
+  assert.doesNotMatch(ci, /remove_owned_previous_source|remove_stale_previous_sources/);
 });
 
 test("independent agent gate restarts exact units, promotes builds, smokes cross-queue, then marks ready", () => {
   const gate = read("deploy/scripts/deploy-goal-agents.sh");
   const ciGate = read("deploy/scripts/ci-ssh-deploy-goal-agents.sh");
+  const sudoers = read("deploy/ansible/templates/brai-deploy-sudoers.j2");
+  const playbook = read("deploy/ansible/brai.yml");
   assert.match(gate, /GOAL_AGENT_IDS=\(/);
   for (const id of ["activity.classifier", "goal.item-matcher", "goal.member-finder", "goal.discovery", "goal.planner"]) {
     assert.match(gate, new RegExp(id.replaceAll(".", "\\.")));
@@ -305,6 +786,17 @@ test("independent agent gate restarts exact units, promotes builds, smokes cross
   assert.match(gate, /context-smoke-cli\.mjs/);
   assert.match(gate, /preview-slots\.sh" ready "\$BRANCH" "\$COMMIT"/);
   assert.ok(gate.indexOf("context-smoke-cli.mjs") < gate.indexOf('preview-slots.sh" ready'));
+  const sourceLockIndex = gate.indexOf("flock 9");
+  const sourceIdentityIndex = gate.indexOf('[[ -r "$ROOT/.brai-deploy-commit"');
+  const readyMarkerIndex = gate.indexOf('mv -f -- "$READY_MARKER_TMP" "$READY_MARKER"');
+  const sourceUnlockIndex = gate.indexOf("exec 9>&-", readyMarkerIndex);
+  const maintenanceTriggerIndex = gate.indexOf("systemctl --no-block start brai-storage-maintenance.service", sourceUnlockIndex);
+  assert.ok(sourceLockIndex < sourceIdentityIndex);
+  assert.ok(gate.indexOf("context-smoke-cli.mjs") < readyMarkerIndex);
+  assert.ok(gate.indexOf('preview-slots.sh" ready') < readyMarkerIndex);
+  assert.ok(readyMarkerIndex < sourceUnlockIndex && sourceUnlockIndex < maintenanceTriggerIndex);
+  assert.match(sudoers, /NOPASSWD: \/bin\/systemctl --no-block start brai-storage-maintenance\.service/);
+  assert.match(playbook, /name: Install deploy user sudoers boundary[\s\S]*?tags:\n\s+- brai-caddy\n\s+- brai-goal-agents\n\s+- brai-storage-maintenance\n\s+- brai-supavisor-maintenance\n\s+- targeted-infra-apply/);
   assert.match(ciGate, /registry\[key\]\?\.branch === branch && registry\[key\]\?\.commit === commit/);
   assert.match(ciGate, /deploy-goal-agents\.sh/);
 });
@@ -319,6 +811,48 @@ test("preview release stops all agent instances before deleting the slot source"
   assert.ok(stopIndex < release.lastIndexOf("cleanup_released_preview_slot_artifacts"));
   assert.match(release, /if systemctl cat "\$unit"/);
   assert.doesNotMatch(release, /BRAI_SUDO:-sudo}" systemctl cat/);
+  const cleanupFunction = release.slice(cleanupIndex, release.indexOf("accepted_build_recorded()", cleanupIndex));
+  assert.ok(cleanupFunction.indexOf('flock -x 8') < cleanupFunction.indexOf('flock -x 9'));
+  assert.ok(cleanupFunction.indexOf('entry?.status === "free"') < cleanupFunction.indexOf('rm -rf "$slot_root/source"'));
+  assert.match(cleanupFunction, /\[\[ -f "\$source_lock" && ! -L "\$source_lock" \]\]/);
+});
+
+test("preview release cleanup preserves a slot reallocated before its source lock", (t) => {
+  const release = read("deploy/scripts/ci-ssh-release-slot.sh");
+  const functionStart = release.indexOf("cleanup_released_preview_slot_artifacts() {");
+  const functionEnd = release.indexOf("accepted_build_recorded()", functionStart);
+  assert.ok(functionStart > 0 && functionEnd > functionStart);
+  const functionSource = release.slice(functionStart, functionEnd);
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "brai-release-source-lock-test-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+
+  for (const [name, entry, shouldRemove] of [
+    ["reallocated", { status: "deploying", branch: "codex/new-owner" }, false],
+    ["free", { status: "free", branch: null }, true],
+  ]) {
+    const envsRoot = path.join(root, name);
+    const slotRoot = path.join(envsRoot, "preview-a");
+    const registry = path.join(envsRoot, "preview-slots.json");
+    fs.mkdirSync(slotRoot, { recursive: true });
+    fs.writeFileSync(path.join(slotRoot, ".source-operation.lock"), "");
+    fs.writeFileSync(path.join(envsRoot, "preview-slots.lock"), "");
+    fs.writeFileSync(registry, JSON.stringify({ A: entry }));
+    for (const artifact of ["source", "source.previous-local-0-deploy-1-2", "web", "mobile-update"]) {
+      fs.mkdirSync(path.join(slotRoot, artifact));
+      fs.writeFileSync(path.join(slotRoot, artifact, "keep"), name);
+    }
+    const result = spawnSync("bash", ["-c", `set -euo pipefail
+${functionSource}
+ENVS_ROOT=${shellQuote(envsRoot)}
+REGISTRY=${shellQuote(registry)}
+SLOT_LOWER=a
+cleanup_released_preview_slot_artifacts '{"released":true,"slot":"A"}'
+`], { encoding: "utf8" });
+    assert.equal(result.status, 0, result.stderr);
+    for (const artifact of ["source", "source.previous-local-0-deploy-1-2", "web", "mobile-update"]) {
+      assert.equal(fs.existsSync(path.join(slotRoot, artifact)), !shouldRemove);
+    }
+  }
 });
 
 test("preview release existence probe cannot be bypassed by missing sudo permission for systemctl cat", () => {

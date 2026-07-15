@@ -35,8 +35,10 @@ type WorkspaceWorkListProps = {
   onStopFocus: (action: ActivityItem) => Promise<void>;
   onSelectFilter: (filter: WorkspaceFilterId) => void;
   onAddToGoals: (itemsId: string, goalIds: string[]) => Promise<void>;
+  onCreateGoalForItem: (itemsId: string, title: string) => Promise<void>;
   onRemoveFromGoal: (relation: RelationItem) => Promise<void>;
   onReorder?: (orderedIds: string[]) => Promise<void>;
+  renderAfter?: (item: WorkspaceWorkItem) => ReactNode;
 };
 
 export function WorkspaceWorkList(props: WorkspaceWorkListProps) {
@@ -102,7 +104,7 @@ function WorkspaceItem({ item, props, dragHandle, mobileDragHandle }: { item: Wo
   const membershipControl = item.goalMembershipReadOnly ? null : (
     <>
       {props.filter.startsWith("goal:") ? <RemoveGoalMembershipButton item={item} onRemove={props.onRemoveFromGoal} /> : null}
-      {!props.filter.startsWith("goal:") ? <GoalMembershipPicker item={item} goals={props.goals} onAdd={props.onAddToGoals} onRemove={props.onRemoveFromGoal} /> : null}
+      {!props.filter.startsWith("goal:") ? <GoalMembershipPicker item={item} goals={props.goals} onAdd={props.onAddToGoals} onCreateGoal={props.onCreateGoalForItem} /> : null}
     </>
   );
   return (
@@ -134,6 +136,7 @@ function WorkspaceItem({ item, props, dragHandle, mobileDragHandle }: { item: Wo
       {item.kind === "action" ? (
         mobileDragHandle ?? (!props.filter.startsWith("goal:") ? <GoalBadges item={item} onSelect={props.onSelectFilter} /> : null)
       ) : !props.filter.startsWith("goal:") ? <GoalBadges item={item} onSelect={props.onSelectFilter} /> : null}
+      {props.renderAfter?.(item)}
     </div>
   );
 }

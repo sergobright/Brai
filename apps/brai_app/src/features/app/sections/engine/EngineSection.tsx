@@ -4,7 +4,6 @@ import { Download, RefreshCw } from "lucide-react";
 import type { AppVersionState } from "@/shared/api/braiApi";
 import { useAppVersion } from "@/shared/config/runtime";
 import type { BraiOtaState } from "@/shared/platform/ota";
-import { platformName } from "@/shared/platform/platform";
 import { moscowTime } from "@/shared/time/format";
 import { Button } from "@/shared/ui/button";
 import { Card } from "@/shared/ui/card";
@@ -22,10 +21,12 @@ export function EngineSection({
   versionCheckedAt,
   versionError,
   versionRefreshing,
+  nativeAndroid,
   onDownloadApk,
   onInstallApk,
   onDownloadWebUpdate,
   onRefreshEngine,
+  onReloadPage = () => window.location.reload(),
 }: {
   appVersionState: AppVersionState | null;
   bundlePublishedAt: string | null;
@@ -35,10 +36,12 @@ export function EngineSection({
   versionCheckedAt: string | null;
   versionError: boolean;
   versionRefreshing: boolean;
+  nativeAndroid: boolean;
   onDownloadApk: () => Promise<BraiOtaState | null>;
   onInstallApk: () => Promise<BraiOtaState | null>;
   onDownloadWebUpdate: () => Promise<BraiOtaState | null>;
   onRefreshEngine: () => Promise<void>;
+  onReloadPage?: () => void;
 }) {
   const appBuild = useAppVersion();
   const view = engineSectionView({ appBuild, appVersionState, otaRefreshing, otaState, versionError, versionRefreshing });
@@ -50,8 +53,8 @@ export function EngineSection({
     if (view.updateAction === "check") {
       await onRefreshEngine();
     } else if (view.updateAction === "download-web") {
-      if (platformName() === "android") await onDownloadWebUpdate();
-      else window.location.reload();
+      if (nativeAndroid) await onDownloadWebUpdate();
+      else onReloadPage();
     } else if (view.updateAction === "download-apk") {
       const state = await onDownloadApk();
       if (!state) window.open(view.apkReleaseUrl, "_blank", "noopener,noreferrer");
@@ -60,11 +63,11 @@ export function EngineSection({
     }
   }
 
-  const button = updateButton(view.updateAction, view.apkInstallPermissionRequired);
+  const button = updateButton(view.updateAction, nativeAndroid, view.apkInstallPermissionRequired);
   const ButtonIcon = button.icon;
 
   return (
-    <section className={cx(SECTION_GRID_CLASS, "content-start items-start xl:w-1/2")} aria-label="Engine">
+    <section className={cx(SECTION_GRID_CLASS, "w-full content-start items-start")} aria-label="Engine">
       <Card className="grid w-full content-start gap-3 self-start p-4 sm:gap-4 sm:p-5">
         <div className="grid gap-1.5">
           <h2 className="m-0 text-lg leading-tight tracking-normal sm:text-xl">Текущая версия {view.installedVersion}</h2>
@@ -126,10 +129,12 @@ function Notice({ text }: { text: string }) {
   return <div className="rounded-md border border-border bg-muted/50 px-3 py-2.5"><p className="m-0 text-sm font-medium">{text}</p></div>;
 }
 
-function updateButton(action: EngineSectionView["updateAction"], permissionRequired = false) {
+function updateButton(action: EngineSectionView["updateAction"], nativeAndroid: boolean, permissionRequired = false) {
   switch (action) {
     case "checking": return { text: "Проверяем...", icon: RefreshCw, disabled: true, animated: false };
-    case "download-web": return { text: "Скачать обновление", icon: Download, disabled: false, animated: false };
+    case "download-web": return nativeAndroid
+      ? { text: "Скачать обновление", icon: Download, disabled: false, animated: false }
+      : { text: "Обновить страницу", icon: RefreshCw, disabled: false, animated: false };
     case "downloading-web":
     case "downloading-apk": return { text: "Скачивается", icon: Download, disabled: true, animated: true };
     case "web-ready": return { text: "Скачано", icon: Download, disabled: true, animated: false };

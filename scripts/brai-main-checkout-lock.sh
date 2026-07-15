@@ -108,8 +108,10 @@ if getent group brai-deploy >/dev/null 2>&1; then
     fi
   done
   for deploy_tool in \
+    "$root/deploy/scripts/create-inbox-operation.sh" \
     "$root/deploy/scripts/create-operation-activity.sh" \
     "$root/deploy/scripts/complete-operation-activities.sh" \
+    "$root/deploy/scripts/complete-inbox-operations.sh" \
     "$root/deploy/scripts/list-operation-activities.sh" \
     "$root/deploy/scripts/sync-occupied-preview-ota-manifests.sh"
   do

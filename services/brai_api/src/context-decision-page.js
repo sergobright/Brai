@@ -82,7 +82,7 @@ function readAuditItems(store, auditPage) {
   const itemsByBatch = new Map(auditPage.map((batch) => [batch.id, []]));
   if (auditPage.length === 0) return itemsByBatch;
   const items = store.db.prepare(`
-    SELECT i.*, d.decision_kind, d.confidence, d.rationale, d.evidence_json, d.proposal_json
+    SELECT i.*, d.decision_kind, d.trigger_items_id, d.confidence, d.rationale, d.evidence_json, d.proposal_json
     FROM context_audit_items i
     JOIN context_decisions d ON d.id = i.decisions_id
     WHERE i.audit_batches_id IN (${auditPage.map(() => '?').join(', ')})

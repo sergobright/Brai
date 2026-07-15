@@ -110,7 +110,7 @@ else
   "$NODE_BIN" "$SCRIPT_DIR/record-runtime-log.mjs" \
     --source deploy \
     --operation accepted_branch.cleanup \
-    --status done \
+    --status "done" \
     --message "Accepted branches cleaned up" \
     --json "$cleanup_json" >/dev/null 2>&1 || true
 fi

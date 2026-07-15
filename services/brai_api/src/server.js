@@ -44,7 +44,7 @@ import {
 const BASE_JSON_HEADERS = {
   'content-type': 'application/json; charset=utf-8',
   'access-control-allow-methods': 'GET,POST,PUT,PATCH,DELETE,OPTIONS',
-  'access-control-allow-headers': 'authorization,content-type,x-api-key,x-brai-api-key,x-brai-target,x-brai-destination,x-brai-cmd-device-id,x-brai-cmd-client-version,x-brai-expected-user-id,x-airwhisper-device-id,x-airwhisper-client-version',
+  'access-control-allow-headers': 'authorization,content-type,x-api-key,x-brai-api-key,x-brai-target,x-brai-destination,x-brai-cmd-device-id,x-brai-cmd-client-version,x-brai-expected-user-id',
   'access-control-allow-credentials': 'true'
 };
 const SESSION_COOKIE = 'brai_session';
@@ -101,8 +101,10 @@ export function createBraiServer({
   testEmailLogin = false,
   shutdownGraceMs = 5000,
   contextAuditReconcileIntervalMs = 60_000,
+  authBackendTimeoutMs = 5_000,
   now = () => new Date(),
-  logger = console
+  logger = console,
+  createAuth = createBraiAuth
 }) {
   fs.mkdirSync(dataRoot, { recursive: true });
   const store = new BraiStore(databaseUrl);
@@ -123,7 +125,7 @@ export function createBraiServer({
     syncthingFolderIdPrefix,
     logger
   });
-  const authRuntime = createBraiAuth({
+  const authRuntime = createAuth({
     databaseUrl,
     secret: betterAuthSecret ?? sessionSecret ?? 'brai-local-auth-secret-for-local-development-only',
     baseURL: betterAuthUrl,
@@ -380,7 +382,18 @@ export function createBraiServer({
         }
       });
       if (req.method === 'GET' && url.pathname === '/health') {
-        store.db.prepare('SELECT 1 AS ok').get();
+        const healthChecks = await Promise.allSettled([
+          Promise.resolve().then(() => store.db.prepare('SELECT 1 AS ok').get()),
+          authBackendCall(() => authRuntime.healthCheck(), authBackendTimeoutMs)
+        ]);
+        if (healthChecks[0].status === 'rejected') {
+          sendJson(req, res, 503, { ok: false, error: 'database_unavailable' });
+          return;
+        }
+        if (healthChecks[1].status === 'rejected') {
+          sendJson(req, res, 503, { ok: false, error: 'auth_backend_unavailable' });
+          return;
+        }
         sendJson(req, res, 200, {
           ok: true,
           service: 'brai-api',
@@ -392,7 +405,7 @@ export function createBraiServer({
       }
 
       if (url.pathname === '/auth/session' && req.method === 'GET') {
-        const session = await betterAuthSession(req, auth);
+        const session = await betterAuthSession(req, auth, authBackendTimeoutMs);
         if (session?.user) {
           sendJson(req, res, 200, { authenticated: true, user: publicAuthUser(session.user) });
           return;
@@ -1011,7 +1024,7 @@ export function createBraiServer({
         return;
       }
 
-      const authContext = await authenticateRequest(req, token, url, sessionSecret, now, auth, store);
+      const authContext = await authenticateRequest(req, token, url, sessionSecret, now, auth, store, authBackendTimeoutMs);
       requestUserId = authContext.userId;
       if (!authContext.authorized) {
         recordRuntimeLog(store, logger, {
@@ -1523,7 +1536,7 @@ export function createBraiServer({
     void (async () => {
       const traceId = crypto.randomUUID();
       const url = new URL(req.url ?? '/', 'http://localhost');
-      const authContext = await authenticateRequest(req, token, url, sessionSecret, now, auth, store);
+      const authContext = await authenticateRequest(req, token, url, sessionSecret, now, auth, store, authBackendTimeoutMs);
       if (url.pathname !== '/v1/live' || !authContext.authorized) {
         recordRuntimeLog(store, logger, {
           traceId,
@@ -1581,16 +1594,19 @@ export function createBraiServer({
         ws.on('close', () => sockets.delete(ws));
         ws.on('error', () => sockets.delete(ws));
       });
-    })().catch(() => {
+    })().catch((error) => {
+      const authUnavailable = error?.status === 503;
       recordRuntimeLog(store, logger, {
         source: 'auth',
         operation: 'auth.websocket',
         status: 'failed',
         severityText: 'WARN',
-        reason: 'upgrade_error',
+        reason: authUnavailable ? 'auth_backend_unavailable' : 'upgrade_error',
         message: 'WebSocket upgrade failed'
       });
-      socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+      socket.write(authUnavailable
+        ? 'HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\n\r\n'
+        : 'HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n');
       socket.destroy();
     });
   });
@@ -1789,8 +1805,8 @@ function actionsCompatState(state) {
   };
 }
 
-async function authenticateRequest(req, token, parsedUrl, sessionSecret, now, auth, store) {
-  const session = await betterAuthSession(req, auth);
+async function authenticateRequest(req, token, parsedUrl, sessionSecret, now, auth, store, authBackendTimeoutMs) {
+  const session = await betterAuthSession(req, auth, authBackendTimeoutMs);
   if (session?.user?.id) {
     return { authorized: true, sessionBased: true, userId: session.user.id, user: publicAuthUser(session.user) };
   }
@@ -1814,17 +1830,50 @@ function expectedUserScopeChanged(values, authenticatedUserId) {
   );
 }
 
-async function betterAuthSession(req, auth) {
+async function betterAuthSession(req, auth, authBackendTimeoutMs) {
   try {
-    const response = await auth.api.getSession({
+    const response = await authBackendCall(() => auth.api.getSession({
       headers: requestHeaders(req),
       asResponse: true
-    });
-    if (!response.ok) return null;
-    return parseJson(await response.text());
-  } catch {
-    return null;
+    }), authBackendTimeoutMs);
+    if (!response.ok) throw authBackendUnavailable();
+    const text = await response.text();
+    if (!text.trim()) throw authBackendUnavailable();
+    const session = JSON.parse(text);
+    if (session === null) return null;
+    if (!session || typeof session !== 'object' || Array.isArray(session)
+      || !session.session || typeof session.session !== 'object' || Array.isArray(session.session)
+      || !session.user || typeof session.user !== 'object' || Array.isArray(session.user)
+      || typeof session.user.id !== 'string' || !session.user.id.trim()) {
+      throw authBackendUnavailable();
+    }
+    return session;
+  } catch (error) {
+    if (error?.status === 503) throw error;
+    throw authBackendUnavailable();
   }
+}
+
+async function authBackendCall(call, timeoutMs) {
+  const boundedTimeoutMs = Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : 5_000;
+  let timer;
+  try {
+    return await Promise.race([
+      Promise.resolve().then(call),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(authBackendUnavailable()), boundedTimeoutMs);
+        timer.unref?.();
+      })
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function authBackendUnavailable() {
+  const error = new Error('auth_backend_unavailable');
+  error.status = 503;
+  return error;
 }
 
 async function prepareSignedInAuthUser({ store, logger, traceId, route, operation, payload, preliminaryContext = {}, ensureUserVault, now }) {

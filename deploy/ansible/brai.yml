@@ -531,6 +531,7 @@
         owner: "{{ brai_syncthing_user }}"
         group: "{{ brai_source_group }}"
         mode: "2770"
+      tags: [brai-vault]
 
     - name: Ensure existing Syncthing vault contents are writable by sync group
       ansible.builtin.file:
@@ -540,6 +541,7 @@
         group: "{{ brai_source_group }}"
         mode: "u=rwX,g=rwX,o="
         recurse: true
+      tags: [brai-vault]
 
     - name: Ensure existing Syncthing vault directories keep sync setgid
       ansible.builtin.command:
@@ -555,6 +557,7 @@
           - "+"
       changed_when: false
       when: not ansible_check_mode
+      tags: [brai-vault]
 
     - name: Restore Syncthing vault root setgid mode
       ansible.builtin.file:
@@ -563,6 +566,7 @@
         owner: "{{ brai_syncthing_user }}"
         group: "{{ brai_source_group }}"
         mode: "2770"
+      tags: [brai-vault]
 
     - name: Check Syncthing systemd service template
       ansible.builtin.stat:
@@ -620,6 +624,9 @@
       loop: "{{ brai_envs | dict2items | list }}"
       loop_control:
         label: "{{ item.key }}"
+      tags:
+        - brai-storage-maintenance
+        - targeted-infra-apply
 
     - name: Create production source checkout path
       ansible.builtin.file:
@@ -639,6 +646,50 @@
       loop: "{{ brai_envs | dict2items | rejectattr('key', 'equalto', 'prod') | list | product(['web', 'mobile-update', 'data', 'source']) | list }}"
       loop_control:
         label: "{{ item.0.key }}/{{ item.1 }}"
+
+    - name: Provision deploy-owned source operation locks
+      ansible.builtin.file:
+        path: "{{ brai_env_root }}/{{ item.value.path }}/.source-operation.lock"
+        state: touch
+        owner: "{{ brai_deploy_user }}"
+        group: "{{ brai_deploy_user }}"
+        mode: "0664"
+        access_time: preserve
+        modification_time: preserve
+      loop: "{{ brai_envs | dict2items | list }}"
+      loop_control:
+        label: "{{ item.key }}"
+      tags:
+        - brai-storage-maintenance
+        - targeted-infra-apply
+
+    - name: Install inert Brai auth host bootstrap
+      ansible.builtin.import_tasks: tasks/brai-auth-bootstrap.yml
+      tags: [brai-auth-bootstrap]
+
+    - name: Create CI upload root
+      ansible.builtin.file:
+        path: "{{ brai_env_root }}/ci-uploads"
+        state: directory
+        owner: "{{ brai_deploy_user }}"
+        group: "{{ brai_deploy_user }}"
+        mode: "2775"
+      tags:
+        - brai-storage-maintenance
+        - targeted-infra-apply
+
+    - name: Provision deploy-owned staging operation lock
+      ansible.builtin.file:
+        path: "{{ brai_env_root }}/ci-uploads/.staging-operation.lock"
+        state: touch
+        owner: "{{ brai_deploy_user }}"
+        group: "{{ brai_deploy_user }}"
+        mode: "0664"
+        access_time: preserve
+        modification_time: preserve
+      tags:
+        - brai-storage-maintenance
+        - targeted-infra-apply
 
     - name: Ensure non-production deploy artifact ownership
       ansible.builtin.file:
@@ -695,6 +746,17 @@
         owner: "{{ brai_deploy_user }}"
         group: "{{ brai_deploy_user }}"
         mode: "2775"
+
+    - name: Ensure release directory exists for storage maintenance
+      ansible.builtin.file:
+        path: "{{ brai_repo }}/deploy/releases"
+        state: directory
+        owner: "{{ brai_deploy_user }}"
+        group: "{{ brai_deploy_user }}"
+        mode: "2775"
+      tags:
+        - brai-storage-maintenance
+        - targeted-infra-apply
 
     - name: Ensure deploy user owns production web and OTA assets
       ansible.builtin.file:
@@ -1018,6 +1080,106 @@
         group: root
         mode: "0755"
 
+    - name: Ensure Docker configuration directory exists
+      ansible.builtin.file:
+        path: /etc/docker
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+      tags:
+        - docker-log-rotation
+        - targeted-infra-apply
+
+    - name: Install bounded Docker json-file log defaults
+      ansible.builtin.copy:
+        dest: /etc/docker/daemon.json
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          {
+            "log-driver": "json-file",
+            "log-opts": {
+              "max-size": "50m",
+              "max-file": "3"
+            }
+          }
+        validate: "/usr/bin/dockerd --validate --config-file=%s"
+      tags:
+        - docker-log-rotation
+        - targeted-infra-apply
+
+    - name: Install Brai storage maintenance script
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../scripts/storage-maintenance.mjs"
+        dest: /srv/opt/brai-storage-maintenance.mjs
+        owner: root
+        group: root
+        mode: "0755"
+      tags:
+        - brai-storage-maintenance
+        - targeted-infra-apply
+
+    - name: Install managed Supavisor tenant bootstrap
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../supabase/pooler.exs"
+        dest: "{{ brai_supavisor_managed_config }}"
+        owner: root
+        group: root
+        mode: "0644"
+      tags:
+        - brai-supavisor-maintenance
+        - targeted-infra-apply
+
+    - name: Install Supavisor tenant URL tool
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../scripts/supavisor-tenants.mjs"
+        dest: "{{ brai_supavisor_tenant_tool }}"
+        owner: root
+        group: root
+        mode: "0755"
+      tags:
+        - brai-supavisor-maintenance
+        - targeted-infra-apply
+
+    - name: Install guarded Supabase maintenance command
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../scripts/supabase-maintenance.sh"
+        dest: "{{ brai_supabase_maintenance }}"
+        owner: root
+        group: root
+        mode: "0755"
+      tags:
+        - brai-supavisor-maintenance
+        - targeted-infra-apply
+
+    - name: Install Brai storage maintenance systemd units
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../systemd/{{ item }}"
+        dest: "/etc/systemd/system/{{ item }}"
+        owner: root
+        group: root
+        mode: "0644"
+      loop:
+        - brai-storage-maintenance.service
+        - brai-storage-maintenance.timer
+      notify: Reload systemd
+      tags:
+        - brai-storage-maintenance
+        - targeted-infra-apply
+
+    - name: Enable Brai storage maintenance timer
+      ansible.builtin.systemd_service:
+        name: brai-storage-maintenance.timer
+        enabled: true
+        state: started
+        daemon_reload: true
+      when: not ansible_check_mode
+      tags:
+        - brai-storage-maintenance
+        - targeted-infra-apply
+
     - name: Install Brai DB Telegram backup script
       ansible.builtin.copy:
         src: "{{ playbook_dir }}/../scripts/backup-postgres-to-telegram.sh"
@@ -1156,6 +1318,9 @@
           changed_when: false
           when: brai_caddy_validate_file.path is defined
       check_mode: false
+      tags:
+        - brai-caddy
+        - brai-auth-bootstrap
 
     - name: Check unmanaged Brai production Caddy routes before managed install
       ansible.builtin.command:
@@ -1207,6 +1372,9 @@
       changed_when: (brai_caddy_prune_check.stdout | from_json).changed
       check_mode: false
       when: ansible_check_mode
+      tags:
+        - brai-caddy
+        - brai-auth-bootstrap
 
     - name: Remove unmanaged Brai production Caddy routes before managed install
       ansible.builtin.command:
@@ -1260,6 +1428,9 @@
       notify:
         - Validate Caddy
         - Reload Caddy
+      tags:
+        - brai-caddy
+        - brai-auth-bootstrap
 
     - name: Install Brai Caddy routes
       ansible.builtin.blockinfile:
@@ -1270,6 +1441,9 @@
       notify:
         - Validate Caddy
         - Reload Caddy
+      tags:
+        - brai-caddy
+        - brai-auth-bootstrap
 
     - name: Install deploy user sudoers boundary
       ansible.builtin.template:
@@ -1280,7 +1454,11 @@
         mode: "0440"
         validate: "visudo -cf %s"
       tags:
+        - brai-caddy
         - brai-goal-agents
+        - brai-storage-maintenance
+        - brai-supavisor-maintenance
+        - targeted-infra-apply
 
   handlers:
     - name: Reload systemd
@@ -1303,11 +1481,13 @@
       ansible.builtin.command:
         cmd: "caddy validate --config {{ brai_caddyfile }}"
       changed_when: false
+      tags: [brai-caddy]
 
     - name: Reload Caddy
       ansible.builtin.systemd_service:
         name: caddy
         state: reloaded
+      tags: [brai-caddy]
 
     - name: Restart Brai Temporal worker
       ansible.builtin.systemd_service:
@@ -1319,3 +1499,4 @@
         name: "syncthing@{{ brai_syncthing_user }}.service"
         daemon_reload: true
         state: restarted
+      tags: [brai-vault]

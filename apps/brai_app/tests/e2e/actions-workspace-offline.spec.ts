@@ -1,8 +1,13 @@
 import { expect, test, type Locator, type Page, type TestInfo } from "@playwright/test";
+import { DEFAULT_APP_SETTINGS } from "@/shared/api/braiApi";
+import { emptyActivitiesState } from "@/shared/types/activities";
+import { emptyInboxState } from "@/shared/types/inbox";
+import { emptyGoal, emptyHistory, emptyTimerState } from "@/shared/types/timer";
 
 test("keeps an API-offline Goal in the Actions workspace after desktop and mobile reloads", async ({ page }, testInfo) => {
   await mockAuthenticatedEmptyWorkspace(page);
   await page.goto("/");
+  await page.locator("[data-startup-splash]").waitFor({ state: "detached" });
   await expect(page.getByRole("heading", { name: "Действия", exact: true })).toBeVisible();
   await expect(page.getByText("Новых действий нет", { exact: true })).toBeVisible();
 
@@ -31,17 +36,18 @@ test("keeps an API-offline Goal in the Actions workspace after desktop and mobil
 
 async function openWorkspaceNavigation(page: Page, testInfo: TestInfo): Promise<Locator> {
   if (testInfo.project.name === "mobile") {
-    await page.locator(".section-page-current").getByRole("button", { name: "Информация о действиях" }).click();
-    const navigation = page.locator(".mobile-context-sheet").getByRole("navigation", { name: "Списки действий" });
+    await page.getByRole("button", { name: "Открыть меню" }).click();
+    const navigation = page.locator(".mobile-profile-drawer").getByRole("navigation", { name: "Списки действий" });
     await expect(navigation).toBeVisible();
     return navigation;
   }
-  const navigation = page.locator(".section-page-current").getByRole("navigation", { name: "Списки действий" });
+  const navigation = page.locator(".contextual-rail").getByRole("navigation", { name: "Списки действий" });
   await expect(navigation).toBeVisible();
   return navigation;
 }
 
 async function mockAuthenticatedEmptyWorkspace(page: Page): Promise<void> {
+  const now = new Date("2026-07-13T00:00:00.000Z");
   await page.route("**/api/auth/session", (route) =>
     route.fulfill({
       json: {
@@ -54,14 +60,14 @@ async function mockAuthenticatedEmptyWorkspace(page: Page): Promise<void> {
       },
     }),
   );
-  await page.route("**/api/v1/activities", (route) =>
-    route.fulfill({
-      json: {
-        activities: [],
-        archived_activities: [],
-        server_revision: 1,
-        server_time_utc: "2026-07-13T00:00:00.000Z",
-      },
-    }),
-  );
+  for (const [path, json] of [
+    ["settings", DEFAULT_APP_SETTINGS],
+    ["timer/state", { ...emptyTimerState(now), server_revision: 1 }],
+    ["sessions", emptyHistory()],
+    ["goals/challenge", emptyGoal()],
+    ["activities", { ...emptyActivitiesState(now), server_revision: 1 }],
+    ["inbox", { ...emptyInboxState(now), server_revision: 1 }],
+  ] as const) {
+    await page.route(`**/api/v1/${path}`, (route) => route.fulfill({ json }));
+  }
 }

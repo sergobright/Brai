@@ -219,19 +219,48 @@ and deploy/preview artifact roots stay `2775` so future files inherit `brai-depl
 
 ### Supabase Runtime Maintenance
 
-Supabase lifecycle configuration lives outside Git on the VPS. The brai.one server runs
-self-hosted Supabase, so preview and Dev isolation use separate Postgres schemas with connection
-URLs carrying an explicit `search_path`:
+Supabase secrets and the upstream base Compose stay outside Git on the VPS. Brai-owned non-secret
+overlay/bootstrap and the maintenance entrypoint are repo-managed and installed by Ansible. The
+brai.one server runs self-hosted Supabase, so preview and Dev isolation uses both a separate
+Supavisor tenant and separate Postgres schemas with connection URLs carrying an explicit
+`search_path`:
 
 ```text
 /etc/brai/supabase-deploy.env
 SUPABASE_SELF_HOSTED=true
 SUPABASE_SELF_HOSTED_DATABASE_URL
+BRAI_SUPAVISOR_TENANT_ISOLATION=true
 ```
 
 Production runtime credentials live in `/etc/brai/brai-api.env`, including `BRAI_DATABASE_URL`.
 Preview and Dev runtime credentials live in `/srv/projects/brai-envs/<environment>/brai-api.env`
 and are deploy-writable so CI can update schema-scoped DSNs after Supabase schema creation.
+After `BRAI_SUPAVISOR_TENANT_ISOLATION=true` is enabled by the accepted maintenance rollout,
+production DSNs must use `brai-prod`; Dev and Preview DSNs must use `brai-nonprod`.
+Deployment rewrites only the Supavisor tenant suffix in the URL username and preserves the password,
+database, query parameters, and schema `search_path`. Deployment fails before service cutover when
+the target DSN has the wrong tenant.
+
+Do not run direct `docker compose --force-recreate` against the stateful Supabase stack. Install and
+use the exact maintenance boundary instead:
+
+Dry-run обязателен перед apply:
+
+```bash
+sudo /srv/opt/brai-supabase-maintenance.sh reconfigure-pooler
+sudo /srv/opt/brai-supabase-maintenance.sh --apply reconfigure-pooler
+```
+
+The command takes production, Dev, Preview A-E, staging, release, and preview-slot locks in canonical
+order; stops dependent API services; recreates only Supavisor; starts production first; and returns
+previously active non-production services one by one only after health/auth canaries. The wrapper
+must delete persistent metadata for legacy `brightos`, `brightos-prod`, and `brightos-nonprod`
+tenants, recreate only `brai-prod` and `brai-nonprod`, and verify that exact target set before any
+runtime DSN is switched or API client is restarted. Failed Preview slots remain stopped and are
+restored only by their normal deploy workflow. If a canary fails, leave the offending
+non-production service stopped, reset only Supavisor, and repeat the production canary. Never widen
+the recovery into a whole-stack or database recreation.
+
 Dev and Preview rebuilds copy current production data into their schema after migrations, excluding
 production Better Auth session, account, and verification rows. Those test env files set
 `BRAI_TEST_EMAIL_LOGIN=true`. Preview/Dev web and Android still start on the login screen and

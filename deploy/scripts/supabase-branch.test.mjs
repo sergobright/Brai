@@ -6,6 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import {
   assertSameDatabaseTarget,
+  constraintTextValues,
   copyTargetColumns,
   copySourceQuery,
   inspectOwnedSequences,
@@ -154,6 +155,9 @@ test("production copy reseeds copied tables before repair migrations and before 
   const copyFunction = script.slice(copyStart, inspectStart);
   const begin = 'client.query("BEGIN ISOLATION LEVEL REPEATABLE READ")';
   const searchPath = "SET LOCAL search_path TO";
+  const dropPostSeedIndex = "DROP INDEX IF EXISTS";
+  const legacyImportFlag = "set_config('brai.allow_legacy_operation_import', 'on', true)";
+  const constraintsImmediate = 'client.query("SET CONSTRAINTS ALL IMMEDIATE")';
   const reapply = "for (const { sql } of postSeedMigrations) await client.query(sql)";
   const flushDeferredTriggers = 'client.query("SET CONSTRAINTS ALL IMMEDIATE")';
   const reseed = "await reseedOwnedSequences(client, { schema: targetSchema, tables: copyTables })";
@@ -163,15 +167,20 @@ test("production copy reseeds copied tables before repair migrations and before 
   assert.match(copyFunction, /const client = await pool\.connect\(\)/);
   assert.ok(copyFunction.indexOf(begin) > 0);
   assert.ok(copyFunction.indexOf(searchPath) > 0);
+  assert.ok(copyFunction.indexOf(dropPostSeedIndex) > copyFunction.indexOf(searchPath));
   assert.ok(copyFunction.indexOf(reapply) > 0);
   assert.ok(firstReseed > 0);
   assert.ok(secondReseed > firstReseed);
   assert.ok(copyFunction.indexOf(begin) < copyFunction.indexOf(searchPath));
+  assert.ok(copyFunction.indexOf(legacyImportFlag) > copyFunction.indexOf(searchPath));
+  assert.ok(copyFunction.indexOf(legacyImportFlag) < copyFunction.indexOf("TRUNCATE TABLE"));
   assert.match(copyFunction, /TRUNCATE TABLE .* CONTINUE IDENTITY CASCADE/);
   assert.doesNotMatch(copyFunction, /RESTART IDENTITY/);
-  assert.ok(copyFunction.indexOf(searchPath) < copyFunction.indexOf("TRUNCATE TABLE"));
+  assert.ok(copyFunction.indexOf(dropPostSeedIndex) < copyFunction.indexOf("TRUNCATE TABLE"));
   assert.ok(copyFunction.indexOf(reapply) > copyFunction.indexOf("OVERRIDING SYSTEM VALUE"));
   assert.ok(firstReseed > copyFunction.indexOf("OVERRIDING SYSTEM VALUE"));
+  assert.ok(copyFunction.indexOf(constraintsImmediate) > firstReseed);
+  assert.ok(copyFunction.indexOf(constraintsImmediate) < copyFunction.indexOf(reapply));
   assert.ok(firstReseed < copyFunction.indexOf(reapply));
   assert.ok(copyFunction.indexOf(flushDeferredTriggers) > firstReseed);
   assert.ok(copyFunction.indexOf(flushDeferredTriggers) < copyFunction.indexOf(reapply));
@@ -191,6 +200,43 @@ test("production copy keeps ai_logs only for agents present in the target schema
   assert.equal(
     query,
     'SELECT source_row."id", source_row."agent_id", source_row."json_data" FROM "prod"."ai_logs" AS source_row WHERE EXISTS ( SELECT 1 FROM "preview"."agents" AS target_agent WHERE target_agent.id = source_row.agent_id )'
+  );
+});
+
+test("production copy skips rows that violate target not-null columns", () => {
+  const query = copySourceQuery({
+    sourceSchema: "prod",
+    targetSchema: "preview",
+    table: "workflow_executions",
+    columns: ["id", "role_contract_id", "status"],
+    requiredColumns: ["id", "role_contract_id"]
+  }).replace(/\s+/g, " ").trim();
+
+  assert.equal(
+    query,
+    'SELECT source_row."id", source_row."role_contract_id", source_row."status" FROM "prod"."workflow_executions" AS source_row WHERE source_row."id" IS NOT NULL AND source_row."role_contract_id" IS NOT NULL'
+  );
+});
+
+test("production copy keeps only event domains accepted by the target preview schema", () => {
+  const query = copySourceQuery({
+    sourceSchema: "prod",
+    targetSchema: "preview",
+    table: "events",
+    columns: ["id", "event_domain", "event_type"],
+    allowedValues: { event_domain: ["timer", "activity", "inbox", "system"] }
+  }).replace(/\s+/g, " ").trim();
+
+  assert.equal(
+    query,
+    'SELECT source_row."id", source_row."event_domain", source_row."event_type" FROM "prod"."events" AS source_row WHERE source_row."event_domain" IN (\'timer\', \'activity\', \'inbox\', \'system\')'
+  );
+});
+
+test("target event domain values are read from Postgres check definitions", () => {
+  assert.deepEqual(
+    constraintTextValues("CHECK ((event_domain = ANY (ARRAY['timer'::text, 'activity'::text, 'user''s'::text])))"),
+    ["timer", "activity", "user's"]
   );
 });
 
@@ -568,6 +614,36 @@ test("dev env setup enables explicit test email login", () => {
   assert.match(contents, /^BRAI_RELEASE_PASSWORD='shared-release-password'$/m);
   assert.doesNotMatch(contents, /BRAI_TEST_AUTO_LOGIN/);
   assert.equal(fs.statSync(envFile).mode & 0o777, 0o660);
+});
+
+test("self-hosted preview generator switches only to the non-production tenant after cutover", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "brai-supabase-tenant-env-"));
+  const envFile = path.join(dir, "brai-api.env");
+  const result = spawnSync("node", [
+    path.join(repoRoot, "deploy/scripts/supabase-branch.mjs"),
+    "dev-env",
+    "--runtime-env",
+    envFile,
+  ], {
+    cwd: repoRoot,
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      BRAI_SUPABASE_DRY_RUN: "true",
+      BRAI_SUPAVISOR_TENANT_ISOLATION: "true",
+      BRAI_RELEASE_PASSWORD: "shared-release-password",
+      SUPABASE_SELF_HOSTED: "true",
+      SUPABASE_SELF_HOSTED_DATABASE_URL: "postgres://postgres.brightos:p%40ss@127.0.0.1:55432/postgres?sslmode=disable",
+    },
+  });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+
+  const databaseUrl = fs.readFileSync(envFile, "utf8").match(/^BRAI_DATABASE_URL='([^']+)'$/m)?.[1];
+  const parsed = new URL(databaseUrl);
+  assert.equal(parsed.username, "postgres.brai-nonprod");
+  assert.equal(parsed.password, "p%40ss");
+  assert.equal(parsed.searchParams.get("sslmode"), "disable");
+  assert.equal(parsed.searchParams.get("options"), "-c search_path=brai_dev,public");
 });
 
 test("preview environment preserves its user-provider encryption key", () => {

@@ -96,5 +96,5 @@ done
     printf 'form = "document=@%s;filename=brai-postgres-prod-%s.dump.enc"\n' "$ENCRYPTED_FILE" "$TIMESTAMP"
   } | curl --fail --silent --show-error --config - >/dev/null
 
-  send_status done "Encrypted Postgres backup sent to Telegram"
+  send_status "done" "Encrypted Postgres backup sent to Telegram"
 ) 9>"$LOCK_FILE"

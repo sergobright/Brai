@@ -96,7 +96,7 @@ describe("Actions workspace accessibility", () => {
         onReorder={vi.fn()}
         onStartFocus={vi.fn()}
         onStopFocus={vi.fn()}
-        renderControl={() => <GoalMembershipPicker item={item} goals={[goal()]} onAdd={vi.fn()} onRemove={vi.fn()} />}
+        renderControl={() => <GoalMembershipPicker item={item} goals={[goal()]} onAdd={vi.fn()} onCreateGoal={vi.fn()} />}
       />,
     );
 
@@ -108,14 +108,14 @@ describe("Actions workspace accessibility", () => {
     expect(row.parentElement?.querySelector(":scope > .action-membership-control")).toBeNull();
     expect(membership.compareDocumentPosition(remove) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(remove.compareDocumentPosition(focus) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Добавить в список: Первый шаг" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Добавить в цель: Первый шаг" })).toBeInTheDocument();
   });
 
   it("applies 44px mobile touch targets without changing desktop control sizes", () => {
     const activities = emptyActivitiesState();
     activities.goals = [goal()];
     const workspace = buildActionsWorkspace({ activities, inbox: emptyInboxState(), relations: emptyRelationsState(), filter: "all" });
-    const { unmount } = render(<ActionsWorkspaceNavigation workspace={workspace} onSelect={vi.fn()} onCreateGoal={vi.fn()} onRestoreGoal={vi.fn()} />);
+    const { unmount } = render(<ActionsWorkspaceNavigation workspace={workspace} onSelect={vi.fn()} onCreateGoal={vi.fn()} />);
 
     expect(screen.getByRole("navigation", { name: "Списки действий" })).toHaveClass(
       "max-[860px]:[&_button]:min-h-11",

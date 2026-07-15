@@ -58,6 +58,7 @@ http://app.brightos.world {
   redir https://app.brightos.world{uri} permanent
 }
 
+
 app.brightos.world {
   root * /srv/projects/brai/deploy/web
   file_server

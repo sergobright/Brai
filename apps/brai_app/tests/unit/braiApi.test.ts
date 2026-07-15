@@ -161,6 +161,22 @@ describe("BraiApi", () => {
     });
   });
 
+  it("preserves the auth backend unavailable status and code", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ error: "auth_backend_unavailable" }), {
+        status: 503,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+
+    await expect(new BraiApi("https://api.example.test").session()).rejects.toMatchObject({
+      name: "BraiApiError",
+      message: "brai_api_503",
+      code: "auth_backend_unavailable",
+      status: 503,
+    });
+  });
+
   it("sends explicit preview email login to the test auth endpoint", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(JSON.stringify({ authenticated: false, user: null }), {

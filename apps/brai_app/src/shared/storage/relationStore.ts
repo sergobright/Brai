@@ -1,5 +1,5 @@
 import { cleanTitle, normalizeDescription } from "@/shared/activities/text";
-import type { PendingActivityEvent } from "@/shared/types/activities";
+import type { ActivityType, PendingActivityEvent } from "@/shared/types/activities";
 import type {
   PendingRelationEvent,
   RelationEventPayload,
@@ -70,10 +70,45 @@ export async function enqueueActionWithGoalRelation(params: {
   relationBaseServerRevision: number;
   expectedUserId?: string;
 }): Promise<{ activityEvent: PendingActivityEvent; relationEvent: PendingRelationEvent }> {
+  return enqueueActivityWithPartOfRelation({
+    ...params,
+    activityType: "action",
+    relatedItemsId: params.goalItemsId,
+    newActivityEndpoint: "source",
+  });
+}
+
+/** Atomically persists a new Goal and links the current item to it. */
+export async function enqueueGoalForItemRelation(params: {
+  title: string;
+  sourceItemsId: string;
+  activityBaseServerRevision: number;
+  relationBaseServerRevision: number;
+  expectedUserId?: string;
+}): Promise<{ activityEvent: PendingActivityEvent; relationEvent: PendingRelationEvent }> {
+  return enqueueActivityWithPartOfRelation({
+    ...params,
+    activityType: "goal",
+    relatedItemsId: params.sourceItemsId,
+    newActivityEndpoint: "target",
+  });
+}
+
+async function enqueueActivityWithPartOfRelation(params: {
+  title: string;
+  descriptionMd?: string;
+  activityType: Extract<ActivityType, "action" | "goal">;
+  relatedItemsId: string;
+  newActivityEndpoint: "source" | "target";
+  position?: number;
+  activityBaseServerRevision: number;
+  relationBaseServerRevision: number;
+  expectedUserId?: string;
+}): Promise<{ activityEvent: PendingActivityEvent; relationEvent: PendingRelationEvent }> {
   const title = cleanTitle(params.title);
-  const goalItemsId = params.goalItemsId.trim();
+  const relatedItemsId = params.relatedItemsId.trim();
   if (!title) throw new Error("activity_title_required");
-  if (!goalItemsId) throw new Error("goal_items_id_required");
+  if (!relatedItemsId) throw new Error("related_items_id_required");
   const db = clientDb();
   return db.transaction("rw", db.meta, db.action_outbox_events, db.relation_outbox_events, async () => {
     if (params.expectedUserId !== undefined) await assertClientUserInCurrentTransaction(params.expectedUserId);
@@ -92,7 +127,7 @@ export async function enqueueActionWithGoalRelation(params: {
       payload: {
         title,
         description_md: normalizeDescription(params.descriptionMd),
-        activity_type_id: "action",
+        activity_type_id: params.activityType,
       },
       baseServerRevision: params.activityBaseServerRevision,
       payloadVersion: 1,
@@ -107,8 +142,8 @@ export async function enqueueActionWithGoalRelation(params: {
       relationId: randomId(),
       payload: {
         relation_type_id: "part_of",
-        source_items_id: actionId,
-        target_items_id: goalItemsId,
+        source_items_id: params.newActivityEndpoint === "source" ? actionId : relatedItemsId,
+        target_items_id: params.newActivityEndpoint === "target" ? actionId : relatedItemsId,
         position: normalizedPosition(params.position),
         dependency_event_ids: [activityEvent.eventId],
       },
@@ -185,9 +220,17 @@ export async function readyRelationEvents(expectedUserId?: string): Promise<Pend
     const dependencies = event.payload.dependency_event_ids ?? [];
     if (dependencies.some((eventId) => pendingActivityIds.has(eventId))) return false;
     if (dependencies.length === 0 || event.type !== "create") return true;
-    const source = event.payload.source_items_id ? canonicalById.get(event.payload.source_items_id) : null;
-    return source?.item_roles_id != null;
+    const activityId = dependentActivityId(event) ?? event.payload.source_items_id;
+    return activityId ? canonicalById.get(activityId)?.item_roles_id != null : false;
   });
+}
+
+function dependentActivityId(event: PendingRelationEvent): string | null {
+  const prefix = `${event.deviceId}:activity:`;
+  const dependency = (event.payload.dependency_event_ids ?? []).find((eventId) => eventId.startsWith(prefix));
+  if (!dependency) return null;
+  const separator = dependency.lastIndexOf(":");
+  return separator > prefix.length ? dependency.slice(0, separator) : null;
 }
 
 export async function markRelationAttempt(events: PendingRelationEvent[], expectedUserId?: string): Promise<void> {

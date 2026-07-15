@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ActionsWorkspaceNavigation } from "@/features/app/sections/actions/ActionsWorkspaceNavigation";
+import { ActionsSection } from "@/features/app/sections/actions/ActionsSection";
 import { GoalWorkspaceHeader } from "@/features/app/sections/actions/GoalWorkspaceHeader";
 import { OperationDetailPanel, OperationWorkspaceRow } from "@/features/app/sections/actions/OperationWorkspaceItem";
 import { WorkspaceWorkList } from "@/features/app/sections/actions/WorkspaceWorkList";
@@ -21,12 +22,20 @@ describe("Actions Goal workspace UI", () => {
 
   it("renders system views in the required order and creates a Goal", () => {
     const activities = emptyActivitiesState();
-    activities.goals = [activity("goal-1", "Луна")];
+    const completed = activity("goal-2", "Готовая цель");
+    completed.status = "Done";
+    completed.completed_at_utc = "2026-07-13T01:00:00.000Z";
+    const archived = activity("goal-3", "Архивная цель");
+    archived.deleted_at_utc = "2026-07-13T02:00:00.000Z";
+    activities.goals = [activity("goal-1", "Луна"), completed];
+    activities.archived_goals = [archived];
     const workspace = buildActionsWorkspace({ activities, inbox: emptyInboxState(), relations: emptyRelationsState(), filter: "all" });
     const onCreateGoal = vi.fn(async () => undefined);
-    const { container } = render(<ActionsWorkspaceNavigation workspace={workspace} onSelect={vi.fn()} onCreateGoal={onCreateGoal} onRestoreGoal={vi.fn()} />);
+    const { container } = render(<ActionsWorkspaceNavigation workspace={workspace} onSelect={vi.fn()} onCreateGoal={onCreateGoal} />);
 
     expect([...container.querySelectorAll("nav > div:first-child button")].map((button) => button.textContent?.replace(/\d+$/, ""))).toEqual(["Все", "Действия", "Операции", "Без цели"]);
+    expect(screen.queryByText("Архив целей")).not.toBeInTheDocument();
+    expect(container.querySelector("nav > section")?.lastElementChild).toHaveTextContent("Завершённые");
     fireEvent.click(screen.getByRole("button", { name: "Создать цель" }));
     fireEvent.change(screen.getByRole("textbox", { name: "Название новой цели" }), { target: { value: "  База на Луне  " } });
     fireEvent.click(screen.getByRole("button", { name: "Создать" }));
@@ -101,7 +110,7 @@ describe("Actions Goal workspace UI", () => {
 
     expect(screen.getByText("Старая операция")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Луна" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /Добавить в список/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Добавить в цель/ })).not.toBeInTheDocument();
 
     rerender(<WorkspaceWorkList {...common} filter="goal:goal-1" />);
     expect(screen.queryByRole("button", { name: /Убрать из цели/ })).not.toBeInTheDocument();
@@ -159,6 +168,54 @@ describe("Actions Goal workspace UI", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Предложить план" }));
     expect(await screen.findByText("План поставлен в очередь. Предложение появится здесь после обработки.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "План предложен" })).toBeDisabled();
+  });
+
+  it("renders Goal and item reviews once beside their owners", () => {
+    const activities = emptyActivitiesState();
+    activities.actions = [activity("action-1", "action-1")];
+    activities.goals = [activity("goal-1", "Луна")];
+    const relations = emptyRelationsState();
+    relations.relations = [{ ...relationItem(), source_items_id: "action-1", target_items_id: "goal-1" }];
+    const workspace = buildActionsWorkspace({ activities, inbox: emptyInboxState(), relations, filter: "goal:goal-1" });
+    const contextReviews = emptyContextDecisionsState();
+    contextReviews.decisions = [
+      planDecision(),
+      { ...planDecision(), id: "decision-relation", decision_kind: "relation_add", subject_items_id: "action-1", proposal: {} },
+      discoveryDecision(),
+    ];
+
+    render(
+      <ActionsSection
+        state={activities}
+        localSnapshotReady
+        autoFocusAddInput={false}
+        activeActivityId={null}
+        activeActivityElapsedSeconds={0}
+        onCreate={vi.fn()}
+        onUpdateTitle={vi.fn()}
+        onAutosaveDetails={vi.fn()}
+        onSetStatus={vi.fn()}
+        onDelete={vi.fn()}
+        onReorder={vi.fn()}
+        mobileCreateDraft={{ title: "", descriptionMd: "" }}
+        onMobileCreateDraftChange={vi.fn()}
+        dockOverflowOpen={false}
+        onStartActionFocus={vi.fn()}
+        onStopActionFocus={vi.fn()}
+        onMobileOverlayChange={vi.fn()}
+        workspace={workspace}
+        contextReviews={contextReviews}
+      />,
+    );
+
+    const goalHeader = screen.getByRole("heading", { name: "Луна" }).closest("section");
+    expect(goalHeader).toHaveTextContent("План цели");
+    expect(screen.getByRole("button", { name: "План предложен" })).toBeDisabled();
+    const actionRow = screen.getByRole("textbox", { name: "Название действия: action-1" }).closest("[data-action-row]")?.parentElement;
+    expect(actionRow).toHaveTextContent("Добавить пункт в предложенную цель.");
+    expect(screen.getAllByText("План цели")).toHaveLength(1);
+    expect(screen.queryByText("Три действия ведут к общему результату")).not.toBeInTheDocument();
   });
 
   it("does not offer a new plan for a completed Goal", () => {
@@ -186,7 +243,10 @@ describe("Actions Goal workspace UI", () => {
     state.decisions = [planDecision()];
     render(<ContextReviewPanel state={state} onResolve={onResolve} />);
 
-    fireEvent.change(screen.getByRole("textbox", { name: "Шаг 1" }), { target: { value: "Исправленный шаг" } });
+    const firstStep = screen.getByRole("textbox", { name: "Шаг 1" });
+    expect(firstStep).toHaveAttribute("name", "goal-plan-step-1-title");
+    expect(screen.getByRole("textbox", { name: "Описание шага 1" })).toHaveAttribute("name", "goal-plan-step-1-description");
+    fireEvent.change(firstStep, { target: { value: "Исправленный шаг" } });
     fireEvent.click(screen.getByRole("button", { name: "Принять план" }));
     expect(onResolve).toHaveBeenCalledWith(state.decisions[0], "accept", expect.objectContaining({
       steps: expect.arrayContaining([expect.objectContaining({ title: "Исправленный шаг", position: 0 })]),
@@ -199,7 +259,10 @@ describe("Actions Goal workspace UI", () => {
     state.decisions = [discoveryDecision()];
     render(<ContextReviewPanel state={state} onResolve={onResolve} />);
 
-    fireEvent.change(screen.getByRole("textbox", { name: "Название предложенной цели" }), { target: { value: "Лунная база" } });
+    const title = screen.getByRole("textbox", { name: "Название предложенной цели" });
+    expect(title).toHaveAttribute("name", "goal-discovery-title");
+    expect(screen.getByRole("textbox", { name: "Описание предложенной цели" })).toHaveAttribute("name", "goal-discovery-description");
+    fireEvent.change(title, { target: { value: "Лунная база" } });
     fireEvent.click(screen.getByRole("button", { name: "Удалить пункт 3" }));
     fireEvent.click(screen.getByRole("button", { name: "Создать цель" }));
 

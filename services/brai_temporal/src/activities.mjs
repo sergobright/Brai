@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { cancellationSignal } from "@temporalio/activity";
+import { cancellationSignal, heartbeat } from "@temporalio/activity";
 import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -299,29 +299,124 @@ function runExistingScript(script, args, { cwd, env }) {
   return runCommand(path.join(cwd, script), args, { cwd, env });
 }
 
-function runCommand(command, args, { cwd = ROOT, env = process.env, allowFailure = false } = {}) {
+export function runCommand(command, args, {
+  cwd = ROOT,
+  env = process.env,
+  allowFailure = false,
+  signal = activityCancellationSignal(),
+  killGraceMs = 5000,
+  heartbeatFn = activityHeartbeat,
+  heartbeatIntervalMs = 1000
+} = {}) {
   return new Promise((resolve, reject) => {
-    const signal = activityCancellationSignal();
+    if (signal?.aborted) {
+      reject(signal.reason ?? new DOMException("Activity cancelled", "AbortError"));
+      return;
+    }
     const child = spawn(command, args, {
       cwd,
       env,
-      ...(signal ? { signal } : {}),
+      detached: process.platform !== "win32",
       stdio: ["ignore", "pipe", "pipe"]
     });
     let stdout = "";
     let stderr = "";
+    let closed = false;
+    let aborting = false;
+    let killTimer;
+    let killPollTimer;
+    let heartbeatTimer;
+    let settled = false;
+    const abortReason = () => signal?.reason ?? new DOMException("Activity cancelled", "AbortError");
+    const killProcessGroup = (processSignal) => {
+      try {
+        if (process.platform === "win32") child.kill(processSignal);
+        else process.kill(-child.pid, processSignal);
+      } catch (error) {
+        if (error?.code !== "ESRCH") throw error;
+      }
+    };
+    const processGroupAlive = () => {
+      try {
+        if (process.platform === "win32") return child.exitCode == null;
+        process.kill(-child.pid, 0);
+        return true;
+      } catch (error) {
+        if (error?.code === "ESRCH") return false;
+        throw error;
+      }
+    };
+    const finish = (callback, value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(killTimer);
+      clearTimeout(killPollTimer);
+      clearInterval(heartbeatTimer);
+      signal?.removeEventListener("abort", onAbort);
+      callback(value);
+    };
+    const finishAbortIfDone = () => {
+      if (closed && !processGroupAlive()) {
+        finish(reject, abortReason());
+        return true;
+      }
+      return false;
+    };
+    const onAbort = () => {
+      if (aborting || settled) return;
+      aborting = true;
+      try {
+        killProcessGroup("SIGTERM");
+      } catch (error) {
+        finish(reject, error);
+        return;
+      }
+      killTimer = setTimeout(() => {
+        try {
+          killProcessGroup("SIGKILL");
+          const deadline = Date.now() + 1000;
+          const waitForGroupExit = () => {
+            try {
+              if (finishAbortIfDone()) return;
+              if (Date.now() >= deadline) {
+                finish(reject, new Error(`Process group for ${command} did not exit after SIGKILL`));
+                return;
+              }
+              killPollTimer = setTimeout(waitForGroupExit, 10);
+            } catch (error) {
+              finish(reject, error);
+            }
+          };
+          waitForGroupExit();
+        } catch (error) {
+          finish(reject, error);
+        }
+      }, Number.isFinite(killGraceMs) && killGraceMs >= 0 ? killGraceMs : 5000);
+    };
     child.stdout.on("data", (chunk) => {
       stdout += chunk;
     });
     child.stderr.on("data", (chunk) => {
       stderr += chunk;
     });
-    child.on("error", reject);
+    child.on("error", (error) => finish(reject, error));
     child.on("close", (code) => {
+      closed = true;
+      if (aborting) {
+        finishAbortIfDone();
+        return;
+      }
       const result = { code, stdout, stderr };
-      if (code === 0 || allowFailure) resolve(result);
-      else reject(Object.assign(new Error(commandFailureMessage(command, code, stdout, stderr)), result));
+      if (code === 0 || allowFailure) finish(resolve, result);
+      else finish(reject, Object.assign(new Error(commandFailureMessage(command, code, stdout, stderr)), result));
     });
+    signal?.addEventListener("abort", onAbort, { once: true });
+    if (signal?.aborted) onAbort();
+    if (heartbeatFn() !== false) {
+      heartbeatTimer = setInterval(heartbeatFn, Number.isFinite(heartbeatIntervalMs) && heartbeatIntervalMs > 0
+        ? heartbeatIntervalMs
+        : 1000);
+    }
   });
 }
 
@@ -330,6 +425,15 @@ function activityCancellationSignal() {
     return cancellationSignal();
   } catch {
     return null;
+  }
+}
+
+function activityHeartbeat() {
+  try {
+    heartbeat();
+    return true;
+  } catch {
+    return false;
   }
 }
 

@@ -3,6 +3,11 @@ brai_env_root: /srv/projects/brai-envs
 brai_node_root: /srv/opt/node-v22.16.0
 brai_node_bin: /srv/opt/node-v22.16.0/bin/node
 brai_caddyfile: /etc/caddy/Caddyfile
+brai_auth_root: /srv/opt/brai-auth
+brai_auth_compose: "{{ brai_auth_root }}/compose.yml"
+brai_auth_runtime_helper: /srv/opt/brai-auth-runtime.sh
+brai_auth_caddy_root: /etc/caddy/brai-auth
+brai_auth_caddy_lock: "{{ brai_auth_root }}/caddy.lock"
 brai_public_site_domain: brai.one
 brai_public_site_legacy_domains:
   - brightos.world
@@ -47,6 +52,9 @@ brai_api_domain: api.brai.one
 brai_api_legacy_domains:
   - api.brightos.world
 brai_supabase_deploy_env_source: /etc/brai/supabase-deploy.env
+brai_supavisor_managed_config: /srv/opt/brai-supavisor-pooler.exs
+brai_supavisor_tenant_tool: /srv/opt/brai-supavisor-tenants.mjs
+brai_supabase_maintenance: /srv/opt/brai-supabase-maintenance.sh
 brai_temporal_worker_env_source: /etc/brai/brai-temporal-worker.env
 brai_temporal_ui_domain: temporal.brai.one
 brai_temporal_ui_legacy_domains:
@@ -93,6 +101,8 @@ brai_envs:
     path: prod
     api_port: 3020
     admin_port: 3040
+    auth_port: 3050
+    auth_compose_project: brai
     service: brai-api.service
     admin_service: brai-admin.service
     goal_agent_service_suffix: ""
@@ -104,6 +114,8 @@ brai_envs:
     path: dev
     api_port: 3030
     admin_port: 3041
+    auth_port: 3051
+    auth_compose_project: dev-brai
     service: brai-api-dev.service
     admin_service: brai-admin-dev.service
     goal_agent_service_suffix: "-dev"
@@ -115,6 +127,8 @@ brai_envs:
     path: preview-a
     api_port: 3031
     admin_port: 3042
+    auth_port: 3052
+    auth_compose_project: preview-a-brai
     service: brai-api-preview-a.service
     admin_service: brai-admin-preview-a.service
     goal_agent_service_suffix: "-preview-a"
@@ -126,6 +140,8 @@ brai_envs:
     path: preview-b
     api_port: 3032
     admin_port: 3043
+    auth_port: 3053
+    auth_compose_project: preview-b-brai
     service: brai-api-preview-b.service
     admin_service: brai-admin-preview-b.service
     goal_agent_service_suffix: "-preview-b"
@@ -137,6 +153,8 @@ brai_envs:
     path: preview-c
     api_port: 3033
     admin_port: 3044
+    auth_port: 3054
+    auth_compose_project: preview-c-brai
     service: brai-api-preview-c.service
     admin_service: brai-admin-preview-c.service
     goal_agent_service_suffix: "-preview-c"
@@ -148,6 +166,8 @@ brai_envs:
     path: preview-d
     api_port: 3034
     admin_port: 3045
+    auth_port: 3055
+    auth_compose_project: preview-d-brai
     service: brai-api-preview-d.service
     admin_service: brai-admin-preview-d.service
     goal_agent_service_suffix: "-preview-d"
@@ -159,6 +179,8 @@ brai_envs:
     path: preview-e
     api_port: 3035
     admin_port: 3046
+    auth_port: 3056
+    auth_compose_project: preview-e-brai
     service: brai-api-preview-e.service
     admin_service: brai-admin-preview-e.service
     goal_agent_service_suffix: "-preview-e"

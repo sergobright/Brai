@@ -8,27 +8,21 @@ NODE_BIN="${NODE_BIN:-node}"
 ENVS_ROOT="${BRAI_ENVS_ROOT:-/srv/projects/brai-envs}"
 BRANCH="${BRAI_BRANCH:-$(git -C "$ROOT" rev-parse --abbrev-ref HEAD)}"
 COMMIT="${BRAI_COMMIT:-$(git -C "$ROOT" rev-parse HEAD)}"
-RUN_ID="${GITHUB_RUN_NUMBER:-$(date -u +%Y%m%d%H%M%S)}"
 SLOT=""
 
 if [[ "$BRANCH" == codex/* ]]; then
   if [[ -n "${BRAI_PREVIEW_SLOT:-}" ]]; then
     SLOT="$BRAI_PREVIEW_SLOT"
-    ALLOCATED_NEW="${BRAI_PREVIEW_ALLOCATED_NEW:-false}"
   else
     ALLOCATION_JSON="$("$SCRIPT_DIR/preview-slots.sh" allocate "$BRANCH" "$COMMIT")"
     SLOT="$(printf '%s' "$ALLOCATION_JSON" | "$NODE_BIN" -e 'let raw=""; process.stdin.on("data", c => raw += c); process.stdin.on("end", () => console.log(JSON.parse(raw).slot));')"
-    ALLOCATED_NEW="$(printf '%s' "$ALLOCATION_JSON" | "$NODE_BIN" -e 'let raw=""; process.stdin.on("data", c => raw += c); process.stdin.on("end", () => console.log(JSON.parse(raw).allocatedNew ? "true" : "false"));')"
   fi
   export BRAI_PREVIEW_SLOT="$SLOT"
   trap '"$SCRIPT_DIR/preview-slots.sh" failed "$BRANCH" "$COMMIT" >/dev/null || true' ERR
-else
-  ALLOCATED_NEW="false"
 fi
 
 mapfile -t DEPLOY_META < <("$NODE_BIN" "$SCRIPT_DIR/resolve-deploy-env.mjs" "$BRANCH")
 ENVIRONMENT="${DEPLOY_META[0]}"
-DISPLAY_LABEL="${DEPLOY_META[1]}"
 DOMAIN="${DEPLOY_META[2]}"
 ENV_PATH="${DEPLOY_META[3]}"
 SERVICE_NAME="${DEPLOY_META[4]}"
@@ -73,8 +67,7 @@ wait_for_preview_api() {
   [[ "$ENVIRONMENT" == preview-* || "$ENVIRONMENT" == "dev" ]] || return 0
   [[ -n "$API_PORT" ]] || return 0
   local url="http://127.0.0.1:$API_PORT/health"
-  local attempt
-  for attempt in {1..20}; do
+  for _ in {1..20}; do
     if "$NODE_BIN" -e 'fetch(process.argv[1]).then((res) => process.exit(res.ok ? 0 : 1)).catch(() => process.exit(1));' "$url"; then
       return 0
     fi
@@ -88,8 +81,7 @@ wait_for_preview_api() {
 wait_for_admin() {
   [[ -n "$ADMIN_PORT" ]] || return 0
   local url="http://127.0.0.1:$ADMIN_PORT/admin"
-  local attempt
-  for attempt in {1..20}; do
+  for _ in {1..20}; do
     if "$NODE_BIN" -e 'fetch(process.argv[1]).then((res) => process.exit(res.ok ? 0 : 1)).catch(() => process.exit(1));' "$url"; then
       return 0
     fi
@@ -174,11 +166,13 @@ export NEXT_PUBLIC_BRAI_ANDROID_API="$ANDROID_API"
 RELEASE_TARGET="${BRAI_RELEASE_TARGET:-$ROOT/deploy/releases}"
 
 if [[ "$ENVIRONMENT" == preview-* && "$BRANCH" == codex/* && "${BRAI_NATIVE_APK_CHANGE:-false}" != "true" ]]; then
-  export BRAI_TARGET_APK_VERSION="$("$NODE_BIN" "$SCRIPT_DIR/resolve-required-apk-version.mjs" prod apkVersion)"
+  BRAI_TARGET_APK_VERSION="$("$NODE_BIN" "$SCRIPT_DIR/resolve-required-apk-version.mjs" prod apkVersion)"
+  export BRAI_TARGET_APK_VERSION
   export BRAI_TARGET_APK_RELEASE_KEY="${SLOT,,}"
   export BRAI_TARGET_APK_BUILD_KIND="stable"
   export BRAI_TARGET_APK_PREVIEW_ITERATION="0"
-  export BRAI_TARGET_APK_VERSION_CODE="$("$NODE_BIN" "$SCRIPT_DIR/resolve-required-apk-version.mjs" prod versionCode)"
+  BRAI_TARGET_APK_VERSION_CODE="$("$NODE_BIN" "$SCRIPT_DIR/resolve-required-apk-version.mjs" prod versionCode)"
+  export BRAI_TARGET_APK_VERSION_CODE
   "$NODE_BIN" -e '
 const fs = require("node:fs");
 const path = require("node:path");
@@ -225,7 +219,10 @@ echo "Building Brai Admin..."
 
 if [[ "$ENVIRONMENT" == "prod" ]]; then
   if [[ -f "$RELEASE_TARGET/releases.json" ]]; then
+    exec 6<"$RELEASE_TARGET"
+    flock 6
     BRAI_RELEASE_TARGET="$RELEASE_TARGET" "$NODE_BIN" "$SCRIPT_DIR/update-release-index.mjs" --render-only
+    exec 6>&-
   fi
 fi
 

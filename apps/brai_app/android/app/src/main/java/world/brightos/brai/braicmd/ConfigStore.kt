@@ -42,7 +42,6 @@ class ConfigStore internal constructor(
     private val prefs = appContext.getSharedPreferences(AppConstants.PREFS, Context.MODE_PRIVATE)
 
     init {
-        migrateLegacyPreferences()
         if (prefs.contains(AppConstants.KEY_ONBOARDING_QUEUE_PAUSED)) {
             prefs.edit().remove(AppConstants.KEY_ONBOARDING_QUEUE_PAUSED).apply()
         }
@@ -322,24 +321,6 @@ class ConfigStore internal constructor(
 
     private fun setContextActionEnabled(key: String, value: Boolean) {
         prefs.edit().putBoolean(key, value).apply()
-    }
-
-    private fun migrateLegacyPreferences() {
-        if (prefs.all.isNotEmpty()) return
-        val legacy = appContext.getSharedPreferences(AppConstants.LEGACY_PREFS, Context.MODE_PRIVATE)
-        if (legacy.all.isEmpty()) return
-        val editor = prefs.edit()
-        for ((key, value) in legacy.all) {
-            when (value) {
-                is String -> editor.putString(key, value)
-                is Boolean -> editor.putBoolean(key, value)
-                is Int -> editor.putInt(key, value)
-                is Long -> editor.putLong(key, value)
-                is Float -> editor.putFloat(key, value)
-                is Set<*> -> editor.putStringSet(key, value.filterIsInstance<String>().toSet())
-            }
-        }
-        editor.apply()
     }
 
     private fun migrateLegacyAccessToken(): String {

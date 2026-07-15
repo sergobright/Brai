@@ -3,6 +3,8 @@
 - Use OpenSpec for planned requirement changes before implementation.
 - Accepted requirements live in `openspec/specs/`.
 - Proposed changes live in `openspec/changes/<change-id>/`.
+- `openspec/changes/` intentionally stays local and ignored. A task that owns a change records its id in `.brai-task/task.json` through `--openspec-change` at starter/follow-up or `node scripts/brai-task.mjs link-openspec <id>` before implementation.
+- After the linked branch is accepted and merged, rerun `deploy/scripts/accept-preview.sh <codex-branch>` while its worktree exists. The idempotent post-merge step moves only linked, terminal-ready changes into the canonical local `openspec/changes/archive/`; it refuses changes with unfinished substantive tasks.
 - Architecture Decision Records live in `docs/adr/` and record decision rationale, alternatives, consequences, and confirmation checks.
 - Create or update an ADR when a change affects architecture, data, security, deployment, dependencies, public contracts, or multiple modules.
 - Link OpenSpec design/proposal files to related ADRs instead of duplicating long rationale.
@@ -17,7 +19,7 @@
 - Before behavior/responsibility/architecture search, call SocratiCode `codebase_status` for the active project path; if the index is ready, use `codebase_search` before reading files.
 - Use `rg`/shell search for exact strings, file discovery, and other non-semantic inspection.
 - Keep `.socraticodecontextartifacts.json` aligned with agent-facing docs, ADRs, OpenSpec, and Memory Bank so rules, requirements, and rationale are searchable as context artifacts.
-- SocratiCode for `/srv/projects/brai` is an always-on runtime service: `brai-socraticode-watcher.service` runs `scripts/brai-socraticode-watcher.mjs`, catches up the shared index, starts file watching, and self-heals every 60 seconds.
+- SocratiCode for `/srv/projects/brai` is an always-on runtime service: `brai-socraticode-watcher.service` runs `scripts/brai-socraticode-watcher.mjs`, performs one mutating `ensure` at startup, starts file watching, and runs a read-only `preflight` every 60 seconds. Timer failures are recorded but never start an automatic rebuild; diagnose them and run an explicit `npm run socraticode:ensure` when repair is required.
 - Run `npm run socraticode:ensure` when the shared index, code graph, context artifacts, or watcher are missing, incomplete, or stale; it performs safe catch-up and restarts watching.
 - Run `npm run socraticode:preflight` when SocratiCode behavior, agent rules, OpenSpec routing, or repository context indexing changes; it must verify the MCP config, canonical `codebase_brightos_brai` index, context artifacts, code graph freshness, and active watcher state.
 - Implementation handoff is fail-closed when the task marker has no successful SocratiCode usage marker. If the work truly only used exact string or file discovery, record the explicit fallback with `node scripts/brai-task.mjs socraticode-exact-only --reason "<why exact inspection was sufficient>"`.

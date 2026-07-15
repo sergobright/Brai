@@ -1,0 +1,14 @@
+services:
+  auth:
+    image: "${BRAI_AUTH_IMAGE:?BRAI_AUTH_IMAGE is required}"
+    env_file:
+      - "${BRAI_AUTH_ENV_FILE:?BRAI_AUTH_ENV_FILE is required}"
+    ports:
+      - "127.0.0.1:${BRAI_AUTH_PORT:?BRAI_AUTH_PORT is required}:3000"
+    networks:
+      - brai-supabase
+    restart: unless-stopped
+
+networks:
+  brai-supabase:
+    external: true

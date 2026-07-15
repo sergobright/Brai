@@ -1,5 +1,5 @@
 export type ContextDecisionKind = "activity_type_change" | "relation_add" | "goal_discovery" | "goal_plan";
-export type ContextDecisionStatus = "pending" | "accepted" | "rejected" | "auto_accepted" | "undone" | "audit_confirmed" | "audit_rejected";
+export type ContextDecisionStatus = "pending" | "accepted" | "rejected" | "auto_accepted" | "undone" | "audit_confirmed" | "audit_rejected" | "stale_context";
 export type ContextResolution = "accept" | "reject";
 
 export interface ContextDecision {
