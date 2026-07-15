@@ -1,0 +1,30 @@
+allowed_approval_policies = ["never"]
+default_permissions = "brai-chat"
+allowed_web_search_modes = []
+allow_managed_hooks_only = true
+allow_appshots = false
+allow_remote_control = false
+
+[allowed_permission_profiles]
+brai-chat = true
+
+[features]
+apps = false
+plugins = false
+tool_suggest = false
+enable_mcp_apps = false
+
+[permissions.filesystem]
+deny_read = ["/codex-home"]
+
+[permissions.brai-chat]
+description = "Read-only Brai chat runtime without credential access."
+
+[permissions.brai-chat.filesystem]
+":minimal" = "read"
+"/workspace" = "read"
+"/attachments" = "read"
+"/codex-home" = "deny"
+
+[permissions.brai-chat.network]
+enabled = false

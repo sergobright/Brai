@@ -29,6 +29,8 @@ SERVICE_NAME="${DEPLOY_META[4]}"
 API_PORT="${DEPLOY_META[5]:-}"
 ADMIN_SERVICE_NAME="${DEPLOY_META[6]:-}"
 ADMIN_PORT="${DEPLOY_META[7]:-}"
+BROKER_SERVICE_NAME="${DEPLOY_META[8]:-}"
+BROKER_SOCKET_PATH="${DEPLOY_META[9]:-}"
 
 GIT_SUBJECT="$(git -C "$ROOT" log -1 --format=%s "$COMMIT" 2>/dev/null || true)"
 GIT_BODY="$(git -C "$ROOT" log -1 --format=%b "$COMMIT" 2>/dev/null || true)"
@@ -91,6 +93,20 @@ wait_for_admin() {
   if [[ -n "$ADMIN_SERVICE_NAME" ]]; then
     "${BRAI_SUDO:-sudo}" journalctl -u "$ADMIN_SERVICE_NAME" -n 80 --no-pager >&2 || true
   fi
+  return 1
+}
+
+wait_for_broker() {
+  [[ -n "$BROKER_SERVICE_NAME" && -n "$BROKER_SOCKET_PATH" ]] || return 1
+  for _ in {1..40}; do
+    if systemctl is-active --quiet "$BROKER_SERVICE_NAME" \
+      && "$NODE_BIN" "$ROOT/services/brai_codex_broker/src/check.mjs" "$BROKER_SOCKET_PATH"; then
+      return 0
+    fi
+    sleep 0.5
+  done
+  echo "Codex broker readiness check failed ($ENVIRONMENT): $BROKER_SOCKET_PATH" >&2
+  "${BRAI_SUDO:-sudo}" journalctl -u "$BROKER_SERVICE_NAME" -n 80 --no-pager >&2 || true
   return 1
 }
 
@@ -260,6 +276,13 @@ if [[ "$ENVIRONMENT" != "prod" ]]; then
 fi
 
 if command -v systemctl >/dev/null 2>&1 && [[ "${BRAI_RESTART_SERVICE:-true}" != "false" ]]; then
+  if [[ "${BRAI_BROKER_ALREADY_RESTARTED:-false}" == "true" ]]; then
+    echo "Using the already provisionally verified $BROKER_SERVICE_NAME."
+  else
+    echo "Restarting $BROKER_SERVICE_NAME..."
+    "${BRAI_SUDO:-sudo}" systemctl restart "$BROKER_SERVICE_NAME"
+    wait_for_broker
+  fi
   check_api_service_contract
   if [[ "${BRAI_API_ALREADY_RESTARTED:-false}" == "true" ]]; then
     echo "Using the already provisionally verified $SERVICE_NAME."

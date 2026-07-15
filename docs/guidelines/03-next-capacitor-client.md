@@ -13,7 +13,9 @@
 
 ## Layout и navigation
 
-- Основная навигация: `Действия`, `Фокус`, `Цель`.
+- Основная навигация в существующем нижнем `MainDock`: `Брай`, `Действия`, `Inbox`, `Фокус`, `Factory`, `Draws`; на mobile `Draws` остаётся в overflow.
+- `/` является canonical route для `Брай`, `/activities` — для `Действия`; `Inbox`, `Фокус`, `Factory` и `Draws` сохраняют собственные canonical routes.
+- Desktop left rail остаётся служебным rail для sync, Engine и account actions и не содержит primary navigation.
 - `Настройки` открываются как full app section из profile dropdown.
 - `/focus` является canonical route для таймера и History.
 - `/timer*` и `/history*` retired live URLs и не должны возвращаться без отдельного принятого решения.

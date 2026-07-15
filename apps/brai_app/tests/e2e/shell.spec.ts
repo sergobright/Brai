@@ -2,15 +2,27 @@ import { expect, test } from "@playwright/test";
 import type { Page } from "@playwright/test";
 import { createMobileAction, dragTouch, horizontalCenterOffset } from "./shell-helpers";
 
-test("renders mobile and desktop navigation without starter content", async ({ page }, testInfo) => {
+test("opens Brai at the canonical root with the exact brand mark", async ({ page }, testInfo) => {
   await page.goto("/");
+  await expect(page.getByRole("heading", { name: "Брай" })).toBeVisible();
+  const items = page.locator(".main-dock a:visible");
+  const expectedLabels = testInfo.project.name === "mobile"
+    ? ["Брай", "Действия", "Inbox", "Фокус", "Factory"]
+    : ["Брай", "Действия", "Inbox", "Фокус", "Factory", "Draws"];
+  await expect(items).toHaveCount(expectedLabels.length);
+  expect(await items.evaluateAll((nodes) => nodes.map((node) => node.getAttribute("aria-label")))).toEqual(expectedLabels);
+  await expect(items.first().locator('img[src="/favicon.png"]')).toHaveCount(1);
+});
+
+test("renders mobile and desktop navigation without starter content", async ({ page }, testInfo) => {
+  await page.goto("/activities");
   await expect(page.getByRole("heading", { name: "Действия" })).toBeVisible();
   await expect(page.getByRole("button", { name: "История фокуса" })).toHaveCount(0);
   if (testInfo.project.name === "mobile") {
     await expect(page.getByRole("button", { name: "Добавить действие" })).toBeVisible();
     await expect(page.locator(".mobile-nav .nav-label").first()).toBeHidden();
-    await expect(page.locator(".mobile-nav .nav-button")).toHaveCount(3);
-    await expect(page.locator(".mobile-nav .nav-button").nth(2)).not.toHaveClass(/active:scale/);
+    await expect(page.locator(".mobile-nav .nav-button")).toHaveCount(5);
+    await expect(page.locator(".mobile-nav .nav-button").nth(4)).not.toHaveClass(/active:scale/);
   } else {
     await expect(page.getByRole("textbox", { name: "Добавить" })).toBeVisible();
     await expect(page.locator(".desktop-rail")).toBeVisible();
@@ -27,23 +39,23 @@ test("renders the mobile floating dock without inactive circular backgrounds", a
   test.skip(testInfo.project.name !== "mobile", "mobile-only dock");
 
   await page.addInitScript(() => window.localStorage.setItem("brai_theme_mode", "light"));
-  await page.goto("/");
+  await page.goto("/activities");
   await expect(page.locator(".main-dock")).toHaveCSS("background-color", "rgb(247, 247, 243)");
   await expect(page.locator(".mobile-nav")).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
   const items = page.locator(".mobile-nav .nav-button");
-  await expect(items).toHaveCount(3);
-  await expect(items.nth(2)).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+  await expect(items).toHaveCount(5);
+  await expect(items.nth(3)).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
 
   await page.getByRole("button", { name: "Фокус" }).last().click();
   await expect(page.getByRole("heading", { name: "Фокус" })).toBeVisible();
-  await expect(items.nth(2)).not.toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+  await expect(items.nth(3)).not.toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
 });
 
 test("keeps the desktop rail static and compact across reloads", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop", "desktop-only rail");
 
   await page.context().addCookies([{ name: "sidebar_state", value: "true", url: `http://127.0.0.1:${process.env.BRAI_PLAYWRIGHT_PORT ?? "3201"}` }]);
-  await page.goto("/");
+  await page.goto("/activities");
   await expect(page.locator(".desktop-rail")).not.toHaveClass(/expanded/);
   await expect
     .poll(async () => (await page.locator(".desktop-rail").boundingBox())?.width ?? 0)
@@ -68,7 +80,7 @@ test("keeps the desktop rail static and compact across reloads", async ({ page }
 test("keeps the compact desktop rail slim and centered", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop", "desktop-only rail");
 
-  await page.goto("/");
+  await page.goto("/activities");
   await expect(page.locator(".desktop-rail")).not.toHaveClass(/expanded/);
   await expect
     .poll(async () => (await page.locator(".desktop-rail").boundingBox())?.width ?? 0)
@@ -107,7 +119,7 @@ test("keeps the compact desktop rail slim and centered", async ({ page }, testIn
 test("keeps the desktop floating dock fixed near the bottom center", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop", "desktop-only dock");
 
-  await page.goto("/");
+  await page.goto("/activities");
   const dock = page.locator(".main-dock");
   await expect(dock).toBeVisible();
 
@@ -125,7 +137,7 @@ test("keeps the desktop floating dock fixed near the bottom center", async ({ pa
 test("keeps Evil Eye out of the desktop action rail", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop", "desktop-only action rail");
 
-  await page.goto("/");
+  await page.goto("/activities");
   await expect(page.getByRole("button", { name: "Настройки" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Evil Eye" })).toHaveCount(0);
 });
@@ -133,7 +145,7 @@ test("keeps Evil Eye out of the desktop action rail", async ({ page }, testInfo)
 test("uses full-width left-aligned desktop content", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop", "desktop-only layout");
 
-  await page.goto("/");
+  await page.goto("/activities");
   const viewport = page.viewportSize();
   const rail = await page.locator(".desktop-rail").boundingBox();
   const main = await page.locator(".main-view").boundingBox();
@@ -480,7 +492,7 @@ test("keeps desktop Focus background and timer stable across rail and panel chan
 test("shows the desktop action delete button only on row hover", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop", "desktop-only action delete control");
 
-  await page.goto("/");
+  await page.goto("/activities");
   await page.getByRole("textbox", { name: "Добавить" }).fill("Фокус");
   await page.keyboard.press("Enter");
   await expect(page.getByRole("textbox", { name: "Название действия: Фокус" })).toBeVisible();
@@ -499,7 +511,7 @@ test("shows the desktop action delete button only on row hover", async ({ page }
 test("pins the active desktop action focus timer to the right edge", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop", "desktop-only action focus control");
 
-  await page.goto("/");
+  await page.goto("/activities");
   await page.getByRole("textbox", { name: "Добавить" }).fill("Фокус");
   await page.keyboard.press("Enter");
   await expect(page.getByRole("textbox", { name: "Название действия: Фокус" })).toBeVisible();
@@ -575,7 +587,7 @@ test("pins the active desktop action focus timer to the right edge", async ({ pa
 test("reorders desktop actions by dragging the row handle", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop", "desktop-only action sorting");
 
-  await page.goto("/");
+  await page.goto("/activities");
   const addInput = page.getByRole("textbox", { name: "Добавить" });
   await addInput.fill("Первое");
   await page.keyboard.press("Enter");
@@ -615,7 +627,7 @@ test("reorders desktop actions by dragging the row handle", async ({ page }, tes
 test("reorders mobile actions by long-pressing a row", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "mobile", "mobile-only action sorting");
 
-  await page.goto("/");
+  await page.goto("/activities");
   await createMobileAction(page, "Первое");
   await createMobileAction(page, "Второе");
 
@@ -641,7 +653,7 @@ test("opens the desktop activity description split panel", async ({ page }, test
   test.skip(testInfo.project.name !== "desktop", "desktop-only detail panel");
 
   const title = "Пересобрать механизм страницы Действий с длинным заголовком который должен быть виден полностью";
-  await page.goto("/");
+  await page.goto("/activities");
   await expect
     .poll(() =>
       page

@@ -426,6 +426,6 @@ describe("BraiApp settings", () => {
     await waitFor(() => expect(window.BraiAndroidBack).toBeTypeOf("function"));
     expect(window.BraiAndroidBack?.()).toBe(true);
 
-    await waitFor(() => expect(screen.getByRole("heading", { name: "Действия" })).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Брай" })).toBeInTheDocument());
   });
 });

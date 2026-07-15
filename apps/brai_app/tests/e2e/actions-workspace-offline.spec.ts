@@ -6,7 +6,7 @@ import { emptyGoal, emptyHistory, emptyTimerState } from "@/shared/types/timer";
 
 test("keeps an API-offline Goal in the Actions workspace after desktop and mobile reloads", async ({ page }, testInfo) => {
   await mockAuthenticatedEmptyWorkspace(page);
-  await page.goto("/");
+  await page.goto("/activities");
   await page.locator("[data-startup-splash]").waitFor({ state: "detached" });
   await expect(page.getByRole("heading", { name: "Действия", exact: true })).toBeVisible();
   await expect(page.getByText("Новых действий нет", { exact: true })).toBeVisible();

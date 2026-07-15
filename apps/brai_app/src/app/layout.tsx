@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { GeistMono } from "geist/font/mono";
 import { GeistSans } from "geist/font/sans";
 import { resolveBraiIconAssets } from "@/shared/config/appIcons";
+import "@copilotkit/react-core/v2/styles.css";
 import "./globals.css";
 
 const appInitScript = `(function(){try{window.__braiStartupStartedAt=window.performance&&window.performance.now?window.performance.now():Date.now();var root=document.documentElement;var nativeAndroid=window.Capacitor&&window.Capacitor.isNativePlatform&&window.Capacitor.isNativePlatform()&&window.Capacitor.getPlatform&&window.Capacitor.getPlatform()==="android";if(nativeAndroid){var onboarding=window.localStorage.getItem("brai_onboarding_state_v1");var onboardingComplete=false;if(onboarding){try{onboardingComplete=!!JSON.parse(onboarding).complete;}catch(error){}}if(!onboardingComplete){root.dataset.theme="dark";root.dataset.sidebarState="collapsed";return;}}var theme=window.localStorage.getItem("brai_theme_mode")||window.localStorage.getItem("bright_os_theme_mode");var systemDark=window.matchMedia&&window.matchMedia("(prefers-color-scheme: dark)").matches;root.dataset.theme=theme==="dark"||theme==="light"?theme:(systemDark?"dark":"light");root.dataset.sidebarState="collapsed";}catch(error){}})();`;

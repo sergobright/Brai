@@ -2483,6 +2483,8 @@ test("accepted preview stale cleanup is required", () => {
   assert.match(releaseScript, /TARGET_BRANCH="\$\{6:-\}"/);
   assert.match(releaseScript, /TARGET_COMMIT="\$\{7:-\}"/);
   assert.match(releaseScript, /stop_preview_unit_if_exists "brai-api-preview-\$SLOT_LOWER\.service"/);
+  assert.match(releaseScript, /stop_preview_unit_if_exists "brai-codex-broker-preview-\$SLOT_LOWER\.service"/);
+  assert.match(releaseScript, /cleanup-preview-state "preview-\$SLOT_LOWER"/);
   assert.match(releaseScript, /stop_preview_unit_if_exists "brai-admin-preview-\$SLOT_LOWER\.service"/);
   assert.match(releaseScript, /cleanup_released_preview_slot_artifacts/);
   assert.match(releaseScript, /accepted_build_recorded\(\)/);

@@ -29,7 +29,7 @@ describe("BraiApp shell", () => {
     expect(document.querySelector("[data-startup-splash]")).not.toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Действия" })).toBeInTheDocument();
     expect(screen.getAllByLabelText("Действия").length).toBeGreaterThan(0);
-    ["Действия", "Входящие", "Фокус"].forEach((title) => {
+    ["Брай", "Действия", "Inbox", "Фокус"].forEach((title) => {
       expect(screen.getAllByRole("button", { name: title }).length).toBeGreaterThan(0);
     });
     expect(screen.queryByRole("button", { name: "Цели фокусировки" })).not.toBeInTheDocument();
@@ -701,7 +701,7 @@ describe("BraiApp shell", () => {
 
     fireEvent.click(screen.getAllByRole("button", { name: "Действия" }).at(-1) as HTMLElement);
     await waitFor(() => expect(screen.getByRole("heading", { name: "Действия" })).toBeInTheDocument());
-    expect(window.location.pathname).toBe("/");
+    expect(window.location.pathname).toBe("/activities");
   });
 
   it("opens mutually exclusive mobile Focus context sheets", async () => {

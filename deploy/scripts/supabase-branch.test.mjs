@@ -82,7 +82,7 @@ test("production copy exposes initially deferred foreign keys to dependency orde
   assert.match(body, /deferred: row\.deferred/);
 });
 
-test("production seed never copies account AI credentials, routing, or device links", () => {
+test("production seed never copies account AI credentials, routing, device links, or any chat state", () => {
   const script = fs.readFileSync(path.join(repoRoot, "deploy/scripts/supabase-branch.mjs"), "utf8");
   const exclusionStart = script.indexOf("const TEST_DATA_COPY_EXCLUDED_TABLES");
   const exclusionEnd = script.indexOf("]);", exclusionStart);
@@ -91,6 +91,7 @@ test("production seed never copies account AI credentials, routing, or device li
   assert.match(exclusions, /"user_provider_credentials"/);
   assert.match(exclusions, /"user_ai_settings"/);
   assert.match(exclusions, /"brai_cmd_account_link_tokens"/);
+  assert.match(script, /!table\.startsWith\("brai_chat_"\)/);
 });
 
 test("preview and dev sanitize cloned account AI data after all seeding", () => {

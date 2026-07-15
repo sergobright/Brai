@@ -12,7 +12,7 @@ describe("BraiApp inbox", () => {
     render(<BraiApp />);
     await screen.findByText("Новых действий нет");
 
-    fireEvent.click(screen.getAllByRole("button", { name: "Входящие" }).at(-1) as HTMLElement);
+    fireEvent.click(screen.getAllByRole("button", { name: "Inbox" }).at(-1) as HTMLElement);
     await waitFor(() => expect(screen.getByRole("heading", { name: "Входящие" })).toBeInTheDocument());
     fireEvent.click(document.querySelector(".actions-fab") as HTMLElement);
     const overlay = within(document.querySelector(".actions-mobile-overlay") as HTMLElement);
@@ -63,7 +63,7 @@ describe("BraiApp inbox", () => {
     render(<BraiApp />);
     await screen.findByText("Новых действий нет");
 
-    fireEvent.click(screen.getAllByRole("button", { name: "Входящие" }).at(-1) as HTMLElement);
+    fireEvent.click(screen.getAllByRole("button", { name: "Inbox" }).at(-1) as HTMLElement);
     await waitFor(() => expect(screen.getByRole("heading", { name: "Входящие" })).toBeInTheDocument());
     expect(screen.getAllByLabelText("Информация о входящих").length).toBeGreaterThan(0);
     expect(screen.queryByRole("button", { name: "Закрыть информацию о входящих" })).not.toBeInTheDocument();
@@ -234,7 +234,7 @@ describe("BraiApp inbox", () => {
 
     render(<BraiApp />);
 
-    fireEvent.click(screen.getAllByRole("button", { name: "Входящие" }).at(-1) as HTMLElement);
+    fireEvent.click(screen.getAllByRole("button", { name: "Inbox" }).at(-1) as HTMLElement);
     expect(await screen.findByText("AI-working")).toBeInTheDocument();
     const title = await screen.findByRole("textbox", { name: "Название входящего: Входящее с файлами" });
     expect(screen.queryByLabelText("Превью вложения photo.png")).not.toBeInTheDocument();

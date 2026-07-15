@@ -613,7 +613,7 @@ describe("BraiApp actions", () => {
     await closeComposer();
     expect(document.querySelector(".actions-fab")).toHaveAttribute("aria-label", "Продолжить черновик действия");
 
-    fireEvent.click(screen.getAllByRole("button", { name: "Входящие" }).at(-1) as HTMLElement);
+    fireEvent.click(screen.getAllByRole("button", { name: "Inbox" }).at(-1) as HTMLElement);
     await waitFor(() => expect(screen.getByRole("heading", { name: "Входящие" })).toBeInTheDocument());
     expect(document.querySelector(".actions-fab")).toHaveAttribute("aria-label", "Добавить входящее");
 
@@ -629,7 +629,7 @@ describe("BraiApp actions", () => {
     expect(within(actionOverlay()).getByRole("textbox", { name: "Добавить действие" })).toHaveValue("Черновик действия");
     await closeComposer();
 
-    fireEvent.click(screen.getAllByRole("button", { name: "Входящие" }).at(-1) as HTMLElement);
+    fireEvent.click(screen.getAllByRole("button", { name: "Inbox" }).at(-1) as HTMLElement);
     await waitFor(() => expect(screen.getByRole("heading", { name: "Входящие" })).toBeInTheDocument());
     fireEvent.click(screen.getByRole("button", { name: "Продолжить черновик входящего" }));
     expect(within(actionOverlay()).getByRole("textbox", { name: "Добавить входящее" })).toHaveValue("Черновик входящего");

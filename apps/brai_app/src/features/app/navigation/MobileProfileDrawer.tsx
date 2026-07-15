@@ -8,7 +8,7 @@ import { ScrollArea } from "@/shared/ui/scroll-area";
 import { Sheet, SheetClose, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/shared/ui/sheet";
 import { cx } from "../appUtils";
 
-export function MobileProfileDrawer({ children, onClose }: { children?: ReactNode; onClose: () => void }) {
+export function MobileProfileDrawer({ children, label, onClose }: { children?: ReactNode; label?: string; onClose: () => void }) {
   const closedRef = useRef(false);
   const onCloseRef = useRef(onClose);
   const openerRef = useRef<HTMLElement | null>(
@@ -16,7 +16,7 @@ export function MobileProfileDrawer({ children, onClose }: { children?: ReactNod
       ? document.activeElement
       : null,
   );
-  const label = children ? "Списки действий" : "Меню";
+  const drawerLabel = label ?? (children ? "Списки действий" : "Меню");
   const closeMenu = useCallback((restoreHistory = true) => {
     if (closedRef.current) return;
     closedRef.current = true;
@@ -64,7 +64,7 @@ export function MobileProfileDrawer({ children, onClose }: { children?: ReactNod
         aria-modal="true"
       >
         <SheetHeader className="sr-only">
-          <SheetTitle>{label}</SheetTitle>
+          <SheetTitle>{drawerLabel}</SheetTitle>
           <SheetDescription>Навигация по разделу</SheetDescription>
         </SheetHeader>
         <div className="flex min-h-11 shrink-0 justify-end px-2">

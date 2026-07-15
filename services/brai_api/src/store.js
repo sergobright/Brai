@@ -4,6 +4,7 @@ import { activityWorkflowStoreMethods } from './store-activity-workflows.js';
 import { appSettingsMethods } from './store-app-settings.js';
 import { authUserMethods } from './store-auth-users.js';
 import { braiCmdStoreMethods } from './store-brai-cmd.js';
+import { braiChatStoreMethods } from './store-brai-chat.js';
 import { contextApplyMethods } from './store-context-apply.js';
 import { contextDecisionMethods } from './store-context-decisions.js';
 import { aiLogMethods } from './store-ai-logs.js';
@@ -35,6 +36,7 @@ Object.assign(
   appSettingsMethods,
   authUserMethods,
   braiCmdStoreMethods,
+  braiChatStoreMethods,
   contextApplyMethods,
   contextDecisionMethods,
   aiLogMethods,

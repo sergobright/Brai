@@ -34,6 +34,19 @@ brai_goal_agent_group: brai-goal-agent
 brai_codex_exec_group: brai-codex-exec
 brai_codex_auth_group: brai-codex-auth
 brai_codex_auth_root: /srv/opt/codex-home
+brai_codex_version: 0.144.4
+brai_codex_broker_user: brai-codex-broker
+brai_codex_broker_root: /srv/opt/brai-codex-broker
+brai_codex_broker_workspace: /srv/opt/brai-codex-broker/workspace
+brai_codex_preview_cleanup: /srv/opt/brai-codex-broker/cleanup-preview-state
+brai_codex_broker_config: /srv/opt/brai-codex-broker/config.toml
+brai_codex_broker_requirements: /srv/opt/brai-codex-broker/requirements.toml
+brai_codex_broker_seccomp: /srv/opt/brai-codex-broker/seccomp.json
+brai_codex_broker_apparmor_profile: brai-codex-app-server
+brai_codex_broker_apparmor_path: /etc/apparmor.d/brai-codex-app-server
+brai_codex_broker_image: brai-codex-app-server:0.144.4
+brai_codex_broker_network: brai-codex-egress
+brai_codex_runtime_root: /srv/opt/brai-codex-runtime
 brai_goal_agent_codex_home: /srv/opt/codex-runtime/brai-goal-agent
 brai_codex_bin: /srv/opt/codex-cli/bin/codex
 brai_goal_agent_runtime_prepare: /srv/opt/brai-goal-agent-runtime-prepare.sh
@@ -94,6 +107,7 @@ brai_envs:
     legacy_domains:
       - app.brightos.world
     path: prod
+    vault_root: "{{ brai_syncthing_vault_path }}"
     api_port: 3020
     admin_port: 3040
     service: brai-api.service
@@ -105,6 +119,7 @@ brai_envs:
     legacy_domains:
       - dev.brightos.world
     path: dev
+    vault_root: "{{ brai_env_root }}/dev/vault"
     api_port: 3030
     admin_port: 3041
     service: brai-api-dev.service
@@ -116,6 +131,7 @@ brai_envs:
     legacy_domains:
       - a.test.brightos.world
     path: preview-a
+    vault_root: "{{ brai_env_root }}/preview-a/vault"
     api_port: 3031
     admin_port: 3042
     service: brai-api-preview-a.service
@@ -127,6 +143,7 @@ brai_envs:
     legacy_domains:
       - b.test.brightos.world
     path: preview-b
+    vault_root: "{{ brai_env_root }}/preview-b/vault"
     api_port: 3032
     admin_port: 3043
     service: brai-api-preview-b.service
@@ -138,6 +155,7 @@ brai_envs:
     legacy_domains:
       - c.test.brightos.world
     path: preview-c
+    vault_root: "{{ brai_env_root }}/preview-c/vault"
     api_port: 3033
     admin_port: 3044
     service: brai-api-preview-c.service
@@ -149,6 +167,7 @@ brai_envs:
     legacy_domains:
       - d.test.brightos.world
     path: preview-d
+    vault_root: "{{ brai_env_root }}/preview-d/vault"
     api_port: 3034
     admin_port: 3045
     service: brai-api-preview-d.service
@@ -160,6 +179,7 @@ brai_envs:
     legacy_domains:
       - e.test.brightos.world
     path: preview-e
+    vault_root: "{{ brai_env_root }}/preview-e/vault"
     api_port: 3035
     admin_port: 3046
     service: brai-api-preview-e.service

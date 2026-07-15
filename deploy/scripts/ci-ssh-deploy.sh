@@ -372,6 +372,19 @@ wait_for_api_health() {
   echo "$label health check failed ($ENVIRONMENT): $url" >&2
   return 1
 }
+wait_for_broker_health() {
+  local label="${1:-Codex broker}"
+  local attempt
+  for attempt in {1..40}; do
+    if systemctl is-active --quiet "$BROKER_SERVICE_NAME" \
+      && node "$SOURCE_ROOT/services/brai_codex_broker/src/check.mjs" "$BROKER_SOCKET_PATH"; then
+      return 0
+    fi
+    sleep 0.5
+  done
+  echo "$label readiness check failed ($ENVIRONMENT): $BROKER_SOCKET_PATH" >&2
+  return 1
+}
 rollback_before_new_api_health() {
   local rollback_failed=0
 
@@ -393,6 +406,21 @@ rollback_before_new_api_health() {
   if (( rollback_failed == 0 )) && ! restore_previous_source; then
     echo "Cannot restore the previous source for $SERVICE_NAME" >&2
     rollback_failed=1
+  fi
+
+  if (( rollback_failed == 0 )) && [[ -n "${BROKER_SERVICE_NAME:-}" ]]; then
+    if [[ "${BROKER_WAS_ACTIVE:-false}" == "true" ]]; then
+      if ! "${BRAI_SUDO:-sudo}" systemctl restart "$BROKER_SERVICE_NAME"; then
+        echo "Cannot restart restored $BROKER_SERVICE_NAME" >&2
+        rollback_failed=1
+      elif ! wait_for_broker_health "Restored Codex broker"; then
+        echo "Restored $BROKER_SERVICE_NAME did not become ready" >&2
+        rollback_failed=1
+      fi
+    elif ! "${BRAI_SUDO:-sudo}" systemctl stop "$BROKER_SERVICE_NAME"; then
+      echo "Cannot restore inactive state for $BROKER_SERVICE_NAME" >&2
+      rollback_failed=1
+    fi
   fi
 
   if (( rollback_failed == 0 )); then
@@ -525,6 +553,7 @@ PREVIOUS_SOURCE=""
 SOURCE_SWAPPED="false"
 PREVIOUS_SOURCE_READY="false"
 API_WAS_ACTIVE="false"
+BROKER_WAS_ACTIVE="false"
 API_TRANSITION_STARTED="false"
 API_QUIESCED="false"
 NEW_API_HEALTHY="false"
@@ -567,6 +596,8 @@ ENVIRONMENT="${DEPLOY_META[0]}"
 ENV_PATH="${DEPLOY_META[3]}"
 SERVICE_NAME="${DEPLOY_META[4]}"
 API_PORT="${DEPLOY_META[5]}"
+BROKER_SERVICE_NAME="${DEPLOY_META[8]}"
+BROKER_SOCKET_PATH="${DEPLOY_META[9]}"
 SOURCE_ROOT="$ENVS_ROOT/$ENV_PATH/source"
 GOAL_AGENT_RUNTIME_GROUP="${BRAI_GOAL_AGENT_GROUP:-brai-goal-agent}"
 case "$SOURCE_ROOT" in
@@ -667,6 +698,10 @@ elif [[ "$SOURCE_PRESENT" == "true" ]]; then
   [[ -r "$RUNTIME_ENV" ]] || { echo "$RUNTIME_ENV is required for an existing $ENVIRONMENT deploy" >&2; exit 1; }
   CURRENT_DATABASE_URL="$(env_database_url "$RUNTIME_ENV")"
   [[ -n "$CURRENT_DATABASE_URL" ]] || { echo "BRAI_DATABASE_URL is missing in $RUNTIME_ENV" >&2; exit 1; }
+fi
+
+if systemctl is-active --quiet "$BROKER_SERVICE_NAME"; then
+  BROKER_WAS_ACTIVE="true"
 fi
 
 if systemctl is-active --quiet "$SERVICE_NAME"; then
@@ -777,6 +812,11 @@ else
   set +a
 fi
 export BRAI_DATABASE_URL="$TARGET_DATABASE_URL"
+
+echo "Starting provisional $BROKER_SERVICE_NAME from incoming source..."
+"${BRAI_SUDO:-sudo}" systemctl restart "$BROKER_SERVICE_NAME"
+wait_for_broker_health "New Codex broker"
+export BRAI_BROKER_ALREADY_RESTARTED="true"
 
 echo "Starting provisional $SERVICE_NAME from incoming source..."
 "${BRAI_SUDO:-sudo}" systemctl restart "$SERVICE_NAME"

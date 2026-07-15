@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 import { openEngineFromProfile, openProfileMenuItem, openSettingsFromProfile, swipeTouch } from "./shell-helpers";
 
 test("shows Settings without update state", async ({ page }, testInfo) => {
-  await page.goto("/");
+  await page.goto("/activities");
   await openSettingsFromProfile(page);
 
   await expect(page.getByRole("heading", { name: "Настройки" })).toBeVisible();
@@ -52,7 +52,7 @@ test("scrolls long provider model lists and saves profiles before external activ
     return route.continue();
   });
 
-  await page.goto("/");
+  await page.goto("/activities");
   await openSettingsFromProfile(page);
   const providers = page.getByRole("combobox", { name: "Поставщик" });
   const models = page.getByRole("combobox", { name: "Модель" });
@@ -136,7 +136,7 @@ test("opens Engine from the profile menu", async ({ page }) => {
     }),
   }));
 
-  await page.goto("/");
+  await page.goto("/activities");
   await openEngineFromProfile(page);
 
   await expect(page.getByRole("heading", { name: "Engine", exact: true })).toBeVisible();
@@ -249,7 +249,7 @@ test("keeps Android Engine download progress compact on mobile", async ({ page }
 test("shows Engine in the mobile dock overflow menu", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "mobile", "mobile-only layout");
 
-  await page.goto("/");
+  await page.goto("/activities");
   await page.getByRole("button", { name: "Открыть левое меню" }).click();
 
   const sheet = page.locator(".mobile-dock-overflow-sheet");
@@ -276,7 +276,7 @@ test("keeps Engine text out of the collapsed desktop rail on load", async ({ pag
 test("opens Archive from the profile menu and restores a deleted action", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop", "desktop-only archive flow");
 
-  await page.goto("/");
+  await page.goto("/activities");
   await page.getByRole("textbox", { name: "Добавить" }).fill("Архивируемое");
   await page.keyboard.press("Enter");
   await expect(page.getByRole("textbox", { name: "Название действия: Архивируемое" })).toBeVisible();

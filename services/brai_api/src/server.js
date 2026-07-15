@@ -17,6 +17,12 @@ import {
 import { processActivityItem } from './activity-normalization.js';
 import { createBraiAuth, OTP_EXPIRES_IN_SECONDS, OTP_RESEND_AFTER_SECONDS, OTP_RESEND_STRATEGY } from './auth.js';
 import {
+  createBraiChatUploadGate,
+  handleBraiChatRoute,
+  isBraiChatRoute,
+  reapStaleBraiChatAttachments
+} from './brai-chat-routes.js';
+import {
   createBraiCmdRuntime,
   handleBraiCmdAdminRoute,
   handleBraiCmdPublicRoute,
@@ -44,7 +50,7 @@ import {
 const BASE_JSON_HEADERS = {
   'content-type': 'application/json; charset=utf-8',
   'access-control-allow-methods': 'GET,POST,PUT,PATCH,DELETE,OPTIONS',
-  'access-control-allow-headers': 'authorization,content-type,x-api-key,x-brai-api-key,x-brai-target,x-brai-destination,x-brai-cmd-device-id,x-brai-cmd-client-version,x-brai-expected-user-id',
+  'access-control-allow-headers': 'authorization,content-type,last-event-id,x-api-key,x-brai-api-key,x-brai-target,x-brai-destination,x-brai-chat-after,x-brai-cmd-device-id,x-brai-cmd-client-version,x-brai-expected-user-id',
   'access-control-allow-credentials': 'true'
 };
 const SESSION_COOKIE = 'brai_session';
@@ -95,12 +101,16 @@ export function createBraiServer({
   goalAgentsEnabled = goalAgentsEnabledFromEnv(),
   goalAgentEnvironment = process.env.BRAI_ENVIRONMENT || 'prod',
   braiCmd = {},
+  braiChatRuntime = null,
   branch = process.env.BRAI_BRANCH || null,
   commit = process.env.BRAI_COMMIT || null,
   databaseBranch = process.env.BRAI_SUPABASE_BRANCH || null,
   testEmailLogin = false,
   shutdownGraceMs = 5000,
   contextAuditReconcileIntervalMs = 60_000,
+  braiChatAttachmentReapIntervalMs = 60 * 60 * 1_000,
+  braiChatUploadMaxConcurrent = 2,
+  braiChatUploadMaxPerUser = 2,
   authBackendTimeoutMs = 5_000,
   now = () => new Date(),
   logger = console,
@@ -113,6 +123,10 @@ export function createBraiServer({
   store.configureGoalAgentEnvironment(goalAgentEnvironment);
   store.configureUserAiEncryptionKey(userAiEncryptionKey);
   const releaseDownloadLimiter = new RateLimiterMemory({ points: 10, duration: 3600 });
+  const braiChatUploadGate = createBraiChatUploadGate({
+    maxConcurrent: braiChatUploadMaxConcurrent,
+    maxPerUser: braiChatUploadMaxPerUser
+  });
   const braiCmdRuntime = createBraiCmdRuntime(braiCmd);
   const resolvedVaultRoot =
     typeof vaultRoot === 'string' && vaultRoot.trim()
@@ -344,6 +358,30 @@ export function createBraiServer({
       }, Number(contextAuditReconcileIntervalMs))
     : null;
   contextAuditInterval?.unref?.();
+
+  let braiChatAttachmentReapRunning = false;
+  const braiChatAttachmentReapInterval = Number(braiChatAttachmentReapIntervalMs) > 0
+    ? setInterval(() => {
+        if (braiChatAttachmentReapRunning) return;
+        braiChatAttachmentReapRunning = true;
+        try {
+          const before = new Date(now().getTime() - (24 * 60 * 60 * 1_000));
+          for (const userId of store.listBraiChatAttachmentCleanupOwners(100)) {
+            withUserScope(userId, () => reapStaleBraiChatAttachments({
+              store, vaultRoot: resolvedVaultRoot, userId, before, logger
+            }));
+          }
+        } catch (error) {
+          logger.error?.('Brai chat attachment reaper failed', {
+            code: 'brai_chat_attachment_reaper_failed',
+            error: error instanceof Error ? error.message : String(error)
+          });
+        } finally {
+          braiChatAttachmentReapRunning = false;
+        }
+      }, Number(braiChatAttachmentReapIntervalMs))
+    : null;
+  braiChatAttachmentReapInterval?.unref?.();
 
   const server = http.createServer(async (req, res) => {
     const requestStartedAt = Date.now();
@@ -1039,6 +1077,10 @@ export function createBraiServer({
         sendJson(req, res, 401, { error: 'unauthorized' });
         return;
       }
+      if (isBraiChatRoute(url.pathname) && !authContext.betterAuth) {
+        sendJson(req, res, 401, { error: 'unauthorized' });
+        return;
+      }
       if (requiresTrustedOrigin(req, authContext) && !isTrustedAppOrigin(req.headers.origin)) {
         recordRuntimeLog(store, logger, {
           traceId,
@@ -1070,6 +1112,22 @@ export function createBraiServer({
       }
 
       await withUserScope(authContext.userId, async () => {
+      if (isBraiChatRoute(url.pathname)) {
+        await handleBraiChatRoute({
+          req,
+          res,
+          url,
+          store,
+          runtime: braiChatRuntime,
+          vaultRoot: resolvedVaultRoot,
+          uploadGate: braiChatUploadGate,
+          sendJson,
+          readJson,
+          now,
+          logger
+        });
+        return;
+      }
       if (isUserAiRoute(url.pathname)) {
         await handleUserAiRoute({
           req,
@@ -1511,6 +1569,16 @@ export function createBraiServer({
       });
       return;
     } catch (error) {
+      const failedPath = new URL(req.url ?? '/', 'http://localhost').pathname;
+      if (isBraiChatRoute(failedPath)) {
+        const explicit = Number.isInteger(error?.status)
+          && /^[a-z0-9_]{1,80}$/.test(error?.message ?? '');
+        const status = explicit ? error.status : 500;
+        const code = explicit ? error.message : 'internal_error';
+        logger.error({ name: error?.name ?? 'Error', code, status });
+        sendJson(req, res, status, { error: code });
+        return;
+      }
       logger.error(error);
       if (Number.isInteger(error.status)) {
         sendJson(req, res, error.status, { error: error.message });
@@ -1613,6 +1681,7 @@ export function createBraiServer({
       if (closePromise) return closePromise;
       closePromise = (async () => {
         if (contextAuditInterval) clearInterval(contextAuditInterval);
+        if (braiChatAttachmentReapInterval) clearInterval(braiChatAttachmentReapInterval);
         for (const socket of sockets) socket.terminate();
         wss.close();
         await new Promise((resolve) => {
@@ -1802,20 +1871,20 @@ function actionsCompatState(state) {
 async function authenticateRequest(req, token, parsedUrl, sessionSecret, now, auth, store, authBackendTimeoutMs) {
   const session = await betterAuthSession(req, auth, authBackendTimeoutMs);
   if (session?.user?.id) {
-    return { authorized: true, sessionBased: true, userId: session.user.id, user: publicAuthUser(session.user) };
+    return { authorized: true, sessionBased: true, betterAuth: true, userId: session.user.id, user: publicAuthUser(session.user) };
   }
 
   if (hasLegacyToken(req, token, parsedUrl)) {
     const primary = store.primaryUser();
-    return { authorized: true, sessionBased: false, userId: primary?.id ?? null, user: publicAuthUser(primary) };
+    return { authorized: true, sessionBased: false, betterAuth: false, userId: primary?.id ?? null, user: publicAuthUser(primary) };
   }
 
   if (hasValidSession(req, sessionSecret, now())) {
     const primary = store.primaryUser();
-    return { authorized: true, sessionBased: true, userId: primary?.id ?? null, user: publicAuthUser(primary) };
+    return { authorized: true, sessionBased: true, betterAuth: false, userId: primary?.id ?? null, user: publicAuthUser(primary) };
   }
 
-  return { authorized: false, sessionBased: false, userId: null, user: null };
+  return { authorized: false, sessionBased: false, betterAuth: false, userId: null, user: null };
 }
 
 function expectedUserScopeChanged(values, authenticatedUserId) {

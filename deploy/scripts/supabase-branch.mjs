@@ -400,7 +400,8 @@ export async function copySchemaData(pool, { sourceSchema, targetSchema, postSee
 
   const sourceTables = new Set(await schemaTables(pool, sourceSchema));
   const copyTables = orderTablesByDependencies(
-    truncatableTables.filter((table) => sourceTables.has(table) && !TEST_DATA_COPY_EXCLUDED_TABLES.has(table)),
+    truncatableTables.filter((table) => sourceTables.has(table)
+      && !TEST_DATA_COPY_EXCLUDED_TABLES.has(table) && !table.startsWith("brai_chat_")),
     { dependencies, fallbackOrder: migrationTableOrder() }
   );
 

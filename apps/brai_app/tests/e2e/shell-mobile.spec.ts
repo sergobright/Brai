@@ -4,7 +4,7 @@ import { createMobileAction, dispatchElementTouch, dispatchTouch, dragTouch, hor
 test("shows Actions lists in the burger drawer and opens account overflow from the aligned three-dot button", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "mobile", "mobile-only drawer");
 
-  await page.goto("/");
+  await page.goto("/activities");
   const railButton = await page.getByRole("button", { name: "Открыть левое меню" }).boundingBox();
   const dockButton = await page.locator(".mobile-nav .nav-button").first().boundingBox();
   expect(Math.abs((railButton?.y ?? 0) + (railButton?.height ?? 0) / 2 - ((dockButton?.y ?? 0) + (dockButton?.height ?? 0) / 2))).toBeLessThanOrEqual(1.5);
@@ -74,7 +74,7 @@ test("shows Actions lists in the burger drawer and opens account overflow from t
 test("opens Settings from the mobile action rail", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "mobile", "mobile-only action rail");
 
-  await page.goto("/");
+  await page.goto("/activities");
   await page.getByRole("button", { name: "Открыть левое меню" }).click();
   await expect(page.locator(".mobile-dock-overflow-sheet")).not.toContainText("Workspace");
 
@@ -146,7 +146,7 @@ test("opens the right mobile dock overflow with Draws and placeholder items", as
 test("opens the dock overflow above an existing mobile sheet", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "mobile", "mobile-only dock overflow layering");
 
-  await page.goto("/");
+  await page.goto("/activities");
   await page.getByRole("button", { name: "Информация о действиях" }).click();
   await expect(page.locator(".mobile-context-sheet")).toBeVisible();
 
@@ -165,7 +165,7 @@ test("opens the dock overflow above an existing mobile sheet", async ({ page }, 
 test("opens mobile action input overlay from the floating plus button", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "mobile", "mobile-only action overlay");
 
-  await page.goto("/");
+  await page.goto("/activities");
   await expect(page.getByRole("navigation", { name: "Основная навигация" })).toBeVisible();
   await page.locator(".section-page-current .actions-fab").click();
   await expect(page.getByRole("textbox", { name: "Добавить действие" })).toBeFocused();
@@ -186,7 +186,7 @@ test("opens mobile action input overlay from the floating plus button", async ({
 test("scrolls mobile create title and description as one text area", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "mobile", "mobile-only action overlay");
 
-  await page.goto("/");
+  await page.goto("/activities");
   await page.locator(".actions-fab").click();
   const textArea = page.locator(".mobile-create-text");
   const title = page.getByRole("textbox", { name: "Добавить действие" });
@@ -216,7 +216,7 @@ test("scrolls mobile create title and description as one text area", async ({ pa
 test("keeps the mobile Actions FAB vertically stable when a dock swipe starts", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "mobile", "mobile-only action swipe layout");
 
-  await page.goto("/");
+  await page.goto("/activities");
   const fab = page.locator(".section-page-current .actions-fab");
   await expect(fab).toBeVisible();
   const before = await fab.boundingBox();
@@ -238,7 +238,7 @@ test("keeps the mobile Actions FAB vertically stable when a dock swipe starts", 
 test("opens and closes mobile Actions info as a bottom sheet", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "mobile", "mobile-only actions info");
 
-  await page.goto("/");
+  await page.goto("/activities");
   await page.getByRole("button", { name: "Информация о действиях" }).click();
   const sheet = page.locator(".mobile-context-sheet");
   const visualBackdrop = page.locator(".mobile-context-backdrop > div").first();
@@ -303,7 +303,7 @@ test("prevents text selection on mobile inbox rows", async ({ page }, testInfo) 
 test("keeps a single mobile action compact without creating empty scroll", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "mobile", "mobile-only action layout");
 
-  await page.goto("/");
+  await page.goto("/activities");
   await createMobileAction(page, "Фокус");
   await expect(page.getByRole("button", { name: /Выполнено 0/ })).toHaveCount(0);
 
@@ -326,7 +326,7 @@ test("does not complete a desktop action when its title is clicked", async ({ pa
   test.skip(testInfo.project.name !== "desktop", "desktop-only inline title behavior");
 
   await mockEmptyActionsApi(page);
-  await page.goto("/");
+  await page.goto("/activities");
   await expect(page.getByText("Новых действий нет")).toBeVisible();
   const addInput = page.getByRole("textbox", { name: "Добавить" });
   await addInput.fill("Клик заголовка");
@@ -347,7 +347,7 @@ test("does not complete a desktop action when its title is clicked", async ({ pa
 test("opens the mobile activity detail editor from a title tap", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "mobile", "mobile-only title tap");
 
-  await page.goto("/");
+  await page.goto("/activities");
   await createMobileAction(page, "Title tap mobile");
 
   await page.getByRole("textbox", { name: "Название действия: Title tap mobile" }).click();
@@ -360,7 +360,7 @@ test("keeps the mobile Operation dialog inside Back, Escape, and focus boundarie
   test.setTimeout(60_000);
 
   await mockOperationWorkspaceApi(page);
-  await page.goto("/");
+  await page.goto("/activities");
   await page.locator(".section-page-current .mobile-menu-button").click();
   await page.locator(".mobile-profile-drawer").getByRole("button", { name: /Операции/ }).click();
 
@@ -391,7 +391,7 @@ test("scrolls the mobile Actions page from completed rows", async ({ page }, tes
   test.skip(testInfo.project.name !== "mobile", "mobile-only completed scroll");
   test.setTimeout(60_000);
 
-  await page.goto("/");
+  await page.goto("/activities");
   for (let index = 1; index <= 14; index += 1) {
     const title = `Готово ${index}`;
     await createMobileAction(page, title);
@@ -427,7 +427,7 @@ test("scrolls the mobile Actions page from completed rows", async ({ page }, tes
 test("reveals and hides the mobile action delete menu by swipe", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "mobile", "mobile-only action delete gesture");
 
-  await page.goto("/");
+  await page.goto("/activities");
   await createMobileAction(page, "Фокус");
 
   const row = page.locator(".action-row").first();
@@ -458,7 +458,7 @@ test("reveals and hides the mobile action delete menu by swipe", async ({ page }
 test("deletes and restores a mobile action after row swipes", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "mobile", "mobile-only archive flow");
 
-  await page.goto("/");
+  await page.goto("/activities");
   await createMobileAction(page, "Мобильный архив");
 
   await swipeActionRowLeft(page, page.locator(".action-row").first());
@@ -480,7 +480,7 @@ test("deletes and restores a mobile action after row swipes", async ({ page }, t
 test("opens the mobile bottom-sheet activity detail editor", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "mobile", "mobile-only detail editor");
 
-  await page.goto("/");
+  await page.goto("/activities");
   const longTitle = "Очень длинный заголовок детали который обязан переноситься полностью на несколько строк без троеточия";
   await createMobileAction(page, longTitle);
 
@@ -594,7 +594,7 @@ test("opens the mobile bottom-sheet activity detail editor", async ({ page }, te
 test("closes the mobile activity detail editor with Back", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "mobile", "mobile-only detail editor back");
 
-  await page.goto("/");
+  await page.goto("/activities");
   await createMobileAction(page, "Back detail");
 
   const rowSurface = page.locator(".action-row-surface").first();
@@ -614,7 +614,7 @@ test("closes the mobile activity detail editor with Back", async ({ page }, test
 test("closes the mobile activity detail editor from its drag handle", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "mobile", "mobile-only detail editor");
 
-  await page.goto("/");
+  await page.goto("/activities");
   await createMobileAction(page, "Описание drag");
 
   const rowSurface = page.locator(".action-row-surface").first();

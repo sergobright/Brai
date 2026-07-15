@@ -4,7 +4,7 @@ import { swipeTouch } from "./shell-helpers";
 test("tracks mobile tab swipes with page transforms from the bottom dock", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "mobile", "mobile touch gesture only");
 
-  await page.goto("/");
+  await page.goto("/activities");
   await expect(page.getByRole("heading", { name: "Действия" })).toBeVisible();
 
   const dockBox = await page.locator(".main-dock").boundingBox();
@@ -27,7 +27,7 @@ test("tracks mobile tab swipes with page transforms from the bottom dock", async
 test("keeps current and adjacent screen gutters aligned during mobile swipes", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "mobile", "mobile touch gesture only");
 
-  await page.goto("/");
+  await page.goto("/activities");
   await expect(page.getByRole("heading", { name: "Действия" })).toBeVisible();
 
   const dockBox = await page.locator(".main-dock").boundingBox();
@@ -71,7 +71,7 @@ test("keeps current and adjacent screen gutters aligned during mobile swipes", a
 test("tracks mobile tab swipes from the full-width bottom menu zone", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "mobile", "mobile touch gesture only");
 
-  await page.goto("/");
+  await page.goto("/activities");
   await expect(page.getByRole("heading", { name: "Действия" })).toBeVisible();
 
   const viewport = page.viewportSize();
@@ -101,7 +101,7 @@ test("tracks mobile tab swipes from the full-width bottom menu zone", async ({ p
 test("opens the mobile menu from the left edge outside the bottom dock", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "mobile", "mobile touch gesture only");
 
-  await page.goto("/");
+  await page.goto("/activities");
   await expect(page.getByRole("heading", { name: "Действия" })).toBeVisible();
 
   await dispatchTouch(page, "touchstart", { x: 2, y: 220 });

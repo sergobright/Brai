@@ -1,17 +1,19 @@
 [Unit]
 Description=Brai API {{ item.key }}
-Wants=brai-temporal.service
-After=network.target brai-temporal.service
+Wants=brai-temporal.service brai-codex-broker-{{ item.key }}.service
+After=network.target brai-temporal.service brai-codex-broker-{{ item.key }}.service
 
 [Service]
 Type=simple
 WorkingDirectory={{ brai_env_root }}/{{ item.value.path }}/source/services/brai_api
+Environment=COPILOTKIT_TELEMETRY_DISABLED=true
+Environment=BRAI_VAULT_ROOT={{ item.value.vault_root }}
 {% if item.key == 'prod' %}
 EnvironmentFile={{ brai_api_env_source }}
-ExecStart=/usr/bin/env BRAI_ENVIRONMENT={{ item.value.goal_agent_queue_environment }} PORT={{ item.value.api_port }} BRAI_RELEASE_DIR={{ brai_repo }}/deploy/releases BRAI_INBOX_STORAGE_ROOT={{ brai_repo }}/data/inbox-attachments BRAI_CODEX_BIN=/srv/opt/codex-cli/bin/codex BRAI_CODEX_MODEL=gpt-5.4-mini BRAI_CODEX_TIMEOUT_MS=20000 CODEX_HOME=/srv/opt/codex-runtime/brai HOME=/srv/opt/codex-runtime/brai {{ brai_node_bin }} src/index.js
+ExecStart=/usr/bin/env BRAI_ENVIRONMENT={{ item.value.goal_agent_queue_environment }} PORT={{ item.value.api_port }} BRAI_RELEASE_DIR={{ brai_repo }}/deploy/releases BRAI_INBOX_STORAGE_ROOT={{ brai_repo }}/data/inbox-attachments BRAI_CODEX_BROKER_SOCKET=/run/brai-codex-broker-{{ item.key }}/broker.sock BRAI_CODEX_BIN=/srv/opt/codex-cli/bin/codex BRAI_CODEX_MODEL=gpt-5.4-mini BRAI_CODEX_TIMEOUT_MS=20000 CODEX_HOME=/srv/opt/codex-runtime/brai HOME=/srv/opt/codex-runtime/brai {{ brai_node_bin }} src/index.js
 {% else %}
 EnvironmentFile={{ brai_env_root }}/{{ item.value.path }}/brai-api.env
-ExecStart=/usr/bin/env BRAI_ENVIRONMENT={{ item.value.goal_agent_queue_environment }} PORT={{ item.value.api_port }} BRAI_RELEASE_DIR={{ brai_repo }}/deploy/releases BRAI_INBOX_STORAGE_ROOT={{ brai_env_root }}/{{ item.value.path }}/data/inbox-attachments BRAI_CODEX_BIN=/srv/opt/codex-cli/bin/codex BRAI_CODEX_MODEL=gpt-5.4-mini BRAI_CODEX_TIMEOUT_MS=20000 CODEX_HOME=/srv/opt/codex-runtime/brai HOME=/srv/opt/codex-runtime/brai {{ brai_node_bin }} src/index.js
+ExecStart=/usr/bin/env BRAI_ENVIRONMENT={{ item.value.goal_agent_queue_environment }} PORT={{ item.value.api_port }} BRAI_RELEASE_DIR={{ brai_repo }}/deploy/releases BRAI_INBOX_STORAGE_ROOT={{ brai_env_root }}/{{ item.value.path }}/data/inbox-attachments BRAI_CODEX_BROKER_SOCKET=/run/brai-codex-broker-{{ item.key }}/broker.sock BRAI_CODEX_BIN=/srv/opt/codex-cli/bin/codex BRAI_CODEX_MODEL=gpt-5.4-mini BRAI_CODEX_TIMEOUT_MS=20000 CODEX_HOME=/srv/opt/codex-runtime/brai HOME=/srv/opt/codex-runtime/brai {{ brai_node_bin }} src/index.js
 {% endif %}
 Restart=always
 RestartSec=3

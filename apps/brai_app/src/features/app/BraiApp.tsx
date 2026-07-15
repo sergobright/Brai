@@ -8,6 +8,7 @@ import { useAppVersion } from "@/shared/config/runtime";
 import { installAndroidBackHandler, isNativeShell, platformName } from "@/shared/platform/platform";
 import { getBraiLocalStorageItem, removeBraiLocalStorageItem, setBraiLocalStorageItem } from "@/shared/storage/localStorageKeys";
 import { ScrollArea } from "@/shared/ui/scroll-area";
+import { BraiBrandIcon } from "@/shared/ui/brai-brand-icon";
 import { SidebarInset, SidebarProvider } from "@/shared/ui/sidebar";
 import { OnboardingFlow, shouldShowOnboarding } from "@/features/onboarding/OnboardingFlow";
 import { loadOnboardingState } from "@/features/onboarding/onboardingModel";
@@ -30,6 +31,7 @@ import { ActionsInfoPanel } from "./sections/actions/ActionsInfoPanel";
 import { ArchiveSection } from "./sections/actions/ArchiveSection";
 import { ActionsSidebarContent } from "./sections/actions/ActionsSidebarContent";
 import { BraiCmdSection } from "./sections/brai-cmd/BraiCmdSection";
+import { BraiChatSection } from "./sections/brai/BraiChatSection";
 import { DrawsSection } from "./sections/draws/DrawsSection";
 import { EvilEyeSection } from "./sections/EvilEyeSection";
 import { EngineSection } from "./sections/engine/EngineSection";
@@ -82,6 +84,7 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
       : { section, content });
   }, []);
   const registerDrawsRail = useCallback((content: ReactNode | null) => registerContextualContent("draws", content), [registerContextualContent]);
+  const registerBraiRail = useCallback((content: ReactNode | null) => registerContextualContent("brai", content), [registerContextualContent]);
   const registerArchiveRail = useCallback((content: ReactNode | null) => registerContextualContent("archive", content), [registerContextualContent]);
   const activeContextualContent = contextualContent?.section === visibleSection ? contextualContent.content : null;
   const dockOverflowOpen = mobileDockMenu != null;
@@ -103,7 +106,7 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
   const handleStartupIntroComplete = useCallback(() => setStartupIntroComplete(true), []);
   const mobileMenuSwipe = useLeftEdgeMenuSwipe(
     () => {
-      if (app.section === "actions") app.setMobileMenuOpen(true);
+      if (app.section === "brai" || app.section === "actions") app.setMobileMenuOpen(true);
       else setMobileDockMenu("left");
     },
     !app.mobileMenuOpen && !mobileDockMenu && !app.mobileContextPanel && !app.actionOverlayOpen,
@@ -326,14 +329,14 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
     if (unauthEngineActiveRef.current || unauthBraiCmdActiveRef.current) {
       setUnauthEngineOpen(false);
       setUnauthBraiCmdOpen(false);
-      selectSectionRef.current("actions");
+      selectSectionRef.current("brai");
       return true;
     }
-    if (sectionRef.current === "actions") return false;
+    if (sectionRef.current === "brai") return false;
     if (window.history.state?.braiSection === sectionRef.current) {
       window.history.back();
     } else {
-      selectSectionRef.current("actions");
+      selectSectionRef.current("brai");
     }
     return true;
   }), []);
@@ -351,7 +354,7 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
             syncStatus={app.displaySyncStatus}
             pendingCount={app.totalPendingCount}
             leading={isPrimarySection(screenSection) || isContextualRailSection(screenSection) ? <MobileMenuButton onClick={openMobileMenu} /> : null}
-            desktopLeading={isContextualRailSection(screenSection) ? (
+            desktopLeading={screenSection === "brai" ? <BraiBrandIcon /> : isContextualRailSection(screenSection) ? (
               <button
                 type="button"
                 className="grid size-7 place-items-center rounded-md border-0 bg-transparent text-foreground hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
@@ -388,6 +391,8 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
             onRequestOtp={app.onRequestOtp}
             onVerifyOtp={app.onVerifyOtp}
           />
+        ) : screenSection === "brai" ? (
+          <BraiChatSection userId={app.authUser?.id} onRailContent={isActivePage ? registerBraiRail : undefined} />
         ) : screenSection === "actions" ? (
           <ActionsSection
             state={app.actions}
@@ -646,6 +651,7 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
       ) : null}
       {app.mobileMenuOpen && !drawsFullscreenActive ? (
         <MobileProfileDrawer
+          label={visibleSection === "brai" ? "Чаты Брая" : undefined}
           onClose={() => app.setMobileMenuOpen(false)}
         >
           {visibleSection === "actions" ? (
