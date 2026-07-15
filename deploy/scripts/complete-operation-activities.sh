@@ -13,6 +13,7 @@ SSH_KEY_FILE="${BRAI_DEPLOY_SSH_KEY_FILE:-${HOME:-}/.ssh/brai_deploy_ed25519}"
 API_ENV_FILE="${BRAI_API_ENV_FILE:-/etc/brai/brai-api.env}"
 MODE="remote"
 CHECK_ACCESS=0
+ACTION="complete"
 
 usage() {
   cat >&2 <<USAGE
@@ -20,6 +21,7 @@ Usage:
   $0 <operation-activity-id>...
   $0 --host-local <operation-activity-id>...
   $0 --local <operation-activity-id>...
+  $0 --soft-delete [--host-local|--local] <operation-activity-id>...
   $0 --check-access
   $0 --host-local --check-access
 
@@ -32,11 +34,12 @@ if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
   exit 0
 fi
 
-while [[ "${1:-}" == "--local" || "${1:-}" == "--host-local" || "${1:-}" == "--check-access" ]]; do
+while [[ "${1:-}" == "--local" || "${1:-}" == "--host-local" || "${1:-}" == "--check-access" || "${1:-}" == "--soft-delete" ]]; do
   case "$1" in
     --local) MODE="local" ;;
     --host-local) MODE="host-local" ;;
     --check-access) CHECK_ACCESS=1 ;;
+    --soft-delete) ACTION="soft-delete" ;;
   esac
   shift
 done
@@ -97,17 +100,22 @@ complete_remote() {
   local key_file
   key_file="$(ssh_key)"
   ssh -i "$key_file" -p "$SSH_PORT" -o BatchMode=yes -o StrictHostKeyChecking=accept-new "$DEPLOY_USER@$DEPLOY_HOST" \
-    bash -s -- "$DEPLOY_REPO" "$SERVICE_USER" "$@" <<'REMOTE'
+    bash -s -- "$DEPLOY_REPO" "$SERVICE_USER" "$ACTION" "$@" <<'REMOTE'
 set -euo pipefail
 DEPLOY_REPO="$1"
 SERVICE_USER="$2"
-shift 2
-exec sudo -n -u "$SERVICE_USER" "$DEPLOY_REPO/deploy/scripts/complete-operation-activities.sh" --local "$@"
+ACTION="$3"
+shift 3
+args=(--local)
+if [[ "$ACTION" == "soft-delete" ]]; then args+=(--soft-delete); fi
+exec sudo -n -u "$SERVICE_USER" "$DEPLOY_REPO/deploy/scripts/complete-operation-activities.sh" "${args[@]}" "$@"
 REMOTE
 }
 
 complete_host_local() {
-  exec sudo -n -u "$SERVICE_USER" "$DEPLOY_REPO/deploy/scripts/complete-operation-activities.sh" --local "$@"
+  local args=(--local)
+  if [[ "$ACTION" == "soft-delete" ]]; then args+=(--soft-delete); fi
+  exec sudo -n -u "$SERVICE_USER" "$DEPLOY_REPO/deploy/scripts/complete-operation-activities.sh" "${args[@]}" "$@"
 }
 
 check_remote_access() {
@@ -143,7 +151,7 @@ load_runtime_env() {
 }
 
 node_pg() {
-  "$NODE_BIN" --input-type=module - "$ROOT" "$@"
+  "$NODE_BIN" --input-type=module - "$ROOT"
 }
 
 check_local_access() {
@@ -169,12 +177,13 @@ complete_local() {
   load_runtime_env
   local ids_json
   ids_json="$("$NODE_BIN" -e 'console.log(JSON.stringify(process.argv.slice(1)))' "$@")"
-  BRAI_OPERATION_IDS_JSON="$ids_json" node_pg <<'NODE'
+  BRAI_OPERATION_IDS_JSON="$ids_json" BRAI_OPERATION_ACTION="$ACTION" node_pg <<'NODE'
 const { createRequire } = await import("node:module");
 const [root] = process.argv.slice(2);
 const require = createRequire(`${root}/services/brai_api/package.json`);
 const { Pool } = require("pg");
 const ids = JSON.parse(process.env.BRAI_OPERATION_IDS_JSON || "[]");
+const action = process.env.BRAI_OPERATION_ACTION || "complete";
 const databaseUrl = process.env.BRAI_DATABASE_URL;
 const ssl = /supabase\.(?:co|com)|pooler\.supabase\.com/.test(databaseUrl) ? { rejectUnauthorized: false } : false;
 const pool = new Pool({ connectionString: databaseUrl, ssl });
@@ -183,17 +192,34 @@ const client = await pool.connect();
 try {
   await client.query("BEGIN");
   const existing = await client.query(`
-    SELECT id, status
+    SELECT id, status, item_roles_id, deleted_at_utc
     FROM activities
     WHERE activity_type_id = 'operation'
       AND author = 'Codex'
-      AND deleted_at_utc IS NULL
-      AND status IN ('New', 'Done')
+      AND (deleted_at_utc IS NULL OR $2 = 'soft-delete')
+      AND (status IN ('New', 'Done') OR $2 = 'soft-delete')
       AND id = ANY($1::text[])
     ORDER BY id
-  `, [ids]);
+    FOR UPDATE
+  `, [ids, action]);
   if (existing.rows.length !== ids.length) throw new Error(`Expected ${ids.length} Codex operation activities, found ${existing.rows.length}.`);
-  const update = await client.query(`
+  if (action === "soft-delete") {
+    await client.query(`
+      UPDATE activities SET deleted_at_utc = COALESCE(deleted_at_utc, $2), updated_at_utc = $2
+      WHERE id = ANY($1::text[]) AND activity_type_id = 'operation' AND author = 'Codex'
+    `, [ids, now]);
+    await client.query(`
+      UPDATE items SET deleted_at_utc = COALESCE(deleted_at_utc, $2), updated_at_utc = $2
+      WHERE id = ANY($1::text[])
+    `, [ids, now]);
+    await client.query(`
+      UPDATE item_roles SET status = 'deleted', active_to_utc = COALESCE(active_to_utc, $2)
+      WHERE id = ANY($1::bigint[]) AND status <> 'deleted'
+    `, [existing.rows.map((row) => row.item_roles_id).filter(Boolean), now]);
+    await client.query("COMMIT");
+    for (const row of existing.rows) console.log(JSON.stringify({ id: row.id, deleted: true }));
+  } else {
+    const update = await client.query(`
     UPDATE activities
     SET status = 'Done',
         completed_at_utc = COALESCE(completed_at_utc, $2),
@@ -204,7 +230,7 @@ try {
       AND status = 'New'
       AND id = ANY($1::text[])
   `, [ids, now]);
-  const done = await client.query(`
+    const done = await client.query(`
     SELECT id, title, author, status, updated_at_utc, completed_at_utc
     FROM activities
     WHERE activity_type_id = 'operation'
@@ -215,10 +241,11 @@ try {
       AND id = ANY($1::text[])
     ORDER BY id
   `, [ids]);
-  if (done.rows.length !== ids.length) throw new Error(`Expected ${ids.length} completed operation activities, found ${done.rows.length}.`);
-  await client.query("COMMIT");
-  console.log(`updated=${update.rowCount}`);
-  console.table(done.rows);
+    if (done.rows.length !== ids.length) throw new Error(`Expected ${ids.length} completed operation activities, found ${done.rows.length}.`);
+    await client.query("COMMIT");
+    console.log(`updated=${update.rowCount}`);
+    console.table(done.rows);
+  }
 } catch (error) {
   await client.query("ROLLBACK");
   throw error;
@@ -232,7 +259,7 @@ NODE
     "$NODE_BIN" "$ROOT/deploy/scripts/record-runtime-log.mjs" \
       --source deploy \
       --operation operation_activity.complete \
-      --status done \
+      --status "done" \
       --message "Completed Codex operation activities" \
       --json "$log_json" >/dev/null 2>&1 || true
   fi

@@ -171,7 +171,7 @@ load_runtime_env() {
 }
 
 node_pg() {
-  "$NODE_BIN" --input-type=module - "$ROOT" "$@"
+  "$NODE_BIN" --input-type=module - "$ROOT"
 }
 
 check_local_access() {

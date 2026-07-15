@@ -179,7 +179,7 @@ if sync_json="$("$NODE_BIN" -e 'console.log(JSON.stringify({ version: process.ar
   BRAI_DATABASE_URL="$PROD_POSTGRES_URL" "$NODE_BIN" "$ROOT/deploy/scripts/record-runtime-log.mjs" \
     --source deploy \
     --operation preview_ota_manifest.sync \
-    --status done \
+    --status "done" \
     --message "Synced occupied preview OTA manifests" \
     --json "$sync_json" >/dev/null 2>&1 || true
 fi

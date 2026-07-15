@@ -531,6 +531,7 @@
         owner: "{{ brai_syncthing_user }}"
         group: "{{ brai_source_group }}"
         mode: "2770"
+      tags: [brai-vault]
 
     - name: Ensure existing Syncthing vault contents are writable by sync group
       ansible.builtin.file:
@@ -540,6 +541,7 @@
         group: "{{ brai_source_group }}"
         mode: "u=rwX,g=rwX,o="
         recurse: true
+      tags: [brai-vault]
 
     - name: Ensure existing Syncthing vault directories keep sync setgid
       ansible.builtin.command:
@@ -555,6 +557,7 @@
           - "+"
       changed_when: false
       when: not ansible_check_mode
+      tags: [brai-vault]
 
     - name: Restore Syncthing vault root setgid mode
       ansible.builtin.file:
@@ -563,6 +566,7 @@
         owner: "{{ brai_syncthing_user }}"
         group: "{{ brai_source_group }}"
         mode: "2770"
+      tags: [brai-vault]
 
     - name: Check Syncthing systemd service template
       ansible.builtin.stat:
@@ -1277,6 +1281,7 @@
           changed_when: false
           when: brai_caddy_validate_file.path is defined
       check_mode: false
+      tags: [brai-caddy]
 
     - name: Check unmanaged Brai production Caddy routes before managed install
       ansible.builtin.command:
@@ -1328,6 +1333,7 @@
       changed_when: (brai_caddy_prune_check.stdout | from_json).changed
       check_mode: false
       when: ansible_check_mode
+      tags: [brai-caddy]
 
     - name: Remove unmanaged Brai production Caddy routes before managed install
       ansible.builtin.command:
@@ -1381,6 +1387,7 @@
       notify:
         - Validate Caddy
         - Reload Caddy
+      tags: [brai-caddy]
 
     - name: Install Brai Caddy routes
       ansible.builtin.blockinfile:
@@ -1391,6 +1398,7 @@
       notify:
         - Validate Caddy
         - Reload Caddy
+      tags: [brai-caddy]
 
     - name: Install deploy user sudoers boundary
       ansible.builtin.template:
@@ -1401,6 +1409,7 @@
         mode: "0440"
         validate: "visudo -cf %s"
       tags:
+        - brai-caddy
         - brai-goal-agents
         - brai-storage-maintenance
         - targeted-infra-apply
@@ -1426,11 +1435,13 @@
       ansible.builtin.command:
         cmd: "caddy validate --config {{ brai_caddyfile }}"
       changed_when: false
+      tags: [brai-caddy]
 
     - name: Reload Caddy
       ansible.builtin.systemd_service:
         name: caddy
         state: reloaded
+      tags: [brai-caddy]
 
     - name: Restart Brai Temporal worker
       ansible.builtin.systemd_service:
@@ -1442,3 +1453,4 @@
         name: "syncthing@{{ brai_syncthing_user }}.service"
         daemon_reload: true
         state: restarted
+      tags: [brai-vault]

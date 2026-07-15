@@ -34,6 +34,7 @@ test("sandbox helper handles classify-delivery explicit files and git writes", (
 test("sandbox helper marks live operation completion as requiring escalation", () => {
   assert.equal(sandboxCheckMode(["deploy/scripts/complete-operation-activities.sh", "operation:agent-task:x"]).mode, "require_escalated");
   assert.equal(sandboxCheckMode(["deploy/scripts/complete-operation-activities.sh", "--local", "operation:agent-task:x"]).mode, "require_escalated");
+  assert.equal(sandboxCheckMode(["deploy/scripts/complete-inbox-operations.sh", "operation:agent-task:x"]).mode, "require_escalated");
   assert.equal(sandboxCheckMode(["deploy/scripts/create-operation-activity.sh", "--id", "operation:agent-task:x"]).mode, "require_escalated");
   assert.equal(sandboxCheckMode(["deploy/scripts/list-operation-activities.sh", "--limit", "5"]).mode, "require_escalated");
   assert.equal(sandboxCheckMode(["deploy/scripts/postgres-diagnostics.mjs"]).mode, "require_escalated");
@@ -42,6 +43,7 @@ test("sandbox helper marks live operation completion as requiring escalation", (
 
 test("sandbox helper marks host access checks as requiring escalation", () => {
   assert.equal(sandboxCheckMode(["node", "scripts/brai-task.mjs", "access-contract", "--server"]).mode, "require_escalated");
+  assert.equal(sandboxCheckMode(["deploy/scripts/apply-main-infra.sh", "--check", "brai-vault"]).mode, "require_escalated");
 });
 
 test("sandbox helper marks handoff commands as requiring escalation", () => {

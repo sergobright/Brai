@@ -219,7 +219,7 @@ if [ "$PRUNE_MODE" -eq 1 ]; then
   prune_accepted_branches "${PRUNE_ACCEPTED_BRANCHES[@]}"
   if command -v "$NODE_BIN" >/dev/null 2>&1; then
     if prune_json="$("$NODE_BIN" -e 'const branches = process.argv.slice(1); console.log(JSON.stringify({ branch_count: branches.length, branches }));' "${PRUNE_ACCEPTED_BRANCHES[@]}")"; then
-      record_runtime_log deploy accepted_worktree.prune done "Pruned accepted branch worktrees" "$prune_json"
+      record_runtime_log deploy accepted_worktree.prune "done" "Pruned accepted branch worktrees" "$prune_json"
     fi
   fi
   exit 0
@@ -250,7 +250,7 @@ if [ -n "$(git_cmd status --porcelain)" ]; then
   echo "Rescued dirty local checkout state to $RESCUE_DIR"
   if command -v "$NODE_BIN" >/dev/null 2>&1; then
     if rescue_json="$("$NODE_BIN" -e 'console.log(JSON.stringify({ branch: process.argv[1], commit: process.argv[2], untracked_present: process.argv[3] === "1" }));' "$CURRENT_BRANCH" "$(git_cmd rev-parse --short HEAD)" "$([ -s "$RESCUE_DIR/untracked.zlist" ] && printf 1 || printf 0)")"; then
-      record_runtime_log deploy main_checkout.dirty_rescue done "Rescued dirty local checkout before sync" "$rescue_json"
+      record_runtime_log deploy main_checkout.dirty_rescue "done" "Rescued dirty local checkout before sync" "$rescue_json"
     fi
   fi
 fi
@@ -371,6 +371,7 @@ if [ "${BRAI_MAIN_SYNC_LOCK_CHECKOUT:-1}" = "1" ]; then
     for deploy_tool in \
       deploy/scripts/create-operation-activity.sh \
       deploy/scripts/complete-operation-activities.sh \
+      deploy/scripts/complete-inbox-operations.sh \
       deploy/scripts/list-operation-activities.sh \
       deploy/scripts/record-runtime-log.mjs \
       deploy/scripts/sync-occupied-preview-ota-manifests.sh
@@ -406,7 +407,7 @@ fi
 
 if command -v "$NODE_BIN" >/dev/null 2>&1; then
   if sync_json="$("$NODE_BIN" -e 'console.log(JSON.stringify({ branch: process.argv[1], commit: process.argv[2].slice(0, 12) }));' "$BRANCH" "$TARGET_COMMIT")"; then
-    record_runtime_log deploy main_checkout.sync done "Synced main checkout" "$sync_json"
+    record_runtime_log deploy main_checkout.sync "done" "Synced main checkout" "$sync_json"
   fi
 fi
 echo "Synced $REPO to origin/$BRANCH@$TARGET_COMMIT"

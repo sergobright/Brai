@@ -5,11 +5,16 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="${BRAI_ROOT:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
 NODE_BIN="${NODE_BIN:-node}"
 NPM_BIN="${NPM_BIN:-npm}"
+LOCAL_DEBUG=false
+if [[ "${1:-}" == "--local-debug" ]]; then
+  LOCAL_DEBUG=true
+  shift
+fi
 FLAVOR="${1:-}"
 BUILD_CLIENT="${BRAI_BUILD_CLIENT:-true}"
 
 if [[ -z "$FLAVOR" ]]; then
-  echo "usage: build-android-env-apk.sh production|dev|previewA|previewB|previewC|previewD|previewE" >&2
+  echo "usage: build-android-env-apk.sh [--local-debug] production|dev|previewA|previewB|previewC|previewD|previewE" >&2
   exit 1
 fi
 
@@ -27,6 +32,9 @@ DOMAIN="${META[2]}"
 GRADLE_TASK="${META[3]}"
 RELEASE_KEY="${META[4]}"
 ENV_PATH="${META[5]}"
+if [[ "$LOCAL_DEBUG" == "true" ]]; then
+  GRADLE_TASK="${GRADLE_TASK%Release}Debug"
+fi
 
 ANDROID_API="https://$DOMAIN/api"
 if [[ "$ENVIRONMENT" == "prod" ]]; then
@@ -53,14 +61,26 @@ if [[ "$ENVIRONMENT" == "prod" && "${BRAI_RECORD_APK_LEDGER:-true}" != "false" &
   APK_LEDGER_RECORD=true
   APK_VERSION_ARGS+=(--next-apk true --target-branch "$BRAI_BRANCH" --target-commit "$BRAI_COMMIT")
 fi
-export BRAI_APP_VERSION="${BRAI_APP_VERSION:-$("$NODE_BIN" "$SCRIPT_DIR/resolve-app-version.mjs" "${OTA_VERSION_ARGS[@]}")}"
-export BRAI_APK_VERSION="${BRAI_APK_VERSION:-$("$NODE_BIN" "$SCRIPT_DIR/resolve-app-version.mjs" "${APK_VERSION_ARGS[@]}")}"
+if [[ "$LOCAL_DEBUG" == "true" ]]; then
+  export BRAI_APP_VERSION="${BRAI_APP_VERSION:-0.0.0}"
+  export BRAI_APK_VERSION="${BRAI_APK_VERSION:-1}"
+else
+  export BRAI_APP_VERSION="${BRAI_APP_VERSION:-$("$NODE_BIN" "$SCRIPT_DIR/resolve-app-version.mjs" "${OTA_VERSION_ARGS[@]}")}"
+  export BRAI_APK_VERSION="${BRAI_APK_VERSION:-$("$NODE_BIN" "$SCRIPT_DIR/resolve-app-version.mjs" "${APK_VERSION_ARGS[@]}")}"
+fi
 export BRAI_APK_RELEASE_KEY="${BRAI_APK_RELEASE_KEY:-$RELEASE_KEY}"
-if [[ "$ENVIRONMENT" == preview-* && "${BRAI_BRANCH:-}" == codex/* && -n "${BRAI_COMMIT:-}" ]]; then
+if [[ "$LOCAL_DEBUG" == "true" ]]; then
+  export BRAI_APK_BUILD_KIND="local-debug"
+  export BRAI_APK_PREVIEW_ITERATION="0"
+  export BRAI_ANDROID_VERSION_CODE="${BRAI_ANDROID_VERSION_CODE:-1}"
+  export BRAI_ANDROID_APP_LABEL="${BRAI_ANDROID_APP_LABEL:-Brai Local $FLAVOR}"
+  unset BRAI_ANDROID_KEYSTORE_PATH BRAI_ANDROID_STORE_PASSWORD BRAI_ANDROID_KEY_ALIAS BRAI_ANDROID_KEY_PASSWORD
+elif [[ "$ENVIRONMENT" == preview-* && "${BRAI_BRANCH:-}" == codex/* && -n "${BRAI_COMMIT:-}" ]]; then
   PREVIEW_JSON="$("$SCRIPT_DIR/preview-slots.sh" next-apk-preview "$BRAI_BRANCH" "$BRAI_COMMIT" "$BRAI_APK_VERSION")"
   export BRAI_APK_BUILD_KIND="preview"
-  export BRAI_APK_PREVIEW_ITERATION="$(printf '%s' "$PREVIEW_JSON" | "$NODE_BIN" -e 'let raw = ""; process.stdin.on("data", c => raw += c); process.stdin.on("end", () => console.log(JSON.parse(raw).previewIteration));')"
-  export BRAI_ANDROID_VERSION_CODE="$(printf '%s' "$PREVIEW_JSON" | "$NODE_BIN" -e 'let raw = ""; process.stdin.on("data", c => raw += c); process.stdin.on("end", () => console.log(JSON.parse(raw).versionCode));')"
+  BRAI_APK_PREVIEW_ITERATION="$(printf '%s' "$PREVIEW_JSON" | "$NODE_BIN" -e 'let raw = ""; process.stdin.on("data", c => raw += c); process.stdin.on("end", () => console.log(JSON.parse(raw).previewIteration));')"
+  BRAI_ANDROID_VERSION_CODE="$(printf '%s' "$PREVIEW_JSON" | "$NODE_BIN" -e 'let raw = ""; process.stdin.on("data", c => raw += c); process.stdin.on("end", () => console.log(JSON.parse(raw).versionCode));')"
+  export BRAI_APK_PREVIEW_ITERATION BRAI_ANDROID_VERSION_CODE
   export BRAI_ANDROID_APP_LABEL="${BRAI_ANDROID_APP_LABEL:-Brai $SLOT v${BRAI_APK_VERSION}.${BRAI_APK_PREVIEW_ITERATION}}"
 else
   export BRAI_APK_BUILD_KIND="${BRAI_APK_BUILD_KIND:-stable}"
@@ -79,7 +99,7 @@ if [[ -z "${JAVA_HOME:-}" && -d "/srv/opt/jdk-21" ]]; then
   export PATH="$JAVA_HOME/bin:$PATH"
 fi
 SIGNING_ENV="${BRAI_ANDROID_SIGNING_ENV:-/srv/projects/brai-envs/android-signing/signing.env}"
-if [[ -f "$SIGNING_ENV" ]]; then
+if [[ "$LOCAL_DEBUG" != "true" && -f "$SIGNING_ENV" ]]; then
   set -a
   # shellcheck source=/dev/null
   . "$SIGNING_ENV"
@@ -104,6 +124,17 @@ console.log(parsed.version || "");
     echo "version.json mismatch in $file: expected $expected, got ${actual:-missing}" >&2
     exit 1
   fi
+}
+
+run_capacitor_sync() {
+  local settings="$ROOT/apps/brai_app/android/capacitor.settings.gradle"
+  local backup status=0
+  backup="$(mktemp)"
+  cp -- "$settings" "$backup"
+  (cd "$ROOT" && "$NPM_BIN" run app:cap:sync) || status=$?
+  cp -- "$backup" "$settings"
+  rm -f -- "$backup"
+  return "$status"
 }
 
 OUT_DIR="$ROOT/apps/brai_app/out"
@@ -134,7 +165,7 @@ fs.writeFileSync(outVersionFile, `${JSON.stringify(parsed, null, 2)}\n`);
 ' "$ROOT" "$BRAI_APP_VERSION" "$BRAI_ANDROID_VERSION_CODE"
 verify_version_json "$ROOT/apps/brai_app/out/version.json" "$BRAI_APP_VERSION"
 "$NODE_BIN" "$SCRIPT_DIR/write-client-runtime-config.mjs"
-(cd "$ROOT" && "$NPM_BIN" run app:cap:sync)
+run_capacitor_sync
 verify_version_json "$ROOT/apps/brai_app/android/app/src/main/assets/public/version.json" "$BRAI_APP_VERSION"
 if [[ -x "/srv/opt/android-build-env/build-android.sh" ]]; then
   /srv/opt/android-build-env/build-android.sh "$ROOT/apps/brai_app/android" "$GRADLE_TASK"
@@ -142,7 +173,9 @@ else
   (cd "$ROOT/apps/brai_app/android" && ./gradlew "$GRADLE_TASK")
 fi
 
-APK="$ROOT/apps/brai_app/android/app/build/outputs/apk/$FLAVOR/release/app-$FLAVOR-release.apk"
+BUILD_TYPE="release"
+if [[ "$LOCAL_DEBUG" == "true" ]]; then BUILD_TYPE="debug"; fi
+APK="$ROOT/apps/brai_app/android/app/build/outputs/apk/$FLAVOR/$BUILD_TYPE/app-$FLAVOR-$BUILD_TYPE.apk"
 if [[ ! -f "$APK" ]]; then
   echo "Missing APK output: $APK" >&2
   exit 1
@@ -164,6 +197,11 @@ process.stdin.on("end", () => {
 if [[ "$APK_EMBEDDED_VERSION" != "$BRAI_APP_VERSION" ]]; then
   echo "Embedded APK version.json mismatch: expected $BRAI_APP_VERSION, got ${APK_EMBEDDED_VERSION:-missing}" >&2
   exit 1
+fi
+
+if [[ "$LOCAL_DEBUG" == "true" ]]; then
+  echo "local-debug-apk=$APK"
+  exit 0
 fi
 
 if [[ "$APK_LEDGER_RECORD" == "true" ]]; then

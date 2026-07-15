@@ -93,6 +93,15 @@ forward_signal() {
 }
 
 run() {
+  if [[ "${BRAI_TEMPORAL_DIRECT:-false}" == "true" ]]; then
+    if [[ "${1:-}" != "query-preview-deploy" ]]; then
+      echo "BRAI_TEMPORAL_DIRECT only permits read-only query-preview-deploy." >&2
+      return 1
+    fi
+    TEMPORAL_ADDRESS="${TEMPORAL_ADDRESS:-127.0.0.1:7233}" run_temporal_client "$@"
+    return
+  fi
+
   need BRAI_DEPLOY_HOST || return 1
   need BRAI_DEPLOY_USER || return 1
   need BRAI_DEPLOY_SSH_KEY || return 1

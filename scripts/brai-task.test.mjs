@@ -140,6 +140,7 @@ test("server access contract checks operation helper sudo boundary", () => {
   const sudoers = fs.readFileSync(new URL("../deploy/ansible/templates/brai-deploy-sudoers.j2", import.meta.url), "utf8");
   assert.match(script, /commandCheck\("operation create helper host-local sudo"/);
   assert.match(script, /commandCheck\("operation complete helper host-local sudo"/);
+  assert.match(script, /commandCheck\("Inbox operation complete helper host-local sudo"/);
   assert.match(script, /commandCheck\("operation list helper host-local sudo"/);
   assert.match(script, /commandCheck\("accepted preview OTA sync access"/);
   assert.match(script, /sync-occupied-preview-ota-manifests\.sh/);
@@ -149,12 +150,14 @@ test("server access contract checks operation helper sudo boundary", () => {
   assert.match(sudoers, /ALL=\(\{\{ brai_service_user \}\}\) NOPASSWD:/);
   assert.match(sudoers, /create-operation-activity\.sh --local \*/);
   assert.match(sudoers, /complete-operation-activities\.sh --local \*/);
+  assert.match(sudoers, /complete-inbox-operations\.sh --local \*/);
   assert.match(sudoers, /list-operation-activities\.sh --local \*/);
   assert.match(sudoers, /brai_operation_maintainers/);
 });
 
 test("delivery classifier keeps operation helper changes in infra", () => {
   assert.equal(deliveryClassForFile("deploy/scripts/create-operation-activity.sh"), "infra");
+  assert.equal(deliveryClassForFile("deploy/scripts/complete-inbox-operations.sh"), "infra");
   assert.equal(deliveryClassForFile("deploy/scripts/list-operation-activities.sh"), "infra");
 });
 
@@ -473,14 +476,18 @@ test("delivery classifier separates infra-docs from runtime preview", () => {
   assert.equal(deliveryClassForFile(".gitignore"), "infra");
   assert.equal(deliveryClassForFile("apps/brai_app/tests/unit/publishScripts.test.ts"), "infra");
   assert.equal(deliveryClassForFile("apps/brai_app/tests/unit/activityStore.test.ts"), "technical");
+  assert.equal(deliveryClassForFile("services/brai_goal_agents/test/deploy.test.mjs"), "technical");
   assert.equal(deliveryClassForFile("apps/brai_app/vitest.config.mts"), "technical");
   assert.equal(deliveryClassForFile("services/brai_api/test/api.auth-migrations.test.js"), "technical");
   assert.equal(deliveryClassForFile("deploy/environments.json"), "infra");
   assert.equal(deliveryClassForFile("deploy/ansible/brai.yml"), "infra");
+  assert.equal(deliveryClassForFile("deploy/chrome-devtools-mcp/caddy-auth.js"), "infra");
   assert.equal(deliveryClassForFile("deploy/systemd/brai-socraticode-watcher.service"), "infra");
   assert.equal(deliveryClassForFile("deploy/systemd/brai-temporal-worker.service"), "infra");
   assert.equal(deliveryClassForFile("deploy/scripts/apk-release-targets.mjs"), "infra");
   assert.equal(deliveryClassForFile("deploy/scripts/build-nonproduction-apks.sh"), "infra");
+  assert.equal(deliveryClassForFile("deploy/scripts/backup-postgres-to-telegram.sh"), "infra");
+  assert.equal(deliveryClassForFile("deploy/scripts/ci-temporal-signal.sh"), "infra");
   assert.equal(deliveryClassForFile("deploy/scripts/resolve-deploy-env.mjs"), "infra");
   assert.equal(deliveryClassForFile("deploy/scripts/classify-delivery.mjs"), "infra");
   assert.equal(deliveryClassForFile("deploy/scripts/preview-slots.mjs"), "infra");
@@ -502,6 +509,7 @@ test("delivery classifier separates infra-docs from runtime preview", () => {
   assert.equal(deliveryClassForFile("scripts/caddy-prune-managed-sites.test.mjs"), "infra");
   assert.equal(deliveryClassForFile("scripts/brai-task.mjs"), "infra");
   assert.equal(deliveryClassForFile("scripts/check-open-openspec-changes.mjs"), "infra");
+  assert.equal(deliveryClassForFile("scripts/check-public-branch.mjs"), "infra");
   assert.equal(deliveryClassForFile("services/brai_temporal/src/state.mjs"), "infra");
   assert.equal(deliveryClassForFile("supabase/migrations/0002_enable_rls_public_tables.sql"), "infra");
   assert.equal(deliveryClassForFile("supabase/migrations/0003_fix_rls_function_search_path.sql"), "infra");
@@ -1960,6 +1968,15 @@ test("delivery handoff writes infra-docs receipt only for merged PRs", () => {
   assert.equal(receipt.runId, 42);
 });
 
+test("delivery handoff performs one safe initial push before fetching a missing remote branch", () => {
+  const script = fs.readFileSync(new URL("./brai-task.mjs", import.meta.url), "utf8");
+  const helper = script.slice(script.indexOf("function ensureTaskBranchPushed"), script.indexOf("function remoteBranchExists"));
+  assert.match(helper, /if \(!remoteBranchExists\(branch\)\)/);
+  assert.match(helper, /\["git", "push", "-u", "origin", `HEAD:refs\/heads\/\$\{branch\}`\]/);
+  assert.ok(helper.indexOf("git\", \"push") < helper.indexOf("fetchTaskBranch(branch)"));
+  assert.match(helper, /remoteSha !== head/);
+});
+
 test("preview handoff waits for an in-progress delivery run before writing a receipt", () => {
   const fixture = setupPreviewHandoffFixture();
   const result = runPreviewHandoffFixture(fixture);
@@ -2408,6 +2425,15 @@ test("accept preview checks verified preview before PR actions", () => {
   assert.match(script, /cd "\$ROOT"/);
   assert.ok(script.indexOf('ROOT="$(find_acceptance_root)"') < script.indexOf("ensure_acceptance_marker_writable"));
   assert.ok(script.indexOf('cd "$ROOT"') < script.indexOf("ensure_acceptance_marker_writable"));
+});
+
+test("accept preview handles deleted merged refs and requires explicit supersession", () => {
+  const script = fs.readFileSync(path.join(process.cwd(), "deploy/scripts/accept-preview.sh"), "utf8");
+  assert.ok(script.indexOf('HEAD_SHA="$(git rev-parse "$BRANCH")"') < script.indexOf('git fetch origin "$BRANCH:refs/remotes/origin/$BRANCH"'));
+  assert.match(script, /--supersede codex\/<older-branch>/);
+  assert.match(script, /gh pr close "\$earlier_number"/);
+  assert.match(script, /ci-ssh-release-slot\.sh/);
+  assert.match(script, /To supersede explicitly:/);
 });
 
 test("accepted preview stale cleanup is required", () => {
