@@ -587,6 +587,7 @@ Brai SHALL render authenticated product sections through one shared responsive p
 - **THEN** its main content is centered in the available workspace
 - **AND** its desktop maximum width is 768px
 - **AND** its opaque fixed header remains visible above independently scrolling content
+- **AND** exactly one shared `ScrollArea` renders the standard scrollbar instead of a raw browser overflow scrollbar or a nested duplicate scroll viewport
 
 #### Scenario: A page has an open panel
 - **WHEN** a persistent panel or explicitly selected item detail is open on desktop
@@ -695,6 +696,7 @@ Brai SHALL render the mobile Dock, its overflow sheets, second level, and contex
 - **AND** its four action controls use the same centers, 44px control size, and 8px gaps as the four main Dock controls
 - **AND** equal 68px edge lanes are reserved on both sides
 - **AND** a separate `SunMedium` control is vertically centered in the second row and horizontally centered directly above the right arrow
+- **AND** `SunMedium` is a descendant of the second level's transform owner and exits in the same motion
 
 #### Scenario: The context grid is opened
 - **WHEN** the user activates the separate `SunMedium` control

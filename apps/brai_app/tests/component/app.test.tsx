@@ -412,7 +412,9 @@ describe("BraiApp shell", () => {
     render(<BraiApp />);
 
     fireEvent.click(screen.getByRole("button", { name: "Открыть правое меню" }));
-    fireEvent.click(screen.getByRole("button", { name: "Контекст-меню" }));
+    const dockSheet = document.querySelector(".mobile-dock-overflow-sheet") as HTMLElement;
+    const contextTrigger = within(dockSheet).getByRole("button", { name: "Контекст-меню" });
+    fireEvent.click(contextTrigger);
 
     expect(document.querySelector(".mobile-dock-overflow-sheet")).toBeInTheDocument();
     const contextSheet = document.querySelector(".mobile-context-menu-sheet") as HTMLElement;

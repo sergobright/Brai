@@ -422,7 +422,7 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
             onMobileOverlayChange={app.setActionOverlayOpen}
           />
         ) : screenSection === "archive" ? (
-          <PageWorkspace main={<ArchiveSection
+          <PageWorkspace mainScroll={false} main={<ArchiveSection
             activityState={app.actions}
             localSnapshotReady={app.localSnapshotReady}
             onRestoreAction={app.onRestoreAction}
@@ -451,7 +451,7 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
             onBackground={app.setFocusBackground}
           />
         ) : screenSection === "draws" ? (
-          <PageWorkspace fullBleed={isActivePage && drawsFullscreenActive} main={<DrawsSection
+          <PageWorkspace fullBleed={isActivePage && drawsFullscreenActive} mainScroll={false} main={<DrawsSection
             fullScreen={isActivePage && drawsFullscreenActive}
             theme={app.theme}
             onFullscreenChange={isActivePage ? handleDrawsFullscreenChange : undefined}

@@ -180,9 +180,20 @@ test("opens the right mobile dock overflow with placeholder items", async ({ pag
     return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
   }));
   upperCenters.forEach((center, index) => expect(Math.abs(center.x - mainCenters[index].x)).toBeLessThanOrEqual(1.5));
-  const sunBox = await page.getByRole("button", { name: "Контекст-меню" }).boundingBox();
+  const sun = sheet.getByRole("button", { name: "Контекст-меню" });
+  await expect(sun).toBeVisible();
+  const sunBox = await sun.boundingBox();
   expect(Math.abs((sunBox?.y ?? 0) + (sunBox?.height ?? 0) / 2 - upperCenters[0].y)).toBeLessThanOrEqual(1.5);
   expect(Math.abs((sunBox?.x ?? 0) + (sunBox?.width ?? 0) / 2 - (rightButtonAfter.x + rightButtonAfter.width / 2))).toBeLessThanOrEqual(1.5);
+
+  await closeButton.click();
+  await page.waitForTimeout(60);
+  const closingSunBox = await sun.boundingBox();
+  expect(closingSunBox).not.toBeNull();
+  expect(closingSunBox?.y ?? 0).toBeGreaterThan((sunBox?.y ?? 0) + 1);
+  await expect(sheet).toHaveCount(0);
+  await page.getByRole("button", { name: "Открыть правое меню" }).click();
+  await expect(sheet).toHaveAttribute("aria-label", "Правое меню");
 
   await leftButton.click();
   await expect(page.locator(".mobile-dock-overflow-sheet")).toHaveAttribute("aria-label", "Левое меню");
@@ -201,7 +212,7 @@ test("opens the 3x4 context grid above the second Dock level", async ({ page }, 
   await page.goto("/");
   await page.getByRole("button", { name: "Открыть правое меню" }).click();
   await expect(page.locator(".mobile-dock-overflow-sheet")).toBeVisible();
-  await page.getByRole("button", { name: "Контекст-меню" }).click();
+  await page.locator(".mobile-dock-overflow-sheet").getByRole("button", { name: "Контекст-меню" }).click();
   const contextMenu = page.locator(".mobile-context-menu-sheet");
   await expect(contextMenu).toBeVisible();
   await expect(contextMenu.getByRole("button", { name: /Контекст \d+: В разработке/ })).toHaveCount(12);

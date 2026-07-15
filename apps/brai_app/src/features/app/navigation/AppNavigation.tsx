@@ -375,7 +375,7 @@ export function MobileDockOverflowSheet({
             "mobile-dock-overflow-sheet pointer-events-auto grid min-w-0 overflow-hidden shadow-xl will-change-transform",
             side === "left"
               ? "max-h-[calc(100dvh-env(safe-area-inset-top)-0.5rem)] w-full grid-rows-[auto_minmax(0,1fr)] rounded-t-2xl border-t border-border bg-card pb-[calc(3.25rem+env(safe-area-inset-bottom))] pt-2"
-              : "h-16 w-full items-center justify-center border-t border-border/40 bg-background/95 px-0 py-1 shadow-none backdrop-blur-[14px] dark:bg-background/95",
+              : "h-16 w-full items-center border-t border-border/40 bg-background/95 px-0 py-1 shadow-none backdrop-blur-[14px] dark:bg-background/95",
           )}
           style={sheetStyle}
           aria-label={side === "left" ? "Левое меню" : "Правое меню"}
@@ -417,7 +417,9 @@ export function MobileDockOverflowSheet({
                   <MobileDockOverflowActionButton key={label} icon={Icon} label={`Заглушка: ${label}`} disabled />
                 ))}
               </div>
-              <span aria-hidden="true" />
+              <div className="grid place-items-center">
+                {!contextMenuOpen ? <MobileDockOverflowActionButton icon={SunMedium} label="Контекст-меню" onClick={onContextMenu} /> : null}
+              </div>
             </div>
           )}
         </aside>
@@ -437,7 +439,6 @@ export function MobileDockOverflowSheet({
           hidden={false}
           onClick={() => side === "right" ? closeSheet() : closeThen(() => onSwitchSide("right"))}
         />
-        {side === "right" ? <MobileContextMenuButton open={false} onClick={onContextMenu} /> : null}
       </>
     ) : null}
     </>

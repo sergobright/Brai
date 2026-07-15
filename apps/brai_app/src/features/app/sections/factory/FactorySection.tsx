@@ -60,6 +60,8 @@ export function FactorySection({ onMobileOverlayChange }: { onMobileOverlayChang
     <section className="relative grid h-full min-h-0 grid-rows-[minmax(0,1fr)] gap-3.5 max-[860px]:gap-0" aria-label="Factory">
       <PageWorkspace
         className="relative"
+        mainScroll={false}
+        panelScroll={false}
         main={<ScrollArea className="h-full min-h-0 min-w-0 max-[860px]:-mx-3.5 max-[860px]:[&>[data-slot=scroll-area-scrollbar]]:!right-0" contentInset="none">
           <div className="grid gap-3 pr-[18px] max-[860px]:px-3.5" aria-label="Поток AI_logs">
             <div className="sticky top-0 z-[2] flex items-center justify-between gap-3 bg-background/95 pb-3 backdrop-blur max-[860px]:hidden">

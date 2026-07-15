@@ -83,7 +83,7 @@ export function FocusSection({
       ? <FocusDesktopPanel label={FOCUS_GOAL_LABEL}><GoalSection goal={goal} todayKey={todayKey} /></FocusDesktopPanel>
       : null;
 
-  return <PageWorkspace className="focus-section relative isolate" main={timerPane} persistentPanel={panel} />;
+  return <PageWorkspace className="focus-section relative isolate" main={timerPane} mainScroll={false} panelScroll={false} persistentPanel={panel} />;
 }
 
 export function FocusContextPanelSheet({

@@ -166,6 +166,8 @@ export function InboxSection({
     >
       <PageWorkspace
         className="actions-workspace relative"
+        mainScroll={false}
+        panelScroll={false}
         main={<ScrollArea className="actions-list-pane h-full min-h-0 min-w-0 max-[860px]:[&>[data-slot=scroll-area-viewport]>div]:pb-24">
           <form className="sticky top-0 z-[4] mb-[18px] max-[860px]:hidden" onSubmit={submitDesktop}>
             <InputGroup className="actions-add-form">
