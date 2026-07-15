@@ -354,6 +354,9 @@ test("local main sync preserves runtime dirs and hard resets to origin main", ()
   assert.match(script, /chown "root:\$SOURCE_GROUP" "\$REPO"/);
   assert.match(script, /chown -R mark:mark \.git/);
   assert.match(script, /chown mark:mark \.codex-worktrees/);
+  assert.match(script, /chown -R "\$GIT_USER:\$SOURCE_GROUP" openspec\/changes/);
+  assert.match(script, /chmod -R u=rwX,g=rwX,o= openspec\/changes/);
+  assert.match(script, /find openspec\/changes -type d -exec chmod g\+s/);
   assert.match(script, /BRAI_LOCK_STALE_WORKTREES:-0/);
   assert.match(script, /chmod u=rwx,g=rx,o=x deploy/);
   assert.match(script, /complete-operation-activities\.sh/);

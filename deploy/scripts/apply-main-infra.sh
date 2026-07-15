@@ -4,7 +4,7 @@ set -euo pipefail
 MODE="${1:-}"
 TARGET="${2:-}"
 ROOT="${BRAI_MAIN_ROOT:-/srv/projects/brai}"
-INVENTORY="${BRAI_ANSIBLE_INVENTORY:-brai,}"
+INVENTORY="${BRAI_ANSIBLE_INVENTORY:-}"
 
 if [[ "$MODE" != "--check" && "$MODE" != "--apply" ]] || [[ "$TARGET" != "brai-caddy" && "$TARGET" != "brai-vault" ]]; then
   echo "usage: apply-main-infra.sh --check|--apply brai-caddy|brai-vault" >&2
@@ -19,13 +19,15 @@ if [[ "$("${GIT[@]}" rev-parse HEAD)" != "$("${GIT[@]}" rev-parse origin/main)" 
   echo "Canonical main must match origin/main before targeted infra apply." >&2
   exit 1
 fi
-ANSIBLE_ARGS=(-i "$INVENTORY")
-if [[ "$INVENTORY" == "brai," ]]; then
-  ANSIBLE_ARGS+=(--connection local)
+if [[ -z "$INVENTORY" ]]; then
+  INVENTORY="$(mktemp "${TMPDIR:-/tmp}/brai-ansible-inventory.XXXXXX")"
+  trap 'rm -f "$INVENTORY"' EXIT
+  printf '[brai]\nlocalhost ansible_connection=local\n' >"$INVENTORY"
 elif [[ ! -r "$INVENTORY" ]]; then
   echo "Ansible inventory is missing: $INVENTORY" >&2
   exit 1
 fi
+ANSIBLE_ARGS=(-i "$INVENTORY")
 
 cd "$ROOT"
 LIST_HOSTS="$(/srv/opt/ansible/bin/ansible-playbook "${ANSIBLE_ARGS[@]}" deploy/ansible/brai.yml --tags "$TARGET" --list-hosts 2>&1)"

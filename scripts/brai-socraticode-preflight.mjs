@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -78,6 +79,40 @@ export function validateCodexConfig() {
   if (!/\[mcp_servers\.socraticode\]/.test(configText)) {
     throw new Error("Codex MCP config has no [mcp_servers.socraticode] section");
   }
+}
+
+export function ensureNonBareWorktree(root) {
+  const env = { ...process.env };
+  delete env.GIT_DIR;
+  delete env.GIT_WORK_TREE;
+  const run = (...args) => spawnSync("git", ["-C", root, ...args], { encoding: "utf8", env });
+  const current = run("rev-parse", "--is-inside-work-tree");
+  if (current.status === 0 && current.stdout.trim() === "true") return false;
+  const repaired = run("config", "core.bare", "false");
+  const verified = run("rev-parse", "--is-inside-work-tree");
+  if (repaired.status !== 0 || verified.status !== 0 || verified.stdout.trim() !== "true") {
+    throw new Error(`SocratiCode requires a non-bare Git worktree at ${root}.`);
+  }
+  return true;
+}
+
+function guardSocraticodeGitState(root, socraticode) {
+  return Object.fromEntries(Object.entries(socraticode).map(([name, operation]) => {
+    if (typeof operation !== "function") return [name, operation];
+    return [name, (...args) => {
+      try {
+        const result = operation(...args);
+        if (result && typeof result.finally === "function") {
+          return result.finally(() => ensureNonBareWorktree(root));
+        }
+        ensureNonBareWorktree(root);
+        return result;
+      } catch (error) {
+        ensureNonBareWorktree(root);
+        throw error;
+      }
+    }];
+  }));
 }
 
 export async function loadSocraticodeModules() {
@@ -244,10 +279,11 @@ export async function runSocraticodeCheck(options = {}) {
   const root = path.resolve(options.root ?? process.cwd());
   const report = options.report ?? ((message) => console.log(message));
 
+  ensureNonBareWorktree(root);
   const { projectId: committedProjectId } = validateProjectFiles(root);
   validateCodexConfig();
 
-  const socraticode = await loadSocraticodeModules();
+  const socraticode = guardSocraticodeGitState(root, await loadSocraticodeModules());
   const effectiveProjectId = socraticode.projectIdFromPath(root);
   const collection = socraticode.collectionName(effectiveProjectId);
   assertExpectedProject({ root, committedProjectId, effectiveProjectId, collection });

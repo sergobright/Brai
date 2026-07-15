@@ -354,6 +354,11 @@ if [ "${BRAI_MAIN_SYNC_LOCK_CHECKOUT:-1}" = "1" ]; then
   if [ -d deploy ]; then
     chmod u=rwx,g=rx,o=x deploy
   fi
+  if [ -d openspec/changes ] && [ ! -L openspec/changes ]; then
+    chown -R "$GIT_USER:$SOURCE_GROUP" openspec/changes
+    chmod -R u=rwX,g=rwX,o= openspec/changes
+    find openspec/changes -type d -exec chmod g+s {} +
+  fi
 
   if getent group brai-deploy >/dev/null 2>&1; then
     if [ -d data ]; then

@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
 
 import {
@@ -9,11 +12,24 @@ import {
   assertLastOperationHealthy,
   assertWatcherActive,
   ensureGraphFresh,
+  ensureNonBareWorktree,
   isGraphStale,
   parseCliArgs,
   parseCommittedProjectId,
   waitForWatcherActive,
 } from "./brai-socraticode-preflight.mjs";
+
+test("SocratiCode restores a corrupted shared Git worktree", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "brai-socraticode-git-"));
+  const gitEnv = { ...process.env };
+  for (const name of ["GIT_COMMON_DIR", "GIT_DIR", "GIT_WORK_TREE"]) delete gitEnv[name];
+  execFileSync("git", ["init", "-b", "main", root], { env: gitEnv });
+  execFileSync("git", ["-C", root, "config", "core.bare", "true"], { env: gitEnv });
+
+  assert.equal(ensureNonBareWorktree(root), true);
+  assert.equal(execFileSync("git", ["-C", root, "rev-parse", "--is-inside-work-tree"], { encoding: "utf8", env: gitEnv }).trim(), "true");
+  assert.equal(ensureNonBareWorktree(root), false);
+});
 
 test("parseCommittedProjectId accepts a stable shared projectId", () => {
   assert.equal(parseCommittedProjectId('{"projectId":"brightos_brai"}'), "brightos_brai");
