@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-readonly AUTH_IMAGE_PATTERN='^ghcr\.io/sergobright/brai-auth@sha256:[0-9a-f]{64}$'
+readonly AUTH_IMAGE_PATTERN='^ghcr\.io/hexafox-labs/brai-auth@sha256:[0-9a-f]{64}$'
 readonly SOURCE_SHA_PATTERN='^[0-9a-f]{40}$'
-readonly AUTH_IMAGE_SOURCE='https://github.com/sergobright/Brai'
+readonly REGISTRY_USER_PATTERN='^([A-Za-z0-9][A-Za-z0-9-]{0,38}|[A-Za-z0-9][A-Za-z0-9-]{0,38}\[bot\])$'
+readonly AUTH_IMAGE_SOURCE='https://github.com/HexaFox-Labs/Brai'
 readonly ABSENT_IMAGE='absent'
 
 die() {
@@ -14,7 +15,7 @@ die() {
 usage() {
   cat >&2 <<'EOF'
 usage:
-  brai-auth-runtime.sh pull-only <digest> <source-sha>
+  brai-auth-runtime.sh pull-only <registry-user> <digest> <source-sha>
   brai-auth-runtime.sh deploy <environment> <digest> <source-sha> [<branch> <commit> <lease>]
   brai-auth-runtime.sh route-enable <environment> [<branch> <commit> <lease>]
   brai-auth-runtime.sh route-disable <environment> [<branch> <commit> <lease>]
@@ -104,7 +105,12 @@ load_environment() {
 }
 
 require_image() {
-  [[ "$1" =~ $AUTH_IMAGE_PATTERN ]] || die 'Auth image must be the exact immutable ghcr.io/sergobright/brai-auth@sha256 digest.' 2
+  [[ "$1" =~ $AUTH_IMAGE_PATTERN ]] || die 'Auth image must be the exact immutable ghcr.io/hexafox-labs/brai-auth@sha256 digest.' 2
+}
+
+require_registry_user() {
+  [[ "$1" =~ $REGISTRY_USER_PATTERN ]] \
+    || die 'GHCR registry user must be a valid bounded GitHub actor login.' 2
 }
 
 parse_lease() {
@@ -181,7 +187,7 @@ verify_image_identity() {
 }
 
 pull_only() (
-  local image="$1" expected_sha="$2" registry_token='' docker_config=''
+  local registry_user="$1" image="$2" expected_sha="$3" registry_token='' docker_config=''
   # Invoked indirectly by the EXIT trap below.
   # shellcheck disable=SC2329
   cleanup_registry_login() {
@@ -200,7 +206,7 @@ pull_only() (
   docker_config="$(/usr/bin/mktemp -d "$AUTH_ROOT/.registry-login.XXXXXX")"
   /bin/chmod 0700 "$docker_config"
   if ! printf '%s\n' "$registry_token" \
-    | DOCKER_CONFIG="$docker_config" "$DOCKER_BIN" login ghcr.io --username sergobright --password-stdin \
+    | DOCKER_CONFIG="$docker_config" "$DOCKER_BIN" login ghcr.io --username "$registry_user" --password-stdin \
       >/dev/null 2>&1; then
     die 'Short-lived GHCR authentication failed.'
   fi
@@ -229,7 +235,7 @@ deploy_image() {
 }
 
 remove_container() {
-  local placeholder='ghcr.io/sergobright/brai-auth@sha256:0000000000000000000000000000000000000000000000000000000000000000'
+  local placeholder='ghcr.io/hexafox-labs/brai-auth@sha256:0000000000000000000000000000000000000000000000000000000000000000'
   compose "$placeholder" rm --stop --force auth
 }
 
@@ -384,15 +390,17 @@ run_action() {
 main() {
   configure_paths
   [[ $# -ge 1 ]] || usage
-  local action="$1" environment='' image='' prior_route='' source_sha=''
+  local action="$1" environment='' registry_user='' image='' prior_route='' source_sha=''
   shift
   if [[ "$action" == pull-only ]]; then
-    [[ $# -eq 2 ]] || usage
-    image="$1"
-    source_sha="$2"
+    [[ $# -eq 3 ]] || usage
+    registry_user="$1"
+    image="$2"
+    source_sha="$3"
+    require_registry_user "$registry_user"
     require_image "$image"
     [[ "$source_sha" =~ $SOURCE_SHA_PATTERN ]] || die 'Auth image source SHA must be an exact lowercase 40-character SHA.' 2
-    pull_only "$image" "$source_sha"
+    pull_only "$registry_user" "$image" "$source_sha"
     printf '{"ok":true,"action":"pull-only"}\n'
     return 0
   fi

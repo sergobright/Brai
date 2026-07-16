@@ -6,6 +6,7 @@ brai_caddyfile: /etc/caddy/Caddyfile
 brai_auth_root: /srv/opt/brai-auth
 brai_auth_compose: "{{ brai_auth_root }}/compose.yml"
 brai_auth_runtime_helper: /srv/opt/brai-auth-runtime.sh
+brai_auth_image_repository: ghcr.io/hexafox-labs/brai-auth
 brai_prod_api_env_helper: /srv/opt/brai-prod-api-env.sh
 brai_prod_api_env_state_root: "{{ brai_protected_env_dir }}/.brai-prod-api-env"
 brai_auth_caddy_root: /etc/caddy/brai-auth
@@ -13,7 +14,7 @@ brai_auth_caddy_lock: "{{ brai_auth_root }}/caddy.lock"
 brai_public_site_domain: brai.one
 brai_public_site_legacy_domains:
   - brightos.world
-brai_github_repository: sergobright/Brai
+brai_github_repository: HexaFox-Labs/Brai
 brai_public_site_root: "{{ brai_repo }}/deploy/site"
 brai_adr_domain: adr.brai.one
 brai_adr_legacy_domains: []

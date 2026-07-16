@@ -14,9 +14,12 @@ const deploySudoers = path.join(repoRoot, "deploy/ansible/templates/brai-deploy-
 const authTasks = path.join(repoRoot, "deploy/ansible/tasks/brai-auth-bootstrap.yml");
 const playbook = path.join(repoRoot, "deploy/ansible/brai.yml");
 const apiService = path.join(repoRoot, "deploy/ansible/templates/brai-api.service.j2");
+const temporalEnv = path.join(repoRoot, "deploy/ansible/templates/brai-temporal-worker.env.j2");
 const groupVars = path.join(repoRoot, "deploy/ansible/group_vars/brai.yml");
-const digest = `ghcr.io/sergobright/brai-auth@sha256:${"a".repeat(64)}`;
-const priorDigest = `ghcr.io/sergobright/brai-auth@sha256:${"b".repeat(64)}`;
+const digest = `ghcr.io/hexafox-labs/brai-auth@sha256:${"a".repeat(64)}`;
+const priorDigest = `ghcr.io/hexafox-labs/brai-auth@sha256:${"b".repeat(64)}`;
+const oldOwnerDigest = `ghcr.io/sergobright/brai-auth@sha256:${"a".repeat(64)}`;
+const registryUser = "HexaFox-Labs";
 const branch = "codex/auth-service";
 const commit = "c".repeat(40);
 const generation = "17";
@@ -58,12 +61,17 @@ test("auth bootstrap isolates database administration and installs the fixed pro
   const variables = fs.readFileSync(groupVars, "utf8");
   const playbookSource = fs.readFileSync(playbook, "utf8");
   const helperSource = fs.readFileSync(prodApiEnvHelper, "utf8");
+  const temporalEnvSource = fs.readFileSync(temporalEnv, "utf8");
 
   assert.match(variables, /^brai_db_admin_group: brai-db-admin$/m);
   assert.match(variables, /^brai_db_admin_members: "\{\{ \(\[brai_deploy_user\] \+ brai_operation_maintainers\) \| unique \| sort \}\}"$/m);
   assert.match(variables, /^brai_db_admin_members_state: "\{\{ brai_protected_env_dir \}\}\/\.brai-db-admin-members"$/m);
   assert.match(variables, /^brai_prod_api_env_helper: \/srv\/opt\/brai-prod-api-env\.sh$/m);
   assert.match(variables, /^brai_prod_api_env_state_root: "\{\{ brai_protected_env_dir \}\}\/\.brai-prod-api-env"$/m);
+  assert.match(variables, /^brai_auth_image_repository: ghcr\.io\/hexafox-labs\/brai-auth$/m);
+  assert.match(variables, /^brai_github_repository: HexaFox-Labs\/Brai$/m);
+  assert.doesNotMatch(variables, /^brai_auth_image_source:/m);
+  assert.match(temporalEnvSource, /^GITHUB_REPOSITORY=\{\{ brai_github_repository \}\}$/m);
   assert.match(tasks, /name: Create isolated Brai database administrator group[\s\S]*?name: "\{\{ brai_db_admin_group \}\}"[\s\S]*?system: true/);
   assert.match(tasks, /name: Reconcile exact production database administrator membership[\s\S]*?\/usr\/bin\/gpasswd[\s\S]*?--members[\s\S]*?brai_db_admin_members \| join\(','\)/);
   assert.match(tasks, /name: Assert exact production database administrator membership[\s\S]*?brai_service_user not in brai_db_admin_members[\s\S]*?brai_goal_agent_user not in brai_db_admin_members/);
@@ -73,6 +81,8 @@ test("auth bootstrap isolates database administration and installs the fixed pro
   assert.match(tasks, /name: Assert Brai service identities cannot read Supabase deploy credentials[\s\S]*?\/usr\/bin\/test[\s\S]*?- "!"[\s\S]*?- -r/);
   assert.match(tasks, /name: Assert production database administrators can read Supabase deploy credentials/);
   assert.match(tasks, /name: Install fixed production API environment transaction helper[\s\S]*?src: "\{\{ playbook_dir \}\}\/files\/brai-prod-api-env\.sh"[\s\S]*?dest: "\{\{ brai_prod_api_env_helper \}\}"[\s\S]*?mode: "0755"/);
+  assert.ok(tasks.includes("immutable `{{ brai_auth_image_repository }}@sha256:...` image с exact OCI source `https://github.com/{{ brai_github_repository }}`"));
+  assert.match(tasks, /`pull-only` принимает валидированный GitHub actor\/login отдельным несекретным аргументом/);
   assert.match(tasks, /name: Provision root-only production API environment transaction state[\s\S]*?mode: "0700"/);
   assert.match(tasks, /name: Provision root-only production API environment transaction lock[\s\S]*?mode: "0600"/);
   assert.equal((playbookSource.match(/brai_supabase_deploy_env_source/g) ?? []).length, 0);
@@ -140,10 +150,15 @@ test("helper syntax and root/test boundary stay fixed", () => {
   assert.match(source, /if \(\( EUID == 0 \)\)/);
   assert.match(source, /BRAI_AUTH_TEST_\* overrides are forbidden for root execution/);
   assert.match(source, /Unsupported test override/);
-  assert.match(source, /pull-only/);
+  assert.match(source, /pull-only <registry-user> <digest> <source-sha>/);
   assert.match(source, /deploy <environment> <digest> <source-sha>/);
+  assert.ok(source.includes("readonly AUTH_IMAGE_PATTERN='^ghcr\\.io/hexafox-labs/brai-auth@sha256:[0-9a-f]{64}$'"));
+  assert.ok(source.includes("readonly AUTH_IMAGE_SOURCE='https://github.com/HexaFox-Labs/Brai'"));
+  assert.ok(source.includes("readonly REGISTRY_USER_PATTERN='^([A-Za-z0-9][A-Za-z0-9-]{0,38}|[A-Za-z0-9][A-Za-z0-9-]{0,38}\\[bot\\])$'"));
+  assert.match(source, /exact immutable ghcr\.io\/hexafox-labs\/brai-auth@sha256 digest/);
   assert.match(source, /A short-lived GHCR token is required on stdin for pull-only/);
-  assert.match(source, /DOCKER_CONFIG=.*login ghcr\.io --username sergobright --password-stdin/);
+  assert.match(source, /DOCKER_CONFIG=.*login ghcr\.io --username "\$registry_user" --password-stdin/);
+  assert.doesNotMatch(source, /--username sergobright/);
   assert.match(source, /org\.opencontainers\.image\.revision/);
   assert.match(source, /org\.opencontainers\.image\.source/);
   assert.match(source, /Auth image is not local; trusted CI must run pull-only before deploy/);
@@ -155,10 +170,17 @@ test("unsupported input and mutable images fail before Docker or Caddy", { skip:
   for (const args of [
     ["deploy", "unknown", digest, commit],
     ["start", "prod", digest],
-    ["deploy", "prod", "ghcr.io/sergobright/brai-auth:latest", commit],
+    ["deploy", "prod", "ghcr.io/hexafox-labs/brai-auth:latest", commit],
+    ["deploy", "prod", `ghcr.io/hexafox-labs/brai-auth@sha256:${"A".repeat(64)}`, commit],
+    ["deploy", "prod", oldOwnerDigest, commit],
     ["deploy", "prod", digest, "/tmp/arbitrary-compose.yml"],
     ["deploy", "prod", digest, "C".repeat(40)],
-    ["pull-only", digest, "C".repeat(40)],
+    ["pull-only", digest, commit],
+    ["pull-only", registryUser, digest, "C".repeat(40)],
+    ["pull-only", "--password-stdin", digest, commit],
+    ["pull-only", "bad user", digest, commit],
+    ["pull-only", `${"a".repeat(40)}`, digest, commit],
+    ["pull-only", "github-actions[bot]extra", digest, commit],
     ["rollback", "prod", digest, "arbitrary-route"],
     ["rollback", "prod", "absent", "enabled"],
   ]) {
@@ -206,7 +228,7 @@ test("Preview branch, commit, generation, and slot are checked before the enviro
   assert.equal(deployed.status, 0, deployed.stderr);
   assert.deepEqual(JSON.parse(deployed.stdout), { ok: true, action: "deploy", environment: "preview-a" });
   const log = fixture.readLog();
-  assert.match(log, /docker image inspect ghcr\.io\/sergobright\/brai-auth@sha256:/);
+  assert.match(log, /docker image inspect ghcr\.io\/hexafox-labs\/brai-auth@sha256:/);
   assert.doesNotMatch(log, /docker login ghcr\.io|docker pull/);
   assert.match(log, /org\.opencontainers\.image\.revision/);
   assert.match(log, /org\.opencontainers\.image\.source/);
@@ -217,13 +239,18 @@ test("Preview branch, commit, generation, and slot are checked before the enviro
 test("pull-only consumes the token in an ephemeral Docker config while deploy is tokenless and local-only", { skip: skipRuntime }, (context) => {
   const fixture = createFixture(context);
 
-  const missingToken = fixture.runWithoutToken("pull-only", digest, commit);
+  const invalidUser = fixture.runWithoutToken("pull-only", "--password-stdin", digest, commit);
+  assert.notEqual(invalidUser.status, 0);
+  assert.match(invalidUser.stderr, /GHCR registry user must be a valid bounded GitHub actor login/);
+  assert.equal(fixture.readLog(), "");
+
+  const missingToken = fixture.runWithoutToken("pull-only", registryUser, digest, commit);
   assert.notEqual(missingToken.status, 0);
   assert.match(missingToken.stderr, /short-lived GHCR token is required on stdin for pull-only/);
   assert.doesNotMatch(fixture.readLog(), /login ghcr\.io|docker pull|up -d/);
 
   fixture.clearLog();
-  const rejectedToken = fixture.runWithInput("wrong-token\n", "pull-only", digest, commit);
+  const rejectedToken = fixture.runWithInput("wrong-token\n", "pull-only", registryUser, digest, commit);
   assert.notEqual(rejectedToken.status, 0);
   assert.match(rejectedToken.stderr, /Short-lived GHCR authentication failed/);
   assert.deepEqual(
@@ -232,15 +259,21 @@ test("pull-only consumes the token in an ephemeral Docker config while deploy is
   );
 
   fixture.clearLog();
-  const pulled = fixture.runWithInput("fixture-token\n", "pull-only", digest, commit);
+  const pulled = fixture.runWithInput("fixture-token\n", "pull-only", registryUser, digest, commit);
   assert.equal(pulled.status, 0, pulled.stderr);
-  assert.match(fixture.readLog(), /docker login ghcr\.io --username sergobright --password-stdin/);
-  assert.match(fixture.readLog(), /docker pull ghcr\.io\/sergobright\/brai-auth@sha256:/);
+  assert.match(fixture.readLog(), /docker login ghcr\.io --username HexaFox-Labs --password-stdin/);
+  assert.match(fixture.readLog(), /docker pull ghcr\.io\/hexafox-labs\/brai-auth@sha256:/);
   assert.doesNotMatch(`${pulled.stdout}${pulled.stderr}${fixture.readLog()}`, /fixture-token/);
   assert.deepEqual(
     fs.readdirSync(path.join(fixture.root, "srv/opt/brai-auth")).filter((entry) => entry.startsWith(".registry-login.")),
     [],
   );
+
+  fixture.clearLog();
+  const botPulled = fixture.runWithInput("fixture-token\n", "pull-only", "github-actions[bot]", digest, commit);
+  assert.equal(botPulled.status, 0, botPulled.stderr);
+  assert.match(fixture.readLog(), /docker login ghcr\.io --username github-actions\[bot\] --password-stdin/);
+  assert.doesNotMatch(`${botPulled.stdout}${botPulled.stderr}${fixture.readLog()}`, /fixture-token/);
 
   fixture.clearLog();
   const local = fixture.runWithoutToken("deploy", "prod", digest, commit);
@@ -305,9 +338,11 @@ test("all seven environments use only their fixed port, env file, and Compose pr
 test("deploy rejects missing or mismatched OCI identity before Compose up", { skip: skipRuntime }, (context) => {
   const fixture = createFixture(context);
   for (const identity of [
-    { revision: "d".repeat(40), source: "https://github.com/sergobright/Brai", error: /revision label/ },
+    { revision: "d".repeat(40), source: "https://github.com/HexaFox-Labs/Brai", error: /revision label/ },
+    { revision: commit, source: "https://github.com/sergobright/Brai", error: /source label/ },
+    { revision: commit, source: "https://github.com/hexafox-labs/Brai", error: /source label/ },
     { revision: commit, source: "https://github.com/attacker/repo", error: /source label/ },
-    { revision: "", source: "https://github.com/sergobright/Brai", error: /revision label/ },
+    { revision: "", source: "https://github.com/HexaFox-Labs/Brai", error: /revision label/ },
     { revision: commit, source: "", error: /source label/ },
   ]) {
     fixture.markImageLocal(identity);
@@ -505,7 +540,7 @@ function createFixture(context) {
     BRAI_AUTH_FAKE_IMAGE_REVISION: imageRevision,
     BRAI_AUTH_FAKE_IMAGE_SOURCE: imageSource,
     BRAI_AUTH_FAKE_DEFAULT_REVISION: commit,
-    BRAI_AUTH_FAKE_DEFAULT_SOURCE: "https://github.com/sergobright/Brai",
+    BRAI_AUTH_FAKE_DEFAULT_SOURCE: "https://github.com/HexaFox-Labs/Brai",
   };
   return {
     root,
@@ -517,7 +552,7 @@ function createFixture(context) {
     clearLog: () => fs.writeFileSync(log, ""),
     readRoute: (environment) => fs.readFileSync(path.join(caddyRoot, environment, "route.caddy"), "utf8"),
     authLock: (environment) => path.join(envsRoot, environment, ".auth-operation.lock"),
-    markImageLocal: ({ revision = commit, source = "https://github.com/sergobright/Brai" } = {}) => {
+    markImageLocal: ({ revision = commit, source = "https://github.com/HexaFox-Labs/Brai" } = {}) => {
       fs.writeFileSync(localImage, "1");
       fs.writeFileSync(imageRevision, revision);
       fs.writeFileSync(imageSource, source);
