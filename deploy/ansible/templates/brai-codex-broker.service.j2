@@ -1,0 +1,55 @@
+[Unit]
+Description=Brai Codex broker {{ item.key }}
+Requires=docker.service
+After=docker.service network-online.target
+Before={{ item.value.service }}
+ConditionPathExists={{ brai_env_root }}/{{ item.value.path }}/source/services/brai_codex_broker/src/index.mjs
+
+[Service]
+Type=simple
+WorkingDirectory={{ brai_env_root }}/{{ item.value.path }}/source/services/brai_codex_broker
+Environment=HOME=/nonexistent
+Environment=BRAI_ENVIRONMENT={{ item.key }}
+Environment=BRAI_CODEX_BROKER_SOCKET=/run/brai-codex-broker-{{ item.key }}/broker.sock
+Environment=BRAI_CODEX_DOCKER_BIN=/usr/bin/docker
+Environment=BRAI_CODEX_IMAGE={{ brai_codex_broker_image }}
+Environment=BRAI_CODEX_VERSION={{ brai_codex_version }}
+Environment=BRAI_CODEX_STATE_ROOT={{ brai_codex_runtime_root }}/{{ item.key }}
+Environment=BRAI_CODEX_ATTACHMENT_ROOT={{ item.value.vault_root }}
+Environment=BRAI_CODEX_WORKSPACE={{ brai_codex_broker_workspace }}
+Environment=BRAI_CODEX_AUTH_FILE={{ brai_codex_auth_root }}/auth.json
+Environment=BRAI_CODEX_CONFIG_FILE={{ brai_codex_broker_config }}
+Environment=BRAI_CODEX_REQUIREMENTS_FILE={{ brai_codex_broker_requirements }}
+Environment=BRAI_CODEX_SECCOMP_FILE={{ brai_codex_broker_seccomp }}
+Environment=BRAI_CODEX_APPARMOR_PROFILE={{ brai_codex_broker_apparmor_profile }}
+Environment=BRAI_CODEX_NETWORK={{ brai_codex_broker_network }}
+Environment=BRAI_CODEX_IDLE_MS=900000
+ExecStart={{ brai_node_bin }} src/index.mjs
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=30
+User={{ brai_codex_broker_user }}
+Group={{ brai_deploy_user }}
+SupplementaryGroups=docker {{ brai_service_group }} {{ brai_codex_auth_group }} {{ brai_source_group }}
+RuntimeDirectory=brai-codex-broker-{{ item.key }}
+RuntimeDirectoryMode=0750
+UMask=0007
+NoNewPrivileges=true
+PrivateDevices=true
+PrivateTmp=true
+ProtectControlGroups=true
+ProtectHome=true
+ProtectKernelLogs=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectSystem=strict
+ReadWritePaths={{ brai_codex_runtime_root }}/{{ item.key }}
+ReadWritePaths={{ item.value.vault_root }}
+RestrictAddressFamilies=AF_UNIX
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RemoveIPC=true
+
+[Install]
+WantedBy=multi-user.target

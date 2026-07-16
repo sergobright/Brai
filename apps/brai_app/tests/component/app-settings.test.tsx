@@ -65,12 +65,12 @@ describe("BraiApp settings", () => {
     expect(await screen.findByText("Главная кнопка диктовки")).toBeInTheDocument();
     expect(screen.getByText("Подключение к Brai")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Открыть меню" }));
-    const rail = await screen.findByLabelText("Левый рейл");
+    const rail = await screen.findByRole("navigation", { name: "Разделы настроек Brai CMD" });
     for (const label of ["Основное", "Разрешения", "Контекстные кнопки", "Внешний вид", "Распознавание", "Постобработка", "Аудио"]) {
       expect(within(rail).getByRole("button", { name: label })).toBeInTheDocument();
     }
     fireEvent.click(within(rail).getByRole("button", { name: "Разрешения" }));
-    await waitFor(() => expect(screen.queryByLabelText("Левый рейл")).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByRole("navigation", { name: "Разделы настроек Brai CMD" })).not.toBeInTheDocument());
     expect(screen.getByText("Разрешения")).toBeInTheDocument();
     expect(screen.queryByText("Главная кнопка диктовки")).not.toBeInTheDocument();
     expect(cmdPlugin.getSettings).toHaveBeenCalledTimes(1);
@@ -438,6 +438,6 @@ describe("BraiApp settings", () => {
     await waitFor(() => expect(window.BraiAndroidBack).toBeTypeOf("function"));
     expect(window.BraiAndroidBack?.()).toBe(true);
 
-    await waitFor(() => expect(screen.getByRole("heading", { name: "Действия" })).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Брай" })).toBeInTheDocument());
   });
 });

@@ -12,6 +12,9 @@
       ansible.builtin.group:
         name: "{{ brai_service_group }}"
         system: true
+      tags:
+        - brai-codex-broker
+        - targeted-infra-apply
 
     - name: Create Brai Goal agent group
       ansible.builtin.group:
@@ -33,6 +36,8 @@
         system: true
       tags:
         - brai-goal-agents
+        - brai-codex-broker
+        - targeted-infra-apply
 
     - name: Create service user
       ansible.builtin.user:
@@ -41,6 +46,23 @@
         shell: /usr/sbin/nologin
         create_home: false
         system: true
+
+    - name: Create isolated Brai Codex broker user
+      ansible.builtin.user:
+        name: "{{ brai_codex_broker_user }}"
+        group: "{{ brai_service_group }}"
+        groups:
+          - docker
+          - "{{ brai_codex_auth_group }}"
+          - "{{ brai_source_group }}"
+          - "{{ brai_deploy_user }}"
+        append: false
+        shell: /usr/sbin/nologin
+        create_home: false
+        system: true
+      tags:
+        - brai-codex-broker
+        - targeted-infra-apply
 
     - name: Create isolated Brai Goal agent user
       ansible.builtin.user:
@@ -71,7 +93,9 @@
           - "{{ brai_codex_auth_group }}"
         append: true
       when: not ansible_check_mode
-      notify: Restart active Brai API services after Codex access change
+      notify:
+        - Restart active Brai Codex brokers
+        - Restart active Brai API services after Codex access change
       tags:
         - brai-goal-agents
 
@@ -263,6 +287,8 @@
         - "{{ brai_codex_auth_root }}/config.toml"
       tags:
         - brai-goal-agents
+        - brai-codex-broker
+        - targeted-infra-apply
 
     - name: Refuse to provision Goal agents without shared Codex auth files
       ansible.builtin.fail:
@@ -273,6 +299,8 @@
       when: not item.stat.exists
       tags:
         - brai-goal-agents
+        - brai-codex-broker
+        - targeted-infra-apply
 
     - name: Isolate shared Brai Codex auth directory
       ansible.builtin.file:
@@ -281,9 +309,13 @@
         group: "{{ brai_codex_auth_group }}"
         mode: "0750"
       when: not ansible_check_mode
-      notify: Restart active Brai API services after Codex access change
+      notify:
+        - Restart active Brai Codex brokers
+        - Restart active Brai API services after Codex access change
       tags:
         - brai-goal-agents
+        - brai-codex-broker
+        - targeted-infra-apply
 
     - name: Grant only Brai Codex auth readers access to shared credentials
       ansible.builtin.file:
@@ -296,9 +328,220 @@
         - "{{ brai_codex_auth_root }}/auth.json"
         - "{{ brai_codex_auth_root }}/config.toml"
       when: not ansible_check_mode
-      notify: Restart active Brai API services after Codex access change
+      notify:
+        - Restart active Brai Codex brokers
+        - Restart active Brai API services after Codex access change
       tags:
         - brai-goal-agents
+        - brai-codex-broker
+        - targeted-infra-apply
+
+    - name: Create Brai Codex broker runtime roots
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: directory
+        owner: "{{ item.owner }}"
+        group: "{{ item.group }}"
+        mode: "{{ item.mode }}"
+      loop:
+        - path: "{{ brai_codex_broker_root }}"
+          owner: root
+          group: root
+          mode: "0755"
+        - path: "{{ brai_codex_broker_workspace }}"
+          owner: root
+          group: root
+          mode: "0555"
+        - path: "{{ brai_codex_runtime_root }}"
+          owner: "{{ brai_codex_broker_user }}"
+          group: "{{ brai_service_group }}"
+          mode: "0700"
+      loop_control:
+        label: "{{ item.path }}"
+      tags:
+        - brai-codex-broker
+        - targeted-infra-apply
+
+    - name: Create environment-qualified Brai Codex state roots
+      ansible.builtin.file:
+        path: "{{ brai_codex_runtime_root }}/{{ item.key }}"
+        state: directory
+        owner: "{{ brai_codex_broker_user }}"
+        group: "{{ brai_service_group }}"
+        mode: "0700"
+      loop: "{{ brai_envs | dict2items | list }}"
+      loop_control:
+        label: "{{ item.key }}"
+      tags:
+        - brai-codex-broker
+        - targeted-infra-apply
+
+    - name: Install fail-closed Brai Codex Preview state cleanup
+      ansible.builtin.template:
+        src: templates/brai-codex-cleanup-preview-state.sh.j2
+        dest: "{{ brai_codex_preview_cleanup }}"
+        owner: root
+        group: root
+        mode: "0755"
+      tags:
+        - brai-codex-broker
+        - targeted-infra-apply
+
+    - name: Install fail-closed Brai Codex runtime configuration
+      ansible.builtin.template:
+        src: templates/brai-codex-runtime-config.toml.j2
+        dest: "{{ brai_codex_broker_config }}"
+        owner: root
+        group: "{{ brai_codex_auth_group }}"
+        mode: "0440"
+      notify: Restart active Brai Codex brokers
+      tags:
+        - brai-codex-broker
+        - targeted-infra-apply
+
+    - name: Install enforced Brai Codex runtime requirements
+      ansible.builtin.template:
+        src: templates/brai-codex-runtime-requirements.toml.j2
+        dest: "{{ brai_codex_broker_requirements }}"
+        owner: root
+        group: "{{ brai_codex_auth_group }}"
+        mode: "0440"
+      notify: Restart active Brai Codex brokers
+      tags:
+        - brai-codex-broker
+        - targeted-infra-apply
+
+    - name: Install Moby-derived Brai Codex seccomp profile
+      ansible.builtin.template:
+        src: templates/brai-codex-seccomp.json.j2
+        dest: "{{ brai_codex_broker_seccomp }}"
+        owner: root
+        group: root
+        mode: "0644"
+      notify: Restart active Brai Codex brokers
+      tags:
+        - brai-codex-broker
+        - targeted-infra-apply
+
+    - name: Install Bubblewrap-compatible Brai Codex AppArmor profile
+      ansible.builtin.template:
+        src: templates/brai-codex-app-server.apparmor.j2
+        dest: "{{ brai_codex_broker_apparmor_path }}"
+        owner: root
+        group: root
+        mode: "0644"
+      register: brai_codex_apparmor_profile_file
+      tags:
+        - brai-codex-broker
+        - targeted-infra-apply
+
+    - name: Load Brai Codex AppArmor profile
+      ansible.builtin.command:
+        argv:
+          - /usr/sbin/apparmor_parser
+          - --replace
+          - "{{ brai_codex_broker_apparmor_path }}"
+      changed_when: brai_codex_apparmor_profile_file.changed
+      when: not ansible_check_mode
+      notify: Restart active Brai Codex brokers
+      tags:
+        - brai-codex-broker
+        - targeted-infra-apply
+
+    - name: Install pinned Brai Codex image definition
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../../services/brai_codex_broker/Dockerfile"
+        dest: "{{ brai_codex_broker_root }}/Dockerfile"
+        owner: root
+        group: root
+        mode: "0644"
+      register: brai_codex_dockerfile
+      tags:
+        - brai-codex-broker
+        - targeted-infra-apply
+
+    - name: Inspect pinned Brai Codex image
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/docker
+          - image
+          - inspect
+          - "{{ brai_codex_broker_image }}"
+      register: brai_codex_image_inspect
+      changed_when: false
+      failed_when: false
+      check_mode: false
+      tags:
+        - brai-codex-broker
+        - targeted-infra-apply
+
+    - name: Build pinned Brai Codex image
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/docker
+          - build
+          - --pull=false
+          - --tag
+          - "{{ brai_codex_broker_image }}"
+          - --file
+          - "{{ brai_codex_broker_root }}/Dockerfile"
+          - "{{ brai_codex_broker_root }}"
+      when:
+        - not ansible_check_mode
+        - brai_codex_dockerfile.changed or brai_codex_image_inspect.rc != 0
+      notify: Restart active Brai Codex brokers
+      tags:
+        - brai-codex-broker
+        - targeted-infra-apply
+
+    - name: Verify pinned Brai Codex image version
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/docker
+          - run
+          - --rm
+          - --read-only
+          - "{{ brai_codex_broker_image }}"
+          - codex
+          - --version
+      register: brai_codex_image_version
+      changed_when: false
+      failed_when: "('codex-cli ' ~ brai_codex_version) not in brai_codex_image_version.stdout"
+      when: not ansible_check_mode
+      tags:
+        - brai-codex-broker
+        - targeted-infra-apply
+
+    - name: Inspect Brai Codex egress network
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/docker
+          - network
+          - inspect
+          - "{{ brai_codex_broker_network }}"
+      register: brai_codex_network_inspect
+      changed_when: false
+      failed_when: false
+      check_mode: false
+      tags:
+        - brai-codex-broker
+        - targeted-infra-apply
+
+    - name: Create Brai Codex egress network
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/docker
+          - network
+          - create
+          - --driver
+          - bridge
+          - "{{ brai_codex_broker_network }}"
+      when:
+        - not ansible_check_mode
+        - brai_codex_network_inspect.rc != 0
+      tags:
+        - brai-codex-broker
+        - targeted-infra-apply
 
     - name: Create isolated Brai Goal agent Codex home
       ansible.builtin.file:
@@ -536,7 +779,10 @@
         owner: "{{ brai_syncthing_user }}"
         group: "{{ brai_source_group }}"
         mode: "2770"
-      tags: [brai-vault]
+      tags:
+        - brai-vault
+        - brai-codex-broker
+        - targeted-infra-apply
 
     - name: Ensure existing Syncthing vault contents are writable by sync group
       ansible.builtin.file:
@@ -631,6 +877,21 @@
         label: "{{ item.key }}"
       tags:
         - brai-storage-maintenance
+        - targeted-infra-apply
+
+    - name: Create non-production environment Vault roots
+      ansible.builtin.file:
+        path: "{{ item.value.vault_root }}"
+        state: directory
+        owner: "{{ brai_deploy_user }}"
+        group: "{{ brai_deploy_user }}"
+        mode: "2770"
+      loop: "{{ brai_envs | dict2items | rejectattr('key', 'equalto', 'prod') | list }}"
+      loop_control:
+        label: "{{ item.key }}"
+      tags:
+        - brai-vault
+        - brai-codex-broker
         - targeted-infra-apply
 
     - name: Create production source checkout path
@@ -838,6 +1099,35 @@
       tags:
         - brai-auth-bootstrap
         - brai-goal-agents
+        - brai-codex-broker
+
+    - name: Check Brai Codex broker source directories before active-service restart
+      ansible.builtin.stat:
+        path: "{{ brai_env_root }}/{{ item.value.path }}/source/services/brai_codex_broker"
+      loop: "{{ brai_envs | dict2items | list }}"
+      loop_control:
+        label: "brai-codex-broker-{{ item.key }}.service"
+      register: brai_codex_broker_source_directories
+      tags:
+        - brai-codex-broker
+        - targeted-infra-apply
+
+    - name: Install Brai Codex broker systemd units
+      ansible.builtin.template:
+        src: templates/brai-codex-broker.service.j2
+        dest: "/etc/systemd/system/brai-codex-broker-{{ item.key }}.service"
+        owner: root
+        group: root
+        mode: "0644"
+      loop: "{{ brai_envs | dict2items | list }}"
+      loop_control:
+        label: "brai-codex-broker-{{ item.key }}.service"
+      notify:
+        - Reload systemd
+        - Restart active Brai Codex brokers
+      tags:
+        - brai-codex-broker
+        - targeted-infra-apply
 
     - name: Install Brai API systemd units
       ansible.builtin.template:
@@ -855,6 +1145,54 @@
       tags:
         - brai-auth-bootstrap
         - brai-goal-agents
+        - brai-codex-broker
+
+    - name: Stop Brai Codex brokers without deployed source
+      ansible.builtin.systemd_service:
+        name: "brai-codex-broker-{{ item.item.key }}.service"
+        enabled: false
+        state: stopped
+        daemon_reload: true
+      loop: "{{ brai_codex_broker_source_directories.results }}"
+      loop_control:
+        label: "brai-codex-broker-{{ item.item.key }}.service"
+      when:
+        - not ansible_check_mode
+        - not item.stat.exists
+      tags:
+        - brai-codex-broker
+        - targeted-infra-apply
+
+    - name: Start Brai Codex brokers with deployed source
+      ansible.builtin.systemd_service:
+        name: "brai-codex-broker-{{ item.item.key }}.service"
+        enabled: true
+        state: started
+        daemon_reload: true
+      loop: "{{ brai_codex_broker_source_directories.results }}"
+      loop_control:
+        label: "brai-codex-broker-{{ item.item.key }}.service"
+      when:
+        - not ansible_check_mode
+        - item.stat.exists
+      tags:
+        - brai-codex-broker
+        - targeted-infra-apply
+
+    - name: Verify installed Brai Codex broker systemd units
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/systemd-analyze
+          - verify
+          - "/etc/systemd/system/brai-codex-broker-{{ item.key }}.service"
+      loop: "{{ brai_envs | dict2items | list }}"
+      loop_control:
+        label: "brai-codex-broker-{{ item.key }}.service"
+      changed_when: false
+      when: not ansible_check_mode
+      tags:
+        - brai-codex-broker
+        - targeted-infra-apply
 
     - name: Install Brai Admin systemd units
       ansible.builtin.template:
@@ -1465,6 +1803,7 @@
       tags:
         - brai-caddy
         - brai-auth-bootstrap
+        - brai-codex-broker
         - brai-goal-agents
         - brai-storage-maintenance
         - brai-supavisor-maintenance
@@ -1474,6 +1813,18 @@
     - name: Reload systemd
       ansible.builtin.systemd_service:
         daemon_reload: true
+
+    - name: Restart active Brai Codex brokers
+      ansible.builtin.command:
+        argv:
+          - /bin/systemctl
+          - try-restart
+          - "brai-codex-broker-{{ item.item.key }}.service"
+      loop: "{{ brai_codex_broker_source_directories.results | default([]) }}"
+      loop_control:
+        label: "brai-codex-broker-{{ item.item.key }}.service"
+      when: item.stat.exists
+      changed_when: true
 
     - name: Restart active Brai API services after Codex access change
       ansible.builtin.command:

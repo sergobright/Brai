@@ -8,6 +8,7 @@ import { useAppVersion } from "@/shared/config/runtime";
 import { installAndroidBackHandler } from "@/shared/platform/platform";
 import type { BraiOtaState } from "@/shared/platform/ota";
 import { FloatingDock } from "@/shared/ui/floating-dock";
+import { BraiBrandIcon } from "@/shared/ui/brai-brand-icon";
 import { NavigationIndicator, UpdateNavigationDot } from "@/shared/ui/navigation-indicator";
 import { ScrollArea } from "@/shared/ui/scroll-area";
 import { formatHourMinute } from "@/shared/time/format";
@@ -72,7 +73,7 @@ export function DesktopRail({
     <Sidebar
       collapsible="icon"
       className="desktop-rail max-[860px]:hidden"
-      aria-label="Основная навигация"
+      aria-label="Служебная панель"
     >
       <SidebarContent className="min-h-0 items-center overflow-y-auto py-2" aria-label="Контекст-меню">
         <div className="grid justify-items-center gap-1">
@@ -580,7 +581,11 @@ export function MainDock({
       active: isActiveNavItem(item.id, section),
       fillIcon: focusActive,
       onClick: () => onSection(item.id),
-      icon: focusActive ? <FocusDockIcon seconds={timer.elapsed_seconds} /> : <Icon className="h-full w-full" aria-hidden="true" />,
+      icon: item.id === "brai"
+        ? <BraiBrandIcon className="h-full w-full" />
+        : focusActive
+          ? <FocusDockIcon seconds={timer.elapsed_seconds} />
+          : Icon ? <Icon className="h-full w-full" aria-hidden="true" /> : null,
     };
   });
 

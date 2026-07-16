@@ -27,6 +27,8 @@ console.log(env.serviceName);
 console.log(env.apiPort);
 console.log(env.adminServiceName);
 console.log(env.adminPort);
+console.log(env.brokerServiceName);
+console.log(env.brokerSocketPath);
 
 function resolvePreviewSlot(branchName) {
   const envsRoot = process.env.BRAI_ENVS_ROOT ?? "/srv/projects/brai-envs";

@@ -77,6 +77,7 @@ function allocate(registry, branch, commit, rawGeneration, now) {
   const generation = optionalLeaseGeneration(rawGeneration);
   const existing = findByBranch(registry, branch);
   if (existing) {
+    const recoveringFailed = existing.entry.status === "failed";
     assertLeaseAdvance(existing.entry, commit, generation);
     removeQueuedBranch(registry, branch);
     const previousStatus = existing.entry.status;
@@ -93,6 +94,7 @@ function allocate(registry, branch, commit, rawGeneration, now) {
       ok: true,
       queued: false,
       allocatedNew: false,
+      recoveringFailed,
       slot: existing.slot,
       previousStatus,
       previousApkBuildKind,
@@ -116,7 +118,7 @@ function allocate(registry, branch, commit, rawGeneration, now) {
     assigned_at: now,
     updated_at: now,
   });
-  return { ok: true, queued: false, allocatedNew: true, slot, entry };
+  return { ok: true, queued: false, allocatedNew: true, recoveringFailed: false, slot, entry };
 }
 
 function assertOwned(registry, branch, commit) {

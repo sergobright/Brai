@@ -201,6 +201,7 @@ NODE
     return 0
   fi
   exec 9>&-
+  "${BRAI_SUDO:-sudo}" /srv/opt/brai-codex-broker/cleanup-preview-state "preview-$SLOT_LOWER" >&2
   shopt -s nullglob
   rm -rf "$slot_root/source" "$slot_root"/source.previous-* "$slot_root/web" "$slot_root/mobile-update"
   shopt -u nullglob
@@ -245,6 +246,7 @@ if [[ "$RELEASE_BRANCH" == codex/* ]]; then
 fi
 if [[ -n "$SLOT_LOWER" ]]; then
   stop_preview_unit_if_exists "brai-api-preview-$SLOT_LOWER.service"
+  stop_preview_unit_if_exists "brai-codex-broker-preview-$SLOT_LOWER.service"
   stop_preview_unit_if_exists "brai-admin-preview-$SLOT_LOWER.service"
   for agent_slug in activity-classifier goal-item-matcher goal-member-finder goal-discovery goal-planner; do
     stop_preview_unit_if_exists "brai-agent-$agent_slug-preview-$SLOT_LOWER.service"

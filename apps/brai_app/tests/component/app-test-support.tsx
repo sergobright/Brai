@@ -420,9 +420,9 @@ export async function openProfileMenuItem(name: string | RegExp) {
 export async function selectBraiCmdGroup(label: string) {
   await screen.findByText("Главная кнопка диктовки");
   fireEvent.click(screen.getByRole("button", { name: "Открыть меню" }));
-  const rail = await screen.findByLabelText("Левый рейл");
-  fireEvent.click(within(rail).getByRole("button", { name: label }));
-  await waitFor(() => expect(screen.queryByLabelText("Левый рейл")).not.toBeInTheDocument());
+  const navigation = await screen.findByRole("navigation", { name: "Разделы настроек Brai CMD" });
+  fireEvent.click(within(navigation).getByRole("button", { name: label }));
+  await waitFor(() => expect(screen.queryByRole("navigation", { name: "Разделы настроек Brai CMD" })).not.toBeInTheDocument());
 }
 
 export async function openSettingsFromProfile() {

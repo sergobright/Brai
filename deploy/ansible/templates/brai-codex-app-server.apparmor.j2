@@ -1,0 +1,50 @@
+# Derived from the Moby docker-default AppArmor profile (Apache-2.0).
+abi <abi/3.0>,
+
+#include <tunables/global>
+
+profile {{ brai_codex_broker_apparmor_profile }} flags=(attach_disconnected,mediate_deleted) {
+  #include <abstractions/base>
+
+  network,
+  deny network alg,
+  capability,
+  file,
+  mount,
+  umount,
+  pivot_root,
+  userns,
+  signal (receive) peer=unconfined,
+  signal (receive) peer=runc,
+  signal (receive) peer=crun,
+  signal (send,receive) peer={{ brai_codex_broker_apparmor_profile }},
+
+  deny @{PROC}/* w,
+  deny @{PROC}/{[^1-9/],[^1-9/][^0-9/],[^1-9s/][^0-9y/][^0-9s/],[^1-9/][^0-9/][^0-9/][^0-9/]*}/** w,
+  deny @{PROC}/sys/[^k]** w,
+  deny @{PROC}/sys/kernel/{?,??,[^s][^h][^m]**} w,
+  deny @{PROC}/sysrq-trigger rwklx,
+  deny @{PROC}/kcore rwklx,
+  deny @{PROC}/acpi/** rwklx,
+  deny @{PROC}/asound/** rwklx,
+  deny @{PROC}/keys rwklx,
+  deny @{PROC}/latency_stats rwklx,
+  deny @{PROC}/sched_debug rwklx,
+  deny @{PROC}/scsi/** rwklx,
+  deny @{PROC}/timer_list rwklx,
+  deny @{PROC}/timer_stats rwklx,
+  deny @{PROC}/bus/** wklx,
+  deny @{PROC}/fs/** wklx,
+  deny @{PROC}/irq/** wklx,
+
+  deny /sys/[^f]*/** wklx,
+  deny /sys/f[^s]*/** wklx,
+  deny /sys/fs/[^c]*/** wklx,
+  deny /sys/fs/c[^g]*/** wklx,
+  deny /sys/fs/cg[^r]*/** wklx,
+  deny /sys/firmware/** rwklx,
+  deny /sys/devices/virtual/powercap/** rwklx,
+  deny /sys/kernel/security/** rwklx,
+
+  ptrace (trace,tracedby,read,readby) peer={{ brai_codex_broker_apparmor_profile }},
+}

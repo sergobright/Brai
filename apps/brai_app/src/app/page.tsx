@@ -1,5 +1,5 @@
 import { BraiApp } from "@/features/app/BraiApp";
 
 export default function Home() {
-  return <BraiApp />;
+  return <BraiApp initialSection="brai" />;
 }

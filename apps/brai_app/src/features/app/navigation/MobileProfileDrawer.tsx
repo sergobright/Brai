@@ -6,7 +6,7 @@ import { ScrollArea } from "@/shared/ui/scroll-area";
 import { cx } from "../appUtils";
 import { useMobileSheetDrag } from "../hooks/useMobileSheetDrag";
 
-export function MobileProfileDrawer({ children, onClose }: { children?: ReactNode; onClose: () => void }) {
+export function MobileProfileDrawer({ children, label, onClose }: { children?: ReactNode; label?: string; onClose: () => void }) {
   const suppressPopRef = useRef(false);
   const dialogRef = useRef<HTMLElement | null>(null);
   const onCloseRef = useRef(onClose);
@@ -15,6 +15,7 @@ export function MobileProfileDrawer({ children, onClose }: { children?: ReactNod
       ? document.activeElement
       : null,
   );
+  const drawerLabel = label ?? (children ? "Списки действий" : "Меню");
   const finishClose = useCallback(() => {
     onCloseRef.current();
     const opener = openerRef.current;
@@ -118,12 +119,12 @@ export function MobileProfileDrawer({ children, onClose }: { children?: ReactNod
           children ? "w-[min(86vw,22rem)] sm:max-w-[22rem]" : "w-16 sm:max-w-16",
         )}
         style={sheetStyle}
-        aria-label={children ? "Списки действий" : "Меню"}
+        aria-label={drawerLabel}
         aria-modal="true"
         role="dialog"
         onClick={(event) => event.stopPropagation()}
       >
-        <div aria-label="Левый рейл" className="flex min-h-0 flex-1 flex-col">
+        <div aria-label={drawerLabel} className="flex min-h-0 flex-1 flex-col">
           <ScrollArea className="min-h-0 flex-1">
             <div className={children ? "px-3 pb-3" : "px-2 pb-3"}>{children}</div>
           </ScrollArea>

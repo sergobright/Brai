@@ -690,6 +690,8 @@ export async function applyVersionHistoryBackfill(pool, manifest, { beforeCommit
 }
 
 async function applyInTransaction(client, manifest) {
+  const linkedPullKeys = new Set(manifest.versions.flatMap((version) =>
+    version.pull_requests.map((pull) => pullKey(pull.repository, pull.pull_number))));
   const workIds = new Map();
   for (const work of manifest.release_works) {
     const result = await client.query(`
@@ -712,7 +714,9 @@ async function applyInTransaction(client, manifest) {
       SELECT release_works_id, work_role FROM github_pull_requests
       WHERE repository = $1 AND pull_number = $2
     `, [pull.repository, pull.pull_number]);
-    if (existing.rowCount && (existing.rows[0].release_works_id !== workId || existing.rows[0].work_role !== pull.work_role)) {
+    if (existing.rowCount
+      && (existing.rows[0].release_works_id !== workId || existing.rows[0].work_role !== pull.work_role)
+      && linkedPullKeys.has(key)) {
       throw new Error(`existing PR membership differs for ${key}`);
     }
     const result = await client.query(`

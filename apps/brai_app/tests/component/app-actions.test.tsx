@@ -471,6 +471,7 @@ describe("BraiApp actions", () => {
   });
 
   it("creates a mobile action with a description from the composer", async () => {
+    window.history.replaceState(null, "", "/activities");
     const defaultFetch = vi.mocked(fetch).getMockImplementation();
     vi.mocked(fetch).mockImplementation(async (input, init) => {
       const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
@@ -599,6 +600,7 @@ describe("BraiApp actions", () => {
   });
 
   it("keeps separate mobile create drafts while switching Actions and Inbox", async () => {
+    window.history.replaceState(null, "", "/activities");
     render(<BraiApp />);
 
     fireEvent.click(document.querySelector(".actions-fab") as HTMLElement);

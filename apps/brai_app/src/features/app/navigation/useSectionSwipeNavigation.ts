@@ -19,6 +19,7 @@ const SECTION_SWIPE_SETTLE_MS = 220;
 const SECTION_SWIPE_EASING = "cubic-bezier(0.22, 1, 0.36, 1)";
 const LEFT_EDGE_MENU_SWIPE_START_PX = 24;
 const NAV_SWIPE_EXCLUSION_SELECTOR = "[data-nav-swipe-exclusion], input, textarea, select, button, a, [role='button'], [role='slider']";
+const MOBILE_SWIPE_NAV_ITEMS = navItems.filter((item) => item.id !== "draws");
 
 /**
  * Handles horizontal mobile swipes between primary Brai sections.
@@ -250,17 +251,17 @@ function isSwipeAxisAllowed(deltaX: number, deltaY: number): boolean {
   );
 }
 
-function sectionAfterSwipe(section: SectionId, deltaX: number): SectionId {
-  const currentIndex = navItems.findIndex((item) => item.id === section);
+export function sectionAfterMobileSwipe(section: SectionId, deltaX: number): SectionId {
+  const currentIndex = MOBILE_SWIPE_NAV_ITEMS.findIndex((item) => item.id === section);
   if (currentIndex < 0) return section;
 
   const direction = deltaX < 0 ? 1 : -1;
-  const nextIndex = Math.max(0, Math.min(navItems.length - 1, currentIndex + direction));
-  return navItems[nextIndex].id;
+  const nextIndex = Math.max(0, Math.min(MOBILE_SWIPE_NAV_ITEMS.length - 1, currentIndex + direction));
+  return MOBILE_SWIPE_NAV_ITEMS[nextIndex].id;
 }
 
 function adjacentSectionAfterSwipe(section: SectionId, deltaX: number): SectionId | null {
-  const next = sectionAfterSwipe(section, deltaX);
+  const next = sectionAfterMobileSwipe(section, deltaX);
   return next === section ? null : next;
 }
 
@@ -287,8 +288,8 @@ export function sectionSwipePageStyle(
 
 function adjacentPageOffset(visual: SectionSwipeVisual): number {
   if (!visual.to) return 0;
-  const fromIndex = navItems.findIndex((item) => item.id === visual.from);
-  const toIndex = navItems.findIndex((item) => item.id === visual.to);
+  const fromIndex = MOBILE_SWIPE_NAV_ITEMS.findIndex((item) => item.id === visual.from);
+  const toIndex = MOBILE_SWIPE_NAV_ITEMS.findIndex((item) => item.id === visual.to);
   const baseOffset = toIndex > fromIndex ? visual.width : -visual.width;
   return baseOffset + visual.deltaX;
 }

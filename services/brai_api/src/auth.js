@@ -2,8 +2,8 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { betterAuth } from 'better-auth';
 import { emailOTP } from 'better-auth/plugins';
 import { Resend } from 'resend';
-import { Pool } from 'pg';
 import { isPostgresUrl, postgresPoolMax } from './postgres-sync-db.js';
+import { createRecoveringPostgresPool } from './postgres-recovery.js';
 
 const DEFAULT_FROM = 'Brai <auth@mail.brai.one>';
 const AUTH_DATABASE_TIMEOUT_MS = 5_000;
@@ -33,7 +33,7 @@ export function createBraiAuth({
   sendOtp = null
 }) {
   if (!isPostgresUrl(databaseUrl)) throw new Error('BRAI_DATABASE_URL must be a postgres:// or postgresql:// URL');
-  const db = new Pool({
+  const db = createRecoveringPostgresPool({
     connectionString: databaseUrl,
     ssl: postgresSsl(databaseUrl),
     max: postgresPoolMax(process.env.BRAI_PG_POOL_MAX),

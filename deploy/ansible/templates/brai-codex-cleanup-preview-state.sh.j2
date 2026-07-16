@@ -1,0 +1,24 @@
+#!/bin/sh
+set -eu
+
+environment="${1:-}"
+case "$environment" in
+  preview-a|preview-b|preview-c|preview-d|preview-e) ;;
+  *)
+    echo "Refusing Codex state cleanup outside preview-a through preview-e" >&2
+    exit 1
+    ;;
+esac
+
+root="{{ brai_codex_runtime_root }}/$environment"
+unit="brai-codex-broker-$environment.service"
+if /bin/systemctl is-active --quiet "$unit"; then
+  echo "Refusing Codex state cleanup while $unit is active" >&2
+  exit 1
+fi
+if [ ! -d "$root" ] || [ -L "$root" ]; then
+  echo "Unsafe or missing Codex preview state root: $root" >&2
+  exit 1
+fi
+
+/usr/bin/find "$root" -xdev -mindepth 1 -delete

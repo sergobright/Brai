@@ -11,6 +11,7 @@ import { hasDesktopPageRail } from "../appModel";
 const DEFAULT_WIDTH = 256;
 const MIN_WIDTH = 192;
 const MAX_WIDTH = 512;
+
 export function isContextualRailSection(section: SectionId): boolean {
   return hasDesktopPageRail(section);
 }

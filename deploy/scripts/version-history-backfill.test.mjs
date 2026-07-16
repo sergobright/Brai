@@ -147,6 +147,61 @@ test("backfill keeps identities stable on the second run and rolls back atomical
     assert.equal(secondRows.details.length, 2);
     assert.equal(secondRows.links.length, 1);
 
+    const liveWork = await pool.query(`
+      INSERT INTO release_works (work_key, status, created_at_utc, updated_at_utc, finalized_at_utc)
+      VALUES ('live:work:503', 'finalized', '2026-07-15T09:00:00.000Z', '2026-07-15T10:00:00.000Z', '2026-07-15T10:00:00.000Z')
+      RETURNING id
+    `);
+    await pool.query(`
+      INSERT INTO github_pull_requests (
+        release_works_id, work_role, repository, pull_number, url, title, body, author_login,
+        state, is_draft, head_branch, base_branch, merge_commit_sha,
+        github_created_at_utc, github_updated_at_utc, github_closed_at_utc, github_merged_at_utc,
+        created_at_utc, updated_at_utc
+      )
+      SELECT $1, 'support', repository, 503, 'https://github.com/sergobright/Brai/pull/503',
+        'Live support PR 503', body, author_login, state, is_draft, 'codex/live-support-503',
+        base_branch, 'merge-live-503', github_created_at_utc, github_updated_at_utc,
+        github_closed_at_utc, github_merged_at_utc, created_at_utc, updated_at_utc
+      FROM github_pull_requests WHERE repository='sergobright/Brai' AND pull_number=501
+    `, [liveWork.rows[0].id]);
+    const manifestWithUnlinkedSnapshot = structuredClone(manifest);
+    manifestWithUnlinkedSnapshot.release_works.push({
+      ...structuredClone(manifest.release_works[0]),
+      work_key: "legacy:pr:sergobright/Brai:503"
+    });
+    manifestWithUnlinkedSnapshot.pull_requests.push({
+      ...structuredClone(manifest.pull_requests[0]),
+      work_key: "legacy:pr:sergobright/Brai:503",
+      pull_number: 503,
+      url: "https://github.com/sergobright/Brai/pull/503",
+      title: "Historical snapshot PR 503",
+      head_branch: "codex/historical-503",
+      merge_commit_sha: "merge-503"
+    });
+    await applyVersionHistoryBackfill(pool, manifestWithUnlinkedSnapshot);
+    const preservedMembership = (await pool.query(`
+      SELECT pulls.work_role, works.work_key, pulls.title
+      FROM github_pull_requests AS pulls
+      JOIN release_works AS works ON works.id=pulls.release_works_id
+      WHERE pulls.repository='sergobright/Brai' AND pulls.pull_number=503
+    `)).rows[0];
+    assert.deepEqual(preservedMembership, {
+      work_role: "support",
+      work_key: "live:work:503",
+      title: "Historical snapshot PR 503"
+    });
+
+    await pool.query(`
+      UPDATE github_pull_requests
+      SET release_works_id=$1, work_role='support'
+      WHERE repository='sergobright/Brai' AND pull_number=501
+    `, [liveWork.rows[0].id]);
+    await assert.rejects(
+      applyVersionHistoryBackfill(pool, manifest),
+      /existing PR membership differs for sergobright\/Brai#501/
+    );
+
     await seedVersion(pool, 902, "2026-07-14T11:00:00.000Z");
     const rollbackManifest = fixtureManifest(902, 502);
     await assert.rejects(

@@ -34,6 +34,8 @@
 {{ brai_deploy_user }} ALL=(root) NOPASSWD: /bin/systemctl restart {{ env.service }}
 {{ brai_deploy_user }} ALL=(root) NOPASSWD: /bin/systemctl stop {{ env.service }}
 {{ brai_deploy_user }} ALL=(root) NOPASSWD: /bin/systemctl restart {{ env.admin_service }}
+{{ brai_deploy_user }} ALL=(root) NOPASSWD: /bin/systemctl restart brai-codex-broker-{{ name }}.service
+{{ brai_deploy_user }} ALL=(root) NOPASSWD: /bin/systemctl stop brai-codex-broker-{{ name }}.service
 {% for agent_name, agent in brai_goal_agents.items() %}
 {{ brai_deploy_user }} ALL=(root) NOPASSWD: /bin/systemctl restart {{ agent.unit_base }}{{ env.goal_agent_service_suffix }}.service
 {% if name in ['prod', 'dev'] %}
@@ -48,5 +50,7 @@
 {{ brai_deploy_user }} ALL=(root) NOPASSWD: /bin/systemctl stop {{ env.admin_service }}
 {{ brai_deploy_user }} ALL=(root) NOPASSWD: /bin/systemctl reset-failed {{ env.service }}
 {{ brai_deploy_user }} ALL=(root) NOPASSWD: /bin/systemctl reset-failed {{ env.admin_service }}
+{{ brai_deploy_user }} ALL=(root) NOPASSWD: /bin/systemctl reset-failed brai-codex-broker-{{ name }}.service
+{{ brai_deploy_user }} ALL=(root) NOPASSWD: {{ brai_codex_preview_cleanup }} {{ name }}
 {% endif %}
 {% endfor %}

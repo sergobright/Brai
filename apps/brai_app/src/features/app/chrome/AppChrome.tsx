@@ -58,6 +58,7 @@ export function ScreenHeader({
   leading,
   desktopLeading,
   trailing,
+  denseMobileActions = false,
 }: {
   title: string;
   icon: LucideIcon;
@@ -66,6 +67,7 @@ export function ScreenHeader({
   leading?: ReactNode;
   desktopLeading?: ReactNode;
   trailing?: ReactNode;
+  denseMobileActions?: boolean;
 }) {
   const environmentLabel = useEnvironmentBadgeLabel();
 
@@ -81,7 +83,13 @@ export function ScreenHeader({
           {title}
         </TextEffect>
       </div>
-      <div className="topbar-actions flex shrink-0 items-center gap-3 max-[860px]:max-w-[min(184px,50vw)] max-[460px]:max-w-[min(174px,50vw)]" data-galaxy-interaction-block>
+      <div
+        className={cx(
+          "topbar-actions flex shrink-0 items-center gap-3 max-[860px]:max-w-[min(184px,50vw)] max-[460px]:max-w-[min(174px,50vw)]",
+          denseMobileActions && "max-[860px]:!max-w-none max-[460px]:!gap-1.5",
+        )}
+        data-galaxy-interaction-block
+      >
         {trailing}
         {environmentLabel ? <EnvironmentBadge className="min-[861px]:hidden" label={environmentLabel} /> : null}
         <StatusPill className="min-[861px]:hidden" status={syncStatus} pendingCount={pendingCount} />
