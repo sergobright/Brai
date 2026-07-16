@@ -25,10 +25,14 @@ trap cleanup EXIT
 printf '%s\n' "$BRAI_DEPLOY_SSH_KEY" >"$KEY_FILE"
 chmod 600 "$KEY_FILE"
 
-SOURCE_SHORT_CHANGES_B64="$(printf '%s' "${BRAI_SOURCE_SHORT_CHANGES:-}" | base64 -w0)"
-SOURCE_DETAILED_CHANGES_B64="$(printf '%s' "${BRAI_SOURCE_DETAILED_CHANGES:-}" | base64 -w0)"
-SOURCE_REASON_B64="$(printf '%s' "${BRAI_SOURCE_REASON:-}" | base64 -w0)"
-VERSION_WORK_B64="$(printf '%s' "${BRAI_VERSION_WORK_JSON:-}" | base64 -w0)"
+encode_remote_value() {
+  printf '.%s' "${1:-}" | base64 -w0
+}
+
+SOURCE_SHORT_CHANGES_B64="$(encode_remote_value "${BRAI_SOURCE_SHORT_CHANGES:-}")"
+SOURCE_DETAILED_CHANGES_B64="$(encode_remote_value "${BRAI_SOURCE_DETAILED_CHANGES:-}")"
+SOURCE_REASON_B64="$(encode_remote_value "${BRAI_SOURCE_REASON:-}")"
+VERSION_WORK_B64="$(encode_remote_value "${BRAI_VERSION_WORK_JSON:-}")"
 
 ssh -i "$KEY_FILE" -p "$SSH_PORT" -o StrictHostKeyChecking=accept-new "$BRAI_DEPLOY_USER@$BRAI_DEPLOY_HOST" \
   bash -s -- "$DEPLOY_REPO" "$BRAI_SOURCE_BRANCH" "$BRAI_TARGET_ENVIRONMENT" "$BRAI_TARGET_BRANCH" "$BRAI_TARGET_COMMIT" "$SOURCE_SHORT_CHANGES_B64" "$SOURCE_DETAILED_CHANGES_B64" "$SOURCE_REASON_B64" "${BRAI_RECORD_PRODUCTION_RELEASE:-false}" "$VERSION_WORK_B64" <<'REMOTE'
@@ -38,11 +42,22 @@ BRAI_SOURCE_BRANCH="$2"
 BRAI_TARGET_ENVIRONMENT="$3"
 BRAI_TARGET_BRANCH="$4"
 BRAI_TARGET_COMMIT="$5"
-BRAI_SOURCE_SHORT_CHANGES="$(printf '%s' "$6" | base64 -d)"
-BRAI_SOURCE_DETAILED_CHANGES="$(printf '%s' "$7" | base64 -d)"
-BRAI_SOURCE_REASON="$(printf '%s' "$8" | base64 -d)"
+
+decode_remote_value() {
+  local decoded
+  decoded="$(printf '%s' "$1" | base64 -d)"
+  if [[ "${decoded:0:1}" != "." ]]; then
+    echo "Invalid encoded deployment value." >&2
+    return 1
+  fi
+  printf '%s' "${decoded:1}"
+}
+
+BRAI_SOURCE_SHORT_CHANGES="$(decode_remote_value "$6")"
+BRAI_SOURCE_DETAILED_CHANGES="$(decode_remote_value "$7")"
+BRAI_SOURCE_REASON="$(decode_remote_value "$8")"
 BRAI_RECORD_PRODUCTION_RELEASE="$9"
-BRAI_VERSION_WORK_JSON="$(printf '%s' "${10}" | base64 -d)"
+BRAI_VERSION_WORK_JSON="$(decode_remote_value "${10}")"
 ENVS_ROOT="${BRAI_ENVS_ROOT:-/srv/projects/brai-envs}"
 NODE_PREFIX="${BRAI_NODE_PREFIX:-/srv/opt/node-v22.16.0/bin}"
 if [[ -d "$NODE_PREFIX" ]]; then
