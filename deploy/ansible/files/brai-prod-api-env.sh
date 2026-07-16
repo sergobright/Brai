@@ -199,6 +199,14 @@ function decodedDatabase(url, label) {
   }
 }
 
+function decodedFragment(url, label) {
+  try {
+    return decodeURIComponent(url.hash);
+  } catch {
+    fail(`${label} fragment encoding is invalid.`);
+  }
+}
+
 function searchPath(url, label) {
   const values = [];
   for (const [key, value] of url.searchParams) {
@@ -207,6 +215,15 @@ function searchPath(url, label) {
   }
   if (values.length !== 1 || !values[0]) fail(`${label} must contain exactly one decoded search_path.`);
   return values[0];
+}
+
+function queryParameterMultiset(url) {
+  const compareText = (left, right) => (left === right ? 0 : left < right ? -1 : 1);
+  return [...url.searchParams]
+    .map(([key, value]) => [key, value])
+    .sort(([leftKey, leftValue], [rightKey, rightValue]) => (
+      compareText(leftKey, rightKey) || compareText(leftValue, rightValue)
+    ));
 }
 
 function shellQuote(value) {
@@ -226,12 +243,15 @@ if (decodedUsername(candidateUrl) !== "brai_api.brai-prod") {
   fail("Candidate production API DSN must use the exact brai_api.brai-prod role.");
 }
 if (
-  candidateUrl.hostname !== currentUrl.hostname
+  candidateUrl.protocol !== currentUrl.protocol
+  || candidateUrl.hostname !== currentUrl.hostname
   || candidateUrl.port !== currentUrl.port
   || decodedDatabase(candidateUrl, "Candidate production API DSN") !== decodedDatabase(currentUrl, "Current production API DSN")
+  || decodedFragment(candidateUrl, "Candidate production API DSN") !== decodedFragment(currentUrl, "Current production API DSN")
   || searchPath(candidateUrl, "Candidate production API DSN") !== searchPath(currentUrl, "Current production API DSN")
+  || JSON.stringify(queryParameterMultiset(candidateUrl)) !== JSON.stringify(queryParameterMultiset(currentUrl))
 ) {
-  fail("Candidate production API DSN must preserve host, port, database, and search_path.");
+  fail("Candidate production API DSN must preserve protocol, host, port, database, fragment, search_path, and the decoded query parameter multiset.");
 }
 current.lines[current.match.index] = `BRAI_DATABASE_URL=${shellQuote(candidate)}`;
 fs.writeFileSync(outputPath, current.lines.join("\n"), { mode: 0o600 });
