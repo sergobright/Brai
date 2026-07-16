@@ -10,7 +10,8 @@ const helper = path.join(repoRoot, "deploy/ansible/files/brai-prod-api-env.sh");
 const skipRuntime = typeof process.getuid === "function" && process.getuid() === 0;
 const currentDsn = "postgres://postgres.brai-prod:old-secret@127.0.0.1:6543/postgres?sslmode=disable&options=-c%20search_path%3Dbrai_prod%2Cpublic";
 const candidateOne = "postgres://brai_api.brai-prod:new-secret@127.0.0.1:6543/postgres?sslmode=disable&options=-c%20search_path%3Dbrai_prod%2Cpublic";
-const candidateTwo = "postgresql://brai_api.brai-prod:next-secret@127.0.0.1:6543/postgres?sslmode=require&options=-c%20search_path%3Dbrai_prod%2Cpublic";
+const candidateTwo = "postgres://brai_api.brai-prod:next-secret@127.0.0.1:6543/postgres?sslmode=disable&options=-c%20search_path%3Dbrai_prod%2Cpublic";
+const candidateReorderedQuery = "postgres://brai_api.brai-prod:ordered-secret@127.0.0.1:6543/postgres?options=-c+search_path%3Dbrai_prod%2Cpublic&ssl%6Dode=disable";
 
 test("production API env helper stages and rolls back byte-exactly without disclosing DSNs", { skip: skipRuntime }, (context) => {
   const fixture = createFixture(context);
@@ -59,6 +60,35 @@ test("production API env helper commits terminal state idempotently and rejects 
   assert.match(fixture.readTarget(), /brai_api\.brai-prod:next-secret/);
 });
 
+test("production API env helper allows credential rotation and query parameter reordering only", { skip: skipRuntime }, (context) => {
+  const credentials = createFixture(context);
+  assert.equal(credentials.run(candidateOne, "stage", "credential-rotation").status, 0);
+  assert.match(credentials.readTarget(), /brai_api\.brai-prod:new-secret/);
+  assert.equal(credentials.run("", "rollback", "credential-rotation").status, 0);
+
+  const preservedFragment = createFixture(context, {
+    target: `BRAI_DATABASE_URL='${currentDsn}#fixed-fragment'\n`,
+  });
+  assert.equal(preservedFragment.run(`${candidateOne}#fixed%2Dfragment`, "stage", "fragment-preserved").status, 0);
+  assert.equal(preservedFragment.run("", "rollback", "fragment-preserved").status, 0);
+
+  const preservedLowercaseFragmentEncoding = createFixture(context, {
+    target: `BRAI_DATABASE_URL='${currentDsn}#fixed%2dfragment'\n`,
+  });
+  assert.equal(preservedLowercaseFragmentEncoding.run(`${candidateOne}#fixed-fragment`, "stage", "fragment-lowercase-encoding").status, 0);
+  assert.equal(preservedLowercaseFragmentEncoding.run("", "rollback", "fragment-lowercase-encoding").status, 0);
+
+  const changedFragment = createFixture(context, {
+    target: `BRAI_DATABASE_URL='${currentDsn}#fixed-fragment'\n`,
+  });
+  assert.notEqual(changedFragment.run(`${candidateOne}#changed-fragment`, "stage", "fragment-changed").status, 0);
+
+  const reordered = createFixture(context);
+  assert.equal(reordered.run(candidateReorderedQuery, "stage", "query-reordered").status, 0);
+  assert.ok(reordered.readTarget().includes(candidateReorderedQuery));
+  assert.equal(reordered.run("", "rollback", "query-reordered").status, 0);
+});
+
 test("production API env helper fails closed on incomplete stage and resumes terminal cleanup", { skip: skipRuntime }, (context) => {
   const incomplete = createFixture(context);
   assert.equal(incomplete.run(candidateOne, "stage", "attempt-incomplete").status, 0);
@@ -94,15 +124,28 @@ test("production API env helper rejects unsafe candidates and cleans bounded std
   const fixture = createFixture(context);
   const invalid = [
     ["wrong protocol", candidateOne.replace("postgres://", "mysql://")],
+    ["protocol swap", candidateOne.replace("postgres://", "postgresql://")],
     ["empty password", candidateOne.replace(":new-secret@", ":@")],
     ["wrong role", candidateOne.replace("brai_api.brai-prod", "postgres.brai-prod")],
     ["legacy tenant", candidateOne.replace("127.0.0.1", "brightos.invalid")],
     ["wrong host", candidateOne.replace("127.0.0.1", "127.0.0.2")],
     ["wrong port", candidateOne.replace(":6543/", ":6544/")],
     ["wrong database", candidateOne.replace("/postgres?", "/other?")],
+    ["added fragment", `${candidateOne}#added-fragment`],
+    ["malformed fragment encoding", `${candidateOne}#broken%ZZ`],
     ["wrong search_path", candidateOne.replace("brai_prod%2Cpublic", "other%2Cpublic")],
     ["missing search_path", candidateOne.replace("&options=-c%20search_path%3Dbrai_prod%2Cpublic", "")],
     ["multiple search_path", `${candidateOne}&search_path=brai_prod,public`],
+    ["added query parameter", `${candidateOne}&application_name=brai-api`],
+    ["removed sslmode", candidateOne.replace("sslmode=disable&", "")],
+    ["changed sslmode", candidateOne.replace("sslmode=disable", "sslmode=require")],
+    ["repeated sslmode", `${candidateOne}&sslmode=disable`],
+    ["removed options", candidateOne.replace("&options=-c%20search_path%3Dbrai_prod%2Cpublic", "")],
+    ["changed options", candidateOne.replace(
+      "options=-c%20search_path%3Dbrai_prod%2Cpublic",
+      "options=-c%20search_path%3Dbrai_prod%2Cpublic%20-c%20statement_timeout%3D5s",
+    )],
+    ["repeated options", `${candidateOne}&options=-c%20search_path%3Dbrai_prod%2Cpublic`],
     ["multiline", `${candidateOne}\n${candidateOne}`],
   ];
   for (const [label, candidate] of invalid) {
