@@ -6,7 +6,9 @@ import { requiresNativeApkChange } from "./detect-native-apk-change.mjs";
 
 export const INFRA_DOCS_LABEL = "brai-delivery:infra-docs";
 export const TECHNICAL_NO_PREVIEW_LABEL = "brai-delivery:technical-no-preview";
+export const CANONICAL_RELEASE_REPOSITORY = "HexaFox-Labs/Brai";
 const LEGACY_NO_PREVIEW_LABELS = new Set(["bright-delivery:infra-docs", "bright-delivery:technical-no-preview"]);
+const LEGACY_RELEASE_REPOSITORY = "sergobright/Brai";
 
 if (path.resolve(process.argv[1] ?? "") === fileURLToPath(import.meta.url)) {
   const args = process.argv.slice(2);
@@ -57,8 +59,8 @@ export function acceptedWorkReconciliations(currentPulls, allPulls = currentPull
     seen.add(work.key);
     const members = allPulls
       .filter((candidate) => pullBase(candidate) === targetBranch && workFromPull(candidate, repository)?.key === work.key)
-      .map((candidate) => snapshotPull(candidate, repository));
-    if (!members.some((member) => member.pullNumber === pull.number)) members.push(snapshotPull(pull, repository));
+      .map((candidate) => snapshotWorkPull(candidate, repository));
+    if (!members.some((member) => member.pullNumber === pull.number)) members.push(snapshotWorkPull(pull, repository));
     members.sort(comparePulls);
     const current = members.find((member) => member.pullNumber === pull.number);
     const unresolved = members.filter((member) => !["CLOSED", "MERGED"].includes(member.state));
@@ -84,6 +86,19 @@ export function acceptedWorkReconciliations(currentPulls, allPulls = currentPull
     });
   }
   return result;
+}
+
+export function canonicalReleaseRepository(repository) {
+  const value = String(repository ?? "").trim();
+  return value.toLowerCase() === LEGACY_RELEASE_REPOSITORY.toLowerCase()
+    ? CANONICAL_RELEASE_REPOSITORY
+    : value;
+}
+
+function snapshotWorkPull(pull, repository) {
+  const work = requiredWorkFromPull(pull, repository);
+  const snapshotRepository = work.legacy ? repository : canonicalReleaseRepository(repository);
+  return snapshotPull(pull, snapshotRepository, work);
 }
 
 function acceptedPreviewPulls(pulls, targetBranch = "main") {
