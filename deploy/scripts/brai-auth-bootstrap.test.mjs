@@ -7,12 +7,14 @@ import test from "node:test";
 
 const repoRoot = path.resolve(import.meta.dirname, "../..");
 const helper = path.join(repoRoot, "deploy/ansible/files/brai-auth-runtime.sh");
+const prodApiEnvHelper = path.join(repoRoot, "deploy/ansible/files/brai-prod-api-env.sh");
 const compose = path.join(repoRoot, "deploy/ansible/files/brai-auth-compose.yml");
 const authSudoers = path.join(repoRoot, "deploy/ansible/templates/brai-auth-sudoers.j2");
 const deploySudoers = path.join(repoRoot, "deploy/ansible/templates/brai-deploy-sudoers.j2");
 const authTasks = path.join(repoRoot, "deploy/ansible/tasks/brai-auth-bootstrap.yml");
 const playbook = path.join(repoRoot, "deploy/ansible/brai.yml");
 const apiService = path.join(repoRoot, "deploy/ansible/templates/brai-api.service.j2");
+const groupVars = path.join(repoRoot, "deploy/ansible/group_vars/brai.yml");
 const digest = `ghcr.io/sergobright/brai-auth@sha256:${"a".repeat(64)}`;
 const priorDigest = `ghcr.io/sergobright/brai-auth@sha256:${"b".repeat(64)}`;
 const branch = "codex/auth-service";
@@ -40,11 +42,40 @@ test("auth sudoers grants are isolated from the shared deploy boundary", () => {
   assert.match(isolated, /brai_auth_runtime_helper \}\} pull-only \*/);
   assert.match(isolated, /brai_auth_runtime_helper \}\} deploy \*/);
   assert.match(isolated, /brai_auth_runtime_helper \}\} preflight-rollback \*/);
+  assert.match(isolated, /brai_prod_api_env_helper \}\} stage \*/);
+  assert.match(isolated, /brai_prod_api_env_helper \}\} rollback \*/);
+  assert.match(isolated, /brai_prod_api_env_helper \}\} commit \*/);
+  assert.doesNotMatch(isolated, /brai_prod_api_env_helper \}\} \*/);
   assert.match(isolated, /apply-main-infra\.sh --check brai-auth-bootstrap/);
   assert.match(isolated, /apply-main-infra\.sh --apply brai-auth-bootstrap/);
   assert.match(isolated, /brai_operation_maintainers/);
   assert.doesNotMatch(shared, /brai_auth_runtime_helper|brai-auth-bootstrap/);
   assert.match(tasks, /name: Install isolated Brai auth sudoers boundary[\s\S]*?dest: \/etc\/sudoers\.d\/brai-auth[\s\S]*?validate: "visudo -cf %s"/);
+});
+
+test("auth bootstrap isolates database administration and installs the fixed production API env helper", () => {
+  const tasks = fs.readFileSync(authTasks, "utf8");
+  const variables = fs.readFileSync(groupVars, "utf8");
+  const playbookSource = fs.readFileSync(playbook, "utf8");
+  const helperSource = fs.readFileSync(prodApiEnvHelper, "utf8");
+
+  assert.match(variables, /^brai_db_admin_group: brai-db-admin$/m);
+  assert.match(variables, /^brai_prod_api_env_helper: \/srv\/opt\/brai-prod-api-env\.sh$/m);
+  assert.match(variables, /^brai_prod_api_env_state_root: "\{\{ brai_protected_env_dir \}\}\/\.brai-prod-api-env"$/m);
+  assert.match(tasks, /name: Create isolated Brai database administrator group[\s\S]*?name: "\{\{ brai_db_admin_group \}\}"[\s\S]*?system: true/);
+  assert.match(tasks, /name: Grant production database administration only to deploy and maintainers[\s\S]*?loop: "\{\{ \[brai_deploy_user\] \+ brai_operation_maintainers \}\}"/);
+  assert.match(tasks, /name: Read Brai service identity group memberships[\s\S]*?brai_service_user[\s\S]*?brai_goal_agent_user/);
+  assert.match(tasks, /name: Remove Brai service identities from production database administration[\s\S]*?\/usr\/bin\/gpasswd[\s\S]*?brai_db_admin_group in item\.stdout\.split\(\)/);
+  assert.match(tasks, /name: Isolate protected Supabase deploy environment from runtime identities[\s\S]*?owner: root[\s\S]*?group: "\{\{ brai_db_admin_group \}\}"[\s\S]*?mode: "0640"/);
+  assert.match(tasks, /name: Assert Brai service identities cannot read Supabase deploy credentials[\s\S]*?\/usr\/bin\/test[\s\S]*?- "!"[\s\S]*?- -r/);
+  assert.match(tasks, /name: Assert production database administrators can read Supabase deploy credentials/);
+  assert.match(tasks, /name: Install fixed production API environment transaction helper[\s\S]*?src: "\{\{ playbook_dir \}\}\/files\/brai-prod-api-env\.sh"[\s\S]*?dest: "\{\{ brai_prod_api_env_helper \}\}"[\s\S]*?mode: "0755"/);
+  assert.match(tasks, /name: Provision root-only production API environment transaction state[\s\S]*?mode: "0700"/);
+  assert.match(tasks, /name: Provision root-only production API environment transaction lock[\s\S]*?mode: "0600"/);
+  assert.equal((playbookSource.match(/brai_supabase_deploy_env_source/g) ?? []).length, 0);
+  assert.match(helperSource, /TARGET=".*\/etc\/brai\/brai-api\.env"/);
+  assert.match(helperSource, /STATE_ROOT=".*\/etc\/brai\/\.brai-prod-api-env"/);
+  assert.doesNotMatch(helperSource, /brai-auth-runtime\.sh/);
 });
 
 test("auth bootstrap target installs API and verified-backup cutover prerequisites", () => {

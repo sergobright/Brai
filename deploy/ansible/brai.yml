@@ -113,7 +113,6 @@
       register: brai_protected_env_files
       loop:
         - "{{ brai_api_env_source }}"
-        - "{{ brai_supabase_deploy_env_source }}"
       tags:
         - brai-env-contract
         - targeted-infra-apply

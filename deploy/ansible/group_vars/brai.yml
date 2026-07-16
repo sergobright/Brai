@@ -6,6 +6,8 @@ brai_caddyfile: /etc/caddy/Caddyfile
 brai_auth_root: /srv/opt/brai-auth
 brai_auth_compose: "{{ brai_auth_root }}/compose.yml"
 brai_auth_runtime_helper: /srv/opt/brai-auth-runtime.sh
+brai_prod_api_env_helper: /srv/opt/brai-prod-api-env.sh
+brai_prod_api_env_state_root: "{{ brai_protected_env_dir }}/.brai-prod-api-env"
 brai_auth_caddy_root: /etc/caddy/brai-auth
 brai_auth_caddy_lock: "{{ brai_auth_root }}/caddy.lock"
 brai_public_site_domain: brai.one
@@ -34,6 +36,7 @@ brai_operation_maintainers:
 brai_source_group: mark
 brai_service_user: brai
 brai_service_group: brai
+brai_db_admin_group: brai-db-admin
 brai_goal_agent_user: brai-goal-agent
 brai_goal_agent_group: brai-goal-agent
 brai_codex_exec_group: brai-codex-exec
