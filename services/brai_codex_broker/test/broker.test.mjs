@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { PassThrough } from "node:stream";
 import test from "node:test";
-import { BrokerServer, RuntimeManager } from "../src/broker.mjs";
+import { AppServerProcess, BrokerServer, RuntimeManager } from "../src/broker.mjs";
 import { BraiCodexBrokerClient } from "../src/client.mjs";
 
 const USER_A = "user_00000001";
@@ -17,6 +17,12 @@ const ATTACHMENT = "attach_0000001";
 const IMAGE_ITEM = "image_item_0001";
 const GENERATED_ATTACHMENT = "generated_attach_0001";
 const PNG_BYTES = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+const GENERATED_ROOT = "/codex-home/generated_images";
+const LARGE_IMAGE_RESULT = "A".repeat(4 * 1024 * 1024);
+
+function generatedPath(filename, threadId = THREAD) {
+  return path.posix.join(GENERATED_ROOT, threadId, filename);
+}
 
 class FakeDocker {
   calls = [];
@@ -28,6 +34,7 @@ class FakeDocker {
   hangOnClose = false;
   stopExitCode = 0;
   execLocally = false;
+  generatedHostRoot = null;
   titleResponse = "Хайку о весне";
   config = {
     config: {
@@ -57,7 +64,19 @@ class FakeDocker {
     this.calls.push({ command, args, options });
     if (args[0] === "stop") return exitedChild(this.stopExitCode);
     if (args[0] === "exec" && this.execLocally) {
-      return nodeSpawn(args[2], args.slice(3), options);
+      const localArgs = args.slice(3);
+      if (this.generatedHostRoot) {
+        const scriptIndex = localArgs.indexOf("-e") + 1;
+        localArgs[scriptIndex] = localArgs[scriptIndex].replace(
+          'const ROOT = "/codex-home/generated_images";',
+          `const ROOT = ${JSON.stringify(this.generatedHostRoot)};`,
+        );
+        localArgs[localArgs.length - 1] = path.join(
+          this.generatedHostRoot,
+          path.posix.relative(GENERATED_ROOT, localArgs.at(-1)),
+        );
+      }
+      return nodeSpawn(args[2], localArgs, options);
     }
     assert.equal(args[0], "run");
     const child = new EventEmitter();
@@ -310,6 +329,97 @@ test("selected images are signature-checked and reject final or parent symlinks"
   await parentSymlinkManager.close();
 });
 
+test("large image completion stays within the app-server limit and is sanitized before broker output", async () => {
+  const fixture = await createFixture();
+  const docker = new FakeDocker();
+  const manager = fixture.manager(docker);
+  const runtime = await manager.ensureRuntime(USER_A);
+  const notification = once(manager, "notification");
+  runtime.child.stdout.write(`${JSON.stringify({
+    method: "item/completed",
+    params: {
+      threadId: THREAD,
+      turnId: TURN,
+      item: {
+        id: IMAGE_ITEM,
+        type: "imageGeneration",
+        status: "completed",
+        result: LARGE_IMAGE_RESULT,
+        savedPath: generatedPath("spring.png"),
+      },
+    },
+  })}\n`);
+
+  const [{ message }] = await notification;
+  assert.equal(runtime.child.signalCode, null);
+  assert.deepEqual(message.params.item, {
+    id: IMAGE_ITEM,
+    type: "imageGeneration",
+    status: "completed",
+    path: generatedPath("spring.png"),
+  });
+  assert.equal(JSON.stringify(message).includes(LARGE_IMAGE_RESULT.slice(0, 1_000)), false);
+  assert.equal(runtime.generatedArtifacts.size, 1);
+  await manager.close();
+});
+
+test("app-server output above its dedicated limit still fails closed", async () => {
+  const child = new EventEmitter();
+  child.stdin = new PassThrough();
+  child.stdout = new PassThrough();
+  child.stderr = new PassThrough();
+  child.signalCode = null;
+  child.kill = (signal) => {
+    child.signalCode = signal;
+    child.emit("exit", null, signal);
+  };
+  const appServer = new AppServerProcess(child, { maxLineBytes: 128 });
+  const closed = once(appServer, "closed");
+  child.stdout.write(`${JSON.stringify({
+    method: "item/completed",
+    params: { padding: "A".repeat(256) },
+  })}\n`);
+
+  const [error] = await closed;
+  assert.match(error.message, /oversized message/);
+  assert.equal(child.signalCode, "SIGKILL");
+});
+
+test("thread/read removes oversized image result and restores the generated artifact path", async () => {
+  const fixture = await createFixture();
+  const docker = new FakeDocker();
+  docker.turnStatus = "interrupted";
+  docker.turnItems = [{
+    id: IMAGE_ITEM,
+    type: "imageGeneration",
+    status: "completed",
+    result: LARGE_IMAGE_RESULT,
+    savedPath: generatedPath("spring.png"),
+  }];
+  const manager = fixture.manager(docker);
+  const runtime = await manager.ensureRuntime(USER_A);
+
+  const snapshot = await manager.request(USER_A, "thread/read", {
+    threadId: THREAD,
+    includeTurns: true,
+  });
+
+  assert.equal(runtime.child.signalCode, null);
+  assert.deepEqual(snapshot.thread.turns[0], {
+    id: TURN,
+    status: "interrupted",
+    items: [{
+      id: IMAGE_ITEM,
+      type: "imageGeneration",
+      status: "completed",
+      path: generatedPath("spring.png"),
+    }],
+  });
+  assert.ok(Buffer.byteLength(JSON.stringify(snapshot)) < 1024 * 1024);
+  assert.equal(runtime.generatedArtifacts.size, 1);
+  await manager.close();
+});
+
 test("generated images export from an allowlisted container item into the owner Vault", async () => {
   const fixture = await createFixture();
   const docker = new FakeDocker();
@@ -332,7 +442,7 @@ test("generated images export from an allowlisted container item into the owner 
         id: IMAGE_ITEM,
         type: "imageGeneration",
         status: "completed",
-        path: "/tmp/generated/spring.png",
+        savedPath: generatedPath("spring.png"),
       },
     },
   })}\n`);
@@ -357,7 +467,7 @@ test("generated images export from an allowlisted container item into the owner 
     publicThreadId: THREAD,
     attachmentId: GENERATED_ATTACHMENT,
   });
-  assert.deepEqual(copied, ["/tmp/generated/spring.png"]);
+  assert.deepEqual(copied, [generatedPath("spring.png")]);
   assert.equal(metadata.id, GENERATED_ATTACHMENT);
   assert.equal(metadata.original_name, "spring.png");
   assert.equal(metadata.media_type, "image/png");
@@ -448,7 +558,7 @@ test("generated image export remains idempotent after a broker restart", async (
           id: IMAGE_ITEM,
           type: "imageGeneration",
           status: "completed",
-          path: "/tmp/generated/spring.png",
+          path: generatedPath("spring.png"),
         },
       },
     })}\n`);
@@ -482,11 +592,12 @@ test("generated image export rejects parent and final symlinks in the container 
       const fixture = await createFixture();
       const docker = new FakeDocker();
       docker.execLocally = true;
+      docker.generatedHostRoot = path.join(fixture.root, "container-generated");
       const manager = fixture.manager(docker);
       const runtime = await manager.ensureRuntime(USER_A);
-      const base = path.join(fixture.root, `export-${kind}`);
+      const base = path.join(docker.generatedHostRoot, THREAD);
       const targetDirectory = path.join(fixture.root, `export-${kind}-target`);
-      await fs.mkdir(base);
+      await fs.mkdir(base, { recursive: true });
       await fs.mkdir(targetDirectory);
       const target = path.join(targetDirectory, "image.png");
       await fs.writeFile(target, PNG_BYTES);
@@ -494,10 +605,10 @@ test("generated image export rejects parent and final symlinks in the container 
       if (kind === "parent") {
         const linkedParent = path.join(base, "generated");
         await fs.symlink(targetDirectory, linkedParent);
-        sourcePath = path.join(linkedParent, "image.png");
+        sourcePath = generatedPath("generated/image.png");
       } else {
-        sourcePath = path.join(base, "image.png");
-        await fs.symlink(target, sourcePath);
+        await fs.symlink(target, path.join(base, "image.png"));
+        sourcePath = generatedPath("image.png");
       }
 
       const notification = once(manager, "notification");
@@ -510,7 +621,7 @@ test("generated image export rejects parent and final symlinks in the container 
             id: IMAGE_ITEM,
             type: "imageGeneration",
             status: "completed",
-            path: sourcePath,
+            savedPath: sourcePath,
           },
         },
       })}\n`);
@@ -543,13 +654,14 @@ test("generated source cleanup keeps parent and final symlink substitutions pend
       const fixture = await createFixture();
       const docker = new FakeDocker();
       docker.execLocally = true;
+      docker.generatedHostRoot = path.join(fixture.root, "container-generated");
       const manager = fixture.manager(docker);
       const runtime = await manager.ensureRuntime(USER_A);
-      const base = path.join(fixture.root, `cleanup-${kind}`);
+      const base = path.join(docker.generatedHostRoot, THREAD);
       const generated = path.join(base, "generated");
-      const sourcePath = path.join(generated, "image.png");
+      const sourcePath = generatedPath("generated/image.png");
       await fs.mkdir(generated, { recursive: true });
-      await fs.writeFile(sourcePath, PNG_BYTES);
+      await fs.writeFile(path.join(generated, "image.png"), PNG_BYTES);
 
       const notification = once(manager, "notification");
       runtime.child.stdout.write(`${JSON.stringify({
@@ -561,7 +673,7 @@ test("generated source cleanup keeps parent and final symlink substitutions pend
             id: IMAGE_ITEM,
             type: "imageGeneration",
             status: "completed",
-            path: sourcePath,
+            savedPath: sourcePath,
           },
         },
       })}\n`);
@@ -583,8 +695,8 @@ test("generated source cleanup keeps parent and final symlink substitutions pend
       } else {
         protectedTarget = path.join(base, "protected.png");
         await fs.writeFile(protectedTarget, PNG_BYTES);
-        await fs.unlink(sourcePath);
-        await fs.symlink(protectedTarget, sourcePath);
+        await fs.unlink(path.join(generated, "image.png"));
+        await fs.symlink(protectedTarget, path.join(generated, "image.png"));
       }
 
       assert.deepEqual(await manager.cleanupGeneratedArtifacts(USER_A, {
@@ -637,7 +749,7 @@ test("generated source cleanup is bounded, retryable and idempotent across a lon
           id: itemId,
           type: "imageGeneration",
           status: "completed",
-          path: `/tmp/generated/source_${suffix}.png`,
+          savedPath: generatedPath(`source_${suffix}.png`),
         },
       },
     })}\n`);
@@ -708,11 +820,13 @@ test("semantic title generation uses a private ephemeral thread without leaking 
   await manager.close();
 });
 
-test("generated image export rejects unrecorded items and paths outside the container temp root", async () => {
+test("generated image export rejects unrecorded items and paths outside the generated thread root", async () => {
   const fixture = await createFixture();
   const docker = new FakeDocker();
+  let accesses = 0;
   const manager = fixture.manager(docker, {
     generatedPathAccess: async ({ operation, destinationPath }) => {
+      accesses += 1;
       assert.equal(operation, "read");
       await fs.writeFile(destinationPath, PNG_BYTES);
     },
@@ -744,6 +858,36 @@ test("generated image export rejects unrecorded items and paths outside the cont
     (error) => error.code === "BRAI_GENERATED_ARTIFACT_UNAVAILABLE",
   );
 
+  const crossThreadItem = "cross_thread_image_item";
+  const crossThreadNotification = once(manager, "notification");
+  runtime.child.stdout.write(`${JSON.stringify({
+    method: "item/completed",
+    params: {
+      threadId: THREAD,
+      turnId: TURN,
+      item: {
+        id: crossThreadItem,
+        type: "imageGeneration",
+        status: "completed",
+        result: LARGE_IMAGE_RESULT,
+        savedPath: generatedPath("cross-thread.png", "thread_00000002"),
+      },
+    },
+  })}\n`);
+  const [{ message: crossThreadMessage }] = await crossThreadNotification;
+  assert.equal(Object.hasOwn(crossThreadMessage.params.item, "result"), false);
+  assert.equal(Object.hasOwn(crossThreadMessage.params.item, "path"), false);
+  await assert.rejects(
+    manager.exportGeneratedArtifact(USER_A, {
+      threadId: THREAD,
+      turnId: TURN,
+      itemId: crossThreadItem,
+      publicThreadId: THREAD,
+      attachmentId: "cross_thread_attachment",
+    }),
+    (error) => error.code === "BRAI_GENERATED_ARTIFACT_UNAVAILABLE",
+  );
+
   const failedItem = "failed_image_item";
   const failedNotification = once(manager, "notification");
   runtime.child.stdout.write(`${JSON.stringify({
@@ -755,7 +899,7 @@ test("generated image export rejects unrecorded items and paths outside the cont
         id: failedItem,
         type: "imageGeneration",
         status: "failed",
-        path: "/tmp/generated/failed.png",
+        savedPath: generatedPath("failed.png"),
       },
     },
   })}\n`);
@@ -770,6 +914,8 @@ test("generated image export rejects unrecorded items and paths outside the cont
     }),
     (error) => error.code === "BRAI_GENERATED_ARTIFACT_UNAVAILABLE",
   );
+  assert.equal(accesses, 0);
+  assert.equal(runtime.generatedArtifacts.size, 0);
   await manager.close();
 });
 

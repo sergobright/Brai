@@ -1020,9 +1020,10 @@ export class BraiChatTurnCoordinator {
     const replayAfterSequence = boundary > 0 ? boundary - 1 : after;
     let lastSequence = replayAfterSequence;
     let compact = boundary > 0 ? [] : null;
-    const flush = () => {
+    const flush = ({ terminal = false } = {}) => {
       if (!compact?.length) return;
-      for (const event of compactEvents(compact)) emit(event);
+      const events = terminal ? compactEvents(compact) : compact;
+      for (const event of events) emit(event);
       compact = [];
     };
     const found = this.#replay(store, publicThreadId, replayAfterSequence, (record) => {
@@ -1033,7 +1034,7 @@ export class BraiChatTurnCoordinator {
       }
       compact.push(record.safe_payload);
       if (record.safe_payload?.type === EventType.RUN_FINISHED
-        || record.safe_payload?.type === EventType.RUN_ERROR) flush();
+        || record.safe_payload?.type === EventType.RUN_ERROR) flush({ terminal: true });
     });
     flush();
     return { found, lastSequence };
@@ -1507,7 +1508,18 @@ export function createBraiChatRuntime({
         body: JSON.stringify(rewritten)
       });
       const response = await handler(request);
-      res.writeHead(response.status, Object.fromEntries(response.headers.entries()));
+      const responseHeaders = new Headers(response.headers);
+      const isEventStream = responseHeaders.get('content-type')
+        ?.toLowerCase().startsWith('text/event-stream');
+      if (isEventStream) {
+        responseHeaders.set('cache-control', 'no-cache, no-transform');
+        responseHeaders.set('content-encoding', 'identity');
+        responseHeaders.set('x-accel-buffering', 'no');
+        responseHeaders.delete('content-length');
+        res.socket?.setNoDelay?.(true);
+      }
+      res.writeHead(response.status, Object.fromEntries(responseHeaders.entries()));
+      if (isEventStream) res.flushHeaders?.();
       if (!response.body) {
         res.end();
         return;
@@ -1516,6 +1528,7 @@ export function createBraiChatRuntime({
         for await (const chunk of response.body) {
           if (res.destroyed) break;
           res.write(Buffer.from(chunk));
+          if (isEventStream) res.flush?.();
         }
       } finally {
         if (!res.destroyed) res.end();

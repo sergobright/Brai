@@ -122,4 +122,13 @@ test("Ansible owns protected auth/image/state wiring and Caddy exposes no broker
   }
   assert.match(broker, /"systempaths=unconfined"/);
   assert.doesNotMatch(caddy, /codex|broker|app-server/i);
+  assert.match(caddy, /@not_brai_chat_runtime not path \/v1\/brai-chat\/runtime\*/);
+  assert.equal(
+    (caddy.match(/@not_brai_chat_runtime not path \/api\/v1\/brai-chat\/runtime\*/g) || []).length,
+    2
+  );
+  assert.equal(
+    (caddy.match(/encode @not_brai_chat_runtime zstd gzip/g) || []).length,
+    3
+  );
 });

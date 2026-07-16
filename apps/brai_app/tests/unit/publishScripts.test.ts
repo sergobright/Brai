@@ -405,6 +405,10 @@ describe("mobile OTA publish scripts", () => {
     expect(template).toContain("redir https://{{ brai_api_domain }}{uri} 308");
     expect(productionApiBlock).not.toContain("brai_basic_auth_directive");
     expect(productionApiBlock).not.toContain("header_up Authorization");
+    expect(template).toContain("@not_brai_chat_runtime not path /v1/brai-chat/runtime*");
+    expect(productionTemplate).toContain("@not_brai_chat_runtime not path /api/v1/brai-chat/runtime*");
+    expect(nonProductionTemplate).toContain("@not_brai_chat_runtime not path /api/v1/brai-chat/runtime*");
+    expect(template.match(/encode @not_brai_chat_runtime zstd gzip/g)?.length).toBe(3);
     expect(productionAdminBlock).toContain("brai_envs.prod.admin_port");
     expect(productionAdminBlock).not.toContain("brai_basic_auth_directive");
     expect(productionTemplate).toContain("@admin path /admin /admin/*");

@@ -1816,3 +1816,65 @@ test('CopilotKit connect forwards Last-Event-ID into durable replay', async () =
   assert.equal(body.includes('"sequence":2'), false);
   assert.equal(body.includes('"sequence":3'), true);
 });
+
+test('CopilotKit connect replays an incomplete active run without compacting it away', async () => {
+  const runtime = createBraiChatRuntime({ broker: new FakeBroker() });
+  const store = fakeStore();
+  const turnId = 'active-connect-run';
+  const records = [
+    { type: EventType.RUN_STARTED, threadId: 'public-thread', runId: turnId },
+    { type: EventType.TEXT_MESSAGE_START, messageId: 'user-active', role: 'user' },
+    { type: EventType.TEXT_MESSAGE_CONTENT, messageId: 'user-active', delta: 'Нарисуй весну' },
+    { type: EventType.TEXT_MESSAGE_END, messageId: 'user-active' },
+    { type: EventType.TEXT_MESSAGE_START, messageId: 'assistant-active', role: 'assistant' },
+    { type: EventType.TEXT_MESSAGE_CONTENT, messageId: 'assistant-active', delta: 'Рисую изображение' },
+    { type: EventType.TOOL_CALL_START, toolCallId: 'image-active', toolCallName: 'image_generation' }
+  ];
+  for (const [index, safePayload] of records.entries()) {
+    store.events.push({
+      id: `active-event-${index + 1}`,
+      turnId,
+      safePayload
+    });
+  }
+  const chunks = [];
+  let flushHeadersCalls = 0;
+  let flushCalls = 0;
+  let noDelayCalls = 0;
+  const res = {
+    destroyed: false,
+    socket: { setNoDelay(value) { assert.equal(value, true); noDelayCalls += 1; } },
+    writeHead(status, headers) { this.status = status; this.headers = headers; },
+    flushHeaders() { flushHeadersCalls += 1; },
+    write(chunk) { chunks.push(Buffer.from(chunk)); },
+    flush() { flushCalls += 1; },
+    end() { this.ended = true; }
+  };
+  await runtime.handleRequest({
+    req: { headers: { accept: 'text/event-stream', 'last-event-id': '5' } },
+    res,
+    url: new URL('https://api.example.test/v1/brai-chat/runtime'),
+    store,
+    userId: 'user-a-long-enough',
+    readJson: async () => ({
+      method: 'agent/connect',
+      params: { agentId: 'brai-codex' },
+      body: {
+        threadId: 'public-thread', runId: 'connect-active-run', state: {}, messages: [],
+        tools: [], context: [], forwardedProps: {}
+      }
+    }),
+    sendJson: () => assert.fail('CopilotKit handler should own a valid connect response')
+  });
+
+  const body = Buffer.concat(chunks).toString('utf8');
+  assert.equal(res.status, 200);
+  assert.equal(res.headers['content-encoding'], 'identity');
+  assert.equal(res.headers['cache-control'], 'no-cache, no-transform');
+  assert.equal(res.headers['x-accel-buffering'], 'no');
+  assert.equal(flushHeadersCalls, 1);
+  assert.ok(flushCalls > 0);
+  assert.equal(noDelayCalls, 1);
+  assert.equal(body.includes('Рисую изображение'), true);
+  assert.equal(body.includes('image_generation'), true);
+});

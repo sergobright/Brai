@@ -11,20 +11,22 @@ const OPAQUE_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{7,127}$/;
 const ENVIRONMENT_ID = /^(?:prod|dev|preview-[a-e])$/;
 const MODEL_ID = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/;
 const EFFORT = /^[A-Za-z0-9][A-Za-z0-9_-]{0,31}$/;
-const MAX_LINE_BYTES = 1024 * 1024;
+const MAX_RPC_LINE_BYTES = 1024 * 1024;
 const MAX_TEXT_BYTES = 256 * 1024;
 const MAX_ATTACHMENTS = 5;
 const MAX_GENERATED_ARTIFACT_CLEANUP = 1_000;
 const MAX_ATTACHMENT_BYTES = 50 * 1024 * 1024;
+const MAX_APP_SERVER_LINE_BYTES = 4 * Math.ceil(MAX_ATTACHMENT_BYTES / 3)
+  + MAX_RPC_LINE_BYTES;
 const DEFAULT_IDLE_MS = 15 * 60 * 1000;
 const TITLE_TIMEOUT_MS = 30 * 1000;
 const WORKSPACE = "/workspace";
-const GENERATED_ROOT = "/tmp";
+const GENERATED_ROOT = "/codex-home/generated_images";
 const GENERATED_ARTIFACT_HELPER_SCRIPT = String.raw`
 const fs = require("node:fs");
 const fsp = require("node:fs/promises");
 const path = require("node:path").posix;
-const ROOT = "/tmp";
+const ROOT = "/codex-home/generated_images";
 const MAX_BYTES = 50 * 1024 * 1024;
 
 async function inspect(candidate) {
@@ -113,10 +115,16 @@ class AppServerError extends Error {
 }
 
 export class AppServerProcess extends EventEmitter {
-  constructor(child, { requestTimeoutMs = 30_000 } = {}) {
+  constructor(child, {
+    requestTimeoutMs = 30_000,
+    maxLineBytes = MAX_APP_SERVER_LINE_BYTES,
+    maxRequestLineBytes = MAX_RPC_LINE_BYTES,
+  } = {}) {
     super();
     this.child = child;
     this.requestTimeoutMs = requestTimeoutMs;
+    this.maxLineBytes = positiveInteger(maxLineBytes, "maxLineBytes");
+    this.maxRequestLineBytes = positiveInteger(maxRequestLineBytes, "maxRequestLineBytes");
     this.nextId = 1;
     this.pending = new Map();
     this.closed = false;
@@ -162,14 +170,14 @@ export class AppServerProcess extends EventEmitter {
 
   #write(message) {
     const line = `${JSON.stringify(message)}\n`;
-    if (Buffer.byteLength(line) > MAX_LINE_BYTES) {
+    if (Buffer.byteLength(line) > this.maxRequestLineBytes) {
       throw new BrokerError("BRAI_REQUEST_TOO_LARGE", "Runtime request is too large");
     }
     this.child.stdin.write(line);
   }
 
   #onLine(line) {
-    if (Buffer.byteLength(line) > MAX_LINE_BYTES) {
+    if (Buffer.byteLength(line) > this.maxLineBytes) {
       this.#close(new Error("Codex runtime emitted an oversized message"));
       this.child.kill("SIGKILL");
       return;
@@ -182,6 +190,7 @@ export class AppServerProcess extends EventEmitter {
       this.child.kill("SIGKILL");
       return;
     }
+    message = sanitizeAppServerMessage(message);
     if (message.id != null && ("result" in message || "error" in message)) {
       const pending = this.pending.get(message.id);
       if (!pending) return;
@@ -774,7 +783,7 @@ export class RuntimeManager extends EventEmitter {
     if (!threadId || !turnId || !item?.id
       || (item.type !== "imageGeneration" && item.type !== "imageView")) return;
     if (["failed", "interrupted", "cancelled", "canceled"].includes(item.status)) return;
-    const generatedPath = generatedContainerPath(item.path);
+    const generatedPath = generatedContainerPath(item.path, threadId);
     if (!generatedPath) return;
     runtime.generatedArtifacts.set(generatedArtifactKey(threadId, turnId, item.id), {
       path: generatedPath
@@ -988,7 +997,7 @@ export class RuntimeManager extends EventEmitter {
 }
 
 export class BrokerServer {
-  constructor(manager, { socketPath, maxLineBytes = MAX_LINE_BYTES } = {}) {
+  constructor(manager, { socketPath, maxLineBytes = MAX_RPC_LINE_BYTES } = {}) {
     this.manager = manager;
     this.socketPath = path.resolve(socketPath);
     this.maxLineBytes = maxLineBytes;
@@ -1479,14 +1488,67 @@ function bindMount(source, target, readonly = false) {
   return `type=bind,src=${source},dst=${target}${readonly ? ",readonly" : ""}`;
 }
 
+function sanitizeAppServerMessage(message) {
+  if (!message || typeof message !== "object") return message;
+  let sanitized = message;
+  const notificationItem = message.params?.item;
+  if (isGeneratedImageItem(notificationItem)) {
+    sanitized = {
+      ...sanitized,
+      params: {
+        ...message.params,
+        item: sanitizeGeneratedImageItem(notificationItem, message.params?.threadId),
+      },
+    };
+  }
+  const result = sanitizeThreadReadResult(sanitized.result);
+  return result === sanitized.result ? sanitized : { ...sanitized, result };
+}
+
+function sanitizeThreadReadResult(result) {
+  const thread = result?.thread;
+  if (!thread || !Array.isArray(thread.turns)) return result;
+  let changed = false;
+  const turns = thread.turns.map((turn) => {
+    if (!Array.isArray(turn?.items)) return turn;
+    let itemsChanged = false;
+    const items = turn.items.map((item) => {
+      if (!isGeneratedImageItem(item)) return item;
+      itemsChanged = true;
+      return sanitizeGeneratedImageItem(item, thread.id);
+    });
+    if (!itemsChanged) return turn;
+    changed = true;
+    return { ...turn, items };
+  });
+  return changed ? { ...result, thread: { ...thread, turns } } : result;
+}
+
+function isGeneratedImageItem(item) {
+  return item?.type === "imageGeneration" || item?.type === "imageView";
+}
+
+function sanitizeGeneratedImageItem(item, threadId) {
+  const sourcePath = item.savedPath ?? item.path;
+  const generatedPath = generatedContainerPath(sourcePath, threadId);
+  const sanitized = { ...item };
+  delete sanitized.result;
+  delete sanitized.savedPath;
+  delete sanitized.path;
+  if (generatedPath) sanitized.path = generatedPath;
+  return sanitized;
+}
+
 function generatedArtifactKey(threadId, turnId, itemId) {
   return `${threadId}\0${turnId}\0${itemId}`;
 }
 
-function generatedContainerPath(value) {
-  if (typeof value !== "string" || value.includes("\0") || value.length > 4_096) return null;
+function generatedContainerPath(value, threadId) {
+  if (typeof value !== "string" || value.includes("\0") || value.length > 4_096
+    || typeof threadId !== "string" || !OPAQUE_ID.test(threadId)) return null;
   const candidate = path.posix.resolve(value);
-  return candidate.startsWith(`${GENERATED_ROOT}/`) ? candidate : null;
+  const threadRoot = path.posix.join(GENERATED_ROOT, threadId);
+  return candidate.startsWith(`${threadRoot}/`) ? candidate : null;
 }
 
 function generatedFilename(sourcePath, extension) {
