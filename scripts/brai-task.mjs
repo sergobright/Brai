@@ -2495,6 +2495,7 @@ function deliveryClassForFile(file) {
       "deploy/scripts/publish-mobile-bundle.sh",
       "deploy/scripts/publish-environment-web-layer.sh",
       "deploy/scripts/publish-web.sh",
+      "deploy/scripts/record-version-pr.mjs",
       "deploy/scripts/promote-accepted-deployment.sh",
       "deploy/scripts/promote-deployment.mjs",
       "deploy/scripts/resolve-deploy-env.mjs",

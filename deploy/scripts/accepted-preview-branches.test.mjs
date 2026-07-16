@@ -2,7 +2,11 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
 
-import { acceptedWorkReconciliations } from "./accepted-preview-branches.mjs";
+import {
+  CANONICAL_RELEASE_REPOSITORY,
+  acceptedWorkReconciliations,
+  canonicalReleaseRepository,
+} from "./accepted-preview-branches.mjs";
 
 process.env.BRAI_RELEASE_NOTES_V2_CUTOFF = "2026-07-15T00:00:00.000Z";
 
@@ -59,8 +63,14 @@ test("owner reconciliation includes merged support PRs in stable order", () => {
 
   assert.deepEqual(entry.work, { key: workKey, role: "owner" });
   assert.deepEqual(entry.pulls.map((item) => [item.pullNumber, item.workRole]), [[1, "support"], [2, "owner"]]);
+  assert.ok(entry.pulls.every((item) => item.repository === CANONICAL_RELEASE_REPOSITORY));
   assert.equal(entry.pulls[0].releaseNotes.build.short_changes, undefined);
   assert.equal(entry.pulls[1].releaseNotes.build.short_changes, "Завершена нормализация истории версий.");
+});
+
+test("explicit release work canonicalizes the historical repository alias", () => {
+  assert.equal(canonicalReleaseRepository("sergobright/Brai"), CANONICAL_RELEASE_REPOSITORY);
+  assert.equal(canonicalReleaseRepository("HexaFox-Labs/Brai"), CANONICAL_RELEASE_REPOSITORY);
 });
 
 test("support merge registers snapshots without waiting for the open owner", () => {
@@ -107,6 +117,7 @@ test("pre-cutoff v1 PR is reconciled through one synthetic owner work", () => {
   const [entry] = acceptedWorkReconciliations([legacy], [legacy]);
   assert.match(entry.work.key, /^work_[0-9a-f-]{36}$/);
   assert.equal(entry.work.role, "owner");
+  assert.equal(entry.pulls[0].repository, "sergobright/Brai");
   assert.equal(entry.pulls[0].releaseNotes.build.details.length, 1);
 });
 
@@ -143,9 +154,11 @@ test("accepted promotion cannot create an unscoped build", () => {
 
 test("delivery records every PR lifecycle event and queues main promotions", () => {
   const workflow = fs.readFileSync(new URL("../../.github/workflows/brai-delivery.yml", import.meta.url), "utf8");
+  const recorder = fs.readFileSync(new URL("./record-version-pr.mjs", import.meta.url), "utf8");
   for (const action of ["opened", "edited", "synchronize", "reopened", "converted_to_draft", "ready_for_review", "closed"]) {
     assert.match(workflow, new RegExp(`- ${action}\\b`));
   }
+  assert.match(recorder, /explicitWork \? canonicalReleaseRepository\(suppliedRepository\) : suppliedRepository/);
   assert.match(workflow, /record-version-pr:[\s\S]*ci-ssh-record-version-pr\.sh/);
   assert.match(workflow, /if \[\[ ! -x deploy\/scripts\/ci-ssh-record-version-pr\.sh \]\]; then/);
   assert.match(workflow, /cancel-in-progress: \$\{\{ github\.event_name == 'push' && startsWith\(github\.ref, 'refs\/heads\/codex\/'\) \}\}/);
