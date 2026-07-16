@@ -1,10 +1,11 @@
 import fs from 'node:fs';
 import { parentPort, workerData } from 'node:worker_threads';
-import { Pool, types } from 'pg';
+import { types } from 'pg';
+import { createRecoveringPostgresPool } from './postgres-recovery.js';
 
 types.setTypeParser(20, (value) => Number(value));
 
-const pool = new Pool({
+const pool = createRecoveringPostgresPool({
   connectionString: workerData.databaseUrl,
   ssl: workerData.ssl,
   max: workerData.poolMax,
