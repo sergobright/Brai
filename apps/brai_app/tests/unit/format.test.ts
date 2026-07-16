@@ -1,5 +1,7 @@
-import { describe, expect, it } from "vitest";
-import { formatDuration, formatGoalDuration, formatHumanDuration, formatPercent, moscowDateTime } from "@/shared/time/format";
+import { afterEach, describe, expect, it } from "vitest";
+import { DEFAULT_DISPLAY_TIME_ZONE, formatDisplayDateTime, formatDuration, formatGoalDuration, formatHumanDuration, formatPercent, setDisplayTimeZone } from "@/shared/time/format";
+
+afterEach(() => setDisplayTimeZone(DEFAULT_DISPLAY_TIME_ZONE));
 
 describe("time formatting", () => {
   it("formats timer digits", () => {
@@ -23,7 +25,12 @@ describe("time formatting", () => {
     expect(formatPercent(124.3)).toBe("124%");
   });
 
-  it("uses Moscow time labels", () => {
-    expect(moscowDateTime("2026-06-13T19:35:12.000Z")).toBe("2026-06-13 22:35");
+  it("formats absolute timestamps in the configured display timezone", () => {
+    setDisplayTimeZone("UTC");
+    expect(formatDisplayDateTime("2026-06-13T19:35:12.000Z")).toBe("2026-06-13 19:35");
+    setDisplayTimeZone("Europe/Moscow");
+    expect(formatDisplayDateTime("2026-06-13T19:35:12.000Z")).toBe("2026-06-13 22:35");
+    setDisplayTimeZone("America/New_York");
+    expect(formatDisplayDateTime("2026-06-13T19:35:12.000Z")).toBe("2026-06-13 15:35");
   });
 });

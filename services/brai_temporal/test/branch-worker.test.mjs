@@ -26,6 +26,8 @@ test("preview dispatch boots exact branch worker before invoking the client", ()
   const client = script.indexOf('BRAI_TEMPORAL_PREVIEW_TASK_QUEUE="$task_queue"');
   assert.ok(queue > 0 && queue < worker && worker < client);
   assert.match(script, /dispatch-preview-deploy requires an exact 40-character --sha/);
+  assert.match(script, /git merge-base "\$sha" origin\/main/);
+  assert.match(script, /--product-base-sha "\$\{product_base_sha,,\}"/);
   assert.match(script, /CLEANUP_TEMPORAL_ADDRESS="127\.0\.0\.1:\$local_port"/);
   assert.match(script, /TEMPORAL_ADDRESS="\$CLEANUP_TEMPORAL_ADDRESS"[\s\S]*?cancel-preview-deploy/);
 });
@@ -40,9 +42,23 @@ test("isolated workflow separates generic deploy and Goal-agent verification", (
   const previewPassed = source.indexOf('"preview_deploy_passed"', agentPassed);
   assert.ok(workflow > 0 && workflow < deploy && deploy < agentStarted);
   assert.ok(agentStarted < verify && verify < agentPassed && agentPassed < previewPassed);
+  assert.match(source.slice(workflow, verify), /productBaseSha: request\.productBaseSha \|\| ""/);
   const activities = fs.readFileSync(path.join(repo, "services/brai_temporal/src/activities.mjs"), "utf8");
   assert.match(activities, /deploy\/scripts\/ci-ssh-deploy-goal-agents\.sh/);
+  assert.match(activities, /BRAI_PRODUCT_BASE_COMMIT: productBaseSha/);
   assert.doesNotMatch(activities, /ci-ssh-goal-agent-gate\.sh/);
+});
+
+test("production validates metadata before deploy and migrates before work reconciliation", () => {
+  const source = fs.readFileSync(path.join(repo, "services/brai_temporal/src/workflows.mjs"), "utf8");
+  const workflow = source.indexOf("async function runProdPromotion");
+  const validate = source.indexOf('mode: "validate"', workflow);
+  const deploy = source.indexOf("activities.deployBranch", workflow);
+  const migrationPassed = source.indexOf('"supabase_prod_migration_passed"', deploy);
+  const reconcile = source.indexOf('mode: "promote"', migrationPassed);
+  const workReconciled = source.indexOf('"prod_work_reconciled"', reconcile);
+  assert.ok(workflow > 0 && workflow < validate && validate < deploy && deploy < migrationPassed);
+  assert.ok(migrationPassed < reconcile && reconcile < workReconciled);
 });
 
 test("Temporal activities heartbeat and wait for cancellation completion", () => {

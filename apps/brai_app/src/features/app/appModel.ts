@@ -1,10 +1,9 @@
-import { Archive, CircleUserRound, Command, Cpu, Eye, Factory, Inbox as InboxIcon, Pencil, Settings, SquareTerminal, Timer, type LucideIcon } from "lucide-react";
+import { Archive, CircleUserRound, Command, Cpu, Factory, Inbox as InboxIcon, Pencil, Settings, SquareTerminal, Timer, type LucideIcon } from "lucide-react";
 
-export type SectionId = "brai" | "actions" | "inbox" | "focus" | "factory" | "draws" | "archive" | "settings" | "brai-cmd" | "engine" | "evil-eye" | "profile";
+export type SectionId = "brai" | "actions" | "inbox" | "focus" | "factory" | "draws" | "archive" | "settings" | "brai-cmd" | "engine" | "profile";
 export type PrimarySectionId = "brai" | "actions" | "inbox" | "focus" | "factory" | "draws";
 export type FocusContextPanel = "none" | "goal" | "history";
 export type FocusBackgroundMode = "galaxy" | "evil-eye";
-export type MobileContextPanel = "actions-info" | "inbox-info" | "focus-goal" | "focus-history";
 export type ThemeMode = "light" | "dark";
 export type Tone = "ok" | "warn" | "bad" | "muted";
 export type AuthMode = "email" | "otp";
@@ -12,12 +11,13 @@ export const SECTION_GRID_CLASS = "grid gap-3.5";
 export const navItems: Array<{ id: PrimarySectionId; label: string; icon: LucideIcon | null; group: "Platform" | "Time"; }> = [
   { id: "brai", label: "Брай", icon: null, group: "Platform" },
   { id: "actions", label: "Действия", icon: SquareTerminal, group: "Platform" },
-  { id: "inbox", label: "Inbox", icon: InboxIcon, group: "Platform" },
+  { id: "inbox", label: "Входящие", icon: InboxIcon, group: "Platform" },
   { id: "focus", label: "Фокус", icon: Timer, group: "Time" },
   { id: "factory", label: "Factory", icon: Factory, group: "Platform" },
   { id: "draws", label: "Draws", icon: Pencil, group: "Platform" },
 ];
 export const FOCUS_CONTEXT_PANEL_STORAGE_KEY = "brai_focus_context_panel";
+export const ENGINE_HISTORY_PANEL_STORAGE_KEY = "brai_engine_history_panel";
 export const FOCUS_BACKGROUND_STORAGE_KEY = "brai_focus_background";
 
 export function resolveAuthMode(production: boolean): AuthMode {
@@ -30,7 +30,6 @@ export function sectionTitle(section: SectionId): string {
   if (section === "settings") return "Настройки";
   if (section === "brai-cmd") return "Brai CMD";
   if (section === "engine") return "Engine";
-  if (section === "evil-eye") return "Evil Eye";
   if (section === "profile") return "Профиль";
   if (section === "inbox") return "Входящие";
   if (section === "factory") return "Factory";
@@ -43,7 +42,6 @@ export function sectionIcon(section: SectionId): LucideIcon {
   if (section === "settings") return Settings;
   if (section === "brai-cmd") return Command;
   if (section === "engine") return Cpu;
-  if (section === "evil-eye") return Eye;
   if (section === "profile") return CircleUserRound;
   return navItems.find((item) => item.id === section)?.icon ?? Timer;
 }
@@ -59,14 +57,13 @@ export function sectionFromLocation(): SectionId {
   if (path === "/draws") return "draws";
   if (path === "/brai-cmd") return "brai-cmd";
   if (path === "/engine") return "engine";
-  if (path === "/evil-eye") return "evil-eye";
   if (path === "/profile") return "profile";
   return "brai";
 }
 
 export function syncSectionUrl(section: SectionId): void {
   if (typeof window === "undefined") return;
-  const nextPath = section === "brai" ? "/" : section === "actions" ? "/activities" : section === "inbox" ? "/inbox" : section === "focus" ? "/focus" : section === "factory" ? "/factory" : section === "draws" ? "/draws" : section === "brai-cmd" ? "/brai-cmd" : section === "engine" ? "/engine" : section === "evil-eye" ? "/evil-eye" : section === "profile" ? "/profile" : "/";
+  const nextPath = section === "brai" ? "/" : section === "actions" ? "/activities" : section === "inbox" ? "/inbox" : section === "focus" ? "/focus" : section === "factory" ? "/factory" : section === "draws" ? "/draws" : section === "brai-cmd" ? "/brai-cmd" : section === "engine" ? "/engine" : section === "profile" ? "/profile" : "/";
   if (window.location.pathname === nextPath && sectionFromLocation() === section) return;
   window.history.pushState({ braiSection: section }, "", nextPath);
 }
@@ -85,5 +82,36 @@ export function navHref(section: PrimarySectionId): string {
 }
 
 function isSectionId(value: unknown): value is SectionId {
-  return value === "brai" || value === "actions" || value === "inbox" || value === "focus" || value === "factory" || value === "draws" || value === "archive" || value === "settings" || value === "brai-cmd" || value === "engine" || value === "evil-eye" || value === "profile";
+  return value === "brai" || value === "actions" || value === "inbox" || value === "focus" || value === "factory" || value === "draws" || value === "archive" || value === "settings" || value === "brai-cmd" || value === "engine" || value === "profile";
+}
+
+export type MobileRailMode = "never" | "all" | "android";
+export type PageWorkspaceConfig = {
+  desktopRail: boolean;
+  mobileRail: MobileRailMode;
+  persistentPanels: ReadonlyArray<Exclude<FocusContextPanel, "none">>;
+  fullscreenOverride: boolean;
+};
+
+export const PAGE_WORKSPACE_REGISTRY: Record<SectionId, PageWorkspaceConfig> = {
+  brai: { desktopRail: true, mobileRail: "all", persistentPanels: [], fullscreenOverride: false },
+  actions: { desktopRail: true, mobileRail: "all", persistentPanels: [], fullscreenOverride: false },
+  inbox: { desktopRail: true, mobileRail: "all", persistentPanels: [], fullscreenOverride: false },
+  focus: { desktopRail: false, mobileRail: "never", persistentPanels: ["goal", "history"], fullscreenOverride: false },
+  factory: { desktopRail: true, mobileRail: "all", persistentPanels: [], fullscreenOverride: false },
+  draws: { desktopRail: true, mobileRail: "all", persistentPanels: [], fullscreenOverride: true },
+  archive: { desktopRail: true, mobileRail: "all", persistentPanels: [], fullscreenOverride: false },
+  settings: { desktopRail: true, mobileRail: "all", persistentPanels: [], fullscreenOverride: false },
+  "brai-cmd": { desktopRail: false, mobileRail: "android", persistentPanels: [], fullscreenOverride: false },
+  engine: { desktopRail: false, mobileRail: "never", persistentPanels: ["history"], fullscreenOverride: false },
+  profile: { desktopRail: false, mobileRail: "never", persistentPanels: [], fullscreenOverride: false },
+};
+
+export function hasDesktopPageRail(section: SectionId): boolean {
+  return PAGE_WORKSPACE_REGISTRY[section].desktopRail;
+}
+
+export function hasMobilePageRail(section: SectionId, nativeAndroid = false): boolean {
+  const mode = PAGE_WORKSPACE_REGISTRY[section].mobileRail;
+  return mode === "all" || (mode === "android" && nativeAndroid);
 }

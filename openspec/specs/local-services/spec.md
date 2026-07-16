@@ -114,9 +114,16 @@ Supavisor SHALL provide separate production and non-production circuit-breaker b
 #### Scenario: Runtime DSNs are generated
 
 - **WHEN** production, Dev, or Preview database URLs are written after tenant isolation is enabled
-- **THEN** production uses tenant `brightos-prod`
-- **AND** Dev and Preview use tenant `brightos-nonprod`
+- **THEN** production uses tenant `brai-prod`
+- **AND** Dev and Preview use tenant `brai-nonprod`
 - **AND** password, database, port, query parameters, and schema `search_path` remain unchanged
+
+#### Scenario: Maintenance removes legacy tenant metadata
+
+- **WHEN** guarded Supavisor maintenance recreates the pooler
+- **THEN** persistent tenant metadata contains exactly `brai-prod` and `brai-nonprod`
+- **AND** legacy `brightos`, `brightos-prod`, and `brightos-nonprod` tenants and their dependent metadata are removed
+- **AND** any unexpected remaining tenant makes maintenance fail closed before API clients restart
 
 #### Scenario: Deployment validates a runtime environment
 

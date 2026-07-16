@@ -38,13 +38,23 @@ send_status() {
   fi
 }
 
-schema_args=()
-for schema in $SCHEMAS; do
-  schema_args+=(--schema="$schema")
-done
-
 (
   flock -n 9 || { echo "backup already running" >&2; exit 75; }
+
+  AUTH_SCHEMA_EXISTS="$(docker exec "$CONTAINER" psql -U "$PGUSER" -d "$DATABASE" --no-psqlrc --tuples-only --no-align \
+    --command="SELECT CASE WHEN EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = 'brai_auth') THEN 1 ELSE 0 END")"
+  [[ "$AUTH_SCHEMA_EXISTS" == "0" || "$AUTH_SCHEMA_EXISTS" == "1" ]] || {
+    echo "brai_auth schema preflight returned an invalid result" >&2
+    exit 1
+  }
+  schema_args=()
+  for schema in $SCHEMAS; do
+    [[ "$schema" != "brai_auth" ]] || continue
+    schema_args+=(--schema="$schema")
+  done
+  if [[ "$AUTH_SCHEMA_EXISTS" == "1" ]]; then
+    schema_args+=(--schema=brai_auth)
+  fi
 
   docker exec "$CONTAINER" pg_dump \
     -U "$PGUSER" \
@@ -64,6 +74,12 @@ done
   if (( BACKUP_BYTES > MAX_BYTES )); then
     send_status failed "Postgres backup is larger than Telegram document limit"
     echo "backup is $BACKUP_BYTES bytes, Telegram limit is $MAX_BYTES bytes" >&2
+    exit 1
+  fi
+
+  if ! docker exec -i "$CONTAINER" pg_restore --list <"$BACKUP_FILE" >/dev/null; then
+    send_status failed "Postgres backup archive verification failed"
+    echo "backup archive verification failed" >&2
     exit 1
   fi
 

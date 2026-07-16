@@ -59,16 +59,19 @@ async function selectedCaddyUrl(page) {
   throw new Error('Caddy authentication is not allowed for chromewebdata.');
 }
 
-export async function applyCaddyAuthentication(page, action, credentialFile) {
+export async function applyCaddyAuthentication(page, action, credentialFile, rawUrl) {
   const failedNavigation = page.url().startsWith('chrome-error:');
-  const url = await selectedCaddyUrl(page);
+  const explicitUrl = rawUrl ? allowedCaddyUrl(rawUrl) : null;
+  const url = explicitUrl ?? await selectedCaddyUrl(page);
   if (action === 'clear') {
-    await page.authenticate(null);
+    await page.setExtraHTTPHeaders({});
   } else {
-    await page.authenticate(readCaddyCredentials(credentialFile, url.href));
+    const credentials = readCaddyCredentials(credentialFile, url.href);
+    const authorization = Buffer.from(`${credentials.username}:${credentials.password}`).toString('base64');
+    await page.setExtraHTTPHeaders({ Authorization: `Basic ${authorization}` });
   }
   const navigation = { waitUntil: 'domcontentloaded', timeout: 30_000 };
-  if (failedNavigation) await page.goto(url.href, navigation);
+  if (explicitUrl || failedNavigation) await page.goto(url.href, navigation);
   else await page.reload(navigation);
   return { host: url.hostname, action };
 }

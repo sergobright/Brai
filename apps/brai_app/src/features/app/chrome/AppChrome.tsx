@@ -1,7 +1,7 @@
 "use client";
 
 import type { CSSProperties, FormEvent, ReactNode } from "react";
-import { useEffect, useId, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { CheckCircle2, KeyRound, Loader2, Lock, Mail, TriangleAlert, WifiOff, X, type LucideIcon } from "lucide-react";
 import { useEnvironmentBadgeLabel } from "@/shared/config/runtime";
 import { installAndroidBackHandler } from "@/shared/platform/platform";
@@ -72,7 +72,7 @@ export function ScreenHeader({
   const environmentLabel = useEnvironmentBadgeLabel();
 
   return (
-    <header className="topbar sticky top-[var(--sticky-top-offset)] z-[18] mb-2 grid min-h-14 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-4 bg-transparent py-2 max-[860px]:min-h-[50px] max-[860px]:gap-2.5 max-[860px]:py-1 max-[860px]:pb-2">
+    <header className="topbar sticky top-[var(--sticky-top-offset)] z-[18] mb-2 grid min-h-14 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-4 bg-background px-7 py-2 max-[860px]:min-h-11 max-[860px]:gap-2 max-[860px]:px-3.5 max-[860px]:py-1">
       <div className="topbar-leading hidden max-[860px]:flex" data-galaxy-interaction-block>{leading}</div>
       <div className="hidden items-center gap-2 min-[861px]:flex">
         {desktopLeading ?? <Icon className="size-5 text-foreground" data-screen-icon aria-hidden="true" />}
@@ -85,7 +85,7 @@ export function ScreenHeader({
       </div>
       <div
         className={cx(
-          "topbar-actions flex shrink-0 items-center gap-2.5 max-[860px]:max-w-[min(184px,50vw)] max-[460px]:max-w-[min(174px,50vw)]",
+          "topbar-actions flex shrink-0 items-center gap-3 max-[860px]:max-w-[min(184px,50vw)] max-[460px]:max-w-[min(174px,50vw)]",
           denseMobileActions && "max-[860px]:!max-w-none max-[460px]:!gap-1.5",
         )}
         data-galaxy-interaction-block
@@ -100,7 +100,7 @@ export function ScreenHeader({
 
 export function EnvironmentBadge({ label, className }: { label: string; className?: string }) {
   return (
-    <span className={cx("inline-grid h-[30px] min-w-[30px] place-items-center rounded-md border border-border bg-card px-2 text-xs font-semibold text-muted-foreground", className)}>
+    <span className={cx("inline-grid h-[30px] min-w-[30px] place-items-center rounded-md border border-border bg-card px-2 text-xs font-semibold text-muted-foreground max-[860px]:size-8 max-[860px]:min-w-8 max-[860px]:px-1", className)}>
       {label}
     </span>
   );
@@ -110,7 +110,7 @@ export function ThemeButton({ theme, onTheme }: { theme: ThemeMode; onTheme: (th
   const next = theme === "dark" ? "light" : "dark";
   return (
     <AnimatedThemeToggler
-      className="theme-button inline-grid h-[42px] w-[42px] place-items-center rounded-lg border border-border bg-card text-muted-foreground hover:text-primary focus-visible:text-primary [&_svg]:h-5 [&_svg]:w-5"
+      className="theme-button relative inline-grid h-[42px] w-[42px] place-items-center rounded-lg border border-border bg-card text-muted-foreground hover:text-primary focus-visible:text-primary max-[860px]:size-8 max-[860px]:rounded-md max-[860px]:before:absolute max-[860px]:before:-inset-1.5 max-[860px]:before:content-[''] [&_svg]:h-5 [&_svg]:w-5"
       title={next === "dark" ? "Темная тема" : "Светлая тема"}
       aria-label={next === "dark" ? "Включить темную тему" : "Включить светлую тему"}
       theme={theme}
@@ -137,7 +137,7 @@ export function IconButton({
     <button
       type="button"
       className={cx(
-        "theme-button inline-grid h-[42px] w-[42px] shrink-0 place-items-center rounded-lg border border-border bg-card text-muted-foreground hover:text-primary focus-visible:text-primary [&_svg]:pointer-events-none",
+        "theme-button relative inline-grid h-[42px] w-[42px] shrink-0 place-items-center rounded-lg border border-border bg-card text-muted-foreground hover:text-primary focus-visible:text-primary max-[860px]:size-8 max-[860px]:rounded-md max-[860px]:before:absolute max-[860px]:before:-inset-1.5 max-[860px]:before:content-[''] [&_svg]:pointer-events-none",
         active && "border-primary/40 bg-accent text-accent-foreground",
         className,
       )}
@@ -156,15 +156,19 @@ export function MobileContextSheet({
   className,
   children,
   contentInset = "balanced",
+  inactive = false,
   onClose,
   onCloseStart,
   scroll = true,
   variant = "context",
+  floatingClose = variant === "detail",
 }: {
   label: string;
   className?: string;
   children: ReactNode;
   contentInset?: "balanced" | "end" | "none";
+  floatingClose?: boolean;
+  inactive?: boolean;
   onClose: () => void;
   onCloseStart?: () => void;
   scroll?: boolean;
@@ -173,7 +177,14 @@ export function MobileContextSheet({
   const suppressPopRef = useRef(false);
   const onCloseRef = useRef(onClose);
   const sheetTop = useMobileSheetTop();
-  const { backdropRef, backdropStyle, closeWithAnimation, resetOpen, sheetDragHandlers, sheetRef, sheetStyle } = useMobileSheetDrag({ onClose, onCloseStart });
+  const closeFromGesture = useCallback(() => {
+    if (window.history.state?.braiMobileSheet === label) {
+      suppressPopRef.current = true;
+      window.history.back();
+    }
+    onCloseRef.current();
+  }, [label]);
+  const { backdropRef, backdropStyle, closeWithAnimation, gestureRef, resetOpen, sheetDragHandlers, sheetRef, sheetStyle } = useMobileSheetDrag({ onClose: closeFromGesture, onCloseStart });
 
   useEffect(() => {
     onCloseRef.current = onClose;
@@ -181,7 +192,7 @@ export function MobileContextSheet({
 
   useEffect(() => {
     resetOpen();
-    if (window.history.state?.braiMobileSheet) {
+    if (window.history.state?.braiMobileSheet === label) {
       window.history.replaceState({ ...window.history.state, braiMobileSheet: label }, "", window.location.href);
     } else {
       window.history.pushState({ ...window.history.state, braiMobileSheet: label }, "", window.location.href);
@@ -192,6 +203,7 @@ export function MobileContextSheet({
         suppressPopRef.current = false;
         return;
       }
+      if (window.history.state?.braiMobileSheet === label) return;
       closeWithAnimation();
     }
 
@@ -218,27 +230,31 @@ export function MobileContextSheet({
 
   return (
     <div
-      className={cx("mobile-context-backdrop pointer-events-none fixed inset-0 z-[84] hidden items-end max-[860px]:flex", className)}
+      ref={gestureRef}
+      className={cx("mobile-context-backdrop fixed inset-0 z-[84] hidden items-end max-[860px]:flex", className)}
       style={{ top: sheetTop } as CSSProperties}
       data-nav-swipe-exclusion
+      aria-hidden={inactive || undefined}
+      inert={inactive || undefined}
+      onClick={closeSheet}
+      {...sheetDragHandlers}
     >
       <div
         ref={backdropRef}
-        className="pointer-events-none absolute inset-0 z-0 bg-foreground/20 dark:bg-background/80"
+        className="absolute inset-0 z-0 bg-foreground/20 dark:bg-background/80"
         style={backdropStyle}
         aria-hidden="true"
       />
       <aside
         ref={sheetRef}
         className={cx(
-          "pointer-events-auto relative z-[1] grid max-h-full w-full min-w-0 overflow-hidden rounded-t-2xl border-t border-border bg-card pb-[env(safe-area-inset-bottom)] shadow-xl animate-[mobile-detail-sheet-in_180ms_ease-out] will-change-transform",
+          "pointer-events-auto relative z-[1] grid max-h-full w-full min-w-0 overflow-hidden rounded-t-2xl border-t border-border bg-card pb-[env(safe-area-inset-bottom)] shadow-xl will-change-transform",
           variant === "detail"
             ? "actions-detail-panel mobile h-full grid-rows-[auto_minmax(0,1fr)] gap-0 pt-1"
             : "mobile-context-sheet grid-rows-[auto_minmax(0,1fr)] pt-2",
         )}
         style={sheetStyle}
         aria-label={label}
-        {...sheetDragHandlers}
         onClick={(event) => event.stopPropagation()}
       >
         <header className={cx("relative flex items-start justify-center", variant === "detail" ? "h-3 min-h-3 pt-0" : "min-h-12 pt-4")}>
@@ -256,7 +272,7 @@ export function MobileContextSheet({
           {variant === "context" ? <h2 className="m-0 text-lg font-semibold leading-tight">{label}</h2> : null}
         </header>
         {scroll ? <ScrollArea className="min-h-0" contentInset={contentInset}>{children}</ScrollArea> : children}
-        {variant === "detail" ? <MobileDetailFloatingCloseButton ariaLabel={`Закрыть панель: ${label}`} onClick={closeSheet} /> : null}
+        {variant === "detail" && floatingClose ? <MobileDetailFloatingCloseButton ariaLabel={`Закрыть панель: ${label}`} onClick={closeSheet} /> : null}
       </aside>
     </div>
   );
@@ -288,7 +304,7 @@ export function StatusPill({ className, status, pendingCount }: { className?: st
   return (
     <span
       className={cx(
-        "status-pill inline-grid h-[42px] w-[42px] shrink-0 place-items-center rounded-lg border-0 bg-transparent p-0",
+        "status-pill inline-grid h-[42px] w-[42px] shrink-0 place-items-center rounded-lg border-0 bg-transparent p-0 max-[860px]:size-8 max-[860px]:rounded-md",
         syncStatusIconToneClasses[tone],
         className,
       )}
@@ -355,15 +371,23 @@ export function AuthPanel({
   const [otpFocusKey, setOtpFocusKey] = useState(0);
   const [otpTimer, setOtpTimer] = useState<AuthOtpTimer>(defaultOtpTimer);
   const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const submittingRef = useRef(false);
+  const pending = busy || submitting;
 
   async function submitAuth(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (busy || submittingRef.current) return;
+    submittingRef.current = true;
+    setSubmitting(true);
     setError("");
+    let authenticated = false;
     try {
       if (mode === "email") {
         if (!onEmailLogin) throw new Error("email_login_unavailable");
         await onEmailLogin(email);
         onAuthenticated?.();
+        authenticated = true;
         return;
       }
       if (!otpSent) {
@@ -372,8 +396,14 @@ export function AuthPanel({
       }
       await onVerifyOtp(email, otp);
       onAuthenticated?.();
+      authenticated = true;
     } catch {
       setError(mode === "email" ? "Email не подошёл" : otpSent ? "Код не подошел" : "Не удалось отправить код");
+    } finally {
+      if (!authenticated) {
+        submittingRef.current = false;
+        setSubmitting(false);
+      }
     }
   }
 
@@ -424,7 +454,7 @@ export function AuthPanel({
               placeholder="Введите почту"
               aria-label="Email"
               aria-invalid={Boolean(error && (mode === "email" || !otpSent))}
-              disabled={busy || (mode === "otp" && otpSent)}
+              disabled={pending || (mode === "otp" && otpSent)}
               onChange={(event) => setEmail(event.target.value)}
             />
             <FieldDescription>
@@ -441,7 +471,7 @@ export function AuthPanel({
                   timer={otpTimer}
                   autoFocusKey={otpFocusKey}
                   ariaInvalid={Boolean(error)}
-                  disabled={busy && otpTimer.sentAtMs !== null}
+                  disabled={pending && otpTimer.sentAtMs !== null}
                   onChange={setOtp}
                   onResend={resendOtpCode}
                 />
@@ -456,8 +486,8 @@ export function AuthPanel({
         </FieldGroup>
       </CardContent>
       <CardFooter>
-        <Button className="w-full" disabled={busy || !email || (mode === "otp" && otpSent && !otp)}>
-          {mode === "otp" && otpSent ? <KeyRound aria-hidden="true" /> : <Mail aria-hidden="true" />}
+        <Button className="w-full" disabled={pending || !email || (mode === "otp" && otpSent && !otp)} aria-busy={pending}>
+          {pending ? <Loader2 className="animate-spin" aria-hidden="true" /> : mode === "otp" && otpSent ? <KeyRound aria-hidden="true" /> : <Mail aria-hidden="true" />}
           {mode === "email" || otpSent ? "Войти" : "Получить код"}
         </Button>
       </CardFooter>

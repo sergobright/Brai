@@ -83,6 +83,7 @@ export async function BranchPreviewDeployWorkflow(input) {
     type: "preview_deploy_requested",
     sha: input.sha,
     baseSha: input.baseSha || "",
+    productBaseSha: input.productBaseSha || "",
     at: input.at,
     source: input.source || "exact-sha-preview-deploy"
   });
@@ -134,7 +135,8 @@ async function runPreviewDeploy(state, request) {
     result = await activities.deployBranch({
       branch: state.branch,
       sha: request.sha || state.lastSha,
-      baseSha: request.baseSha || ""
+      baseSha: request.baseSha || "",
+      productBaseSha: request.productBaseSha || ""
     });
     const passed = { slot: result.previewSlot || request.slot || "" };
     applyPreviewEvent(state, eventLike(request, "supabase_preview_passed", passed));
@@ -171,11 +173,11 @@ async function runNoPreviewHandoff(state, request) {
   applyPreviewEvent(state, eventLike(request, "auto_merge_started"));
 
   try {
-    await activities.enableNoPreviewAutoMerge({
+    const result = await activities.enableNoPreviewAutoMerge({
       branch: state.branch,
       sha: request.sha || state.lastSha
     });
-    applyPreviewEvent(state, eventLike(request, "auto_merge_enabled"));
+    if (!result.awaitingOwnerHandoff) applyPreviewEvent(state, eventLike(request, "auto_merge_enabled"));
   } catch (error) {
     if (isCancellation(error)) throw error;
     const failed = { reason: reasonFromError(error) };
@@ -237,21 +239,23 @@ async function runPromotionRequest(state, request) {
 async function runProdPromotion(state, request) {
   applyPromotionEvent(state, eventLike(request, "prod_deploy_started"));
   applyPromotionEvent(state, eventLike(request, "accepted_previews_started"));
-  applyPromotionEvent(state, eventLike(request, "supabase_prod_migration_started"));
 
   try {
     await activities.completeAcceptedPreviews({
       targetBranch: "main",
       targetEnvironment: "prod",
       targetCommit: state.sha,
-      mode: "promote"
+      mode: "validate"
     });
-    applyPromotionEvent(state, eventLike(request, "prod_version_recorded"));
   } catch (error) {
     if (isCancellation(error)) throw error;
-    applyPromotionEvent(state, eventLike(request, "accepted_previews_failed", { reason: reasonFromError(error) }));
+    const failed = { reason: reasonFromError(error) };
+    applyPromotionEvent(state, eventLike(request, "accepted_previews_failed", failed));
+    applyPromotionEvent(state, eventLike(request, "prod_deploy_failed", failed));
     return;
   }
+
+  applyPromotionEvent(state, eventLike(request, "supabase_prod_migration_started"));
 
   try {
     await activities.deployBranch({
@@ -265,6 +269,20 @@ async function runProdPromotion(state, request) {
     const failed = { reason: reasonFromError(error) };
     applyPromotionEvent(state, eventLike(request, "supabase_prod_migration_failed", failed));
     applyPromotionEvent(state, eventLike(request, "prod_deploy_failed", failed));
+    return;
+  }
+
+  try {
+    await activities.completeAcceptedPreviews({
+      targetBranch: "main",
+      targetEnvironment: "prod",
+      targetCommit: state.sha,
+      mode: "promote"
+    });
+    applyPromotionEvent(state, eventLike(request, "prod_work_reconciled"));
+  } catch (error) {
+    if (isCancellation(error)) throw error;
+    applyPromotionEvent(state, eventLike(request, "accepted_previews_failed", { reason: reasonFromError(error) }));
     return;
   }
 

@@ -82,6 +82,7 @@ async function dispatchPreviewDeploy(client, options) {
       branch,
       sha,
       baseSha: event.baseSha,
+      productBaseSha: event.productBaseSha,
       at: event.at,
       source: event.source
     }],
@@ -425,6 +426,7 @@ function buildEvent(type, options, sha) {
     type,
     sha,
     baseSha: options.baseSha ?? "",
+    productBaseSha: options.productBaseSha ?? "",
     slot: options.slot ?? "",
     deliveryClass: options.deliveryClass ?? "",
     reason: options.reason ?? "",

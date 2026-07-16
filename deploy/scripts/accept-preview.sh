@@ -162,48 +162,50 @@ delivery_label() {
 }
 
 build_acceptance_pr_body() {
-  if is_no_preview_delivery; then
-    cat <<BODY
-Accepted no-preview branch ${BRANCH}.
-
-Delivery class: ${DELIVERY_CLASS}.
-
-This PR was opened by deploy/scripts/accept-preview.sh after CI classified the branch as not requiring a browser preview.
-BODY
-    return
-  fi
   run_brai_node -e '
 const fs = require("node:fs");
 const path = require("node:path");
-const [root, branch, commit] = process.argv.slice(1);
-const receiptPath = path.join(root, ".brai-task", "preview-handoff.json");
-const receipt = JSON.parse(fs.readFileSync(receiptPath, "utf8"));
-if (receipt.branch !== branch || receipt.commit !== commit) {
-  throw new Error(`Preview receipt mismatch for ${branch}@${commit}`);
+const [root, branch, commit, noPreview, deliveryClass] = process.argv.slice(1);
+const marker = JSON.parse(fs.readFileSync(path.join(root, ".brai-task", "task.json"), "utf8"));
+if (marker.branch !== branch || !/^work_[0-9a-f-]{36}$/i.test(marker.workKey || "") || !["owner", "support"].includes(marker.workRole)) {
+  throw new Error(`Task work identity mismatch for ${branch}`);
 }
-const notes = receipt.releaseNotes || {};
-for (const field of ["short_changes", "detailed_changes", "reason"]) {
-  const text = String(notes[field] || "").trim();
-  if (!text) throw new Error(`Preview release notes missing ${field}`);
-  if (!/[А-Яа-яЁё]/.test(text)) throw new Error(`Preview release notes ${field} must be Russian`);
+let notes;
+if (noPreview === "true") {
+  notes = JSON.parse(fs.readFileSync(path.join(root, ".brai-task", "release-notes.json"), "utf8"));
+} else {
+  const receipt = JSON.parse(fs.readFileSync(path.join(root, ".brai-task", "preview-handoff.json"), "utf8"));
+  if (receipt.branch !== branch || receipt.commit !== commit) throw new Error(`Preview receipt mismatch for ${branch}@${commit}`);
+  notes = receipt.releaseNotes;
 }
-const payload = JSON.stringify({
-  receiptType: "brai-release-notes-v1",
-  short_changes: notes.short_changes.trim(),
-  detailed_changes: notes.detailed_changes.trim(),
-  reason: notes.reason.trim(),
-});
-console.log(`Accepted preview branch ${branch}.
+if (!["brai-release-notes-v1", "brai-release-notes-v2"].includes(notes?.receiptType)) throw new Error("Release notes receipt is missing");
+if (notes.receiptType === "brai-release-notes-v2" && (notes.work?.key !== marker.workKey || notes.work?.role !== marker.workRole)) {
+  throw new Error("Release notes work identity does not match task marker");
+}
+const build = notes.build || notes;
+const summary = marker.workRole === "owner" ? build.short_changes : build.details?.map((detail) => detail.title).join("; ");
+if (!String(summary || "").trim()) throw new Error("Release notes have no build summary or details");
+const work = {
+  receiptType: "brai-work-v1",
+  workKey: marker.workKey,
+  workRole: marker.workRole,
+  nativeBoundary: Boolean(notes.platforms?.apk),
+};
+const noteType = notes.receiptType;
+console.log(`Accepted ${noPreview === "true" ? `no-preview ${deliveryClass} ` : "preview "}branch ${branch}.
 
 Release notes:
-- Short: ${notes.short_changes.trim()}
-- Details: ${notes.detailed_changes.trim()}
-- Reason: ${notes.reason.trim()}
+- Work: ${marker.workKey} (${marker.workRole})
+- Summary: ${String(summary).trim()}
 
-<!-- brai-release-notes-v1
-${payload}
+<!-- brai-work-v1
+${JSON.stringify(work)}
+-->
+
+<!-- ${noteType}
+${JSON.stringify(notes)}
 -->`);
-' "$ROOT" "$BRANCH" "$HEAD_SHA"
+' "$ROOT" "$BRANCH" "$HEAD_SHA" "$(is_no_preview_delivery && echo true || echo false)" "${DELIVERY_CLASS:-}"
 }
 
 mark_reconcile_required() {
@@ -316,6 +318,7 @@ if [[ -n "$MERGED_PR_NUMBER" ]]; then
   MERGED_PR_URL="$(gh pr view "$MERGED_PR_NUMBER" --json url --jq ".url")"
   echo "Preview branch already accepted: $MERGED_PR_URL"
   write_acceptance_marker "merged" "$MERGED_PR_NUMBER" "$MERGED_PR_URL"
+  run_brai_node "$ROOT/scripts/brai-task.mjs" archive-accepted-openspec
   exit 0
 fi
 
@@ -353,6 +356,7 @@ fi
 if [[ "$PR_STATE" == "MERGED" ]]; then
   echo "Preview branch already accepted: $PR_URL"
   write_acceptance_marker "merged" "$PR_NUMBER" "$PR_URL"
+  run_brai_node "$ROOT/scripts/brai-task.mjs" archive-accepted-openspec
   exit 0
 fi
 

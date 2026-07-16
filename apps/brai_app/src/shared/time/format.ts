@@ -95,16 +95,21 @@ export function formatPercent(value: number | null | undefined): string {
   return `${safe.toFixed(0)}%`;
 }
 
-export function moscowDateTime(utcIso: string | null | undefined): string {
+/** Formats an absolute timestamp in the user's configured display timezone. */
+export function formatDisplayDateTime(utcIso: string | null | undefined, options?: Intl.DateTimeFormatOptions): string {
   if (!utcIso) return "";
   const ms = Date.parse(utcIso);
   if (!Number.isFinite(ms)) return "";
+  if (options) {
+    return new Intl.DateTimeFormat("ru-RU", { ...options, timeZone: displayTimeZone }).format(new Date(ms));
+  }
   const parts = zonedParts(ms);
   return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}`;
 }
 
-export function moscowTime(utcIso: string | null | undefined): string {
-  return moscowDateTime(utcIso).slice(11);
+/** Formats the time portion of an absolute timestamp in the user's configured display timezone. */
+export function formatDisplayTime(utcIso: string | null | undefined): string {
+  return formatDisplayDateTime(utcIso).slice(11);
 }
 
 export function formatRussianDate(date: string): string {

@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { braiCmdSettingsSnapshot, cmdPlugin, openProfileMenuItem, setupBraiAppTest, stubAndroidCapacitor } from "./app-test-support";
+import { braiCmdSettingsSnapshot, cmdPlugin, openProfileMenuItem, selectBraiCmdGroup, setupBraiAppTest, stubAndroidCapacitor } from "./app-test-support";
 import { BraiApp } from "@/features/app/BraiApp";
 import { ONBOARDING_STORAGE_KEY } from "@/features/onboarding/onboardingModel";
 
@@ -24,6 +24,7 @@ describe("Brai CMD model check races", () => {
     render(<BraiApp />);
 
     await openProfileMenuItem("Brai Cmd");
+    await selectBraiCmdGroup("Распознавание");
     const speechCard = (await screen.findByText("Распознавание речи")).closest("[data-slot=card]") as HTMLElement;
     fireEvent.click(speechCard.querySelector("button")!);
     fireEvent.click(screen.getByText("Свой API-ключ"));

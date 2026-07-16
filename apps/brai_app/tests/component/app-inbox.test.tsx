@@ -65,8 +65,8 @@ describe("BraiApp inbox", () => {
 
     fireEvent.click(screen.getAllByRole("button", { name: "Inbox" }).at(-1) as HTMLElement);
     await waitFor(() => expect(screen.getByRole("heading", { name: "Входящие" })).toBeInTheDocument());
-    expect(screen.getAllByLabelText("Информация о входящих").length).toBeGreaterThan(0);
-    expect(screen.queryByRole("button", { name: "Закрыть информацию о входящих" })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Информация о входящих")).not.toBeInTheDocument();
+    expect(document.querySelector(".page-main")).toHaveClass("max-w-3xl");
 
     const input = screen.getByRole("textbox", { name: "Добавить входящее" });
     fireEvent.change(input, { target: { value: " Новое письмо " } });
@@ -102,12 +102,8 @@ describe("BraiApp inbox", () => {
     const detailScroll = detailPanel.querySelector(".actions-detail-description-scroll");
     expect(detailScroll).toBeInTheDocument();
     expect(detailScroll?.parentElement).toBe(detailPanel);
-    const splitSlider = screen.getByRole("slider", { name: "Изменить ширину панелей" });
-    expect(splitSlider).toHaveAttribute("aria-valuenow", "50");
-    fireEvent.keyDown(splitSlider, { key: "End" });
-    expect(splitSlider).toHaveAttribute("aria-valuenow", "70");
-    fireEvent.keyDown(splitSlider, { key: "Home" });
-    expect(splitSlider).toHaveAttribute("aria-valuenow", "30");
+    expect(screen.queryByRole("slider", { name: "Изменить ширину панелей" })).not.toBeInTheDocument();
+    expect(document.querySelector(".page-workspace.has-panel")).toHaveClass("grid-cols-2");
     const descriptionEditor = screen.getByRole("textbox", { name: "Описание входящего" });
     expect(descriptionEditor).toHaveClass("before:float-right", "before:w-12");
     descriptionEditor.textContent = "# Контекст\n\n## Источник\n\n**важно**";

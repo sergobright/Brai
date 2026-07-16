@@ -6,14 +6,14 @@ import { BraiApi } from "@/shared/api/braiApi";
 import { defaultApiBase } from "@/shared/config/runtime";
 import { getBraiLocalStorageItem, setBraiLocalStorageItem } from "@/shared/storage/localStorageKeys";
 import type { SectionId } from "../appModel";
+import { hasDesktopPageRail } from "../appModel";
 
 const DEFAULT_WIDTH = 256;
 const MIN_WIDTH = 192;
 const MAX_WIDTH = 512;
-const SUPPORTED = new Set<SectionId>(["brai", "actions", "inbox", "factory", "draws", "archive"]);
 
 export function isContextualRailSection(section: SectionId): boolean {
-  return SUPPORTED.has(section);
+  return hasDesktopPageRail(section);
 }
 
 export function useContextualRail(section: SectionId, userId?: string | null) {
@@ -21,26 +21,14 @@ export function useContextualRail(section: SectionId, userId?: string | null) {
   const accountKey = userId ?? "anonymous";
   const currentOpenKey = openKey(accountKey, section);
   const currentWidthKey = widthKey(accountKey);
-  const [openState, setOpenState] = useState({ key: currentOpenKey, value: true });
-  const [widthState, setWidthState] = useState({ key: currentWidthKey, value: DEFAULT_WIDTH });
+  const [openState, setOpenState] = useState(() => ({ key: currentOpenKey, value: readBoolean(currentOpenKey, true) }));
+  const [widthState, setWidthState] = useState(() => ({ key: currentWidthKey, value: readWidth(currentWidthKey) }));
   const saveTimer = useRef<number | null>(null);
-  const open = openState.key === currentOpenKey ? openState.value : true;
-  const width = widthState.key === currentWidthKey ? widthState.value : DEFAULT_WIDTH;
+  const open = openState.key === currentOpenKey ? openState.value : readBoolean(currentOpenKey, true);
+  const width = widthState.key === currentWidthKey ? widthState.value : readWidth(currentWidthKey);
 
   useEffect(() => {
-    if (!isContextualRailSection(section)) return;
-    const timeout = window.setTimeout(() => {
-      setOpenState({ key: currentOpenKey, value: readBoolean(currentOpenKey, true) });
-    }, 0);
-    return () => window.clearTimeout(timeout);
-  }, [currentOpenKey, section]);
-
-  useEffect(() => {
-    const timeout = window.setTimeout(() => {
-      const cached = Number(readStorage(currentWidthKey));
-      if (Number.isFinite(cached)) setWidthState({ key: currentWidthKey, value: clampWidth(cached) });
-    }, 0);
-    if (!userId) return () => window.clearTimeout(timeout);
+    if (!userId) return undefined;
     let cancelled = false;
     void api.preferences().then((preferences) => {
       if (cancelled) return;
@@ -50,7 +38,6 @@ export function useContextualRail(section: SectionId, userId?: string | null) {
     }).catch(() => undefined);
     return () => {
       cancelled = true;
-      window.clearTimeout(timeout);
     };
   }, [api, currentWidthKey, userId]);
 
@@ -118,9 +105,9 @@ export function ContextualRail({ children, open, width, onWidth }: {
       ref={railRef}
       className="contextual-rail relative hidden h-full min-h-0 shrink-0 overflow-hidden border-r border-border bg-card min-[861px]:block"
       style={{ width }}
-      aria-label="Контекстная панель"
+      aria-label="Левый рейл"
     >
-      <div className="h-full min-h-0 overflow-hidden">{children}</div>
+      <div className="h-full min-h-0 overflow-hidden">{children ?? <PageRailPlaceholder />}</div>
       <button
         type="button"
         className="absolute inset-y-0 right-0 z-10 w-2 translate-x-1/2 cursor-ew-resize border-0 bg-transparent outline-none focus-visible:bg-primary/25"
@@ -139,8 +126,21 @@ export function ContextualRail({ children, open, width, onWidth }: {
   );
 }
 
+export function PageRailPlaceholder() {
+  return (
+    <div className="grid h-full min-h-0 place-items-center p-4 text-center text-sm text-muted-foreground">
+      В разработке
+    </div>
+  );
+}
+
 function clampWidth(value: number): number {
   return Math.round(Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, value || DEFAULT_WIDTH)));
+}
+
+function readWidth(key: string): number {
+  const cached = Number(readStorage(key));
+  return Number.isFinite(cached) ? clampWidth(cached) : DEFAULT_WIDTH;
 }
 
 function openKey(account: string, section: SectionId): string {

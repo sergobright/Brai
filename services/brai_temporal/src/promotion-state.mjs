@@ -14,7 +14,7 @@ const PROMOTION_TASKS = {
   supabase_migration: "Supabase migration",
   goal_agents_deploy: "Goal agents deploy",
   deploy: "Target deploy",
-  version_recorded: "Version and deployment ledger recorded",
+  version_recorded: "Version work reconciled",
   accepted_previews: "Accepted preview promotion and slot release"
 };
 
@@ -39,6 +39,7 @@ export const PROMOTION_EVENTS = new Set([
   "supabase_prod_migration_passed",
   "supabase_prod_migration_failed",
   "prod_version_recorded",
+  "prod_work_reconciled",
   "prod_deploy_passed",
   "prod_deploy_failed",
   "released",
@@ -131,6 +132,7 @@ export function applyPromotionEvent(state, rawEvent) {
       break;
     case "dev_version_recorded":
     case "prod_version_recorded":
+    case "prod_work_reconciled":
       setTask(state, "version_recorded", "passed", event);
       state.status = event.type;
       break;

@@ -33,6 +33,15 @@ export function renderReleasePage(data, { downloadBase = "." } = {}) {
       <h1>APK-релизы Brai</h1>
       <div class="grid">${cards}</div>
     </main>
+    <script>
+      for (const node of document.querySelectorAll("time[datetime]")) {
+        const date = new Date(node.dateTime);
+        if (Number.isNaN(date.getTime())) continue;
+        node.textContent = new Intl.DateTimeFormat("ru-RU", { dateStyle: "long", timeStyle: "short" })
+          .format(date)
+          .replace(" г. в ", ", ");
+      }
+    </script>
   </body>
 </html>
 `;
@@ -66,17 +75,17 @@ function formatPublishedAt(value) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "Не опубликовано";
   const datePart = new Intl.DateTimeFormat("ru-RU", {
-    timeZone: "Europe/Moscow",
+    timeZone: "UTC",
     day: "numeric",
     month: "long",
     year: "numeric",
   }).format(date).replace(" г.", "");
   const timePart = new Intl.DateTimeFormat("ru-RU", {
-    timeZone: "Europe/Moscow",
+    timeZone: "UTC",
     hour: "2-digit",
     minute: "2-digit",
   }).format(date);
-  return `${datePart}, ${timePart} МСК`;
+  return `${datePart}, ${timePart}`;
 }
 
 function escapeHtml(value) {

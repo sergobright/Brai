@@ -63,8 +63,9 @@
 ## Sync rules
 
 - Client events должны иметь stable device identity и monotonic client sequence.
-- Server timestamps хранятся UTC.
-- Goal и History day grouping используют Europe/Moscow (UTC+3).
+- Server timestamps хранятся в UTC и сериализуются как UTC ISO timestamps.
+- Пользовательские абсолютные даты и время во всём UI форматируются через общий time helper в `display_timezone` пользователя; компоненты не добавляют фиксированные `МСК`, `UTC` или другие zone suffixes.
+- Goal и History day grouping используют Europe/Moscow (UTC+3) как отдельное доменное правило агрегации, а не как часовой пояс отображения timestamps.
 - Sessions crossing Moscow midnight split only for display/goal aggregation, while canonical sessions remain intact unless spec says otherwise.
 - Timer events more than 5 minutes in the future относительно receive time are ignored/persisted as ignored, not retried forever.
 

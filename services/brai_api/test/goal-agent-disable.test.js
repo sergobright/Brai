@@ -1,12 +1,29 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { IllegalStateError } from '@temporalio/worker';
 import { createFixture, request } from '../test-support/api.js';
 import { goalAgentsEnabledFromEnv } from '../src/goal-agent-switch.js';
-import { createGoalAgentWorkflowRuntime } from '../src/goal-agent-workflow-runtime.js';
+import {
+  createGoalAgentWorkflowRuntime,
+  shutdownGoalAgentWorker
+} from '../src/goal-agent-workflow-runtime.js';
 import { withUserScope } from '../src/user-scope.js';
 
 const OWNER = 'goal-agent-disable-owner';
 const NOW = '2026-07-13T19:00:00.000Z';
+
+test('Goal-agent shutdown tolerates a Temporal worker already draining', () => {
+  assert.doesNotThrow(() => shutdownGoalAgentWorker({
+    shutdown() {
+      throw new IllegalStateError('Not running. Current state: DRAINING');
+    }
+  }));
+  assert.throws(() => shutdownGoalAgentWorker({
+    shutdown() {
+      throw new Error('unexpected shutdown failure');
+    }
+  }), /unexpected shutdown failure/);
+});
 
 test('disabled Goal-agent runtime is a no-op before database or Temporal connections', async () => {
   assert.equal(goalAgentsEnabledFromEnv(''), true);

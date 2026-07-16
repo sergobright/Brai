@@ -20,6 +20,7 @@ import { timerEventMethods } from './store-timer-events.js';
 import { userAiStoreMethods } from './store-user-ai.js';
 import { workflowStoreMethods } from './store-workflows.js';
 import { userContentMethods } from './store-user-content.js';
+import { versionHistoryMethods } from './store-version-history.js';
 export { formatActivity, formatFocusInterval, formatSession, groupSessionsByDateHour } from './store-helpers.js';
 
 export class BraiStore {
@@ -53,5 +54,6 @@ Object.assign(
   workflowStoreMethods,
   userContentMethods,
   readModelMethods,
-  userAiStoreMethods
+  userAiStoreMethods,
+  versionHistoryMethods
 );

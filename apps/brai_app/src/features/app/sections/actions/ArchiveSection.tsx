@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { ArchiveRestore, Clock3 } from "lucide-react";
 import { BraiApi, type ArchivedRoleItem, type ArchiveRole, type ArchiveState } from "@/shared/api/braiApi";
 import { defaultApiBase } from "@/shared/config/runtime";
+import { formatDisplayDateTime } from "@/shared/time/format";
 import type { ActivitiesState, ActivityItem } from "@/shared/types/activities";
 import type { InboxItem } from "@/shared/types/inbox";
 import { Button } from "@/shared/ui/button";
@@ -138,6 +139,5 @@ function roleLabel(system: string, fallback?: string): string {
 }
 
 function formatArchiveDate(value: string): string {
-  const date = new Date(value);
-  return Number.isFinite(date.getTime()) ? new Intl.DateTimeFormat("ru-RU", { dateStyle: "medium", timeStyle: "short" }).format(date) : value;
+  return formatDisplayDateTime(value, { dateStyle: "medium", timeStyle: "short" }) || value;
 }

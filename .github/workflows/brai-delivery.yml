@@ -10,6 +10,12 @@ on:
     branches:
       - main
     types:
+      - opened
+      - edited
+      - synchronize
+      - reopened
+      - converted_to_draft
+      - ready_for_review
       - closed
   delete:
   workflow_dispatch:
@@ -24,11 +30,11 @@ env:
 
 concurrency:
   group: brai-delivery-${{ github.event_name }}-${{ github.ref || github.event.ref || github.run_id }}
-  cancel-in-progress: ${{ github.event_name == 'push' }}
+  cancel-in-progress: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/heads/codex/') }}
 
 jobs:
   public-guard:
-    if: github.event_name != 'delete' && !(github.event_name == 'pull_request' && github.event.action == 'closed')
+    if: github.event_name != 'delete' && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -41,7 +47,7 @@ jobs:
 
   classify-delivery:
     needs: public-guard
-    if: github.event_name != 'delete' && !(github.event_name == 'pull_request' && github.event.action == 'closed')
+    if: github.event_name != 'delete' && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     outputs:
       delivery_class: ${{ steps.classify.outputs.delivery_class }}
@@ -99,7 +105,7 @@ jobs:
     needs:
       - public-guard
       - classify-delivery
-    if: github.event_name != 'delete' && !(github.event_name == 'pull_request' && github.event.action == 'closed')
+    if: github.event_name != 'delete' && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -184,7 +190,7 @@ jobs:
 
   temporal-worker-check:
     needs: public-guard
-    if: github.event_name != 'delete' && !(github.event_name == 'pull_request' && github.event.action == 'closed')
+    if: github.event_name != 'delete' && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -362,6 +368,27 @@ jobs:
           BRAI_PR_URL: ${{ github.event.pull_request.html_url }}
           BRAI_PR_MERGED_AT: ${{ github.event.pull_request.merged_at }}
           BRAI_DELIVERY_CLASS: ${{ contains(toJson(github.event.pull_request.labels), 'brai-delivery:technical-no-preview') && 'technical-no-preview' || 'infra-docs' }}
+
+  record-version-pr:
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+      - name: Record version-history PR snapshot
+        run: |
+          if [[ ! -x deploy/scripts/ci-ssh-record-version-pr.sh ]]; then
+            echo "Version-history PR recorder is not present on the default branch yet; skipped."
+            exit 0
+          fi
+          deploy/scripts/ci-ssh-record-version-pr.sh
+        env:
+          BRAI_DEPLOY_HOST: ${{ vars.BRAI_DEPLOY_HOST }}
+          BRAI_DEPLOY_USER: ${{ vars.BRAI_DEPLOY_USER }}
+          BRAI_DEPLOY_SSH_PORT: ${{ vars.BRAI_DEPLOY_SSH_PORT || '22' }}
+          BRAI_DEPLOY_SSH_KEY: ${{ secrets.BRAI_DEPLOY_SSH_KEY }}
+          BRAI_PR_JSON: ${{ toJson(github.event) }}
 
   release-preview-slot:
     if: |

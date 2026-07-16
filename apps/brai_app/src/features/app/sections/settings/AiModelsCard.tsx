@@ -5,6 +5,7 @@ import { KeyRound, LoaderCircle, Plus, RotateCw, Save, Trash2, TriangleAlert, X 
 import type { AiCapability, AiModel, AiProfile, AiProviderCredential, AiProviderId, AiSettings, BraiApi, BraiApiError } from "@/shared/api/braiApi";
 import { invalidateBraiCmdProviderCredentials, syncBraiCmdProviderCredentials } from "@/shared/platform/braiCmd";
 import { isNativeShell, platformName } from "@/shared/platform/platform";
+import { formatDisplayDateTime } from "@/shared/time/format";
 import { Alert, AlertDescription } from "@/shared/ui/alert";
 import { Badge } from "@/shared/ui/badge";
 import { Button } from "@/shared/ui/button";
@@ -514,8 +515,7 @@ function capabilityName(capability: string): string {
   return capability;
 }
 function formatDate(value: string): string {
-  const date = new Date(value);
-  return Number.isNaN(date.valueOf()) ? "—" : date.toLocaleDateString("ru-RU");
+  return formatDisplayDateTime(value, { dateStyle: "short" }) || "—";
 }
 
 function apiErrorMessage(reason: unknown, fallback: string): string {

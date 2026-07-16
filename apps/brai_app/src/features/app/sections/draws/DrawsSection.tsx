@@ -8,6 +8,7 @@ import type { ExcalidrawElement } from "@excalidraw/excalidraw/element/types";
 import type { ThemeMode } from "../../appModel";
 import { BraiApi, type BraiApiError, type DrawSceneSummary } from "@/shared/api/braiApi";
 import { defaultApiBase } from "@/shared/config/runtime";
+import { formatDisplayDateTime } from "@/shared/time/format";
 import { Button } from "@/shared/ui/button";
 import { Card, CardPanel } from "@/shared/ui/card";
 import { ScrollArea } from "@/shared/ui/scroll-area";
@@ -32,13 +33,12 @@ const emptyScene = (): Record<string, unknown> => ({
   files: {},
 });
 
-export function DrawsSection({ theme, onFullscreenChange, onRailContent }: { theme: ThemeMode; onFullscreenChange?: (fullScreen: boolean) => void; onRailContent?: (content: ReactNode | null) => void }) {
+export function DrawsSection({ fullScreen = false, theme, onFullscreenChange, onRailContent }: { fullScreen?: boolean; theme: ThemeMode; onFullscreenChange?: (fullScreen: boolean) => void; onRailContent?: (content: ReactNode | null) => void }) {
   const api = useMemo(() => new BraiApi(defaultApiBase()), []);
   const [draws, setDraws] = useState<DrawSceneSummary[]>([]);
   const [activeName, setActiveName] = useState(DEFAULT_DRAW_NAME);
   const [scene, setScene] = useState<LoadedScene | null>(null);
   const [status, setStatus] = useState<SaveStatus>("loading");
-  const [fullScreen, setFullScreen] = useState(false);
   const [editingName, setEditingName] = useState<string | null>(null);
   const saveTimerRef = useRef<number | null>(null);
   const loadedRef = useRef(false);
@@ -99,11 +99,6 @@ export function DrawsSection({ theme, onFullscreenChange, onRailContent }: { the
   useEffect(() => () => {
     if (saveTimerRef.current != null) window.clearTimeout(saveTimerRef.current);
   }, []);
-
-  useEffect(() => {
-    onFullscreenChange?.(fullScreen);
-    return () => onFullscreenChange?.(false);
-  }, [fullScreen, onFullscreenChange]);
 
   const createDraw = useCallback(() => {
     const name = toDrawFileName(defaultUntitledName(draws));
@@ -192,7 +187,7 @@ export function DrawsSection({ theme, onFullscreenChange, onRailContent }: { the
             <p className="truncate text-xs text-muted-foreground">{saveStatusLabel(status)}</p>
           </div>
           <div className="flex shrink-0 items-center gap-1">
-            <Button type="button" size="icon-sm" variant="ghost" aria-label={fullScreen ? "Выйти из полноэкранного режима" : "На весь экран"} title={fullScreen ? "Выйти из полноэкранного режима" : "На весь экран"} onClick={() => setFullScreen((open) => !open)}>
+            <Button type="button" size="icon-sm" variant="ghost" aria-label={fullScreen ? "Выйти из полноэкранного режима" : "На весь экран"} title={fullScreen ? "Выйти из полноэкранного режима" : "На весь экран"} onClick={() => onFullscreenChange?.(!fullScreen)}>
               {fullScreen ? <Minimize2 className="size-4" aria-hidden="true" /> : <Maximize2 className="size-4" aria-hidden="true" />}
             </Button>
           </div>
@@ -425,7 +420,5 @@ function saveStatusLabel(status: SaveStatus): string {
 }
 
 function formatUpdatedAt(value: string): string {
-  const date = new Date(value);
-  if (!Number.isFinite(date.getTime())) return "";
-  return new Intl.DateTimeFormat("ru-RU", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }).format(date);
+  return formatDisplayDateTime(value, { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
 }

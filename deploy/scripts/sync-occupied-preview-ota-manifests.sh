@@ -25,7 +25,11 @@ check_access() {
   test -x "$check_root/deploy/scripts/sync-occupied-preview-ota-manifests.sh"
   test -r "$REGISTRY"
   : "${PROD_POSTGRES_URL:?BRAI_PROD_DATABASE_URL or BRAI_DATABASE_URL is required}"
-  BRAI_DATABASE_URL="$PROD_POSTGRES_URL" "$NODE_BIN" "$check_root/deploy/scripts/resolve-app-version.mjs" --environment prod --root "$check_root" >/dev/null
+  BRAI_DATABASE_URL="$PROD_POSTGRES_URL" "$NODE_BIN" "$check_root/deploy/scripts/resolve-app-version.mjs" \
+    --environment prod \
+    --root "$check_root" \
+    --prod-web-version-json "${BRAI_PROD_WEB_VERSION_JSON:-$DEPLOY_REPO/deploy/web/version.json}" \
+    --mobile-target "${BRAI_RELEASE_TARGET:-$DEPLOY_REPO/deploy/releases}" >/dev/null
   echo "accepted preview OTA sync access ok: $check_root"
 }
 
@@ -117,7 +121,11 @@ if [[ ! -f "$REGISTRY" ]]; then
 fi
 
 : "${PROD_POSTGRES_URL:?BRAI_PROD_DATABASE_URL or BRAI_DATABASE_URL is required}"
-VERSION="${BRAI_APP_VERSION:-$(BRAI_DATABASE_URL="$PROD_POSTGRES_URL" "$NODE_BIN" "$ROOT/deploy/scripts/resolve-app-version.mjs" --environment prod --root "$ROOT")}"
+VERSION="${BRAI_APP_VERSION:-$(BRAI_DATABASE_URL="$PROD_POSTGRES_URL" "$NODE_BIN" "$ROOT/deploy/scripts/resolve-app-version.mjs" \
+  --environment prod \
+  --root "$ROOT" \
+  --prod-web-version-json "${BRAI_PROD_WEB_VERSION_JSON:-$DEPLOY_REPO/deploy/web/version.json}" \
+  --mobile-target "${BRAI_RELEASE_TARGET:-$DEPLOY_REPO/deploy/releases}")}"
 mapfile -t FAILED_PREVIEW_SKIP_LINES < <("$NODE_BIN" -e '
 const fs = require("node:fs");
 const registry = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
@@ -156,8 +164,41 @@ fi
 for slot in "${OCCUPIED_SLOTS[@]}"; do
   slot_lower="${slot,,}"
   source_root="$ENVS_ROOT/preview-$slot_lower/source"
+  runtime_config="$ENVS_ROOT/preview-$slot_lower/web/brai-runtime-config.js"
   if [[ ! -d "$source_root" ]]; then
     echo "Missing Preview $slot source: $source_root" >&2
+    exit 1
+  fi
+  mapfile -t SLOT_META < <("$NODE_BIN" - "$REGISTRY" "$slot" "$source_root" "$runtime_config" <<'NODE'
+const fs = require("node:fs");
+const [registryPath, slot, sourceRoot, runtimeConfigPath] = process.argv.slice(2);
+const entry = JSON.parse(fs.readFileSync(registryPath, "utf8"))[slot] || {};
+const branch = String(entry.branch || "");
+const commit = String(entry.commit || "").toLowerCase();
+if (!/^codex\/[A-Za-z0-9._-]+$/.test(branch) || !/^[0-9a-f]{40}$/.test(commit)) {
+  throw new Error(`Preview ${slot} registry identity is incomplete`);
+}
+for (const [name, expected] of [["branch", branch], ["commit", commit]]) {
+  const marker = `${sourceRoot}/.brai-deploy-${name}`;
+  const actual = fs.existsSync(marker) ? fs.readFileSync(marker, "utf8").trim() : "";
+  if (actual !== expected) throw new Error(`Preview ${slot} ${name} marker does not match the slot registry`);
+}
+let productVersion = "";
+if (fs.existsSync(runtimeConfigPath)) {
+  const source = fs.readFileSync(runtimeConfigPath, "utf8");
+  const match = source.match(/window\.__BRAI_RUNTIME_CONFIG__\s*=\s*(\{[\s\S]*\})\s*;\s*$/);
+  if (match) {
+    const parsed = Number(JSON.parse(match[1]).productVersion);
+    if (Number.isInteger(parsed) && parsed > 0) productVersion = String(parsed);
+  }
+}
+console.log(branch);
+console.log(commit);
+console.log(productVersion);
+NODE
+  )
+  if [[ "${#SLOT_META[@]}" -lt 3 ]]; then
+    echo "Cannot preserve Preview $slot runtime identity during OTA sync." >&2
     exit 1
   fi
   echo "Syncing Preview $slot OTA manifest to $VERSION from $source_root."
@@ -170,6 +211,9 @@ for slot in "${OCCUPIED_SLOTS[@]}"; do
     BRAI_PROD_DATABASE_URL="$PROD_POSTGRES_URL" \
     BRAI_PROD_WEB_VERSION_JSON="${BRAI_PROD_WEB_VERSION_JSON:-$ROOT/deploy/web/version.json}" \
     BRAI_RELEASE_TARGET="${BRAI_RELEASE_TARGET:-$ROOT/deploy/releases}" \
+    BRAI_BRANCH="${SLOT_META[0]}" \
+    BRAI_COMMIT="${SLOT_META[1]}" \
+    BRAI_PRODUCT_VERSION="${SLOT_META[2]}" \
     BRAI_BUILD_CLIENT=false \
       "$source_root/deploy/scripts/publish-environment-web-layer.sh" "preview-$slot_lower"
   )

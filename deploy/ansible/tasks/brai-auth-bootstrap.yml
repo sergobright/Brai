@@ -1,0 +1,293 @@
+- name: Create fixed Brai auth runtime root
+  ansible.builtin.file:
+    path: "{{ brai_auth_root }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Install fixed secret-free Brai auth Compose definition
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/files/brai-auth-compose.yml"
+    dest: "{{ brai_auth_compose }}"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Install fixed Brai auth runtime helper
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/files/brai-auth-runtime.sh"
+    dest: "{{ brai_auth_runtime_helper }}"
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Create isolated Brai database administrator group
+  ansible.builtin.group:
+    name: "{{ brai_db_admin_group }}"
+    system: true
+  tags:
+    - brai-env-contract
+    - targeted-infra-apply
+
+- name: Check isolated Brai database administrator group availability
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/getent
+      - group
+      - "{{ brai_db_admin_group }}"
+  register: brai_db_admin_group_before
+  changed_when: false
+  failed_when: brai_db_admin_group_before.rc not in [0, 2]
+  check_mode: false
+  tags:
+    - brai-env-contract
+    - targeted-infra-apply
+
+- name: Reconcile exact production database administrator membership
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/gpasswd
+      - --members
+      - "{{ brai_db_admin_members | join(',') }}"
+      - "{{ brai_db_admin_group }}"
+  changed_when: true
+  when:
+    - not ansible_check_mode
+    - brai_db_admin_group_before.rc == 0
+    - (brai_db_admin_group_before.stdout.split(':')[3].split(',') | reject('equalto', '') | list | sort) != (brai_db_admin_members | sort)
+  tags:
+    - brai-env-contract
+    - targeted-infra-apply
+
+- name: Check applied production database administrator membership contract
+  ansible.builtin.stat:
+    path: "{{ brai_db_admin_members_state }}"
+  register: brai_db_admin_members_contract
+  tags:
+    - brai-env-contract
+    - targeted-infra-apply
+
+- name: Read applied production database administrator membership contract
+  ansible.builtin.slurp:
+    src: "{{ brai_db_admin_members_state }}"
+  register: brai_db_admin_members_contract_content
+  when: brai_db_admin_members_contract.stat.exists
+  no_log: true
+  tags:
+    - brai-env-contract
+    - targeted-infra-apply
+
+- name: Refresh isolated Brai database administrator group membership
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/getent
+      - group
+      - "{{ brai_db_admin_group }}"
+  register: brai_db_admin_group_status
+  changed_when: false
+  failed_when: brai_db_admin_group_status.rc not in [0, 2]
+  check_mode: false
+  tags:
+    - brai-env-contract
+    - targeted-infra-apply
+
+- name: Assert exact production database administrator membership
+  ansible.builtin.assert:
+    that:
+      - (brai_db_admin_group_status.stdout.split(':')[3].split(',') | reject('equalto', '') | list | sort) == (brai_db_admin_members | sort)
+      - brai_service_user not in brai_db_admin_members
+      - brai_goal_agent_user not in brai_db_admin_members
+    fail_msg: "brai-db-admin membership must contain only brai-deploy and current maintainers."
+  when:
+    - brai_db_admin_group_status.rc == 0
+    - not ansible_check_mode or (
+        brai_db_admin_members_contract.stat.exists
+        and (brai_db_admin_members_contract_content.content | b64decode | trim) == (brai_db_admin_members | join(','))
+      )
+  tags:
+    - brai-env-contract
+    - targeted-infra-apply
+
+- name: Record applied production database administrator membership contract
+  ansible.builtin.copy:
+    content: "{{ brai_db_admin_members | join(',') }}\n"
+    dest: "{{ brai_db_admin_members_state }}"
+    owner: root
+    group: root
+    mode: "0600"
+  tags:
+    - brai-env-contract
+    - targeted-infra-apply
+
+- name: Check protected Supabase deploy environment exists
+  ansible.builtin.stat:
+    path: "{{ brai_supabase_deploy_env_source }}"
+  register: brai_auth_supabase_deploy_env
+  tags:
+    - brai-env-contract
+    - targeted-infra-apply
+
+- name: Refuse to create protected Supabase deploy secrets from source
+  ansible.builtin.fail:
+    msg: "{{ brai_supabase_deploy_env_source }} is missing; create it on the server outside Git before auth cutover."
+  when: not brai_auth_supabase_deploy_env.stat.exists
+  tags:
+    - brai-env-contract
+    - targeted-infra-apply
+
+- name: Isolate protected Supabase deploy environment from runtime identities
+  ansible.builtin.file:
+    path: "{{ brai_supabase_deploy_env_source }}"
+    state: file
+    owner: root
+    group: "{{ brai_db_admin_group }}"
+    mode: "0640"
+  when:
+    - brai_auth_supabase_deploy_env.stat.exists
+    - brai_db_admin_group_status.rc == 0
+  tags:
+    - brai-env-contract
+    - targeted-infra-apply
+
+- name: Install fixed production API environment transaction helper
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/files/brai-prod-api-env.sh"
+    dest: "{{ brai_prod_api_env_helper }}"
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Provision root-only production API environment transaction state
+  ansible.builtin.file:
+    path: "{{ brai_prod_api_env_state_root }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Check production API environment transaction state availability
+  ansible.builtin.stat:
+    path: "{{ brai_prod_api_env_state_root }}"
+  register: brai_prod_api_env_state
+
+- name: Provision root-only production API environment transaction lock
+  ansible.builtin.file:
+    path: "{{ brai_prod_api_env_state_root }}/lock"
+    state: touch
+    owner: root
+    group: root
+    mode: "0600"
+    access_time: preserve
+    modification_time: preserve
+  when: brai_prod_api_env_state.stat.exists
+
+- name: Install isolated Brai auth sudoers boundary
+  ansible.builtin.template:
+    src: templates/brai-auth-sudoers.j2
+    dest: /etc/sudoers.d/brai-auth
+    owner: root
+    group: root
+    mode: "0440"
+    validate: "visudo -cf %s"
+
+- name: Assert Brai service identities cannot read Supabase deploy credentials
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/sudo
+      - -u
+      - "{{ item }}"
+      - --
+      - /usr/bin/test
+      - "!"
+      - -r
+      - "{{ brai_supabase_deploy_env_source }}"
+  loop:
+    - "{{ brai_service_user }}"
+    - "{{ brai_goal_agent_user }}"
+  changed_when: false
+  check_mode: false
+  when: brai_db_admin_group_status.rc == 0
+  tags:
+    - brai-env-contract
+    - targeted-infra-apply
+
+- name: Assert production database administrators can read Supabase deploy credentials
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/sudo
+      - -u
+      - "{{ item }}"
+      - --
+      - /usr/bin/test
+      - -r
+      - "{{ brai_supabase_deploy_env_source }}"
+  loop: "{{ [brai_deploy_user] + brai_operation_maintainers }}"
+  changed_when: false
+  check_mode: false
+  when: brai_db_admin_group_status.rc == 0
+  tags:
+    - brai-env-contract
+    - targeted-infra-apply
+
+- name: Provision deploy-owned auth operation locks
+  ansible.builtin.file:
+    path: "{{ brai_env_root }}/{{ item.value.path }}/.auth-operation.lock"
+    state: touch
+    owner: "{{ brai_deploy_user }}"
+    group: "{{ brai_deploy_user }}"
+    mode: "0664"
+    access_time: preserve
+    modification_time: preserve
+  loop: "{{ brai_envs | dict2items | list }}"
+  loop_control:
+    label: "{{ item.key }}"
+
+- name: Create root-owned Brai auth Caddy route directories
+  ansible.builtin.file:
+    path: "{{ brai_auth_caddy_root }}/{{ item.key }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop: "{{ brai_envs | dict2items | list }}"
+  loop_control:
+    label: "{{ item.key }}"
+
+- name: Seed disabled Brai auth Caddy route fragments
+  ansible.builtin.copy:
+    content: "# Brai auth route is disabled until an exact-digest runtime deployment.\n"
+    dest: "{{ brai_auth_caddy_root }}/{{ item.key }}/route.caddy"
+    force: false
+    owner: root
+    group: root
+    mode: "0644"
+  loop: "{{ brai_envs | dict2items | list }}"
+  loop_control:
+    label: "{{ item.key }}"
+
+- name: Provision root-owned global Brai auth Caddy lock
+  ansible.builtin.file:
+    path: "{{ brai_auth_caddy_lock }}"
+    state: touch
+    owner: root
+    group: root
+    mode: "0600"
+    access_time: preserve
+    modification_time: preserve
+
+- name: Register inert Brai auth host bootstrap
+  ansible.builtin.blockinfile:
+    path: "/home/{{ brai_codex_maintenance_user }}/DEPLOYMENT.md"
+    marker: "<!-- {mark} BRAI AUTH HOST BOOTSTRAP -->"
+    insertafter: EOF
+    block: |
+      ## Brai auth host bootstrap
+
+      **Описание:** инертная root-owned host boundary для будущего stateless `brai-auth`; bootstrap сам не создаёт schema/secret/env, не запускает container и не включает route.
+
+      **Для чего используется:** fixed Compose и helper ограничивают lifecycle семью известных Brai environments, immutable `{{ brai_auth_image_repository }}@sha256:...` image с exact OCI source `https://github.com/{{ brai_github_repository }}`, localhost ports `3050`-`3056`, private Docker network `brai-supabase`, exact Preview lease и атомарные Caddy route transitions. Read-only `preflight-rollback` до cutover требует локальный prior digest либо exact `absent` + `disabled`; rollback при Caddy failure всё равно восстанавливает prior runtime или удаляет incoming container и возвращает failure. Отдельный `pull-only` принимает валидированный GitHub actor/login отдельным несекретным аргументом, получает короткоживущий GitHub Actions token только из stdin, pull-ит exact digest через временный root-only `DOCKER_CONFIG`, проверяет OCI `revision` и canonical `source`, затем удаляет credential state; `deploy` token не читает и запускает только уже локальный image с теми же exact labels. Группа `brai-db-admin` ограничивает чтение `/etc/brai/supabase-deploy.env` пользователем `brai-deploy` и maintainers, исключая API и Goal-agent identities. Root helper `/srv/opt/brai-prod-api-env.sh` принимает candidate DSN только через stdin и выполняет attempt-bound `stage|rollback|commit`: меняет только единственную строку `BRAI_DATABASE_URL` в `/etc/brai/brai-api.env`, проверяет exact role `brai_api.brai-prod`, запрещает legacy `brightos`, сохраняет database target/search_path и держит backup/state только в root-owned `/etc/brai/.brai-prod-api-env`. API units получают environment-local `BRAI_AUTH_INTERNAL_URL`; Production backup условно включает существующую schema `brai_auth` и проверяет custom archive через `pg_restore --list` до шифрования и отправки.
+
+      **Как используется:** source of truth — `deploy/ansible/` в Brai repo; check/apply выполняются только из clean synchronized `main`: `deploy/scripts/apply-main-infra.sh --check brai-auth-bootstrap`, затем `--apply brai-auth-bootstrap` и повторный `--check`.
+
+      **Где находится:** `/srv/opt/brai-auth/compose.yml`, `/srv/opt/brai-auth-runtime.sh`, `/srv/opt/brai-prod-api-env.sh`, `/etc/brai/.brai-prod-api-env`, `/etc/brai/.brai-db-admin-members`, `/etc/brai/brai-api.env`, `/etc/brai/supabase-deploy.env`, `/etc/sudoers.d/brai-auth`, `/etc/sudoers.d/brai-deploy`, `/etc/systemd/system/brai-api*.service`, `/srv/opt/brai-db-telegram-backup.sh`, `/etc/caddy/brai-auth/<environment>/route.caddy`, `/srv/projects/brai-envs/<environment>/brai-auth.env`, `/srv/projects/brai-envs/<environment>/.auth-operation.lock`, `/srv/opt/brai-auth/caddy.lock`.

@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import { openEngineFromProfile, openProfileMenuItem, openSettingsFromProfile, swipeTouch } from "./shell-helpers";
 
 test("shows Settings without update state", async ({ page }, testInfo) => {
@@ -6,6 +6,10 @@ test("shows Settings without update state", async ({ page }, testInfo) => {
   await openSettingsFromProfile(page);
 
   await expect(page.getByRole("heading", { name: "Настройки" })).toBeVisible();
+  const pageMain = page.locator(".section-page-current .page-main");
+  await expect(pageMain).toHaveAttribute("data-slot", "scroll-area");
+  await expect(pageMain.locator("> [data-slot='scroll-area-scrollbar']")).toHaveCount(1);
+  await expect(pageMain).not.toHaveClass(/overflow-auto/);
   await expect(page.getByRole("button", { name: "Включить темную тему" })).toBeVisible();
   await page.getByRole("button", { name: "Включить темную тему" }).click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
@@ -140,9 +144,103 @@ test("opens Engine from the profile menu", async ({ page }) => {
   await openEngineFromProfile(page);
 
   await expect(page.getByRole("heading", { name: "Engine", exact: true })).toBeVisible();
-  await expect(page.getByRole("heading", { name: /Текущая версия (unknown|0\.\d+\.\d+)/ })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /Текущая версия приложения (unknown|0\.\d+\.\d+)/ })).toBeVisible();
   await expect(page.getByText("Доступна новая версия 0.11.52.", { exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Скачать обновление" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Обновить страницу" })).toBeVisible();
+});
+
+test("opens compact Engine version cards and returns from version details", async ({ page }, testInfo) => {
+  await mockEngineShellApi(page);
+  await page.route("**/v1/version-history**", (route) => {
+    const url = new URL(route.request().url());
+    const type = url.searchParams.get("type");
+    const cursor = url.searchParams.get("cursor");
+    const items = type === "apk"
+      ? [versionHistoryItem(11, "apk")]
+      : cursor
+        ? [versionHistoryItem(141, "build")]
+        : [versionHistoryItem(142, "build")];
+    return route.fulfill({ json: {
+      items,
+      types: [{ id: "build", title: "Сборка" }, { id: "apk", title: "APK" }],
+      next_cursor: type || cursor ? null : "older",
+    } });
+  });
+
+  await page.goto("/engine");
+  await expect(page.locator("[data-app-shell]")).not.toHaveAttribute("inert", "");
+  const historyButton = page.getByRole("button", { name: "История версий", exact: true });
+  await historyButton.click();
+  await expect(historyButton).toHaveAttribute("aria-pressed", "true");
+  const version142 = page.getByRole("button", { name: "Установленная версия не определена. Версия 142: История work 142" });
+  await expect(version142).toBeVisible();
+  await expect(version142).toContainText("Product");
+  await expect(version142).not.toContainText("Версия 142");
+  await expect(page.getByRole("heading", { name: /История work 142/ })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: /Текущая версия приложения/ })).toBeVisible();
+
+  if (testInfo.project.name === "desktop") {
+    const workspace = page.locator(".section-page-current .page-workspace");
+    await expect(workspace).toHaveClass(/has-panel/);
+    await expect(workspace.locator(".page-panel")).toBeVisible();
+    await expect(page.locator(".mobile-context-sheet")).toHaveCount(0);
+    const mainBox = await workspace.locator(".page-main").boundingBox();
+    const panelBox = await workspace.locator(".page-panel").boundingBox();
+    expect(Math.abs((mainBox?.width ?? 0) - (panelBox?.width ?? 0))).toBeLessThanOrEqual(2);
+
+    await version142.click();
+    await expect(page.getByRole("heading", { name: "Установленная версия не определена. Версия 142: История work 142" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Закрыть подробности версии" })).toBeVisible();
+    await expect(version142).toHaveCount(0);
+    await page.getByRole("button", { name: "Закрыть подробности версии" }).click();
+    await expect(version142).toBeVisible();
+
+    await page.getByRole("button", { name: "Показать более ранние" }).click();
+    await expect(page.getByRole("button", { name: "Установленная версия не определена. Версия 141: История work 141" })).toBeVisible();
+    await page.getByRole("button", { name: "Android APK" }).click();
+    await expect(page.getByRole("button", { name: "Не относится к этой платформе. Версия 11: История work 11" })).toBeVisible();
+    await expect(version142).toHaveCount(0);
+  } else {
+    const historySheet = page.locator(".mobile-context-sheet");
+    await expect(historySheet).toBeVisible();
+    await expect(historySheet.locator(".mobile-context-grabber")).toBeVisible();
+    const headerBox = await page.locator(".section-page-current .topbar").boundingBox();
+    const sheetBox = await historySheet.boundingBox();
+    expect(sheetBox?.y ?? 0).toBeGreaterThanOrEqual((headerBox?.y ?? 0) + (headerBox?.height ?? 0) - 1);
+
+    await version142.click();
+    const detailSheet = page.locator(".version-history-detail-backdrop");
+    await expect(page.locator(".mobile-context-backdrop")).toHaveCount(2);
+    await expect(detailSheet.getByRole("heading", { name: "Установленная версия не определена. Версия 142: История work 142" })).toBeVisible();
+    await expect(detailSheet.locator(".actions-detail-close")).toHaveCount(0);
+    await expect(historySheet).toBeAttached();
+
+    await page.goBack();
+    await expect(detailSheet).toHaveCount(0);
+    await expect(historySheet).toBeVisible();
+    await expect(historyButton).toHaveAttribute("aria-pressed", "true");
+
+    await version142.click();
+    await expect(detailSheet).toBeVisible();
+    const detailDragZone = await detailSheet.locator(".actions-detail-drag-zone").boundingBox();
+    const detailStart = { x: (detailDragZone?.x ?? 0) + (detailDragZone?.width ?? 0) / 2, y: (detailDragZone?.y ?? 0) + 4 };
+    await swipeTouch(page, detailStart, { x: detailStart.x, y: detailStart.y + 420 });
+    await expect(detailSheet).toHaveCount(0);
+    await expect(historySheet).toBeVisible();
+    await expect(historyButton).toHaveAttribute("aria-pressed", "true");
+
+    await page.goBack();
+    await expect(historySheet).toHaveCount(0);
+    await expect(historyButton).toHaveAttribute("aria-pressed", "false");
+
+    await historyButton.click();
+    await expect(historySheet).toBeVisible();
+    const dragZone = await historySheet.locator(".mobile-context-drag-zone").boundingBox();
+    const start = { x: (dragZone?.x ?? 0) + (dragZone?.width ?? 0) / 2, y: (dragZone?.y ?? 0) + 8 };
+    await swipeTouch(page, start, { x: start.x, y: start.y + 420 });
+    await expect(historySheet).toHaveCount(0);
+    await expect(historyButton).toHaveAttribute("aria-pressed", "false");
+  }
 });
 
 test("keeps Android Engine download progress compact on mobile", async ({ page }, testInfo) => {
@@ -245,6 +343,55 @@ test("keeps Android Engine download progress compact on mobile", async ({ page }
     .poll(async () => (await progressBlock.boundingBox())?.height ?? 0)
     .toBeLessThan(72);
 });
+
+function versionHistoryItem(version: number, type: string) {
+  return {
+    id: version,
+    type,
+    version,
+    short_changes: `История work ${version}`,
+    detailed_changes: `Подробности ${version}`,
+    reason: `Причина ${version}`,
+    released_at_utc: "2026-07-14T10:00:00.000Z",
+    created_at_utc: "2026-07-14T10:00:00.000Z",
+    work: { key: `work_${version}`, status: "finalized", created_at_utc: "2026-07-14T09:00:00.000Z", updated_at_utc: "2026-07-14T10:00:00.000Z", finalized_at_utc: "2026-07-14T10:00:00.000Z" },
+    details: [{ id: version, title: `Изменение ${version}`, description: `Результат ${version}`, display_order: 1, pull_request_id: null }],
+    pull_requests: [],
+    refs: [],
+  };
+}
+
+async function mockEngineShellApi(page: Page) {
+  const now = "2026-07-14T10:00:00.000Z";
+  await page.route("**/api/auth/session", (route) => route.fulfill({ json: {
+    authenticated: true,
+    user: { id: "engine-history-e2e", email: "engine-history@example.test", name: "Engine History" },
+  } }));
+  await page.route("**/api/v1/timer/state", (route) => route.fulfill({ json: {
+    active_session: null, elapsed_seconds: 0, server_revision: 1, server_time_utc: now, timezone: "Europe/Moscow",
+  } }));
+  await page.route("**/api/v1/sessions", (route) => route.fulfill({ json: { sessions: [], groups: {} } }));
+  await page.route("**/api/v1/goals/challenge", (route) => route.fulfill({ json: {
+    timezone: "Europe/Moscow", start_date: "2026-07-14", end_date: "2026-07-14", days_count: 1,
+    daily_goal_seconds: 0, total_goal_seconds: 0, completed_seconds: 0, completed_hours: 0, percentage: 0,
+    remaining_seconds: 0, remaining_days: 0, required_average_seconds_per_remaining_day: 0,
+    required_average_hours_per_remaining_day: 0, achieved: false, days: [],
+  } }));
+  await page.route("**/api/v1/activities", (route) => route.fulfill({ json: {
+    server_time_utc: now, server_revision: 1, activities: [], archived_activities: [], goals: [], archived_goals: [],
+  } }));
+  await page.route("**/api/v1/inbox", (route) => route.fulfill({ json: { server_time_utc: now, server_revision: 1, inbox: [] } }));
+  await page.route("**/api/v1/preferences", (route) => route.fulfill({ json: { context_rail_width_px: 360 } }));
+  await page.route("**/api/v1/settings", (route) => route.fulfill({ json: { display_timezone: "Europe/Moscow" } }));
+  await page.route("**/api/v1/version", (route) => route.fulfill({ json: {
+    server_time_utc: now, version: "0.0.142", ota_version: "0.0.142",
+    parts: { canon: 0, release: 0, build: 142, apk: 11 },
+    latest: { canon: null, release: null, build: null, apk: null },
+    target_apk: { version: 11, version_code: 11, file: "brai-v11.apk", release_url: "/releases/", published_at: now, capabilities: [] },
+  } }));
+  await page.route("**/api/v1/relations**", (route) => route.fulfill({ json: { server_time_utc: now, server_revision: 1, relations: [], next_cursor: null } }));
+  await page.route("**/api/v1/context-decisions**", (route) => route.fulfill({ json: { server_time_utc: now, server_revision: 1, decisions: [], next_cursor: null } }));
+}
 
 test("shows Engine in the mobile dock overflow menu", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "mobile", "mobile-only layout");

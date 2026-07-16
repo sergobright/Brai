@@ -74,7 +74,10 @@ test('0025 registers five isolated agent/workflow contracts and remains idempote
       'context_capability_hash', 'deployment_environment', 'input_json', 'llm_call_id', 'result_json'
     ]);
     assert.equal((await pool.query(`
-      SELECT count(*)::int AS count FROM pg_constraint WHERE conname = 'workflow_executions_context_capability_hash_check'
+      SELECT count(*)::int AS count
+      FROM pg_constraint
+      WHERE conname = 'workflow_executions_context_capability_hash_check'
+        AND connamespace = current_schema()::regnamespace
     `)).rows[0].count, 1);
     const unique = await pool.query(`
       SELECT indexdef FROM pg_indexes

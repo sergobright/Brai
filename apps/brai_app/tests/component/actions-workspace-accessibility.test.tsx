@@ -1,8 +1,9 @@
 import { render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ActionsWorkspaceNavigation } from "@/features/app/sections/actions/ActionsWorkspaceNavigation";
+import { SortableActionList } from "@/features/app/sections/actions/ActionList";
 import { ContextReviewPanel } from "@/features/app/sections/actions/ContextReviewPanel";
-import { GoalBadges } from "@/features/app/sections/actions/GoalMembershipControls";
+import { GoalBadges, GoalMembershipPicker } from "@/features/app/sections/actions/GoalMembershipControls";
 import { GoalWorkspaceHeader } from "@/features/app/sections/actions/GoalWorkspaceHeader";
 import { WorkspaceWorkList } from "@/features/app/sections/actions/WorkspaceWorkList";
 import { buildActionsWorkspace, type WorkspaceWorkItem } from "@/features/app/sections/actions/actionsWorkspaceModel";
@@ -74,11 +75,47 @@ describe("Actions workspace accessibility", () => {
     expect(screen.getByRole("button", { name: "Луна" })).toHaveClass("max-[860px]:min-h-11");
   });
 
+  it("keeps Goal membership inside the action row as the third swipe control", () => {
+    const item = workItem();
+    const { container } = render(
+      <SortableActionList
+        actions={[item.activity!]}
+        selectedActionId={null}
+        titleDrafts={{}}
+        openDeleteActionId={item.id}
+        activeActivityId={null}
+        activeActivityElapsedSeconds={0}
+        onSelect={vi.fn()}
+        onEditMobile={vi.fn()}
+        onUpdateTitle={vi.fn()}
+        onTitleDraftChange={vi.fn()}
+        onSetStatus={vi.fn()}
+        onDelete={vi.fn()}
+        onOpenDelete={vi.fn()}
+        onCloseDelete={vi.fn()}
+        onReorder={vi.fn()}
+        onStartFocus={vi.fn()}
+        onStopFocus={vi.fn()}
+        renderControl={() => <GoalMembershipPicker item={item} goals={[goal()]} onAdd={vi.fn()} onCreateGoal={vi.fn()} />}
+      />,
+    );
+
+    const row = container.querySelector(".action-row")!;
+    const controls = row.querySelector(".action-row-controls")!;
+    const membership = controls.querySelector(".action-membership-control")!;
+    const remove = controls.querySelector(".action-delete-button")!;
+    const focus = controls.querySelector(".action-focus-button")!;
+    expect(row.parentElement?.querySelector(":scope > .action-membership-control")).toBeNull();
+    expect(membership.compareDocumentPosition(remove) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(remove.compareDocumentPosition(focus) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Добавить в цель: Первый шаг" })).toBeInTheDocument();
+  });
+
   it("applies 44px mobile touch targets without changing desktop control sizes", () => {
     const activities = emptyActivitiesState();
     activities.goals = [goal()];
     const workspace = buildActionsWorkspace({ activities, inbox: emptyInboxState(), relations: emptyRelationsState(), filter: "all" });
-    const { unmount } = render(<ActionsWorkspaceNavigation workspace={workspace} onSelect={vi.fn()} onCreateGoal={vi.fn()} onRestoreGoal={vi.fn()} />);
+    const { unmount } = render(<ActionsWorkspaceNavigation workspace={workspace} onSelect={vi.fn()} onCreateGoal={vi.fn()} />);
 
     expect(screen.getByRole("navigation", { name: "Списки действий" })).toHaveClass(
       "max-[860px]:[&_button]:min-h-11",

@@ -365,7 +365,7 @@ describe("Brai chat client", () => {
     const { container } = render(<MainDock section="brai" hidden={false} mobileViewport timer={emptyTimerState()} onSection={() => undefined} />);
     const mobile = container.querySelector(".mobile-nav");
     expect(mobile).toBeInstanceOf(HTMLElement);
-    expect(within(mobile as HTMLElement).getAllByRole("button").map((item) => item.getAttribute("aria-label"))).toEqual(["Брай", "Действия", "Inbox", "Фокус", "Factory"]);
+    expect(within(mobile as HTMLElement).getAllByRole("button").map((item) => item.getAttribute("aria-label"))).toEqual(["Брай", "Действия", "Входящие", "Фокус", "Factory"]);
     const icon = mobile?.querySelector("svg");
     expect(icon).toBeInstanceOf(SVGElement);
     expect(icon).toHaveAttribute("viewBox", "0 0 24 24");

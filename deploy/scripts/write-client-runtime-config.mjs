@@ -25,6 +25,7 @@ export function runtimeConfigFromEnv(env = process.env) {
     previewSlot: value(env.NEXT_PUBLIC_BRAI_PREVIEW_SLOT, ""),
     branch: value(env.NEXT_PUBLIC_BRAI_BRANCH, env.BRAI_BRANCH, ""),
     commit: value(env.NEXT_PUBLIC_BRAI_COMMIT, env.BRAI_COMMIT, ""),
+    productVersion: positiveInteger(env.NEXT_PUBLIC_BRAI_PRODUCT_VERSION, env.BRAI_PRODUCT_VERSION),
     webApiBase: value(env.NEXT_PUBLIC_BRAI_API, "/api"),
     androidApiBase: value(env.NEXT_PUBLIC_BRAI_ANDROID_API, "https://api.brai.one"),
     otaChannel: value(env.NEXT_PUBLIC_BRAI_OTA_CHANNEL, "app.brai.one/mobile-update"),
@@ -37,6 +38,11 @@ export function runtimeConfigSource(config) {
 
 function value(...candidates) {
   return candidates.find((candidate) => typeof candidate === "string" && candidate.length > 0) ?? "";
+}
+
+function positiveInteger(...candidates) {
+  const parsed = Number(value(...candidates));
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
 }
 
 function safeJson(value) {

@@ -91,6 +91,7 @@ export NEXT_PUBLIC_BRAI_ENVIRONMENT="$ENVIRONMENT"
 export NEXT_PUBLIC_BRAI_PREVIEW_SLOT="$SLOT"
 export NEXT_PUBLIC_BRAI_BRANCH="${BRAI_BRANCH:-}"
 export NEXT_PUBLIC_BRAI_COMMIT="${BRAI_COMMIT:-}"
+export NEXT_PUBLIC_BRAI_PRODUCT_VERSION="${BRAI_PRODUCT_VERSION:-}"
 export NEXT_PUBLIC_BRAI_OTA_CHANNEL="$DOMAIN/mobile-update"
 export NEXT_PUBLIC_BRAI_API="/api"
 export NEXT_PUBLIC_BRAI_ANDROID_API="$ANDROID_API"
@@ -209,15 +210,5 @@ if [[ "$APK_LEDGER_RECORD" == "true" ]]; then
 fi
 BRAI_RELEASE_ENV="$RELEASE_KEY" BRAI_APK_SOURCE="$APK" "$SCRIPT_DIR/publish-capacitor-apk.sh"
 if [[ "$APK_LEDGER_RECORD" == "true" ]]; then
-  BRAI_DATABASE_URL="${BRAI_DATABASE_URL:-}" "$NODE_BIN" "$SCRIPT_DIR/record-shipped-apk-version.mjs" \
-    --version "$BRAI_APK_VERSION" \
-    --version-code "$BRAI_ANDROID_VERSION_CODE" \
-    --target-branch "$BRAI_BRANCH" \
-    --target-commit "$BRAI_COMMIT" \
-    --released-at "$BRAI_PUBLISHED_AT"
-  LEDGER_VERSION="$(BRAI_DATABASE_URL="${BRAI_DATABASE_URL:-}" "$NODE_BIN" "$SCRIPT_DIR/resolve-app-version.mjs" --kind apk --root "$ROOT")"
-  if [[ "$LEDGER_VERSION" != "$BRAI_APK_VERSION" ]]; then
-    echo "Published APK version $BRAI_APK_VERSION does not match ledger version $LEDGER_VERSION" >&2
-    exit 1
-  fi
+  echo "Published APK version $BRAI_APK_VERSION; ledger recording waits for work reconciliation."
 fi

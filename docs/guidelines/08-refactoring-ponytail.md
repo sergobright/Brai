@@ -1,12 +1,14 @@
-# Рефакторинг и Ponytail
+# Опциональный режим Ponytail
 
 ## Назначение
 
-Этот guideline нужен перед рефакторингом, cleanup, упрощением или переписыванием кода.
+Этот guideline нужен только когда владелец проекта явно просит использовать Ponytail или один из его review skills.
 
-## Режим по умолчанию
+## Режим по умолчанию: выключен
 
-Для software development, debugging, refactoring, code review и implementation work в этом workspace используется Ponytail `full` mode по умолчанию.
+Ponytail не используется по умолчанию для software development, debugging, refactoring, code review или implementation work в этом workspace. Включать Ponytail и его review skills можно только по явному запросу владельца проекта.
+
+Правила ниже описывают поведение явно включённого Ponytail и не применяются к обычной разработке.
 
 Ponytail не означает "сделать хуже". Он означает:
 

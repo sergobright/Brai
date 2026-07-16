@@ -29,15 +29,15 @@ describe("BraiApp shell", () => {
     expect(document.querySelector("[data-startup-splash]")).not.toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Действия" })).toBeInTheDocument();
     expect(screen.getAllByLabelText("Действия").length).toBeGreaterThan(0);
-    ["Брай", "Действия", "Inbox", "Фокус"].forEach((title) => {
+    ["Брай", "Действия", "Входящие", "Фокус"].forEach((title) => {
       expect(screen.getAllByRole("button", { name: title }).length).toBeGreaterThan(0);
     });
     expect(screen.queryByRole("button", { name: "Цели фокусировки" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Настройки" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Открыть меню" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Открыть левое меню" })).toBeInTheDocument();
-    await waitFor(() => expect(screen.getByRole("button", { name: "Информация о действиях" })).toBeInTheDocument());
-    expect(screen.getAllByLabelText("Информация о действиях").length).toBeGreaterThan(0);
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Информация о действиях" })).not.toBeInTheDocument());
+    expect(document.querySelector(".actions-info-panel.desktop")).not.toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "Добавить" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Открыть правое меню" })).toBeInTheDocument();
   });
@@ -51,24 +51,45 @@ describe("BraiApp shell", () => {
     await waitFor(() => expect(cmdPlugin.setVoiceOnlyMode).toHaveBeenCalledWith({ enabled: false }));
     expect(cmdPlugin.setQueuePausedMode).toHaveBeenCalledWith({ enabled: false });
     await waitFor(() => expect(cmdPlugin.setAccessKey).toHaveBeenCalledWith({ token: "authenticated-device-token", displayName: "Test", userId: "test-user" }));
-    expect(cmdPlugin.ensureAccess).toHaveBeenCalledWith({ displayName: "Test" });
+    expect(cmdPlugin.ensureAccess).not.toHaveBeenCalled();
     expect(cmdPlugin.syncProviderCredentials.mock.invocationCallOrder[0]).toBeLessThan(
       cmdPlugin.setOverlayEnabled.mock.invocationCallOrder.find((order) => order > cmdPlugin.syncProviderCredentials.mock.invocationCallOrder[0]) ?? 0,
     );
-    expect(document.querySelector("[data-startup-splash]")).not.toBeInTheDocument();
+    expect(document.querySelector("[data-startup-splash]")).toBeInTheDocument();
   });
 
-  it("keeps account overlays blocked while waiting for device access", async () => {
+  it("keeps dictation and context available with the legacy native bridge", async () => {
     stubAndroidCapacitor();
-    cmdPlugin.ensureAccess.mockResolvedValue({ accessGranted: false });
+    const unimplemented = Object.assign(new Error("not implemented"), { code: "UNIMPLEMENTED" });
+    cmdPlugin.beginAccountCredentialMode.mockRejectedValue(unimplemented);
+    cmdPlugin.syncProviderCredentials.mockRejectedValue(unimplemented);
+    cmdPlugin.setAuthenticatedMode.mockRejectedValue(unimplemented);
 
     render(<BraiApp />);
 
-    await waitFor(() => expect(cmdPlugin.ensureAccess).toHaveBeenCalledWith({ displayName: "Test" }));
-    expect(cmdPlugin.setOverlayEnabled).toHaveBeenCalledWith({ enabled: false });
-    expect(cmdPlugin.setOverlayEnabled).not.toHaveBeenCalledWith({ enabled: true });
-    expect(cmdPlugin.setQueuePausedMode).toHaveBeenCalledWith({ enabled: true });
-    expect(cmdPlugin.setAccessKey).not.toHaveBeenCalled();
+    await waitFor(() => expect(cmdPlugin.setAccessKey).toHaveBeenCalledWith({
+      token: "authenticated-device-token",
+      displayName: "Test",
+      userId: "test-user",
+    }));
+    await waitFor(() => expect(cmdPlugin.setOverlayEnabled).toHaveBeenCalledWith({ enabled: true }));
+    expect(cmdPlugin.setVoiceOnlyMode).toHaveBeenCalledWith({ enabled: false });
+    expect(cmdPlugin.setQueuePausedMode).toHaveBeenCalledWith({ enabled: false });
+  });
+
+  it("activates account access without anonymous device registration", async () => {
+    stubAndroidCapacitor();
+
+    render(<BraiApp />);
+
+    await waitFor(() => expect(cmdPlugin.setAccessKey).toHaveBeenCalledWith({
+      token: "authenticated-device-token",
+      displayName: "Test",
+      userId: "test-user",
+    }));
+    expect(cmdPlugin.ensureAccess).not.toHaveBeenCalled();
+    expect(deviceTokenRequestCount()).toBe(1);
+    await waitFor(() => expect(cmdPlugin.setOverlayEnabled).toHaveBeenCalledWith({ enabled: true }));
   });
 
   it("does not enable authenticated capture before canonical provider sync completes", async () => {
@@ -190,7 +211,7 @@ describe("BraiApp shell", () => {
     expect(cmdPlugin.setOverlayEnabled).toHaveBeenLastCalledWith({ enabled: false });
   });
 
-  it("clears the technical credential and overlays even when server logout is offline", async () => {
+  it("clears the technical credential and restores preliminary voice mode when server logout is offline", async () => {
     stubAndroidCapacitor();
     const defaultFetch = vi.mocked(fetch).getMockImplementation();
     vi.mocked(fetch).mockImplementation(async (input, init) => {
@@ -206,8 +227,10 @@ describe("BraiApp shell", () => {
     await waitFor(() => expect(cmdPlugin.setAccessKey).toHaveBeenCalledWith({ token: "authenticated-device-token", displayName: "Test", userId: "test-user" }));
     await openProfileMenuItem("Выход");
 
+    expect(await screen.findByText("Нужен вход")).toBeInTheDocument();
     await waitFor(() => expect(cmdPlugin.setAccessKey).toHaveBeenLastCalledWith({ token: "", displayName: "", userId: "" }));
-    await waitFor(() => expect(cmdPlugin.setOverlayEnabled).toHaveBeenLastCalledWith({ enabled: false }));
+    await waitFor(() => expect(cmdPlugin.setOverlayEnabled).toHaveBeenCalledWith({ enabled: true }));
+    expect(cmdPlugin.setVoiceOnlyMode).toHaveBeenCalledWith({ enabled: true });
     expect(cmdPlugin.setQueuePausedMode).toHaveBeenCalledWith({ enabled: false });
   });
 
@@ -226,8 +249,33 @@ describe("BraiApp shell", () => {
     expect(auth.onVerifyOtp).not.toHaveBeenCalled();
   });
 
+  it("mutes the login button, shows a spinner, and submits only once", async () => {
+    let finishLogin!: () => void;
+    const login = vi.fn(() => new Promise<void>((resolve) => {
+      finishLogin = resolve;
+    }));
+    const auth = authPanelProps();
+    render(<AuthPanel {...auth} mode="email" onEmailLogin={login} />);
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Email" }), { target: { value: "primary@example.com" } });
+    const form = screen.getByRole("button", { name: "Войти" }).closest("form");
+    fireEvent.submit(form as HTMLFormElement);
+    fireEvent.submit(form as HTMLFormElement);
+
+    await waitFor(() => expect(login).toHaveBeenCalledTimes(1));
+    const button = screen.getByRole("button", { name: "Войти" });
+    expect(button).toBeDisabled();
+    expect(button).toHaveAttribute("aria-busy", "true");
+    expect(button.querySelector(".animate-spin")).toBeInTheDocument();
+
+    await act(async () => finishLogin());
+    expect(button).toBeDisabled();
+    expect(button.querySelector(".animate-spin")).toBeInTheDocument();
+  });
+
   it("uses explicit email-only login on Preview Android", async () => {
     stubAndroidCapacitor();
+    await setMeta("currentUserId", null);
     window.__BRAI_RUNTIME_CONFIG__ = {
       environment: "preview-a",
       androidApiBase: "https://a.test.brai.one/api",
@@ -245,7 +293,7 @@ describe("BraiApp shell", () => {
 
     render(<BraiApp />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Войти" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Войти" }, { timeout: 10_000 }));
     const email = await screen.findByRole("textbox", { name: "Email" });
     fireEvent.change(email, { target: { value: "random@example.test" } });
     fireEvent.click(screen.getByRole("button", { name: "Войти" }));
@@ -265,6 +313,7 @@ describe("BraiApp shell", () => {
 
   it("keeps Android on the OTP flow", async () => {
     stubAndroidCapacitor();
+    await setMeta("currentUserId", null);
     window.__BRAI_RUNTIME_CONFIG__ = {
       environment: "prod",
       androidApiBase: "https://api.brai.one",
@@ -384,6 +433,7 @@ describe("BraiApp shell", () => {
     render(<BraiApp />);
 
     await waitFor(() => expect(document.querySelector('[data-slot="sidebar"][data-state="collapsed"]')).toBeInTheDocument());
+    expect(document.querySelectorAll('.desktop-rail [aria-disabled="true"]')).toHaveLength(12);
     fireEvent.click(screen.getByRole("button", { name: /Engine/ }));
     await waitFor(() => expect(screen.getByRole("heading", { name: "Engine" })).toBeInTheDocument());
     expect(window.location.pathname).toBe("/engine");
@@ -396,22 +446,19 @@ describe("BraiApp shell", () => {
     await waitFor(() => expect(screen.getByRole("heading", { name: "Архив" })).toBeInTheDocument());
   });
 
-  it("opens the mobile Inbox info sheet", async () => {
+  it("keeps Inbox without an informational panel", async () => {
     render(<BraiApp initialSection="inbox" />);
 
     await waitFor(() => expect(screen.getByRole("heading", { name: "Входящие" })).toBeInTheDocument());
-    const infoButton = await screen.findByRole("button", { name: "Информация о входящих" });
-    fireEvent.click(infoButton);
-
-    expect(document.querySelector(".mobile-context-sheet")).toBeInTheDocument();
-    expect(infoButton).toHaveAttribute("aria-pressed", "true");
+    expect(screen.queryByRole("button", { name: "Информация о входящих" })).not.toBeInTheDocument();
+    expect(document.querySelector(".mobile-context-sheet")).not.toBeInTheDocument();
   });
 
-  it("opens the mobile dock overflow over an existing mobile sheet", async () => {
-    render(<BraiApp />);
+  it("opens the mobile dock overflow over an existing Focus sheet", async () => {
+    render(<BraiApp initialSection="focus" />);
 
-    const infoButton = await screen.findByRole("button", { name: "Информация о действиях" });
-    fireEvent.click(infoButton);
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Фокус" })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Цели фокусировки" }));
     expect(document.querySelector(".mobile-context-sheet")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Открыть правое меню" }));
@@ -420,6 +467,20 @@ describe("BraiApp shell", () => {
     expect(document.querySelector(".mobile-dock-overflow-backdrop")).toHaveClass("z-[110]");
     expect(document.querySelector(".mobile-context-sheet")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Draws" })).toBeInTheDocument();
+  });
+
+  it("opens the 3×4 context menu over the second dock level", async () => {
+    render(<BraiApp />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Открыть правое меню" }));
+    const dockSheet = document.querySelector(".mobile-dock-overflow-sheet") as HTMLElement;
+    const contextTrigger = within(dockSheet).getByRole("button", { name: "Контекст-меню" });
+    fireEvent.click(contextTrigger);
+
+    expect(document.querySelector(".mobile-dock-overflow-sheet")).toBeInTheDocument();
+    const contextSheet = document.querySelector(".mobile-context-menu-sheet") as HTMLElement;
+    expect(contextSheet).toHaveClass("grid");
+    expect(within(contextSheet).getAllByRole("button", { name: /Контекст \d+: В разработке/ })).toHaveLength(12);
   });
 
   it("keeps the left dock overflow available and hides the mobile FAB while the right overflow is open", async () => {
@@ -439,6 +500,22 @@ describe("BraiApp shell", () => {
     expect(screen.queryByRole("button", { name: "Добавить действие" })).not.toBeInTheDocument();
   });
 
+  it("keeps both Dock edge controls visible and switches the account dropdown through its close motion", async () => {
+    render(<BraiApp />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Открыть левое меню" }));
+
+    expect(screen.getByRole("button", { name: "Скрыть левое меню" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Открыть правое меню" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Выход" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Открыть правое меню" }));
+    await waitFor(() => expect(document.querySelector(".mobile-dock-overflow-sheet")).toHaveAttribute("aria-label", "Правое меню"));
+
+    fireEvent.click(screen.getByRole("button", { name: "Скрыть правое меню" }));
+    await waitFor(() => expect(document.querySelector(".mobile-dock-overflow-sheet")).not.toBeInTheDocument());
+  });
+
   it("hides app chrome while Draws is fullscreen", async () => {
     Object.defineProperty(window, "innerWidth", { configurable: true, writable: true, value: 1200 });
     stubDrawsFetch();
@@ -452,6 +529,8 @@ describe("BraiApp shell", () => {
     fireEvent.click(fullScreenButton);
 
     await waitFor(() => expect(document.querySelector(".desktop-rail")).not.toBeInTheDocument());
+    expect(document.querySelector(".page-main")).toHaveClass("w-full", "max-w-none");
+    expect(document.querySelector(".page-main")).not.toHaveClass("max-w-3xl", "mx-auto");
     expect(document.querySelector(".main-dock")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Открыть левое меню" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Выйти из полноэкранного режима" })).toBeInTheDocument();
@@ -535,6 +614,9 @@ describe("BraiApp shell", () => {
     await waitFor(() => expect(screen.getByRole("heading", { name: "Фокус" })).toBeInTheDocument());
     expect(screen.getByRole("button", { name: "Цели фокусировки" })).toHaveAttribute("aria-pressed", "false");
     expect(screen.getByRole("button", { name: "История фокуса" })).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByRole("button", { name: "Цели фокусировки" })).toHaveClass("max-[860px]:size-8");
+    expect(screen.getByRole("button", { name: "Цели фокусировки" }).querySelector("svg")).toHaveClass("h-5", "w-5");
+    expect(document.querySelector(".section-page-current .status-pill")).toHaveClass("max-[860px]:size-8");
     expect(document.querySelector(".section-page-current .timer-face .status-pill")).not.toBeInTheDocument();
   });
 
@@ -759,7 +841,7 @@ describe("BraiApp shell", () => {
     );
     expect(contextScrollArea?.querySelector("[data-slot='scroll-area-scrollbar']")).toHaveStyle({ right: "var(--scroll-area-gap)" });
     expect(contextScrollArea?.querySelector("[data-slot='scroll-area-scrollbar']")).toHaveAttribute("data-scrollbar-state", "hidden");
-    expect(window.localStorage.getItem("brai_focus_context_panel")).toBe("goal");
+    await waitFor(() => expect(window.localStorage.getItem("brai_focus_context_panel:test-user")).toBe("goal"));
     first.unmount();
 
     render(<BraiApp initialSection="focus" />);
@@ -864,7 +946,11 @@ describe("BraiApp shell", () => {
 
     render(<BraiApp initialSection="focus" />);
     await waitForLocalOwnerReady();
-    fireEvent.click(await screen.findByRole("button", { name: "История фокуса" }));
+    const historyButton = await screen.findByRole("button", { name: "История фокуса" });
+    fireEvent.click(historyButton);
+    expect(historyButton).toHaveAttribute("aria-pressed", "true");
+    await waitFor(() => expect(window.localStorage.getItem("brai_focus_context_panel:test-user")).toBe("history"));
+    expect(document.querySelector(".mobile-context-sheet")).toHaveTextContent("История фокуса");
     await waitFor(() => expect(screen.getByText("Сессий пока нет")).toBeInTheDocument());
     await waitFor(() => expect(sockets.some((socket) => socket.readyState === 1)).toBe(true));
 
@@ -947,6 +1033,7 @@ describe("BraiApp shell", () => {
     render(<BraiApp initialSection="focus" />);
     await waitForLocalOwnerReady();
     fireEvent.click(await screen.findByRole("button", { name: "История фокуса" }));
+    expect(document.querySelector(".mobile-context-sheet")).toHaveTextContent("История фокуса");
     await waitFor(() => expect(screen.getByText("Сессий пока нет")).toBeInTheDocument());
     await waitFor(() => expect(sockets.some((socket) => socket.readyState === 1)).toBe(true));
 
@@ -1038,7 +1125,11 @@ describe("BraiApp shell", () => {
 
     render(<BraiApp initialSection="focus" />);
     await waitForLocalOwnerReady();
-    fireEvent.click(await screen.findByRole("button", { name: "История фокуса" }));
+    const pollingHistoryButton = await screen.findByRole("button", { name: "История фокуса" });
+    fireEvent.click(pollingHistoryButton);
+    expect(pollingHistoryButton).toHaveAttribute("aria-pressed", "true");
+    await waitFor(() => expect(window.localStorage.getItem("brai_focus_context_panel:test-user")).toBe("history"));
+    expect(document.querySelector(".mobile-context-sheet")).toHaveTextContent("История фокуса");
     await waitFor(() => expect(screen.getByText("Сессий пока нет")).toBeInTheDocument());
 
     await intervals.run(5000);
@@ -1354,7 +1445,8 @@ describe("BraiApp shell", () => {
     expect(within(document.querySelector(".mobile-profile-drawer") as HTMLElement).getByRole("navigation", { name: "Списки действий" })).toBeInTheDocument();
     expect(within(document.querySelector(".mobile-profile-drawer") as HTMLElement).getByRole("button", { name: /^Все\d*$/ })).toBeInTheDocument();
 
-    fireEvent.click(within(document.querySelector(".mobile-profile-drawer") as HTMLElement).getByRole("button", { name: "Закрыть меню" }));
+    expect(within(document.querySelector(".mobile-profile-drawer") as HTMLElement).queryByRole("button", { name: "Закрыть меню" })).not.toBeInTheDocument();
+    fireEvent.click(within(document.querySelector(".mobile-profile-drawer") as HTMLElement).getByRole("button", { name: /^Все\d*$/ }));
     await waitFor(() => expect(document.querySelector(".mobile-menu-backdrop")).not.toBeInTheDocument());
 
     fireEvent.click(screen.getByRole("button", { name: "Открыть левое меню" }));

@@ -6,7 +6,7 @@
     <title>Brai Versions</title>
     <meta
       name="description"
-      content="Brai web, OTA, and Android APK version timeline."
+      content="Evidence-backed history of completed Brai work and platform releases."
     />
     <link rel="icon" href="/brai-logo.png" />
     <link rel="stylesheet" href="/styles.css" />
@@ -29,95 +29,316 @@
       <section class="changelog-header" aria-labelledby="versions-title">
         <h1 id="versions-title">Versions</h1>
         <p>
-          Product delivery notes for the public web layer, Android OTA bundle, and APK baseline.
+          Evidence-backed history of completed Brai work, pull requests, and platform releases.
         </p>
       </section>
 
-      <section class="timeline" aria-label="Version timeline">
-        <article class="timeline-item">
-          <div class="timeline-meta">
-            <time datetime="2026-07-02">July 2, 2026</time>
-            <span>0.0.63</span>
-          </div>
-          <div class="timeline-card">
-            <span class="timeline-dot" aria-hidden="true"></span>
-            <h2>Web and OTA bundle 0.0.63</h2>
-            <div class="tag-list" aria-label="Tags">
-              <span>Web</span>
-              <span>OTA</span>
-              <span>Android target v1</span>
-            </div>
-            <ul>
-              <li>Current public web layer version is 0.0.63.</li>
-              <li>Mobile OTA bundle targets APK v1 and is marked non-mandatory.</li>
-              <li>Published bundle entrypoint remains <code>index.html</code>.</li>
-            </ul>
-            <pre><code>{
-  "otaVersion": "0.0.63",
-  "targetApkVersion": 1,
-  "mandatory": false
-}</code></pre>
-          </div>
-        </article>
-
-        <article class="timeline-item">
-          <div class="timeline-meta">
-            <time datetime="2026-07-02">July 2, 2026</time>
-            <span>v1</span>
-          </div>
-          <div class="timeline-card">
-            <span class="timeline-dot" aria-hidden="true"></span>
-            <h2>APK baseline reset to v1</h2>
-            <div class="tag-list" aria-label="Tags">
-              <span>APK</span>
-              <span>Version code 1</span>
-              <span>Release ledger</span>
-            </div>
-            <ul>
-              <li>Production package is <code>world.brightos.brai</code>.</li>
-              <li>Preview APKs A through E use the same APK version baseline.</li>
-              <li>Runtime <code>build_versions</code> is now the APK ledger only.</li>
-            </ul>
-          </div>
-        </article>
-
-        <article class="timeline-item">
-          <div class="timeline-meta">
-            <time datetime="2026-07-02">July 2, 2026</time>
-            <span>Policy</span>
-          </div>
-          <div class="timeline-card">
-            <span class="timeline-dot" aria-hidden="true"></span>
-            <h2>Version streams separated</h2>
-            <div class="tag-list" aria-label="Tags">
-              <span>Web</span>
-              <span>APK</span>
-              <span>Delivery</span>
-            </div>
-            <ul>
-              <li>Web and OTA versions use the <code>X.Y.Z</code> format.</li>
-              <li>Android APK releases use <code>vN</code>.</li>
-              <li>GitHub PR numbers are review metadata, not product versions.</li>
-            </ul>
-          </div>
-        </article>
-      </section>
+      <div class="history-filters" role="group" aria-label="Filter versions by type"></div>
+      <p class="timeline-state" role="status" aria-live="polite">Loading versions…</p>
+      <section class="timeline" aria-label="Version timeline" aria-busy="true"></section>
+      <div class="history-actions">
+        <button class="history-action" data-history-retry type="button" hidden>Try again</button>
+        <button class="history-action" data-history-more type="button" hidden>Load more</button>
+      </div>
     </main>
 
     <script>
-      const button = document.querySelector(".theme-toggle");
-      const key = "brai-landing-theme";
-      const storedTheme = localStorage.getItem(key);
+      const themeButton = document.querySelector(".theme-toggle");
+      const themeKey = "brai-landing-theme";
+      const storedTheme = localStorage.getItem(themeKey);
       if (storedTheme === "dark") {
         document.documentElement.dataset.theme = "dark";
-        button.textContent = "☀";
+        themeButton.textContent = "☀";
       }
-      button?.addEventListener("click", () => {
+      themeButton?.addEventListener("click", () => {
         const dark = document.documentElement.dataset.theme !== "dark";
         document.documentElement.dataset.theme = dark ? "dark" : "";
-        localStorage.setItem(key, dark ? "dark" : "light");
-        button.textContent = dark ? "☀" : "☾";
+        localStorage.setItem(themeKey, dark ? "dark" : "light");
+        themeButton.textContent = dark ? "☀" : "☾";
       });
+
+      const HISTORY_ENDPOINT = "https://api.brai.one/v1/version-history";
+      const filters = document.querySelector(".history-filters");
+      const timeline = document.querySelector(".timeline");
+      const status = document.querySelector(".timeline-state");
+      const retryButton = document.querySelector("[data-history-retry]");
+      const moreButton = document.querySelector("[data-history-more]");
+      const knownTypes = new Map([
+        ["build", "Product"],
+        ["apk", "Android APK"],
+        ["macos", "macOS"],
+        ["ios", "iOS"],
+      ]);
+      let selectedType = "";
+      let items = [];
+      let nextCursor = null;
+      let requestNumber = 0;
+      let retryAppend = false;
+      let filterSignature = "";
+
+      function element(tag, className, text) {
+        const node = document.createElement(tag);
+        if (className) node.className = className;
+        if (text !== undefined && text !== null) node.textContent = String(text);
+        return node;
+      }
+
+      function titleForType(type) {
+        if (knownTypes.has(type)) return knownTypes.get(type);
+        return type ? type.charAt(0).toUpperCase() + type.slice(1) : "Version";
+      }
+
+      function formatTimestamp(value, dateOnly = false) {
+        if (!value) return "—";
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime())) return String(value);
+        const options = dateOnly
+          ? { year: "numeric", month: "long", day: "numeric" }
+          : { dateStyle: "medium", timeStyle: "short" };
+        return new Intl.DateTimeFormat("en", options).format(date);
+      }
+
+      function metadata(entries) {
+        const list = element("dl", "version-metadata");
+        for (const [label, value] of entries) {
+          if (value === undefined || value === null || value === "") continue;
+          list.append(element("dt", "", label), element("dd", "", value));
+        }
+        return list;
+      }
+
+      function safeUrl(value) {
+        try {
+          const url = new URL(value);
+          return url.protocol === "https:" ? url.href : null;
+        } catch {
+          return null;
+        }
+      }
+
+      function renderFilters() {
+        const available = [["", "All"], ...knownTypes.entries()];
+        const signature = JSON.stringify(available);
+        if (signature !== filterSignature) {
+          const focusedType = document.activeElement?.dataset?.type;
+          filters.replaceChildren();
+          for (const [id, label] of available) {
+            const button = element("button", "history-filter", label);
+            button.type = "button";
+            button.dataset.type = id;
+            button.addEventListener("click", () => {
+              if (selectedType === id) return;
+              selectedType = id;
+              items = [];
+              nextCursor = null;
+              renderFilters();
+              loadHistory(false);
+            });
+            filters.append(button);
+          }
+          filterSignature = signature;
+          if (focusedType !== undefined) {
+            [...filters.querySelectorAll("button")].find((button) => button.dataset.type === focusedType)?.focus();
+          }
+        }
+        for (const button of filters.querySelectorAll("button")) {
+          button.setAttribute("aria-pressed", String(selectedType === button.dataset.type));
+        }
+      }
+
+      function renderPullRequest(pullRequest) {
+        const disclosure = element("details", "pull-request");
+        const number = pullRequest.number ? `#${pullRequest.number}` : "PR";
+        disclosure.append(element("summary", "", `${number} ${pullRequest.title || "Pull request"}`));
+
+        const content = element("div", "pull-request-content");
+        const url = safeUrl(pullRequest.url);
+        if (url) {
+          const link = element("a", "text-link", "Open pull request");
+          link.href = url;
+          link.target = "_blank";
+          link.rel = "noreferrer";
+          content.append(link);
+        }
+        content.append(metadata([
+          ["Repository", pullRequest.repository],
+          ["Role", pullRequest.role],
+          ["State", pullRequest.state],
+          ["Draft", pullRequest.is_draft ? "Yes" : "No"],
+          ["Author", pullRequest.author_login],
+          ["Branches", pullRequest.head_branch && pullRequest.base_branch
+            ? `${pullRequest.head_branch} → ${pullRequest.base_branch}`
+            : pullRequest.head_branch || pullRequest.base_branch],
+          ["Merge commit", pullRequest.merge_commit_sha],
+          ["Created", formatTimestamp(pullRequest.created_at_utc)],
+          ["Updated", formatTimestamp(pullRequest.updated_at_utc)],
+          ["Closed", pullRequest.closed_at_utc ? formatTimestamp(pullRequest.closed_at_utc) : null],
+          ["Merged", pullRequest.merged_at_utc ? formatTimestamp(pullRequest.merged_at_utc) : null],
+        ]));
+        content.append(element(
+          "pre",
+          "pull-request-body",
+          pullRequest.body || "No public PR description.",
+        ));
+        disclosure.append(content);
+        return disclosure;
+      }
+
+      function renderVersion(item) {
+        const article = element("article", "timeline-item");
+        const meta = element("div", "timeline-meta");
+        const time = element("time", "", formatTimestamp(item.released_at_utc, true));
+        if (item.released_at_utc) time.dateTime = item.released_at_utc;
+        meta.append(time, element("span", "", `${titleForType(item.type)} ${item.version ?? "—"}`));
+
+        const card = element("div", "timeline-card");
+        const dot = element("span", "timeline-dot");
+        dot.setAttribute("aria-hidden", "true");
+        card.append(dot, element(
+          "h2",
+          "",
+          item.short_changes || `${titleForType(item.type)} ${item.version ?? "version"}`,
+        ));
+
+        const tags = element("div", "tag-list");
+        tags.setAttribute("aria-label", "Tags");
+        tags.append(
+          element("span", "", titleForType(item.type)),
+          element("span", "", String(item.version ?? "—")),
+        );
+        card.append(tags);
+
+        if (item.detailed_changes) {
+          card.append(element("p", "timeline-description", item.detailed_changes));
+        }
+        if (item.reason) {
+          const reason = element("section", "timeline-section");
+          reason.append(element("h3", "", "Why"), element("p", "", item.reason));
+          card.append(reason);
+        }
+
+        if (Array.isArray(item.details) && item.details.length) {
+          const changes = element("section", "timeline-section");
+          const list = element("ul", "change-list");
+          for (const detail of item.details) {
+            const entry = element("li");
+            entry.append(element("strong", "", detail.title || "Change"));
+            if (detail.description) entry.append(element("p", "", detail.description));
+            list.append(entry);
+          }
+          changes.append(element("h3", "", "Changes"), list);
+          card.append(changes);
+        }
+
+        const work = element("section", "timeline-section");
+        work.append(element("h3", "", "Work"));
+        work.append(item.work
+          ? metadata([
+            ["Key", item.work.key],
+            ["Status", item.work.status],
+            ["Finalized", formatTimestamp(item.work.finalized_at_utc)],
+          ])
+          : element("p", "timeline-note", "No work record is attached to this version."));
+        card.append(work);
+
+        const references = element("section", "timeline-section");
+        references.append(element("h3", "", "References"));
+        if (Array.isArray(item.refs) && item.refs.length) {
+          const list = element("ul", "reference-list");
+          for (const reference of item.refs) {
+            const source = [reference.source_branch, reference.source_commit].filter(Boolean).join(" @ ");
+            const target = [reference.target_branch, reference.target_commit].filter(Boolean).join(" @ ");
+            list.append(element("li", "", `${source || "Unknown source"} → ${target || "Unknown target"}`));
+          }
+          references.append(list);
+        } else {
+          references.append(element("p", "timeline-note", "No source reference is attached to this version."));
+        }
+        card.append(references);
+
+        const pullRequests = element("section", "timeline-section");
+        pullRequests.append(element("h3", "", "Pull requests"));
+        if (Array.isArray(item.pull_requests) && item.pull_requests.length) {
+          for (const pullRequest of item.pull_requests) {
+            pullRequests.append(renderPullRequest(pullRequest));
+          }
+        } else {
+          pullRequests.append(element("p", "timeline-note", "No pull request is attached to this version."));
+        }
+        card.append(pullRequests);
+
+        article.append(meta, card);
+        return article;
+      }
+
+      function renderTimeline(page = null) {
+        if (page) timeline.append(...page.map(renderVersion));
+        else timeline.replaceChildren(...items.map(renderVersion));
+      }
+
+      function setStatus(message, isError = false) {
+        status.textContent = message;
+        status.hidden = !message;
+        status.classList.toggle("is-error", isError);
+      }
+
+      async function loadHistory(append) {
+        const currentRequest = ++requestNumber;
+        retryAppend = append;
+        retryButton.hidden = true;
+        moreButton.disabled = true;
+        if (!append) moreButton.hidden = true;
+        timeline.setAttribute("aria-busy", "true");
+        setStatus(append ? "Loading more versions…" : "Loading versions…");
+        if (!append) renderTimeline();
+
+        const query = new URLSearchParams({ limit: "30" });
+        if (selectedType) query.set("type", selectedType);
+        if (append && nextCursor) query.set("cursor", nextCursor);
+
+        try {
+          const response = await fetch(`${HISTORY_ENDPOINT}?${query}`, {
+            headers: { accept: "application/json" },
+          });
+          if (!response.ok) throw new Error(`History request failed with ${response.status}`);
+          const payload = await response.json();
+          if (currentRequest !== requestNumber) return;
+          const page = Array.isArray(payload.items) ? payload.items : [];
+          for (const type of Array.isArray(payload.types) ? payload.types : []) {
+            if (typeof type?.id === "string" && type.id) knownTypes.set(type.id, type.title || titleForType(type.id));
+          }
+          for (const item of page) {
+            if (typeof item.type === "string" && item.type && !knownTypes.has(item.type)) {
+              knownTypes.set(item.type, titleForType(item.type));
+            }
+          }
+          items = append ? items.concat(page) : page;
+          nextCursor = typeof payload.next_cursor === "string" && payload.next_cursor
+            ? payload.next_cursor
+            : null;
+          renderFilters();
+          renderTimeline(append ? page : null);
+          setStatus(append && page.length
+            ? `Loaded ${page.length} more versions.`
+            : items.length ? "" : "No versions found for this filter.");
+          moreButton.hidden = !nextCursor;
+        } catch (error) {
+          if (currentRequest !== requestNumber) return;
+          const message = error instanceof Error ? error.message : "Unknown error";
+          setStatus(`Could not load version history. ${message}`, true);
+          retryButton.hidden = false;
+        } finally {
+          if (currentRequest === requestNumber) {
+            timeline.setAttribute("aria-busy", "false");
+            moreButton.disabled = false;
+          }
+        }
+      }
+
+      retryButton.addEventListener("click", () => loadHistory(retryAppend));
+      moreButton.addEventListener("click", () => loadHistory(true));
+      renderFilters();
+      loadHistory(false);
     </script>
   </body>
 </html>

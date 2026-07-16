@@ -175,6 +175,15 @@ run() {
       echo "dispatch-preview-deploy requires a safe codex/* --branch" >&2
       return 1
     fi
+    local product_base_sha="${BRAI_PRODUCT_BASE_COMMIT:-}"
+    if [[ -z "$product_base_sha" ]]; then
+      product_base_sha="$(git merge-base "$sha" origin/main 2>/dev/null || true)"
+    fi
+    if [[ "$product_base_sha" =~ ^[0-9a-fA-F]{40}$ ]]; then
+      set -- "$@" --product-base-sha "${product_base_sha,,}"
+    else
+      echo "Product base commit could not be resolved; Preview will show applicable Product state as unknown." >&2
+    fi
     EXACT_BRANCH="$branch"
     EXACT_SHA="$sha"
     local task_queue="brai-preview-branch-$sha"

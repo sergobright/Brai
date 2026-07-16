@@ -9,11 +9,51 @@ SOURCE_BRANCH="${BRAI_SOURCE_BRANCH:?BRAI_SOURCE_BRANCH is required}"
 TARGET_ENVIRONMENT="${BRAI_TARGET_ENVIRONMENT:?BRAI_TARGET_ENVIRONMENT is required}"
 TARGET_BRANCH="${BRAI_TARGET_BRANCH:?BRAI_TARGET_BRANCH is required}"
 TARGET_COMMIT="${BRAI_TARGET_COMMIT:?BRAI_TARGET_COMMIT is required}"
-SOURCE_SHORT_CHANGES="${BRAI_SOURCE_SHORT_CHANGES:?BRAI_SOURCE_SHORT_CHANGES is required}"
-SOURCE_DETAILS="${BRAI_SOURCE_DETAILED_CHANGES:?BRAI_SOURCE_DETAILED_CHANGES is required}"
-SOURCE_REASON="${BRAI_SOURCE_REASON:?BRAI_SOURCE_REASON is required}"
+VERSION_WORK_JSON="${BRAI_VERSION_WORK_JSON:-}"
+if [[ -z "$VERSION_WORK_JSON" ]]; then
+  SOURCE_SHORT_CHANGES="${BRAI_SOURCE_SHORT_CHANGES:?BRAI_SOURCE_SHORT_CHANGES is required}"
+  SOURCE_DETAILS="${BRAI_SOURCE_DETAILED_CHANGES:?BRAI_SOURCE_DETAILED_CHANGES is required}"
+  SOURCE_REASON="${BRAI_SOURCE_REASON:?BRAI_SOURCE_REASON is required}"
+fi
 TARGET_POSTGRES_URL="${BRAI_DATABASE_URL:-}"
 : "${TARGET_POSTGRES_URL:?BRAI_DATABASE_URL is required for accepted promotion}"
+
+if [[ -n "$VERSION_WORK_JSON" ]]; then
+  BRAI_DATABASE_URL="$TARGET_POSTGRES_URL" "$NODE_BIN" "$SCRIPT_DIR/promote-deployment.mjs" \
+    --source-branch "$SOURCE_BRANCH" \
+    --target-environment "$TARGET_ENVIRONMENT" \
+    --target-branch "$TARGET_BRANCH" \
+    --target-commit "$TARGET_COMMIT" \
+    --ledger-only true \
+    --work-json "$VERSION_WORK_JSON"
+  mapfile -t APK_META < <(BRAI_VERSION_WORK_JSON="$VERSION_WORK_JSON" "$NODE_BIN" -e '
+const payload = JSON.parse(process.env.BRAI_VERSION_WORK_JSON);
+const hasApk = payload.pulls?.some((pull) => pull.releaseNotes?.platforms?.apk);
+if (hasApk) {
+  const fs = require("node:fs");
+  const path = require("node:path");
+  const releaseRoot = process.env.BRAI_RELEASE_TARGET;
+  if (!releaseRoot) throw new Error("BRAI_RELEASE_TARGET is required for APK work reconciliation");
+  const release = JSON.parse(fs.readFileSync(path.join(releaseRoot, "releases.json"), "utf8")).sections?.production;
+  if (!release?.apkVersion || !release?.versionCode || !release?.publishedAt) throw new Error("published production APK metadata is incomplete");
+  console.log(payload.work.key);
+  console.log(release.apkVersion);
+  console.log(release.versionCode);
+  console.log(release.publishedAt);
+}
+')
+  if [[ "${#APK_META[@]}" -gt 0 ]]; then
+    [[ "${#APK_META[@]}" -eq 4 ]] || { echo "Invalid published APK reconciliation metadata" >&2; exit 1; }
+    BRAI_DATABASE_URL="$TARGET_POSTGRES_URL" "$NODE_BIN" "$SCRIPT_DIR/record-shipped-apk-version.mjs" \
+      --work-key "${APK_META[0]}" \
+      --version "${APK_META[1]}" \
+      --version-code "${APK_META[2]}" \
+      --target-branch "$TARGET_BRANCH" \
+      --target-commit "$TARGET_COMMIT" \
+      --released-at "${APK_META[3]}"
+  fi
+  exit 0
+fi
 
 accepted_build_recorded() {
   [[ -r "$ROOT/services/brai_api/package.json" ]] || return 1

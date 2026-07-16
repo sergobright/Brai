@@ -63,9 +63,17 @@ test("pooler reconfiguration is repo-managed, bounded, and canaried", () => {
   const sudoers = fs.readFileSync(path.join(repoRoot, "deploy/ansible/templates/brai-deploy-sudoers.j2"), "utf8");
   const deploy = fs.readFileSync(path.join(repoRoot, "deploy/scripts/ci-ssh-deploy.sh"), "utf8");
 
-  assert.match(bootstrap, /POOLER_TENANT_ID/);
-  assert.match(bootstrap, /brightos-prod/);
-  assert.match(bootstrap, /brightos-nonprod/);
+  assert.doesNotMatch(bootstrap, /POOLER_TENANT_ID|brightos/);
+  assert.match(bootstrap, /brai-prod/);
+  assert.match(bootstrap, /brai-nonprod/);
+  assert.match(script, /DELETE FROM _supavisor\.cluster_tenants/);
+  assert.match(script, /DELETE FROM _supavisor\.tenants/);
+  assert.match(script, /'brightos', 'brightos-prod', 'brightos-nonprod'/);
+  assert.match(script, /ARRAY\['brai-nonprod', 'brai-prod'\]::text\[\]/);
+  assert.match(script, /Supavisor tenant metadata is not restricted to Brai targets/);
+  assert.match(script, /"legacyTenantsRemoved":true/);
+  assert.match(script, /--set ON_ERROR_STOP=1/);
+  assert.doesNotMatch(script, /\\\$\\\$/);
   assert.match(script, /systemctl stop "\$\{API_SERVICES\[@\]\}"/);
   assert.match(script, /up -d --force-recreate supavisor/);
   assert.match(script, /wait_for_auth_canary 3020/);
@@ -74,7 +82,12 @@ test("pooler reconfiguration is repo-managed, bounded, and canaried", () => {
   assert.match(script, /BRAI_SUPAVISOR_TENANT_ISOLATION/);
   assert.match(script, /Rollback restored production; non-production APIs remain stopped/);
   assert.doesNotMatch(script, /start_previously_active_services/);
-  assert.ok(script.indexOf("compose_recreate_pooler\n  wait_for_pooler") < script.indexOf("rewrite_runtime_tenants\n\n  /bin/systemctl start brai-api.service"));
+  const install = script.indexOf('/usr/bin/install -o root -g root -m 0644 "$MANAGED_POOLER_CONFIG" "$LIVE_POOLER_CONFIG"');
+  const deleteLegacy = script.indexOf("delete_legacy_tenant_metadata", install);
+  const recreate = script.indexOf("compose_recreate_pooler", deleteLegacy);
+  const assertTargets = script.indexOf("assert_target_tenant_metadata", recreate);
+  const rewrite = script.indexOf("rewrite_runtime_tenants", assertTargets);
+  assert.ok(install > 0 && install < deleteLegacy && deleteLegacy < recreate && recreate < assertTargets && assertTargets < rewrite);
   assert.doesNotMatch(script, /force-recreate "\$@"/);
   assert.match(playbook, /deploy\/supabase\/pooler\.exs|\.\.\/supabase\/pooler\.exs/);
   assert.match(playbook, /dest: "\{\{ brai_supabase_maintenance \}\}"/);

@@ -3,7 +3,13 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { cloneSourceForRemote, commandFailureMessage, exactMergedPull, runCommand } from "../src/activities.mjs";
+import {
+  acceptedBaseRefspecs,
+  cloneSourceForRemote,
+  commandFailureMessage,
+  exactMergedPull,
+  runCommand
+} from "../src/activities.mjs";
 
 test("source checkout clones GitHub remote when auth env is available", () => {
   assert.equal(
@@ -17,6 +23,14 @@ test("source checkout clones GitHub remote when auth env is available", () => {
 
 test("source checkout keeps local clone fallback without auth env", () => {
   assert.notEqual(cloneSourceForRemote({ url: "git@github.com:sergobright/Brai.git", env: {} }), "git@github.com:sergobright/Brai.git");
+});
+
+test("local source checkout carries the accepted base into the nested clone", () => {
+  assert.deepEqual(acceptedBaseRefspecs("main"), [
+    "+refs/remotes/origin/main:refs/remotes/origin/main",
+    "+refs/heads/main:refs/remotes/origin/main"
+  ]);
+  assert.throws(() => acceptedBaseRefspecs("../main"), /Unsupported accepted base branch/);
 });
 
 test("activity failures retain both stderr and stdout tails", () => {

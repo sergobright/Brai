@@ -3,7 +3,7 @@
 import { Fragment, type MouseEvent, useEffect, useMemo, useState } from "react";
 import { AlarmClock, Check, Minus, Pencil, Plus, SquareTerminal, Timer, Trash2, X } from "lucide-react";
 import type { FocusSessionInterval, TimerSession } from "@/shared/types/timer";
-import { formatHourMinute, moscowTime } from "@/shared/time/format";
+import { formatDisplayTime, formatHourMinute } from "@/shared/time/format";
 import { Badge } from "@/shared/ui/badge";
 import { Button } from "@/shared/ui/button";
 import { CardFrame } from "@/shared/ui/card";
@@ -579,7 +579,7 @@ function TimeEditor({
 }
 
 function moscowIntervalLabel(interval: FocusSessionInterval) {
-  return `${moscowTime(interval.started_at_utc)}-${moscowTime(interval.ended_at_utc)} · ${formatHourMinute(interval.duration_seconds)}`;
+  return `${formatDisplayTime(interval.started_at_utc)}-${formatDisplayTime(interval.ended_at_utc)} · ${formatHourMinute(interval.duration_seconds)}`;
 }
 
 function rangeEdit(intervalId: string, sessionId: string, startMs: number, endMs: number): IntervalRangeEdit {

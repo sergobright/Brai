@@ -1,11 +1,14 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { pathToFileURL } from "node:url";
+import { requiresNativeApkChange } from "../deploy/scripts/detect-native-apk-change.mjs";
 
 const CODEX_BRANCH_RE = /^codex\/[a-z0-9][a-z0-9._-]*$/;
+const OPENSPEC_CHANGE_RE = /^[a-z0-9][a-z0-9._-]*$/;
 const PROTECTED_PATH_RE =
   /(^|\/)(\.env(\.|$)|.*\.(sqlite|sqlite3|db|jks|keystore|pem|key|p12|pfx|apk|aab|zip)$|google-services\.json|.*(service-account|credentials|secrets).*\.json$)|^(data\/|deploy\/(site|web|mobile-update|releases)\/)/;
 const DEPENDENCY_DIRS = [
@@ -46,7 +49,9 @@ const ZERO_SHA = "0000000000000000000000000000000000000000";
 const PREVIEW_SLOT_EMOJI = { A: "🅰️", B: "🅱️", C: "🅲", D: "🅳", E: "🅴" };
 const DELIVERY_RECEIPT_VERSION = "brai-delivery-handoff-v1";
 const ACCEPTANCE_RECEIPT_VERSION = "brai-acceptance-v1";
-const RELEASE_NOTES_VERSION = "brai-release-notes-v1";
+const RELEASE_NOTES_VERSION = "brai-release-notes-v2";
+const LEGACY_RELEASE_NOTES_VERSION = "brai-release-notes-v1";
+const WORK_MARKER_VERSION = "brai-work-v1";
 const SOCRATICODE_EXACT_ONLY_REASON_MIN = 16;
 const DEFAULT_INFRA_DOCS_HANDOFF_WAIT_MS = 180000;
 const DEFAULT_INFRA_DOCS_HANDOFF_POLL_MS = 10000;
@@ -86,8 +91,10 @@ export {
   isSocraticodeTool,
   isWriteLikeCommand,
   linkDependencyDirs,
+  parseOpenSpecChangeArgs,
   findOpenTaskForThread,
   parseHookInput,
+  previewReviewNote,
   readPreviewSlot,
   taskStartGuidance,
   taskWorktreeParent,
@@ -97,9 +104,12 @@ export {
   validateDelegatedPaths,
   validateDeliveryReceipt,
   validateReleaseNotes,
+  workMarkerForTask,
   validatePushUpdate,
   validatePreviewReceipt,
   accessContract,
+  archiveOpenSpecChange,
+  preserveLinkedOpenSpecChanges,
   workspacePreflight,
 };
 
@@ -107,10 +117,19 @@ function runCli([command, ...args]) {
   try {
     switch (command) {
       case "start":
-        startTask(args[0]);
+        startTask(args);
         break;
       case "follow-up":
-        markFollowUp(args[0]);
+        markFollowUp(args);
+        break;
+      case "link-openspec":
+        linkOpenSpecChanges(args);
+        break;
+      case "archive-accepted-openspec":
+        archiveAcceptedOpenSpecChanges();
+        break;
+      case "archive-openspec":
+        archiveHistoricalOpenSpecChange(args);
         break;
       case "recover-follow-up":
         recoverFollowUp(args);
@@ -157,6 +176,9 @@ function runCli([command, ...args]) {
       case "release-notes":
         writeReleaseNotesCli(args);
         break;
+      case "adopt-work":
+        adoptLegacyWorkIdentity();
+        break;
       case "require-delivery":
         requireDeliveryVerification(args[0], args[1]);
         break;
@@ -173,7 +195,7 @@ function runCli([command, ...args]) {
         accessContract(args);
         break;
       default:
-        throw new Error("usage: brai-task.mjs start <slug>|follow-up [branch]|recover-follow-up [branch] --from-thread <lost-thread-id>|acceptance-reconcile [branch]|acceptance-repair [branch]|pre-tool-use|pre-commit|pre-push <remote>|stop|classify [--base <ref>] [--head <ref>] [--github-output]|handoff [branch]|preview [branch]|release-notes --short <text> --details <text> --reason <text> --testing <text>|require-delivery [branch] [sha]|require-preview [branch] [sha]|doctor [--strict]|preflight [--strict]|access-contract --local|--server|socraticode-exact-only --reason <text>|socraticode-used --tool <name>|delegate --thread <id> --path <path>|revoke --thread <id>");
+        throw new Error("usage: brai-task.mjs start <slug> [--support-of <owner-branch>] [--openspec-change <id>...]|follow-up [branch] [--openspec-change <id>...]|link-openspec <id>...|archive-accepted-openspec|archive-openspec --change <id> --accepted-pr <number>|recover-follow-up [branch] --from-thread <lost-thread-id>|adopt-work|acceptance-reconcile [branch]|acceptance-repair [branch]|pre-tool-use|pre-commit|pre-push <remote>|stop|classify [--base <ref>] [--head <ref>] [--github-output]|handoff [branch]|preview [branch]|release-notes --short <text> --details <text> --reason <text> --testing <text> --detail <title>::<description> [--detail ...] [--apk-short <text> --apk-details <text> --apk-reason <text> --apk-detail <title>::<description>]|require-delivery [branch] [sha]|require-preview [branch] [sha]|doctor [--strict]|preflight [--strict]|access-contract --local|--server|socraticode-exact-only --reason <text>|socraticode-used --tool <name>|delegate --thread <id> --path <path>|revoke --thread <id>");
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -186,7 +208,28 @@ function runCli([command, ...args]) {
   }
 }
 
-function startTask(slug) {
+function startTask(args) {
+  const rawArgs = Array.isArray(args) ? [...args] : [args];
+  const taskArgs = [];
+  let supportOf = "";
+  let supportSeen = false;
+  for (let index = 0; index < rawArgs.length; index += 1) {
+    const value = rawArgs[index];
+    if (value !== "--support-of") {
+      taskArgs.push(value);
+      continue;
+    }
+    if (supportSeen) throw new Error("Support task accepts --support-of only once.");
+    supportSeen = true;
+    supportOf = String(rawArgs[index + 1] ?? "").trim();
+    if (!CODEX_BRANCH_RE.test(supportOf)) {
+      throw new Error("Support task usage: start <slug> --support-of <codex/owner-branch>");
+    }
+    index += 1;
+  }
+  const { positional, openspecChanges } = parseOpenSpecChangeArgs(taskArgs);
+  const [slug] = positional;
+  if (positional.length !== 1) throw new Error("Task start requires exactly one task slug.");
   if (!slug || !/^[a-z0-9][a-z0-9._-]*$/.test(slug)) {
     throw new Error("Task slug must match [a-z0-9][a-z0-9._-]*");
   }
@@ -207,6 +250,7 @@ function startTask(slug) {
   }
 
   fetchAcceptedBase();
+  const owner = supportOf ? requireSupportOwner(parent, supportOf) : null;
   const openTask = findOpenTaskForThread(parent, currentThreadId(), branch);
   if (openTask) {
     throw new Error(
@@ -222,7 +266,16 @@ function startTask(slug) {
     fs.mkdirSync(parent, { recursive: true });
     git("worktree", "add", "--no-track", "-b", branch, target, acceptedBaseRef());
     enableGitHooks(target);
-    writeTaskMarker(target, withThreadId({ branch, mode: "new", base: git("rev-parse", acceptedBaseRef()), createdAt: new Date().toISOString() }));
+    writeTaskMarker(target, withThreadId({
+      branch,
+      mode: "new",
+      base: git("rev-parse", acceptedBaseRef()),
+      createdAt: new Date().toISOString(),
+      workKey: owner?.marker.workKey ?? `work_${randomUUID()}`,
+      workRole: owner ? "support" : "owner",
+      ...(owner ? { supportOf: owner.marker.branch } : {}),
+      openspecChanges,
+    }));
     const linked = linkDependencyDirs(dependencySourceRoot(root), target);
     if (linked.length) console.log(`Linked dependency dirs: ${linked.join(", ")}`);
   } catch (error) {
@@ -234,7 +287,75 @@ function startTask(slug) {
   console.log(`Created ${branch} at ${target}`);
 }
 
-function markFollowUp(branchArg) {
+function requireSupportOwner(parent, ownerBranch) {
+  const owner = findTaskByBranch(parent, ownerBranch);
+  if (!owner) throw new Error(`Owner task worktree not found for ${ownerBranch}.`);
+  if (taskPathAccepted(owner.path)) throw new Error(`Owner task ${ownerBranch} is already accepted.`);
+  const marker = owner.marker;
+  const validation = validateTaskMarker(marker, ownerBranch);
+  if (!validation.ok) throw new Error(`Owner task ${ownerBranch} is invalid: ${validation.message}`);
+  if (!marker.workKey || !marker.workRole) {
+    throw new Error(`Owner task ${ownerBranch} has legacy state. Its owning thread must run: node scripts/brai-task.mjs adopt-work`);
+  }
+  if (marker.workRole !== "owner") throw new Error(`${ownerBranch} is ${marker.workRole}, not a work owner.`);
+  return { ...owner, marker };
+}
+
+function findTaskByBranch(parent, branch) {
+  if (!fs.existsSync(parent)) return null;
+  for (const entry of fs.readdirSync(parent, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    const taskPath = path.join(parent, entry.name);
+    const marker = readJson(path.join(taskPath, ".brai-task", "task.json"));
+    if (marker?.branch === branch) return { path: taskPath, marker };
+  }
+  return null;
+}
+
+function adoptLegacyWorkIdentity() {
+  const marker = ensureTaskWorkIdentity();
+  console.log(`Adopted ${marker.workKey} as ${marker.workRole} for ${marker.branch}`);
+}
+
+function ensureTaskWorkIdentity() {
+  const root = git("rev-parse", "--show-toplevel");
+  const branch = currentBranch();
+  const marker = readTaskMarker();
+  const validation = validateTaskMarker(marker, branch);
+  if (!validation.ok) throw new Error(validation.message);
+  const threadValidation = validateTaskThread(marker, currentThreadId());
+  if (!threadValidation.ok) throw new Error(threadValidation.message);
+  return ensureMarkerWorkIdentity(root, marker);
+}
+
+function ensureMarkerWorkIdentity(root, marker) {
+  if (marker?.workKey && marker?.workRole) return marker;
+  if (marker?.workKey || marker?.workRole) throw new Error("Brai task marker has a partial work identity; restore it through the official task workflow.");
+  const adopted = { ...marker, workKey: `work_${randomUUID()}`, workRole: "owner", workAdoptedAt: new Date().toISOString() };
+  writeTaskMarker(root, adopted);
+  return adopted;
+}
+
+function workMarkerForTask(marker, { nativeBoundary = false } = {}) {
+  if (!validWorkKey(marker?.workKey) || !["owner", "support"].includes(marker?.workRole)) {
+    throw new Error("Task work identity is missing; run: node scripts/brai-task.mjs adopt-work");
+  }
+  return {
+    receiptType: WORK_MARKER_VERSION,
+    workKey: marker.workKey,
+    workRole: marker.workRole,
+    nativeBoundary: Boolean(nativeBoundary),
+  };
+}
+
+function validWorkKey(value) {
+  return /^work_[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value ?? ""));
+}
+
+function markFollowUp(args) {
+  const { positional, openspecChanges } = parseOpenSpecChangeArgs(args);
+  if (positional.length > 1) throw new Error("Follow-up accepts at most one branch name.");
+  const branchArg = positional[0];
   const branch = branchArg ?? currentBranch();
   if (!CODEX_BRANCH_RE.test(branch)) throw new Error(`Follow-up marker requires codex/* branch, got: ${branch}`);
   if (branch !== currentBranch()) throw new Error(`Current branch is ${currentBranch()}, not ${branch}`);
@@ -250,12 +371,182 @@ function markFollowUp(branchArg) {
     throw new Error(`${threadValidation.message}\n\n${taskStartGuidance()}`);
   }
   writeTaskMarker(git("rev-parse", "--show-toplevel"), withThreadId({
+    ...marker,
     branch,
     mode: "follow-up",
-    base: marker.base,
     createdAt: new Date().toISOString(),
+    openspecChanges: mergeOpenSpecChanges(marker.openspecChanges, openspecChanges),
   }));
   console.log(`Marked explicit follow-up for ${branch}`);
+}
+
+function parseOpenSpecChangeArgs(args) {
+  const positional = [];
+  const openspecChanges = [];
+  for (let index = 0; index < args.length; index += 1) {
+    const value = args[index];
+    if (value === "--openspec-change") {
+      const change = String(args[index + 1] ?? "");
+      if (!OPENSPEC_CHANGE_RE.test(change)) throw new Error(`Invalid OpenSpec change id: ${change || "(missing)"}`);
+      openspecChanges.push(change);
+      index += 1;
+      continue;
+    }
+    if (value.startsWith("--")) throw new Error(`Unknown task option: ${value}`);
+    positional.push(value);
+  }
+  return { positional, openspecChanges: [...new Set(openspecChanges)].sort() };
+}
+
+function mergeOpenSpecChanges(current, additional) {
+  return [...new Set([...(Array.isArray(current) ? current : []), ...additional])].sort();
+}
+
+function linkOpenSpecChanges(changes) {
+  if (!changes.length || changes.some((change) => !OPENSPEC_CHANGE_RE.test(change))) {
+    throw new Error("Usage: node scripts/brai-task.mjs link-openspec <change-id>...");
+  }
+  const branch = currentBranch();
+  const marker = readTaskMarker();
+  const markerValidation = validateTaskMarker(marker, branch);
+  if (!markerValidation.ok) throw new Error(markerValidation.message);
+  const root = git("rev-parse", "--show-toplevel");
+  preserveLinkedOpenSpecChanges(changes, root);
+  const openspecChanges = mergeOpenSpecChanges(marker.openspecChanges, changes);
+  writeTaskMarker(root, withThreadId({ ...marker, openspecChanges }));
+  console.log(`Linked OpenSpec changes: ${openspecChanges.join(", ")}`);
+}
+
+function preserveLinkedOpenSpecChanges(changes, root) {
+  const canonicalRoot = dependencySourceRoot(root);
+  if (canonicalRoot === root) return;
+  for (const change of changes) {
+    const local = path.join(root, "openspec", "changes", change);
+    const durable = path.join(canonicalRoot, "openspec", "changes", change);
+    if (fs.existsSync(local) && !fs.existsSync(durable)) {
+      fs.mkdirSync(path.dirname(durable), { recursive: true });
+      fs.renameSync(local, durable);
+      fs.symlinkSync(path.relative(path.dirname(local), durable), local, "dir");
+      continue;
+    }
+    if (!fs.existsSync(local) && fs.existsSync(durable)) {
+      fs.mkdirSync(path.dirname(local), { recursive: true });
+      fs.symlinkSync(path.relative(path.dirname(local), durable), local, "dir");
+      continue;
+    }
+    if (fs.existsSync(local) && fs.existsSync(durable) && fs.realpathSync(local) !== fs.realpathSync(durable)) {
+      throw new Error(`OpenSpec change ${change} exists in both task and canonical checkouts.`);
+    }
+  }
+}
+
+function archiveAcceptedOpenSpecChanges() {
+  const root = git("rev-parse", "--show-toplevel");
+  const branch = currentBranch();
+  const marker = readTaskMarker();
+  const markerValidation = validateTaskMarker(marker, branch);
+  if (!markerValidation.ok) throw new Error(markerValidation.message);
+  const changes = Array.isArray(marker.openspecChanges) ? marker.openspecChanges : [];
+  if (!changes.length) {
+    console.log("No OpenSpec changes are linked to this accepted task.");
+    return;
+  }
+  const acceptance = readAcceptanceReceipt();
+  const head = git("rev-parse", "HEAD");
+  if (
+    acceptance?.receiptType !== ACCEPTANCE_RECEIPT_VERSION ||
+    acceptance.status !== "merged" ||
+    acceptance.branch !== branch ||
+    acceptance.commit !== head
+  ) {
+    throw new Error("OpenSpec archive requires the merged acceptance receipt for this exact branch head.");
+  }
+  const receiptValidation = acceptance.deliveryClass === DELIVERY_CLASS.RUNTIME_PREVIEW
+    ? validatePreviewReceipt(readPreviewReceipt(), branch, head)
+    : validateDeliveryReceipt(readDeliveryReceipt(), branch, head, acceptance.deliveryClass);
+  if (!receiptValidation.ok) throw new Error(`OpenSpec archive requires verified delivery: ${receiptValidation.message}`);
+
+  for (const change of changes) archiveOpenSpecChange(change, root);
+}
+
+function archiveHistoricalOpenSpecChange(args) {
+  let change = "";
+  let acceptedPr = "";
+  for (let index = 0; index < args.length; index += 2) {
+    const option = args[index];
+    const value = String(args[index + 1] ?? "");
+    if (option === "--change") change = value;
+    else if (option === "--accepted-pr") acceptedPr = value;
+    else throw new Error(`Unknown archive option: ${option || "(missing)"}`);
+  }
+  if (!OPENSPEC_CHANGE_RE.test(change) || !/^\d+$/.test(acceptedPr)) {
+    throw new Error("Usage: node scripts/brai-task.mjs archive-openspec --change <id> --accepted-pr <number>");
+  }
+  if (!isMergedPullRequest(acceptedPr)) throw new Error(`Pull request #${acceptedPr} is not merged.`);
+  archiveOpenSpecChange(change, git("rev-parse", "--show-toplevel"));
+}
+
+function isMergedPullRequest(number) {
+  if (process.env.BRAI_TEST_MERGED_PRS_JSON) {
+    const prs = JSON.parse(process.env.BRAI_TEST_MERGED_PRS_JSON);
+    return Array.isArray(prs) && prs.some((pr) => String(pr.number) === number && (pr.state === "MERGED" || pr.mergedAt));
+  }
+  const result = spawnSync("gh", ["pr", "view", number, "--json", "state", "--jq", ".state"], {
+    cwd: git("rev-parse", "--show-toplevel"),
+    encoding: "utf8",
+    env: process.env,
+  });
+  return result.status === 0 && result.stdout.trim() === "MERGED";
+}
+
+function archiveOpenSpecChange(change, root) {
+  if (!OPENSPEC_CHANGE_RE.test(change)) throw new Error(`Invalid OpenSpec change id: ${change}`);
+  const canonicalRoot = dependencySourceRoot(root);
+  const archiveRoot = path.join(canonicalRoot, "openspec", "changes", "archive");
+  const existing = fs.existsSync(archiveRoot)
+    ? fs.readdirSync(archiveRoot, { withFileTypes: true }).find((entry) => entry.isDirectory() && entry.name.endsWith(`-${change}`))
+    : null;
+  const sourceCandidates = [...new Set([
+    path.join(root, "openspec", "changes", change),
+    path.join(canonicalRoot, "openspec", "changes", change),
+  ])];
+  const source = sourceCandidates.find((candidate) => fs.existsSync(candidate));
+  if (existing && !source) {
+    console.log(`OpenSpec change already archived: ${existing.name}`);
+    return;
+  }
+  if (existing) throw new Error(`OpenSpec archive already exists for ${change}, but the active change is still present.`);
+  if (!source) throw new Error(`Active OpenSpec change is missing: ${change}`);
+
+  completeTerminalOpenSpecTasks(path.join(source, "tasks.md"), change);
+  fs.mkdirSync(archiveRoot, { recursive: true });
+  const destination = path.join(archiveRoot, `${new Date().toISOString().slice(0, 10)}-${change}`);
+  fs.renameSync(source, destination);
+  console.log(`Archived OpenSpec change locally: ${destination}`);
+}
+
+function completeTerminalOpenSpecTasks(tasksPath, change) {
+  if (!fs.existsSync(tasksPath)) throw new Error(`OpenSpec change ${change} has no tasks.md.`);
+  const lines = fs.readFileSync(tasksPath, "utf8").split(/\r?\n/);
+  const openTasks = lines
+    .map((line, index) => ({ index, text: line.replace(/^\s*[-*]\s+\[\s\]\s+/, "") }))
+    .filter(({ text }, index) => /^\s*[-*]\s+\[\s\]\s+/.test(lines[index]));
+  const incomplete = openTasks.filter(({ text }) => !isTerminalOpenSpecTask(text));
+  if (incomplete.length) {
+    throw new Error(
+      `OpenSpec change ${change} still has non-terminal tasks:\n${incomplete.map(({ text }) => `- ${text}`).join("\n")}`,
+    );
+  }
+  if (!openTasks.length) return;
+  for (const { index } of openTasks) lines[index] = lines[index].replace(/\[\s\]/, "[x]");
+  fs.writeFileSync(tasksPath, `${lines.join("\n").replace(/\n*$/, "")}\n`);
+}
+
+function isTerminalOpenSpecTask(text) {
+  const normalized = text.toLowerCase();
+  if (normalized.includes("archive")) return true;
+  if (!normalized.includes("handoff")) return false;
+  return !/\b(?:verify|parity|remove|migration|schema|runtime|production)\b/.test(normalized);
 }
 
 function recoverFollowUp(args) {
@@ -356,25 +647,36 @@ function acceptanceRepair(branchArg) {
   if (!markerValidation.ok) throw new Error(`${markerValidation.message}\n\n${taskStartGuidance()}`);
   const threadValidation = validateTaskThread(readTaskMarker(), currentThreadId());
   if (!threadValidation.ok) throw new Error(`${threadValidation.message}\n\n${taskStartGuidance()}`);
-  if (git("status", "--porcelain").trim()) throw new Error("Working tree must be clean before acceptance repair.");
+  const receipt = readAcceptanceReceipt();
+  const queuedNoPreview = receipt?.status === "waiting_for_turn" && isNoPreviewDeliveryClass(receipt.deliveryClass);
+  const repairFiles = [...new Set([
+    ...diffNames("HEAD"),
+    ...(gitMaybe("diff", "--cached", "--name-only") ?? "").split("\n").filter(Boolean),
+    ...(gitMaybe("ls-files", "--others", "--exclude-standard") ?? "").split("\n").filter(Boolean),
+  ])];
+  if (repairFiles.length && !queuedNoPreview) throw new Error("Working tree must be clean before acceptance repair.");
+  if (repairFiles.length && !isNoPreviewDeliveryClass(classifyDelivery(repairFiles).deliveryClass)) {
+    throw new Error("Queued no-preview acceptance repair may contain only no-preview files.");
+  }
 
   fetchTaskBranch(branch);
   const head = git("rev-parse", "HEAD");
   const remoteHead = git("rev-parse", `origin/${branch}`);
   if (head !== remoteHead) throw new Error(`HEAD ${head} is not origin/${branch} (${remoteHead}). Push before acceptance repair.`);
-  const receipt = readAcceptanceReceipt();
   if (receipt?.receiptType !== ACCEPTANCE_RECEIPT_VERSION || receipt.branch !== branch || receipt.commit !== head) {
     throw new Error("Acceptance repair requires an exact local acceptance receipt for the current branch head.");
   }
-  if (receipt.status !== "acceptance_started") {
-    throw new Error(`Acceptance receipt status is ${receipt.status || "(missing)"}, not acceptance_started.`);
+  if (receipt.status !== "acceptance_started" && !queuedNoPreview) {
+    throw new Error(`Acceptance receipt status is ${receipt.status || "(missing)"}, not repairable.`);
   }
   const pr = findAcceptancePr(branch, head);
   if (!pr) throw new Error(`No open acceptance PR into ${acceptedBaseBranch()} found for ${branch}@${head}.`);
-  if (pr.mergeStateStatus !== "BLOCKED") {
+  if (!queuedNoPreview && pr.mergeStateStatus !== "BLOCKED") {
     throw new Error(`Acceptance PR #${pr.number} mergeStateStatus is ${pr.mergeStateStatus || "(missing)"}, not BLOCKED.`);
   }
-  runRequired(["gh", "pr", "merge", String(pr.number), "--disable-auto"], `Failed to disable auto-merge for PR #${pr.number}.`);
+  if (pr.autoMergeRequest) {
+    runRequired(["gh", "pr", "merge", String(pr.number), "--disable-auto"], `Failed to disable auto-merge for PR #${pr.number}.`);
+  }
   writeAcceptanceReceipt({
     ...receipt,
     prNumber: pr.number,
@@ -545,6 +847,8 @@ function previewHandoff(branchArg) {
     throw new Error(`Blocked delivery paths cannot be handed off:\n${classification.paths.blocked.map((file) => `- ${file}`).join("\n")}`);
   }
   requireSocraticodeForHandoff(changedFiles);
+  ensureTaskWorkIdentity();
+  const releaseNotes = readReleaseNotes({ nativeRequired: nativeApkBoundaryChanged(changedFiles) });
   const branch = branchArg ?? currentBranch();
   if (!CODEX_BRANCH_RE.test(branch)) throw new Error(`Preview handoff requires codex/* branch, got: ${branch}`);
   if (branch !== currentBranch()) throw new Error(`Current branch is ${currentBranch()}, not ${branch}`);
@@ -558,7 +862,6 @@ function previewHandoff(branchArg) {
   const run = waitForSuccessfulPreviewRun(branch, head, ["public-guard", "checks", "temporal-worker-check", "deploy-preview"]);
   const slot = waitForReadyPreviewSlot(branch, head);
   const url = previewUrlForSlot(slot);
-  const releaseNotes = readReleaseNotes();
   writePreviewTestingNote(branch, head, releaseNotes);
   const receipt = {
     branch,
@@ -581,7 +884,7 @@ function previewHandoff(branchArg) {
 
 function writePreviewTestingNote(branch, commit, releaseNotes) {
   const root = git("rev-parse", "--show-toplevel");
-  const encoded = Buffer.from(JSON.stringify(releaseNotes), "utf8").toString("base64");
+  const encoded = Buffer.from(JSON.stringify(previewReviewNote(releaseNotes)), "utf8").toString("base64");
   const result = spawnSync(path.join(root, "deploy/scripts/preview-slots.sh"), ["note", branch, commit, encoded], {
     cwd: root,
     encoding: "utf8",
@@ -590,6 +893,16 @@ function writePreviewTestingNote(branch, commit, releaseNotes) {
   if (result.status !== 0 || result.error) {
     throw new Error(`Failed to store Preview testing note: ${result.error?.message ?? result.stderr ?? result.stdout ?? `exit ${result.status}`}`);
   }
+}
+
+function previewReviewNote(releaseNotes) {
+  if (releaseNotes?.receiptType !== RELEASE_NOTES_VERSION) return releaseNotes;
+  return {
+    short_changes: releaseNotes.build?.short_changes,
+    detailed_changes: releaseNotes.build?.detailed_changes,
+    reason: releaseNotes.build?.reason,
+    testing: releaseNotes.testing,
+  };
 }
 
 function deliveryHandoff(branchArg) {
@@ -614,6 +927,7 @@ function deliveryHandoff(branchArg) {
     return;
   }
   requireSocraticodeForHandoff(changedFiles);
+  ensureTaskWorkIdentity();
 
   if (git("status", "--porcelain").trim()) throw new Error("Working tree is not clean. Commit or remove local changes before handoff.");
   ensureTaskBranchPushed(branch, head);
@@ -621,13 +935,14 @@ function deliveryHandoff(branchArg) {
   if (marker?.base && !isAncestor(marker.base, head)) {
     throw new Error(`Task base ${marker.base} is not an ancestor of ${head}. Start a fresh task branch from ${acceptedBaseRef()}.`);
   }
+  const releaseNotes = readReleaseNotes({ nativeRequired: nativeApkBoundaryChanged(changedFiles) });
 
-  let pr = findInfraDocsPr(branch, head);
+  let pr = findInfraDocsPr(branch, head, taskRoot);
   if (pr?.state !== "MERGED") {
     ensureInfraDocsPr(branch);
   }
-  const run = waitForSuccessfulDeliveryRun(branch, head, ["public-guard", "checks", "temporal-worker-check", "auto-merge-infra-docs"]);
-  pr = findInfraDocsPr(branch, head) ?? pr;
+  const run = waitForSuccessfulDeliveryRun(branch, head, ["public-guard", "checks", "temporal-worker-check", "auto-merge-infra-docs"], taskRoot);
+  pr = findInfraDocsPr(branch, head, taskRoot) ?? pr;
   if (pr?.state !== "MERGED" || !pr?.number || !pr?.url || !pr?.mergedAt) throw new Error(infraDocsPrPendingMessage(pr, branch, head, run));
   const receipt = {
     receiptType: DELIVERY_RECEIPT_VERSION,
@@ -635,6 +950,7 @@ function deliveryHandoff(branchArg) {
     commit: head,
     deliveryClass: classification.deliveryClass,
     classification,
+    releaseNotes,
     prNumber: pr.number,
     prUrl: pr.url,
     prState: pr.state,
@@ -645,6 +961,7 @@ function deliveryHandoff(branchArg) {
     verifiedBy: "brai-task-delivery-v1",
   };
   writeDeliveryReceipt(receipt, taskRoot);
+  finalizeMergedNoPreviewAcceptance(branch, taskRoot);
 
   console.log("No-preview delivery");
   console.log(`Branch: ${branch}`);
@@ -654,6 +971,21 @@ function deliveryHandoff(branchArg) {
   console.log(`PR state: ${receipt.prState}`);
   console.log(`Merged at: ${receipt.mergedAt}`);
   console.log(`GitHub Actions run: ${receipt.runUrl}`);
+}
+
+function finalizeMergedNoPreviewAcceptance(branch, taskRoot) {
+  const result = spawnSync("bash", [path.join(taskRoot, "deploy/scripts/accept-preview.sh"), branch], {
+    cwd: taskRoot,
+    stdio: "inherit",
+    env: {
+      ...process.env,
+      BRAI_ACCEPT_BASE: acceptedBaseBranch(),
+      BRAI_ACCEPT_NO_PREVIEW_ONLY: "true",
+    },
+  });
+  if (result.status !== 0 || result.error) {
+    throw new Error(`Failed to finalize merged no-preview acceptance for ${branch}: ${result.error?.message ?? `exit ${result.status}`}.`);
+  }
 }
 
 function infraDocsPrPendingMessage(pr, branch, head, run) {
@@ -760,6 +1092,7 @@ function serverAccessContract(root = process.env.BRAI_ROOT ?? "/srv/projects/bra
   const protectedEnvDir = process.env.BRAI_PROTECTED_ENV_DIR ?? "/etc/brai";
   const apiEnvFile = process.env.BRAI_API_ENV_FILE ?? path.join(protectedEnvDir, "brai-api.env");
   const supabaseDeployEnvFile = process.env.BRAI_SUPABASE_DEPLOY_ENV_FILE ?? path.join(protectedEnvDir, "supabase-deploy.env");
+  const localCreateInboxOperationHelper = path.join(root, "deploy/scripts/create-inbox-operation.sh");
   const localCreateOperationHelper = path.join(root, "deploy/scripts/create-operation-activity.sh");
   const localCompleteOperationHelper = path.join(root, "deploy/scripts/complete-operation-activities.sh");
   const localCompleteInboxHelper = path.join(root, "deploy/scripts/complete-inbox-operations.sh");
@@ -810,7 +1143,8 @@ function serverAccessContract(root = process.env.BRAI_ROOT ?? "/srv/projects/bra
       requiredModeBits: 0o640,
       forbiddenModeBits: 0o137,
     }),
-    commandCheck("operation create helper host-local sudo", [localCreateOperationHelper, "--host-local", "--check-access"], { cwd: root }),
+    commandCheck("Inbox operation create helper host-local sudo", [localCreateInboxOperationHelper, "--host-local", "--check-access"], { cwd: root }),
+    commandCheck("deprecated operation create helper host-local sudo", [localCreateOperationHelper, "--host-local", "--check-access"], { cwd: root }),
     commandCheck("operation complete helper host-local sudo", [localCompleteOperationHelper, "--host-local", "--check-access"], { cwd: root }),
     commandCheck("Inbox operation complete helper host-local sudo", [localCompleteInboxHelper, "--host-local", "--check-access"], { cwd: root }),
     commandCheck("operation list helper host-local sudo", [localListOperationHelper, "--host-local", "--check-access"], { cwd: root }),
@@ -829,8 +1163,17 @@ function serverAccessContract(root = process.env.BRAI_ROOT ?? "/srv/projects/bra
       deploySshPort,
       deployUser,
       deployHost,
+      localOperationHelper: localCreateInboxOperationHelper,
+      checkName: "Inbox operation create helper remote ssh",
+      root,
+    }),
+    operationHelperRemoteAccessCheck({
+      deployIdentityFile,
+      deploySshPort,
+      deployUser,
+      deployHost,
       localOperationHelper: localCreateOperationHelper,
-      checkName: "operation create helper remote ssh",
+      checkName: "deprecated operation create helper remote ssh",
       root,
     }),
     operationHelperRemoteAccessCheck({
@@ -1235,61 +1578,178 @@ function writeReleaseNotesCli(args) {
   for (let index = 0; index < args.length; index += 2) {
     const key = args[index];
     if (!key?.startsWith("--")) throw new Error(`invalid release-notes argument: ${key}`);
-    values[key.slice(2)] = args[index + 1] ?? "";
+    const name = key.slice(2);
+    const value = args[index + 1] ?? "";
+    if (name === "detail" || name === "apk-detail") (values[name] ??= []).push(value);
+    else values[name] = value;
   }
+  const marker = ensureTaskWorkIdentity();
+  const buildDetails = (values.detail ?? []).map((value) => parseAtomicDetail(value, "--detail"));
+  if (marker.workRole === "support" && (values.short || values.details || values.reason)) {
+    throw new Error("Support release notes accept --detail entries only; owner build summary remains authoritative.");
+  }
+  const apkRequested = [values["apk-short"], values["apk-details"], values["apk-reason"], ...(values["apk-detail"] ?? [])].some(Boolean);
+  const nativeRequired = nativeApkBoundaryChanged(diffFromTaskBase());
   const notes = requireReleaseNotes({
     receiptType: RELEASE_NOTES_VERSION,
-    short_changes: values.short,
-    detailed_changes: values.details,
-    reason: values.reason,
+    work: { key: marker.workKey, role: marker.workRole },
+    build: {
+      ...(marker.workRole === "owner" ? {
+        short_changes: values.short,
+        detailed_changes: values.details,
+        reason: values.reason,
+      } : {}),
+      details: buildDetails,
+    },
+    ...(apkRequested ? {
+      platforms: {
+        apk: {
+          short_changes: values["apk-short"],
+          detailed_changes: values["apk-details"],
+          reason: values["apk-reason"],
+          details: (values["apk-detail"] ?? []).map((value) => parseAtomicDetail(value, "--apk-detail")),
+        },
+      },
+    } : {}),
     testing: values.testing,
-  }, "release-notes arguments");
+  }, "release-notes arguments", { expectedWork: marker, nativeRequired });
   writeReleaseNotes(notes);
   console.log("Wrote .brai-task/release-notes.json");
 }
 
-function readReleaseNotes() {
-  const fromEnv = releaseNotesFromEnv();
-  if (fromEnv) return fromEnv;
+function readReleaseNotes({ nativeRequired = null } = {}) {
   const root = git("rev-parse", "--show-toplevel");
   const file = path.join(root, ".brai-task", "release-notes.json");
-  return requireReleaseNotes(readJson(file), file);
+  const marker = ensureTaskWorkIdentity();
+  const notes = readJson(file);
+  return requireReleaseNotes(notes, file, {
+    expectedWork: marker,
+    nativeRequired,
+    allowLegacy: notes?.receiptType === LEGACY_RELEASE_NOTES_VERSION && legacyReleaseNotesAllowed(marker.branch),
+  });
 }
 
-function releaseNotesFromEnv() {
-  const values = {
-    receiptType: RELEASE_NOTES_VERSION,
-    short_changes: process.env.BRAI_RELEASE_SHORT_CHANGES,
-    detailed_changes: process.env.BRAI_RELEASE_DETAILED_CHANGES,
-    reason: process.env.BRAI_RELEASE_REASON,
-    testing: process.env.BRAI_RELEASE_TESTING,
-  };
-  if (!values.short_changes && !values.detailed_changes && !values.reason && !values.testing) return null;
-  return requireReleaseNotes(values, "BRAI_RELEASE_*");
+function legacyReleaseNotesAllowed(branch) {
+  const pulls = runJsonMaybe([
+    "gh", "pr", "list",
+    "--base", acceptedBaseBranch(),
+    "--head", branch,
+    "--state", "all",
+    "--json", "createdAt",
+  ]);
+  return Array.isArray(pulls) && pulls.length > 0;
 }
 
 function validateReleaseNotes(notes) {
   try {
-    requireReleaseNotes(notes, "release notes");
+    requireReleaseNotes(notes, "release notes", { allowLegacy: true });
     return { ok: true };
   } catch (error) {
     return { ok: false, message: error.message };
   }
 }
 
-function requireReleaseNotes(notes, source) {
+function requireReleaseNotes(notes, source, { expectedWork = null, nativeRequired = null, allowLegacy = false } = {}) {
   if (!notes || typeof notes !== "object") {
     throw new Error(`${source} missing. Run: node scripts/brai-task.mjs release-notes --short "..." --details "..." --reason "..." --testing "..."`);
   }
-  const normalized = { receiptType: RELEASE_NOTES_VERSION };
-  for (const field of ["short_changes", "detailed_changes", "reason", "testing"]) {
-    const text = String(notes[field] ?? "").trim();
-    if (!text) throw new Error(`${source}: ${field} is required.`);
-    if (!/[А-Яа-яЁё]/.test(text)) throw new Error(`${source}: ${field} must be Russian human-readable text.`);
-    if (isGenericReleaseNote(text)) throw new Error(`${source}: ${field} is generic deployment text, not release notes.`);
-    normalized[field] = text;
+  if (notes.receiptType === LEGACY_RELEASE_NOTES_VERSION || (!notes.receiptType && allowLegacy)) {
+    if (!allowLegacy || nativeRequired === true) throw new Error(`${source}: brai-release-notes-v1 is no longer allowed for this task.`);
+    const normalized = { receiptType: LEGACY_RELEASE_NOTES_VERSION };
+    for (const field of ["short_changes", "detailed_changes", "reason", "testing"]) normalized[field] = releaseText(notes[field], source, field);
+    return normalized;
+  }
+  if (notes.receiptType !== RELEASE_NOTES_VERSION) throw new Error(`${source}: expected ${RELEASE_NOTES_VERSION}.`);
+  const work = notes.work ?? {};
+  if (!validWorkKey(work.key) || !["owner", "support"].includes(work.role)) throw new Error(`${source}: immutable work key and owner/support role are required.`);
+  if (expectedWork && (work.key !== expectedWork.workKey || work.role !== expectedWork.workRole)) {
+    throw new Error(`${source}: work identity does not match the task marker.`);
+  }
+  const build = notes.build ?? {};
+  const normalizedBuild = {};
+  if (work.role === "owner") {
+    for (const field of ["short_changes", "detailed_changes", "reason"]) normalizedBuild[field] = releaseText(build[field], source, `build.${field}`);
+  } else if ([build.short_changes, build.detailed_changes, build.reason].some((value) => String(value ?? "").trim())) {
+    throw new Error(`${source}: support receipt cannot replace owner build summary.`);
+  }
+  normalizedBuild.details = normalizeReleaseDetails(build.details, source, "build.details", normalizedBuild);
+  const platforms = {};
+  if (notes.platforms?.apk) {
+    const apk = notes.platforms.apk;
+    platforms.apk = {};
+    for (const field of ["short_changes", "detailed_changes", "reason"]) platforms.apk[field] = releaseText(apk[field], source, `platforms.apk.${field}`);
+    platforms.apk.details = normalizeReleaseDetails(apk.details, source, "platforms.apk.details", platforms.apk);
+  }
+  if (nativeRequired === true && !platforms.apk) throw new Error(`${source}: native APK boundary changed, so a complete platforms.apk block is required.`);
+  if (nativeRequired === false && platforms.apk) throw new Error(`${source}: platforms.apk is present but no native APK boundary changed.`);
+  return {
+    receiptType: RELEASE_NOTES_VERSION,
+    work: { key: work.key, role: work.role },
+    build: normalizedBuild,
+    ...(platforms.apk ? { platforms } : {}),
+    testing: releaseText(notes.testing, source, "testing"),
+  };
+}
+
+function releaseText(value, source, field) {
+  const text = String(value ?? "").trim();
+  if (!text) throw new Error(`${source}: ${field} is required.`);
+  if (!/[А-Яа-яЁё]/.test(text)) throw new Error(`${source}: ${field} must be Russian human-readable text.`);
+  if (isGenericReleaseNote(text)) throw new Error(`${source}: ${field} is generic deployment text, not release notes.`);
+  return text;
+}
+
+function normalizeReleaseDetails(details, source, field, parent = {}) {
+  if (!Array.isArray(details) || details.length === 0) throw new Error(`${source}: ${field} requires at least one atomic detail.`);
+  const normalized = details.map((detail, index) => ({
+    title: releaseText(detail?.title, source, `${field}[${index}].title`),
+    description: releaseText(detail?.description, source, `${field}[${index}].description`),
+  }));
+  const seen = new Set();
+  const seenTitles = new Set();
+  const seenDescriptions = new Set();
+  const parentSummaries = new Set(
+    [parent.short_changes, parent.detailed_changes, parent.reason]
+      .map(comparableReleaseText)
+      .filter(Boolean),
+  );
+  for (const [index, detail] of normalized.entries()) {
+    const title = comparableReleaseText(detail.title);
+    const description = comparableReleaseText(detail.description);
+    const pair = `${title}\n${description}`;
+    if (/\s(?:—|-)\s*\d+$/u.test(detail.title)) throw new Error(`${source}: ${field}[${index}].title must describe the change, not use an automatic numeric suffix.`);
+    if (seen.has(pair)) throw new Error(`${source}: ${field}[${index}] duplicates another atomic detail.`);
+    if (seenTitles.has(title)) throw new Error(`${source}: ${field}[${index}].title duplicates another atomic detail title.`);
+    if (seenDescriptions.has(description)) throw new Error(`${source}: ${field}[${index}].description duplicates another atomic detail description.`);
+    if (title === description) throw new Error(`${source}: ${field}[${index}].title must summarize rather than repeat its description.`);
+    if (parentSummaries.has(title)) throw new Error(`${source}: ${field}[${index}].title duplicates the parent summary.`);
+    if (parentSummaries.has(description)) throw new Error(`${source}: ${field}[${index}].description duplicates the parent summary.`);
+    seen.add(pair);
+    seenTitles.add(title);
+    seenDescriptions.add(description);
   }
   return normalized;
+}
+
+function comparableReleaseText(value) {
+  return String(value ?? "").trim().replace(/\s+/g, " ").replace(/[.!?]+$/u, "").toLocaleLowerCase("ru-RU");
+}
+
+function parseAtomicDetail(value, option) {
+  const text = String(value ?? "");
+  const delimiter = text.indexOf("::");
+  if (delimiter <= 0 || delimiter >= text.length - 2) throw new Error(`${option} must be <title>::<description>.`);
+  return { title: text.slice(0, delimiter).trim(), description: text.slice(delimiter + 2).trim() };
+}
+
+function nativeApkBoundaryChanged(files) {
+  const marker = readTaskMarker();
+  const base = marker?.base && gitMaybe("rev-parse", "--verify", `${marker.base}^{commit}`) ? marker.base : acceptedBaseRef();
+  const range = `${base}...HEAD`;
+  const packageFiles = ["apps/brai_app/package.json", "apps/brai_app/package-lock.json"];
+  const packageDiff = files.some((file) => packageFiles.includes(file)) ? gitMaybe("diff", "--unified=0", range, "--", ...packageFiles) ?? "" : "";
+  const environmentDiff = files.includes("deploy/environments.json") ? gitMaybe("diff", "--unified=0", range, "--", "deploy/environments.json") ?? "" : "";
+  return requiresNativeApkChange(files, packageDiff, environmentDiff);
 }
 
 function isGenericReleaseNote(text) {
@@ -1445,6 +1905,10 @@ function validateTaskMarker(marker, branch) {
   }
   if (!marker.createdAt || Number.isNaN(Date.parse(marker.createdAt))) {
     return { ok: false, message: "Brai task marker has no valid creation timestamp; use the official task starter or follow-up command." };
+  }
+  if (marker.workKey || marker.workRole) {
+    if (!validWorkKey(marker.workKey)) return { ok: false, message: "Brai task marker has no valid immutable work key." };
+    if (!['owner', 'support'].includes(marker.workRole)) return { ok: false, message: "Brai task marker has no valid owner/support work role." };
   }
   return { ok: true };
 }
@@ -1772,11 +2236,11 @@ function isOfficialAcceptanceReconcileCommand(commandText) {
 }
 
 function isInstalledTaskStarterSegment(segment) {
-  return /^\/srv\/opt\/node-v22\.16\.0\/bin\/node\s+\/srv\/opt\/brai-codex-plugins\/plugins\/brai-guard\/hooks\/brai-guard\.mjs\s+start\s+[a-z0-9][a-z0-9._-]*$/.test(segment);
+  return /^\/srv\/opt\/node-v22\.16\.0\/bin\/node\s+\/srv\/opt\/brai-codex-plugins\/plugins\/brai-guard\/hooks\/brai-guard\.mjs\s+start\s+[a-z0-9][a-z0-9._-]*(?:\s+--support-of\s+codex\/[a-z0-9][a-z0-9._-]*)?$/.test(segment);
 }
 
 function isRepoTaskStarterSegment(segment) {
-  return /^(?:scripts\/brai-task-start\.sh|(?:\S+\/)?scripts\/brai-task-start\.sh)\s+[a-z0-9][a-z0-9._-]*$/.test(segment);
+  return /^(?:scripts\/brai-task-start\.sh|(?:\S+\/)?scripts\/brai-task-start\.sh)\s+[a-z0-9][a-z0-9._-]*(?:\s+--support-of\s+codex\/[a-z0-9][a-z0-9._-]*)?$/.test(segment);
 }
 
 function repoTaskStarterIsStable() {
@@ -1858,7 +2322,7 @@ function sandboxCheckMode(commandText) {
     /\bdeploy\/scripts\/accept-preview\.sh\b/.test(text) ||
     /\bdeploy\/scripts\/apply-main-infra\.sh\b/.test(text) ||
     /\bnode scripts\/brai-task\.mjs (acceptance-reconcile|acceptance-repair|handoff|preview)\b/.test(text) ||
-    /\bdeploy\/scripts\/(complete-inbox-operations|complete-operation-activities|create-operation-activity|list-operation-activities)\.sh\b/.test(text)
+    /\bdeploy\/scripts\/(complete-inbox-operations|complete-operation-activities|create-inbox-operation|create-operation-activity|list-operation-activities)\.sh\b/.test(text)
   ) {
     return { mode: "require_escalated", reason: "Brai host/Git/runtime boundaries for this command are not authoritative inside the Codex sandbox." };
   }
@@ -2013,6 +2477,7 @@ function deliveryClassForFile(file) {
       "deploy/scripts/complete-operation-activities.sh",
       "deploy/scripts/complete-inbox-operations.sh",
       "deploy/scripts/codex-cli-smoke.sh",
+      "deploy/scripts/create-inbox-operation.sh",
       "deploy/scripts/create-operation-activity.sh",
       "deploy/scripts/list-operation-activities.sh",
       "deploy/scripts/deploy-branch.sh",
@@ -2030,13 +2495,17 @@ function deliveryClassForFile(file) {
       "deploy/scripts/publish-mobile-bundle.sh",
       "deploy/scripts/publish-environment-web-layer.sh",
       "deploy/scripts/publish-web.sh",
+      "deploy/scripts/record-version-pr.mjs",
       "deploy/scripts/promote-accepted-deployment.sh",
       "deploy/scripts/promote-deployment.mjs",
       "deploy/scripts/resolve-deploy-env.mjs",
       "deploy/scripts/resolve-required-apk-version.mjs",
+      "deploy/scripts/supabase-maintenance.sh",
+      "deploy/scripts/supavisor-tenants.mjs",
       "deploy/scripts/sync-local-main-checkout.sh",
       "deploy/scripts/sync-occupied-preview-ota-manifests.sh",
       "deploy/scripts/update-release-index.mjs",
+      "deploy/supabase/pooler.exs",
       "scripts/caddy-prune-managed-sites.test.mjs",
     ].includes(file)
   ) {
@@ -2154,15 +2623,15 @@ function writeGithubOutput(classification) {
   );
 }
 
-function findSuccessfulDeliveryRun(branch, sha, requiredJobs = ["public-guard", "checks", "temporal-worker-check", "deploy-preview"]) {
-  const runs = runJson(["gh", "run", "list", "--workflow", "Brai delivery", "--branch", branch, "--event", "push", "--limit", "20", "--json", "databaseId,headSha,status,conclusion,url"]);
+function findSuccessfulDeliveryRun(branch, sha, requiredJobs = ["public-guard", "checks", "temporal-worker-check", "deploy-preview"], cwd = null) {
+  const runs = runJson(["gh", "run", "list", "--workflow", "Brai delivery", "--branch", branch, "--event", "push", "--limit", "20", "--json", "databaseId,headSha,status,conclusion,url"], cwd);
   const run = runs.find((candidate) => candidate.headSha === sha);
   if (!run) throw new Error(`No Brai delivery push run found for ${branch}@${sha}.`);
   if (run.status !== "completed" || run.conclusion !== "success") {
     throw new Error(`Delivery run ${run.databaseId} is ${run.status}/${run.conclusion}. Wait or fix CI before handoff.`);
   }
 
-  const details = runJson(["gh", "run", "view", String(run.databaseId), "--json", "jobs"]);
+  const details = runJson(["gh", "run", "view", String(run.databaseId), "--json", "jobs"], cwd);
   const jobs = new Map((details.jobs ?? []).map((job) => [job.name, job.conclusion]));
   for (const job of requiredJobs) {
     if (jobs.get(job) !== "success") throw new Error(`Delivery job ${job} is ${jobs.get(job) ?? "missing"} for run ${run.databaseId}.`);
@@ -2438,8 +2907,8 @@ function ensureInfraDocsPr(branch) {
   if (result.status !== 0 || result.error) throw new Error(`Failed to create or enable no-preview PR for ${branch}: ${result.error?.message ?? `exit ${result.status}`}.`);
 }
 
-function findInfraDocsPr(branch, head) {
-  const prs = runJson(["gh", "pr", "list", "--base", acceptedBaseBranch(), "--head", branch, "--state", "all", "--json", "number,url,state,headRefOid,labels,mergedAt,mergeStateStatus,autoMergeRequest"]);
+function findInfraDocsPr(branch, head, cwd = null) {
+  const prs = runJson(["gh", "pr", "list", "--base", acceptedBaseBranch(), "--head", branch, "--state", "all", "--json", "number,url,state,headRefOid,labels,mergedAt,mergeStateStatus,autoMergeRequest"], cwd);
   return prs.find((pr) =>
     pr.headRefOid === head &&
     Array.isArray(pr.labels) &&
@@ -2468,8 +2937,8 @@ function findAcceptancePr(branch, head) {
   return prs.find((pr) => pr.headRefOid === head) ?? null;
 }
 
-function runJson(args) {
-  const result = spawnSync(args[0], args.slice(1), { cwd: git("rev-parse", "--show-toplevel"), encoding: "utf8", env: process.env });
+function runJson(args, cwd = null) {
+  const result = spawnSync(args[0], args.slice(1), { cwd: cwd ?? git("rev-parse", "--show-toplevel"), encoding: "utf8", env: process.env });
   if (result.status !== 0) {
     throw new Error(`${args.join(" ")} failed:\n${result.stderr || result.stdout || "(no output)"}`);
   }
@@ -2491,10 +2960,10 @@ function runJsonMaybe(args) {
   }
 }
 
-function waitForSuccessfulDeliveryRun(branch, sha, requiredJobs) {
+function waitForSuccessfulDeliveryRun(branch, sha, requiredJobs, cwd = null) {
   const waitMs = Number(process.env.BRAI_INFRA_DOCS_HANDOFF_WAIT_MS ?? DEFAULT_INFRA_DOCS_HANDOFF_WAIT_MS);
   const pollMs = Number(process.env.BRAI_INFRA_DOCS_HANDOFF_POLL_MS ?? DEFAULT_INFRA_DOCS_HANDOFF_POLL_MS);
-  return waitForCondition(() => findSuccessfulDeliveryRun(branch, sha, requiredJobs), waitMs, pollMs);
+  return waitForCondition(() => findSuccessfulDeliveryRun(branch, sha, requiredJobs, cwd), waitMs, pollMs);
 }
 
 function waitForSuccessfulPreviewRun(branch, sha, requiredJobs) {

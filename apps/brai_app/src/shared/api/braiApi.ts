@@ -340,6 +340,13 @@ export class BraiApi {
     return this.request("/v1/version");
   }
 
+  async versionHistory({ type, cursor, limit = 30 }: { type?: VersionHistoryTypeId | null; cursor?: string | null; limit?: number } = {}): Promise<VersionHistoryPage> {
+    const query = new URLSearchParams({ limit: String(limit) });
+    if (type) query.set("type", type);
+    if (cursor) query.set("cursor", cursor);
+    return this.publicRequest(`/v1/version-history?${query}`);
+  }
+
   async settings(): Promise<AppSettings> {
     return this.request("/v1/settings");
   }
@@ -532,7 +539,9 @@ export class BraiApi {
     const { json, timeoutMs = REQUEST_TIMEOUT_MS, ...requestOptions } = options;
     const headers = new Headers(requestOptions.headers);
     if (json !== undefined) headers.set("content-type", "application/json");
-    if (this.expectedUserId !== null && path.startsWith("/v1/")) headers.set("x-brai-expected-user-id", this.expectedUserId);
+    if (this.expectedUserId !== null && path.startsWith("/v1/") && requestOptions.credentials !== "omit") {
+      headers.set("x-brai-expected-user-id", this.expectedUserId);
+    }
     const controller = new AbortController();
     const abortRequest = () => controller.abort();
     if (requestOptions.signal?.aborted) abortRequest();
@@ -544,7 +553,7 @@ export class BraiApi {
       response = await fetch(resolvePath(this.baseUrl, path), {
         ...requestOptions,
         headers,
-        credentials: "include",
+        credentials: requestOptions.credentials ?? "include",
         signal: controller.signal,
         body: json === undefined ? requestOptions.body : JSON.stringify(json),
       });
@@ -574,6 +583,10 @@ export class BraiApi {
 
     return (await response.json()) as T;
   }
+
+  private async publicRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
+    return this.request(path, { ...options, credentials: "omit" });
+  }
 }
 
 interface ActivitiesApiState {
@@ -595,6 +608,71 @@ interface ActivitiesApiSyncResponse {
 }
 
 export type VersionTypeId = "canon" | "release" | "build" | "apk";
+export type VersionHistoryTypeId = "build" | "apk" | "macos" | "ios";
+
+export type VersionHistoryType = {
+  id: VersionHistoryTypeId;
+  title: string;
+};
+
+export type VersionHistoryPullRequest = {
+  id: number;
+  role: "owner" | "support";
+  repository: string;
+  number: number;
+  url: string;
+  title: string;
+  body: string;
+  author_login: string;
+  state: string;
+  is_draft: boolean;
+  head_branch: string;
+  base_branch: string;
+  merge_commit_sha: string | null;
+  created_at_utc: string;
+  updated_at_utc: string;
+  closed_at_utc: string | null;
+  merged_at_utc: string | null;
+};
+
+export type VersionHistoryItem = {
+  id: number;
+  type: VersionHistoryTypeId;
+  version: number;
+  short_changes: string;
+  detailed_changes: string;
+  reason: string;
+  released_at_utc: string;
+  created_at_utc: string;
+  work: {
+    key: string;
+    status: string;
+    created_at_utc: string;
+    updated_at_utc: string;
+    finalized_at_utc: string | null;
+  } | null;
+  details: Array<{
+    id: number;
+    title: string;
+    description: string;
+    display_order: number;
+    pull_request_id: number | null;
+  }>;
+  pull_requests: VersionHistoryPullRequest[];
+  refs: Array<{
+    source_branch: string | null;
+    source_commit: string | null;
+    target_branch: string | null;
+    target_commit: string | null;
+    created_at_utc: string;
+  }>;
+};
+
+export type VersionHistoryPage = {
+  items: VersionHistoryItem[];
+  types: VersionHistoryType[];
+  next_cursor: string | null;
+};
 
 export type AppVersionLedgerRow = {
   id: number;

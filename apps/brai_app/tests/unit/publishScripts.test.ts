@@ -11,7 +11,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 const execFileAsync = promisify(execFile);
 const workspaceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
-const appStaticRoutes = ["brai-cmd", "draws", "engine", "evil-eye", "factory", "focus", "inbox"];
+const appStaticRoutes = ["brai-cmd", "draws", "engine", "factory", "focus", "inbox"];
 const fixtureRoots: string[] = [];
 
 afterEach(async () => {
@@ -65,6 +65,7 @@ describe("mobile OTA publish scripts", () => {
         BRAI_ROOT: root,
         BRAI_BUILD_CLIENT: "false",
         BRAI_APP_VERSION: "9.9.9",
+        BRAI_PRODUCT_VERSION: "147",
         BRAI_TARGET_APK_VERSION: "2999",
         BRAI_PUBLISHED_AT: "2026-06-15T00:00:00Z",
       },
@@ -97,6 +98,7 @@ describe("mobile OTA publish scripts", () => {
     });
     expect(runtimeConfig).toContain("window.__BRAI_RUNTIME_CONFIG__");
     expect(runtimeConfig).toContain('"appVersion": "9.9.9"');
+    expect(runtimeConfig).toContain('"productVersion": 147');
     expect(manifest.otaVersion).toBe(bundleVersion);
     expect(manifest.targetApkVersion).toBe(2999);
   });
@@ -114,6 +116,7 @@ describe("mobile OTA publish scripts", () => {
         NEXT_PUBLIC_BRAI_PREVIEW_SLOT: "A",
         NEXT_PUBLIC_BRAI_BRANCH: "codex/x</script>\u2028",
         NEXT_PUBLIC_BRAI_COMMIT: "abc123",
+        NEXT_PUBLIC_BRAI_PRODUCT_VERSION: "147",
         NEXT_PUBLIC_BRAI_API: "/api",
         NEXT_PUBLIC_BRAI_ANDROID_API: "https://a.test.brai.one/api",
         NEXT_PUBLIC_BRAI_OTA_CHANNEL: "a.test.brai.one/mobile-update",
@@ -131,6 +134,7 @@ describe("mobile OTA publish scripts", () => {
       previewSlot: "A",
       branch: "codex/x</script>\u2028",
       commit: "abc123",
+      productVersion: 147,
       webApiBase: "/api",
       androidApiBase: "https://a.test.brai.one/api",
       otaChannel: "a.test.brai.one/mobile-update",
@@ -187,6 +191,7 @@ describe("mobile OTA publish scripts", () => {
         BRAI_ENVS_ROOT: path.join(root, "envs"),
         BRAI_SKIP_DEPLOY_USER_REENTRY: "true",
         BRAI_APP_VERSION: "9.9.9",
+        BRAI_PRODUCT_VERSION: "147",
         BRAI_TARGET_APK_VERSION: "2999",
         BRAI_PUBLISHED_AT: "2026-06-15T00:00:00Z",
       },
@@ -198,6 +203,7 @@ describe("mobile OTA publish scripts", () => {
     await expect(readFile(path.join(target, "web/index.html"), "utf8")).resolves.toContain("baseline");
     expect(runtimeConfig).toContain('"environment": "preview-b"');
     expect(runtimeConfig).toContain('"previewSlot": "B"');
+    expect(runtimeConfig).toContain('"productVersion": 147');
     expect(runtimeConfig).toContain('"androidApiBase": "https://b.test.brai.one/api"');
     expect(manifest.otaVersion).toBe("9.9.9");
     expect(manifest.targetApkVersion).toBe(2999);
@@ -574,7 +580,7 @@ describe("mobile OTA publish scripts", () => {
     expect(deploy).not.toContain("brai.sqlite");
   });
 
-  it("rebuilds APK release rows and records production ledger rows by default", async () => {
+  it("rebuilds APK release rows and defers production ledger rows to work reconciliation", async () => {
     const deploy = await readFile(path.join(workspaceRoot, "deploy/scripts/ci-ssh-deploy.sh"), "utf8");
     const deployBranch = await readFile(path.join(workspaceRoot, "deploy/scripts/deploy-branch.sh"), "utf8");
     const buildApk = await readFile(path.join(workspaceRoot, "deploy/scripts/build-android-env-apk.sh"), "utf8");
@@ -583,6 +589,9 @@ describe("mobile OTA publish scripts", () => {
     const prodBlock = deploy.slice(deploy.indexOf('elif [[ "$ENVIRONMENT" == "prod" ]]'));
 
     expect(deploy).toContain("export BRAI_NATIVE_APK_CHANGE");
+    expect(deploy).toContain('git rev-list --first-parent "$BRAI_COMMIT"');
+    expect(deploy).toContain('--target-commit "$BRAI_PRODUCT_BASE_COMMIT"');
+    expect(deploy).toContain('--ancestor-commits "$BRAI_PRODUCT_ANCESTOR_COMMITS"');
     expect(deployBranch).toContain("BRAI_NATIVE_APK_CHANGE:-false");
     expect(deployBranch).toContain('resolve-required-apk-version.mjs" prod apkVersion');
     expect(deployBranch).toContain('BRAI_TARGET_APK_VERSION="$("$NODE_BIN" "$SCRIPT_DIR/resolve-required-apk-version.mjs" prod apkVersion)"');
@@ -603,7 +612,8 @@ describe("mobile OTA publish scripts", () => {
     expect(buildApk).toContain('BUILD_CLIENT="${BRAI_BUILD_CLIENT:-true}"');
     expect(buildApk).toContain('Missing static export for BRAI_BUILD_CLIENT=$BUILD_CLIENT');
     expect(buildApk).toContain('write-client-runtime-config.mjs');
-    expect(buildApk).toContain('record-shipped-apk-version.mjs');
+    expect(buildApk).not.toContain('record-shipped-apk-version.mjs');
+    expect(buildApk).toContain('ledger recording waits for work reconciliation');
     expect(buildNonproduction).toContain('for flavor in dev previewA previewB previewC previewD previewE; do');
     expect(buildNonproduction).toContain('BRAI_BUILD_CLIENT=false "$SCRIPT_DIR/build-android-env-apk.sh" "$flavor"');
     expect(releaseSlot).toContain('section?.apkBuildKind === "stable"');
@@ -963,7 +973,10 @@ describe("mobile OTA publish scripts", () => {
     const root = await fixtureRoot("brai-preview-ota-sync-");
     const envsRoot = path.join(root, "envs");
     const sourceRoot = path.join(envsRoot, "preview-b/source");
+    const previewCommit = "c".repeat(40);
     await writeStaticExport(sourceRoot, "preview-b-content");
+    await writeFile(path.join(sourceRoot, ".brai-deploy-branch"), "codex/preview-b\n");
+    await writeFile(path.join(sourceRoot, ".brai-deploy-commit"), `${previewCommit}\n`);
     await mkdir(path.join(sourceRoot, "deploy"), { recursive: true });
     await copyFile(
       path.join(workspaceRoot, "deploy/environments.json"),
@@ -986,7 +999,7 @@ describe("mobile OTA publish scripts", () => {
     await mkdir(path.join(envsRoot, "preview-b/mobile-update"), { recursive: true });
     await writeFile(
       path.join(envsRoot, "preview-slots.json"),
-      JSON.stringify({ B: { status: "ready", branch: "codex/preview-b", commit: "abc" }, queue: [] }),
+      JSON.stringify({ B: { status: "ready", branch: "codex/preview-b", commit: previewCommit }, queue: [] }),
     );
     await writeFile(
       path.join(envsRoot, "preview-b/mobile-update/manifest.json"),
@@ -1009,9 +1022,12 @@ describe("mobile OTA publish scripts", () => {
     });
 
     const manifest = JSON.parse(await readFile(path.join(envsRoot, "preview-b/mobile-update/manifest.json"), "utf8"));
+    const runtimeConfig = await readFile(path.join(envsRoot, "preview-b/web/brai-runtime-config.js"), "utf8");
     const syncScript = await readFile(path.join(workspaceRoot, "deploy/scripts/sync-occupied-preview-ota-manifests.sh"), "utf8");
     await expect(readFile(path.join(envsRoot, "preview-b/web/index.html"), "utf8")).resolves.toContain("preview-b-content");
     expect(syncScript).toContain("BRAI_BUILD_CLIENT=false");
+    expect(runtimeConfig).toContain('"branch": "codex/preview-b"');
+    expect(runtimeConfig).toContain(`"commit": "${previewCommit}"`);
     expect(manifest.otaVersion).toBe("0.0.68");
     expect(manifest.archiveUrl).toBe("https://b.test.brai.one/mobile-update/bundles/0.0.68/bundle.zip");
   });
@@ -1174,7 +1190,9 @@ describe("mobile OTA publish scripts", () => {
     expect(html).toContain("Brai E");
     expect(html).toContain('<div class="version-row"><p class="version">v1</p><span class="size">');
     expect(html).toContain("0 МБ</span>");
-    expect(html).toContain("23 июня 2026, 12:13 МСК");
+    expect(html).toContain("23 июня 2026, 09:13");
+    expect(html).toContain('document.querySelectorAll("time[datetime]")');
+    expect(html).not.toContain("МСК");
     expect(html).toContain('<a class="download" href="./brai-v1.apk">Скачать</a>');
     expect(html).toContain('<span class="download" aria-disabled="true">Скачать</span>');
     expect(html).not.toContain("versionCode");

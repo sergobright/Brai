@@ -1,7 +1,7 @@
 "use client";
 
-import type { CSSProperties, PointerEvent, TouchEvent as ReactTouchEvent } from "react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import type { CSSProperties, PointerEvent } from "react";
+import { useCallback, useEffect, useRef } from "react";
 
 type DragState = {
   id: number;
@@ -21,14 +21,13 @@ const DRAG_HARD_EXCLUSION_SELECTOR = "input, select, textarea, [role='switch'], 
 const DRAG_CONTROL_SELECTOR = "button, a, [role='button']";
 const SCROLL_VIEWPORT_SELECTOR = "[data-slot='scroll-area-viewport']";
 const DRAG_ACTIVATION_PX = 10;
-const SETTLE_MS = 180;
+const MOTION_MS = 200;
+const MOTION_EASING = "cubic-bezier(0.2, 0.8, 0.2, 1)";
 const BACKDROP_FADE_START_RATIO = 0.5;
 const SHEET_OFFSET_VAR = "--mobile-sheet-offset";
 const BACKDROP_OPACITY_VAR = "--mobile-sheet-backdrop-opacity";
 
-/**
- * Provides touch and pointer drag behavior for dismissible mobile sheets.
- */
+/** Provides shared enter, drag, settle, and exit motion for dismissible mobile overlays. */
 export function useMobileSheetDrag({
   axis = "y",
   excludeControls = true,
@@ -42,92 +41,111 @@ export function useMobileSheetDrag({
   onClose: () => void;
   onCloseStart?: () => void;
 }) {
+  const reduceMotion = prefersReducedMotion();
   const onCloseRef = useRef(onClose);
   const onCloseStartRef = useRef(onCloseStart);
   const dragRef = useRef<DragState | null>(null);
   const sheetElementRef = useRef<HTMLElement | null>(null);
   const backdropElementRef = useRef<HTMLElement | null>(null);
+  const gestureElementRef = useRef<HTMLElement | null>(null);
   const removeNativeTouchRef = useRef<(() => void) | null>(null);
   const timerRef = useRef<number | null>(null);
-  const frameRef = useRef<number | null>(null);
+  const offsetFrameRef = useRef<number | null>(null);
+  const openFrameRef = useRef<number | null>(null);
   const pendingOffsetRef = useRef(0);
   const currentOffsetRef = useRef(0);
-  const [dragging, setDragging] = useState(false);
-  const [settling, setSettling] = useState(false);
-  const [closing, setClosing] = useState(false);
+  const closingRef = useRef(false);
 
   useEffect(() => {
     onCloseRef.current = onClose;
     onCloseStartRef.current = onCloseStart;
   }, [onClose, onCloseStart]);
 
-  useEffect(() => {
-    return () => {
-      removeNativeTouchRef.current?.();
-      if (timerRef.current != null) window.clearTimeout(timerRef.current);
-      if (frameRef.current != null) window.cancelAnimationFrame(frameRef.current);
-    };
+  const clearMotion = useCallback(() => {
+    if (timerRef.current != null) window.clearTimeout(timerRef.current);
+    if (offsetFrameRef.current != null) window.cancelAnimationFrame(offsetFrameRef.current);
+    if (openFrameRef.current != null) window.cancelAnimationFrame(openFrameRef.current);
+    timerRef.current = null;
+    offsetFrameRef.current = null;
+    openFrameRef.current = null;
   }, []);
 
-  const clearTimer = useCallback(() => {
-    if (timerRef.current == null) return;
-    window.clearTimeout(timerRef.current);
-    timerRef.current = null;
-  }, []);
+  useEffect(() => () => {
+    removeNativeTouchRef.current?.();
+    clearMotion();
+  }, [clearMotion]);
 
   const applyOffset = useCallback((nextOffset: number) => {
     const offset = Math.max(0, nextOffset);
     currentOffsetRef.current = offset;
-    if (sheetElementRef.current) {
-      sheetElementRef.current.style.setProperty(SHEET_OFFSET_VAR, `${offset}px`);
-    }
-    if (backdropElementRef.current) {
-      backdropElementRef.current.style.setProperty(BACKDROP_OPACITY_VAR, String(backdropOpacity(offset, panelSize(sheetElementRef.current, axis))));
-    }
+    sheetElementRef.current?.style.setProperty(SHEET_OFFSET_VAR, `${offset}px`);
+    backdropElementRef.current?.style.setProperty(
+      BACKDROP_OPACITY_VAR,
+      String(backdropOpacity(offset, panelSize(sheetElementRef.current, axis))),
+    );
   }, [axis]);
 
   const scheduleOffset = useCallback((nextOffset: number) => {
-    const offset = Math.max(0, nextOffset);
-    currentOffsetRef.current = offset;
-    pendingOffsetRef.current = offset;
-    if (frameRef.current != null) return;
-    frameRef.current = window.requestAnimationFrame(() => {
-      frameRef.current = null;
+    pendingOffsetRef.current = Math.max(0, nextOffset);
+    if (offsetFrameRef.current != null) return;
+    offsetFrameRef.current = window.requestAnimationFrame(() => {
+      offsetFrameRef.current = null;
       applyOffset(pendingOffsetRef.current);
     });
   }, [applyOffset]);
 
-  const setBackdropRef = useCallback((element: HTMLElement | null) => {
-    backdropElementRef.current = element;
-    if (element) applyOffset(currentOffsetRef.current);
-  }, [applyOffset]);
+  const setTransition = useCallback((active: boolean) => {
+    const transition = active && !prefersReducedMotion()
+      ? `${MOTION_MS}ms ${MOTION_EASING}`
+      : "none";
+    if (sheetElementRef.current) sheetElementRef.current.style.transition = `transform ${transition}`;
+    if (backdropElementRef.current) backdropElementRef.current.style.transition = `opacity ${transition}`;
+  }, []);
 
-  const finishClose = useCallback(() => {
-    clearTimer();
-    onCloseStartRef.current?.();
+  const settle = useCallback((offset: number, done?: () => void) => {
+    clearMotion();
+    setTransition(true);
+    scheduleOffset(offset);
     if (prefersReducedMotion()) {
-      onCloseRef.current();
+      applyOffset(offset);
+      done?.();
       return;
     }
-    setClosing(true);
-    scheduleOffset(closeDistance(sheetElementRef.current, axis));
     timerRef.current = window.setTimeout(() => {
       timerRef.current = null;
-      onCloseRef.current();
-    }, SETTLE_MS);
-  }, [axis, clearTimer, scheduleOffset]);
+      setTransition(false);
+      done?.();
+    }, MOTION_MS);
+  }, [applyOffset, clearMotion, scheduleOffset, setTransition]);
+
+  const finishClose = useCallback(() => {
+    if (closingRef.current) return;
+    closingRef.current = true;
+    onCloseStartRef.current?.();
+    settle(closeDistance(sheetElementRef.current, axis), () => onCloseRef.current());
+  }, [axis, settle]);
 
   const resetOpen = useCallback(() => {
-    clearTimer();
-    setClosing(false);
-    setSettling(false);
-    setDragging(false);
-    scheduleOffset(0);
-  }, [clearTimer, scheduleOffset]);
+    closingRef.current = false;
+    dragRef.current = null;
+    clearMotion();
+    setTransition(false);
+    applyOffset(closeDistance(sheetElementRef.current, axis));
+    if (prefersReducedMotion()) {
+      applyOffset(0);
+      return;
+    }
+    openFrameRef.current = window.requestAnimationFrame(() => {
+      openFrameRef.current = null;
+      settle(0);
+    });
+  }, [applyOffset, axis, clearMotion, setTransition, settle]);
 
   const start = useCallback((id: number, clientX: number, clientY: number, target: EventTarget | null) => {
     if (!enabled || isHardExcluded(target) || (excludeControls && axis === "x" && isControl(target))) return false;
-    clearTimer();
+    clearMotion();
+    setTransition(false);
+    closingRef.current = false;
     const scrollViewport = closestScrollViewport(target);
     const initialScrollTop = scrollViewport?.scrollTop ?? 0;
     dragRef.current = {
@@ -141,10 +159,8 @@ export function useMobileSheetDrag({
       startedWithScrollableOffset: initialScrollTop > 0,
       scrollViewport,
     };
-    setClosing(false);
-    setSettling(false);
     return true;
-  }, [axis, clearTimer, enabled, excludeControls]);
+  }, [axis, clearMotion, enabled, excludeControls, setTransition]);
 
   const move = useCallback((id: number, clientX: number, clientY: number, preventDefault: () => void) => {
     const drag = dragRef.current;
@@ -171,7 +187,6 @@ export function useMobileSheetDrag({
         drag.startedWithScrollableOffset = false;
       }
       drag.active = true;
-      setDragging(true);
     }
 
     preventDefault();
@@ -185,44 +200,21 @@ export function useMobileSheetDrag({
     if (!drag || drag.id !== id) return;
     dragRef.current = null;
     if (!drag.active) return;
-    setDragging(false);
-
-    if (dragOffset(drag, axis) > closeThreshold(sheetElementRef.current, axis)) {
-      finishClose();
-      return;
-    }
-
-    if (prefersReducedMotion()) {
-      setSettling(false);
-      scheduleOffset(0);
-      return;
-    }
-    setSettling(true);
-    scheduleOffset(0);
-    timerRef.current = window.setTimeout(() => {
-      timerRef.current = null;
-      setSettling(false);
-    }, SETTLE_MS);
-  }, [axis, finishClose, scheduleOffset]);
+    if (dragOffset(drag, axis) > closeThreshold(sheetElementRef.current, axis)) finishClose();
+    else settle(0);
+  }, [axis, finishClose, settle]);
 
   const onPointerDown = useCallback((event: PointerEvent<HTMLElement>) => {
     if (event.pointerType === "touch" || (excludeControls && isControl(event.target))) return;
     const started = start(event.pointerId, event.clientX, event.clientY, event.target);
-    if (started && typeof event.currentTarget.setPointerCapture === "function") {
-      event.currentTarget.setPointerCapture(event.pointerId);
-    }
+    if (started && typeof event.currentTarget.setPointerCapture === "function") event.currentTarget.setPointerCapture(event.pointerId);
   }, [excludeControls, start]);
 
   const onPointerMove = useCallback((event: PointerEvent<HTMLElement>) => {
     if (event.pointerType === "touch") return;
-    move(
-      event.pointerId,
-      event.clientX,
-      event.clientY,
-      () => {
-        if (event.cancelable) event.preventDefault();
-      },
-    );
+    move(event.pointerId, event.clientX, event.clientY, () => {
+      if (event.cancelable) event.preventDefault();
+    });
   }, [move]);
 
   const onPointerEnd = useCallback((event: PointerEvent<HTMLElement>) => {
@@ -233,33 +225,9 @@ export function useMobileSheetDrag({
     end(event.pointerId);
   }, [end]);
 
-  const onTouchStart = useCallback((event: ReactTouchEvent<HTMLElement>) => {
-    const touch = event.changedTouches[0];
-    if (!touch) return;
-    start(touch.identifier, touch.clientX, touch.clientY, event.target);
-  }, [start]);
-
-  const onTouchMove = useCallback((event: ReactTouchEvent<HTMLElement>) => {
-    const drag = dragRef.current;
-    if (!drag) return;
-    const touch = Array.from(event.changedTouches).find((item) => item.identifier === drag.id);
-    if (!touch) return;
-    move(touch.identifier, touch.clientX, touch.clientY, () => {
-      if (event.cancelable) event.preventDefault();
-    });
-  }, [move]);
-
-  const onTouchEnd = useCallback((event: ReactTouchEvent<HTMLElement>) => {
-    const drag = dragRef.current;
-    if (!drag) return;
-    const touch = Array.from(event.changedTouches).find((item) => item.identifier === drag.id);
-    end(touch?.identifier ?? drag.id);
-  }, [end]);
-
   const onNativeTouchStart = useCallback((event: TouchEvent) => {
     const touch = event.changedTouches[0];
-    if (!touch) return;
-    start(touch.identifier, touch.clientX, touch.clientY, event.target);
+    if (touch) start(touch.identifier, touch.clientX, touch.clientY, event.target);
   }, [start]);
 
   const onNativeTouchMove = useCallback((event: TouchEvent) => {
@@ -279,12 +247,11 @@ export function useMobileSheetDrag({
     end(touch?.identifier ?? drag.id);
   }, [end]);
 
-  const setSheetRef = useCallback((element: HTMLElement | null) => {
+  const setGestureRef = useCallback((element: HTMLElement | null) => {
     removeNativeTouchRef.current?.();
     removeNativeTouchRef.current = null;
-    sheetElementRef.current = element;
+    gestureElementRef.current = element;
     if (!element) return;
-    applyOffset(currentOffsetRef.current);
     element.addEventListener("touchstart", onNativeTouchStart, { capture: true, passive: true });
     element.addEventListener("touchmove", onNativeTouchMove, { capture: true, passive: false });
     element.addEventListener("touchend", onNativeTouchEnd, { capture: true, passive: true });
@@ -295,36 +262,42 @@ export function useMobileSheetDrag({
       element.removeEventListener("touchend", onNativeTouchEnd, { capture: true });
       element.removeEventListener("touchcancel", onNativeTouchEnd, { capture: true });
     };
-  }, [applyOffset, onNativeTouchEnd, onNativeTouchMove, onNativeTouchStart]);
+  }, [onNativeTouchEnd, onNativeTouchMove, onNativeTouchStart]);
 
-  const reduceMotion = prefersReducedMotion();
-  const sheetStyle = {
-    transform: sheetTransform(axis),
-    transition: dragging || reduceMotion ? "none" : closing ? `transform ${SETTLE_MS}ms ease-in` : settling ? `transform ${SETTLE_MS}ms ease-out` : undefined,
-  } as CSSProperties;
+  const setSheetRef = useCallback((element: HTMLElement | null) => {
+    sheetElementRef.current = element;
+    if (!element) return;
+    setTransition(false);
+    applyOffset(closeDistance(element, axis));
+  }, [applyOffset, axis, setTransition]);
 
-  const backdropStyle = {
-    opacity: `var(${BACKDROP_OPACITY_VAR}, 1)`,
-    transition: dragging || reduceMotion ? "none" : closing ? `opacity ${SETTLE_MS}ms ease-in` : settling ? `opacity ${SETTLE_MS}ms ease-out` : undefined,
-  } as CSSProperties;
+  const setBackdropRef = useCallback((element: HTMLElement | null) => {
+    backdropElementRef.current = element;
+    if (!element) return;
+    setTransition(false);
+    applyOffset(currentOffsetRef.current);
+  }, [applyOffset, setTransition]);
 
   return {
     backdropRef: setBackdropRef,
-    backdropStyle,
+    backdropStyle: {
+      opacity: `var(${BACKDROP_OPACITY_VAR}, 1)`,
+      transition: reduceMotion ? "none" : undefined,
+    } as CSSProperties,
     closeWithAnimation: finishClose,
+    gestureRef: setGestureRef,
     resetOpen,
     sheetDragHandlers: {
       onPointerDownCapture: onPointerDown,
       onPointerMove,
       onPointerUp: onPointerEnd,
       onPointerCancel: onPointerEnd,
-      onTouchStartCapture: onTouchStart,
-      onTouchMove,
-      onTouchEnd,
-      onTouchCancel: onTouchEnd,
     },
     sheetRef: setSheetRef,
-    sheetStyle,
+    sheetStyle: {
+      transform: sheetTransform(axis),
+      transition: reduceMotion ? "none" : undefined,
+    } as CSSProperties,
   };
 }
 

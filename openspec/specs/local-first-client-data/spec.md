@@ -50,6 +50,20 @@ Brai clients SHALL preserve pending local events across page reloads, app restar
 - **THEN** the client flushes the pending local save before leaving the editor when possible
 - **AND** any leftover local draft is restored and converted into a pending Activity event on the next launch
 
+### Requirement: Goal creation from membership is one durable local intent
+Brai clients SHALL create a new Goal and its membership for the current work Item atomically before projecting either mutation.
+
+#### Scenario: User creates a Goal from Add to Goal
+- **WHEN** the user opens `Добавить в цель`, chooses `Создать цель`, and submits a valid title
+- **THEN** the client writes the Goal Activity create event and dependent `part_of` Relation create event in one Dexie transaction
+- **AND** both events share the required causal ordering and survive reload, restart, or offline use
+- **AND** the new Goal and membership appear optimistically only after that transaction commits
+
+#### Scenario: Existing Goal is selected
+- **WHEN** the user adds the current Item to one eligible Goal
+- **THEN** the client appends one membership without removing existing memberships
+- **AND** the picker excludes deleted, completed, and already-linked Goals
+
 ### Requirement: Deprecated client import paths are absent after cutover
 Brai SHALL not keep deprecated previous-client import logic in the active Next.js/Capacitor boot path after cutover.
 

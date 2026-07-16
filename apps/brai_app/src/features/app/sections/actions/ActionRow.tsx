@@ -37,6 +37,7 @@ export function ActionRow({
   onCloseDelete,
   dragHandle,
   mobileDragProps,
+  membershipControl,
   sortableRef,
   sortableStyle,
   sortableDragging = false,
@@ -62,6 +63,7 @@ export function ActionRow({
   onCloseDelete: () => void;
   dragHandle?: ReactNode;
   mobileDragProps?: HTMLAttributes<HTMLDivElement>;
+  membershipControl?: ReactNode;
   sortableRef?: (node: HTMLDivElement | null) => void;
   sortableStyle?: CSSProperties;
   sortableDragging?: boolean;
@@ -259,6 +261,20 @@ export function ActionRow({
         </div>
       </div>
       <div className="action-row-controls pointer-events-none absolute inset-y-0 right-0 z-[1] flex items-stretch justify-end">
+        {membershipControl ? (
+          <div
+            className={cx(
+              "action-membership-control grid min-h-[54px] w-0 min-w-0 place-items-center overflow-hidden text-muted-foreground transition-[width,opacity,transform] duration-150 [&_button>span]:sr-only [&_button]:h-full [&_button]:w-full",
+              actionControlOpen
+                ? "visible pointer-events-auto w-9 scale-100 opacity-[0.65] max-[860px]:w-[46px]"
+                : "invisible pointer-events-none scale-[0.96] opacity-0",
+              "group-hover:visible group-hover:pointer-events-auto group-hover:w-9 group-hover:scale-100 group-hover:opacity-[0.65] group-focus-within:visible group-focus-within:pointer-events-auto group-focus-within:w-9 group-focus-within:scale-100 group-focus-within:opacity-[0.65] max-[860px]:group-hover:w-[46px] max-[860px]:group-focus-within:w-[46px] min-[861px]:group-hover:w-9 min-[861px]:group-focus-within:w-9",
+            )}
+            data-action-row-control
+          >
+            {membershipControl}
+          </div>
+        ) : null}
         <button
           type="button"
           className={cx(

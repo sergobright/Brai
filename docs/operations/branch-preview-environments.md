@@ -113,11 +113,13 @@ git config core.hooksPath .githooks
 Before a final preview-class implementation handoff, run:
 
 ```bash
-node scripts/brai-task.mjs release-notes --short "..." --details "..." --reason "..." --testing "..."
+node scripts/brai-task.mjs release-notes --short "..." --details "..." --reason "..." --testing "..." \
+  --detail "Отдельное изменение::Что именно изменено, где и с каким эффектом." \
+  --detail "Другое изменение::Его самостоятельное описание без повторения общего резюме."
 scripts/brai-preview-handoff.sh
 ```
 
-The verifier requires a clean tree, pushed `origin/<codex-branch>` at `HEAD`, successful `Brai delivery` jobs including `deploy-preview`, explicit Russian release notes with user-testing guidance, and a ready preview slot from the slot registry or Temporal. Once the exact branch/commit is ready, handoff writes that authored guidance into the locked slot registry; Admin reads it as immutable test instructions and does not generate a summary on page load. Handoff then writes an ignored `.brai-task/preview-handoff.json` receipt that the Codex `Stop` hook checks.
+The verifier requires a clean tree, pushed `origin/<codex-branch>` at `HEAD`, successful `Brai delivery` jobs including `deploy-preview`, explicit Russian release notes with user-testing guidance and at least one explicit atomic `--detail`, and a ready preview slot from the slot registry or Temporal. Parent details summarize the whole release; each `--detail` covers one independent change and must not repeat that summary. Once the exact branch/commit is ready, handoff writes that authored guidance into the locked slot registry; Admin reads it as immutable test instructions and does not generate a summary on page load. Handoff then writes an ignored `.brai-task/preview-handoff.json` receipt that the Codex `Stop` hook checks.
 `scripts/brai-preview-handoff.sh` is not a one-shot probe anymore: by default it keeps polling transient `queued` / `in_progress` preview states until the preview is actually ready or a real failing blocker appears. Tune the polling window only through `BRAI_PREVIEW_HANDOFF_WAIT_MS` and `BRAI_PREVIEW_HANDOFF_POLL_MS` when you intentionally need a different budget.
 
 The final response format for preview-class work is the top-level handoff contract in `AGENTS.md`: after this command succeeds, the final implementation response starts with the command's `<slot emoji> Preview` header, then includes preview URL, branch, and commit before any summary. Do not print a preview emoji in intermediary updates, status replies, questions, acceptance monitoring, no-preview handoffs, or any reply where the slot or deployed commit is unverified. If the preview letter or URL is missing because every slot is occupied, the response must say the branch is queued and include queue position/source when available. If it is missing for any other reason, the response must say exactly which push, CI, or deploy step blocked it. Ordinary preview-class `codex/*` branch push/deploy is standing Brai CI/CD automation and must not be treated as an optional manual confirmation step or as a reason to stop the task while delivery is still active.
@@ -236,7 +238,7 @@ Production runtime credentials live in `/etc/brai/brai-api.env`, including `BRAI
 Preview and Dev runtime credentials live in `/srv/projects/brai-envs/<environment>/brai-api.env`
 and are deploy-writable so CI can update schema-scoped DSNs after Supabase schema creation.
 After `BRAI_SUPAVISOR_TENANT_ISOLATION=true` is enabled by the accepted maintenance rollout,
-production DSNs must use `brightos-prod`; Dev and Preview DSNs must use `brightos-nonprod`.
+production DSNs must use `brai-prod`; Dev and Preview DSNs must use `brai-nonprod`.
 Deployment rewrites only the Supavisor tenant suffix in the URL username and preserves the password,
 database, query parameters, and schema `search_path`. Deployment fails before service cutover when
 the target DSN has the wrong tenant.
@@ -254,8 +256,10 @@ sudo /srv/opt/brai-supabase-maintenance.sh --apply reconfigure-pooler
 The command takes production, Dev, Preview A-E, staging, release, and preview-slot locks in canonical
 order; stops dependent API services; recreates only Supavisor; starts production first; and returns
 previously active non-production services one by one only after health/auth canaries. The wrapper
-must create both tenants before any runtime DSN is switched. Failed Preview slots remain stopped and
-are restored only by their normal deploy workflow. If a canary fails, leave the offending
+must delete persistent metadata for legacy `brightos`, `brightos-prod`, and `brightos-nonprod`
+tenants, recreate only `brai-prod` and `brai-nonprod`, and verify that exact target set before any
+runtime DSN is switched or API client is restarted. Failed Preview slots remain stopped and are
+restored only by their normal deploy workflow. If a canary fails, leave the offending
 non-production service stopped, reset only Supavisor, and repeat the production canary. Never widen
 the recovery into a whole-stack or database recreation.
 

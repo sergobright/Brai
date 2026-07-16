@@ -1,4 +1,4 @@
-import { moscowTime, sessionDuration } from "@/shared/time/format";
+import { formatDisplayTime, sessionDuration } from "@/shared/time/format";
 import type { FocusSessionInterval, TimerSession } from "@/shared/types/timer";
 import { canonicalSessionId } from "./focusHistoryEditModel";
 
@@ -21,8 +21,8 @@ export function focusHistoryRows(sessions: TimerSession[]): FocusHistoryRow[] {
     const intervals = contiguousSessionIntervals(session);
     const actionIntervals = intervals.filter((interval) => interval.activity_id);
     return {
-      arrivalTime: moscowTime(session.ended_at_utc),
-      departureTime: moscowTime(session.started_at_utc),
+      arrivalTime: formatDisplayTime(session.ended_at_utc),
+      departureTime: formatDisplayTime(session.started_at_utc),
       destination: historyTitle(session, actionIntervals),
       duration: formatCompactSessionDuration(sessionDuration(session)),
       endedAtUtc: session.ended_at_utc,

@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 const DEFAULT_ROOT = fileURLToPath(new URL("../../..", import.meta.url));
 const ROOT = process.env.BRAI_ROOT ?? DEFAULT_ROOT;
 
-export async function deployBranch({ branch, sha, baseSha = "" }) {
+export async function deployBranch({ branch, sha, baseSha = "", productBaseSha = "" }) {
   assertSafeBranch(branch);
   assertSafeSha(sha);
 
@@ -19,7 +19,8 @@ export async function deployBranch({ branch, sha, baseSha = "" }) {
         ...gitEnv,
         BRAI_BRANCH: branch,
         BRAI_COMMIT: sha,
-        BRAI_BASE_COMMIT: baseSha
+        BRAI_BASE_COMMIT: baseSha,
+        BRAI_PRODUCT_BASE_COMMIT: productBaseSha
       })
     });
     return {
@@ -62,18 +63,15 @@ export async function enableNoPreviewAutoMerge({ branch, sha }) {
       stderr: ""
     };
   }
-
-  return withSourceCheckout({ branch, sha }, async (cwd, gitEnv) =>
-    runExistingScript("deploy/scripts/accept-preview.sh", [branch], {
-      cwd,
-      env: await deployEnv({
-        ...gitEnv,
-        BRAI_BRANCH: branch,
-        BRAI_ACCEPT_NO_PREVIEW_ONLY: "true",
-        BRAI_ACCEPT_ALLOW_DETACHED_ROOT: "true"
-      })
-    })
-  );
+  const openPull = await openPullForHead(branch, sha);
+  return {
+    code: 0,
+    awaitingOwnerHandoff: true,
+    stdout: openPull
+      ? `No-preview PR #${openPull.number} already exists; task-owner handoff carries release metadata.\n`
+      : `Awaiting task-owner no-preview handoff for ${branch}@${sha}; ignored work metadata is not synthesized in CI.\n`,
+    stderr: ""
+  };
 }
 
 async function mergedPullForHead(branch, sha) {
@@ -99,6 +97,19 @@ async function mergedPullForHead(branch, sha) {
   }
 }
 
+async function openPullForHead(branch, sha) {
+  const result = await runCommand("gh", [
+    "pr", "list", "--base", "main", "--head", branch, "--state", "open", "--limit", "100",
+    "--json", "number,url,headRefOid"
+  ], { cwd: ROOT, env: await deployEnv(), allowFailure: true });
+  if (result.code !== 0) return null;
+  try {
+    return JSON.parse(result.stdout).find((pull) => pull?.headRefOid === sha && pull?.number && pull?.url) ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export function exactMergedPull(pulls, sha) {
   return Array.isArray(pulls)
     ? pulls.find((pull) => pull?.headRefOid === sha && pull?.mergedAt && pull?.number && pull?.url) ?? null
@@ -108,7 +119,7 @@ export function exactMergedPull(pulls, sha) {
 export async function completeAcceptedPreviews({ targetBranch = "main", targetEnvironment = "prod", targetCommit, mode }) {
   assertSafeBranch(targetBranch);
   assertSafeSha(targetCommit);
-  if (!["all", "promote", "release"].includes(mode)) throw new Error(`Unsupported accepted preview mode: ${mode}`);
+  if (!["all", "validate", "promote", "release"].includes(mode)) throw new Error(`Unsupported accepted preview mode: ${mode}`);
 
   return withSourceCheckout({ branch: targetBranch, sha: targetCommit }, async (cwd, gitEnv) =>
     runExistingScript("deploy/scripts/ci-ssh-complete-accepted-previews.sh", [], {
@@ -177,6 +188,7 @@ async function withSourceCheckout({ branch, sha }, callback) {
     await runCommand("git", ["clone", "--no-checkout", cloneSourceForRemote(remote), checkout], {
       env: { ...process.env, ...remote.env }
     });
+    await fetchAcceptedBaseFromRoot(checkout);
     await runCommand("git", ["-C", checkout, "remote", "set-url", "origin", remote.url]);
     const directCheckout = await runCommand("git", ["-C", checkout, "checkout", "--detach", sha], { allowFailure: true });
     if (directCheckout.code !== 0) {
@@ -187,6 +199,29 @@ async function withSourceCheckout({ branch, sha }, callback) {
   } finally {
     await rm(tempRoot, { recursive: true, force: true });
   }
+}
+
+async function fetchAcceptedBaseFromRoot(checkout) {
+  for (const refspec of acceptedBaseRefspecs()) {
+    const result = await runCommand("git", [
+      "-C",
+      checkout,
+      "fetch",
+      "--no-tags",
+      ROOT,
+      refspec
+    ], { allowFailure: true });
+    if (result.code === 0) return;
+  }
+}
+
+export function acceptedBaseRefspecs(branch = process.env.BRAI_ACCEPT_BASE || "main") {
+  if (!/^[A-Za-z0-9._-]+$/.test(branch)) throw new Error(`Unsupported accepted base branch: ${branch}`);
+  const target = `refs/remotes/origin/${branch}`;
+  return [
+    `+refs/remotes/origin/${branch}:${target}`,
+    `+refs/heads/${branch}:${target}`
+  ];
 }
 
 export function cloneSourceForRemote(remote) {

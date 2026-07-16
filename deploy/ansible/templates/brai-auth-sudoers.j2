@@ -1,0 +1,19 @@
+{{ brai_deploy_user }} ALL=(root) NOPASSWD: {{ brai_auth_runtime_helper }} pull-only *
+{{ brai_deploy_user }} ALL=(root) NOPASSWD: {{ brai_auth_runtime_helper }} deploy *
+{{ brai_deploy_user }} ALL=(root) NOPASSWD: {{ brai_auth_runtime_helper }} route-enable *
+{{ brai_deploy_user }} ALL=(root) NOPASSWD: {{ brai_auth_runtime_helper }} route-disable *
+{{ brai_deploy_user }} ALL=(root) NOPASSWD: {{ brai_auth_runtime_helper }} preflight-rollback *
+{{ brai_deploy_user }} ALL=(root) NOPASSWD: {{ brai_auth_runtime_helper }} rollback *
+{{ brai_deploy_user }} ALL=(root) NOPASSWD: {{ brai_auth_runtime_helper }} remove *
+{{ brai_deploy_user }} ALL=(root) NOPASSWD: {{ brai_prod_api_env_helper }} stage *
+{{ brai_deploy_user }} ALL=(root) NOPASSWD: {{ brai_prod_api_env_helper }} rollback *
+{{ brai_deploy_user }} ALL=(root) NOPASSWD: {{ brai_prod_api_env_helper }} commit *
+{{ brai_deploy_user }} ALL=(root) NOPASSWD: {{ brai_repo }}/deploy/scripts/apply-main-infra.sh --check brai-auth-bootstrap
+{{ brai_deploy_user }} ALL=(root) NOPASSWD: {{ brai_repo }}/deploy/scripts/apply-main-infra.sh --apply brai-auth-bootstrap
+{% for maintainer in brai_operation_maintainers %}
+{{ maintainer }} ALL=(root) NOPASSWD: {{ brai_prod_api_env_helper }} stage *
+{{ maintainer }} ALL=(root) NOPASSWD: {{ brai_prod_api_env_helper }} rollback *
+{{ maintainer }} ALL=(root) NOPASSWD: {{ brai_prod_api_env_helper }} commit *
+{{ maintainer }} ALL=(root) NOPASSWD: {{ brai_repo }}/deploy/scripts/apply-main-infra.sh --check brai-auth-bootstrap
+{{ maintainer }} ALL=(root) NOPASSWD: {{ brai_repo }}/deploy/scripts/apply-main-infra.sh --apply brai-auth-bootstrap
+{% endfor %}

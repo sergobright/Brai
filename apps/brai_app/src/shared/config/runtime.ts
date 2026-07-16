@@ -7,6 +7,7 @@ export type BraiRuntimeConfig = {
   previewSlot?: string;
   branch?: string;
   commit?: string;
+  productVersion?: number;
   webApiBase?: string;
   androidApiBase?: string;
   otaChannel?: string;
@@ -27,6 +28,7 @@ export const APP_ENVIRONMENT = process.env.NEXT_PUBLIC_BRAI_ENVIRONMENT || "prod
 export const APP_PREVIEW_SLOT = process.env.NEXT_PUBLIC_BRAI_PREVIEW_SLOT || "";
 export const APP_BRANCH = process.env.NEXT_PUBLIC_BRAI_BRANCH || "";
 export const APP_COMMIT = process.env.NEXT_PUBLIC_BRAI_COMMIT || "";
+export const APP_PRODUCT_VERSION = positiveInteger(process.env.NEXT_PUBLIC_BRAI_PRODUCT_VERSION);
 export const APP_OTA_CHANNEL = process.env.NEXT_PUBLIC_BRAI_OTA_CHANNEL || "app.brai.one/mobile-update";
 export const ENVIRONMENT_BADGE_LABEL =
   APP_ENVIRONMENT === "dev"
@@ -40,7 +42,7 @@ export function runtimeConfig(): BraiRuntimeConfig {
   return window.__BRAI_RUNTIME_CONFIG__ ?? {};
 }
 
-function runtimeValue(key: keyof BraiRuntimeConfig, fallback: string): string {
+function runtimeValue(key: Exclude<keyof BraiRuntimeConfig, "productVersion">, fallback: string): string {
   return runtimeConfig()[key] || fallback;
 }
 
@@ -62,6 +64,11 @@ export function appPreviewSlot(): string {
 
 export function appCommit(): string {
   return runtimeValue("commit", APP_COMMIT);
+}
+
+/** Returns the accepted Product baseline embedded in this client artifact. */
+export function installedProductVersion(): number | null {
+  return positiveInteger(runtimeConfig().productVersion) ?? APP_PRODUCT_VERSION ?? null;
 }
 
 export function environmentBadgeLabel(): string {
@@ -93,4 +100,9 @@ function currentEnvironmentBadgeLabel(): string {
 
 function noopSubscribe(): () => void {
   return () => {};
+}
+
+function positiveInteger(value: unknown): number | undefined {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
 }

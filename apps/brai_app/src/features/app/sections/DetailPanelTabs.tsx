@@ -5,7 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { ChevronDown, Download, File, X } from "lucide-react";
 import { defaultApiBase } from "@/shared/config/runtime";
 import { BraiApi, type EventLogRow } from "@/shared/api/braiApi";
-import { getDisplayTimeZone } from "@/shared/time/format";
+import { formatDisplayDateTime } from "@/shared/time/format";
 import type { ActivityItem } from "@/shared/types/activities";
 import type { InboxItem } from "@/shared/types/inbox";
 import { Button } from "@/shared/ui/button";
@@ -294,13 +294,10 @@ function humanEventTitle(event: EventLogRow): string {
 }
 
 function formatEventDate(value: string): string {
-  const date = new Date(value);
-  if (!Number.isFinite(date.getTime())) return value;
-  return new Intl.DateTimeFormat("ru-RU", {
+  return formatDisplayDateTime(value, {
     dateStyle: "long",
     timeStyle: "medium",
-    timeZone: getDisplayTimeZone(),
-  }).format(date);
+  }) || value;
 }
 
 export function DetailDbReference({ kind }: { kind: DetailPanelKind }) {

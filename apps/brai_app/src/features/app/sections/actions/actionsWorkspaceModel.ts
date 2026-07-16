@@ -1,4 +1,10 @@
 import type { ActivityItem, ActivitiesState } from "@/shared/types/activities";
+import type {
+  ContextAudit,
+  ContextAuditItem,
+  ContextDecision,
+  ContextDecisionsState,
+} from "@/shared/types/contextDecisions";
 import type { InboxItem, InboxState } from "@/shared/types/inbox";
 import type { RelationItem, RelationsState } from "@/shared/types/relations";
 
@@ -53,6 +59,13 @@ export type ActionsWorkspaceView = {
   newItems: WorkspaceWorkItem[];
   doneItems: WorkspaceWorkItem[];
   allItems: WorkspaceWorkItem[];
+  workItems: WorkspaceWorkItem[];
+};
+
+export type InlineContextReviews = {
+  global: ContextDecisionsState;
+  byGoal: Map<string, ContextDecisionsState>;
+  byItem: Map<string, ContextDecisionsState>;
 };
 
 export function goalFilterId(goalId: string): WorkspaceFilterId {
@@ -112,7 +125,111 @@ export function buildActionsWorkspace({
     newItems: allItems.filter((item) => item.status === "New"),
     doneItems: allItems.filter((item) => item.status === "Done"),
     allItems,
+    workItems: work,
   };
+}
+
+/** Partitions review cards by their single inline owner, with unavailable subjects falling back to All. */
+export function partitionContextReviews(state: ContextDecisionsState, workspace: ActionsWorkspaceView): InlineContextReviews {
+  const buckets: InlineContextReviews = {
+    global: reviewState(state),
+    byGoal: new Map(),
+    byItem: new Map(),
+  };
+  const goalIds = new Set([...workspace.activeGoals, ...workspace.completedGoals].map((goal) => goal.id));
+  const itemIds = new Set(workspace.workItems.map((item) => item.id));
+
+  for (const decision of state.decisions) addDecision(buckets, reviewOwner(decision, goalIds, itemIds), decision, state);
+  for (const audit of state.audits) addAudit(buckets, audit, goalIds, itemIds, state);
+  buckets.global.notifications = state.notifications;
+  return buckets;
+}
+
+function reviewOwner(
+  decision: Pick<ContextDecision, "decision_kind" | "subject_items_id" | "proposal">,
+  goalIds: Set<string>,
+  itemIds: Set<string>,
+): { kind: "goal" | "item"; id: string } | null {
+  if (decision.decision_kind === "goal_plan") {
+    const goalId = decision.subject_items_id || stringValue(decision.proposal.goal_items_id);
+    return goalId && goalIds.has(goalId) ? { kind: "goal", id: goalId } : null;
+  }
+  if (decision.decision_kind === "relation_add" || decision.decision_kind === "activity_type_change") {
+    const itemId = decision.subject_items_id;
+    return itemId && itemIds.has(itemId) ? { kind: "item", id: itemId } : null;
+  }
+  return null;
+}
+
+function addDecision(
+  buckets: InlineContextReviews,
+  owner: { kind: "goal" | "item"; id: string } | null,
+  decision: ContextDecision,
+  source: ContextDecisionsState,
+) {
+  reviewBucket(buckets, owner, source).decisions.push(decision);
+}
+
+function addAudit(
+  buckets: InlineContextReviews,
+  audit: ContextAudit,
+  goalIds: Set<string>,
+  itemIds: Set<string>,
+  source: ContextDecisionsState,
+) {
+  const items = audit.items ?? [];
+  if (items.length === 0) {
+    buckets.global.audits.push(audit);
+    return;
+  }
+  const grouped = new Map<string, { owner: { kind: "goal" | "item"; id: string } | null; items: ContextAuditItem[] }>();
+  for (const item of items) {
+    const owner = reviewOwner({
+      decision_kind: item.decision_kind,
+      subject_items_id: item.trigger_items_id ?? null,
+      proposal: item.proposal,
+    }, goalIds, itemIds);
+    const key = owner ? `${owner.kind}:${owner.id}` : "global";
+    const group = grouped.get(key) ?? { owner, items: [] };
+    group.items.push(item);
+    grouped.set(key, group);
+  }
+  for (const group of grouped.values()) {
+    reviewBucket(buckets, group.owner, source).audits.push({
+      ...audit,
+      decision_ids: group.items.map((item) => item.decisions_id),
+      items: group.items,
+    });
+  }
+}
+
+function reviewBucket(
+  buckets: InlineContextReviews,
+  owner: { kind: "goal" | "item"; id: string } | null,
+  source: ContextDecisionsState,
+): ContextDecisionsState {
+  if (!owner) return buckets.global;
+  const map = owner.kind === "goal" ? buckets.byGoal : buckets.byItem;
+  const existing = map.get(owner.id);
+  if (existing) return existing;
+  const created = reviewState(source);
+  map.set(owner.id, created);
+  return created;
+}
+
+function reviewState(source: ContextDecisionsState): ContextDecisionsState {
+  return {
+    server_time_utc: source.server_time_utc,
+    server_revision: source.server_revision,
+    decisions: [],
+    audits: [],
+    notifications: [],
+    next_cursor: null,
+  };
+}
+
+function stringValue(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
 }
 
 export function visibleGoalBadges(item: WorkspaceWorkItem): { named: GoalMembership[]; remaining: number } {

@@ -1,15 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useRef, type ReactNode } from "react";
-import { X } from "lucide-react";
 import { installAndroidBackHandler } from "@/shared/platform/platform";
-import { Button } from "@/shared/ui/button";
 import { ScrollArea } from "@/shared/ui/scroll-area";
-import { Sheet, SheetClose, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/shared/ui/sheet";
 import { cx } from "../appUtils";
+import { useMobileSheetDrag } from "../hooks/useMobileSheetDrag";
 
 export function MobileProfileDrawer({ children, label, onClose }: { children?: ReactNode; label?: string; onClose: () => void }) {
-  const closedRef = useRef(false);
+  const suppressPopRef = useRef(false);
+  const dialogRef = useRef<HTMLElement | null>(null);
   const onCloseRef = useRef(onClose);
   const openerRef = useRef<HTMLElement | null>(
     typeof document !== "undefined" && document.activeElement instanceof HTMLElement && document.activeElement !== document.body
@@ -17,10 +16,7 @@ export function MobileProfileDrawer({ children, label, onClose }: { children?: R
       : null,
   );
   const drawerLabel = label ?? (children ? "Списки действий" : "Меню");
-  const closeMenu = useCallback((restoreHistory = true) => {
-    if (closedRef.current) return;
-    closedRef.current = true;
-    if (restoreHistory && window.history.state?.braiMobileMenu) window.history.back();
+  const finishClose = useCallback(() => {
     onCloseRef.current();
     const opener = openerRef.current;
     if (opener?.isConnected) {
@@ -29,21 +25,78 @@ export function MobileProfileDrawer({ children, label, onClose }: { children?: R
       }));
     }
   }, []);
+  const { backdropRef, backdropStyle, closeWithAnimation, gestureRef, resetOpen, sheetDragHandlers, sheetRef, sheetStyle } = useMobileSheetDrag({
+    axis: "x",
+    excludeControls: true,
+    onClose: finishClose,
+  });
+  const setBackdropGestureRef = useCallback((element: HTMLDivElement | null) => {
+    gestureRef(element);
+    backdropRef(element);
+  }, [backdropRef, gestureRef]);
+  const setSheetDialogRef = useCallback((element: HTMLElement | null) => {
+    dialogRef.current = element;
+    sheetRef(element);
+  }, [sheetRef]);
+  const closeMenu = useCallback((restoreHistory = true) => {
+    if (restoreHistory && window.history.state?.braiMobileMenu) {
+      suppressPopRef.current = true;
+      window.history.back();
+    }
+    closeWithAnimation();
+  }, [closeWithAnimation]);
 
   useEffect(() => {
     onCloseRef.current = onClose;
   }, [onClose]);
 
   useEffect(() => {
-    closedRef.current = false;
+    resetOpen();
     if (window.history.state?.braiMobileMenu) window.history.replaceState({ ...window.history.state, braiMobileMenu: true }, "", window.location.href);
     else window.history.pushState({ ...window.history.state, braiMobileMenu: true }, "", window.location.href);
-    function onPopState() { closeMenu(false); }
+    function onPopState() {
+      if (suppressPopRef.current) {
+        suppressPopRef.current = false;
+        return;
+      }
+      closeMenu(false);
+    }
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
-  }, [closeMenu]);
+  }, [closeMenu, resetOpen]);
 
   useEffect(() => installAndroidBackHandler(() => { closeMenu(); return true; }), [closeMenu]);
+  useEffect(() => {
+    const focusFrame = window.requestAnimationFrame(() => {
+      dialogRef.current?.querySelector<HTMLElement>(FOCUSABLE_SELECTOR)?.focus();
+    });
+    function onKeyDown(event: KeyboardEvent) {
+      const dialog = dialogRef.current;
+      if (!dialog) return;
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeMenu();
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const focusable = Array.from(dialog.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR));
+      if (focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    }
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.cancelAnimationFrame(focusFrame);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [closeMenu]);
   useEffect(() => {
     const close = () => closeMenu();
     window.addEventListener("brai:close-mobile-profile-drawer", close);
@@ -51,36 +104,37 @@ export function MobileProfileDrawer({ children, label, onClose }: { children?: R
   }, [closeMenu]);
 
   return (
-    <Sheet open onOpenChange={(open) => { if (!open) closeMenu(); }}>
-      <SheetContent
-        side="left"
-        showCloseButton={false}
-        overlayClassName="mobile-menu-backdrop z-[90] bg-foreground/15 dark:bg-background/80"
+    <div
+      ref={setBackdropGestureRef}
+      className="mobile-menu-backdrop fixed inset-0 z-[90] bg-foreground/15 dark:bg-background/80"
+      style={backdropStyle}
+      data-nav-swipe-exclusion
+      onClick={() => closeMenu()}
+      {...sheetDragHandlers}
+    >
+      <aside
+        ref={setSheetDialogRef}
         className={cx(
-          "mobile-profile-drawer z-[90] gap-0 overflow-hidden border-r border-border bg-card px-0 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] shadow-xl",
+          "mobile-profile-drawer relative z-[1] flex h-full flex-col overflow-hidden border-r border-border bg-card pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] shadow-xl [touch-action:pan-y] will-change-transform",
           children ? "w-[min(86vw,22rem)] sm:max-w-[22rem]" : "w-16 sm:max-w-16",
         )}
-        data-nav-swipe-exclusion
+        style={sheetStyle}
+        aria-label={drawerLabel}
         aria-modal="true"
+        role="dialog"
+        onClick={(event) => event.stopPropagation()}
       >
-        <SheetHeader className="sr-only">
-          <SheetTitle>{drawerLabel}</SheetTitle>
-          <SheetDescription>Навигация по разделу</SheetDescription>
-        </SheetHeader>
-        <div className="flex min-h-11 shrink-0 justify-end px-2">
-          <SheetClose asChild>
-            <Button type="button" variant="ghost" size="icon-sm" className="size-11" aria-label="Закрыть меню">
-              <X aria-hidden="true" />
-            </Button>
-          </SheetClose>
+        <div aria-label={drawerLabel} className="flex min-h-0 flex-1 flex-col">
+          <ScrollArea className="min-h-0 flex-1">
+            <div className={children ? "px-3 pb-3" : "px-2 pb-3"}>{children}</div>
+          </ScrollArea>
         </div>
-        <ScrollArea className="min-h-0 flex-1">
-          <div className={children ? "px-3 pb-3" : "px-2 pb-3"}>{children}</div>
-        </ScrollArea>
-      </SheetContent>
-    </Sheet>
+      </aside>
+    </div>
   );
 }
+
+const FOCUSABLE_SELECTOR = "button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex='-1'])";
 
 export function requestMobileProfileDrawerClose() {
   if (typeof window !== "undefined") window.dispatchEvent(new Event("brai:close-mobile-profile-drawer"));

@@ -76,6 +76,19 @@ test('version endpoint returns build ledger, APK line, and release-index OTA tar
   }
 });
 
+test('version endpoint does not derive an OTA artifact version from the work build counter', async () => {
+  const fixture = await createFixture(['2026-07-14T12:00:00.000Z']);
+  try {
+    const response = await request(fixture.url, '/v1/version');
+    assert.equal(response.status, 200);
+    assert.equal(response.body.version, '0.0.0');
+    assert.equal(response.body.ota_version, '0.0.0');
+    assert.equal(response.body.parts.build, 1);
+  } finally {
+    await fixture.close();
+  }
+});
+
 test('version endpoint returns preview APK release metadata from release index', async () => {
   const fixture = await createFixture(['2026-06-29T12:00:00.000Z'], {
     releaseFiles: {

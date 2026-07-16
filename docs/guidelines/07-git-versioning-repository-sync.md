@@ -122,6 +122,8 @@ deploy/scripts/accept-preview.sh <codex-branch>
 
 Then monitor the PR/merge queue, `deploy-prod`, metadata promotion, and preview-slot release until completion or a concrete blocker.
 
+When the accepted PR is merged, rerun the same `deploy/scripts/accept-preview.sh <codex-branch>` from the still-present task worktree. This idempotently performs local OpenSpec closure for its marker-linked changes; it does not create a commit, PR, or Preview and it refuses any change with unfinished substantive work.
+
 Acceptance PRs created by `accept-preview.sh` are serialized by PR number. If an earlier open `Accept …` PR from `codex/*` targets `main`, a later acceptance records `waiting_for_turn` and must be retried after the earlier PR merges or closes. Unaccepted/manual PRs do not occupy this queue. This keeps `main` stable while a reconciled accepted branch reruns its exact preview and prevents repeated reconcile/preview cycles without weakening exact-head verification.
 
 If acceptance reports `mergeStateStatus: DIRTY` or `BEHIND`, run the same-branch `acceptance-reconcile` command, resolve conflicts if any, push the same branch, rerun preview handoff for the new head, and rerun `accept-preview.sh`. Do not create a replacement branch or PR for accepted conflict resolution.

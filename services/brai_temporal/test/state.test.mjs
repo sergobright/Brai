@@ -346,6 +346,14 @@ test("prod promotion completes after accepted previews, version record, and depl
   assert.equal(state.gates.complete, true);
 });
 
+test("support merge can reconcile work without claiming that a build was recorded", () => {
+  const state = createPromotionState({ target: "prod", sha: "support1" });
+  applyPromotionEvent(state, { type: "prod_deploy_started", sha: "support1" });
+  applyPromotionEvent(state, { type: "prod_work_reconciled", sha: "support1" });
+  assert.equal(state.tasks.version_recorded.status, "passed");
+  assert.equal(state.status, "prod_work_reconciled");
+});
+
 test("runtime preview is ready only after checks, Supabase, Goal agents, and deploy pass", () => {
   const state = createPreviewState({ branch: "codex/runtime", sha: "r1" });
   applyPreviewEvent(state, { type: "checks_passed", sha: "r1" });

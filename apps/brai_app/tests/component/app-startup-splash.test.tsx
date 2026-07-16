@@ -25,6 +25,7 @@ describe("AppStartupSplash", () => {
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
     delete (window as Window & { __braiStartupStartedAt?: number }).__braiStartupStartedAt;
+    delete document.documentElement.dataset.braiStartupMounted;
   });
 
   it("renders one centered Brai logo with the CSS timeline immediately", () => {
@@ -33,6 +34,7 @@ describe("AppStartupSplash", () => {
     const splash = document.querySelector("[data-startup-splash]");
     const logo = splash?.querySelector("[data-startup-logo]");
     expect(splash).toBeInTheDocument();
+    expect(document.documentElement.dataset.braiStartupMounted).toBe("true");
     expect(within(splash as HTMLElement).getByRole("img", { name: "Brai" })).toBeInTheDocument();
     expect(document.querySelectorAll("[data-startup-logo]")).toHaveLength(1);
     expect(logo).toHaveStyle({ animation: "brai-startup-logo-fade 1000ms linear both" });

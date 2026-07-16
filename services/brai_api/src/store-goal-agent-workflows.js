@@ -111,10 +111,10 @@ export const goalAgentWorkflowMethods = {
       throw workflowError('goal_not_found', 404);
     }
     if (goal.status !== 'New') throw workflowError('goal_not_eligible', 409);
-    return ensureExecution(this, {
+    return atomic(this, () => ensureExecution(this, {
       agentId: 'goal.planner', subjectKind: 'goal', subjectId: goal.id,
       triggerKind: 'explicit_plan_request', triggerRevision, nowIso
-    });
+    }))();
   },
 
   noteGoalDiscoveryChanges({ count = 1, nowIso } = {}) {
@@ -372,6 +372,14 @@ export const goalAgentWorkflowMethods = {
 function ensureExecution(store, input) {
   if (store.goalAgentsEnabled === false) return null;
   const userId = requireUser();
+  if (input.agentId === 'goal.planner') {
+    if (!store.db.currentTxId) return store.db.transaction(() => ensureExecution(store, input))();
+    store.db.prepare('SELECT pg_advisory_xact_lock(hashtext(?))').get(
+      JSON.stringify([userId, 'goal_plan', input.subjectId])
+    );
+    const unresolved = unresolvedGoalPlanExecution(store, userId, input.subjectId);
+    if (unresolved) return formatExecution(unresolved);
+  }
   if (!AGENTS.has(input.agentId)) throw workflowError('goal_agent_unknown', 400);
   const agent = store.getAgent(input.agentId);
   if (!agent) throw workflowError('goal_agent_not_registered', 503);
@@ -384,10 +392,12 @@ function ensureExecution(store, input) {
   const environment = validEnvironment(store.goalAgentEnvironment);
   const now = input.nowIso ?? new Date().toISOString();
   const revision = nonNegative(input.triggerRevision);
+  const identityRevision = input.agentId === 'goal.planner'
+    ? `${revision ?? 0}-request-${nextGoalPlanOrdinal(store, userId, input.subjectId)}`
+    : revision ?? input.watermarkTo ?? 0;
   const workflowId = stableWorkflowId({
     environment, agentId: input.agentId, userId, subjectId: input.subjectId,
-    triggerKind: input.triggerKind, definitionVersion,
-    revision: revision ?? input.watermarkTo ?? 0
+    triggerKind: input.triggerKind, definitionVersion, revision: identityRevision
   });
   const contextCapability = randomBytes(32).toString('base64url');
   const payload = {
@@ -428,6 +438,30 @@ function ensureExecution(store, input) {
   );
   if (!row) throw workflowError('workflow_id_conflict', 409);
   return formatExecution(row);
+}
+
+function unresolvedGoalPlanExecution(store, userId, goalId) {
+  return store.db.prepare(`
+    SELECT execution.* FROM context_decisions decision
+    JOIN workflow_executions execution ON execution.id = decision.workflow_execution_id
+    WHERE decision.user_id = ? AND decision.decision_kind = 'goal_plan'
+      AND decision.trigger_items_id = ? AND decision.status = 'pending'
+    ORDER BY decision.created_at_utc DESC, decision.id DESC LIMIT 1
+  `).get(userId, goalId) ?? store.db.prepare(`
+    SELECT * FROM workflow_executions
+    WHERE user_id = ? AND workflow_definition_id = 'goal.planner'
+      AND subject_kind = 'goal' AND subject_id = ? AND deployment_environment = ?
+      AND status IN ('queued','running')
+    ORDER BY created_at_utc DESC, id DESC LIMIT 1
+  `).get(userId, goalId, validEnvironment(store.goalAgentEnvironment));
+}
+
+function nextGoalPlanOrdinal(store, userId, goalId) {
+  return Number(store.db.prepare(`
+    SELECT count(*)::int AS count FROM workflow_executions
+    WHERE user_id = ? AND workflow_definition_id = 'goal.planner'
+      AND subject_kind = 'goal' AND subject_id = ?
+  `).get(userId, goalId).count) + 1;
 }
 
 function advanceDiscovery(store, execution, now) {

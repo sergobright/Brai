@@ -6,6 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import {
   assertSameDatabaseTarget,
+  constraintTextValues,
   copyTargetColumns,
   copySourceQuery,
   inspectOwnedSequences,
@@ -62,11 +63,16 @@ test("production seed loads only explicitly marked idempotent migrations into th
     path.join(repoRoot, "supabase/migrations/0010_agent_role_normalization_workflows.sql"),
     "utf8"
   );
+  const versionHistoryMigration = fs.readFileSync(
+    path.join(repoRoot, "supabase/migrations/0033_normalize_version_work_history.sql"),
+    "utf8"
+  );
   const seedStart = script.indexOf("async function seedTestDataFromProduction");
   const copyStart = script.indexOf("async function copySchemaData");
   const seedFunction = script.slice(seedStart, copyStart);
 
   assert.match(migration, /^-- brai:reapply-after-production-seed$/m);
+  assert.match(versionHistoryMigration, /^-- brai:reapply-after-production-seed$/m);
   assert.match(script, /sql\.includes\(POST_PRODUCTION_SEED_MIGRATION_MARKER\)/);
   assert.match(seedFunction, /const postSeedMigrations = postProductionSeedMigrations\(\)/);
   assert.match(seedFunction, /copySchemaData\(pool, \{ sourceSchema, targetSchema, postSeedMigrations \}\)/);
@@ -155,8 +161,11 @@ test("production copy reseeds copied tables before repair migrations and before 
   const copyFunction = script.slice(copyStart, inspectStart);
   const begin = 'client.query("BEGIN ISOLATION LEVEL REPEATABLE READ")';
   const searchPath = "SET LOCAL search_path TO";
+  const dropPostSeedIndex = "DROP INDEX IF EXISTS";
+  const legacyImportFlag = "set_config('brai.allow_legacy_operation_import', 'on', true)";
   const constraintsImmediate = 'client.query("SET CONSTRAINTS ALL IMMEDIATE")';
   const reapply = "for (const { sql } of postSeedMigrations) await client.query(sql)";
+  const flushDeferredTriggers = 'client.query("SET CONSTRAINTS ALL IMMEDIATE")';
   const reseed = "await reseedOwnedSequences(client, { schema: targetSchema, tables: copyTables })";
   const firstReseed = copyFunction.indexOf(reseed);
   const secondReseed = copyFunction.indexOf(reseed, firstReseed + reseed.length);
@@ -164,18 +173,23 @@ test("production copy reseeds copied tables before repair migrations and before 
   assert.match(copyFunction, /const client = await pool\.connect\(\)/);
   assert.ok(copyFunction.indexOf(begin) > 0);
   assert.ok(copyFunction.indexOf(searchPath) > 0);
+  assert.ok(copyFunction.indexOf(dropPostSeedIndex) > copyFunction.indexOf(searchPath));
   assert.ok(copyFunction.indexOf(reapply) > 0);
   assert.ok(firstReseed > 0);
   assert.ok(secondReseed > firstReseed);
   assert.ok(copyFunction.indexOf(begin) < copyFunction.indexOf(searchPath));
+  assert.ok(copyFunction.indexOf(legacyImportFlag) > copyFunction.indexOf(searchPath));
+  assert.ok(copyFunction.indexOf(legacyImportFlag) < copyFunction.indexOf("TRUNCATE TABLE"));
   assert.match(copyFunction, /TRUNCATE TABLE .* CONTINUE IDENTITY CASCADE/);
   assert.doesNotMatch(copyFunction, /RESTART IDENTITY/);
-  assert.ok(copyFunction.indexOf(searchPath) < copyFunction.indexOf("TRUNCATE TABLE"));
+  assert.ok(copyFunction.indexOf(dropPostSeedIndex) < copyFunction.indexOf("TRUNCATE TABLE"));
   assert.ok(copyFunction.indexOf(reapply) > copyFunction.indexOf("OVERRIDING SYSTEM VALUE"));
   assert.ok(firstReseed > copyFunction.indexOf("OVERRIDING SYSTEM VALUE"));
   assert.ok(copyFunction.indexOf(constraintsImmediate) > firstReseed);
   assert.ok(copyFunction.indexOf(constraintsImmediate) < copyFunction.indexOf(reapply));
   assert.ok(firstReseed < copyFunction.indexOf(reapply));
+  assert.ok(copyFunction.indexOf(flushDeferredTriggers) > firstReseed);
+  assert.ok(copyFunction.indexOf(flushDeferredTriggers) < copyFunction.indexOf(reapply));
   assert.ok(secondReseed > copyFunction.indexOf(reapply));
   assert.ok(secondReseed < copyFunction.indexOf('client.query("COMMIT")'));
   assert.doesNotMatch(copyFunction, /tables: truncatableTables/);
@@ -192,6 +206,43 @@ test("production copy keeps ai_logs only for agents present in the target schema
   assert.equal(
     query,
     'SELECT source_row."id", source_row."agent_id", source_row."json_data" FROM "prod"."ai_logs" AS source_row WHERE EXISTS ( SELECT 1 FROM "preview"."agents" AS target_agent WHERE target_agent.id = source_row.agent_id )'
+  );
+});
+
+test("production copy skips rows that violate target not-null columns", () => {
+  const query = copySourceQuery({
+    sourceSchema: "prod",
+    targetSchema: "preview",
+    table: "workflow_executions",
+    columns: ["id", "role_contract_id", "status"],
+    requiredColumns: ["id", "role_contract_id"]
+  }).replace(/\s+/g, " ").trim();
+
+  assert.equal(
+    query,
+    'SELECT source_row."id", source_row."role_contract_id", source_row."status" FROM "prod"."workflow_executions" AS source_row WHERE source_row."id" IS NOT NULL AND source_row."role_contract_id" IS NOT NULL'
+  );
+});
+
+test("production copy keeps only event domains accepted by the target preview schema", () => {
+  const query = copySourceQuery({
+    sourceSchema: "prod",
+    targetSchema: "preview",
+    table: "events",
+    columns: ["id", "event_domain", "event_type"],
+    allowedValues: { event_domain: ["timer", "activity", "inbox", "system"] }
+  }).replace(/\s+/g, " ").trim();
+
+  assert.equal(
+    query,
+    'SELECT source_row."id", source_row."event_domain", source_row."event_type" FROM "prod"."events" AS source_row WHERE source_row."event_domain" IN (\'timer\', \'activity\', \'inbox\', \'system\')'
+  );
+});
+
+test("target event domain values are read from Postgres check definitions", () => {
+  assert.deepEqual(
+    constraintTextValues("CHECK ((event_domain = ANY (ARRAY['timer'::text, 'activity'::text, 'user''s'::text])))"),
+    ["timer", "activity", "user's"]
   );
 });
 
@@ -264,6 +315,12 @@ test("Postgres smoke inspects owned sequences on one repeatable-read client unde
   assert.ok(inspectIndex < commitIndex);
   assert.ok(commitIndex < releaseIndex);
   assert.match(smoke, /lockOwnedTables: true/);
+  assert.match(smoke, /version_types WHERE id IN \('apk', 'build', 'macos', 'ios'\)/);
+  assert.doesNotMatch(smoke, /COUNT\(\*\) FROM version_types\) = 4/);
+  assert.match(smoke, /build_version_counters WHERE version_type_id IN \('apk', 'build'\).*COUNT\(\*\) FROM build_version_counters\) = 2/);
+  assert.match(smoke, /versions\.version_type_id = 'build' AND versions\.version <= 148/);
+  assert.match(smoke, /cutoffVersionsWithDetails !== 159/);
+  assert.match(smoke, /importedMergedPulls < 288/);
 });
 
 test("owned sequence inspection SHARE-locks quoted tables before reading allocation state", async () => {

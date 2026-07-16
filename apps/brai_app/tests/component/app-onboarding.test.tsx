@@ -71,6 +71,7 @@ describe("BraiApp onboarding", () => {
     runAppInitScript();
 
     expect(document.documentElement.dataset.theme).toBe("dark");
+    expect(document.documentElement.dataset.nativeAndroid).toBe("true");
 
     render(<BraiApp />);
 
@@ -111,6 +112,17 @@ describe("BraiApp onboarding", () => {
     expect(document.querySelector("[data-app-shell]")).toBeInTheDocument();
     expect(document.querySelector("[data-onboarding-flow]")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Приступить" })).not.toBeInTheDocument();
+  });
+
+  it("keeps an onboarded native launch black before React restores the saved theme", () => {
+    stubAndroidCapacitor();
+    window.localStorage.setItem(ONBOARDING_STORAGE_KEY, JSON.stringify({ complete: true }));
+    window.localStorage.setItem("brai_theme_mode", "light");
+    document.documentElement.dataset.theme = "light";
+
+    runAppInitScript();
+
+    expect(document.documentElement.dataset.theme).toBe("dark");
   });
 
   it("renders the first welcome cards without carousel arrow buttons", async () => {
@@ -431,7 +443,7 @@ describe("BraiApp onboarding", () => {
     expect(screen.getByText(/Brai обладает мощными ИИ-функциями и может работать даже без этих настроек\./)).toBeInTheDocument();
   });
 
-  it("keeps the logo splash above a synchronously restored onboarding step", () => {
+  it("restores an onboarding step without an intermediate logo screen", () => {
     stubAndroidCapacitor();
     window.localStorage.setItem(ONBOARDING_STORAGE_KEY, JSON.stringify({
       complete: false,
@@ -732,7 +744,7 @@ describe("BraiApp onboarding", () => {
     expect(await screen.findByText("Голосовое управление настроено")).toBeInTheDocument();
     await waitFor(() => expect(cmdPlugin.setVoiceOnlyMode).toHaveBeenCalledWith({ enabled: false }));
     await waitFor(() => expect(cmdPlugin.setOverlayEnabled).toHaveBeenCalledWith({ enabled: true }));
-    expect(cmdPlugin.ensureAccess).toHaveBeenCalledWith({ displayName: "Test" });
+    expect(cmdPlugin.ensureAccess).not.toHaveBeenCalled();
     await waitFor(() => expect(cmdPlugin.setAccessKey).toHaveBeenCalledWith({ token: "authenticated-device-token", displayName: "Test", userId: "test-user" }));
   });
 
@@ -847,7 +859,7 @@ describe("BraiApp onboarding", () => {
 
     expect(await screen.findByText("Вход в Brai")).toBeInTheDocument();
     expect(document.querySelector(".auth-galaxy-background")).toBeInTheDocument();
-    expect(screen.getByLabelText("Email")).toBeInTheDocument();
+    expect(await screen.findByLabelText("Email", {}, { timeout: 10_000 })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Войти" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Получить код" })).not.toBeInTheDocument();
     expectNoPasswordPrompt();

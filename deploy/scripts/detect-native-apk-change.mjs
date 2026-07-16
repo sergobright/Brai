@@ -16,20 +16,23 @@ const nativePackagePattern = /^\s*[+-].*("@capacitor\/|@capacitor-community\/|@c
 if (path.resolve(process.argv[1] ?? "") === fileURLToPath(import.meta.url)) {
   const branch = process.argv[2] ?? "";
   const explicitBase = process.argv[3] ?? process.env.BRAI_BASE_COMMIT ?? "";
-  const range = diffRange(branch, explicitBase);
-  if (!range) {
+  const ranges = diffRanges(branch, explicitBase);
+  if (ranges.length === 0) {
     console.log("false");
     process.exit(0);
   }
 
-  const files = gitLines(["diff", "--name-only", range]);
-  const packageDiff = files.some((file) => nativePackageFiles.has(file))
-    ? execFileSync("git", ["diff", "--unified=0", range, "--", ...nativePackageFiles], { encoding: "utf8" })
-    : "";
-  const environmentDiff = files.includes(environmentFile)
-    ? execFileSync("git", ["diff", "--unified=0", range, "--", environmentFile], { encoding: "utf8" })
-    : "";
-  console.log(requiresNativeApkChange(files, packageDiff, environmentDiff) ? "true" : "false");
+  const changed = ranges.some((range) => {
+    const files = gitLines(["diff", "--name-only", range]);
+    const packageDiff = files.some((file) => nativePackageFiles.has(file))
+      ? execFileSync("git", ["diff", "--unified=0", range, "--", ...nativePackageFiles], { encoding: "utf8" })
+      : "";
+    const environmentDiff = files.includes(environmentFile)
+      ? execFileSync("git", ["diff", "--unified=0", range, "--", environmentFile], { encoding: "utf8" })
+      : "";
+    return requiresNativeApkChange(files, packageDiff, environmentDiff);
+  });
+  console.log(changed ? "true" : "false");
 }
 
 export function requiresNativeApkChange(files, packageDiff = "", environmentDiff = "") {
@@ -48,10 +51,20 @@ function requiresNativeEnvironmentChange(diff) {
 }
 
 export function diffRange(branchName, base, referenceExists = refExists) {
-  if (branchName.startsWith("codex/") && referenceExists(acceptedBaseRef())) return `${acceptedBaseRef()}...HEAD`;
-  if (base && !/^0{40}$/.test(base)) return `${base}..HEAD`;
-  if (branchName === "dev" || branchName === "main") return "HEAD^..HEAD";
-  return referenceExists("HEAD^") ? "HEAD^..HEAD" : null;
+  return diffRanges(branchName, base, referenceExists)[0] ?? null;
+}
+
+export function diffRanges(branchName, base, referenceExists = refExists) {
+  const ranges = [];
+  if (branchName.startsWith("codex/") && referenceExists(acceptedBaseRef())) {
+    ranges.push(`${acceptedBaseRef()}...HEAD`);
+  }
+  if (base && !/^0{40}$/.test(base) && referenceExists(base)) {
+    ranges.push(`${base}..HEAD`);
+  }
+  if (ranges.length > 0) return [...new Set(ranges)];
+  if (branchName === "dev" || branchName === "main") return ["HEAD^..HEAD"];
+  return referenceExists("HEAD^") ? ["HEAD^..HEAD"] : [];
 }
 
 function acceptedBaseRef() {

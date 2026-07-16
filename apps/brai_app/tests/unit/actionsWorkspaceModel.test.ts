@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { buildActionsWorkspace, goalFilterId, visibleGoalBadges } from "@/features/app/sections/actions/actionsWorkspaceModel";
+import { buildActionsWorkspace, goalFilterId, partitionContextReviews, visibleGoalBadges } from "@/features/app/sections/actions/actionsWorkspaceModel";
 import { emptyActivitiesState, type ActivityItem } from "@/shared/types/activities";
+import { emptyContextDecisionsState, type ContextDecision } from "@/shared/types/contextDecisions";
 import { emptyInboxState, type InboxItem } from "@/shared/types/inbox";
 import { emptyRelationsState, type RelationItem } from "@/shared/types/relations";
 
@@ -79,7 +80,72 @@ describe("actionsWorkspaceModel", () => {
     expect(view.filter).toBe("all");
     expect(view.allItems.map((item) => item.id)).toEqual(["a1"]);
   });
+
+  it("assigns every decision to one inline owner and falls unavailable subjects back to All", () => {
+    const activities = emptyActivitiesState();
+    activities.actions = [activity("action-1")];
+    activities.goals = [activity("goal-1", "goal")];
+    const inbox = emptyInboxState();
+    inbox.inbox = [operation("operation-1", "New", "2026-07-13T02:00:00.000Z")];
+    const workspace = buildActionsWorkspace({ activities, inbox, relations: emptyRelationsState(), filter: "actions" });
+    const state = emptyContextDecisionsState();
+    state.decisions = [
+      decision("plan", "goal_plan", "goal-1"),
+      decision("relation", "relation_add", "operation-1"),
+      decision("type", "activity_type_change", "action-1", "auto_accepted"),
+      decision("discovery", "goal_discovery", null),
+      decision("missing", "relation_add", "deleted-item"),
+    ];
+    state.notifications = [{ id: "notice", type: "policy_activated", policy_id: "p1", created_at_utc: "2026-07-13T00:00:00.000Z" }];
+
+    const reviews = partitionContextReviews(state, workspace);
+
+    expect(reviews.byGoal.get("goal-1")?.decisions.map((entry) => entry.id)).toEqual(["plan"]);
+    expect(reviews.byItem.get("operation-1")?.decisions.map((entry) => entry.id)).toEqual(["relation"]);
+    expect(reviews.byItem.get("action-1")?.decisions.map((entry) => entry.id)).toEqual(["type"]);
+    expect(reviews.global.decisions.map((entry) => entry.id)).toEqual(["discovery", "missing"]);
+    expect(reviews.global.notifications.map((entry) => entry.id)).toEqual(["notice"]);
+  });
+
+  it("splits audit items by the same goal, item, and fallback placement", () => {
+    const activities = emptyActivitiesState();
+    activities.actions = [activity("action-1")];
+    activities.goals = [activity("goal-1", "goal")];
+    const workspace = buildActionsWorkspace({ activities, inbox: emptyInboxState(), relations: emptyRelationsState(), filter: "all" });
+    const state = emptyContextDecisionsState();
+    state.audits = [{
+      id: "audit-1", status: "pending", policy_id: "p1", decision_ids: ["a", "b", "c"],
+      due_at_utc: "2026-07-14T00:00:00.000Z", created_at_utc: "2026-07-13T00:00:00.000Z", updated_at_utc: "2026-07-13T00:00:00.000Z",
+      items: [
+        auditItem("a", "goal_plan", "goal-1"),
+        auditItem("b", "relation_add", "action-1"),
+        auditItem("c", "activity_type_change", "missing"),
+      ],
+    }];
+
+    const reviews = partitionContextReviews(state, workspace);
+
+    expect(reviews.byGoal.get("goal-1")?.audits[0].decision_ids).toEqual(["a"]);
+    expect(reviews.byItem.get("action-1")?.audits[0].decision_ids).toEqual(["b"]);
+    expect(reviews.global.audits[0].decision_ids).toEqual(["c"]);
+  });
 });
+
+function decision(
+  id: string,
+  kind: ContextDecision["decision_kind"],
+  subject: string | null,
+  status: ContextDecision["status"] = "pending",
+): ContextDecision {
+  return {
+    id, decision_kind: kind, status, confidence: 1, subject_items_id: subject, proposal: {}, rationale: id, evidence: [],
+    created_at_utc: "2026-07-13T00:00:00.000Z", updated_at_utc: "2026-07-13T00:00:00.000Z",
+  };
+}
+
+function auditItem(id: string, kind: ContextDecision["decision_kind"], subject: string) {
+  return { id, decisions_id: id, position: 0, status: "pending" as const, decision_kind: kind, confidence: 1, rationale: id, evidence: [], proposal: {}, trigger_items_id: subject };
+}
 
 function activity(id: string, type: "action" | "goal" | "operation" = "action", status: "New" | "Done" = "New", updatedAt = "2026-07-13T00:00:00.000Z"): ActivityItem {
   return { id, activity_type_id: type, title: id, description_md: "", status, created_at_utc: updatedAt, updated_at_utc: updatedAt, completed_at_utc: status === "Done" ? updatedAt : null, sort_order: null, deleted_at_utc: null, restored_at_utc: null };

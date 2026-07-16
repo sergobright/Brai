@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { braiCmdSettingsSnapshot, cmdPlugin, openEngineFromProfile, openProfileMenu, openProfileMenuItem, openSettingsFromProfile, otaPlugin, setupBraiAppTest, stubAndroidCapacitor, testVersionState } from "./app-test-support";
+import { braiCmdSettingsSnapshot, cmdPlugin, openEngineFromProfile, openProfileMenu, openProfileMenuItem, openSettingsFromProfile, otaPlugin, selectBraiCmdGroup, setupBraiAppTest, stubAndroidCapacitor, testVersionState } from "./app-test-support";
 import { BraiApp } from "@/features/app/BraiApp";
 import { ONBOARDING_STORAGE_KEY } from "@/features/onboarding/onboardingModel";
 import { getMeta } from "@/shared/storage/db";
@@ -29,8 +29,8 @@ describe("BraiApp settings", () => {
     await openEngineFromProfile();
 
     expect(screen.getByRole("heading", { name: "Engine" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Текущая версия unknown" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Скачать обновление" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Текущая версия приложения unknown" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Обновить страницу" })).toBeInTheDocument();
   });
 
   it("keeps Engine available in the mobile profile drawer outside Actions", async () => {
@@ -49,6 +49,8 @@ describe("BraiApp settings", () => {
 
     await waitFor(() => expect(screen.getByRole("heading", { name: "Brai CMD" })).toBeInTheDocument());
     expect(await screen.findByText("Настройки Brai CMD доступны в Android-приложении Brai.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Открыть меню" })).not.toBeInTheDocument();
+    expect(document.querySelector(".contextual-rail")).not.toBeInTheDocument();
     expect(cmdPlugin.openSettings).not.toHaveBeenCalled();
   });
 
@@ -61,8 +63,16 @@ describe("BraiApp settings", () => {
     await waitFor(() => expect(screen.getByRole("heading", { name: "Brai CMD" })).toBeInTheDocument());
     expect(screen.getAllByRole("heading", { name: "Brai CMD" })).toHaveLength(1);
     expect(await screen.findByText("Главная кнопка диктовки")).toBeInTheDocument();
-    expect(screen.getByText("Разрешения")).toBeInTheDocument();
     expect(screen.getByText("Подключение к Brai")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Открыть меню" }));
+    const rail = await screen.findByLabelText("Левый рейл");
+    for (const label of ["Основное", "Разрешения", "Контекстные кнопки", "Внешний вид", "Распознавание", "Постобработка", "Аудио"]) {
+      expect(within(rail).getByRole("button", { name: label })).toBeInTheDocument();
+    }
+    fireEvent.click(within(rail).getByRole("button", { name: "Разрешения" }));
+    await waitFor(() => expect(screen.queryByLabelText("Левый рейл")).not.toBeInTheDocument());
+    expect(screen.getByText("Разрешения")).toBeInTheDocument();
+    expect(screen.queryByText("Главная кнопка диктовки")).not.toBeInTheDocument();
     expect(cmdPlugin.getSettings).toHaveBeenCalledTimes(1);
     expect(cmdPlugin.openSettings).not.toHaveBeenCalled();
   });
@@ -127,6 +137,7 @@ describe("BraiApp settings", () => {
     render(<BraiApp />);
 
     await openProfileMenuItem("Brai Cmd");
+    await selectBraiCmdGroup("Распознавание");
     const speechCard = (await screen.findByText("Распознавание речи")).closest("[data-slot=card]");
     fireEvent.click(within(speechCard as HTMLElement).getByRole("button", { name: "Настроить" }));
     fireEvent.click(screen.getByText("Свой API-ключ"));
@@ -166,6 +177,7 @@ describe("BraiApp settings", () => {
     render(<BraiApp />);
 
     await openProfileMenuItem("Brai Cmd");
+    await selectBraiCmdGroup("Аудио");
     fireEvent.click(await screen.findByRole("button", { name: "Аудиозаписи" }));
 
     expect(screen.getByRole("radiogroup")).toBeInTheDocument();

@@ -195,6 +195,52 @@ h1 {
   line-height: 1.7;
 }
 
+.history-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin: -1.5rem 0 2.5rem;
+}
+
+.history-filter,
+.history-action {
+  min-height: 2.5rem;
+  padding: 0.45rem 0.9rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--foreground);
+  cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+}
+
+.history-filter[aria-pressed="true"] {
+  border-color: var(--foreground);
+  background: var(--foreground);
+  color: var(--background);
+}
+
+.history-filter:focus-visible,
+.history-action:focus-visible,
+.pull-request summary:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  outline-offset: 2px;
+}
+
+.timeline-state {
+  margin: 0 0 2rem;
+  padding: 1rem;
+  border: 1px dashed var(--line);
+  border-radius: 0.75rem;
+  color: var(--muted);
+}
+
+.timeline-state.is-error {
+  border-style: solid;
+  color: var(--foreground);
+}
+
 .timeline {
   display: grid;
   gap: 0;
@@ -237,6 +283,11 @@ h1 {
   letter-spacing: 0;
 }
 
+.timeline-card h3 {
+  margin: 0 0 0.75rem;
+  font-size: 1rem;
+}
+
 .timeline-dot {
   position: absolute;
   top: 0.4rem;
@@ -270,6 +321,88 @@ h1 {
   padding-left: 1.1rem;
   color: var(--foreground);
   line-height: 1.75;
+}
+
+.timeline-description,
+.timeline-section p {
+  margin: 0;
+  line-height: 1.7;
+}
+
+.timeline-section {
+  margin-top: 1.5rem;
+}
+
+.timeline-note {
+  color: var(--muted);
+}
+
+.change-list,
+.reference-list {
+  overflow-wrap: anywhere;
+}
+
+.change-list li + li,
+.reference-list li + li {
+  margin-top: 0.75rem;
+}
+
+.change-list p {
+  margin-top: 0.2rem;
+}
+
+.version-metadata {
+  display: grid;
+  grid-template-columns: minmax(7rem, auto) minmax(0, 1fr);
+  gap: 0.45rem 1rem;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.version-metadata dt {
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.version-metadata dd {
+  margin: 0;
+}
+
+.pull-request {
+  border-top: 1px solid var(--line);
+}
+
+.pull-request:last-child {
+  border-bottom: 1px solid var(--line);
+}
+
+.pull-request summary {
+  padding: 0.9rem 0;
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.pull-request-content {
+  display: grid;
+  gap: 1rem;
+  padding: 0 0 1.25rem;
+}
+
+.pull-request-body {
+  max-height: 30rem;
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.history-actions {
+  display: flex;
+  justify-content: center;
+  gap: 0.75rem;
+}
+
+.history-action {
+  min-width: 8rem;
 }
 
 code {
@@ -331,5 +464,14 @@ pre {
 
   .timeline-card {
     padding: 0 0 3rem 1.8rem;
+  }
+
+  .version-metadata {
+    grid-template-columns: 1fr;
+    gap: 0.2rem;
+  }
+
+  .version-metadata dd + dt {
+    margin-top: 0.65rem;
   }
 }

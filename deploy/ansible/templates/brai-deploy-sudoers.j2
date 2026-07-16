@@ -1,6 +1,7 @@
 {{ brai_deploy_user }} ALL=(root) NOPASSWD: /usr/bin/caddy validate --config {{ brai_caddyfile }}
 {{ brai_deploy_user }} ALL=(root) NOPASSWD: /bin/systemctl reload caddy
 {{ brai_deploy_user }} ALL=(root) NOPASSWD: /bin/systemctl --no-block start brai-storage-maintenance.service
+{{ brai_deploy_user }} ALL=(root) NOPASSWD: /bin/systemctl start brai-db-telegram-backup.service
 {{ brai_deploy_user }} ALL=(root) NOPASSWD: /srv/opt/brai-main-sync.sh *
 {{ brai_deploy_user }} ALL=({{ brai_service_user }}) NOPASSWD: {{ brai_node_root }}/bin/npm --prefix {{ brai_repo }}/services/brai_temporal ci
 {{ brai_deploy_user }} ALL=({{ brai_service_user }}) NOPASSWD: {{ brai_env_root }}/{{ brai_envs.prod.path }}/source/deploy/scripts/codex-cli-smoke.sh
@@ -8,6 +9,7 @@
 {{ brai_deploy_user }} ALL=(root) NOPASSWD: /usr/bin/systemd-run --unit=brai-temporal-worker-delayed-restart --on-active=* --collect /bin/systemctl restart brai-temporal-worker.service
 {{ brai_deploy_user }} ALL=(root) NOPASSWD: {{ brai_goal_agent_runtime_prepare }} ""
 {{ brai_codex_maintenance_user }} ALL=(root) NOPASSWD: {{ brai_goal_agent_runtime_prepare }} ""
+{{ brai_deploy_user }} ALL=({{ brai_service_user }}) NOPASSWD: {{ brai_env_root }}/{{ brai_envs.prod.path }}/source/deploy/scripts/create-inbox-operation.sh --local *
 {{ brai_deploy_user }} ALL=({{ brai_service_user }}) NOPASSWD: {{ brai_env_root }}/{{ brai_envs.prod.path }}/source/deploy/scripts/create-operation-activity.sh --local *
 {{ brai_deploy_user }} ALL=({{ brai_service_user }}) NOPASSWD: {{ brai_env_root }}/{{ brai_envs.prod.path }}/source/deploy/scripts/complete-operation-activities.sh --local *
 {{ brai_deploy_user }} ALL=({{ brai_service_user }}) NOPASSWD: {{ brai_env_root }}/{{ brai_envs.prod.path }}/source/deploy/scripts/complete-inbox-operations.sh --local *
@@ -17,6 +19,7 @@
 {{ brai_deploy_user }} ALL=(root) NOPASSWD: {{ brai_repo }}/deploy/scripts/apply-main-infra.sh --check brai-vault
 {{ brai_deploy_user }} ALL=(root) NOPASSWD: {{ brai_repo }}/deploy/scripts/apply-main-infra.sh --apply brai-vault
 {% for maintainer in brai_operation_maintainers %}
+{{ maintainer }} ALL=({{ brai_service_user }}) NOPASSWD: {{ brai_env_root }}/{{ brai_envs.prod.path }}/source/deploy/scripts/create-inbox-operation.sh --local *
 {{ maintainer }} ALL=({{ brai_service_user }}) NOPASSWD: {{ brai_env_root }}/{{ brai_envs.prod.path }}/source/deploy/scripts/create-operation-activity.sh --local *
 {{ maintainer }} ALL=({{ brai_service_user }}) NOPASSWD: {{ brai_env_root }}/{{ brai_envs.prod.path }}/source/deploy/scripts/complete-operation-activities.sh --local *
 {{ maintainer }} ALL=({{ brai_service_user }}) NOPASSWD: {{ brai_env_root }}/{{ brai_envs.prod.path }}/source/deploy/scripts/complete-inbox-operations.sh --local *

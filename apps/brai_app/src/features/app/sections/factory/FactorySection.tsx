@@ -1,18 +1,18 @@
 "use client";
 
-import type { CSSProperties, KeyboardEvent, PointerEvent } from "react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { Bot, CheckCircle2, Clock3, Database, FileJson, GitBranch, Terminal, XCircle } from "lucide-react";
 import { BraiApi, type AiLog } from "@/shared/api/braiApi";
 import { defaultApiBase } from "@/shared/config/runtime";
+import { formatDisplayDateTime } from "@/shared/time/format";
 import { Badge } from "@/shared/ui/badge";
 import { Card } from "@/shared/ui/card";
 import { ScrollArea } from "@/shared/ui/scroll-area";
 import { MobileContextSheet } from "../../chrome/AppChrome";
+import { PageWorkspace } from "../../chrome/PageWorkspace";
 import { cx } from "../../appUtils";
 import { isMobileNavigationViewport } from "../../navigation/useSectionSwipeNavigation";
 import { DetailPanelTabBar } from "../DetailPanelTabs";
-import { ACTIONS_SPLIT_DEFAULT_PERCENT, ACTIONS_SPLIT_MIN_PERCENT, clampActionsSplitPercent } from "../actions/constants";
 
 type FactoryDetailTab = "info" | "db" | "logs";
 const FACTORY_DETAIL_TABS: Array<{ id: FactoryDetailTab; label: string }> = [
@@ -26,9 +26,6 @@ export function FactorySection({ onMobileOverlayChange }: { onMobileOverlayChang
   const [selectedLogId, setSelectedLogId] = useState<number | null>(null);
   const [mobileLogId, setMobileLogId] = useState<number | null>(null);
   const [detailTab, setDetailTab] = useState<FactoryDetailTab>("info");
-  const [splitPercent, setSplitPercent] = useState(ACTIONS_SPLIT_DEFAULT_PERCENT);
-  const workspaceRef = useRef<HTMLDivElement | null>(null);
-  const splitDragStyleRef = useRef<{ cursor: string; userSelect: string } | null>(null);
   const selectedLog = logs.find((log) => log.id === selectedLogId) ?? null;
   const mobileLog = logs.find((log) => log.id === mobileLogId) ?? null;
 
@@ -39,7 +36,7 @@ export function FactorySection({ onMobileOverlayChange }: { onMobileOverlayChang
       .then(({ logs: nextLogs }) => {
         if (!mounted) return;
         setLogs(nextLogs);
-        setSelectedLogId((current) => (current != null && nextLogs.some((log) => log.id === current) ? current : (nextLogs[0]?.id ?? null)));
+        setSelectedLogId((current) => (current != null && nextLogs.some((log) => log.id === current) ? current : null));
       })
       .catch(() => {
         if (!mounted) return;
@@ -60,58 +57,13 @@ export function FactorySection({ onMobileOverlayChange }: { onMobileOverlayChang
     if (isMobileNavigationViewport()) setMobileLogId(log.id);
   }
 
-  function onSplitPointerDown(event: PointerEvent<HTMLButtonElement>) {
-    const workspace = workspaceRef.current;
-    if (!workspace) return;
-    event.preventDefault();
-    splitDragStyleRef.current = {
-      cursor: document.documentElement.style.cursor,
-      userSelect: document.body.style.userSelect,
-    };
-    document.documentElement.style.cursor = "ew-resize";
-    document.body.style.userSelect = "none";
-    event.currentTarget.setPointerCapture(event.pointerId);
-  }
-
-  function onSplitPointerMove(event: PointerEvent<HTMLButtonElement>) {
-    if (!event.currentTarget.hasPointerCapture(event.pointerId)) return;
-    const workspace = workspaceRef.current;
-    if (!workspace) return;
-    const bounds = workspace.getBoundingClientRect();
-    setSplitPercent(clampActionsSplitPercent(((event.clientX - bounds.left) / bounds.width) * 100));
-  }
-
-  function onSplitPointerEnd(event: PointerEvent<HTMLButtonElement>) {
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
-    const previous = splitDragStyleRef.current;
-    if (!previous) return;
-    document.documentElement.style.cursor = previous.cursor;
-    document.body.style.userSelect = previous.userSelect;
-    splitDragStyleRef.current = null;
-  }
-
-  function onSplitKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
-    if (event.key === "ArrowLeft") {
-      event.preventDefault();
-      setSplitPercent((current) => clampActionsSplitPercent(current - 2));
-    }
-    if (event.key === "ArrowRight") {
-      event.preventDefault();
-      setSplitPercent((current) => clampActionsSplitPercent(current + 2));
-    }
-  }
-
   return (
     <section className="relative grid h-full min-h-0 grid-rows-[minmax(0,1fr)] gap-3.5 max-[860px]:gap-0" aria-label="Factory">
-      <div
-        ref={workspaceRef}
-        className="relative grid h-full min-h-0 min-w-0 grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-0 overflow-hidden max-[860px]:block"
-        style={{
-          "--actions-list-percent": `${splitPercent}%`,
-          gridTemplateColumns: "minmax(0,var(--actions-list-percent)) minmax(0,calc(100% - var(--actions-list-percent)))",
-        } as CSSProperties}
-      >
-        <ScrollArea className="h-full min-h-0 min-w-0 max-[860px]:-mx-3.5 max-[860px]:[&>[data-slot=scroll-area-scrollbar]]:!right-0" contentInset="none">
+      <PageWorkspace
+        className="relative"
+        mainScroll={false}
+        panelScroll={false}
+        main={<ScrollArea className="h-full min-h-0 min-w-0 max-[860px]:-mx-3.5 max-[860px]:[&>[data-slot=scroll-area-scrollbar]]:!right-0" contentInset="none">
           <div className="grid gap-3 pr-[18px] max-[860px]:px-3.5" aria-label="Поток AI_logs">
             <div className="sticky top-0 z-[2] flex items-center justify-between gap-3 bg-background/95 pb-3 backdrop-blur max-[860px]:hidden">
               <div className="min-w-0">
@@ -129,28 +81,9 @@ export function FactorySection({ onMobileOverlayChange }: { onMobileOverlayChang
               />
             ))}
           </div>
-        </ScrollArea>
-
-        <button
-          type="button"
-          className="group absolute inset-y-0 z-[5] hidden w-6 -translate-x-1/2 touch-none !cursor-ew-resize place-items-stretch justify-center border-0 bg-transparent px-[11px] py-0 max-[860px]:hidden min-[861px]:grid [&_*]:!cursor-ew-resize"
-          style={{ left: `${splitPercent}%` }}
-          aria-label="Изменить ширину панелей"
-          aria-valuemin={ACTIONS_SPLIT_MIN_PERCENT}
-          aria-valuemax={100 - ACTIONS_SPLIT_MIN_PERCENT}
-          aria-valuenow={Math.round(splitPercent)}
-          role="slider"
-          onPointerDown={onSplitPointerDown}
-          onPointerMove={onSplitPointerMove}
-          onPointerUp={onSplitPointerEnd}
-          onPointerCancel={onSplitPointerEnd}
-          onKeyDown={onSplitKeyDown}
-        >
-          <span className="block h-full w-px bg-border transition-colors group-hover:bg-primary" aria-hidden="true" />
-        </button>
-
-        <FactoryDetailPanel activeTab={detailTab} log={selectedLog} onTabChange={setDetailTab} />
-      </div>
+        </ScrollArea>}
+        temporaryPanel={selectedLog ? <FactoryDetailPanel activeTab={detailTab} log={selectedLog} onTabChange={setDetailTab} /> : undefined}
+      />
 
       {mobileLog ? <FactoryMobileDetail activeTab={detailTab} log={mobileLog} onClose={() => setMobileLogId(null)} onTabChange={setDetailTab} /> : null}
     </section>
@@ -199,16 +132,12 @@ function FactoryLogCard({ log, selected, onOpen }: { log: AiLog; selected: boole
   );
 }
 
-function FactoryDetailPanel({ activeTab, log, onTabChange }: { activeTab: FactoryDetailTab; log: AiLog | null; onTabChange: (tab: FactoryDetailTab) => void }) {
+function FactoryDetailPanel({ activeTab, log, onTabChange }: { activeTab: FactoryDetailTab; log: AiLog; onTabChange: (tab: FactoryDetailTab) => void }) {
   return (
-    <aside className="grid h-full min-h-0 min-w-0 grid-rows-[minmax(0,1fr)] overflow-hidden pl-7 max-[860px]:hidden" aria-label="Подробности AI log" data-nav-swipe-exclusion>
-      {log ? <FactoryLogDetails activeTab={activeTab} log={log} onTabChange={onTabChange} /> : <FactoryEmptyPanel />}
-    </aside>
+    <div className="grid h-full min-h-0 min-w-0 grid-rows-[minmax(0,1fr)] overflow-hidden pl-7" aria-label="Подробности AI log">
+      <FactoryLogDetails activeTab={activeTab} log={log} onTabChange={onTabChange} />
+    </div>
   );
-}
-
-function FactoryEmptyPanel() {
-  return null;
 }
 
 function FactoryMobileDetail({ activeTab, log, onClose, onTabChange }: { activeTab: FactoryDetailTab; log: AiLog; onClose: () => void; onTabChange: (tab: FactoryDetailTab) => void }) {
@@ -381,10 +310,10 @@ function formatDuration(value: unknown) {
 }
 
 function formatFactoryTime(value: string) {
-  return new Intl.DateTimeFormat("ru-RU", {
+  return formatDisplayDateTime(value, {
     day: "2-digit",
     month: "2-digit",
     hour: "2-digit",
     minute: "2-digit",
-  }).format(new Date(value));
+  });
 }

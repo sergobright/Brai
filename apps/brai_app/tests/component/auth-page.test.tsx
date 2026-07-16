@@ -50,7 +50,9 @@ describe("AuthPage", () => {
     expect(screen.queryByRole("button", { name: "Получить код" })).not.toBeInTheDocument();
 
     fireEvent.change(email, { target: { value: "random@example.test" } });
-    fireEvent.click(screen.getByRole("button", { name: "Войти" }));
+    const loginButton = screen.getByRole("button", { name: "Войти" });
+    await waitFor(() => expect(loginButton).toBeEnabled());
+    fireEvent.click(loginButton);
 
     await waitFor(() => expect(fetch).toHaveBeenCalledWith(
       "/api/auth/test-email-login",

@@ -113,6 +113,20 @@ describe("BraiApi", () => {
     expect(response.target_apk?.file).toBe("brai-v2.apk");
   });
 
+  it("loads public version history without native cross-origin credentials or owner headers", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      Response.json({ server_time_utc: "2026-07-15T12:00:00.000Z", items: [], next_cursor: null }),
+    );
+    const api = new BraiApi("https://api.example.test");
+    api.setExpectedUserId("user/1");
+
+    await api.versionHistory({ type: "apk", cursor: "older", limit: 10 });
+
+    expect(fetchMock.mock.calls[0][0]).toBe("https://api.example.test/v1/version-history?limit=10&type=apk&cursor=older");
+    expect(fetchMock.mock.calls[0][1]?.credentials).toBe("omit");
+    expect(new Headers(fetchMock.mock.calls[0][1]?.headers).has("x-brai-expected-user-id")).toBe(false);
+  });
+
   it("binds and clears the expected owner for v1 HTTP and live requests", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
       new Response(JSON.stringify({}), { status: 200, headers: { "content-type": "application/json" } }));

@@ -29,9 +29,44 @@ const DESCRIPTIONS = [
   {
     table_name: "build_versions",
     title: "Версии",
-    short_description: "Журнал публичных версий.",
+    short_description: "Журнал завершённых работ и опубликованных platform-артефактов.",
     long_description:
-      "Хранит принятые web/OTA сборки и APK-релизы в формате X.Y.Z.S с описанием изменений, причиной выпуска и временем релиза.\nЭто источник правды для текущей версии продукта и истории того, какие изменения вошли в конкретный выпуск.",
+      "Хранит build-записи завершённых project works и отдельные APK или будущие platform releases с неизменным номером и временем публикации.\nBuild является ledger выполненной работы; browser web, Android OTA и APK остаются фактами соответствующих артефактов и не обязаны увеличиваться вместе.",
+  },
+  {
+    table_name: "release_works",
+    title: "Release works",
+    short_description: "Стабильные идентификаторы законченных объёмов работы.",
+    long_description:
+      "Один work объединяет owner PR и необязательные support PR. Support merge сам по себе не создаёт build; owner или явно разрешённая support-only finalization завершает work атомарно вместе с version history.",
+  },
+  {
+    table_name: "github_pull_requests",
+    title: "GitHub pull requests",
+    short_description: "Публичные GitHub snapshots PR, зарегистрированных в release work.",
+    long_description:
+      "Хранит полный release-time snapshot PR и неизменяемую принадлежность к work с ролью owner или support. Один PR может быть связан не более чем с одной версией каждого platform type.",
+  },
+  {
+    table_name: "build_version_details",
+    title: "Version details",
+    short_description: "Атомарные упорядоченные изменения версии.",
+    long_description:
+      "Каждая version содержит хотя бы одну независимую detail. Необязательная ссылка на GitHub PR сохраняет provenance, а display_order задаёт стабильный публичный порядок.",
+  },
+  {
+    table_name: "build_version_pull_requests",
+    title: "Version pull requests",
+    short_description: "Типизированные связи версий с GitHub PR.",
+    long_description:
+      "Связывает build или platform version с доказанными PR. Composite foreign key фиксирует тип родительской версии; один PR может входить максимум в одну version каждого type.",
+  },
+  {
+    table_name: "build_version_refs",
+    title: "Ссылки версий",
+    short_description: "Git refs, доказанно относящиеся к версии.",
+    long_description:
+      "Хранит source и target branch/commit для конкретной build или platform version. Исторический backfill использует только точные refs и не выводит отношения из соседних дат, PR numbers или commit ranges.",
   },
   {
     table_name: "deployment_records",

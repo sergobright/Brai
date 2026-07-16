@@ -5,6 +5,7 @@ import {
   appVersion,
   defaultApiBase,
   environmentBadgeLabel,
+  installedProductVersion,
   isProductionEnvironment,
 } from "@/shared/config/runtime";
 
@@ -19,6 +20,7 @@ describe("client runtime config", () => {
       appVersion: "9.9.9",
       environment: "preview-b",
       previewSlot: "B",
+      productVersion: 147,
       webApiBase: "/preview-api",
       androidApiBase: "https://b.test.brai.one/api",
     };
@@ -29,6 +31,7 @@ describe("client runtime config", () => {
     expect(environmentBadgeLabel()).toBe("B");
     expect(isProductionEnvironment()).toBe(false);
     expect(defaultApiBase()).toBe("/preview-api");
+    expect(installedProductVersion()).toBe(147);
   });
 
   it("uses runtime Android API base inside the native shell", () => {

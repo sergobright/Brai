@@ -36,12 +36,12 @@ test("keeps an API-offline Goal in the Actions workspace after desktop and mobil
 
 async function openWorkspaceNavigation(page: Page, testInfo: TestInfo): Promise<Locator> {
   if (testInfo.project.name === "mobile") {
-    await page.locator(".section-page-current").getByRole("button", { name: "Информация о действиях" }).click();
-    const navigation = page.locator(".mobile-context-sheet").getByRole("navigation", { name: "Списки действий" });
+    await page.getByRole("button", { name: "Открыть меню" }).click();
+    const navigation = page.locator(".mobile-profile-drawer").getByRole("navigation", { name: "Списки действий" });
     await expect(navigation).toBeVisible();
     return navigation;
   }
-  const navigation = page.locator(".section-page-current").getByRole("navigation", { name: "Списки действий" });
+  const navigation = page.locator(".contextual-rail").getByRole("navigation", { name: "Списки действий" });
   await expect(navigation).toBeVisible();
   return navigation;
 }
