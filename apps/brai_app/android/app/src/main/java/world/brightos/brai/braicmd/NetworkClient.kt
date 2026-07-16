@@ -222,7 +222,7 @@ class NetworkClient internal constructor(
         require(cleanToken.length in 8..4_096 && !cleanToken.contains('\r') && !cleanToken.contains('\n')) {
             "invalid_link_token"
         }
-        val connection = openAuthenticatedConnection("/v1/brai-cmd/account-access/activate", "POST").apply {
+        val connection = openNativeConnection("/v1/brai-cmd/account-access/activate", "POST").apply {
             doOutput = true
             connectTimeout = ACCOUNT_ACCESS_TIMEOUT_MS
             readTimeout = ACCOUNT_ACCESS_TIMEOUT_MS
@@ -479,12 +479,16 @@ class NetworkClient internal constructor(
     private fun openAuthenticatedConnection(path: String, method: String, accessToken: String): HttpURLConnection {
         val token = accessToken.trim()
         if (token.isBlank()) throw QueueAuthBlockedException()
-        return openPublicConnection(path, method).apply {
+        return openNativeConnection(path, method).apply {
             setRequestProperty("Authorization", "Bearer $token")
+        }
+    }
+
+    private fun openNativeConnection(path: String, method: String): HttpURLConnection =
+        openPublicConnection(path, method).apply {
             setRequestProperty("X-Brai-Cmd-Device-Id", config.installId)
             setRequestProperty("X-Brai-Cmd-Client-Version", BuildConfig.VERSION_NAME)
         }
-    }
 
     private fun readJson(connection: HttpURLConnection): JSONObject {
         val status = connection.responseCode

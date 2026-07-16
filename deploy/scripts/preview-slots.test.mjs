@@ -72,6 +72,19 @@ test("queued preview lease also rejects a lower generation", (context) => {
   assert.equal(queued.lease_generation, 20);
 });
 
+test("follow-up allocation reports the failed preview APK state", (context) => {
+  const { run } = runner(context);
+  assert.equal(run("allocate", "codex/native-revert", "commit-a", "10").status, 0);
+  assert.equal(run("apk", "codex/native-revert", "commit-a", "120002", "brai-b-v12-preview2.apk", "12", "2", "preview").status, 0);
+  assert.equal(run("failed", "codex/native-revert", "commit-a").status, 0);
+
+  const followUp = JSON.parse(run("allocate", "codex/native-revert", "commit-b", "20").stdout);
+  assert.equal(followUp.previousStatus, "failed");
+  assert.equal(followUp.previousApkBuildKind, "preview");
+  assert.equal(followUp.entry.status, "deploying");
+  assert.equal(followUp.entry.commit, "commit-b");
+});
+
 function runner(context) {
   const envsRoot = fs.mkdtempSync(path.join(os.tmpdir(), "brai-preview-cas-"));
   context.after(() => fs.rmSync(envsRoot, { recursive: true, force: true }));

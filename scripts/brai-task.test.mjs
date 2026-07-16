@@ -43,7 +43,7 @@ import {
 } from "./brai-task.mjs";
 import { acceptedPreviewBranches } from "../deploy/scripts/accepted-preview-branches.mjs";
 import { classifyDeployDelivery } from "../deploy/scripts/classify-delivery.mjs";
-import { diffRange, requiresNativeApkChange } from "../deploy/scripts/detect-native-apk-change.mjs";
+import { diffRange, diffRanges, requiresNativeApkChange } from "../deploy/scripts/detect-native-apk-change.mjs";
 
 const tempRoots = new Set();
 
@@ -774,11 +774,12 @@ test("production client publish also refreshes the public landing", () => {
   assert.match(script, /"\$SCRIPT_DIR\/publish-web\.sh"/);
 });
 
-test("publish permission helper normalizes entire bounded artifact trees", () => {
+test("publish permission helper preserves shared artifact ownership", () => {
   const script = fs.readFileSync(path.resolve(import.meta.dirname, "../deploy/scripts/permissions.sh"), "utf8");
-  assert.doesNotMatch(script, /-user "\$\(id -u\)"/);
-  assert.match(script, /find "\$target" -type d -exec chmod 2775/);
-  assert.match(script, /find "\$target" -type f -exec chmod 0664/);
+  assert.match(script, /find "\$target" -type d -user "\$\(id -u\)" -exec chmod 2775/);
+  assert.match(script, /find "\$target" -type f -user "\$\(id -u\)" -exec chmod 0664/);
+  assert.match(script, /find "\$target" -type d ! -perm -2775/);
+  assert.match(script, /find "\$target" -type f ! -perm -0664/);
 });
 
 test("ADR publishing uses writable cache and output fallbacks", () => {
@@ -950,6 +951,10 @@ test("native APK detector keeps the full codex branch diff across follow-up push
     diffRange("codex/native-change", "incremental-follow-up-sha", () => true),
     "origin/main...HEAD",
   );
+  assert.deepEqual(
+    diffRanges("codex/native-change", "incremental-follow-up-sha", () => true),
+    ["origin/main...HEAD", "incremental-follow-up-sha..HEAD"],
+  );
 });
 
 test("production deploy resolves ledger version through the shared resolver", () => {
@@ -1049,6 +1054,10 @@ test("preview deploy requires Postgres and preserves artifact setgid", () => {
   assert.match(script, /BRAI_DATABASE_URL is required/);
   assert.match(ciDeploy, /postgres-smoke\.mjs "\$CURRENT_DATABASE_URL"/);
   assert.match(ciDeploy, /postgres-smoke\.mjs "\$TARGET_DATABASE_URL"/);
+  assert.match(ciDeploy, /BRAI_PREVIEW_PREVIOUS_STATUS.*previousStatus/);
+  assert.match(ciDeploy, /BRAI_PREVIEW_PREVIOUS_APK_BUILD_KIND.*previousApkBuildKind/);
+  assert.match(ciDeploy, /BRAI_PREVIEW_PREVIOUS_STATUS" == "failed"/);
+  assert.match(ciDeploy, /BRAI_PREVIEW_PREVIOUS_APK_BUILD_KIND" == "preview"/);
   assert.match(script, /check_api_service_contract/);
   assert.match(script, /BRAI_INBOUND_STORAGE_ROOT/);
   assert.match(script, /BRAI_INBOX_STORAGE_ROOT/);
@@ -1202,7 +1211,7 @@ test("local OpenSpec archive closes terminal handoff tasks and is idempotent", (
   fs.writeFileSync(tasks, "- [x] Implement.\n- [ ] Run verified preview handoff.\n- [ ] Archive this OpenSpec change.\n");
 
   archiveOpenSpecChange("ready", worktree);
-  const archived = path.join(canonical, "openspec", "changes", "archive", "2026-07-15-ready", "tasks.md");
+  const archived = path.join(canonical, "openspec", "changes", "archive", `${new Date().toISOString().slice(0, 10)}-ready`, "tasks.md");
   assert.equal(fs.existsSync(archived), true);
   assert.match(fs.readFileSync(archived, "utf8"), /\[x\] Run verified preview handoff/);
   assert.doesNotThrow(() => archiveOpenSpecChange("ready", worktree));

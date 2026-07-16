@@ -172,7 +172,6 @@ test('test email login creates or reuses the primary Better Auth user without se
     const activated = await jsonRequest(fixture.url, '/v1/brai-cmd/account-access/activate', {
       method: 'POST',
       headers: {
-        authorization: `Bearer ${anonymousFirstDevice.body.token}`,
         'x-brai-cmd-device-id': 'authenticated-install-1'
       },
       body: JSON.stringify({ link_token: deviceToken.body.token })

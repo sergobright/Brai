@@ -159,6 +159,7 @@ test("production copy reseeds copied tables before repair migrations and before 
   const legacyImportFlag = "set_config('brai.allow_legacy_operation_import', 'on', true)";
   const constraintsImmediate = 'client.query("SET CONSTRAINTS ALL IMMEDIATE")';
   const reapply = "for (const { sql } of postSeedMigrations) await client.query(sql)";
+  const flushDeferredTriggers = 'client.query("SET CONSTRAINTS ALL IMMEDIATE")';
   const reseed = "await reseedOwnedSequences(client, { schema: targetSchema, tables: copyTables })";
   const firstReseed = copyFunction.indexOf(reseed);
   const secondReseed = copyFunction.indexOf(reseed, firstReseed + reseed.length);
@@ -181,6 +182,8 @@ test("production copy reseeds copied tables before repair migrations and before 
   assert.ok(copyFunction.indexOf(constraintsImmediate) > firstReseed);
   assert.ok(copyFunction.indexOf(constraintsImmediate) < copyFunction.indexOf(reapply));
   assert.ok(firstReseed < copyFunction.indexOf(reapply));
+  assert.ok(copyFunction.indexOf(flushDeferredTriggers) > firstReseed);
+  assert.ok(copyFunction.indexOf(flushDeferredTriggers) < copyFunction.indexOf(reapply));
   assert.ok(secondReseed > copyFunction.indexOf(reapply));
   assert.ok(secondReseed < copyFunction.indexOf('client.query("COMMIT")'));
   assert.doesNotMatch(copyFunction, /tables: truncatableTables/);

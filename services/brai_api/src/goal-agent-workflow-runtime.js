@@ -1,6 +1,6 @@
 import { activityInfo as temporalActivityInfo } from '@temporalio/activity';
 import { Client, Connection, WorkflowNotFoundError } from '@temporalio/client';
-import { NativeConnection, Worker } from '@temporalio/worker';
+import { IllegalStateError, NativeConnection, Worker } from '@temporalio/worker';
 import { timingSafeEqual } from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -30,6 +30,14 @@ const AGENT_IDS = [
   'goal.discovery', 'goal.planner'
 ];
 const TERMINAL_TEMPORAL = new Set(['FAILED', 'CANCELLED', 'TERMINATED', 'TIMED_OUT']);
+
+export function shutdownGoalAgentWorker(worker) {
+  try {
+    worker.shutdown();
+  } catch (error) {
+    if (!(error instanceof IllegalStateError)) throw error;
+  }
+}
 
 export async function createGoalAgentWorkflowRuntime({
   databaseUrl,
@@ -99,7 +107,7 @@ export async function createGoalAgentWorkflowRuntime({
     startReconciler: reconciler.start,
     async close() {
       await reconciler.close();
-      contextWorker.shutdown();
+      shutdownGoalAgentWorker(contextWorker);
       await contextWorkerRun;
       store.db.close();
       await contextConnection.close();

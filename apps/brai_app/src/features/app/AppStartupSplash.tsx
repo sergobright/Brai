@@ -46,6 +46,10 @@ export function AppStartupSplash({ onIntroComplete, persist = false, ready }: Ap
   const show = persist || (!expired && (!ready || !introComplete));
 
   useEffect(() => {
+    document.documentElement.dataset.braiStartupMounted = "true";
+  }, []);
+
+  useEffect(() => {
     const maxTimeout = window.setTimeout(() => setExpired(true), remainingStartupTime(SPLASH_MAX_VISIBLE_MS));
     return () => window.clearTimeout(maxTimeout);
   }, []);

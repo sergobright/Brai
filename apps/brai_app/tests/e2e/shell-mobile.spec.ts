@@ -562,6 +562,7 @@ test("reveals and hides the mobile action delete menu by swipe", async ({ page }
   await dispatchElementTouch(page, ".action-row", "touchend", { x: startX - 72, y });
   await expect(row).toHaveClass(/delete-open/);
   await expect(surface).toHaveAttribute("style", /translate3d\(0px, 0px, 0px\)/);
+  await expect(page.getByRole("button", { name: "Добавить в цель: Фокус" })).toBeVisible();
 
   await surface.click({ position: { x: 24, y: 24 } });
   await expect(row).not.toHaveClass(/delete-open/);

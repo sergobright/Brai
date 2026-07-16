@@ -27,6 +27,7 @@ export function SortableActionList({
   activeActivityElapsedSeconds = 0,
   onStartFocus,
   onStopFocus,
+  renderControl,
   renderAfter,
 }: {
   actions: ActivityItem[];
@@ -44,6 +45,7 @@ export function SortableActionList({
   onReorder: (orderedIds: string[], movedAction: ActivityItem) => Promise<void>;
   onStartFocus?: (action: ActivityItem) => Promise<void>;
   onStopFocus?: (action: ActivityItem) => Promise<void>;
+  renderControl?: (action: ActivityItem) => ReactNode;
   renderAfter?: (action: ActivityItem) => ReactNode;
   titleDrafts?: Record<string, string>;
   onTitleDraftChange?: (actionId: string, title: string | null) => void;
@@ -90,6 +92,7 @@ export function SortableActionList({
               deleteOpen={openDeleteActionId === action.id}
               onOpenDelete={() => onOpenDelete(action.id)}
               onCloseDelete={onCloseDelete}
+              membershipControl={renderControl?.(action)}
             />
             {renderAfter?.(action)}
           </div>
@@ -116,6 +119,7 @@ function SortableActionRow(props: {
   onCloseDelete: () => void;
   titleDraft?: string;
   onTitleDraftChange: (actionId: string, title: string | null) => void;
+  membershipControl?: ReactNode;
 }) {
   const { attributes, listeners, setActivatorNodeRef, setNodeRef, transform, transition, isDragging } = useSortable({
     id: props.action.id,

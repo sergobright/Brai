@@ -436,10 +436,11 @@ export const braiCmdStoreMethods = {
     const linkToken = String(input.linkToken ?? '').trim();
     const currentAccess = input.currentAccess;
     if (!/^bl_[A-Za-z0-9_-]{43}$/.test(linkToken)) throw braiCmdTokenError('invalid_link_token', 401);
-    if (!currentAccess?.id || !currentAccess.deviceIdHash) {
+    const deviceId = String(input.deviceId ?? '').trim();
+    if (!currentAccess?.deviceIdHash && !deviceId) {
       throw braiCmdTokenError('invalid_device_access', 401);
     }
-    const deviceIdHash = currentAccess.deviceIdHash;
+    const deviceIdHash = currentAccess?.deviceIdHash || hashSecret(deviceId);
     const nowIso = cleanIso(input.nowIso);
     const issued = buildBraiCmdAccess({
       displayName: 'Brai',
@@ -449,17 +450,19 @@ export const braiCmdStoreMethods = {
     });
     let link;
     this.db.transaction(() => {
-      const activeAccess = this.db.prepare(`
-        SELECT status, device_id_hash, expires_at_utc
-        FROM brai_cmd_access_tokens WHERE id = ?
-      `).get(currentAccess.id);
-      if (
-        activeAccess?.status !== 'active'
-        || Date.parse(activeAccess.expires_at_utc) <= Date.parse(nowIso)
-        || !activeAccess.device_id_hash
-        || !safeEqualHex(activeAccess.device_id_hash, deviceIdHash)
-      ) {
-        throw braiCmdTokenError('invalid_device_access', 401);
+      if (currentAccess) {
+        const activeAccess = this.db.prepare(`
+          SELECT status, device_id_hash, expires_at_utc
+          FROM brai_cmd_access_tokens WHERE id = ?
+        `).get(currentAccess.id);
+        if (
+          activeAccess?.status !== 'active'
+          || Date.parse(activeAccess.expires_at_utc) <= Date.parse(nowIso)
+          || !activeAccess.device_id_hash
+          || !safeEqualHex(activeAccess.device_id_hash, deviceIdHash)
+        ) {
+          throw braiCmdTokenError('invalid_device_access', 401);
+        }
       }
       link = this.db.prepare(`
         SELECT * FROM brai_cmd_account_link_tokens WHERE token_hash = ?
@@ -497,7 +500,7 @@ export const braiCmdStoreMethods = {
       jsonData: {
         account_link_id: link.id,
         access_token_id: issued.record.id,
-        replaced_access_token_id: currentAccess.id
+        replaced_access_token_id: currentAccess?.id ?? null
       }
     });
     return issued;

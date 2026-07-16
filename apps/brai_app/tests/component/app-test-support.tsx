@@ -50,6 +50,7 @@ const androidCapabilitiesPlugin = vi.hoisted(() => ({
 }));
 
 let cmdAccountUserId = "";
+let cmdAccessGranted = true;
 
 const actionsWidgetPlugin = vi.hoisted(() => ({
   acknowledgeStatusChanges: vi.fn(),
@@ -194,20 +195,23 @@ export function setupBraiAppTest() {
     cmdPlugin.openSettings.mockResolvedValue({});
     cmdPlugin.addListener.mockResolvedValue({ remove: vi.fn(async () => undefined) });
     cmdAccountUserId = "";
+    cmdAccessGranted = true;
     cmdPlugin.beginAccountCredentialMode.mockImplementation(async ({ userId }: { userId: string }) => {
       cmdAccountUserId = userId;
+      cmdAccessGranted = false;
       return { accountCredentialsActive: true, overlayEnabled: false, queuePausedMode: true };
     });
     cmdPlugin.deleteAudio.mockResolvedValue({ ok: true, state: braiCmdSettingsSnapshot() });
     cmdPlugin.ensureAccess.mockResolvedValue({ accessGranted: true });
     cmdPlugin.downloadAudio.mockResolvedValue({ ok: true, path: "Downloads/Brai CMD/audio.m4a" });
     cmdPlugin.getSettings.mockResolvedValue(braiCmdSettingsSnapshot());
-    cmdPlugin.getState.mockResolvedValue({
-      accessGranted: true,
+    cmdPlugin.getState.mockImplementation(async () => ({
+      accountCredentialsActive: Boolean(cmdAccountUserId),
+      accessGranted: cmdAccessGranted,
       deviceId: "test-install",
       clientVersion: "60006",
       appPackage: "world.brightos.brai.preview.b.work",
-    });
+    }));
     cmdPlugin.invalidateProviderCredentials.mockResolvedValue({ ok: true });
     cmdPlugin.openPermission.mockResolvedValue(braiCmdSettingsSnapshot());
     cmdPlugin.preparePreliminaryProfile.mockResolvedValue({
@@ -225,6 +229,7 @@ export function setupBraiAppTest() {
     cmdPlugin.saveProvider.mockResolvedValue(braiCmdSettingsSnapshot());
     cmdPlugin.setAccessKey.mockImplementation(async ({ token, userId }: { token: string; userId: string }) => {
       cmdAccountUserId = token ? userId : "";
+      cmdAccessGranted = Boolean(token);
       return { accessGranted: Boolean(token) };
     });
     cmdPlugin.syncProviderCredentials.mockResolvedValue({ ok: true, counts: { configured: 0, imported: 0, ignored: 0, failed: 0 } });
@@ -381,6 +386,8 @@ export function setupBraiAppTest() {
     delete window.BraiAndroidBack;
     delete window.__BRAI_RUNTIME_CONFIG__;
     delete document.documentElement.dataset.sidebarState;
+    delete document.documentElement.dataset.nativeAndroid;
+    delete document.documentElement.dataset.braiStartupMounted;
   });
 }
 

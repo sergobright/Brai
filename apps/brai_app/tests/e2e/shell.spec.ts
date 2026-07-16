@@ -532,9 +532,12 @@ test("shows the desktop action delete button only on row hover", async ({ page }
 
   const row = page.locator(".action-row").first();
   const deleteButton = row.locator(".action-delete-button");
+  const membershipButton = page.getByRole("button", { name: "Добавить в цель: Фокус" });
   await expect(deleteButton).toHaveCSS("visibility", "hidden");
+  await expect(membershipButton).toHaveCSS("visibility", "hidden");
   await row.hover();
   await expect(page.getByRole("button", { name: "Удалить: Фокус" })).toBeVisible();
+  await expect(membershipButton).toBeVisible();
   await expect(deleteButton).toHaveCSS("opacity", "0.42");
 
   await deleteButton.click();

@@ -349,15 +349,23 @@ export function AuthPanel({
   const [otpFocusKey, setOtpFocusKey] = useState(0);
   const [otpTimer, setOtpTimer] = useState<AuthOtpTimer>(defaultOtpTimer);
   const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const submittingRef = useRef(false);
+  const pending = busy || submitting;
 
   async function submitAuth(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (busy || submittingRef.current) return;
+    submittingRef.current = true;
+    setSubmitting(true);
     setError("");
+    let authenticated = false;
     try {
       if (mode === "email") {
         if (!onEmailLogin) throw new Error("email_login_unavailable");
         await onEmailLogin(email);
         onAuthenticated?.();
+        authenticated = true;
         return;
       }
       if (!otpSent) {
@@ -366,8 +374,14 @@ export function AuthPanel({
       }
       await onVerifyOtp(email, otp);
       onAuthenticated?.();
+      authenticated = true;
     } catch {
       setError(mode === "email" ? "Email не подошёл" : otpSent ? "Код не подошел" : "Не удалось отправить код");
+    } finally {
+      if (!authenticated) {
+        submittingRef.current = false;
+        setSubmitting(false);
+      }
     }
   }
 
@@ -418,7 +432,7 @@ export function AuthPanel({
               placeholder="Введите почту"
               aria-label="Email"
               aria-invalid={Boolean(error && (mode === "email" || !otpSent))}
-              disabled={busy || (mode === "otp" && otpSent)}
+              disabled={pending || (mode === "otp" && otpSent)}
               onChange={(event) => setEmail(event.target.value)}
             />
             <FieldDescription>
@@ -435,7 +449,7 @@ export function AuthPanel({
                   timer={otpTimer}
                   autoFocusKey={otpFocusKey}
                   ariaInvalid={Boolean(error)}
-                  disabled={busy && otpTimer.sentAtMs !== null}
+                  disabled={pending && otpTimer.sentAtMs !== null}
                   onChange={setOtp}
                   onResend={resendOtpCode}
                 />
@@ -450,8 +464,8 @@ export function AuthPanel({
         </FieldGroup>
       </CardContent>
       <CardFooter>
-        <Button className="w-full" disabled={busy || !email || (mode === "otp" && otpSent && !otp)}>
-          {mode === "otp" && otpSent ? <KeyRound aria-hidden="true" /> : <Mail aria-hidden="true" />}
+        <Button className="w-full" disabled={pending || !email || (mode === "otp" && otpSent && !otp)} aria-busy={pending}>
+          {pending ? <Loader2 className="animate-spin" aria-hidden="true" /> : mode === "otp" && otpSent ? <KeyRound aria-hidden="true" /> : <Mail aria-hidden="true" />}
           {mode === "email" || otpSent ? "Войти" : "Получить код"}
         </Button>
       </CardFooter>

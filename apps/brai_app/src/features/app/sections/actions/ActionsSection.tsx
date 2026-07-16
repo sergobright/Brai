@@ -192,13 +192,8 @@ export function ActionsSection({
     }
   }
 
-  function renderMemberships(item: WorkspaceWorkItem) {
-    return (
-      <div className="flex min-w-0 items-center justify-between gap-2">
-        <GoalBadges item={item} onSelect={onSelectWorkspaceFilter} />
-        <GoalMembershipPicker item={item} goals={workspace.activeGoals} onAdd={onAddToGoals} onCreateGoal={onCreateGoalForItem} />
-      </div>
-    );
+  function renderMembershipControl(item: WorkspaceWorkItem) {
+    return <GoalMembershipPicker item={item} goals={workspace.activeGoals} onAdd={onAddToGoals} onCreateGoal={onCreateGoalForItem} />;
   }
 
   function renderContextReviews(item: WorkspaceWorkItem) {
@@ -312,9 +307,13 @@ export function ActionsSection({
                 activeActivityElapsedSeconds={activeActivityElapsedSeconds}
                 onStartFocus={(action) => onStartActionFocus(action.id)}
                 onStopFocus={(action) => onStopActionFocus(action.id)}
+                renderControl={(action) => {
+                  const item = newItems.find((entry) => entry.id === action.id);
+                  return item ? renderMembershipControl(item) : null;
+                }}
                 renderAfter={(action) => {
                   const item = newItems.find((entry) => entry.id === action.id);
-                  return item ? <>{renderMemberships(item)}{renderContextReviews(item)}</> : null;
+                  return item ? <><GoalBadges item={item} onSelect={onSelectWorkspaceFilter} />{renderContextReviews(item)}</> : null;
                 }}
               />
             ) : (

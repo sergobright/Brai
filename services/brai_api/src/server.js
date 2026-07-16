@@ -961,7 +961,12 @@ export function createBraiServer({
           sendJson(req, res, 405, { error: 'method_not_allowed' });
           return;
         }
-        const currentAccess = requireBraiCmdAccess(req, store);
+        const currentAccess = req.headers.authorization ? requireBraiCmdAccess(req, store) : null;
+        const deviceId = firstTextField(req.headers, ['x-brai-cmd-device-id', 'x-airwhisper-device-id']);
+        if (!deviceId) {
+          sendJson(req, res, 400, { error: 'missing_device_id' });
+          return;
+        }
         const body = await readJson(req, { limit: 4096 });
         const linkToken = firstTextField(body, ['link_token', 'linkToken']);
         if (!linkToken) {
@@ -971,6 +976,7 @@ export function createBraiServer({
         const issued = store.activateBraiCmdAccountLink({
           linkToken,
           currentAccess,
+          deviceId,
           nowIso: now().toISOString()
         });
         requestUserId = issued.record.userId;

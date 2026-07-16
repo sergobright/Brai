@@ -558,6 +558,14 @@ if [[ "$BRAI_BRANCH" == codex/* ]]; then
   BRAI_PREVIEW_QUEUED="false"
   BRAI_PREVIEW_SLOT="$(printf '%s' "$ALLOCATION_JSON" | allocation_field slot)"
   BRAI_PREVIEW_ALLOCATED_NEW="$(printf '%s' "$ALLOCATION_JSON" | allocation_field allocatedNew)"
+  BRAI_PREVIEW_PREVIOUS_STATUS="$(printf '%s' "$ALLOCATION_JSON" | allocation_field previousStatus)"
+  BRAI_PREVIEW_PREVIOUS_APK_BUILD_KIND="$(printf '%s' "$ALLOCATION_JSON" | allocation_field previousApkBuildKind)"
+  if [[ "$BRAI_NATIVE_APK_CHANGE" != "true" \
+    && "$BRAI_PREVIEW_PREVIOUS_STATUS" == "failed" \
+    && "$BRAI_PREVIEW_PREVIOUS_APK_BUILD_KIND" == "preview" ]]; then
+    echo "Rebuilding the preview APK after a failed deploy left a preview artifact in the slot."
+    BRAI_NATIVE_APK_CHANGE="true"
+  fi
   export BRAI_PREVIEW_SLOT BRAI_PREVIEW_ALLOCATED_NEW
   printf 'BRAI_PREVIEW_SLOT_OUTPUT=%s\n' "$BRAI_PREVIEW_SLOT"
 fi

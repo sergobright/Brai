@@ -110,7 +110,7 @@ describe("Actions Goal workspace UI", () => {
 
     expect(screen.getByText("Старая операция")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Луна" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /Добавить в список/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Добавить в цель/ })).not.toBeInTheDocument();
 
     rerender(<WorkspaceWorkList {...common} filter="goal:goal-1" />);
     expect(screen.queryByRole("button", { name: /Убрать из цели/ })).not.toBeInTheDocument();

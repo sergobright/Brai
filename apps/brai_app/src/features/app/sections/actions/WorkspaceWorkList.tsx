@@ -128,15 +128,13 @@ function WorkspaceItem({ item, props, dragHandle, mobileDragHandle }: { item: Wo
           onOpenDelete={() => props.onOpenDelete(item.activity!.id)}
           onCloseDelete={props.onCloseDelete}
           dragHandle={dragHandle}
+          membershipControl={membershipControl}
         />
       ) : (
         <OperationWorkspaceRow item={item} selected={props.selectedId === item.id} onSelect={() => props.onSelect(item)} controls={<>{membershipControl}{dragHandle ?? mobileDragHandle}</>} />
       )}
       {item.kind === "action" ? (
-        <div className="flex min-w-0 items-center justify-between gap-2">
-          {mobileDragHandle ?? (!props.filter.startsWith("goal:") ? <GoalBadges item={item} onSelect={props.onSelectFilter} /> : <span />)}
-          {membershipControl}
-        </div>
+        mobileDragHandle ?? (!props.filter.startsWith("goal:") ? <GoalBadges item={item} onSelect={props.onSelectFilter} /> : null)
       ) : !props.filter.startsWith("goal:") ? <GoalBadges item={item} onSelect={props.onSelectFilter} /> : null}
       {props.renderAfter?.(item)}
     </div>

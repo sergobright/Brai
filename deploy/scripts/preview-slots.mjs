@@ -79,6 +79,8 @@ function allocate(registry, branch, commit, rawGeneration, now) {
   if (existing) {
     assertLeaseAdvance(existing.entry, commit, generation);
     removeQueuedBranch(registry, branch);
+    const previousStatus = existing.entry.status;
+    const previousApkBuildKind = existing.entry.apk_build_kind ?? null;
     const commitChanged = Boolean(existing.entry.commit && commit && existing.entry.commit !== commit);
     Object.assign(existing.entry, {
       status: "deploying",
@@ -87,7 +89,15 @@ function allocate(registry, branch, commit, rawGeneration, now) {
       updated_at: now,
       ...(commitChanged ? { review_note: null } : {}),
     });
-    return { ok: true, queued: false, allocatedNew: false, slot: existing.slot, entry: existing.entry };
+    return {
+      ok: true,
+      queued: false,
+      allocatedNew: false,
+      slot: existing.slot,
+      previousStatus,
+      previousApkBuildKind,
+      entry: existing.entry,
+    };
   }
 
   const slot = slots.find((candidate) => registry[candidate].status === "free");
