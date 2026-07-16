@@ -621,6 +621,7 @@ test("delivery classifier separates infra-docs from runtime preview", () => {
   assert.equal(classifyDelivery(["apps/brai_app/vitest.config.mts"]).deliveryClass, "technical-no-preview");
   assert.equal(classifyDelivery(["services/brai_api/test/api.auth-migrations.test.js"]).deliveryClass, "technical-no-preview");
   assert.equal(classifyDelivery(["deploy/scripts/supabase-branch.test.mjs"]).deliveryClass, "technical-no-preview");
+  assert.equal(classifyDelivery(["deploy/scripts/record-version-pr.mjs"]).deliveryClass, "infra-docs");
   assert.equal(
     classifyDelivery(["apps/brai_app/package.json"], {
       diffs: {
