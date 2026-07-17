@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import { AbstractAgent, compactEvents, EventType } from '@ag-ui/client';
-import { Observable, Subject } from 'rxjs';
+import { Observable, Subject, map } from 'rxjs';
 import { BraiCodexBrokerClient } from './brai-codex-broker-client.js';
 import { assistantMessageIdForRun, CodexAguiNormalizer } from './brai-codex-agui.js';
 import {
@@ -25,6 +25,26 @@ const ALLOWED_RUNTIME_METHODS = new Set(['info', 'agent/connect', 'agent/run', '
 function scopedThreadId(userId, publicThreadId) {
   const owner = crypto.createHash('sha256').update(userId).digest('hex').slice(0, 20);
   return `${owner}:${publicThreadId}`;
+}
+
+/**
+ * The durable store intentionally contains only the public thread id. CopilotKit,
+ * however, receives the owner-scoped id from the request rewrite. Keep that
+ * boundary explicit when replaying or streaming AG-UI events; otherwise its
+ * client discards a valid replay as belonging to another thread.
+ */
+function eventForRuntimeThread(event, runtimeThreadId) {
+  if (!event || typeof event !== 'object') return event;
+  let next = event;
+  if (typeof event.threadId === 'string' && event.threadId !== runtimeThreadId) {
+    next = { ...next, threadId: runtimeThreadId };
+  }
+  if (event.input && typeof event.input === 'object'
+    && typeof event.input.threadId === 'string'
+    && event.input.threadId !== runtimeThreadId) {
+    next = { ...next, input: { ...event.input, threadId: runtimeThreadId } };
+  }
+  return next;
 }
 
 function lastUserInput(input, runId) {
@@ -231,16 +251,18 @@ function normalizeGeneratedTitle(value) {
 }
 
 class BraiCodexAgent extends AbstractAgent {
-  constructor({ coordinator, store, userId, publicThreadId }) {
+  constructor({ coordinator, store, userId, publicThreadId, runtimeThreadId }) {
     super({ agentId: AGENT_ID, description: 'Брай на базе Codex' });
     this.coordinator = coordinator;
     this.store = store;
     this.userId = userId;
     this.publicThreadId = publicThreadId;
+    this.runtimeThreadId = runtimeThreadId;
   }
 
   run(input) {
-    return this.coordinator.run({ store: this.store, userId: this.userId, publicThreadId: this.publicThreadId, input });
+    return this.coordinator.run({ store: this.store, userId: this.userId, publicThreadId: this.publicThreadId, input })
+      .pipe(map((event) => eventForRuntimeThread(event, this.runtimeThreadId)));
   }
 
   abortRun() {
@@ -254,7 +276,8 @@ class BraiCodexAgent extends AbstractAgent {
       coordinator: this.coordinator,
       store: this.store,
       userId: this.userId,
-      publicThreadId: this.publicThreadId
+      publicThreadId: this.publicThreadId,
+      runtimeThreadId: this.runtimeThreadId
     });
     clone.messages = structuredClone(this.messages);
     clone.state = structuredClone(this.state);
@@ -263,11 +286,12 @@ class BraiCodexAgent extends AbstractAgent {
 }
 
 class BraiPersistentAgentRunner {
-  constructor({ coordinator, store, userId, publicThreadId }) {
+  constructor({ coordinator, store, userId, publicThreadId, runtimeThreadId }) {
     this.coordinator = coordinator;
     this.store = store;
     this.userId = userId;
     this.publicThreadId = publicThreadId;
+    this.runtimeThreadId = runtimeThreadId;
   }
 
   run({ agent, input }) {
@@ -277,7 +301,7 @@ class BraiPersistentAgentRunner {
   connect({ headers } = {}) {
     return this.coordinator.connect({
       store: this.store, userId: this.userId, publicThreadId: this.publicThreadId, headers
-    });
+    }).pipe(map((event) => eventForRuntimeThread(event, this.runtimeThreadId)));
   }
 
   isRunning() {
@@ -1572,10 +1596,14 @@ export function createBraiChatRuntime({
       const [{ CopilotSseRuntime, createCopilotRuntimeHandler }] = await Promise.all([
         import('@copilotkit/runtime/v2')
       ]);
-      const runner = new BraiPersistentAgentRunner({ coordinator, store, userId, publicThreadId });
+      const runner = new BraiPersistentAgentRunner({
+        coordinator, store, userId, publicThreadId, runtimeThreadId: namespacedThreadId
+      });
       const runtime = new CopilotSseRuntime({
         agents: {
-          [AGENT_ID]: new BraiCodexAgent({ coordinator, store, userId, publicThreadId })
+          [AGENT_ID]: new BraiCodexAgent({
+            coordinator, store, userId, publicThreadId, runtimeThreadId: namespacedThreadId
+          })
         },
         runner,
         debug: false,

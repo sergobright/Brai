@@ -1901,6 +1901,51 @@ test('CopilotKit resume connect forwards an acknowledged Last-Event-ID into dura
   assert.equal(body.includes('"sequence":3'), true);
 });
 
+test('CopilotKit replay scopes durable public thread ids to the connected runtime thread', async () => {
+  const runtime = createBraiChatRuntime({ broker: new FakeBroker() });
+  const store = fakeStore();
+  store.events.push({
+    id: 'scoped-replay-start',
+    turnId: 'scoped-replay-run',
+    safePayload: {
+      type: EventType.RUN_STARTED,
+      threadId: 'public-thread',
+      runId: 'scoped-replay-run',
+      input: { threadId: 'public-thread', runId: 'scoped-replay-run', messages: [] }
+    }
+  });
+  const chunks = [];
+  const res = {
+    destroyed: false,
+    writeHead(status, headers) { this.status = status; this.headers = headers; },
+    write(chunk) { chunks.push(Buffer.from(chunk)); },
+    end() { this.ended = true; }
+  };
+  const userId = 'user-a-long-enough';
+  const scopedThreadId = `${crypto.createHash('sha256').update(userId).digest('hex').slice(0, 20)}:public-thread`;
+  await runtime.handleRequest({
+    req: { headers: { accept: 'text/event-stream' } },
+    res,
+    url: new URL('https://api.example.test/v1/brai-chat/runtime'),
+    store,
+    userId,
+    readJson: async () => ({
+      method: 'agent/connect',
+      params: { agentId: 'brai-codex' },
+      body: {
+        threadId: 'public-thread', runId: 'connect-run', state: {}, messages: [],
+        tools: [], context: [], forwardedProps: {}
+      }
+    }),
+    sendJson: () => assert.fail('CopilotKit handler should own a valid connect response')
+  });
+
+  const body = Buffer.concat(chunks).toString('utf8');
+  assert.equal(res.status, 200);
+  assert.equal(body.includes(`\"threadId\":\"${scopedThreadId}\"`), true);
+  assert.equal(body.includes('\"threadId\":\"public-thread\"'), false);
+});
+
 test('CopilotKit connect replays an incomplete active run without compacting it away', async () => {
   const runtime = createBraiChatRuntime({ broker: new FakeBroker() });
   const store = fakeStore();
