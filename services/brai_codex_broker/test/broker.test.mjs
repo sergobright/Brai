@@ -851,6 +851,7 @@ test("semantic title generation uses a private ephemeral thread without leaking 
   assert.equal(titleTurn.params.permissions, "brai-chat");
   assert.equal(titleTurn.params.model, "gpt-5.4");
   assert.equal(titleTurn.params.effort, "medium");
+  assert.equal(titleTurn.params.summary, "auto");
   assert.match(titleTurn.params.input[0].text, /основном языке диалога пользователя/);
   await manager.close();
 });
@@ -1128,6 +1129,8 @@ test("Unix JSONL RPC rejects arbitrary input and forwards correlated safe notifi
   const notification = once(client, "notification");
   const result = await client.call("startTurn", { userId: USER_A, threadId: THREAD, text: "Привет" });
   assert.deepEqual(result, { turnId: TURN });
+  const turnStart = docker.runtimes[0].requests.find(({ method }) => method === "turn/start");
+  assert.equal(turnStart.params.summary, "auto");
   const [event] = await notification;
   assert.match(event.notificationEpoch, /^[0-9a-f-]{36}$/);
   assert.deepEqual({ ...event, notificationEpoch: undefined }, {

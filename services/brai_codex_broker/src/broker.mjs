@@ -1315,6 +1315,11 @@ function safeTurnParams(params) {
     approvalPolicy: "never",
     permissions: "brai-chat",
     cwd: WORKSPACE,
+    // Codex App Server 0.144.4 does not emit reasoning summary notifications
+    // unless turn/start explicitly opts in. Raw reasoning remains disabled by
+    // the managed runtime config; only the public model-generated summary is
+    // forwarded to AG-UI.
+    summary: "auto",
     input: userInput(params.text, params.attachments ?? []),
     ...(optionalModel(params.model) ? { model: params.model } : {}),
     ...(params.reasoningEffort != null ? { effort: requirePattern(params.reasoningEffort, EFFORT, "reasoningEffort") } : {}),
