@@ -2,7 +2,7 @@
 
 import type { ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
-import { ChevronDown, Download, File, X } from "lucide-react";
+import { ChevronDown, Download, File } from "lucide-react";
 import { defaultApiBase } from "@/shared/config/runtime";
 import { BraiApi, type EventLogRow } from "@/shared/api/braiApi";
 import { formatDisplayDateTime } from "@/shared/time/format";
@@ -12,6 +12,7 @@ import { Button } from "@/shared/ui/button";
 import { cn } from "@/shared/ui/cn";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/shared/ui/collapsible";
 import { ScrollArea } from "@/shared/ui/scroll-area";
+import { ImageViewerDialog } from "../chrome/ImageViewerDialog";
 import rawFieldReference from "./detailFieldReference.json";
 
 export type DetailPanelKind = "actions" | "inbox";
@@ -157,42 +158,7 @@ export function DetailAttachments({ links }: { links: string[] }) {
           );
         })}
       </div>
-      {previewLink ? (
-        <div
-          className="fixed inset-0 z-[120] grid place-items-center bg-background/95 p-4"
-          role="dialog"
-          aria-modal="true"
-          aria-label={attachmentName(previewLink)}
-          onClick={() => setPreviewLink(null)}
-        >
-          <Button
-            type="button"
-            variant="secondary"
-            size="icon"
-            className="absolute right-4 top-4"
-            aria-label="Закрыть вложение"
-            title="Закрыть"
-            onClick={(event) => {
-              event.stopPropagation();
-              setPreviewLink(null);
-            }}
-          >
-            <X aria-hidden="true" />
-          </Button>
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={attachmentHref(previewLink)}
-            alt={attachmentName(previewLink)}
-            draggable={false}
-            className="max-h-full max-w-full object-contain"
-            onClick={(event) => event.stopPropagation()}
-            onError={() => {
-              setMissingImageLinks((current) => new Set(current).add(previewLink));
-              setPreviewLink(null);
-            }}
-          />
-        </div>
-      ) : null}
+      {previewLink ? <ImageViewerDialog label={attachmentName(previewLink)} onOpenChange={(open) => { if (!open) setPreviewLink(null); }} open src={attachmentHref(previewLink)} /> : null}
     </section>
   );
 }

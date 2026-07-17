@@ -187,6 +187,31 @@ nextjs-portal {
   pointer-events: none !important;
 }
 
+/* CopilotKit declares its own dark token set on every nested data-copilotkit
+ * node. Preserve the application surface there too: otherwise a #0a0a0a
+ * rectangle appears below the chat and composer in the dark shell. */
+.brai-copilot-surface [data-copilotkit] {
+  --accent: var(--brai-copilot-accent) !important;
+  --accent-foreground: var(--brai-copilot-accent-foreground) !important;
+  --background: var(--brai-copilot-background) !important;
+  --border: var(--brai-copilot-border) !important;
+  --card: var(--brai-copilot-background) !important;
+  --card-foreground: var(--brai-copilot-card-foreground) !important;
+  --destructive: var(--brai-copilot-destructive) !important;
+  --destructive-foreground: var(--brai-copilot-destructive-foreground) !important;
+  --foreground: var(--brai-copilot-foreground) !important;
+  --input: var(--brai-copilot-input) !important;
+  --muted: var(--brai-copilot-muted) !important;
+  --muted-foreground: var(--brai-copilot-muted-foreground) !important;
+  --popover: var(--brai-copilot-popover) !important;
+  --popover-foreground: var(--brai-copilot-popover-foreground) !important;
+  --primary: var(--brai-copilot-primary) !important;
+  --primary-foreground: var(--brai-copilot-primary-foreground) !important;
+  --ring: var(--brai-copilot-ring) !important;
+  --secondary: var(--brai-copilot-secondary) !important;
+  --secondary-foreground: var(--brai-copilot-secondary-foreground) !important;
+}
+
 ::view-transition-old(root),
 ::view-transition-new(root) {
   animation: none;

@@ -425,6 +425,7 @@ function surface(overrides: {
       draftStorageKey="brai_chat_draft:test"
       loadAttachment={vi.fn(async () => new Blob([new Uint8Array([0x89])], { type: "image/png" }))}
       onDeleteAttachment={overrides.onDeleteAttachment ?? vi.fn(async () => undefined)}
+      onComposerReady={vi.fn()}
       onError={overrides.onError ?? vi.fn()}
       onRetryChange={overrides.onRetryChange ?? vi.fn()}
       onRunFinished={overrides.onRunFinished ?? vi.fn()}

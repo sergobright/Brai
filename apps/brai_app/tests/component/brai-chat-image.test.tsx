@@ -19,7 +19,7 @@ describe("BraiChatImage", () => {
 
     const dialog = await screen.findByRole("dialog");
     expect(within(dialog).getByRole("img", { name: "Лиса в малине" })).toBeInTheDocument();
-    expect(dialog.parentElement).toHaveClass("pt-[calc(env(safe-area-inset-top)+0.75rem)]");
+    expect(dialog.parentElement).toHaveClass("pt-[max(env(safe-area-inset-top),3.5rem)]");
     fireEvent.click(within(dialog).getByRole("button", { name: "Закрыть просмотр" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
   });

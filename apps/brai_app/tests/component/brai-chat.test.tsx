@@ -28,6 +28,7 @@ vi.mock("@/features/app/sections/brai/BraiCopilotSurface", () => ({
         (props.onError as (message: string, retryable: boolean) => void)("Ранний сбой", true);
       }}>Вызвать ранний сбой</button>
       <button type="button" onClick={() => (props.onRunFinished as () => void)()}>Завершить тестовый run</button>
+      <button type="button" onClick={() => (props.onComposerReady as () => void)()}>Композитор готов</button>
     </div>
   ),
 }));
@@ -113,6 +114,18 @@ describe("Brai chat client", () => {
     expect(screen.getAllByText("Последний чат")).toHaveLength(2);
   });
 
+  it("shows a focused new-chat launch state until the composer is ready", async () => {
+    renderChat();
+    await screen.findByTestId("copilot-chat");
+
+    fireEvent.click(screen.getByRole("button", { name: "Новый чат" }));
+
+    expect(await screen.findByRole("status")).toHaveTextContent("Запускается новый чат…");
+    expect(screen.getByTestId("copilot-chat")).toHaveAttribute("data-thread-id", "thread-2");
+    fireEvent.click(screen.getByRole("button", { name: "Композитор готов" }));
+    await waitFor(() => expect(screen.queryByRole("status")).not.toBeInTheDocument());
+  });
+
   it("opens, switches and closes one standard context panel from the header actions", async () => {
     renderChat();
     await screen.findByTestId("copilot-chat");
@@ -140,7 +153,7 @@ describe("Brai chat client", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Docs" }));
 
-    expect(screen.getByRole("complementary", { name: "Docs" })).toHaveClass("mobile");
+    expect(screen.getByRole("complementary", { name: "Docs" })).toHaveClass("mobile-context-sheet");
     expect(window.history.state?.braiMobileSheet).toBe("Docs");
   });
 

@@ -97,8 +97,10 @@ const BRAI_COPILOT_THEME: CopilotThemeStyle = {
 };
 
 type BraiCopilotContextValue = {
+  autoFocusComposer: boolean;
   onError: (message: string, retryable?: boolean) => void;
   onDeleteAttachment: (id: string) => Promise<void>;
+  onComposerReady: () => void;
   onRetryChange: (retry: (() => Promise<void>) | null) => void;
   onRunFinished: () => void;
   onSteer: (messageId: string, text: string) => Promise<void>;
@@ -111,11 +113,13 @@ type BraiCopilotContextValue = {
 const BraiCopilotContext = createContext<BraiCopilotContextValue | null>(null);
 
 export function BraiCopilotSurface({
+  autoFocusComposer = false,
   headers,
   draftStorageKey,
   loadAttachment,
   onError,
   onDeleteAttachment,
+  onComposerReady,
   onRetryChange,
   onRunFinished,
   onSteer,
@@ -125,11 +129,13 @@ export function BraiCopilotSurface({
   theme,
   threadId,
 }: {
+  autoFocusComposer?: boolean;
   headers?: Record<string, string>;
   draftStorageKey: string;
   loadAttachment: (id: string, download?: boolean) => Promise<Blob>;
   onError: (message: string, retryable?: boolean) => void;
   onDeleteAttachment: (id: string) => Promise<void>;
+  onComposerReady: () => void;
   onRetryChange: (retry: (() => Promise<void>) | null) => void;
   onRunFinished: () => void;
   onSteer: (messageId: string, text: string) => Promise<void>;
@@ -163,8 +169,8 @@ export function BraiCopilotSurface({
   }, []);
 
   const context = useMemo(() => ({
-    draft, loadAttachment, onDeleteAttachment, onError, onRetryChange, onRunFinished, onSteer, releaseReservations, setDraft,
-  }), [draft, loadAttachment, onDeleteAttachment, onError, onRetryChange, onRunFinished, onSteer, releaseReservations, setDraft]);
+    autoFocusComposer, draft, loadAttachment, onComposerReady, onDeleteAttachment, onError, onRetryChange, onRunFinished, onSteer, releaseReservations, setDraft,
+  }), [autoFocusComposer, draft, loadAttachment, onComposerReady, onDeleteAttachment, onError, onRetryChange, onRunFinished, onSteer, releaseReservations, setDraft]);
   // CopilotKit treats a changed headers object as a changed runtime
   // configuration. The VisualViewport emits frequent updates while Android's
   // keyboard is open, so an unstable object here repeatedly reconnects the
@@ -420,6 +426,7 @@ const BraiChatTextArea = forwardRef<HTMLTextAreaElement, ComponentProps<"textare
   { className, onChange, onKeyDown, value, ...props },
   ref,
 ) {
+  const context = useRequiredContext();
   const localRef = useRef<HTMLTextAreaElement | null>(null);
   useImperativeHandle(ref, () => localRef.current as HTMLTextAreaElement, []);
 
@@ -436,6 +443,14 @@ const BraiChatTextArea = forwardRef<HTMLTextAreaElement, ComponentProps<"textare
   useLayoutEffect(() => {
     resize();
   }, [resize, value]);
+
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => {
+      if (context.autoFocusComposer) localRef.current?.focus({ preventScroll: true });
+      context.onComposerReady();
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [context.autoFocusComposer, context.onComposerReady]);
 
   return (
     <Textarea

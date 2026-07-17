@@ -1,12 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Download, Loader2, RefreshCw, X } from "lucide-react";
-import { Dialog } from "@base-ui/react/dialog";
-import { installAndroidBackHandler } from "@/shared/platform/platform";
+import { Download, Loader2, RefreshCw } from "lucide-react";
 import { Button } from "@/shared/ui/button";
 import { cx } from "../../appUtils";
-import { useMobileSheetDrag } from "../../hooks/useMobileSheetDrag";
+import { ImageViewerDialog } from "../../chrome/ImageViewerDialog";
 
 export function BraiChatImage({
   attachmentId,
@@ -23,17 +21,6 @@ export function BraiChatImage({
   const [viewerOpen, setViewerOpen] = useState(false);
   const [loadVersion, setLoadVersion] = useState(0);
   const objectUrlRef = useRef("");
-  const closeViewer = useCallback(() => setViewerOpen(false), []);
-  const {
-    backdropRef,
-    backdropStyle,
-    closeWithAnimation,
-    gestureRef,
-    resetOpen,
-    sheetDragHandlers,
-    sheetRef,
-    sheetStyle,
-  } = useMobileSheetDrag({ onClose: closeViewer });
 
   const releaseObjectUrl = useCallback(() => {
     if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);
@@ -61,15 +48,6 @@ export function BraiChatImage({
   const currentKey = `${attachmentId}:${loadVersion}`;
   const objectUrl = loadState?.key === currentKey ? loadState.objectUrl : "";
   const failed = loadState?.key === currentKey && loadState.failed;
-
-  useEffect(() => {
-    if (!viewerOpen) return;
-    resetOpen();
-    return installAndroidBackHandler(() => {
-      closeWithAnimation();
-      return true;
-    });
-  }, [closeWithAnimation, resetOpen, viewerOpen]);
 
   const download = useCallback(async () => {
     try {
@@ -113,24 +91,7 @@ export function BraiChatImage({
           <Button type="button" size="icon-xs" variant="secondary" aria-label="Скачать изображение" onClick={() => void download()}><Download aria-hidden="true" /></Button>
         </div>
       </div>
-      <Dialog.Root open={viewerOpen} onOpenChange={setViewerOpen}>
-        <Dialog.Portal>
-          <Dialog.Backdrop ref={backdropRef} className="fixed inset-0 z-[180] bg-background/95 backdrop-blur-sm" style={backdropStyle} />
-          <Dialog.Viewport ref={gestureRef} className="fixed inset-0 z-[181] grid place-items-center px-3 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] pt-[calc(env(safe-area-inset-top)+0.75rem)]" {...sheetDragHandlers}>
-            <Dialog.Popup ref={sheetRef} className="grid h-full w-full max-w-5xl grid-rows-[auto_minmax(0,1fr)] outline-none" style={sheetStyle}>
-              <Dialog.Title className="sr-only">{label}</Dialog.Title>
-              <div className="flex justify-end gap-2" data-mobile-sheet-no-drag>
-                <Button type="button" size="sm" variant="secondary" onClick={() => void download()}><Download aria-hidden="true" />Скачать</Button>
-                <Button type="button" size="icon-sm" variant="secondary" aria-label="Закрыть просмотр" onClick={closeViewer}><X aria-hidden="true" /></Button>
-              </div>
-              <div className="grid min-h-0 place-items-center overflow-auto p-2">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={objectUrl} alt={label} className="max-h-full max-w-full object-contain" />
-              </div>
-            </Dialog.Popup>
-          </Dialog.Viewport>
-        </Dialog.Portal>
-      </Dialog.Root>
+      <ImageViewerDialog label={label} onDownload={() => void download()} onOpenChange={setViewerOpen} open={viewerOpen} src={objectUrl} />
     </>
   );
 }

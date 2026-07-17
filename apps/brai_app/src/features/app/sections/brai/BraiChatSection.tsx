@@ -71,6 +71,7 @@ export function BraiChatSection({
   const [chatError, setChatError] = useState("");
   const [retryableError, setRetryableError] = useState(false);
   const [retryAvailable, setRetryAvailable] = useState(false);
+  const [startingNewThread, setStartingNewThread] = useState(false);
   const [pendingAnchor, setPendingAnchor] = useState<PendingAnchor | null>(null);
   const [workspaceTargetId, setWorkspaceTargetId] = useState<string | null>(null);
   const activeThreadIdRef = useRef<string | null>(null);
@@ -229,6 +230,7 @@ export function BraiChatSection({
   }, [activeThreadId, messages, pendingAnchor]);
 
   const createThread = useCallback(async () => {
+    setStartingNewThread(true);
     try {
       const thread = await api.createThread();
       setArchivedMode(false);
@@ -239,12 +241,14 @@ export function BraiChatSection({
       clearChatError();
       requestMobileProfileDrawerClose();
     } catch {
+      setStartingNewThread(false);
       setStatus("Новый чат не создан");
       reportChatError("Новый чат не создан");
     }
   }, [activateThread, api, clearChatError, reportChatError, resetProjections, setArchivedMode]);
 
   const selectThread = useCallback((id: string) => {
+    setStartingNewThread(false);
     resetProjections();
     clearChatError();
     activateThread(id);
@@ -399,6 +403,7 @@ export function BraiChatSection({
     ...(userId ? { "x-brai-expected-user-id": userId } : {}),
     "x-brai-chat-replay-mode": "full",
   }), [userId]);
+  const handleComposerReady = useCallback(() => setStartingNewThread(false), []);
 
   return (
     <div
@@ -409,14 +414,14 @@ export function BraiChatSection({
       data-nav-swipe-exclusion
     >
       <section className="brai-chat-pane grid h-full min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)] bg-background" aria-label="Чат с Браем">
-        <div className="flex min-h-12 flex-wrap items-center gap-2 border-b border-border px-3 py-2">
-          <p className="m-0 min-w-24 flex-1 truncate text-sm font-semibold">{activeThread?.title ?? "Брай"}</p>
+        <div className="flex min-h-10 flex-wrap items-center gap-1.5 border-b border-border px-3 py-1.5">
+          <p className="m-0 min-w-0 flex-1 truncate text-sm font-semibold text-foreground">{activeThread?.title ?? "Брай"}</p>
           <Select value={activeThread?.model ?? ""} disabled={!activeThread || models.length === 0} onValueChange={(model) => void updateSettings({ model })}>
-            <SelectTrigger size="sm" aria-label="Модель Брая"><SelectValue placeholder="Модель" /></SelectTrigger>
+            <SelectTrigger size="sm" className="!h-7 w-36 !gap-1 !px-2 !text-xs max-[460px]:w-32 [&_svg]:!size-3" aria-label="Модель Брая"><SelectValue placeholder="Модель" /></SelectTrigger>
             <SelectContent>{models.map((model) => <SelectItem key={model.id} value={model.id}>{model.display_name || model.id}</SelectItem>)}</SelectContent>
           </Select>
           <Select value={activeThread?.reasoning_effort ?? ""} disabled={!activeThread || reasoningEfforts.length === 0} onValueChange={(reasoning_effort) => void updateSettings({ reasoning_effort })}>
-            <SelectTrigger size="sm" aria-label="Глубина рассуждений Брая"><SelectValue placeholder="Рассуждения" /></SelectTrigger>
+            <SelectTrigger size="sm" className="!h-7 w-24 !gap-1 !px-2 !text-xs [&_svg]:!size-3" aria-label="Глубина рассуждений Брая"><SelectValue placeholder="Рассуждения" /></SelectTrigger>
             <SelectContent>{reasoningEfforts.map((effort) => <SelectItem key={effort} value={effort}>{effort}</SelectItem>)}</SelectContent>
           </Select>
         </div>
@@ -438,6 +443,7 @@ export function BraiChatSection({
           {activeThread ? (
             <BraiCopilotSurface
               key={activeThread.id}
+              autoFocusComposer={startingNewThread}
               theme={theme}
               runtimeUrl={api.runtimeUrl()}
               threadId={activeThread.id}
@@ -448,6 +454,7 @@ export function BraiChatSection({
               onRunFinished={refreshAfterRun}
               onSteer={steer}
               onDeleteAttachment={(id) => api.deleteUnlinkedAttachment(id)}
+              onComposerReady={handleComposerReady}
               onUpload={async (file) => {
                 const attachment = await api.uploadAttachment(activeThread.id, file);
                 clearChatError();
@@ -459,6 +466,11 @@ export function BraiChatSection({
           ) : (
             <div className="grid h-full place-items-center px-6 text-center"><div><p className="text-sm text-muted-foreground">{status}</p>{!archived ? <Button type="button" className="mt-3" onClick={() => void createThread()}><Plus aria-hidden="true" />Новый чат</Button> : null}</div></div>
           )}
+          {startingNewThread ? (
+            <div className="absolute inset-0 z-30 grid place-items-center bg-background px-6 text-center" role="status">
+              <p className="m-0 text-sm text-muted-foreground">Запускается новый чат…</p>
+            </div>
+          ) : null}
         </div>
       </section>
       {contextPanel !== "none" ? (
