@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { setupBraiAppTest, swipe } from "./app-test-support";
 import { BraiApp } from "@/features/app/BraiApp";
 import { installAndroidBackHandler } from "@/shared/platform/platform";
@@ -43,6 +43,30 @@ describe("BraiApp gestures", () => {
     expect(current).toBeInstanceOf(HTMLElement);
     expect((current as HTMLElement).style.transform).toBe("");
     expect(document.querySelector('[data-section-page="focus"]')).not.toBeInTheDocument();
+  });
+
+  it("keeps the BRAI session mounted without reloading it across section navigation", async () => {
+    render(<BraiApp initialSection="brai" />);
+    await screen.findByRole("heading", { name: "Брай" });
+    await waitFor(() => expect(vi.mocked(fetch).mock.calls.some(([input]) =>
+      String(input).includes("/v1/brai-chat/threads?"))).toBe(true));
+    const braiPage = document.querySelector('[data-section-page="brai"]');
+    const before = vi.mocked(fetch).mock.calls.filter(([input]) =>
+      String(input).includes("/v1/brai-chat/threads?")).length;
+    const dock = document.querySelector(".main-dock .mobile-nav");
+    expect(braiPage).toBeInstanceOf(HTMLElement);
+    expect(dock).toBeInstanceOf(HTMLElement);
+
+    fireEvent.click(within(dock as HTMLElement).getByRole("button", { name: "Действия" }));
+    await screen.findByRole("heading", { name: "Действия" });
+    fireEvent.click(within(dock as HTMLElement).getByRole("button", { name: "Брай" }));
+    await screen.findByRole("heading", { name: "Брай" });
+
+    expect(document.querySelector('[data-section-page="brai"]')).toBe(braiPage);
+    expect(vi.mocked(fetch).mock.calls.filter(([input]) =>
+      String(input).includes("/v1/brai-chat/threads?")).length).toBe(before);
+    fireEvent.click(within(dock as HTMLElement).getByRole("button", { name: "Действия" }));
+    await screen.findByRole("heading", { name: "Действия" });
   });
 
   it("opens the Actions navigation drawer from a left-edge page swipe", async () => {
@@ -149,6 +173,7 @@ describe("BraiApp gestures", () => {
   });
 
   it("keeps focus inside the modal drawer and restores it after Escape", async () => {
+    window.history.replaceState({ braiSection: "actions" }, "", "/activities");
     render(<BraiApp />);
 
     const trigger = screen.getByRole("button", { name: "Открыть меню" });

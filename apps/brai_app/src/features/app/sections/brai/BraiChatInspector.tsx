@@ -1,12 +1,12 @@
 "use client";
 
 import { useEffect, useMemo } from "react";
-import Image from "next/image";
 import { BookOpen, Code2, CornerUpLeft, Eye } from "lucide-react";
 import { Button } from "@/shared/ui/button";
 import { MarkdownContent } from "@/shared/ui/markdown-content";
 import { ScrollArea } from "@/shared/ui/scroll-area";
 import { cx } from "../../appUtils";
+import { BraiChatImage } from "./BraiChatImage";
 import { workspaceArtifacts, type BraiChatArtifact, type BraiWorkspaceMode } from "./braiChatModel";
 
 export type WorkspaceInstance = "desktop" | "mobile";
@@ -19,14 +19,14 @@ const MODE_COPY: Record<BraiWorkspaceMode, { empty: string; label: string; icon:
 
 export function BraiChatWorkspace({
   artifacts,
-  attachmentUrl,
+  loadAttachment,
   instance,
   mode,
   onSource,
   targetId,
 }: {
   artifacts: BraiChatArtifact[];
-  attachmentUrl: (id: string) => string;
+  loadAttachment: (id: string, download?: boolean) => Promise<Blob>;
   instance: WorkspaceInstance;
   mode: BraiWorkspaceMode;
   onSource: (artifact: BraiChatArtifact) => void;
@@ -81,7 +81,7 @@ export function BraiChatWorkspace({
                     </Button>
                   ) : null}
                 </header>
-                <WorkspaceArtifactContent artifact={artifact} attachmentUrl={attachmentUrl} />
+                <WorkspaceArtifactContent artifact={artifact} loadAttachment={loadAttachment} />
               </article>
             ))}
           </div>
@@ -91,21 +91,14 @@ export function BraiChatWorkspace({
   );
 }
 
-function WorkspaceArtifactContent({ artifact, attachmentUrl }: {
+function WorkspaceArtifactContent({ artifact, loadAttachment }: {
   artifact: BraiChatArtifact;
-  attachmentUrl: (id: string) => string;
+  loadAttachment: (id: string, download?: boolean) => Promise<Blob>;
 }) {
   if (artifact.kind === "image" && artifact.attachmentId) {
     return (
-      <div className="grid place-items-center p-4">
-        <Image
-          unoptimized
-          src={attachmentUrl(artifact.attachmentId)}
-          alt={artifact.label}
-          width={1200}
-          height={900}
-          className="h-auto max-h-[70dvh] w-full object-contain"
-        />
+      <div className="p-4">
+        <BraiChatImage attachmentId={artifact.attachmentId} label={artifact.label} loadBlob={loadAttachment} />
       </div>
     );
   }

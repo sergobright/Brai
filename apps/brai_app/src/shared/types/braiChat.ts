@@ -67,3 +67,9 @@ export type BraiChatModel = {
   reasoning_efforts: string[];
   default_reasoning_effort?: string | null;
 };
+
+export type BraiChatModelCatalog = {
+  models: BraiChatModel[];
+  default_model: string;
+  default_reasoning_effort: string;
+};

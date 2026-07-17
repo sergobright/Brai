@@ -14,6 +14,9 @@ const TABLES = [
 const MIGRATION_SQL = fs.readFileSync(path.resolve(
   import.meta.dirname, '../../../supabase/migrations/0034_brai_codex_chat.sql'
 ), 'utf8');
+const IDENTITY_MIGRATION_SQL = fs.readFileSync(path.resolve(
+  import.meta.dirname, '../../../supabase/migrations/0036_brai_codex_identity.sql'
+), 'utf8');
 
 test('Brai chat migration is idempotent, described, RLS-protected and cascades account data', async () => {
   const database = await createTestDatabase();
@@ -21,6 +24,8 @@ test('Brai chat migration is idempotent, described, RLS-protected and cascades a
   try {
     await pool.query(MIGRATION_SQL);
     await pool.query(MIGRATION_SQL);
+    await pool.query(IDENTITY_MIGRATION_SQL);
+    await pool.query(IDENTITY_MIGRATION_SQL);
 
     const tables = await pool.query(`
       SELECT c.relname, c.relrowsecurity
@@ -63,6 +68,9 @@ test('Brai chat migration is idempotent, described, RLS-protected and cascades a
     assert.equal((await pool.query(`
       SELECT count(*)::int AS count FROM schema_migrations WHERE version = 68
     `)).rows[0].count, 1);
+    assert.equal((await pool.query(`
+      SELECT count(*)::int AS count FROM schema_migrations WHERE version = 69
+    `)).rows[0].count, 1);
     const titleAgent = (await pool.query(`
       SELECT id, version, target, kind, status, llm_provider, llm_model,
         llm_prompt_template, llm_timeout_ms, fallback_description, source_module,
@@ -83,6 +91,30 @@ test('Brai chat migration is idempotent, described, RLS-protected and cascades a
     assert.equal(titleAgent.schema_version, 'brai.chat-title.result.v1');
     assert.equal(titleAgent.runtime_service, 'brai-codex-broker');
     assert.equal(titleAgent.metadata_json.log_schema, 'brai.chat_title.ai_log.v1');
+    const chatAgent = (await pool.query(`
+      SELECT id, version, target, kind, status, llm_provider, llm_model,
+        llm_prompt_template, llm_timeout_ms, fallback_description, source_module,
+        prompt_version, schema_version, runtime_service, metadata_json
+      FROM agents WHERE id = 'brai-codex'
+    `)).rows[0];
+    assert.equal(chatAgent.version, '1');
+    assert.equal(chatAgent.target, 'brai_chat_threads');
+    assert.equal(chatAgent.kind, 'runtime');
+    assert.equal(chatAgent.status, 'active');
+    assert.equal(chatAgent.llm_provider, 'codex');
+    assert.equal(chatAgent.llm_model, 'GPT-5.6-Luna');
+    assert.match(chatAgent.llm_prompt_template, /отладочном режиме/);
+    assert.match(chatAgent.llm_prompt_template, /статический снимок/);
+    assert.equal(chatAgent.llm_timeout_ms, 900_000);
+    assert.match(chatAgent.fallback_description, /сохранённая история и черновик не удаляются/);
+    assert.equal(chatAgent.source_module, 'services/brai_codex_broker/src/broker.mjs');
+    assert.equal(chatAgent.prompt_version, 'brai-codex.identity.v1');
+    assert.equal(chatAgent.schema_version, 'brai.chat.agui.v1');
+    assert.equal(chatAgent.runtime_service, 'brai-codex-broker');
+    assert.equal(chatAgent.metadata_json.log_schema, 'brai.chat.ai_log.v1');
+    assert.equal(chatAgent.metadata_json.web_search, 'cached');
+    assert.equal(chatAgent.metadata_json.live_search, false);
+    assert.equal(chatAgent.metadata_json.arbitrary_network, false);
     await pool.query(`
       INSERT INTO "user" ("id", "name", "email", "emailVerified", "createdAt", "updatedAt")
       VALUES ('generated-title-owner', 'Owner', 'generated-title@example.test', true, now(), now());

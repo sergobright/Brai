@@ -83,17 +83,19 @@ test('Better-Auth chat API isolates owners and supports lifecycle, settings, rep
     assert.equal(models.status, 200);
     assert.deepEqual(models.body, {
       models: [{
-        id: 'codex-1', display_name: 'Codex 1',
-        reasoning_efforts: ['low', 'high'], default_reasoning_effort: 'low'
+        id: 'codex-1', display_name: 'GPT-5.6-Luna',
+        reasoning_efforts: ['low', 'medium', 'high'], default_reasoning_effort: 'low'
       }],
       default_model: 'codex-1',
-      default_reasoning_effort: 'low'
+      default_reasoning_effort: 'medium'
     });
 
     const created = await chatJson(fixture, '/v1/brai-chat/threads', { method: 'POST', body: '{}' });
     assert.equal(created.status, 201);
     assert.equal(created.body.thread.title, 'Новый чат');
     assert.equal(created.body.thread.version, 1);
+    assert.equal(created.body.thread.model, 'codex-1');
+    assert.equal(created.body.thread.reasoning_effort, 'medium');
     const threadId = created.body.thread.id;
 
     const configured = await chatJson(fixture, `/v1/brai-chat/threads/${threadId}`, {
@@ -177,7 +179,7 @@ test('Better-Auth chat API isolates owners and supports lifecycle, settings, rep
 
     const inherited = await chatJson(fixture, '/v1/brai-chat/threads', { method: 'POST', body: '{}' });
     assert.equal(inherited.body.thread.model, 'codex-1');
-    assert.equal(inherited.body.thread.reasoning_effort, 'high');
+    assert.equal(inherited.body.thread.reasoning_effort, 'medium');
     withUserScope('chat-owner-a', () => fixture.store.putBraiChatMessage({
       threadId: inherited.body.thread.id,
       idempotencyKey: 'auto-title-key',
@@ -216,7 +218,7 @@ test('authenticated steer route validates input, scopes ownership and maps inact
   let mode = 'inactive';
   const calls = [];
   const runtime = {
-    listModels: async () => ({ models: [], default_model: null }),
+    ...modelRuntime(),
     steer: async (input) => {
       calls.push(input);
       if (mode === 'inactive') throw Object.assign(new Error('chat_turn_not_active'), { status: 409 });
@@ -284,26 +286,27 @@ test('chat runtime CORS preflight allows both durable replay cursor headers', as
       headers: {
         origin: 'http://localhost',
         'access-control-request-method': 'POST',
-        'access-control-request-headers': 'last-event-id,x-brai-chat-after'
+        'access-control-request-headers': 'last-event-id,x-brai-chat-after,x-brai-chat-replay-mode'
       }
     });
     assert.equal(response.status, 204);
     const allowed = response.headers.get('access-control-allow-headers') ?? '';
     assert.match(allowed, /(?:^|,)last-event-id(?:,|$)/);
     assert.match(allowed, /(?:^|,)x-brai-chat-after(?:,|$)/);
+    assert.match(allowed, /(?:^|,)x-brai-chat-replay-mode(?:,|$)/);
   } finally {
     await fixture.close();
   }
 });
 
-test('model route preserves an explicit runtime default that is not first', async () => {
+test('model route pins Luna medium even when the runtime default is different', async () => {
   const fixture = await createFixture(NOW, {
     createAuth: authRuntime(() => 'model-owner'),
     braiChatRuntime: {
       listModels: async () => ({
         models: [
           { id: 'model-a', display_name: 'A', reasoning_efforts: [], default_reasoning_effort: null },
-          { id: 'model-b', display_name: 'B', reasoning_efforts: ['high'], default_reasoning_effort: 'high' }
+          { id: 'model-b', display_name: 'GPT-5.6-Luna', reasoning_efforts: ['medium', 'high'], default_reasoning_effort: 'high' }
         ],
         default_model: 'model-b'
       })
@@ -313,7 +316,7 @@ test('model route preserves an explicit runtime default that is not first', asyn
     const response = await request(fixture.url, '/v1/brai-chat/models');
     assert.equal(response.status, 200);
     assert.equal(response.body.default_model, 'model-b');
-    assert.equal(response.body.default_reasoning_effort, 'high');
+    assert.equal(response.body.default_reasoning_effort, 'medium');
   } finally {
     await fixture.close();
   }
@@ -429,7 +432,15 @@ test('private image attachments verify signatures and clean files when validatio
     const download = await fetch(`${fixture.url}/v1/brai-chat/attachments/${attachmentId}`);
     assert.equal(download.status, 200);
     assert.equal(download.headers.get('content-type'), 'image/png');
+    assert.match(download.headers.get('content-disposition'), /^inline;/);
     assert.deepEqual(Buffer.from(await download.arrayBuffer()), PNG);
+    const explicitDownload = await fetch(
+      `${fixture.url}/v1/brai-chat/attachments/${attachmentId}?download=1`
+    );
+    assert.equal(explicitDownload.status, 200);
+    assert.match(explicitDownload.headers.get('content-disposition'), /^attachment;/);
+    assert.equal(explicitDownload.headers.get('x-content-type-options'), 'nosniff');
+    assert.deepEqual(Buffer.from(await explicitDownload.arrayBuffer()), PNG);
 
     const attachmentPath = path.join(vaultRoot, 'attachment-owner', internal[0].relative_path);
     const outsideFile = path.join(os.tmpdir(), `brai-chat-outside-${crypto.randomUUID()}`);
@@ -451,6 +462,9 @@ test('private image attachments verify signatures and clean files when validatio
 
     activeUser = 'attachment-other';
     assert.equal((await fetch(`${fixture.url}/v1/brai-chat/attachments/${attachmentId}`)).status, 404);
+    assert.equal((await fetch(
+      `${fixture.url}/v1/brai-chat/attachments/${attachmentId}?download=1`
+    )).status, 404);
   } finally {
     await fixture.close();
     fs.rmSync(vaultRoot, { recursive: true, force: true });
@@ -904,8 +918,8 @@ function modelRuntime() {
   return {
     listModels: async () => ({
       models: [{
-        id: 'codex-1', display_name: 'Codex 1',
-        reasoning_efforts: ['low', 'high'], default_reasoning_effort: 'low'
+        id: 'codex-1', display_name: 'GPT-5.6-Luna',
+        reasoning_efforts: ['low', 'medium', 'high'], default_reasoning_effort: 'low'
       }],
       default_model: 'codex-1'
     })

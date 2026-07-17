@@ -23,6 +23,11 @@ MVP не получает доступ к данным, проектам, DB, о
 - В новом chat request path API handlers не читают и не монтируют Codex credential: read-only credential получает только broker-managed user runtime. Существующий Inbox Codex executor остаётся отдельным legacy consumer и не используется чатом.
 - Каждый пользователь получает on-demand non-root container без inbound ports, Brai source/API/DB secrets или чужого state. Root filesystem и пустой workspace read-only; per-user `CODEX_HOME` writable; shared auth и выбранные attachments read-only. Codex работает с `approval=never`, read-only sandbox и отключённой tool network.
 - Active turn отделён от subscriber connection. Persist-before-fan-out и monotonic sequence обеспечивают replay; turn и idle deadlines равны 15 минутам, причём idle cleanup не останавливает active turn.
+- Холодный CopilotKit consumer всегда получает полный Postgres-backed AG-UI replay. Sequence cursor принимается только при явном `resume` уже гидратированной локальной сессии и не может заменить полную историю. Messages, events, threads и artifacts обновляются независимо, поэтому частичный сбой проекции не очищает уже видимый ответ.
+- Client держит BRAI session и CopilotKit provider смонтированными на уровне приложения при переходах между разделами. Последний активный тред хранится локально для пары user/environment, а управляемый черновик — отдельно для каждого треда.
+- Runtime agent `brai-codex` зарегистрирован версионируемой identity-инструкцией. Она описывает BrightOS/Brai через статический architecture snapshot и явно сообщает debug-ограничения: нет живого репозитория, DB, Vault, внутренних данных, выполнения команд или изменения файлов. Каждый фактический turn пишет одну idempotent bounded запись `ai_logs`.
+- Управляемый поиск разрешён только в режиме `cached`; live search, произвольная сеть и network-enabled commands запрещены. Новые треды получают реальный catalog ID модели с display name `GPT-5.6-Luna` и reasoning effort `medium`; существующие настройки не переписываются, а readiness завершается ошибкой при отсутствии закреплённой модели.
+- `attachment_id` является единой identity сгенерированного изображения. Runtime проверяет файл, MIME, размер и SHA-256 до события `ready`, публикует один безопасный `brai.artifact.v1` без host path/base64/internal args и синтезирует «Изображение готово.», если модель не дала текст. Просмотр и `?download=1` используют owner-scoped авторизованный endpoint.
 - Главное меню остаётся в существующем нижнем `MainDock`. `Брай` становится первым пунктом и route `/`; `Действия` переходят на `/activities`; `Inbox`, `Фокус`, `Factory`, `Draws` и служебный `DesktopRail` сохраняются.
 
 ## Рассмотренные альтернативы
@@ -50,14 +55,16 @@ MVP не получает доступ к данным, проектам, DB, о
 ## Проверка
 
 - Migration/API tests доказывают ownership, RLS, idempotency, archive/restore, replay, search и attachment cleanup.
-- Adapter tests доказывают AG-UI ordering, redaction, 64 KiB bound, detached replay, stop/steer/retry и safe errors.
+- Adapter tests доказывают AG-UI ordering, cold full replay/resume distinction, `summaryIndex` reasoning boundaries, redaction, 64 KiB bound, detached replay, stop/steer/retry, single image artifact и safe errors.
 - Broker tests доказывают RPC allowlist, path containment, per-user state, selected-file-only mounts, idle handling и отсутствие public ports/Docker socket внутри user container.
+- Client tests доказывают persistent session mount, last-thread restore, independent projections, per-thread draft preservation, dock geometry и авторизованный image viewer/download.
 - Preview QA проходит через опубликованный HTTPS route после Caddy и app login на desktop/mobile с console/network inspection.
 - Upgrade Codex начинается с `codex app-server generate-ts` и сравнения required methods/events для новой pinned версии.
 
 ## Ссылки
 
 - `openspec/changes/add-brai-codex-chat/`
+- `openspec/changes/stabilize-brai-chat/`
 - `openspec/specs/next-capacitor-client/spec.md`
 - `openspec/specs/local-services/spec.md`
 - [Codex App Server](https://learn.chatgpt.com/docs/app-server.md)

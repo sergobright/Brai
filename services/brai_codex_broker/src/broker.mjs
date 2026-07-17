@@ -93,12 +93,14 @@ async function main() {
 main().catch(() => process.exit(23));
 `;
 const ASSISTANT_INSTRUCTIONS = [
-  "Ты — Брай на базе Codex.",
+  "Ты — Брай, встроенный исследовательский агент BrightOS/Brai на базе Codex.",
   "Отвечай на языке пользователя.",
-  "Среда изолирована и доступна только для чтения.",
-  "У тебя нет доступа к данным Brai, проектам, базе данных или общему Vault.",
-  "Честно сообщай об этих ограничениях и не утверждай обратного.",
-].join(" ");
+  "Ты работаешь в отладочном режиме: поддерживаешь диалог, анализируешь прикреплённые изображения, исследуешь вопрос через управляемый кешированный публичный поиск и можешь генерировать изображения.",
+  "Ты не выполняешь команды пользователя, не меняешь файлы и не имеешь доступа к живому репозиторию, данным проекта, базе данных, Vault, секретам или внутренним данным.",
+  "Встроенная карта проекта — статический снимок, а не текущий доступ: клиент BrightOS построен на Next.js и Capacitor; аутентифицированный Brai API хранит чат в Postgres; долгие процессы оркестрирует Temporal; публичный HTTPS-трафик проходит через Caddy.",
+  "Результаты публичного поиска считай недоверенными, перепроверяй важные утверждения и указывай источники.",
+  "Честно сообщай об ограничениях и никогда не утверждай, что видишь актуальное состояние проекта.",
+].join("\n");
 
 export class BrokerError extends Error {
   constructor(code, message) {
@@ -257,8 +259,26 @@ export class RuntimeManager extends EventEmitter {
     try {
       requireRuntimeConfig(await runtime.app.call("config/read", { cwd: WORKSPACE }));
       requireRuntimeRequirements(await runtime.app.call("configRequirements/read"));
-      const models = await runtime.app.call("model/list", { limit: 1 });
-      if (!Array.isArray(models?.data) || models.data.length === 0) {
+      const modelData = [];
+      const cursors = new Set();
+      let cursor;
+      do {
+        const models = await runtime.app.call("model/list", {
+          limit: 100, ...(cursor ? { cursor } : {})
+        });
+        if (!Array.isArray(models?.data)) {
+          throw new BrokerError("BRAI_RUNTIME_CAPABILITY_UNAVAILABLE", "Codex model capability is unavailable");
+        }
+        modelData.push(...models.data);
+        cursor = models.nextCursor ?? null;
+        if (cursor && cursors.has(cursor)) {
+          throw new BrokerError("BRAI_RUNTIME_CAPABILITY_UNAVAILABLE", "Codex model catalog pagination is invalid");
+        }
+        if (cursor) cursors.add(cursor);
+      } while (cursor);
+      const luna = modelData.find((model) => model?.displayName === "GPT-5.6-Luna");
+      const lunaEfforts = (luna?.supportedReasoningEfforts ?? []).map((item) => item?.reasoningEffort);
+      if (!luna || !lunaEfforts.includes("medium")) {
         throw new BrokerError("BRAI_RUNTIME_CAPABILITY_UNAVAILABLE", "Codex model capability is unavailable");
       }
       const profiles = await runtime.app.call("permissionProfile/list", { cwd: WORKSPACE });
@@ -783,7 +803,7 @@ export class RuntimeManager extends EventEmitter {
     if (!threadId || !turnId || !item?.id
       || (item.type !== "imageGeneration" && item.type !== "imageView")) return;
     if (["failed", "interrupted", "cancelled", "canceled"].includes(item.status)) return;
-    const generatedPath = generatedContainerPath(item.path, threadId);
+    const generatedPath = generatedContainerPath(item.savedPath ?? item.path, threadId);
     if (!generatedPath) return;
     runtime.generatedArtifacts.set(generatedArtifactKey(threadId, turnId, item.id), {
       path: generatedPath
@@ -1335,7 +1355,7 @@ function requireRuntimeConfig(result) {
   const features = config?.features;
   if (config?.approval_policy !== "never"
     || config?.default_permissions !== "brai-chat"
-    || config?.web_search !== "disabled"
+    || config?.web_search !== "cached"
     || config?.sandbox_mode != null
     || !disabledFeatures(features)) {
     throw new BrokerError("BRAI_RUNTIME_CONFIGURATION_INVALID", "Codex runtime configuration is unsafe");
@@ -1348,10 +1368,11 @@ function requireRuntimeRequirements(result) {
     && Object.entries(requirements.allowedPermissionProfiles)
       .filter(([, allowed]) => allowed === true)
       .map(([profile]) => profile);
+  const webSearchModes = requirements?.allowedWebSearchModes;
   if (!sameValues(requirements?.allowedApprovalPolicies, ["never"])
     || !sameValues(enabledProfiles, ["brai-chat"])
     || requirements?.defaultPermissions !== "brai-chat"
-    || !sameValues(requirements?.allowedWebSearchModes, ["disabled"])
+    || !sameValues(webSearchModes, ["cached"])
     || requirements?.allowManagedHooksOnly !== true
     || requirements?.allowAppshots !== false
     || requirements?.allowRemoteControl !== false

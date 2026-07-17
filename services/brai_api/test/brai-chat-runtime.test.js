@@ -479,7 +479,14 @@ test('tool and image-only run remains visible in durable history after reconnect
 
   const toolStart = replayed.find((event) => event.type === EventType.TOOL_CALL_START);
   assert.match(toolStart.parentMessageId, /^assistant:/);
-  assert.ok(replayed.some((event) => event.type === EventType.TOOL_CALL_RESULT));
+  const toolResult = replayed.find((event) => event.type === EventType.TOOL_CALL_RESULT);
+  assert.deepEqual(JSON.parse(toolResult.content), {
+    status: 'ready',
+    attachment_id: store.attachments[0].id,
+    name: 'spring.png',
+    media_type: 'image/png',
+    byte_size: 8
+  });
   const imageArtifact = replayed.find((event) =>
     event.type === EventType.CUSTOM && event.name === 'brai.artifact.v1'
       && event.value.kind === 'image');
@@ -499,6 +506,14 @@ test('tool and image-only run remains visible in durable history after reconnect
       && params.attachmentIds[0] === imageArtifact.value.attachment_id
       && !Object.hasOwn(params, 'path')));
   assert.ok(replayed.some((event) => event.type === EventType.RUN_FINISHED));
+  assert.equal(replayed.filter((event) => event.type === EventType.CUSTOM
+    && event.name === 'brai.artifact.v1' && event.value.kind === 'image').length, 1);
+  assert.equal(replayed.filter((event) => event.type === EventType.TEXT_MESSAGE_CONTENT)
+    .map((event) => event.delta).join(''), 'Изображение готово.');
+  const chatLogs = store.aiLogs.filter((log) => log.agentId === 'brai-codex');
+  assert.equal(chatLogs.length, 1);
+  assert.equal(chatLogs[0].jsonData.has_generated_image, true);
+  assert.equal(chatLogs[0].jsonData.has_assistant_text, true);
   assert.equal(JSON.stringify(replayed).includes('/tmp/private-output.png'), false);
   assert.equal(JSON.stringify(replayed).includes('private-image-item'), false);
 });
@@ -724,15 +739,16 @@ test('successful first assistant turn selects a semantic title while manual rena
   assert.equal(titleInputs[0].userId, 'user-a');
   assert.equal(titleInputs[0].userMessage, 'напиши хайку про весну');
   assert.deepEqual(titleInputs[0].assistantMessages, ['Весенний ветер']);
-  await waitFor(() => store.aiLogs.length === 1);
-  assert.equal(store.aiLogs[0].agentId, 'brai.chat-title');
-  assert.equal(store.aiLogs[0].agentVersion, '1');
-  assert.equal(store.aiLogs[0].status, 'done');
-  assert.equal(store.aiLogs[0].jsonData.schema, 'brai.chat_title.ai_log.v1');
-  assert.equal(store.aiLogs[0].jsonData.title_applied, true);
-  assert.equal(JSON.stringify(store.aiLogs[0]).includes('напиши хайку'), false);
-  assert.equal(JSON.stringify(store.aiLogs[0]).includes('Весенний ветер'), false);
-  assert.equal(JSON.stringify(store.aiLogs[0]).includes('Хайку про весну'), false);
+  await waitFor(() => store.aiLogs.some((log) => log.agentId === 'brai.chat-title'));
+  const titleLog = store.aiLogs.find((log) => log.agentId === 'brai.chat-title');
+  assert.equal(titleLog.agentVersion, '1');
+  assert.equal(titleLog.status, 'done');
+  assert.equal(titleLog.jsonData.schema, 'brai.chat_title.ai_log.v1');
+  assert.equal(titleLog.jsonData.title_applied, true);
+  assert.equal(JSON.stringify(titleLog).includes('напиши хайку'), false);
+  assert.equal(JSON.stringify(titleLog).includes('Весенний ветер'), false);
+  assert.equal(JSON.stringify(titleLog).includes('Хайку про весну'), false);
+  assert.equal(store.aiLogs.filter((log) => log.agentId === 'brai-codex').length, 1);
 
   store.thread.title = 'Моё название';
   store.thread.title_source = 'manual';
@@ -773,10 +789,12 @@ test('semantic title generator failure leaves the default title unchanged', asyn
     await new Promise((resolve) => setImmediate(resolve));
     assert.equal(store.thread.title, 'Новый чат');
     assert.equal(store.thread.title_source, 'default');
-    await waitFor(() => store.aiLogs.length === 1);
-    assert.equal(store.aiLogs[0].status, 'failed');
-    assert.equal(store.aiLogs[0].jsonData.title_applied, false);
-    assert.equal(JSON.stringify(store.aiLogs[0]).includes('Не копируй меня'), false);
+    await waitFor(() => store.aiLogs.some((log) => log.agentId === 'brai.chat-title'));
+    const titleLog = store.aiLogs.find((log) => log.agentId === 'brai.chat-title');
+    assert.equal(titleLog.status, 'failed');
+    assert.equal(titleLog.jsonData.title_applied, false);
+    assert.equal(JSON.stringify(titleLog).includes('Не копируй меня'), false);
+    assert.equal(store.aiLogs.filter((log) => log.agentId === 'brai-codex').length, 1);
   }
 });
 
@@ -813,13 +831,15 @@ test('manual rename during background title generation wins and records one comp
   store.thread.title = 'Ручной заголовок';
   store.thread.title_source = 'manual';
   resolveTitle('Модельный заголовок');
-  await waitFor(() => store.aiLogs.length === 1);
+  await waitFor(() => store.aiLogs.some((log) => log.agentId === 'brai.chat-title'));
 
   assert.equal(store.thread.title, 'Ручной заголовок');
   assert.equal(store.thread.title_source, 'manual');
-  assert.equal(store.aiLogs[0].status, 'done');
-  assert.equal(store.aiLogs[0].jsonData.title_applied, false);
-  assert.equal(store.aiLogs.length, 1);
+  const titleLog = store.aiLogs.find((log) => log.agentId === 'brai.chat-title');
+  assert.equal(titleLog.status, 'done');
+  assert.equal(titleLog.jsonData.title_applied, false);
+  assert.equal(store.aiLogs.filter((log) => log.agentId === 'brai.chat-title').length, 1);
+  assert.equal(store.aiLogs.filter((log) => log.agentId === 'brai-codex').length, 1);
 });
 
 test('restart recovery generates a title from already persisted assistant output', async () => {
@@ -1344,7 +1364,8 @@ test('connect paginates replay strictly after the acknowledged sequence', async 
   const coordinator = new BraiChatTurnCoordinator({ broker: new FakeBroker() });
   const replayed = [];
   await new Promise((resolve, reject) => coordinator.connect({
-    store, userId: 'user-a', publicThreadId: 'public-thread', headers: { 'last-event-id': '500' }
+    store, userId: 'user-a', publicThreadId: 'public-thread',
+    headers: { 'last-event-id': '500', 'x-brai-chat-replay-mode': 'resume' }
   }).subscribe({ next: (event) => replayed.push(event.value.sequence), error: reject, complete: resolve }));
 
   assert.equal(replayed.length, 605);
@@ -1422,8 +1443,8 @@ test('cold replay immediately before a terminal event includes its matching run 
 
       assert.equal(replayed[0].type, EventType.RUN_STARTED);
       assert.equal(replayed[0].runId, 'historic-run');
-      assert.deepEqual(replayed.filter((event) => event.type === EventType.TEXT_MESSAGE_CONTENT)
-        .map((event) => event.delta), ['Первая часть']);
+      assert.equal(replayed.filter((event) => event.type === EventType.TEXT_MESSAGE_CONTENT)
+        .map((event) => event.delta).join(''), 'Первая часть');
       assert.equal(replayed.at(-1).type, terminalType);
       assert.deepEqual(store.replayCalls, [{ after: 0, limit: 500 }]);
     });
@@ -1465,7 +1486,7 @@ test('standalone pre-start RUN_ERROR does not borrow a prior run boundary', asyn
     store,
     userId: 'user-a',
     publicThreadId: 'public-thread',
-    headers: { 'last-event-id': '2' }
+    headers: { 'last-event-id': '2', 'x-brai-chat-replay-mode': 'resume' }
   }).subscribe({ next: (event) => replayed.push(event), error: reject, complete: resolve }));
 
   assert.deepEqual(replayed.map((event) => event.type), [EventType.RUN_ERROR]);
@@ -1833,7 +1854,7 @@ test('self-hosted CopilotKit single endpoint advertises only the Brai agent', as
   assert.equal(process.env.COPILOTKIT_TELEMETRY_DISABLED, 'true');
 });
 
-test('CopilotKit connect forwards Last-Event-ID into durable replay', async () => {
+test('CopilotKit resume connect forwards an acknowledged Last-Event-ID into durable replay', async () => {
   const runtime = createBraiChatRuntime({ broker: new FakeBroker() });
   const store = fakeStore();
   for (let sequence = 1; sequence <= 3; sequence += 1) {
@@ -1850,7 +1871,13 @@ test('CopilotKit connect forwards Last-Event-ID into durable replay', async () =
     end() { this.ended = true; }
   };
   await runtime.handleRequest({
-    req: { headers: { accept: 'text/event-stream', 'last-event-id': '2' } },
+    req: {
+      headers: {
+        accept: 'text/event-stream',
+        'last-event-id': '2',
+        'x-brai-chat-replay-mode': 'resume'
+      }
+    },
     res,
     url: new URL('https://api.example.test/v1/brai-chat/runtime'),
     store,

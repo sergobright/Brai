@@ -1,8 +1,8 @@
 "use client";
 
 import type { ComponentProps, CSSProperties } from "react";
-import { createContext, forwardRef, useCallback, useContext, useEffect, useMemo, useRef } from "react";
-import { ArrowUp, ChevronDown, Plus } from "lucide-react";
+import { createContext, forwardRef, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { ArrowUp, ChevronDown, ImageIcon, Plus, Search } from "lucide-react";
 import {
   CopilotChat,
   CopilotChatAssistantMessage,
@@ -12,15 +12,16 @@ import {
   CopilotKit,
   UseAgentUpdate,
   useAgent,
-  useConfigureSuggestions,
   useCopilotKit,
   useDefaultRenderTool,
 } from "@copilotkit/react-core/v2";
 import { Button } from "@/shared/ui/button";
+import { getBraiLocalStorageItem, setBraiLocalStorageItem } from "@/shared/storage/localStorageKeys";
 import { Textarea } from "@/shared/ui/textarea";
 import { cx } from "../../appUtils";
 import type { ThemeMode } from "../../appModel";
 import { attachmentReservationError } from "./braiChatModel";
+import { BraiChatImage } from "./BraiChatImage";
 
 const BRAI_AGENT_ID = "brai-codex";
 const MAX_ATTACHMENT_BYTES = 50 * 1024 * 1024;
@@ -97,12 +98,17 @@ type BraiCopilotContextValue = {
   onRunFinished: () => void;
   onSteer: (messageId: string, text: string) => Promise<void>;
   releaseReservations: (ids: string[]) => void;
+  draft: string;
+  setDraft: (value: string) => void;
+  loadAttachment: (id: string, download?: boolean) => Promise<Blob>;
 };
 
 const BraiCopilotContext = createContext<BraiCopilotContextValue | null>(null);
 
 export function BraiCopilotSurface({
   headers,
+  draftStorageKey,
+  loadAttachment,
   onError,
   onDeleteAttachment,
   onRetryChange,
@@ -114,6 +120,8 @@ export function BraiCopilotSurface({
   threadId,
 }: {
   headers?: Record<string, string>;
+  draftStorageKey: string;
+  loadAttachment: (id: string, download?: boolean) => Promise<Blob>;
   onError: (message: string, retryable?: boolean) => void;
   onDeleteAttachment: (id: string) => Promise<void>;
   onRetryChange: (retry: (() => Promise<void>) | null) => void;
@@ -126,14 +134,30 @@ export function BraiCopilotSurface({
 }) {
   const reservations = useRef(new Map<string, number>());
   const fileReservations = useRef(new WeakMap<File, string>());
+  const [draft, setDraftState] = useState(() => {
+    try {
+      return getBraiLocalStorageItem(draftStorageKey) ?? "";
+    } catch {
+      return "";
+    }
+  });
+
+  const setDraft = useCallback((value: string) => {
+    setDraftState(value);
+    try {
+      setBraiLocalStorageItem(draftStorageKey, value);
+    } catch {
+      // localStorage is optional in constrained WebViews.
+    }
+  }, [draftStorageKey]);
 
   const releaseReservations = useCallback((ids: string[]) => {
     for (const id of ids) reservations.current.delete(id);
   }, []);
 
   const context = useMemo(() => ({
-    onDeleteAttachment, onError, onRetryChange, onRunFinished, onSteer, releaseReservations,
-  }), [onDeleteAttachment, onError, onRetryChange, onRunFinished, onSteer, releaseReservations]);
+    draft, loadAttachment, onDeleteAttachment, onError, onRetryChange, onRunFinished, onSteer, releaseReservations, setDraft,
+  }), [draft, loadAttachment, onDeleteAttachment, onError, onRetryChange, onRunFinished, onSteer, releaseReservations, setDraft]);
 
   return (
     <CopilotKit
@@ -148,7 +172,6 @@ export function BraiCopilotSurface({
       onError={() => onError("Брай временно недоступен", true)}
     >
       <BraiCopilotContext.Provider value={context}>
-        <BraiChatSuggestions />
         <BraiDefaultToolRenderer />
         <div
           className={theme === "dark" ? "brai-copilot-surface dark h-full min-h-0" : "brai-copilot-surface h-full min-h-0"}
@@ -162,8 +185,8 @@ export function BraiCopilotSurface({
             chatView={BraiChatView}
             labels={{
               chatInputPlaceholder: "Напишите Браю…",
-              welcomeMessageText: "Чем помочь? Среда изолирована и доступна только для чтения.",
-              chatDisclaimerText: "Брай на базе Codex не имеет доступа к данным и проектам Brai.",
+              welcomeMessageText: "",
+              chatDisclaimerText: "",
               assistantMessageToolbarRegenerateLabel: "Повторить ответ",
             }}
             messageView={{
@@ -214,20 +237,31 @@ export function BraiCopilotSurface({
 }
 
 function BraiDefaultToolRenderer() {
-  useDefaultRenderTool();
-  return null;
-}
-
-function BraiChatSuggestions() {
-  useConfigureSuggestions({
-    consumerAgentId: BRAI_AGENT_ID,
-    available: "before-first-message",
-    suggestions: [
-      { title: "Помоги с кодом", message: "Помоги разобраться с кодом и предложи следующий шаг." },
-      { title: "Найди проблему", message: "Проанализируй проблему и объясни вероятную причину." },
-      { title: "Составь план", message: "Составь короткий пошаговый план решения задачи." },
-    ],
-  });
+  const context = useRequiredContext();
+  useDefaultRenderTool({
+    render: ({ name, parameters, result, status }) => {
+      if (name === "image_generation" || name === "image_view") {
+        const artifact = parseToolResult(result);
+        const attachmentId = typeof artifact?.attachment_id === "string" ? artifact.attachment_id : null;
+        return (
+          <div className="my-2 grid gap-2 rounded-lg border border-border bg-card p-3 text-sm">
+            <div className="flex items-center gap-2 text-muted-foreground"><ImageIcon className="size-4" aria-hidden="true" />{status === "complete" ? attachmentId ? "Изображение готово" : "Не удалось подготовить изображение" : "Создаю изображение…"}</div>
+            {attachmentId ? <BraiChatImage attachmentId={attachmentId} label={typeof artifact?.name === "string" ? artifact.name : "Изображение Брая"} loadBlob={context.loadAttachment} /> : null}
+          </div>
+        );
+      }
+      if (name === "web_search") {
+        const query = recordValue(parameters) && typeof parameters.query === "string" ? parameters.query : "";
+        return (
+          <div className="my-2 flex items-center gap-2 rounded-lg border border-border bg-card p-3 text-sm text-muted-foreground">
+            <Search className="size-4" aria-hidden="true" />
+            <span>{status === "complete" ? "Поиск завершён" : "Ищу в публичных источниках…"}{query ? `: ${query}` : ""}</span>
+          </div>
+        );
+      }
+      return <div className="my-2 rounded-lg border border-border bg-card p-3 text-sm text-muted-foreground">{status === "complete" ? "Операция завершена" : "Выполняю операцию…"}</div>;
+    },
+  }, [context.loadAttachment]);
   return null;
 }
 
@@ -238,6 +272,7 @@ function BraiChatViewComponent(props: ComponentProps<typeof CopilotChat.View>) {
   const { copilotkit } = useCopilotKit();
   const running = Boolean(agent.isRunning || props.isRunning);
   const wasRunning = useRef(running);
+  const preserveNextEmptyDraft = useRef(false);
 
   const retryLast = useCallback(async () => {
     try {
@@ -264,15 +299,17 @@ function BraiChatViewComponent(props: ComponentProps<typeof CopilotChat.View>) {
     if ((agent.isRunning || props.isRunning) && value.trim()) {
       const messageId = crypto.randomUUID();
       agent.addMessage({ id: messageId, role: "user", content: value });
-      props.onInputChange?.("");
+      context.setDraft("");
       void context.onSteer(messageId, value).catch(() => context.onError("Сообщение не направлено в активный ответ. Попробуйте ещё раз"));
       return;
     }
     if ((agent.isRunning || props.isRunning) && props.attachments?.length) {
+      preserveNextEmptyDraft.current = true;
       context.onError("Изображения можно отправить после завершения текущего ответа");
       return;
     }
     if (props.attachments?.some((attachment) => attachment.status === "uploading")) {
+      preserveNextEmptyDraft.current = true;
       context.onError("Дождитесь загрузки изображений перед отправкой");
       return;
     }
@@ -282,6 +319,15 @@ function BraiChatViewComponent(props: ComponentProps<typeof CopilotChat.View>) {
     });
     props.onSubmitMessage?.(value);
     context.releaseReservations(reservationIds);
+  }
+
+  function changeDraft(value: string) {
+    if (!value && preserveNextEmptyDraft.current) {
+      preserveNextEmptyDraft.current = false;
+      return;
+    }
+    preserveNextEmptyDraft.current = false;
+    context.setDraft(value);
   }
 
   function removeAttachment(id: string) {
@@ -301,12 +347,18 @@ function BraiChatViewComponent(props: ComponentProps<typeof CopilotChat.View>) {
       {...props}
       input={{
         className: "pb-1",
+        positioning: "static",
+        bottomAnchored: true,
+        showDisclaimer: false,
         textArea: BraiChatTextArea,
         sendButton: BraiChatSendButton,
         addMenuButton: BraiChatAddMenuButton,
         disclaimer: { className: "text-muted-foreground" },
       }}
       scrollView={BraiChatScrollView}
+      welcomeScreen={false}
+      inputValue={context.draft}
+      onInputChange={changeDraft}
       onSubmitMessage={submit}
       onRemoveAttachment={removeAttachment}
     />
@@ -461,4 +513,18 @@ function useRequiredContext(): BraiCopilotContextValue {
   const value = useContext(BraiCopilotContext);
   if (!value) throw new Error("brai_copilot_context_missing");
   return value;
+}
+
+function parseToolResult(result: string | undefined): Record<string, unknown> | null {
+  if (!result) return null;
+  try {
+    const parsed: unknown = JSON.parse(result);
+    return recordValue(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function recordValue(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }

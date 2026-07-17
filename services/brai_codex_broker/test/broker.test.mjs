@@ -41,7 +41,7 @@ class FakeDocker {
       approval_policy: "never",
       default_permissions: "brai-chat",
       sandbox_mode: null,
-      web_search: "disabled",
+      web_search: "cached",
       features: { apps: false, plugins: false, tool_suggest: false, enable_mcp_apps: false },
     },
     origins: {},
@@ -51,7 +51,7 @@ class FakeDocker {
       allowedApprovalPolicies: ["never"],
       allowedPermissionProfiles: { "brai-chat": true },
       defaultPermissions: "brai-chat",
-      allowedWebSearchModes: ["disabled"],
+      allowedWebSearchModes: ["cached"],
       allowManagedHooksOnly: true,
       allowAppshots: false,
       allowRemoteControl: false,
@@ -124,7 +124,15 @@ class FakeDocker {
         respond(this.requirements);
         break;
       case "model/list":
-        respond({ data: [{ id: "gpt-5.4", model: "gpt-5.4" }], nextCursor: null });
+        respond({
+          data: [{
+            id: "gpt-5.6-luna",
+            model: "gpt-5.6-luna",
+            displayName: "GPT-5.6-Luna",
+            supportedReasoningEfforts: [{ reasoningEffort: "medium" }],
+          }],
+          nextCursor: null,
+        });
         break;
       case "permissionProfile/list":
         respond({ data: [{ id: "brai-chat", description: "isolated", allowed: true }], nextCursor: null });

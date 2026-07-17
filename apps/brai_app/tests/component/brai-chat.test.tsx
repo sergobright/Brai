@@ -34,6 +34,7 @@ vi.mock("@/features/app/sections/brai/BraiCopilotSurface", () => ({
 
 describe("Brai chat client", () => {
   beforeEach(() => {
+    window.localStorage.clear();
     chatFixture.delayedNextMessages = null;
     chatFixture.events = [];
     chatFixture.failUrls = [];
@@ -62,10 +63,22 @@ describe("Brai chat client", () => {
         return json({ messages: chatFixture.messages, next_cursor: null });
       }
       if (url.includes("/events")) return json({ events: chatFixture.events, next_cursor: null });
+      if (url.includes("/attachments/")) return new Response(
+        new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+        { status: 200, headers: { "content-type": "image/png" } },
+      );
       if (url.includes("/search")) return json({ results: chatFixture.searchResults });
-      if (url.includes("/models")) return json({ models: [{ id: "codex", display_name: "Codex", reasoning_efforts: ["medium"] }] });
+      if (url.includes("/models")) return json({
+        models: [{ id: "codex", display_name: "GPT-5.6-Luna", reasoning_efforts: ["medium"] }],
+        default_model: "codex",
+        default_reasoning_effort: "medium",
+      });
       if (url.endsWith("/threads") && !url.includes("?")) return json({ thread: { ...thread, id: "thread-2", title: "Новый чат" } }, 201);
       return json({});
+    }));
+    vi.stubGlobal("URL", Object.assign(URL, {
+      createObjectURL: vi.fn(() => "blob:brai-image"),
+      revokeObjectURL: vi.fn(),
     }));
   });
 
@@ -82,11 +95,22 @@ describe("Brai chat client", () => {
     expect(screen.getByRole("button", { name: "Preview" })).toHaveAttribute("aria-pressed", "false");
     expect(screen.getByRole("button", { name: "Code" })).toHaveAttribute("aria-pressed", "false");
     expect(screen.getByRole("button", { name: "Docs" })).toHaveAttribute("aria-pressed", "false");
-    expect(screen.getByRole("combobox", { name: "Модель" })).toBeInTheDocument();
-    expect(screen.getByRole("combobox", { name: "Глубина рассуждений" })).toBeInTheDocument();
-    expect(screen.getByText("Только чтение")).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "Модель Брая" })).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "Глубина рассуждений Брая" })).toBeInTheDocument();
+    expect(screen.queryByText("Только чтение")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Показать архив чатов" }));
     await waitFor(() => expect(fetch).toHaveBeenCalledWith(expect.stringContaining("archived=archived"), expect.any(Object)));
+  });
+
+  it("opens the last active thread remembered for this user and environment", async () => {
+    const remembered = { ...thread, id: "thread-remembered", title: "Последний чат" };
+    chatFixture.threads = [thread, remembered];
+    window.localStorage.setItem("brai_chat_last_thread:user-1:%2Fapi", remembered.id);
+
+    renderChat();
+
+    await waitFor(() => expect(screen.getByTestId("copilot-chat")).toHaveAttribute("data-thread-id", remembered.id));
+    expect(screen.getAllByText("Последний чат")).toHaveLength(2);
   });
 
   it("opens, switches and closes one standard context panel from the header actions", async () => {
@@ -228,6 +252,35 @@ describe("Brai chat client", () => {
     expect(screen.getAllByText("Проверка чата")).toHaveLength(2);
   });
 
+  it("keeps a successful artifact projection when the message projection fails", async () => {
+    chatFixture.failUrls = ["/messages"];
+    chatFixture.events = [{
+      version: 1,
+      id: "event-partial",
+      thread_id: "thread-1",
+      message_id: null,
+      turn_id: "turn-partial",
+      sequence: 1,
+      type: "CUSTOM",
+      safe_payload: {
+        type: "CUSTOM",
+        name: "brai.artifact.v1",
+        value: { kind: "diff", name: "Сохранённый результат", source_event_id: "file-partial" },
+      },
+      truncated: false,
+      created_at_utc: "2026-07-15T00:00:00Z",
+    }];
+
+    renderChat();
+    await screen.findByTestId("copilot-chat");
+    fireEvent.click(screen.getByRole("button", { name: "Code" }));
+
+    const workspace = await screen.findByRole("complementary", { name: "Панель Code" });
+    expect(await within(workspace).findByText("Сохранённый результат")).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent("Часть истории временно не загрузилась");
+    expect(screen.getByTestId("copilot-chat")).toHaveAttribute("data-thread-id", "thread-1");
+  });
+
   it("does not apply a completed run refresh after the user switches threads", async () => {
     const delayed = deferredResponse();
     chatFixture.threads = [thread, { ...thread, id: "thread-2", title: "Следующий чат" }];
@@ -284,7 +337,23 @@ describe("Brai chat client", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Preview" }));
     const workspace = await screen.findByRole("complementary", { name: "Панель Preview" });
     expect(window.history.state?.braiMobileSheet).toBeUndefined();
-    expect(await within(workspace).findByRole("img", { name: "screen.png" })).toHaveAttribute("src", "/api/v1/brai-chat/attachments/attachment-1");
+    expect(await within(workspace).findByRole("img", { name: "screen.png" })).toHaveAttribute("src", "blob:brai-image");
+    expect(within(workspace).getByRole("button", { name: "Открыть изображение" })).toBeInTheDocument();
+    expect(within(workspace).getByRole("button", { name: "Скачать изображение" })).toBeInTheDocument();
+    fireEvent.click(within(workspace).getByRole("button", { name: "Открыть изображение" }));
+    const viewer = screen.getByRole("dialog", { name: "screen.png" });
+    expect(within(viewer).getByRole("img", { name: "screen.png" })).toHaveAttribute("src", "blob:brai-image");
+    fireEvent.click(within(viewer).getByRole("button", { name: "Закрыть просмотр" }));
+    expect(screen.queryByRole("dialog", { name: "screen.png" })).not.toBeInTheDocument();
+
+    const anchorClick = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
+    fireEvent.click(within(workspace).getByRole("button", { name: "Скачать изображение" }));
+    await waitFor(() => expect(fetch).toHaveBeenCalledWith(
+      expect.stringContaining("/attachments/attachment-1?download=1"),
+      expect.objectContaining({ credentials: "include" }),
+    ));
+    expect(anchorClick).toHaveBeenCalledOnce();
+    anchorClick.mockRestore();
 
     fireEvent.click(within(workspace).getByRole("button", { name: "К сообщению" }));
     await waitFor(() => expect(scrollIntoView).toHaveBeenCalled());

@@ -50,7 +50,7 @@ import {
 const BASE_JSON_HEADERS = {
   'content-type': 'application/json; charset=utf-8',
   'access-control-allow-methods': 'GET,POST,PUT,PATCH,DELETE,OPTIONS',
-  'access-control-allow-headers': 'authorization,content-type,last-event-id,x-api-key,x-brai-api-key,x-brai-target,x-brai-destination,x-brai-chat-after,x-brai-cmd-device-id,x-brai-cmd-client-version,x-brai-expected-user-id',
+  'access-control-allow-headers': 'authorization,content-type,last-event-id,x-api-key,x-brai-api-key,x-brai-target,x-brai-destination,x-brai-chat-after,x-brai-chat-replay-mode,x-brai-cmd-device-id,x-brai-cmd-client-version,x-brai-expected-user-id',
   'access-control-allow-credentials': 'true'
 };
 const SESSION_COOKIE = 'brai_session';

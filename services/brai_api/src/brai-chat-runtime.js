@@ -11,6 +11,7 @@ import { withUserScope } from './user-scope.js';
 process.env.COPILOTKIT_TELEMETRY_DISABLED = 'true';
 
 const AGENT_ID = 'brai-codex';
+const AGENT_VERSION = '1';
 const TITLE_AGENT_ID = 'brai.chat-title';
 const TITLE_AGENT_VERSION = '1';
 const DEFAULT_TURN_TIMEOUT_MS = 15 * 60 * 1_000;
@@ -63,6 +64,17 @@ function titleLlmCallId(state) {
     .digest('hex')}`;
 }
 
+function chatLlmCallId(state) {
+  return `brai-chat:${crypto.createHash('sha256')
+    .update(`${state.userId}\0${state.publicThreadId}\0${state.runId}`)
+    .digest('hex')}`;
+}
+
+function hasAssistantText(state) {
+  return [...state.messageText.entries()].some(([messageId, text]) =>
+    state.messageRoles.get(messageId) !== 'user' && text.trim());
+}
+
 function observableError(message) {
   return new Observable((subscriber) => subscriber.error(new Error(message)));
 }
@@ -100,6 +112,8 @@ function delay(ms) {
 }
 
 function replayAfter(headers = {}) {
+  const mode = headers['x-brai-chat-replay-mode'] ?? headers['X-Brai-Chat-Replay-Mode'];
+  if (mode !== 'resume') return 0;
   const raw = headers['last-event-id'] ?? headers['Last-Event-ID']
     ?? headers['x-brai-chat-after'] ?? headers['X-Brai-Chat-After'] ?? '0';
   const value = Number(raw);
@@ -493,7 +507,8 @@ export class BraiChatTurnCoordinator {
       deadlineAtUtc: new Date(deadline).toISOString(), deadline,
       effectiveModel, effectiveReasoningEffort, brokerWatermark: 0,
       brokerEpoch: null, lastNotificationSequence: 0,
-      snapshotCoverage: new Map(), titleGenerationAttempted: false
+      snapshotCoverage: new Map(), titleGenerationAttempted: false,
+      generatedImageReady: false
     };
   }
 
@@ -789,6 +804,7 @@ export class BraiChatTurnCoordinator {
     state.messageRoles = new Map(persisted.messageRoles);
     state.userMessageText ??= persisted.userMessageText;
     state.hasAssistantOutput ||= persisted.hasAssistantOutput;
+    state.generatedImageReady ||= persisted.generatedImageReady;
     state.assistantMessageIds = new Set(
       [...persisted.messageText.keys()].filter((id) => persisted.messageRoles.get(id) !== 'user')
     );
@@ -837,6 +853,7 @@ export class BraiChatTurnCoordinator {
         const events = await this.#materializeGeneratedArtifact(
           state, params, state.normalizer.translate('item/completed', params)
         );
+        if (readyGeneratedAttachmentIds(events).length) state.generatedImageReady = true;
         await this.#publishReconciled(state, persisted, events);
         void this.#cleanupDurableGeneratedArtifacts(
           state, readyGeneratedAttachmentIds(events)
@@ -844,8 +861,11 @@ export class BraiChatTurnCoordinator {
       }
     }
     if (isTerminalTurn(turn) && !state.done) {
-      await this.#publishReconciled(state, persisted,
-        state.normalizer.translate('turn/completed', { turn }));
+      const fallback = state.generatedImageReady && !hasAssistantText(state)
+        ? state.normalizer.assistantFallback('Изображение готово.') : [];
+      await this.#publishReconciled(state, persisted, [
+        ...fallback, ...state.normalizer.translate('turn/completed', { turn })
+      ]);
       await this.#completeState(state);
     }
   }
@@ -912,7 +932,7 @@ export class BraiChatTurnCoordinator {
       payloadCounts: new Map(), messageText: new Map(), messageRoles: new Map(),
       reasoningText: new Map(), toolOutput: new Map(),
       streamOffsets: new Map(), streamText: new Map(), userMessageText: null,
-      hasAssistantOutput: false
+      hasAssistantOutput: false, generatedImageReady: false
     };
     this.#replay(state.store, state.publicThreadId, 0, (record) => {
       if (record.turn_id !== state.runId) return;
@@ -941,6 +961,9 @@ export class BraiChatTurnCoordinator {
         result.hasAssistantOutput = true;
       } else if (event.type === EventType.TOOL_CALL_START) {
         result.hasAssistantOutput = true;
+      } else if (event.type === EventType.CUSTOM && event.name === 'brai.artifact.v1'
+        && event.value?.kind === 'image' && event.value?.status === 'ready') {
+        result.generatedImageReady = true;
       } else if (event.type === EventType.CUSTOM && event.value?.kind === 'command_output') {
         const id = event.value.source_event_id;
         result.toolOutput.set(id, `${result.toolOutput.get(id) || ''}${event.value.delta || ''}`);
@@ -1058,8 +1081,10 @@ export class BraiChatTurnCoordinator {
       event.type === EventType.CUSTOM && event.name === 'brai.artifact.v1'
         && event.value?.kind === 'image');
     if (artifactIndex < 0) return events;
-
     const source = events[artifactIndex].value;
+    const resultIndex = events.findIndex((event) =>
+      event.type === EventType.TOOL_CALL_RESULT
+        && event.toolCallId === source.source_event_id);
     const messageId = assistantMessageIdForRun(state.runId);
     const attachmentId = `attachment_${crypto.createHash('sha256')
       .update(`${state.userId}\0${state.publicThreadId}\0${state.runId}\0${item.id}`)
@@ -1093,7 +1118,7 @@ export class BraiChatTurnCoordinator {
         turnId: state.runId,
         idempotencyKey: idempotencyKey('assistant', state.runId, messageId),
         role: 'assistant',
-        content: '',
+        content: 'Изображение готово.',
         status: state.terminalStatus || 'streaming',
         model: state.effectiveModel,
         reasoningEffort: state.effectiveReasoningEffort
@@ -1119,6 +1144,18 @@ export class BraiChatTurnCoordinator {
           byte_size: attachment.byte_size
         }
       };
+      if (resultIndex >= 0) {
+        events[resultIndex] = {
+          ...events[resultIndex],
+          content: JSON.stringify({
+            status: 'ready',
+            attachment_id: attachment.id,
+            name: attachment.filename,
+            media_type: attachment.media_type,
+            byte_size: attachment.byte_size
+          })
+        };
+      }
     } catch (error) {
       if (exported) {
         try {
@@ -1147,6 +1184,12 @@ export class BraiChatTurnCoordinator {
           retryable: true
         }
       };
+      if (resultIndex >= 0) {
+        events[resultIndex] = {
+          ...events[resultIndex],
+          content: JSON.stringify({ status: 'failed', code: safe.code, retryable: true })
+        };
+      }
     }
     return events;
   }
@@ -1186,13 +1229,16 @@ export class BraiChatTurnCoordinator {
       if (method === 'turn/completed' && state.timeoutTriggered) return;
       if (method === 'turn/completed') state.terminalStatus = turnStatus(params?.turn?.status);
       if (method === 'error') state.terminalStatus = 'failed';
-      const events = await this.#materializeGeneratedArtifact(
+      let events = await this.#materializeGeneratedArtifact(
         state, params, state.normalizer.translate(method, params)
       );
+      const readyIds = readyGeneratedAttachmentIds(events);
+      if (readyIds.length) state.generatedImageReady = true;
+      if (method === 'turn/completed' && state.generatedImageReady && !hasAssistantText(state)) {
+        events = [...state.normalizer.assistantFallback('Изображение готово.'), ...events];
+      }
       await this.#publishAll(state, events);
-      void this.#cleanupDurableGeneratedArtifacts(
-        state, readyGeneratedAttachmentIds(events)
-      );
+      void this.#cleanupDurableGeneratedArtifacts(state, readyIds);
       if (method === 'turn/completed' || method === 'error') await this.#completeState(state);
     }).catch((error) => this.#fail(state, error));
   }
@@ -1260,7 +1306,11 @@ export class BraiChatTurnCoordinator {
   async #finish(state, turn) {
     if (state.done || !state.normalizer) return;
     state.terminalStatus = turnStatus(turn?.status);
-    await this.#publishAll(state, state.normalizer.translate('turn/completed', { turn }));
+    const fallback = state.generatedImageReady && !hasAssistantText(state)
+      ? state.normalizer.assistantFallback('Изображение готово.') : [];
+    await this.#publishAll(state, [
+      ...fallback, ...state.normalizer.translate('turn/completed', { turn })
+    ]);
     await this.#completeState(state);
   }
 
@@ -1396,6 +1446,31 @@ export class BraiChatTurnCoordinator {
     } catch {
       // Completion remains terminal even if later reconciliation must clear DB state.
     }
+    try {
+      withUserScope(state.userId, () => state.store.recordAiLog({
+        agentId: AGENT_ID,
+        agentVersion: AGENT_VERSION,
+        status: state.terminalStatus === 'failed' ? 'failed' : 'done',
+        aiTitle: state.terminalStatus === 'failed' ? 'Ответ Брая завершился ошибкой' : 'Ответ Брая завершён',
+        flowId: state.publicThreadId,
+        flowCommand: AGENT_ID,
+        traceId: `brai-chat:${state.runId}`,
+        runId: state.runId,
+        llmCallId: chatLlmCallId(state),
+        userId: state.userId,
+        jsonData: {
+          schema: 'brai.chat.ai_log.v1',
+          outcome: state.terminalStatus ?? 'completed',
+          model: state.effectiveModel ?? null,
+          reasoning_effort: state.effectiveReasoningEffort ?? null,
+          duration_ms: Math.max(0, Date.now() - Date.parse(state.startedAtUtc)),
+          has_assistant_text: hasAssistantText(state),
+          has_generated_image: state.generatedImageReady
+        }
+      }));
+    } catch {
+      // Runtime completion remains authoritative if observability is unavailable.
+    }
     state.subject.complete();
     this.active.delete(state.key);
     void this.#generateTitle(state);
@@ -1504,12 +1579,13 @@ export function createBraiChatRuntime({
         },
         runner,
         debug: false,
-        forwardHeaders: { allow: ['last-event-id', 'x-brai-chat-after'] }
+        forwardHeaders: { allow: ['last-event-id', 'x-brai-chat-after', 'x-brai-chat-replay-mode'] }
       });
       const handler = createCopilotRuntimeHandler({ runtime, mode: 'single-route' });
       const replayHeaders = Object.fromEntries([
         ['last-event-id', req.headers['last-event-id']],
-        ['x-brai-chat-after', req.headers['x-brai-chat-after']]
+        ['x-brai-chat-after', req.headers['x-brai-chat-after']],
+        ['x-brai-chat-replay-mode', req.headers['x-brai-chat-replay-mode']]
       ].filter(([, value]) => typeof value === 'string'));
       const request = new Request(url.href, {
         method: 'POST',

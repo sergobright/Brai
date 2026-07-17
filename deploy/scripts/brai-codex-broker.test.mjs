@@ -98,11 +98,11 @@ test("Ansible owns protected auth/image/state wiring and Caddy exposes no broker
   assert.match(previewCleanup, /find "\$root" -xdev -mindepth 1 -delete/);
   assert.match(config, /approval_policy = "never"/);
   assert.match(config, /default_permissions = "brai-chat"/);
-  assert.match(config, /web_search = "disabled"/);
+  assert.match(config, /web_search = "cached"/);
   assert.match(config, /\[features\][\s\S]*apps = false[\s\S]*plugins = false[\s\S]*tool_suggest = false[\s\S]*enable_mcp_apps = false/);
   assert.doesNotMatch(config, /\[permissions\.brai-chat/);
   assert.match(requirements, /allowed_approval_policies = \["never"\]/);
-  assert.match(requirements, /allowed_web_search_modes = \[\]/);
+  assert.match(requirements, /allowed_web_search_modes = \["cached"\]/);
   assert.match(requirements, /\[allowed_permission_profiles\]\nbrai-chat = true/);
   assert.match(requirements, /\[permissions\.filesystem\]\ndeny_read = \["\/codex-home"\]/);
   assert.match(requirements, /\[permissions\.brai-chat\.network\]\nenabled = false/);

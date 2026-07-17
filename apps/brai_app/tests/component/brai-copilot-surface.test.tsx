@@ -1,5 +1,5 @@
 import type { ButtonHTMLAttributes, ComponentType, CSSProperties, ElementType, ReactNode } from "react";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { BraiCopilotSurface } from "@/features/app/sections/brai/BraiCopilotSurface";
 
@@ -13,6 +13,7 @@ type FakeViewProps = {
     textArea?: ElementType<Record<string, unknown>>;
   };
   isRunning?: boolean;
+  inputValue?: string;
   messages?: FakeMessage[];
   messageView?: {
     assistantMessage?: ComponentType<FakeAssistantProps>;
@@ -62,10 +63,10 @@ vi.mock("@copilotkit/react-core/v2", async () => {
     return (
       <div>
         {AddMenuButton ? <AddMenuButton onAddFile={() => undefined} /> : null}
-        {TextArea ? <TextArea /> : null}
+        {TextArea ? <TextArea value={props.inputValue ?? ""} onChange={(event: React.ChangeEvent<HTMLTextAreaElement>) => props.onInputChange?.(event.target.value)} /> : null}
         {SendButton ? <SendButton /> : null}
         {ScrollView ? <ScrollView><span>История</span></ScrollView> : null}
-        <button type="button" onClick={() => props.onSubmitMessage?.("Уточнение")}>Отправить тест</button>
+        <button type="button" onClick={() => props.onSubmitMessage?.(props.inputValue || "Уточнение")}>Отправить тест</button>
         {props.attachments?.map((attachment) => <button key={attachment.id} type="button" onClick={() => props.onRemoveAttachment?.(attachment.id)}>Удалить {attachment.id}</button>)}
         {Assistant ? props.messages?.filter((message) => message.role === "assistant").map((message) => (
           <Assistant key={message.id} message={message} messages={props.messages} isRunning={props.isRunning} />
@@ -143,6 +144,7 @@ vi.mock("@copilotkit/react-core/v2", async () => {
 
 describe("BraiCopilotSurface", () => {
   beforeEach(() => {
+    window.localStorage.clear();
     fake.agent.isRunning = false;
     fake.agent.messages = [];
     fake.agent.addMessage.mockReset();
@@ -184,12 +186,9 @@ describe("BraiCopilotSurface", () => {
     });
     expect(Object.values(fake.chatProps?.style ?? {})).not.toContain("inherit");
     expect(container.querySelector<HTMLElement>(".brai-copilot-surface")?.style.getPropertyValue("--brai-copilot-background")).toBe("var(--background)");
-    expect(fake.configureSuggestions).toHaveBeenCalledWith(expect.objectContaining({
-      available: "before-first-message",
-      consumerAgentId: "brai-codex",
-      suggestions: expect.arrayContaining([expect.objectContaining({ title: "Помоги с кодом" })]),
-    }));
+    expect(fake.configureSuggestions).not.toHaveBeenCalled();
     expect(fake.defaultRenderTool).toHaveBeenCalledOnce();
+    expect(fake.chatProps?.labels).toMatchObject({ welcomeMessageText: "", chatDisclaimerText: "" });
     expect(fake.chatProps?.messageView?.reasoningMessage).toBeTypeOf("function");
     expect(fake.viewProps?.input?.addMenuButton).toBeTypeOf("function");
     expect(fake.viewProps?.input?.textArea).toBeTruthy();
@@ -210,7 +209,23 @@ describe("BraiCopilotSurface", () => {
     expect(message).toMatchObject({ role: "user", content: "Уточнение" });
     expect(message.id).toMatch(/^[0-9a-f-]{36}$/i);
     expect(onSteer).toHaveBeenCalledWith(message.id, "Уточнение");
-    expect(fake.inputChange).toHaveBeenCalledWith("");
+    expect(window.localStorage.getItem("brai_chat_draft:test")).toBe("");
+    expect(fake.stockSubmit).not.toHaveBeenCalled();
+  });
+
+  it("keeps the per-thread draft when send is attempted during an attachment upload", async () => {
+    window.localStorage.setItem("brai_chat_draft:test", "Текст не должен исчезнуть");
+    fake.attachments = [{ id: "uploading-image", status: "uploading" }];
+    const onError = vi.fn();
+    renderSurface({ onError });
+
+    expect(screen.getByRole("textbox", { name: "Сообщение Браю" })).toHaveValue("Текст не должен исчезнуть");
+    fireEvent.click(screen.getByRole("button", { name: "Отправить тест" }));
+    act(() => fake.viewProps?.onInputChange?.(""));
+
+    expect(onError).toHaveBeenCalledWith("Дождитесь загрузки изображений перед отправкой");
+    expect(screen.getByRole("textbox", { name: "Сообщение Браю" })).toHaveValue("Текст не должен исчезнуть");
+    expect(window.localStorage.getItem("brai_chat_draft:test")).toBe("Текст не должен исчезнуть");
     expect(fake.stockSubmit).not.toHaveBeenCalled();
   });
 
@@ -290,6 +305,8 @@ function surface(overrides: {
       runtimeUrl="/api/v1/brai-chat/runtime"
       theme="dark"
       threadId="thread-1"
+      draftStorageKey="brai_chat_draft:test"
+      loadAttachment={vi.fn(async () => new Blob([new Uint8Array([0x89])], { type: "image/png" }))}
       onDeleteAttachment={overrides.onDeleteAttachment ?? vi.fn(async () => undefined)}
       onError={overrides.onError ?? vi.fn()}
       onRetryChange={overrides.onRetryChange ?? vi.fn()}

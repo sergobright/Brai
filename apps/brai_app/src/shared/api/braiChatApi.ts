@@ -2,7 +2,7 @@ import type {
   BraiChatAttachment,
   BraiChatEvent,
   BraiChatMessage,
-  BraiChatModel,
+  BraiChatModelCatalog,
   BraiChatSearchHit,
   BraiChatThread,
 } from "@/shared/types/braiChat";
@@ -28,8 +28,8 @@ export class BraiChatApi {
     return resolveBraiChatUrl(this.baseUrl, "/v1/brai-chat/runtime");
   }
 
-  async models(): Promise<BraiChatModel[]> {
-    return (await this.request<{ models: BraiChatModel[] }>("/v1/brai-chat/models")).models;
+  async models(): Promise<BraiChatModelCatalog> {
+    return this.request<BraiChatModelCatalog>("/v1/brai-chat/models");
   }
 
   async threads(archived = false): Promise<BraiChatThread[]> {
@@ -118,7 +118,22 @@ export class BraiChatApi {
     return resolveBraiChatUrl(this.baseUrl, `/v1/brai-chat/attachments/${encodeURIComponent(id)}`);
   }
 
+  async attachmentBlob(id: string, download = false): Promise<Blob> {
+    const suffix = download ? "?download=1" : "";
+    return this.requestBlob(`/v1/brai-chat/attachments/${encodeURIComponent(id)}${suffix}`);
+  }
+
   private async request<T>(path: string, init: RequestInit = {}, timeoutMs = REQUEST_TIMEOUT_MS): Promise<T> {
+    const response = await this.requestResponse(path, init, timeoutMs);
+    const body = await response.text();
+    return (body ? JSON.parse(body) : undefined) as T;
+  }
+
+  private async requestBlob(path: string): Promise<Blob> {
+    return (await this.requestResponse(path)).blob();
+  }
+
+  private async requestResponse(path: string, init: RequestInit = {}, timeoutMs = REQUEST_TIMEOUT_MS): Promise<Response> {
     const headers = new Headers(init.headers);
     if (typeof init.body === "string") headers.set("content-type", "application/json");
     if (this.expectedUserId) headers.set("x-brai-expected-user-id", this.expectedUserId);
@@ -132,8 +147,7 @@ export class BraiChatApi {
         signal: controller.signal,
       });
       if (!response.ok) throw Object.assign(new Error(`brai_chat_api_${response.status}`), { status: response.status });
-      const body = await response.text();
-      return (body ? JSON.parse(body) : undefined) as T;
+      return response;
     } finally {
       window.clearTimeout(timeout);
     }

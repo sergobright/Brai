@@ -10,19 +10,17 @@ const MAX_EVENT_PAYLOAD_BYTES = 72 * 1024;
 const MAX_ATTACHMENT_BYTES = 50 * 1024 * 1024;
 
 export const braiChatStoreMethods = {
-  createBraiChatThread({ id = crypto.randomUUID(), nowIso = new Date().toISOString() } = {}) {
+  createBraiChatThread({
+    id = crypto.randomUUID(), model = null, reasoningEffort = null,
+    nowIso = new Date().toISOString()
+  } = {}) {
     const userId = requireUser();
-    const inherited = this.db.prepare(`
-      SELECT model, reasoning_effort FROM brai_chat_threads
-      WHERE user_id = ? ORDER BY updated_at_utc DESC, id DESC LIMIT 1
-    `).get(userId);
     this.db.prepare(`
       INSERT INTO brai_chat_threads (
         id, user_id, title, title_source, model, reasoning_effort,
         created_at_utc, updated_at_utc
       ) VALUES (?, ?, ?, 'default', ?, ?, ?, ?)
-    `).run(id, userId, DEFAULT_TITLE, inherited?.model ?? null,
-      inherited?.reasoning_effort ?? null, nowIso, nowIso);
+    `).run(id, userId, DEFAULT_TITLE, model, reasoningEffort, nowIso, nowIso);
     return this.getBraiChatThread(id);
   },
 

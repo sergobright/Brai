@@ -3,11 +3,11 @@
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
-import { Archive, ArchiveRestore, BookOpen, Code2, Eye, LockKeyhole, Pencil, Plus, Search, X } from "lucide-react";
+import { Archive, ArchiveRestore, BookOpen, Code2, Eye, Pencil, Plus, Search, X } from "lucide-react";
 import { BraiChatApi } from "@/shared/api/braiChatApi";
 import { defaultApiBase } from "@/shared/config/runtime";
 import type { BraiChatEvent, BraiChatMessage, BraiChatModel, BraiChatSearchHit, BraiChatThread } from "@/shared/types/braiChat";
-import { Badge } from "@/shared/ui/badge";
+import { getBraiLocalStorageItem, setBraiLocalStorageItem } from "@/shared/storage/localStorageKeys";
 import { Button } from "@/shared/ui/button";
 import { Input } from "@/shared/ui/input";
 import { ScrollArea } from "@/shared/ui/scroll-area";
@@ -54,6 +54,10 @@ export function BraiChatSection({
   onRailContent?: (content: ReactNode | null) => void;
 }) {
   const api = useMemo(() => new BraiChatApi(defaultApiBase(), userId), [userId]);
+  const lastThreadStorageKey = useMemo(
+    () => `brai_chat_last_thread:${encodeURIComponent(userId ?? "anonymous")}:${encodeURIComponent(defaultApiBase() || "same-origin")}`,
+    [userId],
+  );
   const [threads, setThreads] = useState<BraiChatThread[]>([]);
   const [archived, setArchived] = useState(false);
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
@@ -74,6 +78,10 @@ export function BraiChatSection({
   const mobileViewport = useMobileNavigationViewport();
   const activeThread = threads.find((thread) => thread.id === activeThreadId) ?? null;
   const artifacts = useMemo(() => projectBraiChatArtifacts(messages, events), [events, messages]);
+  const loadAttachment = useCallback(
+    (id: string, download?: boolean) => api.attachmentBlob(id, download),
+    [api],
+  );
 
   const reportChatError = useCallback((message: string, retryable = false) => {
     setChatError(message);
@@ -102,7 +110,14 @@ export function BraiChatSection({
   const activateThread = useCallback((id: string | null) => {
     activeThreadIdRef.current = id;
     setActiveThreadId(id);
-  }, []);
+    if (id && !archivedRef.current) {
+      try {
+        setBraiLocalStorageItem(lastThreadStorageKey, id);
+      } catch {
+        // localStorage is optional in constrained WebViews.
+      }
+    }
+  }, [lastThreadStorageKey]);
 
   const setArchivedMode = useCallback((value: boolean) => {
     archivedRef.current = value;
@@ -131,7 +146,17 @@ export function BraiChatSection({
     try {
       const next = await api.threads(showArchived);
       const current = activeThreadIdRef.current;
-      const nextId = next.some((thread) => thread.id === current) ? current : next[0]?.id ?? null;
+      let remembered: string | null = null;
+      if (!showArchived) {
+        try {
+          remembered = getBraiLocalStorageItem(lastThreadStorageKey);
+        } catch {
+          // localStorage is optional in constrained WebViews.
+        }
+      }
+      const nextId = next.some((thread) => thread.id === current)
+        ? current
+        : next.some((thread) => thread.id === remembered) ? remembered : next[0]?.id ?? null;
       if (nextId !== current) resetProjections();
       setThreads(next);
       activateThread(nextId);
@@ -142,7 +167,7 @@ export function BraiChatSection({
       reportChatError("Брай временно недоступен");
       return false;
     }
-  }, [activateThread, api, reportChatError, resetProjections]);
+  }, [activateThread, api, lastThreadStorageKey, reportChatError, resetProjections]);
 
   useEffect(() => {
     const timeout = window.setTimeout(() => void loadThreads(archived), 0);
@@ -151,19 +176,20 @@ export function BraiChatSection({
 
   useEffect(() => {
     let cancelled = false;
-    void api.models().then((next) => { if (!cancelled) setModels(next); }).catch(() => undefined);
+    void api.models().then((catalog) => { if (!cancelled) setModels(catalog.models); }).catch(() => undefined);
     return () => { cancelled = true; };
   }, [api]);
 
   useEffect(() => {
     if (!activeThreadId) return;
     let cancelled = false;
-    void Promise.all([api.messages(activeThreadId), api.events(activeThreadId)]).then(([nextMessages, nextEvents]) => {
+    void Promise.allSettled([api.messages(activeThreadId), api.events(activeThreadId)]).then(([messageResult, eventResult]) => {
       if (cancelled) return;
-      setMessages(nextMessages);
-      setEvents(nextEvents);
-    }).catch(() => {
-      if (!cancelled) reportChatError("Историю не удалось загрузить. Попробуйте переключить чат");
+      if (messageResult.status === "fulfilled") setMessages(messageResult.value);
+      if (eventResult.status === "fulfilled") setEvents(eventResult.value);
+      if (messageResult.status === "rejected" || eventResult.status === "rejected") {
+        reportChatError("Часть истории временно не загрузилась. Уже полученные сообщения сохранены");
+      }
     });
     return () => { cancelled = true; };
   }, [activeThreadId, api, reportChatError]);
@@ -294,13 +320,22 @@ export function BraiChatSection({
     if (!activeThreadId) return;
     const completedThreadId = activeThreadId;
     const completedArchived = archived;
-    try {
-      const [nextMessages, nextEvents, nextThreads] = await Promise.all([api.messages(completedThreadId), api.events(completedThreadId), api.threads(completedArchived)]);
-      if (activeThreadIdRef.current !== completedThreadId || archivedRef.current !== completedArchived) return;
-      setMessages(nextMessages);
-      setEvents(nextEvents);
-      setThreads(nextThreads);
+    const [messageResult, eventResult, threadResult] = await Promise.allSettled([
+      api.messages(completedThreadId),
+      api.events(completedThreadId),
+      api.threads(completedArchived),
+    ]);
+    if (activeThreadIdRef.current !== completedThreadId || archivedRef.current !== completedArchived) return;
+    if (messageResult.status === "fulfilled") setMessages(messageResult.value);
+    if (eventResult.status === "fulfilled") setEvents(eventResult.value);
+    if (threadResult.status === "fulfilled") setThreads(threadResult.value);
+    const failed = [messageResult, eventResult, threadResult].some((result) => result.status === "rejected");
+    if (failed) {
+      reportChatError("Ответ завершён. Часть обновлений временно недоступна, уже полученные данные сохранены");
+    } else {
       clearChatError();
+    }
+    if (threadResult.status === "fulfilled") {
       clearGeneratedTitleRefreshTimers();
       for (const delayMs of GENERATED_TITLE_REFRESH_DELAYS_MS) {
         const timer = window.setTimeout(() => {
@@ -314,8 +349,6 @@ export function BraiChatSection({
         }, delayMs);
         generatedTitleRefreshTimersRef.current.push(timer);
       }
-    } catch {
-      reportChatError("Ответ завершён, но историю не удалось обновить. Переключите чат для повтора");
     }
   }, [activeThreadId, api, archived, clearChatError, clearGeneratedTitleRefreshTimers, reportChatError]);
 
@@ -358,28 +391,30 @@ export function BraiChatSection({
 
   const selectedModel = models.find((model) => model.id === activeThread?.model) ?? null;
   const reasoningEfforts = selectedModel?.reasoning_efforts ?? [];
-  const providerHeaders = userId ? { "x-brai-expected-user-id": userId } : undefined;
+  const providerHeaders = {
+    ...(userId ? { "x-brai-expected-user-id": userId } : {}),
+    "x-brai-chat-replay-mode": "full",
+  };
 
   return (
     <div
       className={cx(
-        "brai-chat-workspace grid h-full min-h-0 gap-7 overflow-hidden max-[860px]:block max-[860px]:overflow-visible",
+        "brai-chat-workspace grid h-full min-h-0 gap-7 overflow-hidden max-[860px]:grid max-[860px]:grid-cols-[minmax(0,1fr)]",
         contextPanel === "none" ? "grid-cols-[minmax(0,1fr)]" : "grid-cols-[minmax(0,1fr)_minmax(0,1fr)]",
       )}
       data-nav-swipe-exclusion
     >
-      <section className="brai-chat-pane grid min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)] bg-background" aria-label="Чат с Браем">
+      <section className="brai-chat-pane grid h-full min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)] bg-background" aria-label="Чат с Браем">
         <div className="flex min-h-12 flex-wrap items-center gap-2 border-b border-border px-3 py-2">
           <p className="m-0 min-w-24 flex-1 truncate text-sm font-semibold">{activeThread?.title ?? "Брай"}</p>
           <Select value={activeThread?.model ?? ""} disabled={!activeThread || models.length === 0} onValueChange={(model) => void updateSettings({ model })}>
-            <SelectTrigger size="sm" aria-label="Модель"><SelectValue placeholder="Модель" /></SelectTrigger>
+            <SelectTrigger size="sm" aria-label="Модель Брая"><SelectValue placeholder="Модель" /></SelectTrigger>
             <SelectContent>{models.map((model) => <SelectItem key={model.id} value={model.id}>{model.display_name || model.id}</SelectItem>)}</SelectContent>
           </Select>
           <Select value={activeThread?.reasoning_effort ?? ""} disabled={!activeThread || reasoningEfforts.length === 0} onValueChange={(reasoning_effort) => void updateSettings({ reasoning_effort })}>
-            <SelectTrigger size="sm" aria-label="Глубина рассуждений"><SelectValue placeholder="Рассуждения" /></SelectTrigger>
+            <SelectTrigger size="sm" aria-label="Глубина рассуждений Брая"><SelectValue placeholder="Рассуждения" /></SelectTrigger>
             <SelectContent>{reasoningEfforts.map((effort) => <SelectItem key={effort} value={effort}>{effort}</SelectItem>)}</SelectContent>
           </Select>
-          <Badge variant="secondary" className="gap-1"><LockKeyhole className="size-3" aria-hidden="true" />Только чтение</Badge>
         </div>
         <div className="relative min-h-0 overflow-hidden">
           {chatError ? (
@@ -413,6 +448,8 @@ export function BraiChatSection({
                 clearChatError();
                 return { id: attachment.id, mediaType: attachment.media_type, url: api.attachmentUrl(attachment.id) };
               }}
+              loadAttachment={loadAttachment}
+              draftStorageKey={`brai_chat_draft:${encodeURIComponent(userId ?? "anonymous")}:${encodeURIComponent(defaultApiBase() || "same-origin")}:${activeThread.id}`}
             />
           ) : (
             <div className="grid h-full place-items-center px-6 text-center"><div><p className="text-sm text-muted-foreground">{status}</p>{!archived ? <Button type="button" className="mt-3" onClick={() => void createThread()}><Plus aria-hidden="true" />Новый чат</Button> : null}</div></div>
@@ -426,7 +463,7 @@ export function BraiChatSection({
           mode={contextPanel}
           artifacts={artifacts}
           targetId={workspaceTargetId}
-          attachmentUrl={(id) => api.attachmentUrl(id)}
+          loadAttachment={loadAttachment}
           onSource={navigateToSource}
         />
       </aside>
@@ -438,7 +475,7 @@ export function BraiChatSection({
             mode={contextPanel}
             artifacts={artifacts}
             targetId={workspaceTargetId}
-            attachmentUrl={(id) => api.attachmentUrl(id)}
+            loadAttachment={loadAttachment}
             onSource={navigateToSource}
           />
         </MobileContextSheet>
