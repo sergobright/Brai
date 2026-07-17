@@ -236,6 +236,16 @@ describe("BraiCopilotSurface", () => {
     });
   });
 
+  it("keeps runtime headers stable across visual viewport rerenders", () => {
+    const headers = { "x-brai-chat-replay-mode": "full" };
+    const view = render(surface({ headers }));
+    const firstRuntimeHeaders = fake.copilotKitProps?.headers;
+
+    view.rerender(surface({ headers }));
+
+    expect(fake.copilotKitProps?.headers).toBe(firstRuntimeHeaders);
+  });
+
   it("keeps the stock chat while inheriting every semantic Brai theme token", () => {
     const { container } = renderSurface();
 
@@ -261,8 +271,9 @@ describe("BraiCopilotSurface", () => {
     expect(fake.inputProps?.textArea).toBeTruthy();
     expect(fake.inputProps?.bottomAnchored).toBe(true);
     expect(fake.inputProps?.showDisclaimer).toBe(false);
-    expect(screen.getByTestId("copilot-chat-input")).toHaveClass("min-h-10", "bg-background");
+    expect(screen.getByTestId("copilot-chat-input")).toHaveClass("min-h-0", "bg-background");
     expect(screen.getByRole("textbox", { name: "Сообщение Браю" })).toHaveClass("max-h-[50dvh]", "min-h-6");
+    expect(screen.getByRole("textbox", { name: "Сообщение Браю" })).toHaveAttribute("rows", "1");
     expect(fake.viewProps?.scrollView).toBeTypeOf("function");
     expect(screen.getByTestId("copilot-default-scroll-view")).toHaveTextContent("История");
     expect(screen.getByRole("button", { name: "Прокрутить к последнему сообщению" })).toBeInTheDocument();
@@ -401,6 +412,7 @@ function surface(overrides: {
   onRunFinished?: () => void;
   onSteer?: (messageId: string, text: string) => Promise<void>;
   onUpload?: (file: File) => Promise<{ id: string; mediaType: string; url: string }>;
+  headers?: Record<string, string>;
   runtimeBearerToken?: string | null;
 } = {}) {
   return (
@@ -408,7 +420,7 @@ function surface(overrides: {
       runtimeUrl="/api/v1/brai-chat/runtime"
       theme="dark"
       threadId="thread-1"
-      headers={{ "x-brai-chat-replay-mode": "full" }}
+      headers={overrides.headers ?? { "x-brai-chat-replay-mode": "full" }}
       runtimeBearerToken={overrides.runtimeBearerToken}
       draftStorageKey="brai_chat_draft:test"
       loadAttachment={vi.fn(async () => new Blob([new Uint8Array([0x89])], { type: "image/png" }))}

@@ -62,8 +62,11 @@ const BRAI_COPILOT_THEME: CopilotThemeStyle = {
   "--cpk-default-font-family": "var(--font-app-sans)",
   "--cpk-default-mono-font-family": "var(--font-app-mono)",
   "--cpk-color-black": "var(--brai-copilot-foreground)",
-  "--cpk-color-gray-100": "var(--brai-copilot-muted)",
-  "--cpk-color-gray-200": "var(--brai-copilot-muted)",
+  // The stock chat uses these as its scroll and input backgrounds. Keeping
+  // them on `background` prevents a second, lighter rectangle below chat
+  // content and the composer in the dark shell.
+  "--cpk-color-gray-100": "var(--brai-copilot-background)",
+  "--cpk-color-gray-200": "var(--brai-copilot-background)",
   "--cpk-color-gray-400": "var(--brai-copilot-muted-foreground)",
   "--cpk-color-gray-500": "var(--brai-copilot-muted-foreground)",
   "--cpk-color-gray-700": "var(--brai-copilot-border)",
@@ -162,10 +165,14 @@ export function BraiCopilotSurface({
   const context = useMemo(() => ({
     draft, loadAttachment, onDeleteAttachment, onError, onRetryChange, onRunFinished, onSteer, releaseReservations, setDraft,
   }), [draft, loadAttachment, onDeleteAttachment, onError, onRetryChange, onRunFinished, onSteer, releaseReservations, setDraft]);
-  const runtimeHeaders = {
+  // CopilotKit treats a changed headers object as a changed runtime
+  // configuration. The VisualViewport emits frequent updates while Android's
+  // keyboard is open, so an unstable object here repeatedly reconnects the
+  // chat and makes its auto-scroll visibly flicker.
+  const runtimeHeaders = useMemo(() => ({
     ...headers,
     ...(runtimeBearerToken ? { Authorization: `Bearer ${runtimeBearerToken}` } : {}),
-  };
+  }), [headers, runtimeBearerToken]);
 
   return (
     <CopilotKit
@@ -188,7 +195,7 @@ export function BraiCopilotSurface({
           <CopilotChat
             agentId={BRAI_AGENT_ID}
             threadId={threadId}
-            className="h-full min-h-0 bg-background text-foreground [&_[data-testid=copilot-chat-textarea]]:!text-foreground [&_[data-testid=copilot-chat-textarea]]:placeholder:!text-muted-foreground [&_[data-testid=copilot-slash-menu]]:!border-border [&_[data-testid=copilot-slash-menu]]:!bg-popover [&_[data-testid=copilot-slash-menu]]:!text-popover-foreground [&_[data-testid=copilot-slash-menu]_[role=option]:hover]:!bg-accent [&_[data-testid=copilot-slash-menu]_[role=option][data-active=true]]:!bg-accent"
+            className="h-full min-h-0 !bg-background text-foreground [&_.copilotKitChat]:!bg-background [&_[data-testid=copilot-scroll-content]]:!bg-background [&_[data-testid=copilot-chat-textarea]]:!text-foreground [&_[data-testid=copilot-chat-textarea]]:placeholder:!text-muted-foreground [&_[data-testid=copilot-slash-menu]]:!border-border [&_[data-testid=copilot-slash-menu]]:!bg-popover [&_[data-testid=copilot-slash-menu]]:!text-popover-foreground [&_[data-testid=copilot-slash-menu]_[role=option]:hover]:!bg-accent [&_[data-testid=copilot-slash-menu]_[role=option][data-active=true]]:!bg-accent"
             style={BRAI_COPILOT_THEME}
             chatView={BraiChatView}
             labels={{
@@ -395,7 +402,7 @@ function BraiCompactChatInputComponent(props: ComponentProps<typeof CopilotChatI
         >
           <div
             data-testid="copilot-chat-input"
-            className="pointer-events-auto mx-auto grid min-h-10 w-full max-w-3xl grid-cols-[auto_minmax(0,1fr)_auto] items-end gap-1 rounded-xl border border-border bg-background px-1.5 py-1"
+            className="pointer-events-auto mx-auto grid min-h-0 w-full max-w-3xl grid-cols-[auto_minmax(0,1fr)_auto] items-end gap-1 rounded-xl border border-border bg-background px-1.5 py-1"
           >
             {addMenuButton}
             <div className="flex min-w-0 items-end">{textArea}</div>
@@ -435,6 +442,7 @@ const BraiChatTextArea = forwardRef<HTMLTextAreaElement, ComponentProps<"textare
       {...props}
       ref={localRef}
       bare
+      rows={1}
       id="brai-chat-message"
       name="message"
       aria-label="Сообщение Браю"
@@ -453,7 +461,7 @@ const BraiChatTextArea = forwardRef<HTMLTextAreaElement, ComponentProps<"textare
         }
         onKeyDown?.(event);
       }}
-      className={cx("min-h-6 max-h-[50dvh] w-full resize-none bg-transparent !py-1 !pr-1 text-base leading-6 text-foreground outline-none placeholder:text-muted-foreground", className)}
+      className={cx("box-border min-h-6 max-h-[50dvh] w-full resize-none bg-transparent !py-1 !pr-1 text-base leading-6 text-foreground outline-none placeholder:text-muted-foreground", className)}
     />
   );
 });
@@ -527,7 +535,7 @@ function BraiChatScrollView({
     <CopilotChat.View.ScrollView
       {...props}
       className={cx(
-        "text-foreground [scrollbar-color:var(--border)_transparent] [scrollbar-width:thin] [&::-webkit-scrollbar]:size-2 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-border [&::-webkit-scrollbar-track]:bg-transparent",
+        "!bg-background text-foreground [scrollbar-color:var(--border)_transparent] [scrollbar-width:thin] [&::-webkit-scrollbar]:size-2 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-border [&::-webkit-scrollbar-track]:bg-transparent",
         className,
       )}
       scrollToBottomButton={BraiChatScrollToBottomButton}

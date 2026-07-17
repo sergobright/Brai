@@ -23,6 +23,7 @@ export function BraiChatWorkspace({
   instance,
   mode,
   onSource,
+  showHeading = true,
   targetId,
 }: {
   artifacts: BraiChatArtifact[];
@@ -30,6 +31,7 @@ export function BraiChatWorkspace({
   instance: WorkspaceInstance;
   mode: BraiWorkspaceMode;
   onSource: (artifact: BraiChatArtifact) => void;
+  showHeading?: boolean;
   targetId?: string | null;
 }) {
   const visibleArtifacts = useMemo(() => workspaceArtifacts(artifacts, mode), [artifacts, mode]);
@@ -47,12 +49,14 @@ export function BraiChatWorkspace({
   }, [instance, mode, targetId, visibleArtifacts]);
 
   return (
-    <div className="grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)]">
-      <header className="mb-3 flex min-h-9 items-center gap-3">
-        <Icon className="size-4 text-muted-foreground" aria-hidden="true" />
-        <h2 className="m-0 text-xl font-semibold leading-tight">{copy.label}</h2>
-        <span className="text-xs text-muted-foreground">{visibleArtifacts.length || ""}</span>
-      </header>
+    <div className={cx("grid h-full min-h-0", showHeading ? "grid-rows-[auto_minmax(0,1fr)]" : "grid-rows-[minmax(0,1fr)]")}>
+      {showHeading ? (
+        <header className="mb-3 flex min-h-9 items-center gap-3">
+          <Icon className="size-4 text-muted-foreground" aria-hidden="true" />
+          <h2 className="m-0 text-xl font-semibold leading-tight">{copy.label}</h2>
+          <span className="text-xs text-muted-foreground">{visibleArtifacts.length || ""}</span>
+        </header>
+      ) : null}
       {visibleArtifacts.length === 0 ? (
         <div className="grid min-h-0 place-items-center p-8 text-center">
           <div className="grid max-w-sm justify-items-center gap-3 text-muted-foreground">

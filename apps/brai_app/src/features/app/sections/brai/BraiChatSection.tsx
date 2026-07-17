@@ -393,10 +393,12 @@ export function BraiChatSection({
 
   const selectedModel = models.find((model) => model.id === activeThread?.model) ?? null;
   const reasoningEfforts = selectedModel?.reasoning_efforts ?? [];
-  const providerHeaders = {
+  // Keep the provider configuration referentially stable. In particular, a
+  // keyboard's VisualViewport updates must not reconnect CopilotKit.
+  const providerHeaders = useMemo(() => ({
     ...(userId ? { "x-brai-expected-user-id": userId } : {}),
     "x-brai-chat-replay-mode": "full",
-  };
+  }), [userId]);
 
   return (
     <div
@@ -472,7 +474,7 @@ export function BraiChatSection({
       </aside>
       ) : null}
       {contextPanel !== "none" && mobileViewport ? (
-        <MobileContextSheet label={CONTEXT_PANEL_LABELS[contextPanel]} variant="detail" scroll={false} onClose={() => onContextPanelChange("none")}>
+        <MobileContextSheet label={CONTEXT_PANEL_LABELS[contextPanel]} scroll={false} onClose={() => onContextPanelChange("none")}>
           <BraiChatWorkspace
             instance="mobile"
             mode={contextPanel}
@@ -480,6 +482,7 @@ export function BraiChatSection({
             targetId={workspaceTargetId}
             loadAttachment={loadAttachment}
             onSource={navigateToSource}
+            showHeading={false}
           />
         </MobileContextSheet>
       ) : null}
