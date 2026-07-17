@@ -45,17 +45,22 @@ describe("BraiApp gestures", () => {
     expect(document.querySelector('[data-section-page="focus"]')).not.toBeInTheDocument();
   });
 
-  it("keeps the BRAI session mounted without reloading it across section navigation", async () => {
-    render(<BraiApp initialSection="brai" />);
+  it("mounts BRAI only after the authenticated visit and then keeps the session across navigation", async () => {
+    render(<BraiApp />);
+    await screen.findByRole("heading", { name: "Действия" });
+    expect(vi.mocked(fetch).mock.calls.some(([input]) =>
+      String(input).includes("/v1/brai-chat/threads?"))).toBe(false);
+    const dock = document.querySelector(".main-dock .mobile-nav");
+    expect(dock).toBeInstanceOf(HTMLElement);
+
+    fireEvent.click(within(dock as HTMLElement).getByRole("button", { name: "Брай" }));
     await screen.findByRole("heading", { name: "Брай" });
     await waitFor(() => expect(vi.mocked(fetch).mock.calls.some(([input]) =>
       String(input).includes("/v1/brai-chat/threads?"))).toBe(true));
     const braiPage = document.querySelector('[data-section-page="brai"]');
     const before = vi.mocked(fetch).mock.calls.filter(([input]) =>
       String(input).includes("/v1/brai-chat/threads?")).length;
-    const dock = document.querySelector(".main-dock .mobile-nav");
     expect(braiPage).toBeInstanceOf(HTMLElement);
-    expect(dock).toBeInstanceOf(HTMLElement);
 
     fireEvent.click(within(dock as HTMLElement).getByRole("button", { name: "Действия" }));
     await screen.findByRole("heading", { name: "Действия" });

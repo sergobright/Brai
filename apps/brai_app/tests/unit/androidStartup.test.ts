@@ -12,20 +12,6 @@ describe("Android startup", () => {
     expect(source).not.toContain("setOnboardingVoiceOnly(");
   });
 
-  it("clears stale WebView chunks before Capacitor loads an OTA bundle", () => {
-    const source = fs.readFileSync(
-      path.join(process.cwd(), "android/app/src/main/java/world/brightos/brai/MainActivity.java"),
-      "utf8",
-    );
-    const capacitorConfig = fs.readFileSync(path.join(process.cwd(), "capacitor.config.ts"), "utf8");
-    const clearCache = source.indexOf("startupWebView.clearCache(true)");
-    const loadBridge = source.indexOf("super.load()");
-
-    expect(clearCache).toBeGreaterThan(0);
-    expect(loadBridge).toBeGreaterThan(clearCache);
-    expect(capacitorConfig).toContain('appendUserAgent: " BraiNative/1"');
-  });
-
   it("does not expose the internal Brai CMD credential as user access", () => {
     const runtimeSource = [
       path.join(process.cwd(), "src"),

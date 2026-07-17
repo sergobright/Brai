@@ -299,6 +299,32 @@ test('chat runtime CORS preflight allows both durable replay cursor headers', as
   }
 });
 
+test('chat runtime preserves trusted Capacitor CORS on direct CopilotKit responses', async () => {
+  const fixture = await createFixture(NOW, {
+    createAuth: authRuntime(() => 'runtime-cors-owner'),
+    braiChatRuntime: {
+      ...modelRuntime(),
+      handleRequest: async ({ res }) => {
+        res.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok: true }));
+      }
+    }
+  });
+  try {
+    seedUser(fixture, 'runtime-cors-owner');
+    const response = await fetch(`${fixture.url}/v1/brai-chat/runtime`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', origin: 'https://localhost' },
+      body: JSON.stringify({ method: 'info' })
+    });
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get('access-control-allow-origin'), 'https://localhost');
+    assert.equal(response.headers.get('access-control-allow-credentials'), 'true');
+  } finally {
+    await fixture.close();
+  }
+});
+
 test('model route pins Luna medium even when the runtime default is different', async () => {
   const fixture = await createFixture(NOW, {
     createAuth: authRuntime(() => 'model-owner'),

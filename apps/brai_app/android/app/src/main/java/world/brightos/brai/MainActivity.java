@@ -77,18 +77,6 @@ public class MainActivity extends BridgeActivity {
     }
 
     @Override
-    protected void load() {
-        WebView startupWebView = findViewById(com.getcapacitor.android.R.id.webview);
-        if (startupWebView != null) {
-            // Turbopack can reuse chunk paths between OTA bundles. Clear the
-            // WebView resource cache before Capacitor loads index.html so a
-            // new runtime config cannot be combined with an older JS chunk.
-            startupWebView.clearCache(true);
-        }
-        super.load();
-    }
-
-    @Override
     public void onDestroy() {
         if (otaManager != null) {
             BraiOtaRegistry.clearManager(otaManager);

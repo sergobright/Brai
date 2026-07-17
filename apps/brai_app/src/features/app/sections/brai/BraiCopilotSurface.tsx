@@ -115,6 +115,7 @@ export function BraiCopilotSurface({
   onRunFinished,
   onSteer,
   onUpload,
+  runtimeBearerToken,
   runtimeUrl,
   theme,
   threadId,
@@ -128,6 +129,7 @@ export function BraiCopilotSurface({
   onRunFinished: () => void;
   onSteer: (messageId: string, text: string) => Promise<void>;
   onUpload: (file: File) => Promise<{ id: string; mediaType: string; url: string }>;
+  runtimeBearerToken?: string | null;
   runtimeUrl: string;
   theme: ThemeMode;
   threadId: string;
@@ -158,6 +160,10 @@ export function BraiCopilotSurface({
   const context = useMemo(() => ({
     draft, loadAttachment, onDeleteAttachment, onError, onRetryChange, onRunFinished, onSteer, releaseReservations, setDraft,
   }), [draft, loadAttachment, onDeleteAttachment, onError, onRetryChange, onRunFinished, onSteer, releaseReservations, setDraft]);
+  const runtimeHeaders = {
+    ...headers,
+    ...(runtimeBearerToken ? { Authorization: `Bearer ${runtimeBearerToken}` } : {}),
+  };
 
   return (
     <CopilotKit
@@ -165,7 +171,7 @@ export function BraiCopilotSurface({
       agent={BRAI_AGENT_ID}
       threadId={threadId}
       credentials="include"
-      headers={headers}
+      headers={runtimeHeaders}
       useSingleEndpoint
       enableInspector={false}
       showDevConsole={false}
@@ -180,7 +186,7 @@ export function BraiCopilotSurface({
           <CopilotChat
             agentId={BRAI_AGENT_ID}
             threadId={threadId}
-            className="h-full min-h-0 bg-background text-foreground [&_[data-testid=copilot-chat-input]]:!rounded-2xl [&_[data-testid=copilot-chat-input]]:!border [&_[data-testid=copilot-chat-input]]:!border-border [&_[data-testid=copilot-chat-input]]:!bg-card [&_[data-testid=copilot-chat-input]]:!shadow-sm [&_[data-testid=copilot-chat-textarea]]:!text-foreground [&_[data-testid=copilot-chat-textarea]]:placeholder:!text-muted-foreground [&_[data-testid=copilot-slash-menu]]:!border-border [&_[data-testid=copilot-slash-menu]]:!bg-popover [&_[data-testid=copilot-slash-menu]]:!text-popover-foreground [&_[data-testid=copilot-slash-menu]_[role=option]:hover]:!bg-accent [&_[data-testid=copilot-slash-menu]_[role=option][data-active=true]]:!bg-accent"
+            className="h-full min-h-0 bg-background text-foreground [&_[data-testid=copilot-chat-textarea]]:!text-foreground [&_[data-testid=copilot-chat-textarea]]:placeholder:!text-muted-foreground [&_[data-testid=copilot-slash-menu]]:!border-border [&_[data-testid=copilot-slash-menu]]:!bg-popover [&_[data-testid=copilot-slash-menu]]:!text-popover-foreground [&_[data-testid=copilot-slash-menu]_[role=option]:hover]:!bg-accent [&_[data-testid=copilot-slash-menu]_[role=option][data-active=true]]:!bg-accent"
             style={BRAI_COPILOT_THEME}
             chatView={BraiChatView}
             labels={{
@@ -345,16 +351,7 @@ function BraiChatViewComponent(props: ComponentProps<typeof CopilotChat.View>) {
   return (
     <CopilotChat.View
       {...props}
-      input={{
-        className: "pb-1",
-        positioning: "static",
-        bottomAnchored: true,
-        showDisclaimer: false,
-        textArea: BraiChatTextArea,
-        sendButton: BraiChatSendButton,
-        addMenuButton: BraiChatAddMenuButton,
-        disclaimer: { className: "text-muted-foreground" },
-      }}
+      input={BraiCompactChatInput}
       scrollView={BraiChatScrollView}
       welcomeScreen={false}
       inputValue={context.draft}
@@ -366,6 +363,38 @@ function BraiChatViewComponent(props: ComponentProps<typeof CopilotChat.View>) {
 }
 
 const BraiChatView = Object.assign(BraiChatViewComponent, CopilotChat.View);
+
+function BraiCompactChatInputComponent(props: ComponentProps<typeof CopilotChatInput>) {
+  return (
+    <CopilotChatInput
+      {...props}
+      positioning="static"
+      bottomAnchored
+      showDisclaimer={false}
+      textArea={BraiChatTextArea}
+      sendButton={BraiChatSendButton}
+      addMenuButton={BraiChatAddMenuButton}
+    >
+      {({ addMenuButton, sendButton, textArea }) => (
+        <div
+          data-copilotkit
+          className="pointer-events-none relative z-20 bg-background px-4 pb-1"
+        >
+          <div
+            data-testid="copilot-chat-input"
+            className="pointer-events-auto mx-auto grid min-h-14 w-full max-w-3xl grid-cols-[auto_minmax(0,1fr)_auto] items-end gap-2 rounded-2xl border border-border bg-background px-2 py-2 shadow-sm"
+          >
+            {addMenuButton}
+            <div className="flex min-h-9 min-w-0 items-center">{textArea}</div>
+            {sendButton}
+          </div>
+        </div>
+      )}
+    </CopilotChatInput>
+  );
+}
+
+const BraiCompactChatInput = Object.assign(BraiCompactChatInputComponent, CopilotChatInput);
 
 const BraiChatTextArea = forwardRef<HTMLTextAreaElement, ComponentProps<"textarea">>(function BraiChatTextArea(
   { className, ...props },
@@ -381,7 +410,7 @@ const BraiChatTextArea = forwardRef<HTMLTextAreaElement, ComponentProps<"textare
       aria-label="Сообщение Браю"
       data-testid="copilot-chat-textarea"
       placeholder={props.placeholder ?? "Напишите Браю…"}
-      className={cx("w-full resize-none bg-transparent text-base leading-relaxed text-foreground outline-none placeholder:text-muted-foreground", className)}
+      className={cx("max-h-32 min-h-6 w-full resize-none bg-transparent !py-1.5 !pr-1 text-base leading-relaxed text-foreground outline-none placeholder:text-muted-foreground", className)}
     />
   );
 });

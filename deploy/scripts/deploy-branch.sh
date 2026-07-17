@@ -190,6 +190,10 @@ if [[ "$ENVIRONMENT" == preview-* && "$BRANCH" == codex/* && "${BRAI_NATIVE_APK_
   export BRAI_TARGET_APK_PREVIEW_ITERATION="0"
   BRAI_TARGET_APK_VERSION_CODE="$("$NODE_BIN" "$SCRIPT_DIR/resolve-required-apk-version.mjs" prod versionCode)"
   export BRAI_TARGET_APK_VERSION_CODE
+  exec 6<"$RELEASE_TARGET"
+  flock 6
+  BRAI_RELEASE_TARGET="$RELEASE_TARGET" "$NODE_BIN" "$SCRIPT_DIR/update-release-index.mjs" \
+    --restore-stable-preview "$BRAI_TARGET_APK_RELEASE_KEY"
   "$NODE_BIN" -e '
 const fs = require("node:fs");
 const path = require("node:path");
@@ -227,6 +231,7 @@ if (Number(slot.apkVersion) !== productionApkVersion || Number(slot.versionCode)
   fail(`stable slot APK baseline ${slot.apkVersion}/${slot.versionCode} does not match Production ${productionApkVersion}/${productionVersionCode}`);
 }
 ' "$RELEASE_TARGET/releases.json" "$BRAI_TARGET_APK_RELEASE_KEY" "$BRAI_TARGET_APK_VERSION" "$BRAI_TARGET_APK_VERSION_CODE"
+  exec 6>&-
 fi
 
 "$SCRIPT_DIR/publish-client-web-layer.sh"

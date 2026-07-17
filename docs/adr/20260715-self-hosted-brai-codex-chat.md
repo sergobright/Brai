@@ -16,6 +16,7 @@ MVP не получает доступ к данным, проектам, DB, о
 ## Решение
 
 - Статический client использует pinned `@copilotkit/react-core` `1.62.3` и обращается только к Better-Auth-protected Brai API; Copilot Cloud, managed thread storage и необязательная телеметрия не используются.
+- Web передаёт Better Auth cookie как прежде. Android WebView получает из уже подтверждённой native-сессии подписанный Better Auth bearer, держит его только в памяти страницы и использует для CopilotKit runtime transport. Заголовок выдаётся только доверенным native origins, а CORS применяется до прямого JSON/SSE-ответа runtime.
 - Brai API использует pinned `@copilotkit/runtime` `1.62.3`, `@ag-ui/client` `0.0.57` и один custom AG-UI agent. Adapter преобразует pinned Codex App Server `0.144.4` JSON-RPC в стандартные AG-UI events и versioned safe `brai.*` custom events.
 - Один allowlist/redaction boundary отбрасывает raw reasoning, credentials и host paths до stream, Postgres, logs и search; технический output ограничивается 64 KiB.
 - Postgres является product source of truth для owner-scoped threads, messages, normalized events, attachments, replay и search. Persistent per-user `CODEX_HOME` остаётся provider state для native resume/reconciliation, но не заменяет Brai history.
@@ -24,7 +25,7 @@ MVP не получает доступ к данным, проектам, DB, о
 - Каждый пользователь получает on-demand non-root container без inbound ports, Brai source/API/DB secrets или чужого state. Root filesystem и пустой workspace read-only; per-user `CODEX_HOME` writable; shared auth и выбранные attachments read-only. Codex работает с `approval=never`, read-only sandbox и отключённой tool network.
 - Active turn отделён от subscriber connection. Persist-before-fan-out и monotonic sequence обеспечивают replay; turn и idle deadlines равны 15 минутам, причём idle cleanup не останавливает active turn.
 - Холодный CopilotKit consumer всегда получает полный Postgres-backed AG-UI replay. Sequence cursor принимается только при явном `resume` уже гидратированной локальной сессии и не может заменить полную историю. Messages, events, threads и artifacts обновляются независимо, поэтому частичный сбой проекции не очищает уже видимый ответ.
-- Client держит BRAI session и CopilotKit provider смонтированными на уровне приложения при переходах между разделами. Последний активный тред хранится локально для пары user/environment, а управляемый черновик — отдельно для каждого треда.
+- Client монтирует BRAI session и CopilotKit provider после аутентификации и первого фактического входа в раздел, затем держит их смонтированными при переходах между разделами. Так внутренний skeleton не участвует в pre-auth startup. Последний активный тред хранится локально для пары user/environment, а управляемый черновик — отдельно для каждого треда.
 - Runtime agent `brai-codex` зарегистрирован версионируемой identity-инструкцией. Она описывает BrightOS/Brai через статический architecture snapshot и явно сообщает debug-ограничения: нет живого репозитория, DB, Vault, внутренних данных, выполнения команд или изменения файлов. Каждый фактический turn пишет одну idempotent bounded запись `ai_logs`.
 - Управляемый поиск разрешён только в режиме `cached`; live search, произвольная сеть и network-enabled commands запрещены. Новые треды получают реальный catalog ID модели с display name `GPT-5.6-Luna` и reasoning effort `medium`; существующие настройки не переписываются, а readiness завершается ошибкой при отсутствии закреплённой модели.
 - Каждый `turn/start` явно запрашивает `summary: "auto"` по generated schema закреплённого Codex App Server `0.144.4`. AG-UI собирает только публичное reasoning summary по `summaryIndex` и границам частей; raw reasoning остаётся отключённым и не передаётся клиенту.
@@ -59,6 +60,8 @@ MVP не получает доступ к данным, проектам, DB, о
 - Adapter tests доказывают AG-UI ordering, cold full replay/resume distinction, `summaryIndex` reasoning boundaries, redaction, 64 KiB bound, detached replay, stop/steer/retry, single image artifact и safe errors.
 - Broker tests доказывают RPC allowlist, path containment, per-user state, selected-file-only mounts, idle handling и отсутствие public ports/Docker socket внутри user container.
 - Client tests доказывают persistent session mount, last-thread restore, independent projections, per-thread draft preservation, dock geometry и авторизованный image viewer/download.
+- Native transport tests доказывают выдачу и cold restore подписанного Better Auth bearer только для доверенного origin, доступ runtime через `Authorization` и наличие CORS на прямых CopilotKit-ответах.
+- Preview delivery tests доказывают, что web/OTA-only follow-up не создаёт новую APK-линию, а под release lock возвращает занятый slot к его опубликованной stable APK.
 - Preview QA проходит через опубликованный HTTPS route после Caddy и app login на desktop/mobile с console/network inspection.
 - Upgrade Codex начинается с `codex app-server generate-ts` и сравнения required methods/events для новой pinned версии.
 

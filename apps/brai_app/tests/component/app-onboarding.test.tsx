@@ -125,32 +125,6 @@ describe("BraiApp onboarding", () => {
     expect(document.documentElement.dataset.theme).toBe("dark");
   });
 
-  it("hides the server shell before first paint when the Capacitor Android bridge is late", () => {
-    delete window.Capacitor;
-    vi.spyOn(window.navigator, "userAgent", "get").mockReturnValue(
-      "Mozilla/5.0 (Linux; Android 15; Pixel 9 Build/AP4A; wv) AppleWebKit/537.36 Version/4.0 Chrome/138.0 Mobile Safari/537.36 BraiNative/1",
-    );
-    document.documentElement.dataset.theme = "light";
-
-    runAppInitScript();
-
-    expect(document.documentElement.dataset.nativeAndroid).toBe("true");
-    expect(document.documentElement.dataset.theme).toBe("dark");
-  });
-
-  it("does not classify an ordinary Android in-app browser as the Brai APK", () => {
-    delete window.Capacitor;
-    vi.spyOn(window.navigator, "userAgent", "get").mockReturnValue(
-      "Mozilla/5.0 (Linux; Android 15; Pixel 9 Build/AP4A; wv) AppleWebKit/537.36 Version/4.0 Chrome/138.0 Mobile Safari/537.36",
-    );
-    window.localStorage.setItem("brai_theme_mode", "light");
-
-    runAppInitScript();
-
-    expect(document.documentElement.dataset.nativeAndroid).toBeUndefined();
-    expect(document.documentElement.dataset.theme).toBe("light");
-  });
-
   it("renders the first welcome cards without carousel arrow buttons", async () => {
     vi.useFakeTimers();
     stubAndroidCapacitor();

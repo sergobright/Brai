@@ -65,6 +65,7 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
   const engineDownloading = engineView.updateAction === "downloading-web" || engineView.updateAction === "downloading-apk";
   const { authDisplayName, authUser, provisionBraiCmdDeviceToken } = app;
   const authUserId = authUser?.id ?? null;
+  const [braiSessionOwnerId, setBraiSessionOwnerId] = useState<string | null>(null);
   const router = useRouter();
   const nativeAndroid = useMountedNativeAndroid();
   const [mobileDockLayer, setMobileDockLayer] = useState<"left" | "right" | "context" | null>(null);
@@ -117,6 +118,12 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
   const unauthEngineActiveRef = useRef(false);
   const unauthBraiCmdActiveRef = useRef(false);
   const adjacentSection = unauthEngineActive ? null : app.swipeNavigation.visual?.to;
+  const braiRequested = visibleSection === "brai" || adjacentSection === "brai";
+  const shouldRenderBraiSession = Boolean(
+    authUserId
+    && !onboardingActive
+    && (braiSessionOwnerId === authUserId || braiRequested)
+  );
   const handleStartupIntroComplete = useCallback(() => setStartupIntroComplete(true), []);
   const mobileMenuSwipe = useLeftEdgeMenuSwipe(
     () => {
@@ -163,6 +170,17 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
     unauthEngineActiveRef.current = unauthEngineActive;
     unauthBraiCmdActiveRef.current = unauthBraiCmdActive;
   }, [app.section, app.selectSection, unauthBraiCmdActive, unauthEngineActive]);
+
+  useEffect(() => {
+    const nextOwnerId = !authUserId
+      ? null
+      : !onboardingActive && braiRequested
+        ? authUserId
+        : undefined;
+    if (nextOwnerId === undefined) return;
+    const timeout = window.setTimeout(() => setBraiSessionOwnerId(nextOwnerId), 0);
+    return () => window.clearTimeout(timeout);
+  }, [authUserId, braiRequested, onboardingActive]);
 
   useEffect(() => {
     if (!unauthEngineOpen) return;
@@ -664,7 +682,7 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
                 {renderSectionScreen(adjacentSection, false)}
               </section>
             ) : null}
-            <section
+            {shouldRenderBraiSession ? <section
               key="brai-section-page"
               className={cx(
                 "section-page min-w-0 [backface-visibility:hidden]",
@@ -679,7 +697,7 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
                 : adjacentSection === "brai" ? sectionSwipePageStyle(app.swipeNavigation.visual, "adjacent") : undefined}
             >
               {renderSectionScreen("brai", visibleSection === "brai")}
-            </section>
+            </section> : null}
           </div>
         </ScrollArea>
       </SidebarInset>

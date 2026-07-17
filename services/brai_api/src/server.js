@@ -389,6 +389,7 @@ export function createBraiServer({
     let requestPath = req.url ?? '/';
     let requestUserId = null;
     try {
+      applyCorsHeaders(req, res);
       if (req.method === 'OPTIONS') {
         res.writeHead(204, jsonHeaders(req));
         res.end();
@@ -445,7 +446,13 @@ export function createBraiServer({
       if (url.pathname === '/auth/session' && req.method === 'GET') {
         const session = await betterAuthSession(req, auth, authBackendTimeoutMs);
         if (session?.user) {
-          sendJson(req, res, 200, { authenticated: true, user: publicAuthUser(session.user) });
+          sendJson(
+            req,
+            res,
+            200,
+            { authenticated: true, user: publicAuthUser(session.user) },
+            nativeRuntimeAuthHeaders(req)
+          );
           return;
         }
         if (hasValidSession(req, sessionSecret, now())) {
@@ -2052,7 +2059,10 @@ async function relayAuthResponse(req, res, response) {
 
 function relayAuthText(req, res, response, text, parsed = parseJson(text)) {
   const cookies = setCookieHeaders(response.headers);
-  const extraHeaders = cookies.length > 0 ? { 'set-cookie': cookies } : {};
+  const extraHeaders = {
+    ...(cookies.length > 0 ? { 'set-cookie': cookies } : {}),
+    ...nativeRuntimeAuthHeaders(req, response.headers)
+  };
   if (response.ok && parsed?.user?.id) {
     sendJson(req, res, response.status, { authenticated: true, user: publicAuthUser(parsed.user) }, extraHeaders);
     return;
@@ -2095,6 +2105,12 @@ function authPreliminaryContext(body) {
 function sendJson(req, res, status, body, extraHeaders = {}) {
   res.writeHead(status, { ...jsonHeaders(req), ...extraHeaders });
   res.end(JSON.stringify(body));
+}
+
+function applyCorsHeaders(req, res) {
+  for (const [key, value] of Object.entries(jsonHeaders(req))) {
+    if (key !== 'content-type') res.setHeader(key, value);
+  }
 }
 
 function jsonHeaders(req) {
@@ -2189,6 +2205,34 @@ function isTestEmailLoginOrigin(origin) {
   if (/^https:\/\/[a-e]\.test\.brai\.one$/.test(origin ?? '')) return true;
   if (/^https:\/\/[a-e]\.test\.brightos\.world$/.test(origin ?? '')) return true;
   return /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin ?? '');
+}
+
+function nativeRuntimeAuthHeaders(req, responseHeaders = null) {
+  if (!isNativeAppOrigin(req?.headers?.origin)) return {};
+  const token = responseHeaders?.get?.('set-auth-token') || signedSessionCookie(req?.headers?.cookie);
+  if (!token) return {};
+  return {
+    'set-auth-token': token,
+    'access-control-expose-headers': 'set-auth-token'
+  };
+}
+
+function signedSessionCookie(cookieHeader) {
+  if (typeof cookieHeader !== 'string') return null;
+  for (const part of cookieHeader.split(';')) {
+    const separator = part.indexOf('=');
+    if (separator <= 0) continue;
+    const name = part.slice(0, separator).trim();
+    const value = part.slice(separator + 1).trim();
+    if (name.endsWith('better-auth.session_token') && value.includes('.')) return value;
+  }
+  return null;
+}
+
+function isNativeAppOrigin(origin) {
+  return origin === 'capacitor://localhost'
+    || origin === 'https://localhost'
+    || origin === 'http://localhost';
 }
 
 function requiresTrustedOrigin(req, authContext) {

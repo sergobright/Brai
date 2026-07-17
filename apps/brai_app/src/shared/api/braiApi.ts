@@ -9,6 +9,7 @@ import type { ActivitiesState, ActivitiesSyncResponse, PendingActivityEvent } fr
 import { normalizeContextDecisionsState, type ContextDecisionsState, type ContextDecisionsWireState, type ContextResolutionRequest, type ContextResolutionResponse, type GoalPlanResponse } from "@/shared/types/contextDecisions";
 import type { InboxState, InboxSyncResponse, InboxWorkflowDetails, PendingInboxEvent } from "@/shared/types/inbox";
 import { normalizeRelationsState, type PendingRelationEvent, type RelationsState, type RelationsSyncResponse, type RelationsWireState, type RelationsWireSyncResponse } from "@/shared/types/relations";
+import { captureRuntimeBearerToken, clearRuntimeBearerToken } from "@/shared/auth/runtimeBearerToken";
 import { drainContextReviews, drainRelations } from "./pagination";
 interface RequestOptions extends RequestInit {
   json?: unknown;
@@ -232,7 +233,11 @@ export class BraiApi {
 
   setExpectedUserId(userId: string | null): void { this.expectedUserId = userId; }
 
-  async session(): Promise<AuthSession> { return this.request("/auth/session"); }
+  async session(): Promise<AuthSession> {
+    const session = await this.request<AuthSession>("/auth/session");
+    if (!session.authenticated) clearRuntimeBearerToken();
+    return session;
+  }
 
   async requestOtp(email: string): Promise<OtpSendResult> {
     return this.request("/auth/otp/send", {
@@ -255,7 +260,13 @@ export class BraiApi {
     });
   }
 
-  async logout(): Promise<void> { await this.request("/auth/logout", { method: "POST" }); }
+  async logout(): Promise<void> {
+    try {
+      await this.request("/auth/logout", { method: "POST" });
+    } finally {
+      clearRuntimeBearerToken();
+    }
+  }
   async state(): Promise<TimerState> { return this.request("/v1/timer/state"); }
   async history(): Promise<HistoryData> { return this.request("/v1/sessions"); }
   async goal(): Promise<GoalData> { return this.request("/v1/goals/challenge"); }
@@ -557,6 +568,7 @@ export class BraiApi {
         signal: controller.signal,
         body: json === undefined ? requestOptions.body : JSON.stringify(json),
       });
+      captureRuntimeBearerToken(response);
     } finally {
       clearTimeout(timeoutId);
       requestOptions.signal?.removeEventListener("abort", abortRequest);

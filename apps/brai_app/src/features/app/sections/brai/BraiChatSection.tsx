@@ -8,6 +8,7 @@ import { BraiChatApi } from "@/shared/api/braiChatApi";
 import { defaultApiBase } from "@/shared/config/runtime";
 import type { BraiChatEvent, BraiChatMessage, BraiChatModel, BraiChatSearchHit, BraiChatThread } from "@/shared/types/braiChat";
 import { getBraiLocalStorageItem, setBraiLocalStorageItem } from "@/shared/storage/localStorageKeys";
+import { useRuntimeBearerToken } from "@/shared/auth/runtimeBearerToken";
 import { Button } from "@/shared/ui/button";
 import { Input } from "@/shared/ui/input";
 import { ScrollArea } from "@/shared/ui/scroll-area";
@@ -54,6 +55,7 @@ export function BraiChatSection({
   onRailContent?: (content: ReactNode | null) => void;
 }) {
   const api = useMemo(() => new BraiChatApi(defaultApiBase(), userId), [userId]);
+  const runtimeBearerToken = useRuntimeBearerToken();
   const lastThreadStorageKey = useMemo(
     () => `brai_chat_last_thread:${encodeURIComponent(userId ?? "anonymous")}:${encodeURIComponent(defaultApiBase() || "same-origin")}`,
     [userId],
@@ -438,6 +440,7 @@ export function BraiChatSection({
               runtimeUrl={api.runtimeUrl()}
               threadId={activeThread.id}
               headers={providerHeaders}
+              runtimeBearerToken={runtimeBearerToken}
               onError={reportChatError}
               onRetryChange={handleRetryChange}
               onRunFinished={refreshAfterRun}

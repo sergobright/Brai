@@ -6,7 +6,6 @@ const config: CapacitorConfig = {
   webDir: "out",
   android: {
     path: "android",
-    appendUserAgent: " BraiNative/1",
   },
   server: {
     androidScheme: "https",

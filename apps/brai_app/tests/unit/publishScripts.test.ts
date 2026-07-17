@@ -283,9 +283,12 @@ describe("mobile OTA publish scripts", () => {
     expect(manifest.targetApkVersion).toBe(8);
   });
 
-  it("fails closed before non-native Preview OTA publication without a matching stable slot APK", async () => {
+  it("restores the stable slot APK before non-native Preview OTA publication", async () => {
     const deployBranch = await readFile(path.join(workspaceRoot, "deploy/scripts/deploy-branch.sh"), "utf8");
+    const restoreIndex = deployBranch.indexOf("--restore-stable-preview");
     const guardIndex = deployBranch.indexOf("Cannot publish Preview");
+    expect(restoreIndex).toBeGreaterThan(0);
+    expect(restoreIndex).toBeLessThan(guardIndex);
     expect(guardIndex).toBeGreaterThan(0);
     expect(guardIndex).toBeLessThan(deployBranch.indexOf('"$SCRIPT_DIR/publish-client-web-layer.sh"'));
 
@@ -293,31 +296,31 @@ describe("mobile OTA publish scripts", () => {
       {
         name: "missing-slot",
         slot: undefined,
-        artifact: false,
-        error: "stable slot APK release is missing",
+        stableArtifact: true,
+        error: "Missing static export for BRAI_BUILD_CLIENT=false",
       },
       {
         name: "preview-slot",
         slot: { file: "brai-c-v10-preview1.apk", apkVersion: 10, versionCode: 100001, apkBuildKind: "preview" },
-        artifact: true,
-        error: "slot APK release is preview, expected stable",
+        stableArtifact: true,
+        error: "Missing static export for BRAI_BUILD_CLIENT=false",
       },
       {
         name: "stale-slot",
         slot: { file: "brai-c-v9.apk", apkVersion: 9, versionCode: 9, apkBuildKind: "stable" },
-        artifact: true,
-        error: "stable slot APK baseline 9/9 does not match Production 10/10",
+        stableArtifact: true,
+        error: "Missing static export for BRAI_BUILD_CLIENT=false",
       },
       {
-        name: "missing-artifact",
-        slot: { file: "brai-c-v10.apk", apkVersion: 10, versionCode: 10, apkBuildKind: "stable" },
-        artifact: false,
-        error: "stable slot APK artifact is missing: brai-c-v10.apk",
+        name: "missing-stable-artifact",
+        slot: { file: "brai-c-v10-preview1.apk", apkVersion: 10, versionCode: 100001, apkBuildKind: "preview" },
+        stableArtifact: false,
+        error: "missing stable Preview APK: brai-c-v10.apk",
       },
       {
         name: "matching-slot",
         slot: { file: "brai-c-v10.apk", apkVersion: 10, versionCode: 10, apkBuildKind: "stable" },
-        artifact: true,
+        stableArtifact: true,
         error: "Missing static export for BRAI_BUILD_CLIENT=false",
       },
     ];
@@ -333,8 +336,11 @@ describe("mobile OTA publish scripts", () => {
       await mkdir(releaseDir, { recursive: true });
       const production = { file: "brai-v10.apk", apkVersion: 10, versionCode: 10, apkBuildKind: "stable" };
       await writeFile(path.join(releaseDir, production.file), "production-apk");
-      if (testCase.slot && testCase.artifact) {
+      if (testCase.slot) {
         await writeFile(path.join(releaseDir, testCase.slot.file), "slot-apk");
+      }
+      if (testCase.stableArtifact) {
+        await writeFile(path.join(releaseDir, "brai-c-v10.apk"), "stable-slot-apk");
       }
       await writeFile(
         path.join(releaseDir, "releases.json"),
@@ -367,6 +373,16 @@ describe("mobile OTA publish scripts", () => {
 
       expect(stderr).toContain(testCase.error);
       expect(fs.existsSync(path.join(root, "envs/preview-c/mobile-update/manifest.json"))).toBe(false);
+      if (testCase.stableArtifact) {
+        const releases = JSON.parse(await readFile(path.join(releaseDir, "releases.json"), "utf8"));
+        expect(releases.sections.c).toMatchObject({
+          file: "brai-c-v10.apk",
+          apkVersion: 10,
+          versionCode: 10,
+          apkBuildKind: "stable",
+          previewIteration: null,
+        });
+      }
     }
   });
 
