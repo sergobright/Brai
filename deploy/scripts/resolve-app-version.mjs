@@ -60,8 +60,8 @@ export async function resolveAppVersionAsync(options = {}) {
     nextOta = false,
     nextApk = false,
     targetBranch = "",
-    targetCommit = "",
-    ancestorCommits = "",
+    targetCommit = process.env.BRAI_PRODUCT_BASE_COMMIT || "",
+    ancestorCommits = process.env.BRAI_PRODUCT_ANCESTOR_COMMITS || "",
     prodWebVersionJson = "",
     mobileTarget = "",
     root = repoRoot,
@@ -77,9 +77,11 @@ export async function resolveAppVersionAsync(options = {}) {
     return resolveProductVersionPg(postgresUrl || prodPostgresUrl, { targetCommit, ancestorCommits });
   }
   if (explicit) return validOtaVersion(explicit);
+  const productVersion = await resolveProductVersionPg(prodPostgresUrl || postgresUrl, { targetCommit, ancestorCommits });
   const deployedVersions = [
     prodWebVersionJson && readVersionJson(prodWebVersionJson),
     mobileTarget && latestMobileTargetVersion(mobileTarget),
+    productVersion && `0.0.${productVersion}`,
   ];
   if (changedHint && !["true", "false"].includes(changedHint)) throw new Error(`invalid client artifact change hint: ${changedHint}`);
   const shouldIncrement = nextOta || (environment === "prod" && (changedHint === "true" || clientArtifactChanged({ root, baseCommit })));

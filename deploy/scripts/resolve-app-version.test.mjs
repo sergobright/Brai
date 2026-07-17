@@ -56,7 +56,7 @@ test("OTA version resolution fails without published artifact metadata", async (
   );
 });
 
-test("OTA version follows published artifacts instead of the independent build ledger", { skip: !process.env.BRAI_TEST_DATABASE_URL }, async () => {
+test("OTA version uses published artifacts with the accepted Product version as a downgrade floor", { skip: !process.env.BRAI_TEST_DATABASE_URL }, async () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "brai-version-"));
   const database = await createTestDatabase();
   const store = new BraiStore(database.url);
@@ -96,6 +96,14 @@ test("OTA version follows published artifacts instead of the independent build l
 
     assert.equal(await resolveAppVersionAsync({ environment: "prod", postgresUrl: database.url, prodWebVersionJson, mobileTarget }), "0.0.63");
     assert.equal(await resolveAppVersionAsync({ environment: "prod", prodWebVersionJson, mobileTarget, clientArtifactChanged: "true" }), "0.0.64");
+    assert.equal(await resolveAppVersionAsync({
+      environment: "preview-a",
+      prodPostgresUrl: database.url,
+      prodWebVersionJson,
+      mobileTarget,
+      nextOta: true,
+      targetCommit: acceptedProduct66,
+    }), "0.0.67");
     await assert.rejects(
       () => resolveAppVersionAsync({ environment: "prod", prodWebVersionJson, mobileTarget, clientArtifactChanged: "yes" }),
       /invalid client artifact change hint/,

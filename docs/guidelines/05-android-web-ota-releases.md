@@ -9,6 +9,7 @@ Brai keeps completed work, APK releases, and OTA/web artifacts as separate versi
 - Preview APK filenames are slot-specific `brai-a-vN-previewM.apk` through `brai-e-vN-previewM.apk`; accepted stable filenames remain `brai-vN.apk`, `brai-dev-vN.apk`, and `brai-a-vN.apk` through `brai-e-vN.apk`.
 - Preview APKs are transient separate applications from the stable Preview A-E baseline, so rejected preview APKs cannot update into accepted stable APKs.
 - OTA/web uses `X.Y.Z`; the old fourth public digit is not shown or compared.
+- Published OTA must be monotonic within each environment. The publisher rejects a candidate below any retained manifest/bundle or the accepted Product-version floor (`0.0.<Product N>`); a stale artifact root or explicit environment value must never lower a channel.
 - `build_versions` stores one completed-work row per finalized release work (`version_type_id='build'`) and independent published platform rows such as `version_type_id='apk'`.
 - APK reset affects only the APK line: after reset APK rows `version_type_id='apk', version IN (1, 2)` remain, APK rows above `2` are deleted, and existing `build` rows remain.
 - Owner finalization must create or reuse exactly one build row after every registered owner/support PR reaches a terminal state. Merged support PRs join that build; a support merge never creates its own build.

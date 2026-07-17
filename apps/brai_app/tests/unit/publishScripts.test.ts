@@ -520,6 +520,7 @@ describe("mobile OTA publish scripts", () => {
     expect(deployBranch).not.toContain("--db");
     expect(deployBranch).not.toContain("--prod-db");
     expect(deployBranch).toContain('--mobile-target "$MOBILE_TARGET"');
+    expect(deployBranch).toContain('export BRAI_OTA_VERSION_FLOOR="0.0.${BRAI_PRODUCT_VERSION}"');
     expect(deployBranch).toContain('BRAI_RECORD_PROD_BRANCH_DEPLOYMENT');
     const buildApk = await readFile(path.join(workspaceRoot, "deploy/scripts/build-android-env-apk.sh"), "utf8");
     expect(buildApk).toContain('MOBILE_TARGET="${BRAI_MOBILE_TARGET:-}"');
@@ -940,6 +941,37 @@ describe("mobile OTA publish scripts", () => {
 
     const nextInode = (await stat(archivePath)).ino;
     expect(nextInode).not.toBe(previousInode);
+  });
+
+  it("refuses to publish an OTA bundle below the existing or Product version floor", async () => {
+    const root = await fixtureRoot("brai-mobile-downgrade-");
+    await writeStaticExport(root, "ota-downgrade");
+    const target = path.join(root, "deploy/mobile-update");
+    await mkdir(path.join(target, "bundles", "0.0.151"), { recursive: true });
+    await writeFile(path.join(target, "manifest.json"), JSON.stringify({ otaVersion: "0.0.151" }));
+    await writeFile(path.join(target, "bundles", "0.0.151", "metadata.json"), JSON.stringify({ otaVersion: "0.0.151" }));
+
+    await expect(execFileAsync("bash", [path.join(workspaceRoot, "deploy/scripts/publish-mobile-bundle.sh")], {
+      env: {
+        ...process.env,
+        BRAI_ROOT: root,
+        BRAI_APP_VERSION: "0.0.1",
+        BRAI_OTA_VERSION_FLOOR: "0.0.152",
+        BRAI_TARGET_APK_VERSION: "2999",
+      },
+    })).rejects.toThrow(/Refusing OTA downgrade: 0\.0\.1 is older than published floor 0\.0\.152/);
+
+    await execFileAsync("bash", [path.join(workspaceRoot, "deploy/scripts/publish-mobile-bundle.sh")], {
+      env: {
+        ...process.env,
+        BRAI_ROOT: root,
+        BRAI_APP_VERSION: "0.0.153",
+        BRAI_OTA_VERSION_FLOOR: "0.0.152",
+        BRAI_TARGET_APK_VERSION: "2999",
+      },
+    });
+
+    expect(JSON.parse(await readFile(path.join(target, "manifest.json"), "utf8")).otaVersion).toBe("0.0.153");
   });
 
   it("keeps mobile OTA bundles outside browser web publication cleanup", async () => {
