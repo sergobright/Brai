@@ -51,7 +51,7 @@ class FakeDocker {
       allowedApprovalPolicies: ["never"],
       allowedPermissionProfiles: { "brai-chat": true },
       defaultPermissions: "brai-chat",
-      allowedWebSearchModes: ["cached"],
+      allowedWebSearchModes: ["cached", "disabled"],
       allowManagedHooksOnly: true,
       allowAppshots: false,
       allowRemoteControl: false,
@@ -240,6 +240,33 @@ test("preflight fails closed when managed Codex requirements are weakened", asyn
     (error) => error.code === "BRAI_RUNTIME_CONFIGURATION_INVALID",
   );
   assert.equal(manager.readiness().ready, false);
+});
+
+test("preflight accepts the safe disabled-to-cached deploy transition and rejects live search", async (t) => {
+  await t.test("old disabled config remains safe during provisional broker startup", async () => {
+    const fixture = await createFixture();
+    const docker = new FakeDocker();
+    docker.config.config.web_search = "disabled";
+    docker.requirements.requirements.allowedWebSearchModes = ["disabled"];
+    const manager = fixture.manager(docker);
+    await manager.preflight();
+    assert.equal(manager.readiness().ready, true);
+  });
+
+  for (const target of ["config", "requirements"]) {
+    await t.test(`live search is rejected in ${target}`, async () => {
+      const fixture = await createFixture();
+      const docker = new FakeDocker();
+      if (target === "config") docker.config.config.web_search = "live";
+      else docker.requirements.requirements.allowedWebSearchModes = ["cached", "live", "disabled"];
+      const manager = fixture.manager(docker);
+      await assert.rejects(
+        manager.preflight(),
+        (error) => error.code === "BRAI_RUNTIME_CONFIGURATION_INVALID",
+      );
+      assert.equal(manager.readiness().ready, false);
+    });
+  }
 });
 
 test("production and Dev fixed environment names pass configuration validation", async () => {

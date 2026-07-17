@@ -1355,7 +1355,7 @@ function requireRuntimeConfig(result) {
   const features = config?.features;
   if (config?.approval_policy !== "never"
     || config?.default_permissions !== "brai-chat"
-    || config?.web_search !== "cached"
+    || !["cached", "disabled"].includes(config?.web_search)
     || config?.sandbox_mode != null
     || !disabledFeatures(features)) {
     throw new BrokerError("BRAI_RUNTIME_CONFIGURATION_INVALID", "Codex runtime configuration is unsafe");
@@ -1372,13 +1372,22 @@ function requireRuntimeRequirements(result) {
   if (!sameValues(requirements?.allowedApprovalPolicies, ["never"])
     || !sameValues(enabledProfiles, ["brai-chat"])
     || requirements?.defaultPermissions !== "brai-chat"
-    || !sameValues(webSearchModes, ["cached"])
+    || !safeWebSearchModes(webSearchModes)
     || requirements?.allowManagedHooksOnly !== true
     || requirements?.allowAppshots !== false
     || requirements?.allowRemoteControl !== false
     || !disabledFeatures(requirements?.featureRequirements)) {
     throw new BrokerError("BRAI_RUNTIME_CONFIGURATION_INVALID", "Codex runtime requirements are unsafe");
   }
+}
+
+function safeWebSearchModes(modes) {
+  // App Server reports "disabled" alongside an enabled cached mode. The
+  // disabled-only shape is also required while a provisional broker starts
+  // against the previous safe config before Ansible installs the new one.
+  return sameValues(modes, ["disabled"])
+    || sameValues(modes, ["cached"])
+    || sameValues(modes, ["cached", "disabled"]);
 }
 
 function disabledFeatures(features) {
