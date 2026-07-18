@@ -33,6 +33,7 @@ type FakeViewProps = {
   messageView?: {
     assistantMessage?: ComponentType<FakeAssistantProps>;
     reasoningMessage?: ComponentType<Record<string, unknown>>;
+    userMessage?: ComponentType<FakeUserProps>;
   };
   onInputChange?: (value: string) => void;
   onRemoveAttachment?: (id: string) => void;
@@ -41,9 +42,18 @@ type FakeViewProps = {
 };
 type FakeAssistantProps = FakeViewProps & {
   message: FakeMessage;
+  copyButton?: { className?: string };
   id?: string;
   markdownRenderer?: ComponentType<{ content: string; className?: string }>;
   onRegenerate?: () => void;
+  regenerateButton?: { className?: string };
+  toolbar?: { className?: string };
+};
+type FakeUserProps = {
+  className?: string;
+  id?: string;
+  message: FakeMessage;
+  toolbar?: { className?: string };
 };
 type FakeChatProps = {
   attachments?: Record<string, unknown>;
@@ -63,6 +73,7 @@ const fake = vi.hoisted(() => ({
     messages: [] as FakeMessage[],
     addMessage: vi.fn<(message: FakeMessage) => void>(),
   },
+  assistantProps: [] as FakeAssistantProps[],
   attachments: [] as FakeAttachment[],
   chatProps: null as FakeChatProps | null,
   copilotKitProps: null as FakeCopilotKitProps | null,
@@ -76,6 +87,7 @@ const fake = vi.hoisted(() => ({
   runAgent: vi.fn(async () => undefined),
   stockSubmit: vi.fn(),
   viewProps: null as FakeViewProps | null,
+  userProps: [] as FakeUserProps[],
 }));
 
 vi.mock("@copilotkit/react-core/v2", async () => {
@@ -84,6 +96,7 @@ vi.mock("@copilotkit/react-core/v2", async () => {
   function FakeView(props: FakeViewProps) {
     fake.viewProps = props;
     const Assistant = props.messageView?.assistantMessage;
+    const User = props.messageView?.userMessage;
     const Input = typeof props.input === "function" ? props.input : null;
     const inputConfig = typeof props.input === "object" ? props.input : null;
     const AddMenuButton = inputConfig?.addMenuButton;
@@ -109,6 +122,9 @@ vi.mock("@copilotkit/react-core/v2", async () => {
         {props.attachments?.map((attachment) => <button key={attachment.id} type="button" onClick={() => props.onRemoveAttachment?.(attachment.id)}>Удалить {attachment.id}</button>)}
         {Assistant ? props.messages?.filter((message) => message.role === "assistant").map((message) => (
           <Assistant key={message.id} message={message} messages={props.messages} isRunning={props.isRunning} />
+        )) : null}
+        {User ? props.messages?.filter((message) => message.role === "user").map((message) => (
+          <User key={message.id} message={message} />
         )) : null}
         <button type="button" onClick={() => fake.finishRun?.()}>Завершить run</button>
       </div>
@@ -138,6 +154,7 @@ vi.mock("@copilotkit/react-core/v2", async () => {
   }
 
   function FakeAssistantMessage(props: FakeAssistantProps) {
+    fake.assistantProps.push(props);
     const MarkdownRenderer = props.markdownRenderer;
     fake.markdownRendererTypes.push(MarkdownRenderer);
     return (
@@ -152,7 +169,8 @@ vi.mock("@copilotkit/react-core/v2", async () => {
     return <span className={className}>{content}</span>;
   }
 
-  function FakeUserMessage(props: { id?: string; message: FakeMessage }) {
+  function FakeUserMessage(props: FakeUserProps) {
+    fake.userProps.push(props);
     return <div id={props.id}>{props.message.content}</div>;
   }
 
@@ -220,6 +238,7 @@ describe("BraiCopilotSurface", () => {
     fake.agent.messages = [];
     fake.agent.addMessage.mockReset();
     fake.agent.addMessage.mockImplementation((message) => fake.agent.messages.push(message));
+    fake.assistantProps = [];
     fake.attachments = [];
     fake.chatProps = null;
     fake.copilotKitProps = null;
@@ -233,6 +252,7 @@ describe("BraiCopilotSurface", () => {
     fake.runAgent.mockClear();
     fake.stockSubmit.mockReset();
     fake.viewProps = null;
+    fake.userProps = [];
   });
 
   it("names the composer controls and fields for assistive technology", () => {
@@ -320,6 +340,22 @@ describe("BraiCopilotSurface", () => {
     expect(firstRenderer).toBeTypeOf("function");
     expect(fake.markdownRendererTypes.at(-1)).toBe(firstRenderer);
     expect(screen.getByText("Стабильный ответ")).toBeInTheDocument();
+  });
+
+  it("removes the hidden user toolbar gap and keeps assistant actions tiny and muted", () => {
+    fake.agent.messages = [
+      { id: "user-1", role: "user", content: "Вопрос" },
+      { id: "assistant-1", role: "assistant", content: "Ответ" },
+    ];
+
+    renderSurface();
+
+    expect(fake.userProps[0]?.toolbar?.className).toContain("!hidden");
+    expect(fake.userProps[0]?.className).toContain("!pt-2");
+    expect(fake.assistantProps[0]?.toolbar?.className).toContain("!h-4");
+    expect(fake.assistantProps[0]?.copyButton?.className).toContain("opacity-20");
+    expect(fake.assistantProps[0]?.copyButton?.className).toContain("!size-4");
+    expect(fake.assistantProps[0]?.regenerateButton?.className).toContain("opacity-20");
   });
 
   it("steers an active run through the runtime before clearing its draft", async () => {

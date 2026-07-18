@@ -121,6 +121,22 @@ class OverlayGeometryTest {
         assertNull(layout)
     }
 
+    @Test
+    fun centersStatusBubbleOnItsButtonAndClampsItToTheScreen() {
+        assertEquals(
+            500,
+            centeredStatusBubbleY(
+                buttonY = 480,
+                buttonHeight = 80,
+                bubbleHeight = 40,
+                screenHeight = 1_000,
+                margin = 8
+            )
+        )
+        assertEquals(8, centeredStatusBubbleY(0, 40, 80, 1_000, 8))
+        assertEquals(912, centeredStatusBubbleY(980, 40, 80, 1_000, 8))
+    }
+
     private fun assertLayoutIsVisibleAndSeparated(layout: RadialMenuLayout, actionSize: Int, gap: Int) {
         val hubCenter = Pair(layout.hub.x + layout.hub.size / 2.0, layout.hub.y + layout.hub.size / 2.0)
         val centers = layout.actions.map { point -> Pair(point.x + actionSize / 2.0, point.y + actionSize / 2.0) }

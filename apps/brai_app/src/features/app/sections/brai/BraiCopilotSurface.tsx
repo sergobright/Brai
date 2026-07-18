@@ -575,9 +575,9 @@ function AnchoredAssistantMessageComponent(props: ComponentProps<typeof CopilotC
       {...props}
       id={`brai-message-${props.message.id}`}
       className={cx("text-foreground", props.className)}
-      toolbar={{ className: "mt-0.5 flex !h-5 items-center gap-0.5" }}
-      copyButton={{ className: "!size-5 !p-1 text-muted-foreground/30 hover:text-muted-foreground [&_svg]:!size-3" }}
-      regenerateButton={{ className: "!size-5 !p-1 text-muted-foreground/30 hover:text-muted-foreground [&_svg]:!size-3" }}
+      toolbar={{ className: "mt-0.5 flex !h-4 items-center gap-0.5" }}
+      copyButton={{ className: "relative !size-4 !p-0.5 text-muted-foreground opacity-20 after:absolute after:-inset-2 hover:opacity-50 [&_svg]:!size-2.5" }}
+      regenerateButton={{ className: "relative !size-4 !p-0.5 text-muted-foreground opacity-20 after:absolute after:-inset-2 hover:opacity-50 [&_svg]:!size-2.5" }}
       markdownRenderer={BraiAssistantMarkdownRenderer}
       onRegenerate={canRetry ? () => void retry() : undefined}
     />
@@ -633,7 +633,14 @@ function BraiReasoningHeader({
 }
 
 function AnchoredUserMessageComponent(props: ComponentProps<typeof CopilotChatUserMessage>) {
-  return <CopilotChatUserMessage {...props} id={`brai-message-${props.message.id}`} className={cx("!pt-3 text-foreground", props.className)} />;
+  return (
+    <CopilotChatUserMessage
+      {...props}
+      id={`brai-message-${props.message.id}`}
+      className={cx("!pt-2 text-foreground", props.className)}
+      toolbar={{ className: "!hidden" }}
+    />
+  );
 }
 
 const AnchoredUserMessage = Object.assign(AnchoredUserMessageComponent, CopilotChatUserMessage);

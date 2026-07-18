@@ -5,6 +5,7 @@ import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.os.Handler
 import android.view.Gravity
+import android.view.View
 import android.view.WindowManager
 import android.widget.TextView
 import world.brightos.brai.capabilities.BraiAccessibilityService
@@ -36,6 +37,7 @@ internal class OverlayStatusBubble(
         bubble.text = text
         bubble.setTextColor(textColor(notice.tone))
         bubble.background = roundedBackground(backgroundColor(notice.tone))
+        measure(bubble)
 
         if (params == null) {
             params = WindowManager.LayoutParams(
@@ -49,7 +51,7 @@ internal class OverlayStatusBubble(
             ).apply {
                 gravity = Gravity.TOP or Gravity.START
                 x = bubbleX(buttonParams)
-                y = bubbleY(buttonParams)
+                y = bubbleY(buttonParams, bubble.measuredHeight)
             }
             runCatching { windowManager.addView(bubble, params) }
         } else {
@@ -64,8 +66,9 @@ internal class OverlayStatusBubble(
         val bubble = view ?: return
         val lp = params ?: return
         buttonParams ?: return
+        measure(bubble)
         lp.x = bubbleX(buttonParams)
-        lp.y = bubbleY(buttonParams)
+        lp.y = bubbleY(buttonParams, bubble.measuredHeight)
         runCatching { windowManager.updateViewLayout(bubble, lp) }
     }
 
@@ -92,10 +95,23 @@ internal class OverlayStatusBubble(
         return preferred.coerceIn(margin, max(margin, screenWidth - width - margin))
     }
 
-    private fun bubbleY(buttonParams: WindowManager.LayoutParams): Int {
+    private fun bubbleY(buttonParams: WindowManager.LayoutParams, bubbleHeight: Int): Int {
         val screenHeight = service.resources.displayMetrics.heightPixels
         val margin = service.dp(8)
-        return min(max(margin, buttonParams.y + service.dp(2)), max(margin, screenHeight - service.dp(56)))
+        return centeredStatusBubbleY(
+            buttonY = buttonParams.y,
+            buttonHeight = buttonParams.height,
+            bubbleHeight = bubbleHeight,
+            screenHeight = screenHeight,
+            margin = margin
+        )
+    }
+
+    private fun measure(bubble: TextView) {
+        bubble.measure(
+            View.MeasureSpec.makeMeasureSpec(service.dp(BUBBLE_WIDTH_DP), View.MeasureSpec.EXACTLY),
+            View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
+        )
     }
 
     private fun roundedBackground(color: Int): GradientDrawable =
@@ -124,4 +140,15 @@ internal class OverlayStatusBubble(
         private const val COLOR_WHITE = 0xFFFFFFFF.toInt()
         private const val COLOR_UPDATE_TEXT = 0xFF1B1600.toInt()
     }
+}
+
+internal fun centeredStatusBubbleY(
+    buttonY: Int,
+    buttonHeight: Int,
+    bubbleHeight: Int,
+    screenHeight: Int,
+    margin: Int
+): Int {
+    val preferred = buttonY + (buttonHeight - bubbleHeight) / 2
+    return min(max(margin, preferred), max(margin, screenHeight - bubbleHeight - margin))
 }

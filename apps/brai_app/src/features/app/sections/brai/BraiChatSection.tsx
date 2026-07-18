@@ -3,16 +3,18 @@
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
-import { Archive, ArchiveRestore, BookOpen, Code2, Eye, Pencil, Plus, Search, X } from "lucide-react";
+import { Archive, BookOpen, Code2, Ellipsis, Eye, Pencil, Plus, Search, X } from "lucide-react";
 import { BraiChatApi } from "@/shared/api/braiChatApi";
 import { defaultApiBase } from "@/shared/config/runtime";
 import type { BraiChatEvent, BraiChatMessage, BraiChatModel, BraiChatSearchHit, BraiChatThread } from "@/shared/types/braiChat";
 import { getBraiLocalStorageItem, setBraiLocalStorageItem } from "@/shared/storage/localStorageKeys";
 import { useRuntimeBearerToken } from "@/shared/auth/runtimeBearerToken";
 import { Button } from "@/shared/ui/button";
+import { Checkbox } from "@/shared/ui/checkbox";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/shared/ui/dropdown-menu";
 import { Input } from "@/shared/ui/input";
-import { ScrollArea } from "@/shared/ui/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/shared/ui/select";
+import { SidebarContent, SidebarGroup, SidebarGroupContent, SidebarGroupLabel, SidebarMenu, SidebarMenuAction, SidebarMenuButton, SidebarMenuItem } from "@/shared/ui/sidebar";
 import { cx } from "../../appUtils";
 import { IconButton, MobileContextSheet } from "../../chrome/AppChrome";
 import type { ThemeMode } from "../../appModel";
@@ -543,29 +545,56 @@ function BraiThreadRail({ activeThreadId, archived, searchResults, status, threa
   const [editing, setEditing] = useState<string | null>(null);
 
   return (
-    <div className="grid h-full min-h-0 grid-rows-[auto_auto_minmax(0,1fr)]">
-      <div className="flex items-center gap-2 border-b border-border p-3">
-        <Button type="button" className="flex-1" size="sm" onClick={() => void onCreate()}><Plus aria-hidden="true" />Новый чат</Button>
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="flex items-center gap-1 border-b border-border p-2">
+        <Button type="button" className="h-8 flex-1 justify-start px-2" size="sm" variant="ghost" onClick={() => void onCreate()}><Plus aria-hidden="true" />Новый чат</Button>
         <Button type="button" size="icon-sm" variant={archived ? "secondary" : "ghost"} aria-label={archived ? "Показать активные чаты" : "Показать архив чатов"} onClick={() => onArchived(!archived)}><Archive aria-hidden="true" /></Button>
       </div>
-      <form className="grid gap-2 border-b border-border p-3" onSubmit={(event) => { event.preventDefault(); void onSearch(query, includeArchived); }}>
-        <div className="flex gap-1"><Input id="brai-chat-search" name="query" type="search" value={query} aria-label="Поиск по чатам" placeholder="Поиск" onChange={(event) => setQuery(event.target.value)} /><Button type="submit" size="icon-sm" variant="ghost" aria-label="Найти"><Search aria-hidden="true" /></Button></div>
-        <label className="flex items-center gap-2 text-xs text-muted-foreground"><input type="checkbox" checked={includeArchived} onChange={(event) => setIncludeArchived(event.target.checked)} />Искать в архиве</label>
+      <form className="grid gap-1.5 border-b border-border p-2" onSubmit={(event) => { event.preventDefault(); void onSearch(query, includeArchived); }}>
+        <div className="flex gap-1"><Input className="h-8" id="brai-chat-search" name="query" type="search" value={query} aria-label="Поиск по чатам" placeholder="Поиск" onChange={(event) => setQuery(event.target.value)} /><Button type="submit" size="icon-sm" variant="ghost" aria-label="Найти"><Search aria-hidden="true" /></Button></div>
+        <label className="flex h-7 items-center gap-2 rounded-md px-2 text-xs text-muted-foreground hover:bg-accent/60">
+          <Checkbox checked={includeArchived} onCheckedChange={(checked) => setIncludeArchived(checked === true)} />
+          Искать в архиве
+        </label>
       </form>
-      <section className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)]" aria-labelledby="brai-thread-list-label">
-        <h2 id="brai-thread-list-label" className="m-0 px-4 pb-1 pt-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Чаты</h2>
-        <ScrollArea className="min-h-0" contentInset="none"><div className="grid gap-1 p-2">
-          {searchResults.length > 0 ? searchResults.map((hit) => (
-            <button key={hit.id} type="button" className="rounded-md px-3 py-2 text-left hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => void onSearchHit(hit)}><span className="block truncate text-sm font-medium">{hit.thread_title}</span><SearchSnippet snippet={hit.snippet} /></button>
-          )) : threads.map((thread) => (
-            <div key={thread.id} className={cx("group grid grid-cols-[minmax(0,1fr)_auto] items-center rounded-md", activeThreadId === thread.id && "bg-accent") }>
-              {editing === thread.id ? <Input autoFocus defaultValue={thread.title} aria-label={`Название чата: ${thread.title}`} className="m-1" onBlur={(event) => { void onRename(thread.id, event.target.value); setEditing(null); }} onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); if (event.key === "Escape") setEditing(null); }} /> : <button type="button" className="min-w-0 truncate px-3 py-2 text-left text-sm" onClick={() => onSelect(thread.id)}>{thread.title}</button>}
-              <div className="flex pr-1"><Button type="button" size="icon-xs" variant="ghost" aria-label={`Переименовать: ${thread.title}`} onClick={() => setEditing(thread.id)}><Pencil aria-hidden="true" /></Button><Button type="button" size="icon-xs" variant="ghost" aria-label={`${archived ? "Восстановить" : "Архивировать"}: ${thread.title}`} onClick={() => void onArchive(thread)}>{archived ? <ArchiveRestore aria-hidden="true" /> : <Archive aria-hidden="true" />}</Button></div>
-            </div>
-          ))}
-          {searchResults.length === 0 && threads.length === 0 ? <p className="px-3 py-4 text-sm text-muted-foreground">{status}</p> : null}
-        </div></ScrollArea>
-      </section>
+      <SidebarContent>
+        <SidebarGroup className="p-2">
+          <SidebarGroupLabel id="brai-thread-list-label">Чаты</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu aria-labelledby="brai-thread-list-label">
+              {searchResults.length > 0 ? searchResults.map((hit) => (
+                <SidebarMenuItem key={hit.id}>
+                  <SidebarMenuButton className="h-auto min-h-8 items-start py-1.5" onClick={() => void onSearchHit(hit)}>
+                    <span className="min-w-0"><span className="block truncate font-medium">{hit.thread_title}</span><SearchSnippet snippet={hit.snippet} /></span>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              )) : threads.map((thread) => (
+                <SidebarMenuItem key={thread.id}>
+                  {editing === thread.id ? (
+                    <Input autoFocus defaultValue={thread.title} aria-label={`Название чата: ${thread.title}`} className="h-8 pr-8" onBlur={(event) => { void onRename(thread.id, event.target.value); setEditing(null); }} onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); if (event.key === "Escape") setEditing(null); }} />
+                  ) : (
+                    <SidebarMenuButton isActive={activeThreadId === thread.id} onClick={() => onSelect(thread.id)}>
+                      <span>{thread.title}</span>
+                    </SidebarMenuButton>
+                  )}
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <SidebarMenuAction aria-label={`Действия чата: ${thread.title}`} showOnHover>
+                        <Ellipsis aria-hidden="true" />
+                      </SidebarMenuAction>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent side="right" align="start">
+                      <DropdownMenuItem onSelect={() => setEditing(thread.id)}><Pencil aria-hidden="true" />Переименовать</DropdownMenuItem>
+                      <DropdownMenuItem onSelect={() => void onArchive(thread)}><Archive aria-hidden="true" />{archived ? "Восстановить" : "Архивировать"}</DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </SidebarMenuItem>
+              ))}
+            </SidebarMenu>
+            {searchResults.length === 0 && threads.length === 0 ? <p className="px-2 py-3 text-sm text-muted-foreground">{status}</p> : null}
+          </SidebarGroupContent>
+        </SidebarGroup>
+      </SidebarContent>
     </div>
   );
 }

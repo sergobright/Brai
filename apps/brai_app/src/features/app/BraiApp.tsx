@@ -22,6 +22,7 @@ import { IconButton, ScreenHeader, ThemeButton } from "./chrome/AppChrome";
 import { PageWorkspace } from "./chrome/PageWorkspace";
 import { useActionsWorkspace } from "./hooks/useActionsWorkspace";
 import { useBraiAppState } from "./hooks/useBraiAppState";
+import { useSoftwareKeyboardOpen } from "./hooks/useSoftwareKeyboardOpen";
 import { DesktopRail, MainDock, MobileContextMenuSheet, MobileDockOverflowButton, MobileDockOverflowSheet, MobileMenuButton } from "./navigation/AppNavigation";
 import { MobileProfileDrawer, requestMobileProfileDrawerClose } from "./navigation/MobileProfileDrawer";
 import { ContextualRail, PageRailPlaceholder, useContextualRail } from "./navigation/ContextualRail";
@@ -103,6 +104,7 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
   const [actionsMobileCreateDraft, setActionsMobileCreateDraft] = useStoredMobileCreateDraft(ACTIONS_MOBILE_CREATE_DRAFT_STORAGE_KEY);
   const [inboxMobileCreateDraft, setInboxMobileCreateDraft] = useStoredMobileCreateDraft(INBOX_MOBILE_CREATE_DRAFT_STORAGE_KEY);
   const mobileViewport = useMountedMobileNavigationViewport();
+  const softwareKeyboardOpen = useSoftwareKeyboardOpen(mobileViewport);
   const engineMobileHistoryOpen = mobileViewport && visibleSection === "engine" && app.engineHistoryOpen;
   const [drawsFullScreen, setDrawsFullScreen] = useState(false);
   const { selectFilter: selectActionsWorkspaceFilter, workspace: actionsWorkspace } = useActionsWorkspace(app.actions, app.inbox, app.relations);
@@ -620,12 +622,14 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
       inert={domainMutationsBlocked}
       aria-busy={domainMutationsBlocked}
       className={cx(
-        "app-shell h-dvh min-h-0 overflow-hidden [--sticky-top-offset:0px] max-[860px]:grid max-[860px]:grid-rows-[minmax(0,1fr)_auto] max-[860px]:[--mobile-top-padding:env(safe-area-inset-top)]",
+        "app-shell h-dvh min-h-0 overflow-hidden [--sticky-top-offset:0px] max-[860px]:grid max-[860px]:grid-rows-[minmax(0,1fr)_auto] max-[860px]:transition-[grid-template-rows] max-[860px]:duration-200 max-[860px]:ease-out max-[860px]:[--mobile-top-padding:env(safe-area-inset-top)]",
         app.actionOverlayOpen && "has-mobile-action-overlay max-[860px]:pb-0",
         app.mobileMenuOpen && "has-mobile-menu",
         drawsFullscreenActive && "max-[860px]:grid-rows-[minmax(0,1fr)]",
+        softwareKeyboardOpen && "max-[860px]:grid-rows-[minmax(0,1fr)_0px]",
       )}
       data-app-shell
+      data-software-keyboard={softwareKeyboardOpen ? "open" : "closed"}
     >
       {!drawsFullscreenActive && !mobileViewport ? (
         <DesktopRail
@@ -706,6 +710,7 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
           expanded={mobileDockLayer === "right" || mobileDockLayer === "context"}
           section={visibleSection}
           hidden={app.actionOverlayOpen || app.mobilePanelOpen}
+          keyboardOpen={softwareKeyboardOpen}
           mobileViewport={mobileViewport}
           onSection={app.selectSection}
           swipeHandlers={app.swipeNavigation.handlers}
@@ -718,17 +723,20 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
             side="left"
             hasUpdate={engineView.hasUpdate}
             hidden={app.mobileMenuOpen || app.actionOverlayOpen}
+            keyboardOpen={softwareKeyboardOpen}
             onClick={() => setMobileDockLayer("left")}
           />
           <MobileDockOverflowButton
             side="right"
             hidden={app.mobileMenuOpen || app.actionOverlayOpen}
+            keyboardOpen={softwareKeyboardOpen}
             onClick={() => setMobileDockLayer("right")}
           />
         </>
       ) : null}
       {app.mobileMenuOpen && !drawsFullscreenActive ? (
         <MobileProfileDrawer
+          contentOwnsScroll={visibleSection === "brai"}
           label={visibleSection === "brai" ? "Чаты Брая" : undefined}
           onClose={() => app.setMobileMenuOpen(false)}
         >

@@ -92,6 +92,9 @@ describe("Brai chat client", () => {
     expect(screen.queryByRole("complementary", { name: /Панель/ })).not.toBeInTheDocument();
     expect(screen.getByRole("searchbox", { name: "Поиск по чатам" })).toHaveAttribute("id", "brai-chat-search");
     expect(screen.getByRole("searchbox", { name: "Поиск по чатам" })).toHaveAttribute("name", "query");
+    expect(screen.getByRole("list", { name: "Чаты" })).toHaveAttribute("data-sidebar", "menu");
+    expect(screen.getByRole("button", { name: "Действия чата: Проверка чата" })).toHaveAttribute("data-slot", "dropdown-menu-trigger");
+    expect(screen.getByRole("button", { name: "Действия чата: Проверка чата" }).closest("li")).toHaveAttribute("data-sidebar", "menu-item");
     expect(screen.queryByRole("tab")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Preview" })).toHaveAttribute("aria-pressed", "false");
     expect(screen.getByRole("button", { name: "Code" })).toHaveAttribute("aria-pressed", "false");
@@ -396,7 +399,8 @@ describe("Brai chat client", () => {
 
     chatFixture.threads = [{ ...thread, id: "thread-2", title: "Следующий чат" }];
     chatFixture.messages = [];
-    fireEvent.click(screen.getByRole("button", { name: "Архивировать: Проверка чата" }));
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Действия чата: Проверка чата" }), { button: 0, ctrlKey: false });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Архивировать" }));
 
     await waitFor(() => expect(screen.getByTestId("copilot-chat")).toHaveAttribute("data-thread-id", "thread-2"));
     expect(within(workspace).queryByRole("img", { name: "screen.png" })).not.toBeInTheDocument();
@@ -453,6 +457,14 @@ describe("Brai chat client", () => {
     expect(icon).toHaveAttribute("viewBox", "0 0 24 24");
     expect(icon).toHaveAttribute("stroke", "currentColor");
     expect(icon?.querySelector("image")).not.toBeInTheDocument();
+  });
+
+  it("animates the mobile Dock out of the global keyboard viewport", () => {
+    const { container } = render(<MainDock section="brai" hidden={false} keyboardOpen mobileViewport timer={emptyTimerState()} onSection={() => undefined} />);
+    const dock = container.querySelector(".main-dock");
+
+    expect(dock).toHaveClass("max-[860px]:translate-y-2", "max-[860px]:opacity-0");
+    expect(dock).toHaveAttribute("aria-hidden", "true");
   });
 
   it("keeps the global menu in MainDock and the desktop rail service-only", () => {
@@ -544,7 +556,7 @@ function ChatHarness() {
   const [contextPanel, setContextPanel] = useState<BraiContextPanel>("none");
   const registerRail = useCallback((content: ReactNode | null) => setRail(content), []);
   return (
-    <>
+    <SidebarProvider open={false}>
       <div aria-label="Действия заголовка">
         <BraiContextPanelActions panel={contextPanel} onPanelChange={setContextPanel} />
       </div>
@@ -556,6 +568,6 @@ function ChatHarness() {
         onContextPanelChange={setContextPanel}
         onRailContent={registerRail}
       />
-    </>
+    </SidebarProvider>
   );
 }
