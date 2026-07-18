@@ -274,13 +274,13 @@ describe("BraiCopilotSurface", () => {
     expect(fake.inputProps?.bottomAnchored).toBe(true);
     expect(fake.inputProps?.keyboardHeight).toBeUndefined();
     expect(fake.inputProps?.showDisclaimer).toBe(false);
-    expect(fake.viewProps?.autoScroll).toBe("pin-to-bottom");
+    expect(fake.viewProps?.autoScroll).toBe("none");
     expect(screen.getByTestId("copilot-chat-input")).toHaveClass("min-h-0", "bg-background");
     expect(screen.getByRole("textbox", { name: "Сообщение Браю" })).toHaveClass("field-sizing-content", "max-h-[50dvh]", "min-h-6");
     expect(screen.getByRole("textbox", { name: "Сообщение Браю" })).toHaveAttribute("rows", "1");
     expect(fake.viewProps?.scrollView).toBeTypeOf("function");
-    expect(screen.getByTestId("copilot-default-scroll-view")).toHaveTextContent("История");
-    expect(screen.getByRole("button", { name: "Прокрутить к последнему сообщению" })).toBeInTheDocument();
+    expect(screen.getByTestId("brai-chat-scroll")).toHaveTextContent("История");
+    expect(screen.queryByTestId("copilot-default-scroll-view")).not.toBeInTheDocument();
   });
 
   it("does not rewrite the textarea height for every typed character", () => {
@@ -290,6 +290,30 @@ describe("BraiCopilotSurface", () => {
     fireEvent.change(textarea, { target: { value: "тест" } });
 
     expect(textarea.style.height).toBe("");
+  });
+
+  it("does not scroll on draft renders and follows actual message growth without animation", () => {
+    fake.agent.messages = [{ id: "assistant-1", role: "assistant", content: "Ответ" }];
+    renderSurface();
+
+    const textarea = screen.getByRole<HTMLTextAreaElement>("textbox", { name: "Сообщение Браю" });
+    const scroll = screen.getByTestId("brai-chat-scroll");
+    let scrollHeight = 1_000;
+    Object.defineProperties(scroll, {
+      clientHeight: { configurable: true, get: () => 500 },
+      scrollHeight: { configurable: true, get: () => scrollHeight },
+      scrollTop: { configurable: true, value: 500, writable: true },
+    });
+    fireEvent.scroll(scroll);
+
+    fireEvent.change(textarea, { target: { value: "а" } });
+    expect(scroll.scrollTop).toBe(500);
+
+    fake.agent.messages = [{ id: "assistant-1", role: "assistant", content: "Ответ продолжился" }];
+    scrollHeight = 1_100;
+    fireEvent.change(textarea, { target: { value: "аб" } });
+
+    expect(scroll.scrollTop).toBe(1_100);
   });
 
   it("steers an active run through the runtime before clearing its draft", async () => {

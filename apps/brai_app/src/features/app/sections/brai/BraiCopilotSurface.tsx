@@ -1,7 +1,7 @@
 "use client";
 
 import type { ComponentProps, CSSProperties } from "react";
-import { createContext, forwardRef, memo, useCallback, useContext, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
+import { createContext, forwardRef, memo, useCallback, useContext, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ArrowUp, ChevronDown, ChevronRight, ImageIcon, Plus, Search } from "lucide-react";
 import {
   CopilotChat,
@@ -99,6 +99,7 @@ const BRAI_COPILOT_THEME: CopilotThemeStyle = {
 
 type BraiCopilotContextValue = {
   autoFocusComposer: boolean;
+  threadId: string;
   onError: (message: string, retryable?: boolean) => void;
   onDeleteAttachment: (id: string) => Promise<void>;
   onComposerReady: () => void;
@@ -112,6 +113,20 @@ type BraiCopilotContextValue = {
 };
 
 const BraiCopilotContext = createContext<BraiCopilotContextValue | null>(null);
+
+type BraiScrollSignal = {
+  threadId: string;
+  messageCount: number;
+  lastMessageRole: string | null;
+  revision: string;
+};
+
+const BraiScrollSignalContext = createContext<BraiScrollSignal>({
+  threadId: "",
+  messageCount: 0,
+  lastMessageRole: null,
+  revision: "",
+});
 
 export const BraiCopilotSurface = memo(function BraiCopilotSurface({
   autoFocusComposer = false,
@@ -170,8 +185,8 @@ export const BraiCopilotSurface = memo(function BraiCopilotSurface({
   }, []);
 
   const context = useMemo(() => ({
-    autoFocusComposer, draft, loadAttachment, onComposerReady, onDeleteAttachment, onError, onRetryChange, onRunFinished, onSteer, releaseReservations, setDraft,
-  }), [autoFocusComposer, draft, loadAttachment, onComposerReady, onDeleteAttachment, onError, onRetryChange, onRunFinished, onSteer, releaseReservations, setDraft]);
+    autoFocusComposer, draft, loadAttachment, onComposerReady, onDeleteAttachment, onError, onRetryChange, onRunFinished, onSteer, releaseReservations, setDraft, threadId,
+  }), [autoFocusComposer, draft, loadAttachment, onComposerReady, onDeleteAttachment, onError, onRetryChange, onRunFinished, onSteer, releaseReservations, setDraft, threadId]);
   // CopilotKit treats a changed headers object as a changed runtime
   // configuration. The VisualViewport emits frequent updates while Android's
   // keyboard is open, so an unstable object here repeatedly reconnects the
@@ -312,6 +327,12 @@ function BraiChatViewComponent(props: ComponentProps<typeof CopilotChat.View>) {
 
   const lastMessage = props.messages?.at(-1);
   const canRetry = !running && (lastMessage?.role === "user" || lastMessage?.role === "assistant");
+  const scrollSignal = useMemo<BraiScrollSignal>(() => ({
+    threadId: context.threadId,
+    messageCount: props.messages?.length ?? 0,
+    lastMessageRole: lastMessage?.role ?? null,
+    revision: messageRevision(lastMessage),
+  }), [context.threadId, lastMessage, props.messages?.length]);
 
   useEffect(() => {
     onRetryChange(canRetry ? retryLast : null);
@@ -375,17 +396,19 @@ function BraiChatViewComponent(props: ComponentProps<typeof CopilotChat.View>) {
   }
 
   return (
-    <CopilotChat.View
-      {...props}
-      autoScroll="pin-to-bottom"
-      input={BraiCompactChatInput}
-      scrollView={BraiChatScrollView}
-      welcomeScreen={false}
-      inputValue={context.draft}
-      onInputChange={changeDraft}
-      onSubmitMessage={submit}
-      onRemoveAttachment={removeAttachment}
-    />
+    <BraiScrollSignalContext.Provider value={scrollSignal}>
+      <CopilotChat.View
+        {...props}
+        autoScroll="none"
+        input={BraiCompactChatInput}
+        scrollView={BraiChatScrollView}
+        welcomeScreen={false}
+        inputValue={context.draft}
+        onInputChange={changeDraft}
+        onSubmitMessage={submit}
+        onRemoveAttachment={removeAttachment}
+      />
+    </BraiScrollSignalContext.Provider>
   );
 }
 
@@ -527,18 +550,133 @@ function BraiChatScrollToBottomButton({
 
 function BraiChatScrollView({
   className,
+  autoScroll: _autoScroll,
+  feather: _feather,
+  inputContainerHeight = 0,
+  isResizing: _isResizing,
+  onScroll,
+  scrollToBottomButton: _scrollToBottomButton,
+  children,
   ...props
 }: ComponentProps<typeof CopilotChat.View.ScrollView>) {
+  void _autoScroll;
+  void _feather;
+  void _isResizing;
+  void _scrollToBottomButton;
+  const signal = useContext(BraiScrollSignalContext);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const contentRef = useRef<HTMLDivElement | null>(null);
+  const previousSignal = useRef<BraiScrollSignal | null>(null);
+  const previousScrollHeight = useRef(0);
+  const pinnedToBottom = useRef(true);
+  const [showScrollButton, setShowScrollButton] = useState(false);
+
+  const updatePinnedState = useCallback((element: HTMLDivElement) => {
+    const distanceFromBottom = element.scrollHeight - element.scrollTop - element.clientHeight;
+    const pinned = distanceFromBottom <= 24;
+    pinnedToBottom.current = pinned;
+    setShowScrollButton(!pinned);
+  }, []);
+
+  const scrollToBottom = useCallback(() => {
+    const element = scrollRef.current;
+    if (!element) return;
+    element.scrollTop = element.scrollHeight;
+    pinnedToBottom.current = true;
+    setShowScrollButton(false);
+  }, []);
+
+  useLayoutEffect(() => {
+    const element = scrollRef.current;
+    if (!element) return;
+
+    const previous = previousSignal.current;
+    const initialReplay = previous === null || previous.threadId !== signal.threadId;
+    const submittedUserMessage = Boolean(
+      previous
+      && signal.messageCount > previous.messageCount
+      && signal.lastMessageRole === "user"
+    );
+    const contentGrew = element.scrollHeight > previousScrollHeight.current;
+
+    if (initialReplay || submittedUserMessage || (pinnedToBottom.current && contentGrew)) {
+      // Deliberately avoid smooth scrolling. CopilotKit's StickToBottom starts a
+      // new animation for every controlled draft render and streaming token.
+      // A direct assignment keeps mandatory chat autoscroll without per-token
+      // animation queues or visible intermediate positions.
+      element.scrollTop = element.scrollHeight;
+      pinnedToBottom.current = true;
+      setShowScrollButton(false);
+    }
+
+    previousSignal.current = signal;
+    previousScrollHeight.current = element.scrollHeight;
+  }, [inputContainerHeight, signal]);
+
+  useEffect(() => {
+    const element = scrollRef.current;
+    const content = contentRef.current;
+    if (!element || !content || typeof ResizeObserver === "undefined") return;
+    let previousClientHeight = element.clientHeight;
+    const observer = new ResizeObserver(() => {
+      const nextClientHeight = element.clientHeight;
+      const nextScrollHeight = element.scrollHeight;
+      if (
+        pinnedToBottom.current
+        && (nextClientHeight !== previousClientHeight || nextScrollHeight > previousScrollHeight.current)
+      ) {
+        element.scrollTop = element.scrollHeight;
+      }
+      previousClientHeight = nextClientHeight;
+      previousScrollHeight.current = nextScrollHeight;
+      updatePinnedState(element);
+    });
+    observer.observe(element);
+    observer.observe(content);
+    return () => observer.disconnect();
+  }, [updatePinnedState]);
+
   return (
-    <CopilotChat.View.ScrollView
+    <div
       {...props}
+      ref={scrollRef}
+      data-testid="brai-chat-scroll"
       className={cx(
-        "!bg-background text-foreground [scrollbar-color:var(--border)_transparent] [scrollbar-width:thin] [&::-webkit-scrollbar]:size-2 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-border [&::-webkit-scrollbar-track]:bg-transparent",
+        "relative flex h-full max-h-full min-h-0 flex-col overflow-x-hidden overflow-y-auto !bg-background text-foreground [scrollbar-color:var(--border)_transparent] [scrollbar-width:thin] [&::-webkit-scrollbar]:size-2 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-border [&::-webkit-scrollbar-track]:bg-transparent",
         className,
       )}
-      scrollToBottomButton={BraiChatScrollToBottomButton}
-    />
+      onScroll={(event) => {
+        updatePinnedState(event.currentTarget);
+        onScroll?.(event);
+      }}
+    >
+      <div ref={contentRef} className="px-4 @3xl:px-0 [div[data-popup-chat]_&]:px-6 [div[data-sidebar-chat]_&]:px-8">
+        {children}
+      </div>
+      {showScrollButton ? (
+        <div
+          className="pointer-events-none sticky inset-x-0 z-30 flex h-0 justify-center"
+          style={{ bottom: `${inputContainerHeight + 12}px` }}
+        >
+          <BraiChatScrollToBottomButton onClick={scrollToBottom} />
+        </div>
+      ) : null}
+    </div>
   );
+}
+
+function messageRevision(message: unknown): string {
+  if (!message || typeof message !== "object") return "";
+  const record = message as Record<string, unknown>;
+  const content = record.content;
+  const serializedContent = typeof content === "string" ? content : JSON.stringify(content ?? null);
+  return [
+    typeof record.id === "string" ? record.id : "",
+    typeof record.role === "string" ? record.role : "",
+    serializedContent.length,
+    serializedContent.slice(-64),
+    typeof record.status === "string" ? record.status : "",
+  ].join(":");
 }
 
 function AnchoredAssistantMessageComponent(props: ComponentProps<typeof CopilotChatAssistantMessage>) {
