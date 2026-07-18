@@ -96,6 +96,18 @@ export function BraiChatSection({
     setRetryableError(false);
   }, []);
 
+  // The app shell updates its timer every second. Keep these transport
+  // callbacks stable so that this unrelated state never reconfigures or
+  // reconnects the long-lived CopilotKit chat surface.
+  const deleteUnlinkedAttachment = useCallback((id: string) => api.deleteUnlinkedAttachment(id), [api]);
+  const uploadAttachment = useCallback(async (file: File) => {
+    const threadId = activeThreadIdRef.current;
+    if (!threadId) throw new Error("brai_chat_thread_missing");
+    const attachment = await api.uploadAttachment(threadId, file);
+    clearChatError();
+    return { id: attachment.id, mediaType: attachment.media_type, url: api.attachmentUrl(attachment.id) };
+  }, [api, clearChatError]);
+
   const handleRetryChange = useCallback((retry: RetryLast | null) => {
     retryLastRef.current = retry;
     setRetryAvailable(Boolean(retry));
@@ -453,13 +465,9 @@ export function BraiChatSection({
               onRetryChange={handleRetryChange}
               onRunFinished={refreshAfterRun}
               onSteer={steer}
-              onDeleteAttachment={(id) => api.deleteUnlinkedAttachment(id)}
+              onDeleteAttachment={deleteUnlinkedAttachment}
               onComposerReady={handleComposerReady}
-              onUpload={async (file) => {
-                const attachment = await api.uploadAttachment(activeThread.id, file);
-                clearChatError();
-                return { id: attachment.id, mediaType: attachment.media_type, url: api.attachmentUrl(attachment.id) };
-              }}
+              onUpload={uploadAttachment}
               loadAttachment={loadAttachment}
               draftStorageKey={`brai_chat_draft:${encodeURIComponent(userId ?? "anonymous")}:${encodeURIComponent(defaultApiBase() || "same-origin")}:${activeThread.id}`}
             />

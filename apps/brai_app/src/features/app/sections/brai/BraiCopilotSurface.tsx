@@ -1,7 +1,7 @@
 "use client";
 
 import type { ComponentProps, CSSProperties } from "react";
-import { createContext, forwardRef, useCallback, useContext, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createContext, forwardRef, memo, useCallback, useContext, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ArrowUp, ChevronDown, ChevronRight, ImageIcon, Plus, Search } from "lucide-react";
 import {
   CopilotChat,
@@ -112,7 +112,7 @@ type BraiCopilotContextValue = {
 
 const BraiCopilotContext = createContext<BraiCopilotContextValue | null>(null);
 
-export function BraiCopilotSurface({
+export const BraiCopilotSurface = memo(function BraiCopilotSurface({
   autoFocusComposer = false,
   headers,
   draftStorageKey,
@@ -255,7 +255,7 @@ export function BraiCopilotSurface({
       </BraiCopilotContext.Provider>
     </CopilotKit>
   );
-}
+});
 
 function BraiDefaultToolRenderer() {
   const context = useRequiredContext();
