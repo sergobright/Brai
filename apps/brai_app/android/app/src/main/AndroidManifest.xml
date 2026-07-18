@@ -14,7 +14,6 @@
             android:name=".MainActivity"
             android:label="${braiAppLabel}"
             android:theme="@style/AppTheme.NoActionBarLaunch"
-            android:windowSoftInputMode="adjustResize"
             android:launchMode="singleTask"
             android:exported="true">
 
