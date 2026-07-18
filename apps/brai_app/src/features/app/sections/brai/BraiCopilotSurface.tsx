@@ -1,7 +1,7 @@
 "use client";
 
 import type { ComponentProps, CSSProperties } from "react";
-import { createContext, forwardRef, memo, useCallback, useContext, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createContext, forwardRef, memo, useCallback, useContext, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { ArrowUp, ChevronDown, ChevronRight, ImageIcon, Plus, Search } from "lucide-react";
 import {
   CopilotChat,
@@ -16,6 +16,7 @@ import {
   useDefaultRenderTool,
 } from "@copilotkit/react-core/v2";
 import { Button } from "@/shared/ui/button";
+import { cn } from "@/shared/ui/cn";
 import { getBraiLocalStorageItem, setBraiLocalStorageItem } from "@/shared/storage/localStorageKeys";
 import { Textarea } from "@/shared/ui/textarea";
 import { cx } from "../../appUtils";
@@ -376,12 +377,7 @@ function BraiChatViewComponent(props: ComponentProps<typeof CopilotChat.View>) {
   return (
     <CopilotChat.View
       {...props}
-      // CopilotKit's pin-to-send mode still observes every streamed content
-      // resize and adjusts a spacer. In Android WebView that can combine with
-      // keyboard viewport changes into a visible scroll loop, so BRAI owns
-      // navigation to the latest message exclusively through its explicit
-      // scroll button.
-      autoScroll="none"
+      autoScroll="pin-to-bottom"
       input={BraiCompactChatInput}
       scrollView={BraiChatScrollView}
       welcomeScreen={false}
@@ -401,7 +397,6 @@ function BraiCompactChatInputComponent(props: ComponentProps<typeof CopilotChatI
       {...props}
       positioning="static"
       bottomAnchored
-      keyboardHeight={0}
       showDisclaimer={false}
       className="!min-h-0 !bg-transparent !p-0"
       textArea={BraiChatTextArea}
@@ -430,26 +425,12 @@ function BraiCompactChatInputComponent(props: ComponentProps<typeof CopilotChatI
 const BraiCompactChatInput = Object.assign(BraiCompactChatInputComponent, CopilotChatInput);
 
 const BraiChatTextArea = forwardRef<HTMLTextAreaElement, ComponentProps<"textarea">>(function BraiChatTextArea(
-  { className, onChange, onKeyDown, value, ...props },
+  { className, onKeyDown, ...props },
   ref,
 ) {
   const context = useRequiredContext();
   const localRef = useRef<HTMLTextAreaElement | null>(null);
   useImperativeHandle(ref, () => localRef.current as HTMLTextAreaElement, []);
-
-  const resize = useCallback(() => {
-    const element = localRef.current;
-    if (!element) return;
-    element.style.height = "auto";
-    const maximum = Math.max(24, Math.floor(window.innerHeight / 2));
-    const next = Math.max(24, Math.min(element.scrollHeight, maximum));
-    element.style.height = `${next}px`;
-    element.style.overflowY = element.scrollHeight > maximum ? "auto" : "hidden";
-  }, []);
-
-  useLayoutEffect(() => {
-    resize();
-  }, [resize, value]);
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
@@ -470,11 +451,6 @@ const BraiChatTextArea = forwardRef<HTMLTextAreaElement, ComponentProps<"textare
       aria-label="Сообщение Браю"
       data-testid="copilot-chat-textarea"
       placeholder={props.placeholder ?? "Напишите Браю…"}
-      value={value}
-      onChange={(event) => {
-        onChange?.(event);
-        requestAnimationFrame(resize);
-      }}
       onKeyDown={(event) => {
         if (event.key === "Enter") {
           // Mobile keyboards must keep the textarea's native newline behavior.
@@ -483,7 +459,7 @@ const BraiChatTextArea = forwardRef<HTMLTextAreaElement, ComponentProps<"textare
         }
         onKeyDown?.(event);
       }}
-      className={cx("box-border min-h-6 max-h-[50dvh] w-full resize-none bg-transparent !py-1 !pr-1 text-base leading-6 text-foreground outline-none placeholder:text-muted-foreground", className)}
+      className={cn("field-sizing-content box-border min-h-6 max-h-[50dvh] w-full resize-none overflow-y-auto bg-transparent !py-1 !pr-1 text-base leading-6 text-foreground outline-none placeholder:text-muted-foreground", className)}
     />
   );
 });
@@ -585,11 +561,15 @@ function AnchoredAssistantMessageComponent(props: ComponentProps<typeof CopilotC
       {...props}
       id={`brai-message-${props.message.id}`}
       className={cx("text-foreground", props.className)}
-      toolbar={{ className: "mt-1 flex !h-5 items-center gap-0.5" }}
-      copyButton={{ className: "!size-5 !p-1 text-muted-foreground/45 hover:text-muted-foreground [&_svg]:!size-3" }}
-      regenerateButton={{ className: "!size-5 !p-1 text-muted-foreground/45 hover:text-muted-foreground [&_svg]:!size-3" }}
-      markdownRenderer={({ content, ...rendererProps }) => (
-        <CopilotChatAssistantMessage.MarkdownRenderer {...rendererProps} content={normalizeLatexDisplayMath(content)} />
+      toolbar={{ className: "mt-0.5 flex !h-5 items-center gap-0.5" }}
+      copyButton={{ className: "!size-5 !p-1 text-muted-foreground/30 hover:text-muted-foreground [&_svg]:!size-3" }}
+      regenerateButton={{ className: "!size-5 !p-1 text-muted-foreground/30 hover:text-muted-foreground [&_svg]:!size-3" }}
+      markdownRenderer={({ content, className, ...rendererProps }) => (
+        <CopilotChatAssistantMessage.MarkdownRenderer
+          {...rendererProps}
+          className={cn(className, "!space-y-1.5 [&_p]:!my-0")}
+          content={normalizeLatexDisplayMath(content)}
+        />
       )}
       onRegenerate={canRetry ? () => void retry() : undefined}
     />
@@ -645,7 +625,7 @@ function BraiReasoningHeader({
 }
 
 function AnchoredUserMessageComponent(props: ComponentProps<typeof CopilotChatUserMessage>) {
-  return <CopilotChatUserMessage {...props} id={`brai-message-${props.message.id}`} className={cx("!pt-4 text-foreground", props.className)} />;
+  return <CopilotChatUserMessage {...props} id={`brai-message-${props.message.id}`} className={cx("!pt-3 text-foreground", props.className)} />;
 }
 
 const AnchoredUserMessage = Object.assign(AnchoredUserMessageComponent, CopilotChatUserMessage);
