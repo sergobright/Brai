@@ -54,6 +54,10 @@ export function reconcileVersionWork(target, payload, { sourceBranch, targetBran
   const details = merged
     .sort(compareMergedPulls)
     .flatMap((pull) => pull.releaseNotes?.build?.details?.map((detail) => ({ ...detail, pullNumber: pull.pullNumber })) ?? []);
+  const work = target.releaseWork(workKey);
+  const existingBuild = target.db.prepare(`
+    SELECT id FROM build_versions WHERE release_works_id = ? AND version_type_id = 'build'
+  `).get(work?.id);
   const result = target.finalizeVersionWork({
     workKey,
     versionTypeId: "build",
@@ -64,8 +68,11 @@ export function reconcileVersionWork(target, payload, { sourceBranch, targetBran
     pullNumbers: merged.map((pull) => pull.pullNumber),
     sourceBranch: owner.headBranch || sourceBranch,
     sourceCommit: owner.mergeCommitSha || payload.sha || null,
-    targetBranch,
-    targetCommit,
+    // A missing native APK may be reconciled long after its Product build was
+    // recorded. That build's historic target ref is valid evidence; do not
+    // manufacture a second build ref for the later APK-only promotion.
+    targetBranch: existingBuild ? null : targetBranch,
+    targetCommit: existingBuild ? null : targetCommit,
     releasedAtUtc: deployedAtUtc,
   });
   console.log(`Finalized ${workKey} as build ${result.version}`);
