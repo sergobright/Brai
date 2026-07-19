@@ -200,12 +200,34 @@ NODE
     exec 8>&-
     return 0
   fi
-  exec 9>&-
   "${BRAI_SUDO:-sudo}" /srv/opt/brai-codex-broker/cleanup-preview-state "preview-$SLOT_LOWER" >&2
   shopt -s nullglob
-  rm -rf "$slot_root/source" "$slot_root"/source.previous-* "$slot_root/web" "$slot_root/mobile-update"
+  local artifacts=(
+    "$slot_root/source"
+    "$slot_root"/source.previous-*
+    "$slot_root/web"
+    "$slot_root/mobile-update"
+  )
   shopt -u nullglob
+  local attempt
+  for attempt in 1 2 3; do
+    rm -rf -- "${artifacts[@]}" || true
+    if [[ ! -e "$slot_root/source" && ! -L "$slot_root/source" \
+      && ! -e "$slot_root/web" && ! -L "$slot_root/web" \
+      && ! -e "$slot_root/mobile-update" && ! -L "$slot_root/mobile-update" ]] \
+      && ! compgen -G "$slot_root/source.previous-*" >/dev/null; then
+      exec 9>&-
+      exec 8>&-
+      return 0
+    fi
+    if (( attempt < 3 )); then
+      sleep 0.2
+    fi
+  done
+  echo "Released Preview artifact cleanup remained incomplete after 3 bounded attempts: $slot_root" >&2
+  exec 9>&-
   exec 8>&-
+  return 1
 }
 accepted_build_recorded() {
   [[ "$BRAI_ACCEPTED_PREVIEW" == "true" && -n "$TARGET_BRANCH" && -n "$TARGET_COMMIT" ]] || return 1

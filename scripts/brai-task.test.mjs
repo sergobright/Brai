@@ -2759,7 +2759,8 @@ test("accepted preview stale cleanup is required", () => {
   assert.match(releaseScript, /source_branch = \$1 AND target_branch = \$2 AND target_commit = \$3/);
   assert.match(releaseScript, /"alreadyReleased":true/);
   assert.match(releaseScript, /"\$ENVS_ROOT"\/preview-\[a-e\]/);
-  assert.match(releaseScript, /rm -rf "\$slot_root\/source" "\$slot_root"\/source\.previous-\* "\$slot_root\/web" "\$slot_root\/mobile-update"/);
+  assert.match(releaseScript, /local artifacts=\([\s\S]*"\$slot_root\/source"[\s\S]*"\$slot_root"\/source\.previous-\*[\s\S]*"\$slot_root\/web"[\s\S]*"\$slot_root\/mobile-update"/);
+  assert.match(releaseScript, /rm -rf -- "\$\{artifacts\[@\]\}"/);
   assert.doesNotMatch(releaseScript, /rm -rf .*data/);
   assert.doesNotMatch(releaseScript, /rm -rf .*vault/);
   assert.match(workflow, /dispatch-promotion --target prod/);

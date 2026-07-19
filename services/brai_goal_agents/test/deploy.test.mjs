@@ -813,8 +813,11 @@ test("preview release stops all agent instances before deleting the slot source"
   assert.doesNotMatch(release, /BRAI_SUDO:-sudo}" systemctl cat/);
   const cleanupFunction = release.slice(cleanupIndex, release.indexOf("accepted_build_recorded()", cleanupIndex));
   assert.ok(cleanupFunction.indexOf('flock -x 8') < cleanupFunction.indexOf('flock -x 9'));
-  assert.ok(cleanupFunction.indexOf('entry?.status === "free"') < cleanupFunction.indexOf('rm -rf "$slot_root/source"'));
+  assert.ok(cleanupFunction.indexOf('entry?.status === "free"') < cleanupFunction.indexOf('rm -rf -- "${artifacts[@]}"'));
+  assert.ok(cleanupFunction.indexOf('rm -rf -- "${artifacts[@]}"') < cleanupFunction.lastIndexOf("exec 9>&-"));
   assert.match(cleanupFunction, /\[\[ -f "\$source_lock" && ! -L "\$source_lock" \]\]/);
+  assert.match(cleanupFunction, /for attempt in 1 2 3; do[\s\S]*sleep 0\.2/);
+  assert.match(cleanupFunction, /Released Preview artifact cleanup remained incomplete after 3 bounded attempts/);
 });
 
 test("preview release cleanup preserves a slot reallocated before its source lock", (t) => {
@@ -854,6 +857,42 @@ cleanup_released_preview_slot_artifacts '{"released":true,"slot":"A"}'
       assert.equal(fs.existsSync(path.join(slotRoot, artifact)), !shouldRemove);
     }
   }
+});
+
+test("preview release retries when a stopped writer recreates an artifact during cleanup", (t) => {
+  const release = read("deploy/scripts/ci-ssh-release-slot.sh");
+  const functionStart = release.indexOf("cleanup_released_preview_slot_artifacts() {");
+  const functionEnd = release.indexOf("accepted_build_recorded()", functionStart);
+  assert.ok(functionStart > 0 && functionEnd > functionStart);
+  const functionSource = release.slice(functionStart, functionEnd);
+  const envsRoot = fs.mkdtempSync(path.join(os.tmpdir(), "brai-release-cleanup-race-test-"));
+  t.after(() => fs.rmSync(envsRoot, { recursive: true, force: true }));
+  const slotRoot = path.join(envsRoot, "preview-a");
+  const registry = path.join(envsRoot, "preview-slots.json");
+  fs.mkdirSync(path.join(slotRoot, "source", "apps", "brai_app", "android"), { recursive: true });
+  fs.writeFileSync(path.join(slotRoot, ".source-operation.lock"), "");
+  fs.writeFileSync(path.join(envsRoot, "preview-slots.lock"), "");
+  fs.writeFileSync(registry, JSON.stringify({ A: { status: "free", branch: null } }));
+
+  const result = spawnSync("bash", ["-c", `set -euo pipefail
+${functionSource}
+ENVS_ROOT=${shellQuote(envsRoot)}
+REGISTRY=${shellQuote(registry)}
+SLOT_LOWER=a
+BRAI_SUDO=true
+cleanup_attempt=0
+rm() {
+  command rm "$@"
+  cleanup_attempt=$((cleanup_attempt + 1))
+  if (( cleanup_attempt == 1 )); then
+    mkdir -p "$ENVS_ROOT/preview-a/source/apps/brai_app/android"
+  fi
+}
+cleanup_released_preview_slot_artifacts '{"released":true,"slot":"A"}'
+`], { encoding: "utf8" });
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(fs.existsSync(path.join(slotRoot, "source")), false);
 });
 
 test("preview release existence probe cannot be bypassed by missing sudo permission for systemctl cat", () => {
