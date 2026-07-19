@@ -37,7 +37,14 @@ try {
     WHERE status = 'finalized'
     ORDER BY work_key
   `).all().map((row) => row.work_key);
-  console.log(JSON.stringify({ latestBuildVersion, finalizedWorkKeys }));
+  const finalizedPulls = store.db.prepare(`
+    SELECT pulls.repository, pulls.pull_number
+    FROM github_pull_requests AS pulls
+    JOIN release_works AS works ON works.id = pulls.release_works_id
+    WHERE works.status = 'finalized'
+    ORDER BY LOWER(pulls.repository), pulls.pull_number
+  `).all().map((row) => ({ repository: row.repository, pullNumber: row.pull_number }));
+  console.log(JSON.stringify({ latestBuildVersion, finalizedWorkKeys, finalizedPulls }));
 } finally {
   store.close();
 }

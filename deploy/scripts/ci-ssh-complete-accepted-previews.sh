@@ -128,10 +128,15 @@ FINALIZED_WORK_KEYS_JSON="$(printf '%s' "$VERSION_WORK_STATE" | "$NODE_BIN" -e '
 let raw = ""; process.stdin.on("data", chunk => raw += chunk); process.stdin.on("end", () => {
   const value = JSON.parse(raw); process.stdout.write(JSON.stringify(value.finalizedWorkKeys || []));
 });')"
+FINALIZED_PULLS_JSON="$(printf '%s' "$VERSION_WORK_STATE" | "$NODE_BIN" -e '
+let raw = ""; process.stdin.on("data", chunk => raw += chunk); process.stdin.on("end", () => {
+  const value = JSON.parse(raw); process.stdout.write(JSON.stringify(value.finalizedPulls || []));
+});')"
 REQUIRED_PREVIEWS_JSON="$(
   cd "$ROOT"
   BRAI_TARGET_BRANCH="$TARGET_BRANCH" \
   BRAI_FINALIZED_WORK_KEYS_JSON="$FINALIZED_WORK_KEYS_JSON" \
+  BRAI_FINALIZED_PULLS_JSON="$FINALIZED_PULLS_JSON" \
     "$NODE_BIN" "$SCRIPT_DIR/accepted-preview-branches.mjs" --json --reconcile-unfinalized "$TARGET_COMMIT"
 )"
 CLEANUP_BRANCH_LIST="$(

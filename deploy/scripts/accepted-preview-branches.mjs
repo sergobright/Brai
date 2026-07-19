@@ -24,8 +24,12 @@ if (path.resolve(process.argv[1] ?? "") === fileURLToPath(import.meta.url)) {
     : null;
   const allPulls = supplied ?? (json || reconcileUnfinalized ? await fetchAllPulls(targetBranch) : null);
   const finalizedWorkKeys = new Set(JSON.parse(process.env.BRAI_FINALIZED_WORK_KEYS_JSON || "[]"));
+  const finalizedPullKeys = new Set(
+    JSON.parse(process.env.BRAI_FINALIZED_PULLS_JSON || "[]")
+      .map((pull) => pullIdentity(pull?.repository, pull?.pullNumber)),
+  );
   const pulls = reconcileUnfinalized
-    ? unfinalizedWorkCandidates(allPulls, finalizedWorkKeys, targetBranch, repository)
+    ? unfinalizedWorkCandidates(allPulls, finalizedWorkKeys, targetBranch, repository, finalizedPullKeys)
     : supplied ?? (recentMerged ? await fetchRecentMergedPulls(targetBranch) : await fetchAssociatedPulls(commit));
   if (!supplied) await enrichLegacyNativeBoundaries(pulls, repository);
 
@@ -45,6 +49,7 @@ export function unfinalizedWorkCandidates(
   finalizedWorkKeys = new Set(),
   targetBranch = "main",
   repository = "sergobright/Brai",
+  finalizedPullKeys = new Set(),
 ) {
   if (!Array.isArray(pulls)) throw new Error("GitHub pull request lookup did not return an array");
   const selected = new Map();
@@ -52,7 +57,7 @@ export function unfinalizedWorkCandidates(
     const branch = pullHead(pull);
     if (pullBase(pull) !== targetBranch || !pullMerged(pull) || !branch?.startsWith("codex/")) continue;
     const work = workFromPull(pull, repository);
-    if (!work || finalizedWorkKeys.has(work.key)) continue;
+    if (!work || finalizedWorkKeys.has(work.key) || finalizedPullKeys.has(pullIdentity(repository, pull.number))) continue;
     const current = selected.get(work.key);
     if (!current || (work.role === "owner" && current.work.role !== "owner")) {
       selected.set(work.key, { pull, work });
@@ -122,6 +127,15 @@ export function canonicalReleaseRepository(repository) {
   return value.toLowerCase() === LEGACY_RELEASE_REPOSITORY.toLowerCase()
     ? CANONICAL_RELEASE_REPOSITORY
     : value;
+}
+
+function pullIdentity(repository, pullNumber) {
+  const normalizedRepository = canonicalReleaseRepository(repository).toLowerCase();
+  const number = Number(pullNumber);
+  if (!normalizedRepository || !Number.isSafeInteger(number) || number < 1) {
+    throw new Error("invalid finalized pull identity");
+  }
+  return `${normalizedRepository}#${number}`;
 }
 
 function snapshotWorkPull(pull, repository) {
