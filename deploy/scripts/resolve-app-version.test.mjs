@@ -56,6 +56,21 @@ test("OTA version resolution fails without published artifact metadata", async (
   );
 });
 
+test("OTA version uses the already resolved Product version as its deployment floor", async () => {
+  assert.equal(await resolveAppVersionAsync({
+    environment: "prod",
+    explicit: "",
+    productVersion: "152",
+    clientArtifactChanged: "true",
+  }), "0.0.153");
+  assert.equal(await resolveAppVersionAsync({
+    environment: "prod",
+    explicit: "",
+    productVersion: "152",
+    clientArtifactChanged: "false",
+  }), "0.0.152");
+});
+
 test("OTA version uses published artifacts with the accepted Product version as a downgrade floor", { skip: !process.env.BRAI_TEST_DATABASE_URL }, async () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "brai-version-"));
   const database = await createTestDatabase();

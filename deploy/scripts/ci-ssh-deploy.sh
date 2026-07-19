@@ -871,7 +871,11 @@ if [[ "$BRAI_NATIVE_APK_CHANGE" == "true" ]]; then
     deploy/scripts/build-android-env-apk.sh dev
   elif [[ "$ENVIRONMENT" == "prod" ]]; then
     deploy/scripts/build-android-env-apk.sh production
-    export BRAI_APP_VERSION="$(node deploy/scripts/resolve-app-version.mjs --environment prod --root "$SOURCE_ROOT")"
+    export BRAI_APP_VERSION="$(node deploy/scripts/resolve-app-version.mjs \
+      --environment prod \
+      --root "$SOURCE_ROOT" \
+      --prod-web-version-json "$BRAI_PROD_WEB_VERSION_JSON" \
+      --mobile-target "$BRAI_MOBILE_TARGET")"
     deploy/scripts/build-nonproduction-apks.sh
   fi
 fi

@@ -962,11 +962,16 @@ test("native APK detector uses only the frozen Product base across codex follow-
 
 test("production deploy resolves ledger version through the shared resolver", () => {
   const script = fs.readFileSync(new URL("../deploy/scripts/deploy-branch.sh", import.meta.url), "utf8");
+  const remoteDeploy = fs.readFileSync(new URL("../deploy/scripts/ci-ssh-deploy.sh", import.meta.url), "utf8");
   assert.match(script, /resolve-app-version\.mjs/);
   assert.doesNotMatch(script, /version_type_id = 'canon'/);
   assert.doesNotMatch(script, /version_type_id = 'release'/);
   assert.doesNotMatch(script, /version_type_id = 'build'/);
   assert.doesNotMatch(script, /version_type_id = 'apk'/);
+  assert.match(
+    remoteDeploy,
+    /resolve-app-version\.mjs \\\n\s+--environment prod \\\n\s+--root "\$SOURCE_ROOT" \\\n\s+--prod-web-version-json "\$BRAI_PROD_WEB_VERSION_JSON" \\\n\s+--mobile-target "\$BRAI_MOBILE_TARGET"/,
+  );
 });
 
 test("remote deploy serializes dependency staging before replacing the active source tree", () => {

@@ -17,6 +17,7 @@ if (path.resolve(process.argv[1] ?? "") === fileURLToPath(import.meta.url)) {
     environment: args.environment,
     postgresUrl: args["postgres-url"] || process.env.BRAI_DATABASE_URL || "",
     prodPostgresUrl: args["prod-postgres-url"] || process.env.BRAI_PROD_DATABASE_URL || "",
+    productVersion: args["product-version"] || process.env.BRAI_PRODUCT_VERSION || "",
     prodWebVersionJson: args["prod-web-version-json"],
     mobileTarget: args["mobile-target"],
     nextOta: args["next-ota"] === "true",
@@ -62,6 +63,7 @@ export async function resolveAppVersionAsync(options = {}) {
     targetBranch = "",
     targetCommit = process.env.BRAI_PRODUCT_BASE_COMMIT || "",
     ancestorCommits = process.env.BRAI_PRODUCT_ANCESTOR_COMMITS || "",
+    productVersion: acceptedProductVersion = process.env.BRAI_PRODUCT_VERSION || "",
     prodWebVersionJson = "",
     mobileTarget = "",
     root = repoRoot,
@@ -77,7 +79,9 @@ export async function resolveAppVersionAsync(options = {}) {
     return resolveProductVersionPg(postgresUrl || prodPostgresUrl, { targetCommit, ancestorCommits });
   }
   if (explicit) return validOtaVersion(explicit);
-  const productVersion = await resolveProductVersionPg(prodPostgresUrl || postgresUrl, { targetCommit, ancestorCommits });
+  const productVersion = acceptedProductVersion
+    ? validProductVersion(acceptedProductVersion)
+    : await resolveProductVersionPg(prodPostgresUrl || postgresUrl, { targetCommit, ancestorCommits });
   const deployedVersions = [
     prodWebVersionJson && readVersionJson(prodWebVersionJson),
     mobileTarget && latestMobileTargetVersion(mobileTarget),
