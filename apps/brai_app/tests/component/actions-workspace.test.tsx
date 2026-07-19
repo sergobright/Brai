@@ -218,6 +218,46 @@ describe("Actions Goal workspace UI", () => {
     expect(screen.queryByText("Три действия ведут к общему результату")).not.toBeInTheDocument();
   });
 
+  it("hides recommendation agents and their pending proposals when disabled", () => {
+    const activities = emptyActivitiesState();
+    activities.actions = [activity("action-1", "action-1")];
+    activities.goals = [activity("goal-1", "Луна")];
+    const relations = emptyRelationsState();
+    relations.relations = [{ ...relationItem(), source_items_id: "action-1", target_items_id: "goal-1" }];
+    const workspace = buildActionsWorkspace({ activities, inbox: emptyInboxState(), relations, filter: "goal:goal-1" });
+    const contextReviews = emptyContextDecisionsState();
+    contextReviews.decisions = [planDecision(), discoveryDecision()];
+
+    render(
+      <ActionsSection
+        state={activities}
+        localSnapshotReady
+        autoFocusAddInput={false}
+        activeActivityId={null}
+        activeActivityElapsedSeconds={0}
+        onCreate={vi.fn()}
+        onUpdateTitle={vi.fn()}
+        onAutosaveDetails={vi.fn()}
+        onSetStatus={vi.fn()}
+        onDelete={vi.fn()}
+        onReorder={vi.fn()}
+        mobileCreateDraft={{ title: "", descriptionMd: "" }}
+        onMobileCreateDraftChange={vi.fn()}
+        dockOverflowOpen={false}
+        onStartActionFocus={vi.fn()}
+        onStopActionFocus={vi.fn()}
+        onMobileOverlayChange={vi.fn()}
+        workspace={workspace}
+        contextReviews={contextReviews}
+        agentRecommendationsEnabled={false}
+      />,
+    );
+
+    expect(screen.queryByRole("button", { name: "Предложить план" })).not.toBeInTheDocument();
+    expect(screen.queryByText("План цели")).not.toBeInTheDocument();
+    expect(screen.queryByText("Три действия ведут к общему результату")).not.toBeInTheDocument();
+  });
+
   it("does not offer a new plan for a completed Goal", () => {
     const goal = activity("goal-1", "Луна");
     goal.status = "Done";

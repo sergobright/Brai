@@ -80,6 +80,18 @@ Failure isolation is per agent queue: a stopped planner leaves planner workflows
 queued/retrying but does not justify routing them to another agent or stopping
 manual Goal/Relation work. Check the environment-specific unit journal, API
 context poller heartbeat, workflow execution/attempt, and `ai_logs` provenance;
+
+`BRAI_GOAL_AGENT_RECOMMENDATIONS_ENABLED` is a separate product producer gate.
+It is opt-in and therefore defaults to `false`. With the default, the API does
+not enqueue new classifier, matcher, member-finder, discovery, or planner
+proposal executions, and the Actions UI does not expose their proposal panels.
+The Goal-agent workers and API context worker remain deployable and health-
+checked, so delivery gates can still verify their isolated control plane.
+Existing queued executions are not deleted; ordinary Activity/Inbox
+normalization and manual Relations are independent and remain available. Set
+the variable to an explicit true value only for a deliberate recommendation
+experiment. `BRAI_GOAL_AGENTS_ENABLED=false` remains the stronger operational
+kill switch described above.
 do not infer domain success from an ordinary process log alone.
 
 ## Process Change Rule
@@ -128,7 +140,7 @@ Accepted PR conflict reconciliation does not add a separate Temporal gate. The a
 
 The preview slot registry remains `/srv/projects/brai-envs/preview-slots.json`; Temporal does not replace that lock or registry. Commit-bearing updates are compare-and-set mutations. A late SHA A deploy cannot change a lease already advanced to SHA B, and handoff requires the exact SHA in the successful GitHub run, SHA-isolated Temporal workflow, and ready slot entry.
 
-Native-boundary preview deploys may build a slot-specific APK inside the existing `preview_deploy_started` to `preview_deploy_passed` gate. Accepted native work rebuilds the production, Dev, and Preview A-E stable APK baselines during the production deploy from one static client export; preview slot release reuses the published stable slot APK when the release index and file are already present, and only rebuilds that slot as a fallback. These APK builds are required deploy/release substeps, not separate Temporal state transitions; failure still reports through `preview_deploy_failed`, `prod_deploy_failed`, or `slot_release_failed`.
+Native-boundary preview deploys may build a slot-specific APK inside the existing `preview_deploy_started` to `preview_deploy_passed` gate. Accepted native work rebuilds the production, Dev, and Preview A-E stable APK baselines during the production deploy from one static client export. The non-production builds pin their APK version to the already published Production release-index baseline instead of resolving the not-yet-recorded APK ledger again, and fail closed if an explicit version disagrees. Preview slot release reuses the published stable slot APK when the release index and file are already present, and only rebuilds that slot as a fallback. These APK builds are required deploy/release substeps, not separate Temporal state transitions; failure still reports through `preview_deploy_failed`, `prod_deploy_failed`, or `slot_release_failed`.
 
 Accepted `deploy-prod` reruns are idempotent after a partial success: if the preview slot was already released, promotion may pass only when the production build ledger already records the accepted branch for the target commit, and the release rerun records `slot_released` for the already-free slot instead of leaving the workflow blocked.
 
@@ -212,6 +224,13 @@ workflow task. `prod_deploy_passed` completes the
 promotion workflow only after prior required steps have succeeded in GitHub Actions. Russian
 human-readable `build_versions` release notes are part of the existing version/ledger recording
 step; changing their text source does not add a new Temporal gate.
+
+Android clears the WebView resource cache before Capacitor loads the selected embedded or OTA
+bundle. Turbopack may reuse a chunk pathname across different static exports, so runtime metadata
+and JavaScript must never be assembled from different bundle versions. The early document script
+also recognizes the APK-only `BraiNative/1` user-agent marker before the Capacitor bridge is ready,
+keeping the server-rendered shell hidden until the startup splash is mounted without affecting
+ordinary in-app Android browsers.
 
 Dev deploys are persistent-environment promotions from branch `dev`. They use the long-lived
 Supabase branch `brai-dev`, do not refresh from production automatically after the first clone, and

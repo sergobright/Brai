@@ -948,15 +948,16 @@ test("native APK detector ignores OTA web-layer changes", () => {
   );
 });
 
-test("native APK detector keeps the full codex branch diff across follow-up pushes", () => {
+test("native APK detector uses only the frozen Product base across codex follow-up pushes", () => {
   assert.equal(
-    diffRange("codex/native-change", "incremental-follow-up-sha", () => true),
-    "origin/main...HEAD",
+    diffRange("codex/native-change", "frozen-product-base-sha", () => true),
+    "frozen-product-base-sha..HEAD",
   );
   assert.deepEqual(
-    diffRanges("codex/native-change", "incremental-follow-up-sha", () => true),
-    ["origin/main...HEAD", "incremental-follow-up-sha..HEAD"],
+    diffRanges("codex/native-change", "frozen-product-base-sha", () => true),
+    ["frozen-product-base-sha..HEAD"],
   );
+  assert.deepEqual(diffRanges("codex/native-change", "", () => true), ["origin/main...HEAD"]);
 });
 
 test("production deploy resolves ledger version through the shared resolver", () => {
@@ -970,6 +971,7 @@ test("production deploy resolves ledger version through the shared resolver", ()
 
 test("remote deploy serializes dependency staging before replacing the active source tree", () => {
   const deploy = fs.readFileSync(new URL("../deploy/scripts/ci-ssh-deploy.sh", import.meta.url), "utf8");
+  assert.match(deploy, /BRAI_PRODUCT_BASE_COMMIT:-\$\{BRAI_BASE_COMMIT:-\}/);
   const uploadHeadroomIndex = deploy.indexOf("check_upload_headroom\n");
   const uploadIndex = deploy.indexOf('tar -xzf - -C "$REMOTE_UPLOAD"');
   const stageIndex = deploy.indexOf('cd "$REMOTE_UPLOAD"');

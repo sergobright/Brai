@@ -6,7 +6,12 @@ import { ScrollArea } from "@/shared/ui/scroll-area";
 import { cx } from "../appUtils";
 import { useMobileSheetDrag } from "../hooks/useMobileSheetDrag";
 
-export function MobileProfileDrawer({ children, label, onClose }: { children?: ReactNode; label?: string; onClose: () => void }) {
+export function MobileProfileDrawer({ children, contentOwnsScroll = false, label, onClose }: {
+  children?: ReactNode;
+  contentOwnsScroll?: boolean;
+  label?: string;
+  onClose: () => void;
+}) {
   const suppressPopRef = useRef(false);
   const dialogRef = useRef<HTMLElement | null>(null);
   const onCloseRef = useRef(onClose);
@@ -125,9 +130,13 @@ export function MobileProfileDrawer({ children, label, onClose }: { children?: R
         onClick={(event) => event.stopPropagation()}
       >
         <div aria-label={drawerLabel} className="flex min-h-0 flex-1 flex-col">
-          <ScrollArea className="min-h-0 flex-1">
-            <div className={children ? "px-3 pb-3" : "px-2 pb-3"}>{children}</div>
-          </ScrollArea>
+          {contentOwnsScroll ? (
+            <div className="min-h-0 flex-1">{children}</div>
+          ) : (
+            <ScrollArea className="min-h-0 flex-1">
+              <div className={children ? "px-3 pb-3" : "px-2 pb-3"}>{children}</div>
+            </ScrollArea>
+          )}
         </div>
       </aside>
     </div>

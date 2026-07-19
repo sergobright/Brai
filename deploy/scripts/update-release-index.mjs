@@ -13,6 +13,8 @@ const targets = apkReleaseTargets(root);
 const data = readIndex();
 if (args["render-only"] === "true") {
   publishReleaseMetadata(data, false);
+} else if (args["restore-stable-preview"]) {
+  restoreStablePreview(args["restore-stable-preview"]);
 } else {
   const releaseKey = required(args, "release");
   const fileName = required(args, "file");
@@ -43,6 +45,46 @@ if (args["render-only"] === "true") {
     capabilities: apkCapabilities(),
   };
 
+  publishReleaseMetadata(data, true);
+}
+
+function restoreStablePreview(releaseKey) {
+  const target = apkReleaseTargetByKey(releaseKey, root);
+  if (!target || !/^[a-e]$/.test(releaseKey)) {
+    throw new Error(`invalid Preview release section: ${releaseKey}`);
+  }
+  const production = data.sections.production;
+  const apkVersion = Number(production?.apkVersion);
+  const versionCode = Number(production?.versionCode);
+  if (production?.apkBuildKind !== "stable"
+    || !Number.isInteger(apkVersion) || apkVersion <= 0
+    || !Number.isInteger(versionCode) || versionCode <= 0) {
+    throw new Error("published Production stable APK baseline is invalid");
+  }
+  const fileName = `brai-${releaseKey}-v${apkVersion}.apk`;
+  const filePath = path.join(releaseDir, fileName);
+  if (!fs.existsSync(filePath)) throw new Error(`missing stable Preview APK: ${fileName}`);
+  const current = data.sections[releaseKey];
+  const publishedAt = current?.apkBuildKind === "stable"
+    && current.file === fileName
+    && current.publishedAt
+    ? current.publishedAt
+    : fs.statSync(filePath).mtime.toISOString();
+  data.sections[releaseKey] = {
+    ...sectionDefaults(target),
+    title: target.androidApp,
+    applicationId: target.applicationId,
+    file: fileName,
+    apkVersion,
+    versionCode,
+    releaseKey,
+    apkBuildKind: "stable",
+    previewIteration: null,
+    publishedAt,
+    sizeBytes: fs.statSync(filePath).size,
+    sha256: sha256(filePath),
+    capabilities: apkCapabilities(),
+  };
   publishReleaseMetadata(data, true);
 }
 

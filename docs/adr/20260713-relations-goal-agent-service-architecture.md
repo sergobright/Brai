@@ -480,6 +480,9 @@ deployment registry, обязательном по workspace rules, без secre
 - Inbox conversion использует тот же Item, forced Operations не конвертируются.
 - Пять agent IDs, queues, policies и deploy services существуют отдельно, shared
   runner не смешивает их prompts/responsibilities.
+- Product producer для этих proposal agents выключен по умолчанию отдельным
+  opt-in gate; control-plane workers остаются изолированными и проверяемыми, но
+  без явного включения не получают новые пользовательские recommendation runs.
 - Effective worker build ID включает declared manifest base и детерминированный
   digest runtime content; изменение worker/API-context кода не переиспользует
   frozen definition/build молча.

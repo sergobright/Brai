@@ -76,21 +76,32 @@ export const aiLogMethods = {
   }
 ,
 
-  listAiLogs({ limit = 50 } = {}) {
+  listAiLogs({ limit = 50, agentId = null } = {}) {
     const rowLimit = Math.max(1, Math.min(Number(limit) || 50, 200));
     const userId = scopedUserId();
+    const cleanAgentId = typeof agentId === 'string' && agentId.trim() ? agentId.trim() : null;
+    const predicates = [];
+    const params = [];
+    if (userId) {
+      predicates.push('user_id = ?');
+      params.push(userId);
+    }
+    if (cleanAgentId) {
+      predicates.push('agent_id = ?');
+      params.push(cleanAgentId);
+    }
     return this.db
       .prepare(
         `
           SELECT id, agent_id, agent_version, dt, status, json_data, ai_title, flow_id, flow_command, trace_id,
             workflow_id, run_id, attempt_number, llm_call_id
           FROM ai_logs
-          ${userId ? 'WHERE user_id = ?' : ''}
+          ${predicates.length ? `WHERE ${predicates.join(' AND ')}` : ''}
           ORDER BY dt DESC, id DESC
           LIMIT ?
         `
       )
-      .all(...(userId ? [userId, rowLimit] : [rowLimit]))
+      .all(...params, rowLimit)
       .map((row) => ({
         ...row,
         json_data: parseJsonObject(row.json_data)

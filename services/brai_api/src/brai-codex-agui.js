@@ -10,8 +10,6 @@ import {
 
 const RAW_REASONING_METHODS = new Set([
   'item/reasoning/textDelta',
-  'item/reasoning/summaryPartAdded',
-  'item/reasoning/summaryPartCompleted',
   'item/reasoning/rawContentDelta'
 ]);
 const TOOL_TYPES = new Set([
@@ -52,6 +50,11 @@ function toolArgs(item) {
   if (item.type === 'fileChange') return { files: Array.isArray(item.changes) ? item.changes.length : 0 };
   if (item.type === 'mcpToolCall' || item.type === 'dynamicToolCall') {
     return { arguments: sanitizeJsonValue(item.arguments) };
+  }
+  if (item.type === 'webSearch') return { query: sanitizeBraiChatText(item.query || '', { maxBytes: 2_000 }) };
+  if (item.type === 'imageGeneration') {
+    const prompt = sanitizeBraiChatText(item.revisedPrompt || '', { maxBytes: 4_000 });
+    return prompt ? { prompt } : {};
   }
   if (item.type === 'imageView') return { image: sanitizeBraiChatFilename(item.path) };
   return {};
@@ -192,13 +195,15 @@ export class CodexAguiNormalizer {
       return events;
     }
 
-    if (method === 'item/reasoning/summaryTextDelta') {
-      const itemId = this.#itemId(params.itemId, 'reasoning');
+    if (method === 'item/reasoning/summaryPartAdded'
+      || method === 'item/reasoning/summaryPartCompleted'
+      || method === 'item/reasoning/summaryTextDelta') {
+      const summaryIndex = Number.isSafeInteger(params.summaryIndex) ? params.summaryIndex : 0;
+      const internalItemId = typeof params.itemId === 'string' ? params.itemId : 'reasoning:fallback';
+      const itemId = this.#itemId(`${internalItemId}:summary:${summaryIndex}`, 'reasoning');
       const state = this.reasoningItems.get(itemId) || {
-        started: false, ended: false, outputBytes: 0, truncated: false
+        internalItemId, summaryIndex, started: false, ended: false, outputBytes: 0, truncated: false
       };
-      const delta = boundedItemDelta(state, params.delta, 8_192);
-      if (!delta) return [];
       const reasoningEvents = [];
       if (!this.reasoningStarted) {
         this.reasoningStarted = true;
@@ -215,11 +220,18 @@ export class CodexAguiNormalizer {
           role: 'reasoning'
         });
       }
-      reasoningEvents.push({
-        type: EventType.REASONING_MESSAGE_CONTENT,
-        messageId: itemId,
-        delta
-      });
+      if (method === 'item/reasoning/summaryTextDelta') {
+        const delta = boundedItemDelta(state, params.delta, 8_192);
+        if (delta) reasoningEvents.push({
+          type: EventType.REASONING_MESSAGE_CONTENT,
+          messageId: itemId,
+          delta
+        });
+      }
+      if (method === 'item/reasoning/summaryPartCompleted' && !state.ended) {
+        state.ended = true;
+        reasoningEvents.push({ type: EventType.REASONING_MESSAGE_END, messageId: itemId });
+      }
       this.reasoningItems.set(itemId, state);
       return reasoningEvents;
     }
@@ -281,6 +293,7 @@ export class CodexAguiNormalizer {
     this.toolItems.set(itemId, {
       item: { ...item, id: itemId }, output: '', ended: false, outputBytes: 0, truncated: false
     });
+    const args = toolArgs(item);
     return [
       {
         type: EventType.TOOL_CALL_START,
@@ -288,7 +301,9 @@ export class CodexAguiNormalizer {
         toolCallName: toolName(item),
         parentMessageId: this.toolParentMessageId
       },
-      { type: EventType.TOOL_CALL_ARGS, toolCallId: itemId, delta: JSON.stringify(toolArgs(item)) },
+      ...(Object.keys(args).length
+        ? [{ type: EventType.TOOL_CALL_ARGS, toolCallId: itemId, delta: JSON.stringify(args) }]
+        : []),
       custom('brai.detail.v1', {
         kind: item.type,
         source_event_id: itemId,
@@ -304,11 +319,13 @@ export class CodexAguiNormalizer {
       item.id, item.type === 'agentMessage' ? 'message' : item.type || 'item'
     );
     if (item.type === 'reasoning') {
-      const state = this.reasoningItems.get(itemId);
-      if (!state?.started || state.ended) return [];
-      state.ended = true;
-      this.reasoningItems.set(itemId, state);
-      return [{ type: EventType.REASONING_MESSAGE_END, messageId: itemId }];
+      const events = [];
+      for (const [messageId, state] of this.reasoningItems) {
+        if (state.internalItemId !== item.id || !state.started || state.ended) continue;
+        state.ended = true;
+        events.push({ type: EventType.REASONING_MESSAGE_END, messageId });
+      }
+      return events;
     }
     if (item.type === 'agentMessage') {
       const state = this.textItems.get(itemId) || {
@@ -380,6 +397,17 @@ export class CodexAguiNormalizer {
     }
     this.finished = true;
     return events;
+  }
+
+  assistantFallback(text) {
+    const content = sanitizeBraiChatText(text, { maxBytes: 1_000 });
+    if (!content) return [];
+    const messageId = this.toolParentMessageId;
+    return [
+      { type: EventType.TEXT_MESSAGE_START, messageId, role: 'assistant' },
+      { type: EventType.TEXT_MESSAGE_CONTENT, messageId, delta: content },
+      { type: EventType.TEXT_MESSAGE_END, messageId }
+    ];
   }
 
   #closeReasoning() {

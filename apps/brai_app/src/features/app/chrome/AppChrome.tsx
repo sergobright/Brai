@@ -72,7 +72,7 @@ export function ScreenHeader({
   const environmentLabel = useEnvironmentBadgeLabel();
 
   return (
-    <header className="topbar sticky top-[var(--sticky-top-offset)] z-[18] mb-2 grid min-h-14 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-4 bg-background px-7 py-2 max-[860px]:min-h-11 max-[860px]:gap-2 max-[860px]:px-3.5 max-[860px]:py-1">
+    <header className="topbar sticky top-[var(--sticky-top-offset)] z-[18] mb-2 grid min-h-14 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-4 bg-background px-7 py-2 max-[860px]:top-[var(--mobile-top-padding)] max-[860px]:min-h-11 max-[860px]:gap-2 max-[860px]:px-3.5 max-[860px]:py-1">
       <div className="topbar-leading hidden max-[860px]:flex" data-galaxy-interaction-block>{leading}</div>
       <div className="hidden items-center gap-2 min-[861px]:flex">
         {desktopLeading ?? <Icon className="size-5 text-foreground" data-screen-icon aria-hidden="true" />}
@@ -231,7 +231,7 @@ export function MobileContextSheet({
   return (
     <div
       ref={gestureRef}
-      className={cx("mobile-context-backdrop fixed inset-0 z-[84] hidden items-end max-[860px]:flex", className)}
+      className={cx("mobile-context-backdrop fixed inset-x-0 bottom-[calc(3.25rem+env(safe-area-inset-bottom))] z-[84] hidden items-end max-[860px]:flex", className)}
       style={{ top: sheetTop } as CSSProperties}
       data-nav-swipe-exclusion
       aria-hidden={inactive || undefined}
@@ -251,7 +251,7 @@ export function MobileContextSheet({
           "pointer-events-auto relative z-[1] grid max-h-full w-full min-w-0 overflow-hidden rounded-t-2xl border-t border-border bg-card pb-[env(safe-area-inset-bottom)] shadow-xl will-change-transform",
           variant === "detail"
             ? "actions-detail-panel mobile h-full grid-rows-[auto_minmax(0,1fr)] gap-0 pt-1"
-            : "mobile-context-sheet grid-rows-[auto_minmax(0,1fr)] pt-2",
+            : "mobile-context-sheet h-full grid-rows-[auto_minmax(0,1fr)] pt-2",
         )}
         style={sheetStyle}
         aria-label={label}

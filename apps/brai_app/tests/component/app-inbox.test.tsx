@@ -248,7 +248,7 @@ describe("BraiApp inbox", () => {
     expect(attachmentImage).toHaveAttribute("src", "/api/v1/inbox/attachments/photo.png.thumb.jpg");
     fireEvent.click(screen.getByRole("button", { name: "Открыть вложение photo.png" }));
     expect(screen.getByRole("dialog", { name: "photo.png" })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Закрыть вложение" }));
+    fireEvent.click(screen.getByRole("button", { name: "Закрыть просмотр" }));
     expect(screen.queryByRole("dialog", { name: "photo.png" })).not.toBeInTheDocument();
     fireEvent.error(attachmentImage);
     expect(attachmentImage).toHaveAttribute("src", "/api/v1/inbox/attachments/photo.png");

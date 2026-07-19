@@ -8,7 +8,6 @@ import { appCommit, installedProductVersion, useAppVersion } from "@/shared/conf
 import { installAndroidBackHandler, isNativeShell, platformName } from "@/shared/platform/platform";
 import { getBraiLocalStorageItem, removeBraiLocalStorageItem, setBraiLocalStorageItem } from "@/shared/storage/localStorageKeys";
 import { ScrollArea } from "@/shared/ui/scroll-area";
-import { BraiBrandIcon } from "@/shared/ui/brai-brand-icon";
 import { SidebarInset, SidebarProvider } from "@/shared/ui/sidebar";
 import { OnboardingFlow, shouldShowOnboarding } from "@/features/onboarding/OnboardingFlow";
 import { loadOnboardingState } from "@/features/onboarding/onboardingModel";
@@ -23,6 +22,7 @@ import { IconButton, ScreenHeader, ThemeButton } from "./chrome/AppChrome";
 import { PageWorkspace } from "./chrome/PageWorkspace";
 import { useActionsWorkspace } from "./hooks/useActionsWorkspace";
 import { useBraiAppState } from "./hooks/useBraiAppState";
+import { useSoftwareKeyboardOpen } from "./hooks/useSoftwareKeyboardOpen";
 import { DesktopRail, MainDock, MobileContextMenuSheet, MobileDockOverflowButton, MobileDockOverflowSheet, MobileMenuButton } from "./navigation/AppNavigation";
 import { MobileProfileDrawer, requestMobileProfileDrawerClose } from "./navigation/MobileProfileDrawer";
 import { ContextualRail, PageRailPlaceholder, useContextualRail } from "./navigation/ContextualRail";
@@ -44,6 +44,7 @@ import { ProfileSection } from "./sections/profile/ProfileSection";
 import { SettingsSection } from "./sections/settings/SettingsSection";
 import type { MobileCreateDraft } from "./sections/MobileCreateComposer";
 const SECTION_PAGE_INSET_CLASS = "grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] pb-11 pt-3.5 max-[860px]:pb-7 max-[860px]:pt-[var(--mobile-top-padding)]";
+const BRAI_SECTION_PAGE_INSET_CLASS = "grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] pb-[6.25rem] pt-3.5 max-[860px]:pb-1 max-[860px]:pt-[var(--mobile-top-padding)]";
 const SECTION_BODY_INSET_CLASS = "min-h-0 min-w-0 px-7 pr-0 max-[860px]:px-3.5 max-[860px]:pr-0";
 const FULLSCREEN_SECTION_PAGE_CLASS = "grid h-full min-h-0 grid-rows-[minmax(0,1fr)] p-0";
 const EMPTY_MOBILE_CREATE_DRAFT: MobileCreateDraft = { title: "", descriptionMd: "" };
@@ -65,6 +66,7 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
   const engineDownloading = engineView.updateAction === "downloading-web" || engineView.updateAction === "downloading-apk";
   const { authDisplayName, authUser, provisionBraiCmdDeviceToken } = app;
   const authUserId = authUser?.id ?? null;
+  const [braiSessionOwnerId, setBraiSessionOwnerId] = useState<string | null>(null);
   const router = useRouter();
   const nativeAndroid = useMountedNativeAndroid();
   const [mobileDockLayer, setMobileDockLayer] = useState<"left" | "right" | "context" | null>(null);
@@ -93,6 +95,7 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
   const registerBraiRail = useCallback((content: ReactNode | null) => registerContextualContent("brai", content), [registerContextualContent]);
   const registerArchiveRail = useCallback((content: ReactNode | null) => registerContextualContent("archive", content), [registerContextualContent]);
   const registerBraiCmdRail = useCallback((content: ReactNode | null) => registerContextualContent("brai-cmd", content), [registerContextualContent]);
+  const registerFactoryRail = useCallback((content: ReactNode | null) => registerContextualContent("factory", content), [registerContextualContent]);
   const { setMobileMenuOpen } = app;
   const closeMobilePageRail = useCallback(() => setMobileMenuOpen(false), [setMobileMenuOpen]);
   const activeContextualContent = contextualContent?.section === visibleSection ? contextualContent.content : null;
@@ -102,6 +105,7 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
   const [actionsMobileCreateDraft, setActionsMobileCreateDraft] = useStoredMobileCreateDraft(ACTIONS_MOBILE_CREATE_DRAFT_STORAGE_KEY);
   const [inboxMobileCreateDraft, setInboxMobileCreateDraft] = useStoredMobileCreateDraft(INBOX_MOBILE_CREATE_DRAFT_STORAGE_KEY);
   const mobileViewport = useMountedMobileNavigationViewport();
+  const softwareKeyboardOpen = useSoftwareKeyboardOpen(mobileViewport);
   const engineMobileHistoryOpen = mobileViewport && visibleSection === "engine" && app.engineHistoryOpen;
   const [drawsFullScreen, setDrawsFullScreen] = useState(false);
   const { selectFilter: selectActionsWorkspaceFilter, workspace: actionsWorkspace } = useActionsWorkspace(app.actions, app.inbox, app.relations);
@@ -117,6 +121,12 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
   const unauthEngineActiveRef = useRef(false);
   const unauthBraiCmdActiveRef = useRef(false);
   const adjacentSection = unauthEngineActive ? null : app.swipeNavigation.visual?.to;
+  const braiRequested = visibleSection === "brai" || adjacentSection === "brai";
+  const shouldRenderBraiSession = Boolean(
+    authUserId
+    && !onboardingActive
+    && (braiSessionOwnerId === authUserId || braiRequested)
+  );
   const handleStartupIntroComplete = useCallback(() => setStartupIntroComplete(true), []);
   const mobileMenuSwipe = useLeftEdgeMenuSwipe(
     () => {
@@ -163,6 +173,17 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
     unauthEngineActiveRef.current = unauthEngineActive;
     unauthBraiCmdActiveRef.current = unauthBraiCmdActive;
   }, [app.section, app.selectSection, unauthBraiCmdActive, unauthEngineActive]);
+
+  useEffect(() => {
+    const nextOwnerId = !authUserId
+      ? null
+      : !onboardingActive && braiRequested
+        ? authUserId
+        : undefined;
+    if (nextOwnerId === undefined) return;
+    const timeout = window.setTimeout(() => setBraiSessionOwnerId(nextOwnerId), 0);
+    return () => window.clearTimeout(timeout);
+  }, [authUserId, braiRequested, onboardingActive]);
 
   useEffect(() => {
     if (!unauthEngineOpen) return;
@@ -367,19 +388,16 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
             leading={hasMobilePageRail(screenSection, nativeAndroid === true) ? <MobileMenuButton onClick={openMobileMenu} /> : null}
             denseMobileActions={screenSection === "brai"}
             desktopLeading={screenSection === "brai" ? (
-              <div className="flex items-center gap-2">
-                <BraiBrandIcon />
-                <button
-                  type="button"
-                  className="grid size-7 place-items-center rounded-md border-0 bg-transparent text-foreground hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                  aria-label={contextualRail.open ? "Закрыть панель чатов" : "Открыть панель чатов"}
-                  title={contextualRail.open ? "Закрыть панель чатов" : "Открыть панель чатов"}
-                  aria-pressed={contextualRail.open}
-                  onClick={() => contextualRail.setOpen(!contextualRail.open)}
-                >
-                  {contextualRail.open ? <PanelLeftClose className="size-5" aria-hidden="true" /> : <PanelLeftOpen className="size-5" aria-hidden="true" />}
-                </button>
-              </div>
+              <button
+                type="button"
+                className="grid size-7 place-items-center rounded-md border-0 bg-transparent text-foreground hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                aria-label={contextualRail.open ? "Закрыть панель чатов" : "Открыть панель чатов"}
+                title={contextualRail.open ? "Закрыть панель чатов" : "Открыть панель чатов"}
+                aria-pressed={contextualRail.open}
+                onClick={() => contextualRail.setOpen(!contextualRail.open)}
+              >
+                {contextualRail.open ? <PanelLeftClose className="size-5" aria-hidden="true" /> : <PanelLeftOpen className="size-5" aria-hidden="true" />}
+              </button>
             ) : hasDesktopPageRail(screenSection) ? (
               <button
                 type="button"
@@ -456,6 +474,7 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
             onRemoveFromGoal={app.onRemoveFromGoal}
             onReorderGoal={app.onReorderGoal}
             onCreateActionInGoal={app.onCreateActionInGoal}
+            agentRecommendationsEnabled={false}
             contextReviews={app.contextReviews}
             relationSyncIssues={app.relationSyncIssues}
             onResolveContextDecision={app.onResolveContextDecision}
@@ -487,7 +506,10 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
         ) : screenSection === "profile" ? (
           <PageWorkspace main={<ProfileSection />} />
         ) : screenSection === "factory" ? (
-          <FactorySection onMobileOverlayChange={app.setActionOverlayOpen} />
+          <FactorySection
+            onMobileOverlayChange={app.setActionOverlayOpen}
+            onRailContent={isActivePage ? registerFactoryRail : undefined}
+          />
         ) : screenSection === "focus" ? (
           <FocusSection
             state={app.timer}
@@ -605,12 +627,14 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
       inert={domainMutationsBlocked}
       aria-busy={domainMutationsBlocked}
       className={cx(
-        "app-shell h-dvh min-h-0 overflow-hidden [--sticky-top-offset:0px] max-[860px]:grid max-[860px]:grid-rows-[minmax(0,1fr)_auto] max-[860px]:[--mobile-top-padding:env(safe-area-inset-top)]",
+        "app-shell h-dvh min-h-0 overflow-hidden [--sticky-top-offset:0px] max-[860px]:grid max-[860px]:grid-rows-[minmax(0,1fr)_auto] max-[860px]:transition-[grid-template-rows] max-[860px]:duration-200 max-[860px]:ease-out max-[860px]:[--mobile-top-padding:env(safe-area-inset-top)]",
         app.actionOverlayOpen && "has-mobile-action-overlay max-[860px]:pb-0",
         app.mobileMenuOpen && "has-mobile-menu",
         drawsFullscreenActive && "max-[860px]:grid-rows-[minmax(0,1fr)]",
+        softwareKeyboardOpen && "max-[860px]:grid-rows-[minmax(0,1fr)_0px]",
       )}
       data-app-shell
+      data-software-keyboard={softwareKeyboardOpen ? "open" : "closed"}
     >
       {!drawsFullscreenActive && !mobileViewport ? (
         <DesktopRail
@@ -646,15 +670,19 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
         {visibleSection === "focus" ? <FocusBackground active={app.active} mode={app.focusBackground} /> : null}
         <ScrollArea scrollbar={false} className="main-scroll relative z-[1] h-full [&>[data-slot=scroll-area-viewport]>div]:h-full max-[860px]:[&>[data-slot=scroll-area-viewport]]:overscroll-contain max-[860px]:[&>[data-slot=scroll-area-viewport]]:[touch-action:pan-y]">
           <div className="section-swipe-stage relative m-0 h-full min-h-0 w-full overflow-x-hidden overflow-y-visible">
-            <section
-              className={cx("section-page section-page-current relative z-[1] min-w-0 [backface-visibility:hidden]", drawsFullscreenActive ? FULLSCREEN_SECTION_PAGE_CLASS : SECTION_PAGE_INSET_CLASS, app.swipeNavigation.visual && "will-change-transform")}
-              data-section-page={visibleSection}
-              style={sectionSwipePageStyle(app.swipeNavigation.visual, "current")}
-            >
-              {renderSectionScreen(visibleSection, true)}
-            </section>
-            {adjacentSection && adjacentSection !== app.section ? (
+            {visibleSection !== "brai" ? (
               <section
+                key="current-section-page"
+                className={cx("section-page section-page-current relative z-[1] min-w-0 [backface-visibility:hidden]", drawsFullscreenActive ? FULLSCREEN_SECTION_PAGE_CLASS : SECTION_PAGE_INSET_CLASS, app.swipeNavigation.visual && "will-change-transform")}
+                data-section-page={visibleSection}
+                style={sectionSwipePageStyle(app.swipeNavigation.visual, "current")}
+              >
+                {renderSectionScreen(visibleSection, true)}
+              </section>
+            ) : null}
+            {adjacentSection && adjacentSection !== app.section && adjacentSection !== "brai" ? (
+              <section
+                key="adjacent-section-page"
                 className={cx("section-page section-page-adjacent pointer-events-none absolute inset-0 z-0 min-w-0 [backface-visibility:hidden]", SECTION_PAGE_INSET_CLASS, app.swipeNavigation.visual && "will-change-transform")}
                 data-section-page={adjacentSection}
                 aria-hidden="true"
@@ -663,6 +691,22 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
                 {renderSectionScreen(adjacentSection, false)}
               </section>
             ) : null}
+            {shouldRenderBraiSession ? <section
+              key="brai-section-page"
+              className={cx(
+                "section-page min-w-0 [backface-visibility:hidden]",
+                BRAI_SECTION_PAGE_INSET_CLASS,
+                visibleSection === "brai" ? "section-page-current relative z-[1]" : adjacentSection === "brai" ? "section-page-adjacent pointer-events-none absolute inset-0 z-0" : "hidden",
+                app.swipeNavigation.visual && (visibleSection === "brai" || adjacentSection === "brai") && "will-change-transform",
+              )}
+              data-section-page="brai"
+              aria-hidden={visibleSection !== "brai"}
+              style={visibleSection === "brai"
+                ? sectionSwipePageStyle(app.swipeNavigation.visual, "current")
+                : adjacentSection === "brai" ? sectionSwipePageStyle(app.swipeNavigation.visual, "adjacent") : undefined}
+            >
+              {renderSectionScreen("brai", visibleSection === "brai")}
+            </section> : null}
           </div>
         </ScrollArea>
       </SidebarInset>
@@ -671,6 +715,7 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
           expanded={mobileDockLayer === "right" || mobileDockLayer === "context"}
           section={visibleSection}
           hidden={app.actionOverlayOpen || app.mobilePanelOpen}
+          keyboardOpen={softwareKeyboardOpen}
           mobileViewport={mobileViewport}
           onSection={app.selectSection}
           swipeHandlers={app.swipeNavigation.handlers}
@@ -683,17 +728,20 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
             side="left"
             hasUpdate={engineView.hasUpdate}
             hidden={app.mobileMenuOpen || app.actionOverlayOpen}
+            keyboardOpen={softwareKeyboardOpen}
             onClick={() => setMobileDockLayer("left")}
           />
           <MobileDockOverflowButton
             side="right"
             hidden={app.mobileMenuOpen || app.actionOverlayOpen}
+            keyboardOpen={softwareKeyboardOpen}
             onClick={() => setMobileDockLayer("right")}
           />
         </>
       ) : null}
       {app.mobileMenuOpen && !drawsFullscreenActive ? (
         <MobileProfileDrawer
+          contentOwnsScroll={visibleSection === "brai"}
           label={visibleSection === "brai" ? "Чаты Брая" : undefined}
           onClose={() => app.setMobileMenuOpen(false)}
         >

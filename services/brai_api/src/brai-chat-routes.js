@@ -19,6 +19,8 @@ const STALE_ATTACHMENT_MS = 24 * 60 * 60 * 1_000;
 const ATTACHMENT_REAP_LIMIT = 100;
 const ATTACHMENT_SCAN_LIMIT = 500;
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+const DEFAULT_MODEL_DISPLAY_NAME = 'GPT-5.6-Luna';
+const DEFAULT_REASONING_EFFORT = 'medium';
 
 export function isBraiChatRoute(pathname) {
   return pathname === '/v1/brai-chat' || pathname.startsWith('/v1/brai-chat/');
@@ -66,7 +68,14 @@ export async function handleBraiChatRoute({
     }
     if (req.method === 'POST') {
       await readJson(req, { limit: 1024 });
-      sendJson(req, res, 201, { thread: store.createBraiChatThread({ nowIso: now().toISOString() }) });
+      const catalog = await modelCatalog(runtime);
+      sendJson(req, res, 201, {
+        thread: store.createBraiChatThread({
+          model: catalog.default_model,
+          reasoningEffort: catalog.default_reasoning_effort,
+          nowIso: now().toISOString()
+        })
+      });
       return;
     }
   }
@@ -228,13 +237,14 @@ async function modelCatalog(runtime) {
       default_reasoning_effort: defaultEffort
     };
   }).filter(Boolean);
-  const defaultModel = models.some((model) => model.id === raw?.default_model)
-    ? raw.default_model : models[0]?.id ?? null;
-  const selected = models.find((model) => model.id === defaultModel);
+  const selected = models.find((model) => model.display_name === DEFAULT_MODEL_DISPLAY_NAME);
+  if (!selected || !selected.reasoning_efforts.includes(DEFAULT_REASONING_EFFORT)) {
+    throw httpError('brai_chat_default_model_unavailable', 503);
+  }
   return {
     models,
-    default_model: defaultModel,
-    default_reasoning_effort: selected?.default_reasoning_effort ?? null
+    default_model: selected.id,
+    default_reasoning_effort: DEFAULT_REASONING_EFFORT
   };
 }
 
@@ -450,8 +460,9 @@ function serveAttachment(req, res, store, vaultRoot, attachmentId, sendJson) {
   res.writeHead(200, {
     'content-type': attachment.media_type,
     'content-length': attachment.byte_size,
-    'content-disposition': `inline; filename*=UTF-8''${encodeURIComponent(attachment.filename)}`,
-    'cache-control': 'private, max-age=86400'
+    'content-disposition': `${new URL(req.url, 'http://localhost').searchParams.get('download') === '1' ? 'attachment' : 'inline'}; filename*=UTF-8''${encodeURIComponent(attachment.filename)}`,
+    'cache-control': 'private, max-age=86400',
+    'x-content-type-options': 'nosniff'
   });
   const stream = fs.createReadStream(null, { fd, autoClose: true });
   stream.on('error', () => res.destroy());

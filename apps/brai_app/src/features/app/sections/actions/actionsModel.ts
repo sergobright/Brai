@@ -14,7 +14,8 @@ export function useRestoreActionEditDrafts(
       const action = actions.find((item) => item.id === draftItem.actionId);
       if (!action) continue;
       restoredDraftsRef.current.add(draftItem.actionId);
-      void onAutosaveDetails(action, draftItem.title || action.title, draftItem.descriptionMd);
+      void onAutosaveDetails(action, draftItem.title || action.title, draftItem.descriptionMd)
+        .catch(() => undefined);
     }
   }, [actions, onAutosaveDetails]);
 }

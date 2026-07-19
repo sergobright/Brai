@@ -1,12 +1,12 @@
 "use client";
 
 import { useEffect, useMemo } from "react";
-import Image from "next/image";
 import { BookOpen, Code2, CornerUpLeft, Eye } from "lucide-react";
 import { Button } from "@/shared/ui/button";
 import { MarkdownContent } from "@/shared/ui/markdown-content";
 import { ScrollArea } from "@/shared/ui/scroll-area";
 import { cx } from "../../appUtils";
+import { BraiChatImage } from "./BraiChatImage";
 import { workspaceArtifacts, type BraiChatArtifact, type BraiWorkspaceMode } from "./braiChatModel";
 
 export type WorkspaceInstance = "desktop" | "mobile";
@@ -19,17 +19,19 @@ const MODE_COPY: Record<BraiWorkspaceMode, { empty: string; label: string; icon:
 
 export function BraiChatWorkspace({
   artifacts,
-  attachmentUrl,
+  loadAttachment,
   instance,
   mode,
   onSource,
+  showHeading = true,
   targetId,
 }: {
   artifacts: BraiChatArtifact[];
-  attachmentUrl: (id: string) => string;
+  loadAttachment: (id: string, download?: boolean) => Promise<Blob>;
   instance: WorkspaceInstance;
   mode: BraiWorkspaceMode;
   onSource: (artifact: BraiChatArtifact) => void;
+  showHeading?: boolean;
   targetId?: string | null;
 }) {
   const visibleArtifacts = useMemo(() => workspaceArtifacts(artifacts, mode), [artifacts, mode]);
@@ -47,12 +49,14 @@ export function BraiChatWorkspace({
   }, [instance, mode, targetId, visibleArtifacts]);
 
   return (
-    <div className="grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)]">
-      <header className="mb-3 flex min-h-9 items-center gap-3">
-        <Icon className="size-4 text-muted-foreground" aria-hidden="true" />
-        <h2 className="m-0 text-xl font-semibold leading-tight">{copy.label}</h2>
-        <span className="text-xs text-muted-foreground">{visibleArtifacts.length || ""}</span>
-      </header>
+    <div className={cx("grid h-full min-h-0", showHeading ? "grid-rows-[auto_minmax(0,1fr)]" : "grid-rows-[minmax(0,1fr)]")}>
+      {showHeading ? (
+        <header className="mb-3 flex min-h-9 items-center gap-3">
+          <Icon className="size-4 text-muted-foreground" aria-hidden="true" />
+          <h2 className="m-0 text-xl font-semibold leading-tight">{copy.label}</h2>
+          <span className="text-xs text-muted-foreground">{visibleArtifacts.length || ""}</span>
+        </header>
+      ) : null}
       {visibleArtifacts.length === 0 ? (
         <div className="grid min-h-0 place-items-center p-8 text-center">
           <div className="grid max-w-sm justify-items-center gap-3 text-muted-foreground">
@@ -81,7 +85,7 @@ export function BraiChatWorkspace({
                     </Button>
                   ) : null}
                 </header>
-                <WorkspaceArtifactContent artifact={artifact} attachmentUrl={attachmentUrl} />
+                <WorkspaceArtifactContent artifact={artifact} loadAttachment={loadAttachment} />
               </article>
             ))}
           </div>
@@ -91,21 +95,14 @@ export function BraiChatWorkspace({
   );
 }
 
-function WorkspaceArtifactContent({ artifact, attachmentUrl }: {
+function WorkspaceArtifactContent({ artifact, loadAttachment }: {
   artifact: BraiChatArtifact;
-  attachmentUrl: (id: string) => string;
+  loadAttachment: (id: string, download?: boolean) => Promise<Blob>;
 }) {
   if (artifact.kind === "image" && artifact.attachmentId) {
     return (
-      <div className="grid place-items-center p-4">
-        <Image
-          unoptimized
-          src={attachmentUrl(artifact.attachmentId)}
-          alt={artifact.label}
-          width={1200}
-          height={900}
-          className="h-auto max-h-[70dvh] w-full object-contain"
-        />
+      <div className="p-4">
+        <BraiChatImage attachmentId={artifact.attachmentId} label={artifact.label} loadBlob={loadAttachment} />
       </div>
     );
   }

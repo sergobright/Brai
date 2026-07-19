@@ -20,6 +20,7 @@ console.log(match.slice(1, 4).join("."));
 ' "$ROOT")"
 OTA_VERSION="${BRAI_OTA_VERSION:-$VERSION}"
 BUNDLE_ID="${BRAI_MOBILE_BUNDLE_VERSION:-$OTA_VERSION}"
+OTA_VERSION_FLOOR="${BRAI_OTA_VERSION_FLOOR:-}"
 UPDATE_BASE_URL="${BRAI_UPDATE_BASE_URL:-https://app.brai.one/mobile-update}"
 TARGET_APK_VERSION="${BRAI_TARGET_APK_VERSION:-${BRAI_APK_VERSION:-1}}"
 TARGET_APK_RELEASE_KEY="${BRAI_TARGET_APK_RELEASE_KEY:-production}"
@@ -52,6 +53,44 @@ if [[ ! "$OTA_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
   echo "Invalid OTA version: $OTA_VERSION" >&2
   exit 1
 fi
+
+"$NODE_BIN" -e '
+const fs = require("node:fs");
+const path = require("node:path");
+const [targetRoot, candidate, configuredFloor] = process.argv.slice(1);
+const normalize = (value) => {
+  const match = String(value || "").match(/^(\d+)\.(\d+)\.(\d+)(?:$|[._+-])/);
+  return match ? match.slice(1, 4).join(".") : "";
+};
+const compare = (left, right) => {
+  const a = left.split(".").map(Number);
+  const b = right.split(".").map(Number);
+  for (let index = 0; index < 3; index += 1) {
+    if (a[index] !== b[index]) return a[index] - b[index];
+  }
+  return 0;
+};
+const versions = [configuredFloor];
+const manifestPath = path.join(targetRoot, "manifest.json");
+if (fs.existsSync(manifestPath)) {
+  versions.push(JSON.parse(fs.readFileSync(manifestPath, "utf8")).otaVersion || "");
+}
+const bundlesPath = path.join(targetRoot, "bundles");
+if (fs.existsSync(bundlesPath)) {
+  for (const entry of fs.readdirSync(bundlesPath, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    versions.push(entry.name);
+    const metadataPath = path.join(bundlesPath, entry.name, "metadata.json");
+    if (fs.existsSync(metadataPath)) versions.push(JSON.parse(fs.readFileSync(metadataPath, "utf8")).otaVersion || "");
+  }
+}
+const floor = versions.map(normalize).filter(Boolean).reduce((latest, version) => !latest || compare(version, latest) > 0 ? version : latest, "");
+const normalizedCandidate = normalize(candidate);
+if (!normalizedCandidate) throw new Error(`Invalid OTA version: ${candidate}`);
+if (floor && compare(normalizedCandidate, floor) < 0) {
+  throw new Error(`Refusing OTA downgrade: ${normalizedCandidate} is older than published floor ${floor}`);
+}
+' "$TARGET_ROOT" "$OTA_VERSION" "$OTA_VERSION_FLOOR"
 
 if [[ ! "$BUNDLE_ID" =~ ^[A-Za-z0-9._+-]+$ ]]; then
   echo "Invalid bundle id: $BUNDLE_ID" >&2

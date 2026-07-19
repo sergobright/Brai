@@ -15,7 +15,10 @@ const nativePackagePattern = /^\s*[+-].*("@capacitor\/|@capacitor-community\/|@c
 
 if (path.resolve(process.argv[1] ?? "") === fileURLToPath(import.meta.url)) {
   const branch = process.argv[2] ?? "";
-  const explicitBase = process.argv[3] ?? process.env.BRAI_BASE_COMMIT ?? "";
+  const explicitBase = process.argv[3]
+    ?? process.env.BRAI_PRODUCT_BASE_COMMIT
+    ?? process.env.BRAI_BASE_COMMIT
+    ?? "";
   const ranges = diffRanges(branch, explicitBase);
   if (ranges.length === 0) {
     console.log("false");
@@ -55,10 +58,12 @@ export function diffRange(branchName, base, referenceExists = refExists) {
 }
 
 export function diffRanges(branchName, base, referenceExists = refExists) {
-  const ranges = [];
-  if (branchName.startsWith("codex/") && referenceExists(acceptedBaseRef())) {
-    ranges.push(`${acceptedBaseRef()}...HEAD`);
+  if (branchName.startsWith("codex/")) {
+    if (base && !/^0{40}$/.test(base) && referenceExists(base)) return [`${base}..HEAD`];
+    if (referenceExists(acceptedBaseRef())) return [`${acceptedBaseRef()}...HEAD`];
+    return [];
   }
+  const ranges = [];
   if (base && !/^0{40}$/.test(base) && referenceExists(base)) {
     ranges.push(`${base}..HEAD`);
   }

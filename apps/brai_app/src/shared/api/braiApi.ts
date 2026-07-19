@@ -9,6 +9,7 @@ import type { ActivitiesState, ActivitiesSyncResponse, PendingActivityEvent } fr
 import { normalizeContextDecisionsState, type ContextDecisionsState, type ContextDecisionsWireState, type ContextResolutionRequest, type ContextResolutionResponse, type GoalPlanResponse } from "@/shared/types/contextDecisions";
 import type { InboxState, InboxSyncResponse, InboxWorkflowDetails, PendingInboxEvent } from "@/shared/types/inbox";
 import { normalizeRelationsState, type PendingRelationEvent, type RelationsState, type RelationsSyncResponse, type RelationsWireState, type RelationsWireSyncResponse } from "@/shared/types/relations";
+import { captureRuntimeBearerToken, clearRuntimeBearerToken } from "@/shared/auth/runtimeBearerToken";
 import { drainContextReviews, drainRelations } from "./pagination";
 interface RequestOptions extends RequestInit {
   json?: unknown;
@@ -75,6 +76,35 @@ export type AiLog = {
   flow_id: string | null;
   flow_command: string | null;
   trace_id?: string | null;
+};
+
+export type AgentCatalogEntry = {
+  id: string;
+  version: string;
+  target: string;
+  kind: string;
+  status: string;
+  enabled: boolean;
+  toggleable: boolean;
+  title: string;
+  summary: string;
+  trigger_description: string;
+  conditions_description: string;
+  input_description: string;
+  output_description: string;
+  interactions_description: string;
+  side_effects_description: string;
+  llm_provider: string;
+  llm_model: string;
+  llm_timeout_ms: number | null;
+  fallback_description: string;
+  source_module: string;
+  prompt_version: string;
+  schema_version: string;
+  task_queue_base: string;
+  runtime_service: string;
+  metadata_json: Record<string, unknown>;
+  updated_at_utc: string;
 };
 
 export type EventLogRow = {
@@ -232,7 +262,11 @@ export class BraiApi {
 
   setExpectedUserId(userId: string | null): void { this.expectedUserId = userId; }
 
-  async session(): Promise<AuthSession> { return this.request("/auth/session"); }
+  async session(): Promise<AuthSession> {
+    const session = await this.request<AuthSession>("/auth/session");
+    if (!session.authenticated) clearRuntimeBearerToken();
+    return session;
+  }
 
   async requestOtp(email: string): Promise<OtpSendResult> {
     return this.request("/auth/otp/send", {
@@ -255,7 +289,13 @@ export class BraiApi {
     });
   }
 
-  async logout(): Promise<void> { await this.request("/auth/logout", { method: "POST" }); }
+  async logout(): Promise<void> {
+    try {
+      await this.request("/auth/logout", { method: "POST" });
+    } finally {
+      clearRuntimeBearerToken();
+    }
+  }
   async state(): Promise<TimerState> { return this.request("/v1/timer/state"); }
   async history(): Promise<HistoryData> { return this.request("/v1/sessions"); }
   async goal(): Promise<GoalData> { return this.request("/v1/goals/challenge"); }
@@ -308,8 +348,21 @@ export class BraiApi {
     return this.request(`/v1/activities/${encodeURIComponent(activityId)}/workflow`);
   }
 
-  async aiLogs(limit = 50): Promise<{ logs: AiLog[] }> {
-    return this.request(`/v1/ai-logs?limit=${encodeURIComponent(String(limit))}`);
+  async aiLogs(limit = 50, agentId?: string | null): Promise<{ logs: AiLog[] }> {
+    const query = new URLSearchParams({ limit: String(limit) });
+    if (agentId) query.set("agent_id", agentId);
+    return this.request(`/v1/ai-logs?${query}`);
+  }
+
+  async agents(): Promise<{ agents: AgentCatalogEntry[]; can_manage_agents: boolean }> {
+    return this.request("/v1/agents");
+  }
+
+  async setAgentEnabled(agentId: string, enabled: boolean): Promise<{ agent: AgentCatalogEntry }> {
+    return this.request(`/v1/agents/${encodeURIComponent(agentId)}/status`, {
+      method: "PATCH",
+      json: { enabled },
+    });
   }
 
   async events(limit = 100): Promise<{ events: EventLogRow[] }> {
@@ -557,6 +610,7 @@ export class BraiApi {
         signal: controller.signal,
         body: json === undefined ? requestOptions.body : JSON.stringify(json),
       });
+      captureRuntimeBearerToken(response);
     } finally {
       clearTimeout(timeoutId);
       requestOptions.signal?.removeEventListener("abort", abortRequest);

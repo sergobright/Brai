@@ -13,22 +13,17 @@ import kotlin.math.min
 internal class AccessibilityTextInserter(private val service: BraiAccessibilityService) {
     fun insert(text: String, focusedNode: AccessibilityNodeInfo?, findNode: () -> AccessibilityNodeInfo?): Boolean {
         if (text.isBlank()) return false
-        copyToClipboard(text)
         val node = focusedNode?.takeIf { it.refresh() } ?: findNode()
         if (node == null) {
+            copyToClipboard(text)
             return false
         }
-        val direct = runCatching { insertDirect(node, text) }.getOrDefault(false)
-        if (!direct) {
-            val pasted = runCatching { pasteViaClipboard(node) }.getOrDefault(false)
-            if (!pasted) {
-                val menuPasted = runCatching { pasteViaContextMenu(node) }.getOrDefault(false)
-                if (!menuPasted) {
-                    return false
-                }
-            }
-        }
-        return true
+        return insertWithClipboardFallback(
+            directInsert = { insertDirect(node, text) },
+            copyToClipboard = { copyToClipboard(text) },
+            pasteFromClipboard = { pasteViaClipboard(node) },
+            pasteFromContextMenu = { pasteViaContextMenu(node) }
+        )
     }
 
     private fun copyToClipboard(text: String) {
@@ -155,4 +150,16 @@ internal class AccessibilityTextInserter(private val service: BraiAccessibilityS
         private const val PASTE_MENU_ATTEMPTS = 6
         private const val PASTE_MENU_DELAY_MS = 90L
     }
+}
+
+internal fun insertWithClipboardFallback(
+    directInsert: () -> Boolean,
+    copyToClipboard: () -> Unit,
+    pasteFromClipboard: () -> Boolean,
+    pasteFromContextMenu: () -> Boolean
+): Boolean {
+    if (runCatching(directInsert).getOrDefault(false)) return true
+    copyToClipboard()
+    if (runCatching(pasteFromClipboard).getOrDefault(false)) return true
+    return runCatching(pasteFromContextMenu).getOrDefault(false)
 }

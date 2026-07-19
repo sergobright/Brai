@@ -41,7 +41,7 @@ class FakeDocker {
       approval_policy: "never",
       default_permissions: "brai-chat",
       sandbox_mode: null,
-      web_search: "disabled",
+      web_search: "cached",
       features: { apps: false, plugins: false, tool_suggest: false, enable_mcp_apps: false },
     },
     origins: {},
@@ -51,7 +51,7 @@ class FakeDocker {
       allowedApprovalPolicies: ["never"],
       allowedPermissionProfiles: { "brai-chat": true },
       defaultPermissions: "brai-chat",
-      allowedWebSearchModes: ["disabled"],
+      allowedWebSearchModes: ["cached", "disabled"],
       allowManagedHooksOnly: true,
       allowAppshots: false,
       allowRemoteControl: false,
@@ -124,7 +124,15 @@ class FakeDocker {
         respond(this.requirements);
         break;
       case "model/list":
-        respond({ data: [{ id: "gpt-5.4", model: "gpt-5.4" }], nextCursor: null });
+        respond({
+          data: [{
+            id: "gpt-5.6-luna",
+            model: "gpt-5.6-luna",
+            displayName: "GPT-5.6-Luna",
+            supportedReasoningEfforts: [{ reasoningEffort: "medium" }],
+          }],
+          nextCursor: null,
+        });
         break;
       case "permissionProfile/list":
         respond({ data: [{ id: "brai-chat", description: "isolated", allowed: true }], nextCursor: null });
@@ -232,6 +240,33 @@ test("preflight fails closed when managed Codex requirements are weakened", asyn
     (error) => error.code === "BRAI_RUNTIME_CONFIGURATION_INVALID",
   );
   assert.equal(manager.readiness().ready, false);
+});
+
+test("preflight accepts the safe disabled-to-cached deploy transition and rejects live search", async (t) => {
+  await t.test("old disabled config remains safe during provisional broker startup", async () => {
+    const fixture = await createFixture();
+    const docker = new FakeDocker();
+    docker.config.config.web_search = "disabled";
+    docker.requirements.requirements.allowedWebSearchModes = ["disabled"];
+    const manager = fixture.manager(docker);
+    await manager.preflight();
+    assert.equal(manager.readiness().ready, true);
+  });
+
+  for (const target of ["config", "requirements"]) {
+    await t.test(`live search is rejected in ${target}`, async () => {
+      const fixture = await createFixture();
+      const docker = new FakeDocker();
+      if (target === "config") docker.config.config.web_search = "live";
+      else docker.requirements.requirements.allowedWebSearchModes = ["cached", "live", "disabled"];
+      const manager = fixture.manager(docker);
+      await assert.rejects(
+        manager.preflight(),
+        (error) => error.code === "BRAI_RUNTIME_CONFIGURATION_INVALID",
+      );
+      assert.equal(manager.readiness().ready, false);
+    });
+  }
 });
 
 test("production and Dev fixed environment names pass configuration validation", async () => {
@@ -816,6 +851,7 @@ test("semantic title generation uses a private ephemeral thread without leaking 
   assert.equal(titleTurn.params.permissions, "brai-chat");
   assert.equal(titleTurn.params.model, "gpt-5.4");
   assert.equal(titleTurn.params.effort, "medium");
+  assert.equal(titleTurn.params.summary, "auto");
   assert.match(titleTurn.params.input[0].text, /основном языке диалога пользователя/);
   await manager.close();
 });
@@ -988,8 +1024,58 @@ test("starting a thread with attachments keeps its first turn in the same runtim
   const methods = docker.runtimes[0].requests.map(({ method }) => method);
   assert.equal(methods.filter((method) => method === "thread/resume").length, 0);
   assert.ok(methods.indexOf("thread/start") < methods.indexOf("turn/start"));
+  const startRequest = docker.runtimes[0].requests.find(({ method }) => method === "thread/start");
+  assert.deepEqual(startRequest.params.dynamicTools.map(({ name }) => name), [
+    "brai_create_action",
+    "brai_create_inbox",
+  ]);
   client.close();
   await server.close();
+});
+
+test("dynamic tool requests stay owner-scoped and return only bounded text to App Server", async () => {
+  const fixture = await createFixture();
+  const docker = new FakeDocker();
+  const manager = fixture.manager(docker);
+  const runtime = await manager.ensureRuntime(USER_A);
+  const notification = once(manager, "notification");
+  runtime.child.stdout.write(`${JSON.stringify({
+    id: 901,
+    method: "item/tool/call",
+    params: {
+      arguments: { title: "Позвонить маме" },
+      callId: "call_00000001",
+      threadId: THREAD,
+      tool: "brai_create_action",
+      turnId: TURN,
+    },
+  })}\n`);
+  const [{ userId, message }] = await notification;
+  assert.equal(userId, USER_A);
+  assert.equal(message.method, "item/tool/call");
+  assert.equal(message.params.tool, "brai_create_action");
+  assert.equal(message.params.arguments.title, "Позвонить маме");
+  assert.match(message.params.toolRequestId, /^[0-9a-f-]{36}$/);
+
+  assert.throws(
+    () => manager.respondToolCall(USER_B, {
+      toolRequestId: message.params.toolRequestId,
+      success: true,
+      contentItems: [{ type: "inputText", text: "Чужой ответ" }],
+    }),
+    (error) => error.code === "BRAI_TOOL_REQUEST_NOT_FOUND",
+  );
+  assert.deepEqual(manager.respondToolCall(USER_A, {
+    toolRequestId: message.params.toolRequestId,
+    success: true,
+    contentItems: [{ type: "inputText", text: "Действие добавлено." }],
+  }), { delivered: true });
+  const response = runtime.child.requests.find((request) => request.id === 901 && request.result);
+  assert.deepEqual(response.result, {
+    success: true,
+    contentItems: [{ type: "inputText", text: "Действие добавлено." }],
+  });
+  await manager.close();
 });
 
 test("a thread already loaded in the current runtime starts without an empty-history resume", async () => {
@@ -1093,6 +1179,8 @@ test("Unix JSONL RPC rejects arbitrary input and forwards correlated safe notifi
   const notification = once(client, "notification");
   const result = await client.call("startTurn", { userId: USER_A, threadId: THREAD, text: "Привет" });
   assert.deepEqual(result, { turnId: TURN });
+  const turnStart = docker.runtimes[0].requests.find(({ method }) => method === "turn/start");
+  assert.equal(turnStart.params.summary, "auto");
   const [event] = await notification;
   assert.match(event.notificationEpoch, /^[0-9a-f-]{36}$/);
   assert.deepEqual({ ...event, notificationEpoch: undefined }, {

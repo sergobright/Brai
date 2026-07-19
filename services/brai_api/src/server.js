@@ -37,7 +37,10 @@ import {
   serveReleaseDownload,
   serveReleasePage
 } from './release-routes.js';
-import { goalAgentsEnabledFromEnv } from './goal-agent-switch.js';
+import {
+  goalAgentRecommendationsEnabledFromEnv,
+  goalAgentsEnabledFromEnv
+} from './goal-agent-switch.js';
 import { BraiStore, formatFocusInterval, formatSession } from './store.js';
 import { scopedUserId, withUserScope } from './user-scope.js';
 import {
@@ -50,7 +53,7 @@ import {
 const BASE_JSON_HEADERS = {
   'content-type': 'application/json; charset=utf-8',
   'access-control-allow-methods': 'GET,POST,PUT,PATCH,DELETE,OPTIONS',
-  'access-control-allow-headers': 'authorization,content-type,last-event-id,x-api-key,x-brai-api-key,x-brai-target,x-brai-destination,x-brai-chat-after,x-brai-cmd-device-id,x-brai-cmd-client-version,x-brai-expected-user-id',
+  'access-control-allow-headers': 'authorization,content-type,last-event-id,x-api-key,x-brai-api-key,x-brai-target,x-brai-destination,x-brai-chat-after,x-brai-chat-replay-mode,x-brai-cmd-device-id,x-brai-cmd-client-version,x-brai-expected-user-id',
   'access-control-allow-credentials': 'true'
 };
 const SESSION_COOKIE = 'brai_session';
@@ -99,6 +102,7 @@ export function createBraiServer({
   activityWorkflowStarter = null,
   activityAutoProcess = true,
   goalAgentsEnabled = goalAgentsEnabledFromEnv(),
+  goalAgentRecommendationsEnabled = goalAgentRecommendationsEnabledFromEnv(),
   goalAgentEnvironment = process.env.BRAI_ENVIRONMENT || 'prod',
   braiCmd = {},
   braiChatRuntime = null,
@@ -120,6 +124,7 @@ export function createBraiServer({
   const store = new BraiStore(databaseUrl);
   store.logger = logger;
   store.goalAgentsEnabled = goalAgentsEnabled !== false;
+  store.goalAgentRecommendationsEnabled = goalAgentRecommendationsEnabled === true;
   store.configureGoalAgentEnvironment(goalAgentEnvironment);
   store.configureUserAiEncryptionKey(userAiEncryptionKey);
   const releaseDownloadLimiter = new RateLimiterMemory({ points: 10, duration: 3600 });
@@ -346,6 +351,89 @@ export function createBraiServer({
     }, 0);
   };
 
+  braiChatRuntime?.configureDomainTools?.(async ({
+    userId, publicThreadId, runId, callId, tool, arguments: toolArguments
+  }) => withUserScope(userId, async () => {
+    const nowDate = now();
+    const nowIso = nowDate.toISOString();
+    const stableKey = `brai-chat:${userId}:${publicThreadId}:${runId}:${callId}`;
+    const digest = crypto.createHash('sha256').update(stableKey).digest('hex');
+    if (tool === 'brai_create_action') {
+      const title = braiToolText(toolArguments?.title, 500, true);
+      const description = braiToolText(toolArguments?.description, 20_000, false);
+      const activityId = `brai-chat:activity:${digest.slice(0, 32)}`;
+      const eventId = `brai-chat:${digest}:create`;
+      const existed = Boolean(store.getActivityItem(activityId));
+      const result = store.syncActivityEvents({
+        device: {
+          device_id: 'brai-chat-agent',
+          platform: 'server',
+          display_name: 'Brai chat'
+        },
+        events: [{
+          event_id: eventId,
+          client_sequence: store.nextPostgresCounter('events.client_sequence.brai-chat-agent'),
+          change_type: 'create',
+          activity_id: activityId,
+          occurred_at_utc: nowIso,
+          payload: {
+            title,
+            description_md: description,
+            activity_type_id: 'action'
+          }
+        }],
+        nowIso
+      });
+      if (result.ignored_events?.length) throw new Error('domain_mutation_failed');
+      const state = activitiesState(store, nowDate);
+      broadcast(sockets, {
+        type: 'activities_synced',
+        activities_state: state,
+        actions_state: actionsCompatState(state)
+      }, userId);
+      if (!existed) processActivityLater({ ownerUserId: userId, activityId });
+      return {
+        success: true,
+        text: `Действие ${existed ? 'уже существовало' : 'создано'}: ${JSON.stringify(title)}. ID: ${activityId}`
+      };
+    }
+    if (tool === 'brai_create_inbox') {
+      const text = braiToolText(toolArguments?.text, 20_000, true);
+      const description = braiToolText(toolArguments?.description, 20_000, false);
+      const inboxId = `inbox:brai-chat:${digest.slice(0, 32)}`;
+      const eventId = `${inboxId}:create`;
+      const ingestIdempotencyHash = inboxIngestIdempotencyHash(stableKey);
+      const ingestPayloadHash = crypto.createHash('sha256').update(JSON.stringify({
+        text, description, source: 'brai-chat', thread_id: publicThreadId
+      })).digest('hex');
+      const created = store.createInboxApiItem({
+        eventId,
+        inboxId,
+        title: text.split(/\r?\n/, 1)[0].trim().slice(0, 500),
+        descriptionText: description,
+        explanationText: text,
+        attachmentLinks: [],
+        source: 'brai-chat',
+        sourceKey: publicThreadId,
+        responseRequired: false,
+        relatedInboxId: null,
+        recordTypeId: 1,
+        preliminarySection: '',
+        ingestIdempotencyHash,
+        ingestPayloadHash,
+        nowIso
+      });
+      const state = inboxState(store, nowDate);
+      broadcast(sockets, { type: 'inbox_synced', inbox_state: state }, userId);
+      if (created.accepted_event) processInboxLater({ ownerUserId: userId, inboxId });
+      return {
+        success: true,
+        text: `Входящая запись ${created.accepted_event ? 'создана' : 'уже существовала'}: ${JSON.stringify(text.slice(0, 500))}. ID: ${inboxId}`
+      };
+    }
+    throw new Error('domain_tool_not_allowed');
+  }));
+
   const contextAuditInterval = Number(contextAuditReconcileIntervalMs) > 0
     ? setInterval(() => {
         try {
@@ -389,6 +477,7 @@ export function createBraiServer({
     let requestPath = req.url ?? '/';
     let requestUserId = null;
     try {
+      applyCorsHeaders(req, res);
       if (req.method === 'OPTIONS') {
         res.writeHead(204, jsonHeaders(req));
         res.end();
@@ -445,7 +534,13 @@ export function createBraiServer({
       if (url.pathname === '/auth/session' && req.method === 'GET') {
         const session = await betterAuthSession(req, auth, authBackendTimeoutMs);
         if (session?.user) {
-          sendJson(req, res, 200, { authenticated: true, user: publicAuthUser(session.user) });
+          sendJson(
+            req,
+            res,
+            200,
+            { authenticated: true, user: publicAuthUser(session.user) },
+            nativeRuntimeAuthHeaders(req)
+          );
           return;
         }
         if (hasValidSession(req, sessionSecret, now())) {
@@ -1447,7 +1542,35 @@ export function createBraiServer({
       }
 
       if (req.method === 'GET' && url.pathname === '/v1/ai-logs') {
-        sendJson(req, res, 200, { logs: store.listAiLogs({ limit: url.searchParams.get('limit') }) });
+        sendJson(req, res, 200, {
+          logs: store.listAiLogs({
+            limit: url.searchParams.get('limit'),
+            agentId: url.searchParams.get('agent_id')
+          })
+        });
+        return;
+      }
+
+      if (req.method === 'GET' && url.pathname === '/v1/agents') {
+        sendJson(req, res, 200, {
+          agents: store.listAgents(),
+          can_manage_agents: authContext.userId === store.primaryUserId()
+        });
+        return;
+      }
+
+      const agentStatusMatch = req.method === 'PATCH'
+        ? url.pathname.match(/^\/v1\/agents\/([^/]+)\/status$/)
+        : null;
+      if (agentStatusMatch) {
+        const body = await readJson(req, { limit: 8 * 1024 });
+        const agent = store.setAgentEnabled({
+          agentId: decodeURIComponent(agentStatusMatch[1]),
+          enabled: body.enabled,
+          actorUserId: authContext.userId,
+          nowIso: now().toISOString()
+        });
+        sendJson(req, res, 200, { agent });
         return;
       }
 
@@ -1895,6 +2018,14 @@ function actionsCompatState(state) {
   };
 }
 
+function braiToolText(value, maxLength, required) {
+  const text = typeof value === 'string'
+    ? value.replace(/\u0000/g, '').replace(/\r\n?/g, '\n').trim().slice(0, maxLength)
+    : '';
+  if (required && !text) throw new Error('invalid_tool_arguments');
+  return text;
+}
+
 async function authenticateRequest(req, token, parsedUrl, sessionSecret, now, auth, store, authBackendTimeoutMs) {
   const session = await betterAuthSession(req, auth, authBackendTimeoutMs);
   if (session?.user?.id) {
@@ -2052,7 +2183,10 @@ async function relayAuthResponse(req, res, response) {
 
 function relayAuthText(req, res, response, text, parsed = parseJson(text)) {
   const cookies = setCookieHeaders(response.headers);
-  const extraHeaders = cookies.length > 0 ? { 'set-cookie': cookies } : {};
+  const extraHeaders = {
+    ...(cookies.length > 0 ? { 'set-cookie': cookies } : {}),
+    ...nativeRuntimeAuthHeaders(req, response.headers)
+  };
   if (response.ok && parsed?.user?.id) {
     sendJson(req, res, response.status, { authenticated: true, user: publicAuthUser(parsed.user) }, extraHeaders);
     return;
@@ -2095,6 +2229,12 @@ function authPreliminaryContext(body) {
 function sendJson(req, res, status, body, extraHeaders = {}) {
   res.writeHead(status, { ...jsonHeaders(req), ...extraHeaders });
   res.end(JSON.stringify(body));
+}
+
+function applyCorsHeaders(req, res) {
+  for (const [key, value] of Object.entries(jsonHeaders(req))) {
+    if (key !== 'content-type') res.setHeader(key, value);
+  }
 }
 
 function jsonHeaders(req) {
@@ -2189,6 +2329,34 @@ function isTestEmailLoginOrigin(origin) {
   if (/^https:\/\/[a-e]\.test\.brai\.one$/.test(origin ?? '')) return true;
   if (/^https:\/\/[a-e]\.test\.brightos\.world$/.test(origin ?? '')) return true;
   return /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin ?? '');
+}
+
+function nativeRuntimeAuthHeaders(req, responseHeaders = null) {
+  if (!isNativeAppOrigin(req?.headers?.origin)) return {};
+  const token = responseHeaders?.get?.('set-auth-token') || signedSessionCookie(req?.headers?.cookie);
+  if (!token) return {};
+  return {
+    'set-auth-token': token,
+    'access-control-expose-headers': 'set-auth-token'
+  };
+}
+
+function signedSessionCookie(cookieHeader) {
+  if (typeof cookieHeader !== 'string') return null;
+  for (const part of cookieHeader.split(';')) {
+    const separator = part.indexOf('=');
+    if (separator <= 0) continue;
+    const name = part.slice(0, separator).trim();
+    const value = part.slice(separator + 1).trim();
+    if (name.endsWith('better-auth.session_token') && value.includes('.')) return value;
+  }
+  return null;
+}
+
+function isNativeAppOrigin(origin) {
+  return origin === 'capacitor://localhost'
+    || origin === 'https://localhost'
+    || origin === 'http://localhost';
 }
 
 function requiresTrustedOrigin(req, authContext) {

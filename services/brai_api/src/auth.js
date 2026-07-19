@@ -1,6 +1,6 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { betterAuth } from 'better-auth';
-import { emailOTP } from 'better-auth/plugins';
+import { bearer, emailOTP } from 'better-auth/plugins';
 import { Resend } from 'resend';
 import { isPostgresUrl, postgresPoolMax } from './postgres-sync-db.js';
 import { createRecoveringPostgresPool } from './postgres-recovery.js';
@@ -91,6 +91,7 @@ export function createBraiAuth({
       }
     },
     plugins: [
+      bearer({ requireSignature: true }),
       emailOTP({
         allowedAttempts: OTP_ALLOWED_ATTEMPTS,
         expiresIn: OTP_EXPIRES_IN_SECONDS,

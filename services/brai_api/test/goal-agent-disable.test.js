@@ -2,7 +2,10 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { IllegalStateError } from '@temporalio/worker';
 import { createFixture, request } from '../test-support/api.js';
-import { goalAgentsEnabledFromEnv } from '../src/goal-agent-switch.js';
+import {
+  goalAgentRecommendationsEnabledFromEnv,
+  goalAgentsEnabledFromEnv
+} from '../src/goal-agent-switch.js';
 import {
   createGoalAgentWorkflowRuntime,
   shutdownGoalAgentWorker
@@ -39,6 +42,46 @@ test('disabled Goal-agent runtime is a no-op before database or Temporal connect
   assert.equal(await runtime.recoverQueued(), 0);
   assert.equal(runtime.startReconciler(), false);
   await runtime.close();
+});
+
+test('environment switch is an emergency kill while catalog status owns agent enablement', () => {
+  assert.equal(goalAgentRecommendationsEnabledFromEnv(undefined), true);
+  assert.equal(goalAgentRecommendationsEnabledFromEnv(''), true);
+  for (const value of ['1', 'true', 'YES', 'on']) {
+    assert.equal(goalAgentRecommendationsEnabledFromEnv(value), true);
+  }
+  for (const value of ['0', 'false', 'NO', 'off']) {
+    assert.equal(goalAgentRecommendationsEnabledFromEnv(value), false);
+  }
+});
+
+test('disabled recommendations stop new automatic and explicit proposal work', async () => {
+  const fixture = await createFixture([NOW], { goalAgentRecommendationsEnabled: false });
+  try {
+    claimOwner(fixture);
+    owner(fixture, () => {
+      seedActivity(fixture.store, 'recommendations-off-action', 'action');
+      seedActivity(fixture.store, 'recommendations-off-goal', 'goal');
+    });
+
+    assert.equal(owner(fixture, () => fixture.store.scheduleGoalAgentForActivity({
+      itemsId: 'recommendations-off-action',
+      triggerKind: 'activity_created',
+      triggerRevision: 1,
+      nowIso: NOW
+    })), null);
+    assert.equal(owner(fixture, () => fixture.store.noteGoalDiscoveryChanges({
+      count: 1,
+      nowIso: NOW
+    })), false);
+    assert.throws(() => owner(fixture, () => fixture.store.requestGoalPlan({
+      itemsId: 'recommendations-off-goal',
+      triggerRevision: 1,
+      nowIso: NOW
+    })), (error) => error.code === 'goal_agents_disabled' && error.status === 503);
+  } finally {
+    await fixture.close();
+  }
 });
 
 test('disabled store triggers preserve queued work and watermarks while manual Relations remain available', async () => {

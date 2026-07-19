@@ -1,8 +1,8 @@
 "use client";
 
 import type { ComponentProps, CSSProperties } from "react";
-import { createContext, forwardRef, useCallback, useContext, useEffect, useMemo, useRef } from "react";
-import { ArrowUp, ChevronDown, Plus } from "lucide-react";
+import { createContext, forwardRef, memo, useCallback, useContext, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { ArrowUp, ChevronDown, ChevronRight, ImageIcon, Plus, Search } from "lucide-react";
 import {
   CopilotChat,
   CopilotChatAssistantMessage,
@@ -12,21 +12,26 @@ import {
   CopilotKit,
   UseAgentUpdate,
   useAgent,
-  useConfigureSuggestions,
   useCopilotKit,
   useDefaultRenderTool,
 } from "@copilotkit/react-core/v2";
 import { Button } from "@/shared/ui/button";
+import { cn } from "@/shared/ui/cn";
+import { getBraiLocalStorageItem, setBraiLocalStorageItem } from "@/shared/storage/localStorageKeys";
 import { Textarea } from "@/shared/ui/textarea";
+import { platformName } from "@/shared/platform/platform";
 import { cx } from "../../appUtils";
 import type { ThemeMode } from "../../appModel";
+import { isMobileNavigationViewport } from "../../navigation/useSectionSwipeNavigation";
 import { attachmentReservationError } from "./braiChatModel";
+import { BraiChatImage } from "./BraiChatImage";
 
 const BRAI_AGENT_ID = "brai-codex";
 const MAX_ATTACHMENT_BYTES = 50 * 1024 * 1024;
 type CopilotThemeStyle = CSSProperties & Record<`--${string}`, string>;
 
 const BRAI_COPILOT_TOKEN_BRIDGE: CopilotThemeStyle = {
+  "--brai-chat-composer-height": "3.25rem",
   "--brai-copilot-accent": "var(--accent)",
   "--brai-copilot-accent-foreground": "var(--accent-foreground)",
   "--brai-copilot-background": "var(--background)",
@@ -54,18 +59,23 @@ const BRAI_COPILOT_THEME: CopilotThemeStyle = {
   "--accent-foreground": "var(--brai-copilot-accent-foreground)",
   "--background": "var(--brai-copilot-background)",
   "--border": "var(--brai-copilot-border)",
-  "--card": "var(--brai-copilot-card)",
+  // CopilotKit uses `card` for its default message and scroll surfaces. A
+  // separate card color makes a visible rectangle inside the app workspace.
+  "--card": "var(--brai-copilot-background)",
   "--card-foreground": "var(--brai-copilot-card-foreground)",
   "--cpk-default-font-family": "var(--font-app-sans)",
   "--cpk-default-mono-font-family": "var(--font-app-mono)",
   "--cpk-color-black": "var(--brai-copilot-foreground)",
-  "--cpk-color-gray-100": "var(--brai-copilot-muted)",
-  "--cpk-color-gray-200": "var(--brai-copilot-muted)",
+  // The stock chat uses these as its scroll and input backgrounds. Keeping
+  // them on `background` prevents a second, lighter rectangle below chat
+  // content and the composer in the dark shell.
+  "--cpk-color-gray-100": "var(--brai-copilot-background)",
+  "--cpk-color-gray-200": "var(--brai-copilot-background)",
   "--cpk-color-gray-400": "var(--brai-copilot-muted-foreground)",
   "--cpk-color-gray-500": "var(--brai-copilot-muted-foreground)",
   "--cpk-color-gray-700": "var(--brai-copilot-border)",
   "--cpk-color-gray-800": "var(--brai-copilot-accent)",
-  "--cpk-color-gray-900": "var(--brai-copilot-card)",
+  "--cpk-color-gray-900": "var(--brai-copilot-foreground)",
   "--cpk-color-white": "var(--brai-copilot-background)",
   "--cpk-color-zinc-100": "var(--brai-copilot-foreground)",
   "--cpk-color-zinc-200": "var(--brai-copilot-foreground)",
@@ -73,7 +83,7 @@ const BRAI_COPILOT_THEME: CopilotThemeStyle = {
   "--cpk-color-zinc-400": "var(--brai-copilot-muted-foreground)",
   "--cpk-color-zinc-700": "var(--brai-copilot-accent)",
   "--cpk-color-zinc-800": "var(--brai-copilot-border)",
-  "--cpk-color-zinc-900": "var(--brai-copilot-card)",
+  "--cpk-color-zinc-900": "var(--brai-copilot-foreground)",
   "--destructive": "var(--brai-copilot-destructive)",
   "--destructive-foreground": "var(--brai-copilot-destructive-foreground)",
   "--foreground": "var(--brai-copilot-foreground)",
@@ -91,49 +101,88 @@ const BRAI_COPILOT_THEME: CopilotThemeStyle = {
 };
 
 type BraiCopilotContextValue = {
+  autoFocusComposer: boolean;
   onError: (message: string, retryable?: boolean) => void;
   onDeleteAttachment: (id: string) => Promise<void>;
+  onComposerReady: () => void;
   onRetryChange: (retry: (() => Promise<void>) | null) => void;
   onRunFinished: () => void;
   onSteer: (messageId: string, text: string) => Promise<void>;
   releaseReservations: (ids: string[]) => void;
+  draft: string;
+  setDraft: (value: string) => void;
+  loadAttachment: (id: string, download?: boolean) => Promise<Blob>;
 };
 
 const BraiCopilotContext = createContext<BraiCopilotContextValue | null>(null);
 
-export function BraiCopilotSurface({
+export const BraiCopilotSurface = memo(function BraiCopilotSurface({
+  autoFocusComposer = false,
   headers,
+  draftStorageKey,
+  loadAttachment,
   onError,
   onDeleteAttachment,
+  onComposerReady,
   onRetryChange,
   onRunFinished,
   onSteer,
   onUpload,
+  runtimeBearerToken,
   runtimeUrl,
   theme,
   threadId,
 }: {
+  autoFocusComposer?: boolean;
   headers?: Record<string, string>;
+  draftStorageKey: string;
+  loadAttachment: (id: string, download?: boolean) => Promise<Blob>;
   onError: (message: string, retryable?: boolean) => void;
   onDeleteAttachment: (id: string) => Promise<void>;
+  onComposerReady: () => void;
   onRetryChange: (retry: (() => Promise<void>) | null) => void;
   onRunFinished: () => void;
   onSteer: (messageId: string, text: string) => Promise<void>;
   onUpload: (file: File) => Promise<{ id: string; mediaType: string; url: string }>;
+  runtimeBearerToken?: string | null;
   runtimeUrl: string;
   theme: ThemeMode;
   threadId: string;
 }) {
   const reservations = useRef(new Map<string, number>());
   const fileReservations = useRef(new WeakMap<File, string>());
+  const [draft, setDraftState] = useState(() => {
+    try {
+      return getBraiLocalStorageItem(draftStorageKey) ?? "";
+    } catch {
+      return "";
+    }
+  });
+
+  const setDraft = useCallback((value: string) => {
+    setDraftState(value);
+    try {
+      setBraiLocalStorageItem(draftStorageKey, value);
+    } catch {
+      // localStorage is optional in constrained WebViews.
+    }
+  }, [draftStorageKey]);
 
   const releaseReservations = useCallback((ids: string[]) => {
     for (const id of ids) reservations.current.delete(id);
   }, []);
 
   const context = useMemo(() => ({
-    onDeleteAttachment, onError, onRetryChange, onRunFinished, onSteer, releaseReservations,
-  }), [onDeleteAttachment, onError, onRetryChange, onRunFinished, onSteer, releaseReservations]);
+    autoFocusComposer, draft, loadAttachment, onComposerReady, onDeleteAttachment, onError, onRetryChange, onRunFinished, onSteer, releaseReservations, setDraft,
+  }), [autoFocusComposer, draft, loadAttachment, onComposerReady, onDeleteAttachment, onError, onRetryChange, onRunFinished, onSteer, releaseReservations, setDraft]);
+  // CopilotKit treats a changed headers object as a changed runtime
+  // configuration. The VisualViewport emits frequent updates while Android's
+  // keyboard is open, so an unstable object here repeatedly reconnects the
+  // chat and makes its auto-scroll visibly flicker.
+  const runtimeHeaders = useMemo(() => ({
+    ...headers,
+    ...(runtimeBearerToken ? { Authorization: `Bearer ${runtimeBearerToken}` } : {}),
+  }), [headers, runtimeBearerToken]);
 
   return (
     <CopilotKit
@@ -141,14 +190,13 @@ export function BraiCopilotSurface({
       agent={BRAI_AGENT_ID}
       threadId={threadId}
       credentials="include"
-      headers={headers}
+      headers={runtimeHeaders}
       useSingleEndpoint
       enableInspector={false}
       showDevConsole={false}
       onError={() => onError("Брай временно недоступен", true)}
     >
       <BraiCopilotContext.Provider value={context}>
-        <BraiChatSuggestions />
         <BraiDefaultToolRenderer />
         <div
           className={theme === "dark" ? "brai-copilot-surface dark h-full min-h-0" : "brai-copilot-surface h-full min-h-0"}
@@ -157,13 +205,13 @@ export function BraiCopilotSurface({
           <CopilotChat
             agentId={BRAI_AGENT_ID}
             threadId={threadId}
-            className="h-full min-h-0 bg-background text-foreground [&_[data-testid=copilot-chat-input]]:!rounded-2xl [&_[data-testid=copilot-chat-input]]:!border [&_[data-testid=copilot-chat-input]]:!border-border [&_[data-testid=copilot-chat-input]]:!bg-card [&_[data-testid=copilot-chat-input]]:!shadow-sm [&_[data-testid=copilot-chat-textarea]]:!text-foreground [&_[data-testid=copilot-chat-textarea]]:placeholder:!text-muted-foreground [&_[data-testid=copilot-slash-menu]]:!border-border [&_[data-testid=copilot-slash-menu]]:!bg-popover [&_[data-testid=copilot-slash-menu]]:!text-popover-foreground [&_[data-testid=copilot-slash-menu]_[role=option]:hover]:!bg-accent [&_[data-testid=copilot-slash-menu]_[role=option][data-active=true]]:!bg-accent"
+            className="brai-chat-stable-composer-inset h-full min-h-0 !bg-background text-foreground [&_.copilotKitChat]:!bg-background [&_[data-testid=copilot-scroll-content]]:!bg-background [&_[data-testid=copilot-chat-textarea]]:!text-foreground [&_[data-testid=copilot-chat-textarea]]:placeholder:!text-muted-foreground [&_[data-testid=copilot-slash-menu]]:!border-border [&_[data-testid=copilot-slash-menu]]:!bg-popover [&_[data-testid=copilot-slash-menu]]:!text-popover-foreground [&_[data-testid=copilot-slash-menu]_[role=option]:hover]:!bg-accent [&_[data-testid=copilot-slash-menu]_[role=option][data-active=true]]:!bg-accent"
             style={BRAI_COPILOT_THEME}
             chatView={BraiChatView}
             labels={{
               chatInputPlaceholder: "Напишите Браю…",
-              welcomeMessageText: "Чем помочь? Среда изолирована и доступна только для чтения.",
-              chatDisclaimerText: "Брай на базе Codex не имеет доступа к данным и проектам Brai.",
+              welcomeMessageText: "",
+              chatDisclaimerText: "",
               assistantMessageToolbarRegenerateLabel: "Повторить ответ",
             }}
             messageView={{
@@ -211,23 +259,34 @@ export function BraiCopilotSurface({
       </BraiCopilotContext.Provider>
     </CopilotKit>
   );
-}
+});
 
 function BraiDefaultToolRenderer() {
-  useDefaultRenderTool();
-  return null;
-}
-
-function BraiChatSuggestions() {
-  useConfigureSuggestions({
-    consumerAgentId: BRAI_AGENT_ID,
-    available: "before-first-message",
-    suggestions: [
-      { title: "Помоги с кодом", message: "Помоги разобраться с кодом и предложи следующий шаг." },
-      { title: "Найди проблему", message: "Проанализируй проблему и объясни вероятную причину." },
-      { title: "Составь план", message: "Составь короткий пошаговый план решения задачи." },
-    ],
-  });
+  const context = useRequiredContext();
+  useDefaultRenderTool({
+    render: ({ name, parameters, result, status }) => {
+      if (name === "image_generation" || name === "image_view") {
+        const artifact = parseToolResult(result);
+        const attachmentId = typeof artifact?.attachment_id === "string" ? artifact.attachment_id : null;
+        return (
+          <div className="my-1.5 grid gap-1.5 text-sm">
+            <div className="flex items-center gap-2 text-muted-foreground"><ImageIcon className="size-4" aria-hidden="true" />{status === "complete" ? attachmentId ? "Изображение готово" : "Не удалось подготовить изображение" : "Создаю изображение…"}</div>
+            {attachmentId ? <BraiChatImage attachmentId={attachmentId} label={typeof artifact?.name === "string" ? artifact.name : "Изображение Брая"} loadBlob={context.loadAttachment} /> : null}
+          </div>
+        );
+      }
+      if (name === "web_search") {
+        const query = recordValue(parameters) && typeof parameters.query === "string" ? parameters.query : "";
+        return (
+          <div className="my-1.5 flex items-center gap-2 text-sm text-muted-foreground">
+            <Search className="size-4" aria-hidden="true" />
+            <span>{status === "complete" ? "Поиск завершён" : "Ищу в публичных источниках…"}{query ? `: ${query}` : ""}</span>
+          </div>
+        );
+      }
+      return <div className="my-1.5 text-sm text-muted-foreground">{status === "complete" ? "Операция завершена" : "Выполняю операцию…"}</div>;
+    },
+  }, [context.loadAttachment]);
   return null;
 }
 
@@ -238,6 +297,8 @@ function BraiChatViewComponent(props: ComponentProps<typeof CopilotChat.View>) {
   const { copilotkit } = useCopilotKit();
   const running = Boolean(agent.isRunning || props.isRunning);
   const wasRunning = useRef(running);
+  const preserveNextEmptyDraft = useRef(false);
+  const steering = useRef(false);
 
   const retryLast = useCallback(async () => {
     try {
@@ -263,16 +324,27 @@ function BraiChatViewComponent(props: ComponentProps<typeof CopilotChat.View>) {
   function submit(value: string) {
     if ((agent.isRunning || props.isRunning) && value.trim()) {
       const messageId = crypto.randomUUID();
-      agent.addMessage({ id: messageId, role: "user", content: value });
-      props.onInputChange?.("");
-      void context.onSteer(messageId, value).catch(() => context.onError("Сообщение не направлено в активный ответ. Попробуйте ещё раз"));
+      if (steering.current) return;
+      steering.current = true;
+      // The runtime publishes the accepted steer back into this same stream.
+      // Adding it optimistically here turns a late 409 into the next regular
+      // request in CopilotKit, which is not a steer at all.
+      void context.onSteer(messageId, value).then(() => {
+        context.setDraft("");
+      }).catch(() => {
+        context.onError("Сообщение не направлено в активный ответ. Попробуйте ещё раз");
+      }).finally(() => {
+        steering.current = false;
+      });
       return;
     }
     if ((agent.isRunning || props.isRunning) && props.attachments?.length) {
+      preserveNextEmptyDraft.current = true;
       context.onError("Изображения можно отправить после завершения текущего ответа");
       return;
     }
     if (props.attachments?.some((attachment) => attachment.status === "uploading")) {
+      preserveNextEmptyDraft.current = true;
       context.onError("Дождитесь загрузки изображений перед отправкой");
       return;
     }
@@ -282,6 +354,15 @@ function BraiChatViewComponent(props: ComponentProps<typeof CopilotChat.View>) {
     });
     props.onSubmitMessage?.(value);
     context.releaseReservations(reservationIds);
+  }
+
+  function changeDraft(value: string) {
+    if (!value && preserveNextEmptyDraft.current) {
+      preserveNextEmptyDraft.current = false;
+      return;
+    }
+    preserveNextEmptyDraft.current = false;
+    context.setDraft(value);
   }
 
   function removeAttachment(id: string) {
@@ -299,14 +380,12 @@ function BraiChatViewComponent(props: ComponentProps<typeof CopilotChat.View>) {
   return (
     <CopilotChat.View
       {...props}
-      input={{
-        className: "pb-1",
-        textArea: BraiChatTextArea,
-        sendButton: BraiChatSendButton,
-        addMenuButton: BraiChatAddMenuButton,
-        disclaimer: { className: "text-muted-foreground" },
-      }}
+      autoScroll="pin-to-bottom"
+      input={BraiCompactChatInput}
       scrollView={BraiChatScrollView}
+      welcomeScreen={false}
+      inputValue={context.draft}
+      onInputChange={changeDraft}
       onSubmitMessage={submit}
       onRemoveAttachment={removeAttachment}
     />
@@ -315,21 +394,101 @@ function BraiChatViewComponent(props: ComponentProps<typeof CopilotChat.View>) {
 
 const BraiChatView = Object.assign(BraiChatViewComponent, CopilotChat.View);
 
+function BraiCompactChatInputComponent(props: ComponentProps<typeof CopilotChatInput>) {
+  const inputRef = useRef<HTMLDivElement | null>(null);
+
+  useLayoutEffect(() => {
+    const input = inputRef.current;
+    const surface = input?.closest<HTMLElement>(".brai-copilot-surface");
+    const overlay = input?.closest<HTMLElement>('[data-testid="copilot-input-overlay"]');
+    if (!surface || !overlay) return undefined;
+
+    const updateInset = () => {
+      const measuredHeight = Math.ceil(overlay.getBoundingClientRect().height);
+      if (measuredHeight > 0) {
+        surface.style.setProperty("--brai-chat-composer-height", `${Math.max(52, measuredHeight)}px`);
+      }
+    };
+    updateInset();
+    if (typeof ResizeObserver === "undefined") return undefined;
+    const observer = new ResizeObserver(updateInset);
+    observer.observe(overlay);
+    return () => observer.disconnect();
+  }, []);
+
+  return (
+    <CopilotChatInput
+      {...props}
+      positioning="static"
+      bottomAnchored
+      showDisclaimer={false}
+      className="!min-h-0 !bg-transparent !p-0"
+      textArea={BraiChatTextArea}
+      sendButton={BraiChatSendButton}
+      addMenuButton={BraiChatAddMenuButton}
+    >
+      {({ addMenuButton, sendButton, textArea }) => (
+        <div
+          data-copilotkit
+          ref={inputRef}
+          data-brai-composer-inset-source
+          className="pointer-events-none relative z-20 bg-background px-3 pb-1 pt-0.5"
+        >
+          <div
+            data-testid="copilot-chat-input"
+            className="pointer-events-auto mx-auto grid min-h-0 w-full max-w-3xl grid-cols-[auto_minmax(0,1fr)_auto] items-end gap-1 rounded-xl border border-border bg-background px-1.5 py-1"
+          >
+            {addMenuButton}
+            <div className="flex min-w-0 items-end">{textArea}</div>
+            {sendButton}
+          </div>
+        </div>
+      )}
+    </CopilotChatInput>
+  );
+}
+
+const BraiCompactChatInput = Object.assign(BraiCompactChatInputComponent, CopilotChatInput);
+
 const BraiChatTextArea = forwardRef<HTMLTextAreaElement, ComponentProps<"textarea">>(function BraiChatTextArea(
-  { className, ...props },
+  { className, onKeyDown, ...props },
   ref,
 ) {
+  const context = useRequiredContext();
+  const localRef = useRef<HTMLTextAreaElement | null>(null);
+  useImperativeHandle(ref, () => localRef.current as HTMLTextAreaElement, []);
+
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => {
+      if (context.autoFocusComposer) localRef.current?.focus({ preventScroll: true });
+      context.onComposerReady();
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [context.autoFocusComposer, context.onComposerReady]);
+
   return (
     <Textarea
       {...props}
-      ref={ref}
+      ref={localRef}
       bare
+      rows={1}
       id="brai-chat-message"
       name="message"
       aria-label="Сообщение Браю"
       data-testid="copilot-chat-textarea"
       placeholder={props.placeholder ?? "Напишите Браю…"}
-      className={cx("w-full resize-none bg-transparent text-base leading-relaxed text-foreground outline-none placeholder:text-muted-foreground", className)}
+      onKeyDown={(event) => {
+        if (event.key === "Enter") {
+          const mobileComposer = platformName() === "android" || isMobileNavigationViewport();
+          if (mobileComposer || event.shiftKey || event.nativeEvent.isComposing) {
+            // Mobile Enter and desktop Shift+Enter retain native multiline entry.
+            event.stopPropagation();
+            return;
+          }
+        }
+        onKeyDown?.(event);
+      }}
+      className={cn("field-sizing-content box-border min-h-6 max-h-[50dvh] w-full resize-none overflow-y-auto bg-transparent !py-1 !pr-1 text-base leading-6 text-foreground outline-none placeholder:text-muted-foreground", className)}
     />
   );
 });
@@ -340,7 +499,7 @@ function BraiChatSendButton({ className, children, ...props }: ComponentProps<ty
       {...props}
       type="button"
       size="icon"
-      className={cx("size-9 rounded-full", className)}
+      className={cx("size-8 rounded-full", className)}
       data-testid="copilot-send-button"
       aria-label={children ? "Остановить ответ" : "Отправить сообщение"}
     >
@@ -364,7 +523,7 @@ function BraiChatAddMenuButton({
       type="button"
       size="icon"
       variant="ghost"
-      className={cx("size-9 rounded-full text-muted-foreground hover:text-accent-foreground", className)}
+      className={cx("size-8 rounded-full text-muted-foreground hover:text-accent-foreground", className)}
       data-testid="copilot-add-menu-button"
       aria-label="Добавить изображение"
       title="Добавить изображение"
@@ -403,10 +562,24 @@ function BraiChatScrollView({
     <CopilotChat.View.ScrollView
       {...props}
       className={cx(
-        "text-foreground [scrollbar-color:var(--border)_transparent] [scrollbar-width:thin] [&::-webkit-scrollbar]:size-2 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-border [&::-webkit-scrollbar-track]:bg-transparent",
+        "!bg-background text-foreground [scrollbar-color:var(--border)_transparent] [scrollbar-width:thin] [&::-webkit-scrollbar]:size-2 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-border [&::-webkit-scrollbar-track]:bg-transparent",
         className,
       )}
       scrollToBottomButton={BraiChatScrollToBottomButton}
+    />
+  );
+}
+
+function BraiAssistantMarkdownRenderer({
+  content,
+  className,
+  ...props
+}: ComponentProps<typeof CopilotChatAssistantMessage.MarkdownRenderer>) {
+  return (
+    <CopilotChatAssistantMessage.MarkdownRenderer
+      {...props}
+      className={cn(className, "!space-y-1.5 [&_p]:!my-0")}
+      content={normalizeLatexDisplayMath(content)}
     />
   );
 }
@@ -430,7 +603,11 @@ function AnchoredAssistantMessageComponent(props: ComponentProps<typeof CopilotC
     <CopilotChatAssistantMessage
       {...props}
       id={`brai-message-${props.message.id}`}
-      className={cx("text-foreground", props.className)}
+      className={cx("!pt-2 text-foreground", props.className)}
+      toolbar={{ className: "mt-0.5 flex !h-4 items-center gap-0.5" }}
+      copyButton={{ className: "relative !size-4 !p-0.5 text-muted-foreground opacity-20 after:absolute after:-inset-2 hover:opacity-50 [&_svg]:!size-2.5" }}
+      regenerateButton={{ className: "relative !size-4 !p-0.5 text-muted-foreground opacity-20 after:absolute after:-inset-2 hover:opacity-50 [&_svg]:!size-2.5" }}
+      markdownRenderer={BraiAssistantMarkdownRenderer}
       onRegenerate={canRetry ? () => void retry() : undefined}
     />
   );
@@ -442,17 +619,57 @@ function BraiReasoningMessageComponent(props: ComponentProps<typeof CopilotChatR
   return (
     <CopilotChatReasoningMessage
       {...props}
-      className={cx("rounded-lg border border-border bg-card text-foreground", props.className)}
-      header={{ className: "text-muted-foreground hover:text-foreground" }}
-      contentView={{ className: "text-muted-foreground" }}
+      className={cx("my-1 rounded-md border border-border/70 bg-transparent text-foreground", props.className)}
+      header={BraiReasoningHeader}
+      contentView={{ className: "px-2 pb-2 text-sm text-muted-foreground" }}
     />
   );
 }
 
 const BraiReasoningMessage = Object.assign(BraiReasoningMessageComponent, CopilotChatReasoningMessage);
 
+/** Returns the public, localized status for a reasoning summary without exposing its raw chain of thought. */
+export function braiReasoningLabel(isStreaming: boolean | undefined) {
+  return isStreaming ? "Размышляю…" : "Размышлял несколько секунд";
+}
+
+function BraiReasoningHeader({
+  children,
+  className,
+  hasContent,
+  isOpen,
+  isStreaming,
+  label: _label,
+  ...props
+}: ComponentProps<typeof CopilotChatReasoningMessage.Header>) {
+  return (
+    <button
+      {...props}
+      type="button"
+      aria-expanded={hasContent ? isOpen : undefined}
+      className={cx(
+        "inline-flex min-h-8 items-center gap-1 px-2 text-sm text-muted-foreground transition-colors",
+        hasContent ? "cursor-pointer hover:text-foreground" : "cursor-default",
+        className,
+      )}
+    >
+      <span className="font-medium">{braiReasoningLabel(isStreaming)}</span>
+      {isStreaming && !hasContent ? <span className="size-1.5 animate-pulse rounded-full bg-muted-foreground" aria-hidden="true" /> : null}
+      {children}
+      {hasContent ? <ChevronRight className={cx("size-3.5 shrink-0 transition-transform duration-200", isOpen && "rotate-90")} aria-hidden="true" /> : null}
+    </button>
+  );
+}
+
 function AnchoredUserMessageComponent(props: ComponentProps<typeof CopilotChatUserMessage>) {
-  return <CopilotChatUserMessage {...props} id={`brai-message-${props.message.id}`} className={cx("text-foreground", props.className)} />;
+  return (
+    <CopilotChatUserMessage
+      {...props}
+      id={`brai-message-${props.message.id}`}
+      className={cx("!pt-2 text-foreground", props.className)}
+      toolbar={{ className: "!hidden" }}
+    />
+  );
 }
 
 const AnchoredUserMessage = Object.assign(AnchoredUserMessageComponent, CopilotChatUserMessage);
@@ -461,4 +678,24 @@ function useRequiredContext(): BraiCopilotContextValue {
   const value = useContext(BraiCopilotContext);
   if (!value) throw new Error("brai_copilot_context_missing");
   return value;
+}
+
+function parseToolResult(result: string | undefined): Record<string, unknown> | null {
+  if (!result) return null;
+  try {
+    const parsed: unknown = JSON.parse(result);
+    return recordValue(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function recordValue(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+/** Converts display delimiters emitted by Codex into Streamdown's KaTeX form. */
+export function normalizeLatexDisplayMath(content: string): string {
+  const normalized = content.replace(/\\\[([\s\S]*?)\\\]/g, (_match, formula: string) => `$$\n${formula.trim()}\n$$`);
+  return normalized.replace(/(^|\n)\[\s*((?=[^\n]*\\)[^\n]+?)\s*\](?=\n|$)/g, (_match, prefix: string, formula: string) => `${prefix}$$\n${formula.trim()}\n$$`);
 }

@@ -8,4 +8,10 @@ describe("Android manifest", () => {
 
     expect(manifest).toContain('android:allowBackup="false"');
   });
+
+  it("leaves Android keyboard handling to the production-default window mode", () => {
+    const manifest = readFileSync(resolve(process.cwd(), "android/app/src/main/AndroidManifest.xml"), "utf8");
+
+    expect(manifest).not.toContain("android:windowSoftInputMode");
+  });
 });

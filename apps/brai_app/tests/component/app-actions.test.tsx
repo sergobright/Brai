@@ -828,7 +828,7 @@ describe("BraiApp actions", () => {
     });
   }, 10_000);
 
-  it("shows Action AI badges and workflow details", async () => {
+  it("shows only the temporary Action AI marker and workflow details", async () => {
     vi.stubGlobal(
       "matchMedia",
       vi.fn(() => ({
@@ -947,7 +947,7 @@ describe("BraiApp actions", () => {
     expect(within(runningRow).getByText("AI-working")).toBeInTheDocument();
     const normalizedTitle = screen.getByRole("textbox", { name: "Название действия: Нормализованное действие" });
     const normalizedRow = normalizedTitle.closest(".action-row") as HTMLElement;
-    expect(within(normalizedRow).getByText("AI")).toBeInTheDocument();
+    expect(within(normalizedRow).queryByText("AI")).not.toBeInTheDocument();
     expect(within(normalizedRow).queryByText("AI-working")).not.toBeInTheDocument();
 
     fireEvent.click(runningTitle);

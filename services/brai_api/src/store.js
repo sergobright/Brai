@@ -3,6 +3,7 @@ import { activityEventMethods } from './store-activity-events.js';
 import { activityWorkflowStoreMethods } from './store-activity-workflows.js';
 import { appSettingsMethods } from './store-app-settings.js';
 import { authUserMethods } from './store-auth-users.js';
+import { agentCatalogMethods } from './store-agent-catalog.js';
 import { braiCmdStoreMethods } from './store-brai-cmd.js';
 import { braiChatStoreMethods } from './store-brai-chat.js';
 import { contextApplyMethods } from './store-context-apply.js';
@@ -35,6 +36,7 @@ export class BraiStore {
 Object.assign(
   BraiStore.prototype,
   appSettingsMethods,
+  agentCatalogMethods,
   authUserMethods,
   braiCmdStoreMethods,
   braiChatStoreMethods,

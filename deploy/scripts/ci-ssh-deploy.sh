@@ -37,7 +37,8 @@ if ! [[ "$DEPLOY_MIN_FREE_GB" =~ ^[0-9]+$ ]] || (( 10#$DEPLOY_MIN_FREE_GB < 12 )
   exit 1
 fi
 if [[ -z "${BRAI_NATIVE_APK_CHANGE:-}" ]]; then
-  BRAI_NATIVE_APK_CHANGE="$(node deploy/scripts/detect-native-apk-change.mjs "$BRAI_BRANCH" "${BRAI_BASE_COMMIT:-}")"
+  BRAI_NATIVE_APK_CHANGE="$(node deploy/scripts/detect-native-apk-change.mjs \
+    "$BRAI_BRANCH" "${BRAI_PRODUCT_BASE_COMMIT:-${BRAI_BASE_COMMIT:-}}")"
 fi
 if [[ -z "${BRAI_CLIENT_ARTIFACT_CHANGE:-}" ]]; then
   BRAI_CLIENT_ARTIFACT_CHANGE="$(node --input-type=module - "${BRAI_BASE_COMMIT:-}" <<'NODE'

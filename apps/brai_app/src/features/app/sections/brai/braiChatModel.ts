@@ -63,14 +63,15 @@ export function projectBraiChatArtifacts(messages: BraiChatMessage[], events: Br
       if (!kind) continue;
       const attachmentId = stringValue(custom.value.attachment_id);
       if (kind === "image" && !attachmentId) continue;
-      const id = `artifact:${source}`;
+      const id = kind === "image" ? `attachment:${attachmentId}` : `artifact:${source}`;
+      const existing = artifacts.get(id);
       artifacts.set(id, {
         id,
         kind,
-        label: stringValue(custom.value.name) ?? (kind === "diff" ? "Изменения файлов" : "Изображение"),
+        label: stringValue(custom.value.name) ?? existing?.label ?? (kind === "diff" ? "Изменения файлов" : "Изображение"),
         content: JSON.stringify(custom.value, null, 2),
         attachmentId,
-        sourceMessageId: stringValue(custom.value.source_message_id),
+        sourceMessageId: stringValue(custom.value.source_message_id) ?? existing?.sourceMessageId,
         sourceEventId: event.id,
       });
       continue;

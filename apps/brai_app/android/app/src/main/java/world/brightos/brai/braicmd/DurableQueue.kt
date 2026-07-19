@@ -438,7 +438,10 @@ internal fun classifyQueueFailure(error: Throwable): QueueFailureDisposition =
         is ServerResponseException -> when {
             error.statusCode == 401 || error.statusCode == 403 -> QueueFailureDisposition.Blocked
             error.code == "upstream_error" -> QueueFailureDisposition.Transient
-            error.statusCode in setOf(400, 413, 415, 422) -> QueueFailureDisposition.Permanent
+            // A server can reject a valid recording because a model, quota, or
+            // validation rule changed. Keep user audio durable and retryable;
+            // only locally corrupted files may be quarantined automatically.
+            error.statusCode in setOf(400, 413, 415, 422) -> QueueFailureDisposition.Blocked
             error.statusCode in setOf(408, 425, 429) || error.statusCode >= 500 -> QueueFailureDisposition.Transient
             else -> QueueFailureDisposition.Transient
         }

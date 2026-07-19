@@ -105,6 +105,23 @@ test('test email login creates or reuses the primary Better Auth user without se
     assert.match(firstCookie, /better-auth\.session_token=/);
     assert.match(firstCookie, /SameSite=None/i);
     assert.match(firstCookie, /Secure/i);
+    const firstBearer = first.headers.get('set-auth-token');
+    assert.match(firstBearer, /^[^;\s]+\.[^;\s]+$/);
+    assert.match(first.headers.get('access-control-expose-headers') ?? '', /(?:^|,)\s*set-auth-token\s*(?:,|$)/i);
+
+    const restoredNativeSession = await jsonRequest(fixture.url, '/auth/session', {
+      headers: { cookie: firstCookie, origin: 'https://localhost' }
+    });
+    assert.equal(restoredNativeSession.status, 200);
+    assert.equal(restoredNativeSession.body.authenticated, true);
+    const restoredBearer = restoredNativeSession.headers.get('set-auth-token');
+    assert.equal(decodeURIComponent(restoredBearer), firstBearer);
+
+    const bearerActivities = await jsonRequest(fixture.url, '/v1/activities', {
+      headers: { authorization: `Bearer ${restoredBearer}`, origin: 'https://localhost' }
+    });
+    assert.equal(bearerActivities.status, 200);
+    assert.equal(bearerActivities.headers.get('access-control-allow-origin'), 'https://localhost');
 
     const activities = await jsonRequest(fixture.url, '/v1/activities', {
       headers: { cookie: firstCookie, origin: 'capacitor://localhost' }

@@ -118,7 +118,8 @@ function fakeStore() {
       active_turn_deadline_at_utc: null,
       active_turn_model: null,
       active_turn_reasoning_effort: null,
-      codex_thread_id: null
+      codex_thread_id: null,
+      codex_tool_contract_version: 1
     },
     replayCalls: [],
     onReplay: null,
@@ -137,7 +138,13 @@ function fakeStore() {
       this.aiLogs.push(saved);
       return saved.id;
     },
-    setBraiChatCodexThreadId(_threadId, codexThreadId) { this.thread.codex_thread_id = codexThreadId; },
+    setBraiChatCodexThreadId(_threadId, codexThreadId, toolContractVersion = null) {
+      this.thread.codex_thread_id = codexThreadId;
+      this.thread.codex_tool_contract_version = toolContractVersion;
+    },
+    listBraiChatRecentMessages() {
+      return this.messages.map((message, sequence) => ({ ...message, sequence: sequence + 1 }));
+    },
     setBraiChatActiveTurn(_threadId, active = {}) {
       this.thread.active_turn_id = active.runId ?? null;
       this.thread.active_codex_turn_id = active.codexTurnId ?? null;
@@ -336,6 +343,128 @@ test('run waits for its subscriber so AG-UI starts with RUN_STARTED', async () =
   assert.equal(streamed[0]?.type, EventType.RUN_STARTED);
 });
 
+test('dynamic domain tool requests execute in the authenticated public thread and return through broker', async () => {
+  const broker = new FakeBroker();
+  const store = fakeStore();
+  const calls = [];
+  const coordinator = new BraiChatTurnCoordinator({
+    broker,
+    turnTimeoutMs: 10_000,
+    toolExecutor: async (input) => {
+      calls.push(input);
+      return { success: true, text: 'Действие «Позвонить маме» добавлено.' };
+    }
+  });
+  coordinator.run({
+    store,
+    userId: 'user-a',
+    publicThreadId: 'public-thread',
+    input: {
+      threadId: 'scoped-thread',
+      runId: 'public-run',
+      messages: [{ id: 'user-message', role: 'user', content: 'Добавь действие: позвонить маме' }]
+    }
+  }).subscribe(() => {});
+  await waitFor(() => broker.requests.some((request) => request.method === 'startTurn'));
+
+  broker.notify('item/tool/call', {
+    toolRequestId: 'tool-request-0001',
+    callId: 'tool-call-0001',
+    threadId: 'internal-thread-secret',
+    turnId: 'internal-turn-secret',
+    tool: 'brai_create_action',
+    arguments: { title: 'Позвонить маме' }
+  });
+  await waitFor(() => broker.requests.some((request) => request.method === 'respondToolCall'));
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].store, store);
+  assert.deepEqual({
+    userId: calls[0].userId,
+    publicThreadId: calls[0].publicThreadId,
+    runId: calls[0].runId,
+    callId: calls[0].callId,
+    tool: calls[0].tool,
+    arguments: calls[0].arguments
+  }, {
+    userId: 'user-a',
+    publicThreadId: 'public-thread',
+    runId: 'public-run',
+    callId: 'tool-call-0001',
+    tool: 'brai_create_action',
+    arguments: { title: 'Позвонить маме' }
+  });
+  const response = broker.requests.find((request) => request.method === 'respondToolCall');
+  assert.deepEqual(response.params, {
+    userId: 'user-a',
+    toolRequestId: 'tool-request-0001',
+    success: true,
+    contentItems: [{
+      type: 'inputText',
+      text: 'Действие «Позвонить маме» добавлено.'
+    }]
+  });
+
+  broker.notify('turn/completed', {
+    threadId: 'internal-thread-secret',
+    turn: { id: 'internal-turn-secret', status: 'completed' }
+  });
+  await waitFor(() => store.thread.active_turn_id === null);
+});
+
+test('a legacy Codex thread upgrades to the dynamic-tool contract with bounded visible context', async () => {
+  const broker = new FakeBroker();
+  const store = fakeStore();
+  store.thread.codex_thread_id = 'legacy-internal-thread';
+  store.thread.codex_tool_contract_version = null;
+  store.messages.push(
+    {
+      id: 'old-user',
+      threadId: 'public-thread',
+      role: 'user',
+      content: 'Мы обсуждали поездку.',
+      idempotencyKey: 'old-user',
+    },
+    {
+      id: 'old-assistant',
+      threadId: 'public-thread',
+      role: 'assistant',
+      content: 'Да, поездку в Казань.',
+      idempotencyKey: 'old-assistant',
+    },
+  );
+  const coordinator = new BraiChatTurnCoordinator({ broker, turnTimeoutMs: 10_000 });
+  coordinator.run({
+    store,
+    userId: 'user-a',
+    publicThreadId: 'public-thread',
+    input: {
+      runId: 'upgrade-run',
+      messages: [{ id: 'current-user', role: 'user', content: 'Добавь это во Входящие' }],
+    },
+  }).subscribe(() => {});
+  await waitFor(() => broker.requests.some((request) => request.method === 'startTurn'));
+
+  assert.equal(broker.requests.some((request) => request.method === 'resumeThread'), false);
+  assert.equal(broker.requests.filter((request) => request.method === 'startThread').length, 1);
+  const startTurn = broker.requests.find((request) => request.method === 'startTurn');
+  assert.match(startTurn.params.text, /Пользователь: Мы обсуждали поездку\./);
+  assert.match(startTurn.params.text, /Брай: Да, поездку в Казань\./);
+  assert.match(startTurn.params.text, /Текущее сообщение пользователя:\nДобавь это во Входящие/);
+  assert.equal(store.thread.codex_tool_contract_version, 1);
+  assert.equal(
+    store.messages.find((message) => message.id === 'current-user').content,
+    'Добавь это во Входящие',
+    'the durable visible message must not contain the hidden bootstrap',
+  );
+
+  broker.notify('turn/completed', {
+    threadId: 'internal-thread-secret',
+    turn: { id: 'internal-turn-secret', status: 'completed' },
+  });
+  await waitFor(() => store.thread.active_turn_id === null);
+});
+
 test('turn continues and persists after the HTTP subscriber detaches', async () => {
   const broker = new FakeBroker();
   const store = fakeStore();
@@ -479,7 +608,14 @@ test('tool and image-only run remains visible in durable history after reconnect
 
   const toolStart = replayed.find((event) => event.type === EventType.TOOL_CALL_START);
   assert.match(toolStart.parentMessageId, /^assistant:/);
-  assert.ok(replayed.some((event) => event.type === EventType.TOOL_CALL_RESULT));
+  const toolResult = replayed.find((event) => event.type === EventType.TOOL_CALL_RESULT);
+  assert.deepEqual(JSON.parse(toolResult.content), {
+    status: 'ready',
+    attachment_id: store.attachments[0].id,
+    name: 'spring.png',
+    media_type: 'image/png',
+    byte_size: 8
+  });
   const imageArtifact = replayed.find((event) =>
     event.type === EventType.CUSTOM && event.name === 'brai.artifact.v1'
       && event.value.kind === 'image');
@@ -499,6 +635,14 @@ test('tool and image-only run remains visible in durable history after reconnect
       && params.attachmentIds[0] === imageArtifact.value.attachment_id
       && !Object.hasOwn(params, 'path')));
   assert.ok(replayed.some((event) => event.type === EventType.RUN_FINISHED));
+  assert.equal(replayed.filter((event) => event.type === EventType.CUSTOM
+    && event.name === 'brai.artifact.v1' && event.value.kind === 'image').length, 1);
+  assert.equal(replayed.filter((event) => event.type === EventType.TEXT_MESSAGE_CONTENT)
+    .map((event) => event.delta).join(''), 'Изображение готово.');
+  const chatLogs = store.aiLogs.filter((log) => log.agentId === 'brai-codex');
+  assert.equal(chatLogs.length, 1);
+  assert.equal(chatLogs[0].jsonData.has_generated_image, true);
+  assert.equal(chatLogs[0].jsonData.has_assistant_text, true);
   assert.equal(JSON.stringify(replayed).includes('/tmp/private-output.png'), false);
   assert.equal(JSON.stringify(replayed).includes('private-image-item'), false);
 });
@@ -724,15 +868,16 @@ test('successful first assistant turn selects a semantic title while manual rena
   assert.equal(titleInputs[0].userId, 'user-a');
   assert.equal(titleInputs[0].userMessage, 'напиши хайку про весну');
   assert.deepEqual(titleInputs[0].assistantMessages, ['Весенний ветер']);
-  await waitFor(() => store.aiLogs.length === 1);
-  assert.equal(store.aiLogs[0].agentId, 'brai.chat-title');
-  assert.equal(store.aiLogs[0].agentVersion, '1');
-  assert.equal(store.aiLogs[0].status, 'done');
-  assert.equal(store.aiLogs[0].jsonData.schema, 'brai.chat_title.ai_log.v1');
-  assert.equal(store.aiLogs[0].jsonData.title_applied, true);
-  assert.equal(JSON.stringify(store.aiLogs[0]).includes('напиши хайку'), false);
-  assert.equal(JSON.stringify(store.aiLogs[0]).includes('Весенний ветер'), false);
-  assert.equal(JSON.stringify(store.aiLogs[0]).includes('Хайку про весну'), false);
+  await waitFor(() => store.aiLogs.some((log) => log.agentId === 'brai.chat-title'));
+  const titleLog = store.aiLogs.find((log) => log.agentId === 'brai.chat-title');
+  assert.equal(titleLog.agentVersion, '1');
+  assert.equal(titleLog.status, 'done');
+  assert.equal(titleLog.jsonData.schema, 'brai.chat_title.ai_log.v1');
+  assert.equal(titleLog.jsonData.title_applied, true);
+  assert.equal(JSON.stringify(titleLog).includes('напиши хайку'), false);
+  assert.equal(JSON.stringify(titleLog).includes('Весенний ветер'), false);
+  assert.equal(JSON.stringify(titleLog).includes('Хайку про весну'), false);
+  assert.equal(store.aiLogs.filter((log) => log.agentId === 'brai-codex').length, 1);
 
   store.thread.title = 'Моё название';
   store.thread.title_source = 'manual';
@@ -773,10 +918,12 @@ test('semantic title generator failure leaves the default title unchanged', asyn
     await new Promise((resolve) => setImmediate(resolve));
     assert.equal(store.thread.title, 'Новый чат');
     assert.equal(store.thread.title_source, 'default');
-    await waitFor(() => store.aiLogs.length === 1);
-    assert.equal(store.aiLogs[0].status, 'failed');
-    assert.equal(store.aiLogs[0].jsonData.title_applied, false);
-    assert.equal(JSON.stringify(store.aiLogs[0]).includes('Не копируй меня'), false);
+    await waitFor(() => store.aiLogs.some((log) => log.agentId === 'brai.chat-title'));
+    const titleLog = store.aiLogs.find((log) => log.agentId === 'brai.chat-title');
+    assert.equal(titleLog.status, 'failed');
+    assert.equal(titleLog.jsonData.title_applied, false);
+    assert.equal(JSON.stringify(titleLog).includes('Не копируй меня'), false);
+    assert.equal(store.aiLogs.filter((log) => log.agentId === 'brai-codex').length, 1);
   }
 });
 
@@ -813,13 +960,15 @@ test('manual rename during background title generation wins and records one comp
   store.thread.title = 'Ручной заголовок';
   store.thread.title_source = 'manual';
   resolveTitle('Модельный заголовок');
-  await waitFor(() => store.aiLogs.length === 1);
+  await waitFor(() => store.aiLogs.some((log) => log.agentId === 'brai.chat-title'));
 
   assert.equal(store.thread.title, 'Ручной заголовок');
   assert.equal(store.thread.title_source, 'manual');
-  assert.equal(store.aiLogs[0].status, 'done');
-  assert.equal(store.aiLogs[0].jsonData.title_applied, false);
-  assert.equal(store.aiLogs.length, 1);
+  const titleLog = store.aiLogs.find((log) => log.agentId === 'brai.chat-title');
+  assert.equal(titleLog.status, 'done');
+  assert.equal(titleLog.jsonData.title_applied, false);
+  assert.equal(store.aiLogs.filter((log) => log.agentId === 'brai.chat-title').length, 1);
+  assert.equal(store.aiLogs.filter((log) => log.agentId === 'brai-codex').length, 1);
 });
 
 test('restart recovery generates a title from already persisted assistant output', async () => {
@@ -1344,7 +1493,8 @@ test('connect paginates replay strictly after the acknowledged sequence', async 
   const coordinator = new BraiChatTurnCoordinator({ broker: new FakeBroker() });
   const replayed = [];
   await new Promise((resolve, reject) => coordinator.connect({
-    store, userId: 'user-a', publicThreadId: 'public-thread', headers: { 'last-event-id': '500' }
+    store, userId: 'user-a', publicThreadId: 'public-thread',
+    headers: { 'last-event-id': '500', 'x-brai-chat-replay-mode': 'resume' }
   }).subscribe({ next: (event) => replayed.push(event.value.sequence), error: reject, complete: resolve }));
 
   assert.equal(replayed.length, 605);
@@ -1422,8 +1572,8 @@ test('cold replay immediately before a terminal event includes its matching run 
 
       assert.equal(replayed[0].type, EventType.RUN_STARTED);
       assert.equal(replayed[0].runId, 'historic-run');
-      assert.deepEqual(replayed.filter((event) => event.type === EventType.TEXT_MESSAGE_CONTENT)
-        .map((event) => event.delta), ['Первая часть']);
+      assert.equal(replayed.filter((event) => event.type === EventType.TEXT_MESSAGE_CONTENT)
+        .map((event) => event.delta).join(''), 'Первая часть');
       assert.equal(replayed.at(-1).type, terminalType);
       assert.deepEqual(store.replayCalls, [{ after: 0, limit: 500 }]);
     });
@@ -1465,7 +1615,7 @@ test('standalone pre-start RUN_ERROR does not borrow a prior run boundary', asyn
     store,
     userId: 'user-a',
     publicThreadId: 'public-thread',
-    headers: { 'last-event-id': '2' }
+    headers: { 'last-event-id': '2', 'x-brai-chat-replay-mode': 'resume' }
   }).subscribe({ next: (event) => replayed.push(event), error: reject, complete: resolve }));
 
   assert.deepEqual(replayed.map((event) => event.type), [EventType.RUN_ERROR]);
@@ -1833,7 +1983,7 @@ test('self-hosted CopilotKit single endpoint advertises only the Brai agent', as
   assert.equal(process.env.COPILOTKIT_TELEMETRY_DISABLED, 'true');
 });
 
-test('CopilotKit connect forwards Last-Event-ID into durable replay', async () => {
+test('CopilotKit resume connect forwards an acknowledged Last-Event-ID into durable replay', async () => {
   const runtime = createBraiChatRuntime({ broker: new FakeBroker() });
   const store = fakeStore();
   for (let sequence = 1; sequence <= 3; sequence += 1) {
@@ -1850,7 +2000,13 @@ test('CopilotKit connect forwards Last-Event-ID into durable replay', async () =
     end() { this.ended = true; }
   };
   await runtime.handleRequest({
-    req: { headers: { accept: 'text/event-stream', 'last-event-id': '2' } },
+    req: {
+      headers: {
+        accept: 'text/event-stream',
+        'last-event-id': '2',
+        'x-brai-chat-replay-mode': 'resume'
+      }
+    },
     res,
     url: new URL('https://api.example.test/v1/brai-chat/runtime'),
     store,
@@ -1872,6 +2028,51 @@ test('CopilotKit connect forwards Last-Event-ID into durable replay', async () =
   assert.equal(body.includes('"sequence":1'), false);
   assert.equal(body.includes('"sequence":2'), false);
   assert.equal(body.includes('"sequence":3'), true);
+});
+
+test('CopilotKit replay scopes durable public thread ids to the connected runtime thread', async () => {
+  const runtime = createBraiChatRuntime({ broker: new FakeBroker() });
+  const store = fakeStore();
+  store.events.push({
+    id: 'scoped-replay-start',
+    turnId: 'scoped-replay-run',
+    safePayload: {
+      type: EventType.RUN_STARTED,
+      threadId: 'public-thread',
+      runId: 'scoped-replay-run',
+      input: { threadId: 'public-thread', runId: 'scoped-replay-run', messages: [] }
+    }
+  });
+  const chunks = [];
+  const res = {
+    destroyed: false,
+    writeHead(status, headers) { this.status = status; this.headers = headers; },
+    write(chunk) { chunks.push(Buffer.from(chunk)); },
+    end() { this.ended = true; }
+  };
+  const userId = 'user-a-long-enough';
+  const scopedThreadId = `${crypto.createHash('sha256').update(userId).digest('hex').slice(0, 20)}:public-thread`;
+  await runtime.handleRequest({
+    req: { headers: { accept: 'text/event-stream' } },
+    res,
+    url: new URL('https://api.example.test/v1/brai-chat/runtime'),
+    store,
+    userId,
+    readJson: async () => ({
+      method: 'agent/connect',
+      params: { agentId: 'brai-codex' },
+      body: {
+        threadId: 'public-thread', runId: 'connect-run', state: {}, messages: [],
+        tools: [], context: [], forwardedProps: {}
+      }
+    }),
+    sendJson: () => assert.fail('CopilotKit handler should own a valid connect response')
+  });
+
+  const body = Buffer.concat(chunks).toString('utf8');
+  assert.equal(res.status, 200);
+  assert.equal(body.includes(`\"threadId\":\"${scopedThreadId}\"`), true);
+  assert.equal(body.includes('\"threadId\":\"public-thread\"'), false);
 });
 
 test('CopilotKit connect replays an incomplete active run without compacting it away', async () => {

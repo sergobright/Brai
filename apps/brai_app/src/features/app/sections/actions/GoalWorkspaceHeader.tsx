@@ -18,6 +18,7 @@ export function GoalWorkspaceHeader({
   onSetStatus,
   onDelete,
   onPlan,
+  planEnabled = true,
   planPending = false,
   children,
 }: {
@@ -27,6 +28,7 @@ export function GoalWorkspaceHeader({
   onSetStatus: (goal: ActivityItem, status: ActivityStatus) => Promise<void>;
   onDelete: (goal: ActivityItem) => Promise<void>;
   onPlan: (goal: ActivityItem) => Promise<GoalPlanResponse>;
+  planEnabled?: boolean;
   planPending?: boolean;
   children?: ReactNode;
 }) {
@@ -117,7 +119,7 @@ export function GoalWorkspaceHeader({
             <strong className="text-sm tabular-nums">{progress.done}/{progress.total}</strong>
           </div>
           <div className="flex flex-wrap gap-2">
-            {goal.status !== "Done" ? (
+            {goal.status !== "Done" && planEnabled ? (
               <Button type="button" variant="outline" size="sm" disabled={planBusy || planAvailable} onClick={() => void requestPlan()}><Sparkles aria-hidden="true" />{planBusy ? "Формируем…" : planAvailable ? "План предложен" : "Предложить план"}</Button>
             ) : null}
             {goal.status === "Done" ? (

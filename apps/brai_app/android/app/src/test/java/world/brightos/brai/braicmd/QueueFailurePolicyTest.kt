@@ -36,13 +36,13 @@ class QueueFailurePolicyTest {
     }
 
     @Test
-    fun rejectedOrCorruptPayloadsArePermanent() {
+    fun onlyLocallyCorruptPayloadsArePermanent() {
+        assertEquals(QueueFailureDisposition.Permanent, classifyQueueFailure(QueueCorruptItemException("corrupt")))
         listOf(
-            QueueCorruptItemException("corrupt"),
             ServerResponseException(400, "bad_request", "bad"),
             ServerResponseException(413, "request_too_large", "large"),
             ServerResponseException(415, "unsupported_media_type", "mime"),
             ServerResponseException(422, "unprocessable", "bad")
-        ).forEach { assertEquals(QueueFailureDisposition.Permanent, classifyQueueFailure(it)) }
+        ).forEach { assertEquals(QueueFailureDisposition.Blocked, classifyQueueFailure(it)) }
     }
 }

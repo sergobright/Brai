@@ -2,7 +2,10 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { braiCmdConfigFromEnv } from './brai-cmd.js';
 import { createBraiChatRuntime } from './brai-chat-runtime.js';
-import { goalAgentsEnabledFromEnv } from './goal-agent-switch.js';
+import {
+  goalAgentRecommendationsEnabledFromEnv,
+  goalAgentsEnabledFromEnv
+} from './goal-agent-switch.js';
 import { createGoalAgentWorkflowRuntime } from './goal-agent-workflow-runtime.js';
 import { createInboxWorkflowRuntime } from './inbox-workflow-runtime.js';
 import { isPostgresUrl } from './postgres-sync-db.js';
@@ -53,6 +56,7 @@ const databaseBranch = process.env.BRAI_SUPABASE_BRANCH ?? '';
 const testEmailLogin = /^(1|true|yes)$/i.test(process.env.BRAI_TEST_EMAIL_LOGIN ?? '')
   && /^brai[-_]((preview[-_])|dev(?:$|[-_]))/i.test(databaseBranch);
 const goalAgentsEnabled = goalAgentsEnabledFromEnv();
+const goalAgentRecommendationsEnabled = goalAgentRecommendationsEnabledFromEnv();
 const environment = process.env.BRAI_ENVIRONMENT?.trim() || 'prod';
 const braiChatRuntime = createBraiChatRuntime({
   socketPath: process.env.BRAI_CODEX_BROKER_SOCKET?.trim() || undefined
@@ -126,6 +130,7 @@ const runtime = createBraiServer({
   inboxWorkflowStarter: inboxWorkflow.start,
   activityWorkflowStarter: inboxWorkflow.startActivity,
   goalAgentsEnabled,
+  goalAgentRecommendationsEnabled,
   goalAgentEnvironment: environment,
   braiChatRuntime,
   testEmailLogin,

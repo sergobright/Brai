@@ -167,6 +167,21 @@ class BraiCmdQueueTest {
     }
 
     @Test
+    fun serverValidationFailureKeepsTheRecordingVisibleForRetry() {
+        ConfigStore(context).apply { transcriptionProviderMode = "key" }
+        val recording = audio("retry-after-server-validation")
+
+        val result = QueueTransportWorker(context, {
+            throw ServerResponseException(422, "unprocessable", "temporary validation")
+        }).run(null)
+
+        assertEquals(QueueTransportStatus.Blocked, result.status)
+        assertTrue(recording.isFile)
+        assertEquals(1, BraiCmdQueue.snapshot(context).transport.main)
+        assertFalse(File(context.filesDir, "failed-recordings/${recording.name}").exists())
+    }
+
+    @Test
     fun legacyAudioActionsAreInferredWithoutChangingDeliveredRows() {
         recordings.mkdirs()
         val main = audio("main")
