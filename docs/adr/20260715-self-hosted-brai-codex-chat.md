@@ -81,4 +81,6 @@ MVP не получает доступ к данным, проектам, DB, о
 
 ## Заменено
 
-Нет.
+Частично: `docs/adr/20260719-brai-domain-tools-and-global-agent-controls.md`
+разрешает две bounded owner-scoped domain-операции, сохраняя остальные
+ограничения debug runtime.

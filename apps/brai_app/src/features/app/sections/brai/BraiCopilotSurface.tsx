@@ -19,8 +19,10 @@ import { Button } from "@/shared/ui/button";
 import { cn } from "@/shared/ui/cn";
 import { getBraiLocalStorageItem, setBraiLocalStorageItem } from "@/shared/storage/localStorageKeys";
 import { Textarea } from "@/shared/ui/textarea";
+import { platformName } from "@/shared/platform/platform";
 import { cx } from "../../appUtils";
 import type { ThemeMode } from "../../appModel";
+import { isMobileNavigationViewport } from "../../navigation/useSectionSwipeNavigation";
 import { attachmentReservationError } from "./braiChatModel";
 import { BraiChatImage } from "./BraiChatImage";
 
@@ -477,9 +479,12 @@ const BraiChatTextArea = forwardRef<HTMLTextAreaElement, ComponentProps<"textare
       placeholder={props.placeholder ?? "Напишите Браю…"}
       onKeyDown={(event) => {
         if (event.key === "Enter") {
-          // Mobile keyboards must keep the textarea's native newline behavior.
-          event.stopPropagation();
-          return;
+          const mobileComposer = platformName() === "android" || isMobileNavigationViewport();
+          if (mobileComposer || event.shiftKey || event.nativeEvent.isComposing) {
+            // Mobile Enter and desktop Shift+Enter retain native multiline entry.
+            event.stopPropagation();
+            return;
+          }
         }
         onKeyDown?.(event);
       }}

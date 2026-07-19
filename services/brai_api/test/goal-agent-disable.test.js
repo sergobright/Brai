@@ -44,11 +44,14 @@ test('disabled Goal-agent runtime is a no-op before database or Temporal connect
   await runtime.close();
 });
 
-test('background Goal-agent recommendations are opt-in', () => {
-  assert.equal(goalAgentRecommendationsEnabledFromEnv(undefined), false);
-  assert.equal(goalAgentRecommendationsEnabledFromEnv(''), false);
+test('environment switch is an emergency kill while catalog status owns agent enablement', () => {
+  assert.equal(goalAgentRecommendationsEnabledFromEnv(undefined), true);
+  assert.equal(goalAgentRecommendationsEnabledFromEnv(''), true);
   for (const value of ['1', 'true', 'YES', 'on']) {
     assert.equal(goalAgentRecommendationsEnabledFromEnv(value), true);
+  }
+  for (const value of ['0', 'false', 'NO', 'off']) {
+    assert.equal(goalAgentRecommendationsEnabledFromEnv(value), false);
   }
 });
 

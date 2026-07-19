@@ -90,6 +90,18 @@ export async function createFixture(times, options = {}) {
     });
     runtime.store.configureGoalAgentEnvironment(options.goalAgentEnvironment ?? 'prod');
     runtime.store.syncGoalAgentCatalog(await loadGoalAgentManifests(), times[0]);
+    if (options.goalAgentCatalogActive !== false) {
+      runtime.store.db.prepare(`
+        UPDATE agents SET status = 'active'
+        WHERE id IN (
+          'activity.classifier',
+          'goal.item-matcher',
+          'goal.member-finder',
+          'goal.discovery',
+          'goal.planner'
+        )
+      `).run();
+    }
 
     const close = async () => {
       if (closed) return;
@@ -266,7 +278,8 @@ export async function createTestDatabase(migrations = [
   '0033_normalize_version_work_history.sql',
   '0034_brai_codex_chat.sql',
   '0035_brai_chat_generated_titles.sql',
-  '0036_brai_codex_identity.sql'
+  '0036_brai_codex_identity.sql',
+  '0037_primary_agent_controls.sql'
 ]) {
   const baseUrl = process.env.BRAI_TEST_DATABASE_URL?.trim();
   if (!baseUrl) throw new Error('BRAI_TEST_DATABASE_URL is required for API tests');

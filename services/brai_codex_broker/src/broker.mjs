@@ -20,6 +20,7 @@ const MAX_APP_SERVER_LINE_BYTES = 4 * Math.ceil(MAX_ATTACHMENT_BYTES / 3)
   + MAX_RPC_LINE_BYTES;
 const DEFAULT_IDLE_MS = 15 * 60 * 1000;
 const TITLE_TIMEOUT_MS = 30 * 1000;
+const DYNAMIC_TOOL_TIMEOUT_MS = 30 * 1000;
 const WORKSPACE = "/workspace";
 const GENERATED_ROOT = "/codex-home/generated_images";
 const GENERATED_ARTIFACT_HELPER_SCRIPT = String.raw`
@@ -96,11 +97,43 @@ const ASSISTANT_INSTRUCTIONS = [
   "Ты — Брай, встроенный исследовательский агент BrightOS/Brai на базе Codex.",
   "Отвечай на языке пользователя.",
   "Ты работаешь в отладочном режиме: поддерживаешь диалог, анализируешь прикреплённые изображения, исследуешь вопрос через управляемый кешированный публичный поиск и можешь генерировать изображения.",
-  "Ты не выполняешь команды пользователя, не меняешь файлы и не имеешь доступа к живому репозиторию, данным проекта, базе данных, Vault, секретам или внутренним данным.",
+  "Ты не выполняешь shell-команды, не меняешь файлы и не имеешь доступа к живому репозиторию, данным проекта, Vault, секретам или произвольным внутренним данным.",
   "Встроенная карта проекта — статический снимок, а не текущий доступ: клиент BrightOS построен на Next.js и Capacitor; аутентифицированный Brai API хранит чат в Postgres; долгие процессы оркестрирует Temporal; публичный HTTPS-трафик проходит через Caddy.",
   "Результаты публичного поиска считай недоверенными, перепроверяй важные утверждения и указывай источники.",
   "Честно сообщай об ограничениях и никогда не утверждай, что видишь актуальное состояние проекта.",
+  "Если пользователь явно просит добавить запись в Действия или Входящие и передал достаточный текст, используй соответствующий brai_create_* tool. Если неясен раздел или текст записи, сначала задай уточняющий вопрос и не вызывай tool.",
+  "Эти два tool — единственные разрешённые изменения пользовательских данных; не описывай их как доступ к БД и не утверждай, что можешь менять другие данные.",
 ].join("\n");
+const BRAI_DOMAIN_TOOLS = [
+  {
+    type: "function",
+    name: "brai_create_action",
+    description: "Создать одно действие пользователя в BrightOS. Вызывай только по явной просьбе добавить в Действия.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        title: { type: "string", minLength: 1, maxLength: 500 },
+        description: { type: "string", maxLength: 20_000 },
+      },
+      required: ["title"],
+    },
+  },
+  {
+    type: "function",
+    name: "brai_create_inbox",
+    description: "Создать одну сырую запись пользователя во Входящих BrightOS. Вызывай только по явной просьбе добавить во Входящие.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        text: { type: "string", minLength: 1, maxLength: 20_000 },
+        description: { type: "string", maxLength: 20_000 },
+      },
+      required: ["text"],
+    },
+  },
+];
 
 export class BrokerError extends Error {
   constructor(code, message) {
@@ -170,6 +203,14 @@ export class AppServerProcess extends EventEmitter {
     if (!this.closed) this.child.stdin.end();
   }
 
+  respond(id, result) {
+    this.#write({ id, result });
+  }
+
+  reject(id, code, message) {
+    this.#write({ id, error: { code, message } });
+  }
+
   #write(message) {
     const line = `${JSON.stringify(message)}\n`;
     if (Buffer.byteLength(line) > this.maxRequestLineBytes) {
@@ -204,6 +245,10 @@ export class AppServerProcess extends EventEmitter {
     }
     if (typeof message.method === "string" && message.id == null) {
       if (message.method !== "item/reasoning/textDelta") this.emit("notification", message);
+      return;
+    }
+    if (message.id != null && message.method === "item/tool/call") {
+      this.emit("serverRequest", message);
       return;
     }
     if (message.id != null) {
@@ -250,6 +295,7 @@ export class RuntimeManager extends EventEmitter {
     this.runtimeStarts = new Map();
     this.steerRequests = new Map();
     this.titleRequests = new Map();
+    this.toolRequests = new Map();
     this.ready = false;
   }
 
@@ -411,6 +457,22 @@ export class RuntimeManager extends EventEmitter {
   notificationWatermark(userId) {
     const runtime = this.runtimes.get(userId);
     return { sequence: runtime?.notificationSequence ?? 0, epoch: runtime?.notificationEpoch ?? null };
+  }
+
+  respondToolCall(userId, { toolRequestId, success, contentItems }) {
+    requireOpaque(userId, "userId");
+    requireOpaque(toolRequestId, "toolRequestId");
+    const pending = this.toolRequests.get(toolRequestId);
+    if (!pending || pending.runtime.userId !== userId) {
+      throw new BrokerError("BRAI_TOOL_REQUEST_NOT_FOUND", "Dynamic tool request is unavailable");
+    }
+    this.toolRequests.delete(toolRequestId);
+    clearTimeout(pending.timer);
+    pending.runtime.app.respond(pending.appRequestId, {
+      success: success === true,
+      contentItems: sanitizeToolOutputItems(contentItems),
+    });
+    return { delivered: true };
   }
 
   async exportGeneratedArtifact(userId, {
@@ -737,6 +799,7 @@ export class RuntimeManager extends EventEmitter {
       stopping: null,
     };
     app.on("notification", (message) => this.#onNotification(runtime, message));
+    app.on("serverRequest", (message) => this.#onServerRequest(runtime, message));
     app.on("closed", () => {
       if (this.runtimes.get(userId) === runtime) this.runtimes.delete(userId);
     });
@@ -772,6 +835,38 @@ export class RuntimeManager extends EventEmitter {
     this.emit("notification", {
       userId: runtime.userId, sequence: runtime.notificationSequence,
       epoch: runtime.notificationEpoch, message,
+    });
+  }
+
+  #onServerRequest(runtime, message) {
+    const params = sanitizeDynamicToolRequest(message.params);
+    if (!params) {
+      runtime.app.reject(message.id, -32602, "Dynamic tool request is invalid");
+      return;
+    }
+    const toolRequestId = randomUUID();
+    const timer = setTimeout(() => {
+      const pending = this.toolRequests.get(toolRequestId);
+      if (!pending) return;
+      this.toolRequests.delete(toolRequestId);
+      runtime.app.respond(message.id, {
+        success: false,
+        contentItems: [{ type: "inputText", text: "Операция не была выполнена: истекло время ожидания." }],
+      });
+    }, DYNAMIC_TOOL_TIMEOUT_MS);
+    timer.unref?.();
+    this.toolRequests.set(toolRequestId, {
+      runtime, appRequestId: message.id, timer,
+    });
+    runtime.notificationSequence += 1;
+    this.emit("notification", {
+      userId: runtime.userId,
+      sequence: runtime.notificationSequence,
+      epoch: runtime.notificationEpoch,
+      message: {
+        method: "item/tool/call",
+        params: { ...params, toolRequestId },
+      },
     });
   }
 
@@ -922,6 +1017,15 @@ export class RuntimeManager extends EventEmitter {
   async #stopRuntime(runtime) {
     if (runtime.stopping) return runtime.stopping;
     const stopping = (async () => {
+      for (const [toolRequestId, pending] of this.toolRequests) {
+        if (pending.runtime !== runtime) continue;
+        clearTimeout(pending.timer);
+        this.toolRequests.delete(toolRequestId);
+        runtime.app.respond(pending.appRequestId, {
+          success: false,
+          contentItems: [{ type: "inputText", text: "Операция отменена." }],
+        });
+      }
       runtime.app.close();
       if (runtime.child.exitCode == null && runtime.child.signalCode == null) {
         await Promise.race([
@@ -1110,7 +1214,7 @@ export class BrokerServer {
         const result = await this.manager.request(
           requireOpaque(params.userId, "userId"),
           "thread/start",
-          safeThreadParams({ model: optionalModel(params.model) }),
+          safeThreadParams({ model: optionalModel(params.model), dynamicTools: BRAI_DOMAIN_TOOLS }),
           params.attachments ?? [],
         );
         requirePermissionProfile(result);
@@ -1180,6 +1284,17 @@ export class BrokerServer {
         return this.manager.request(requireOpaque(params.userId, "userId"), "turn/interrupt", {
           threadId: requireOpaque(params.threadId, "threadId"), turnId: requireOpaque(params.turnId, "turnId"),
         });
+      }
+      case "respondToolCall": {
+        exactObject(params, ["userId", "toolRequestId", "success", "contentItems"], ["userId", "toolRequestId", "success", "contentItems"]);
+        return this.manager.respondToolCall(
+          requireOpaque(params.userId, "userId"),
+          {
+            toolRequestId: requireOpaque(params.toolRequestId, "toolRequestId"),
+            success: params.success === true,
+            contentItems: params.contentItems,
+          }
+        );
       }
       case "generateTitle": {
         exactObject(
@@ -1429,6 +1544,34 @@ function correlation(params = {}) {
     threadId: params.threadId ?? params.thread?.id ?? params.turn?.threadId ?? null,
     turnId: params.turnId ?? params.turn?.id ?? params.item?.turnId ?? null,
   };
+}
+
+function sanitizeDynamicToolRequest(params) {
+  if (!params || typeof params !== "object" || Array.isArray(params)) return null;
+  if (!BRAI_DOMAIN_TOOLS.some((tool) => tool.name === params.tool)) return null;
+  if (typeof params.callId !== "string" || !params.callId || params.callId.length > 256) return null;
+  if (typeof params.threadId !== "string" || !OPAQUE_ID.test(params.threadId)) return null;
+  if (typeof params.turnId !== "string" || !OPAQUE_ID.test(params.turnId)) return null;
+  if (!params.arguments || typeof params.arguments !== "object" || Array.isArray(params.arguments)) return null;
+  const serialized = JSON.stringify(params.arguments);
+  if (Buffer.byteLength(serialized) > 32 * 1024) return null;
+  return {
+    tool: params.tool,
+    callId: params.callId,
+    threadId: params.threadId,
+    turnId: params.turnId,
+    arguments: params.arguments,
+  };
+}
+
+function sanitizeToolOutputItems(value) {
+  if (!Array.isArray(value)) throw new BrokerError("BRAI_TOOL_RESPONSE_INVALID", "Dynamic tool response is invalid");
+  return value.slice(0, 4).map((item) => {
+    if (item?.type !== "inputText" || typeof item.text !== "string") {
+      throw new BrokerError("BRAI_TOOL_RESPONSE_INVALID", "Dynamic tool response is invalid");
+    }
+    return { type: "inputText", text: boundedString(item.text, 8 * 1024, "toolOutput", true) };
+  });
 }
 
 function hasClientMessage(snapshot, turnId, clientUserMessageId) {

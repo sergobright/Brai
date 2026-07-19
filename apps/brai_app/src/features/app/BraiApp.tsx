@@ -95,6 +95,7 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
   const registerBraiRail = useCallback((content: ReactNode | null) => registerContextualContent("brai", content), [registerContextualContent]);
   const registerArchiveRail = useCallback((content: ReactNode | null) => registerContextualContent("archive", content), [registerContextualContent]);
   const registerBraiCmdRail = useCallback((content: ReactNode | null) => registerContextualContent("brai-cmd", content), [registerContextualContent]);
+  const registerFactoryRail = useCallback((content: ReactNode | null) => registerContextualContent("factory", content), [registerContextualContent]);
   const { setMobileMenuOpen } = app;
   const closeMobilePageRail = useCallback(() => setMobileMenuOpen(false), [setMobileMenuOpen]);
   const activeContextualContent = contextualContent?.section === visibleSection ? contextualContent.content : null;
@@ -505,7 +506,10 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
         ) : screenSection === "profile" ? (
           <PageWorkspace main={<ProfileSection />} />
         ) : screenSection === "factory" ? (
-          <FactorySection onMobileOverlayChange={app.setActionOverlayOpen} />
+          <FactorySection
+            onMobileOverlayChange={app.setActionOverlayOpen}
+            onRailContent={isActivePage ? registerFactoryRail : undefined}
+          />
         ) : screenSection === "focus" ? (
           <FocusSection
             state={app.timer}

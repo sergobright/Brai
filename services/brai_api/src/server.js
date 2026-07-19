@@ -351,6 +351,89 @@ export function createBraiServer({
     }, 0);
   };
 
+  braiChatRuntime?.configureDomainTools?.(async ({
+    userId, publicThreadId, runId, callId, tool, arguments: toolArguments
+  }) => withUserScope(userId, async () => {
+    const nowDate = now();
+    const nowIso = nowDate.toISOString();
+    const stableKey = `brai-chat:${userId}:${publicThreadId}:${runId}:${callId}`;
+    const digest = crypto.createHash('sha256').update(stableKey).digest('hex');
+    if (tool === 'brai_create_action') {
+      const title = braiToolText(toolArguments?.title, 500, true);
+      const description = braiToolText(toolArguments?.description, 20_000, false);
+      const activityId = `brai-chat:activity:${digest.slice(0, 32)}`;
+      const eventId = `brai-chat:${digest}:create`;
+      const existed = Boolean(store.getActivityItem(activityId));
+      const result = store.syncActivityEvents({
+        device: {
+          device_id: 'brai-chat-agent',
+          platform: 'server',
+          display_name: 'Brai chat'
+        },
+        events: [{
+          event_id: eventId,
+          client_sequence: store.nextPostgresCounter('events.client_sequence.brai-chat-agent'),
+          change_type: 'create',
+          activity_id: activityId,
+          occurred_at_utc: nowIso,
+          payload: {
+            title,
+            description_md: description,
+            activity_type_id: 'action'
+          }
+        }],
+        nowIso
+      });
+      if (result.ignored_events?.length) throw new Error('domain_mutation_failed');
+      const state = activitiesState(store, nowDate);
+      broadcast(sockets, {
+        type: 'activities_synced',
+        activities_state: state,
+        actions_state: actionsCompatState(state)
+      }, userId);
+      if (!existed) processActivityLater({ ownerUserId: userId, activityId });
+      return {
+        success: true,
+        text: `Действие ${existed ? 'уже существовало' : 'создано'}: ${JSON.stringify(title)}. ID: ${activityId}`
+      };
+    }
+    if (tool === 'brai_create_inbox') {
+      const text = braiToolText(toolArguments?.text, 20_000, true);
+      const description = braiToolText(toolArguments?.description, 20_000, false);
+      const inboxId = `inbox:brai-chat:${digest.slice(0, 32)}`;
+      const eventId = `${inboxId}:create`;
+      const ingestIdempotencyHash = inboxIngestIdempotencyHash(stableKey);
+      const ingestPayloadHash = crypto.createHash('sha256').update(JSON.stringify({
+        text, description, source: 'brai-chat', thread_id: publicThreadId
+      })).digest('hex');
+      const created = store.createInboxApiItem({
+        eventId,
+        inboxId,
+        title: text.split(/\r?\n/, 1)[0].trim().slice(0, 500),
+        descriptionText: description,
+        explanationText: text,
+        attachmentLinks: [],
+        source: 'brai-chat',
+        sourceKey: publicThreadId,
+        responseRequired: false,
+        relatedInboxId: null,
+        recordTypeId: 1,
+        preliminarySection: '',
+        ingestIdempotencyHash,
+        ingestPayloadHash,
+        nowIso
+      });
+      const state = inboxState(store, nowDate);
+      broadcast(sockets, { type: 'inbox_synced', inbox_state: state }, userId);
+      if (created.accepted_event) processInboxLater({ ownerUserId: userId, inboxId });
+      return {
+        success: true,
+        text: `Входящая запись ${created.accepted_event ? 'создана' : 'уже существовала'}: ${JSON.stringify(text.slice(0, 500))}. ID: ${inboxId}`
+      };
+    }
+    throw new Error('domain_tool_not_allowed');
+  }));
+
   const contextAuditInterval = Number(contextAuditReconcileIntervalMs) > 0
     ? setInterval(() => {
         try {
@@ -1459,7 +1542,35 @@ export function createBraiServer({
       }
 
       if (req.method === 'GET' && url.pathname === '/v1/ai-logs') {
-        sendJson(req, res, 200, { logs: store.listAiLogs({ limit: url.searchParams.get('limit') }) });
+        sendJson(req, res, 200, {
+          logs: store.listAiLogs({
+            limit: url.searchParams.get('limit'),
+            agentId: url.searchParams.get('agent_id')
+          })
+        });
+        return;
+      }
+
+      if (req.method === 'GET' && url.pathname === '/v1/agents') {
+        sendJson(req, res, 200, {
+          agents: store.listAgents(),
+          can_manage_agents: authContext.userId === store.primaryUserId()
+        });
+        return;
+      }
+
+      const agentStatusMatch = req.method === 'PATCH'
+        ? url.pathname.match(/^\/v1\/agents\/([^/]+)\/status$/)
+        : null;
+      if (agentStatusMatch) {
+        const body = await readJson(req, { limit: 8 * 1024 });
+        const agent = store.setAgentEnabled({
+          agentId: decodeURIComponent(agentStatusMatch[1]),
+          enabled: body.enabled,
+          actorUserId: authContext.userId,
+          nowIso: now().toISOString()
+        });
+        sendJson(req, res, 200, { agent });
         return;
       }
 
@@ -1905,6 +2016,14 @@ function actionsCompatState(state) {
     server_revision: state.server_revision,
     actions: state.activities
   };
+}
+
+function braiToolText(value, maxLength, required) {
+  const text = typeof value === 'string'
+    ? value.replace(/\u0000/g, '').replace(/\r\n?/g, '\n').trim().slice(0, maxLength)
+    : '';
+  if (required && !text) throw new Error('invalid_tool_arguments');
+  return text;
 }
 
 async function authenticateRequest(req, token, parsedUrl, sessionSecret, now, auth, store, authBackendTimeoutMs) {

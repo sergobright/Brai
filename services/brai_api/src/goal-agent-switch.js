@@ -5,5 +5,5 @@ export function goalAgentsEnabledFromEnv(value = process.env.BRAI_GOAL_AGENTS_EN
 export function goalAgentRecommendationsEnabledFromEnv(
   value = process.env.BRAI_GOAL_AGENT_RECOMMENDATIONS_ENABLED
 ) {
-  return /^(1|true|yes|on)$/i.test(String(value ?? '').trim());
+  return !/^(0|false|no|off)$/i.test(String(value ?? '').trim());
 }

@@ -175,7 +175,7 @@ export function InboxSection({
                 ref={desktopInputRef}
                 value={draft}
                 maxLength={TITLE_MAX_LENGTH}
-                placeholder="Добавить входящее"
+                placeholder={draft ? undefined : "Добавить входящее"}
                 aria-label="Добавить входящее"
                 autoFocus={autoFocusAddInput}
                 onChange={(event) => setDraft(event.target.value)}

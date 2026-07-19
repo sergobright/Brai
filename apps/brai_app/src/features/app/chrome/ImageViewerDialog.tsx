@@ -54,19 +54,40 @@ export function ImageViewerDialog({
         <Dialog.Backdrop ref={backdropRef} className="fixed inset-0 z-[180] bg-background/95 backdrop-blur-sm" style={backdropStyle} />
         <Dialog.Viewport
           ref={gestureRef}
-          className="fixed inset-0 z-[181] grid place-items-center px-3 pb-[max(env(safe-area-inset-bottom),1.5rem)] pt-[max(env(safe-area-inset-top),3.5rem)]"
+          className="fixed inset-0 z-[181] grid place-items-center overflow-hidden p-0"
           {...sheetDragHandlers}
         >
-          <Dialog.Popup ref={sheetRef} className="grid h-full w-full max-w-5xl grid-rows-[2.5rem_minmax(0,1fr)] overflow-hidden outline-none" style={sheetStyle}>
+          <Dialog.Popup ref={sheetRef} className="relative grid h-full w-full place-items-center overflow-hidden outline-none" style={sheetStyle}>
             <Dialog.Title className="sr-only">{label}</Dialog.Title>
-            <div className="flex justify-end gap-2" data-mobile-sheet-no-drag>
-              {onDownload ? <Button type="button" size="sm" variant="secondary" onClick={onDownload}><Download aria-hidden="true" />Скачать</Button> : null}
-              <Button type="button" size="icon-sm" variant="secondary" aria-label="Закрыть просмотр" onClick={close}><X aria-hidden="true" /></Button>
+            <div
+              className="absolute right-[max(env(safe-area-inset-right),0.75rem)] top-[max(env(safe-area-inset-top),0.75rem)] z-[2] flex gap-1.5"
+              data-mobile-sheet-no-drag
+            >
+              {onDownload ? (
+                <Button
+                  type="button"
+                  size="icon-sm"
+                  variant="secondary"
+                  className="bg-background/65 text-foreground shadow-sm backdrop-blur-md hover:bg-background/85"
+                  aria-label="Скачать изображение"
+                  onClick={onDownload}
+                >
+                  <Download aria-hidden="true" />
+                </Button>
+              ) : null}
+              <Button
+                type="button"
+                size="icon-sm"
+                variant="secondary"
+                className="bg-background/65 text-foreground shadow-sm backdrop-blur-md hover:bg-background/85"
+                aria-label="Закрыть просмотр"
+                onClick={close}
+              >
+                <X aria-hidden="true" />
+              </Button>
             </div>
-            <div className="grid min-h-0 place-items-center overflow-hidden">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={src} alt={label} draggable={false} className="block max-h-full max-w-full object-contain" />
-            </div>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={src} alt={label} draggable={false} className="block h-full w-full object-contain" />
           </Dialog.Popup>
         </Dialog.Viewport>
       </Dialog.Portal>

@@ -1024,8 +1024,58 @@ test("starting a thread with attachments keeps its first turn in the same runtim
   const methods = docker.runtimes[0].requests.map(({ method }) => method);
   assert.equal(methods.filter((method) => method === "thread/resume").length, 0);
   assert.ok(methods.indexOf("thread/start") < methods.indexOf("turn/start"));
+  const startRequest = docker.runtimes[0].requests.find(({ method }) => method === "thread/start");
+  assert.deepEqual(startRequest.params.dynamicTools.map(({ name }) => name), [
+    "brai_create_action",
+    "brai_create_inbox",
+  ]);
   client.close();
   await server.close();
+});
+
+test("dynamic tool requests stay owner-scoped and return only bounded text to App Server", async () => {
+  const fixture = await createFixture();
+  const docker = new FakeDocker();
+  const manager = fixture.manager(docker);
+  const runtime = await manager.ensureRuntime(USER_A);
+  const notification = once(manager, "notification");
+  runtime.child.stdout.write(`${JSON.stringify({
+    id: 901,
+    method: "item/tool/call",
+    params: {
+      arguments: { title: "Позвонить маме" },
+      callId: "call_00000001",
+      threadId: THREAD,
+      tool: "brai_create_action",
+      turnId: TURN,
+    },
+  })}\n`);
+  const [{ userId, message }] = await notification;
+  assert.equal(userId, USER_A);
+  assert.equal(message.method, "item/tool/call");
+  assert.equal(message.params.tool, "brai_create_action");
+  assert.equal(message.params.arguments.title, "Позвонить маме");
+  assert.match(message.params.toolRequestId, /^[0-9a-f-]{36}$/);
+
+  assert.throws(
+    () => manager.respondToolCall(USER_B, {
+      toolRequestId: message.params.toolRequestId,
+      success: true,
+      contentItems: [{ type: "inputText", text: "Чужой ответ" }],
+    }),
+    (error) => error.code === "BRAI_TOOL_REQUEST_NOT_FOUND",
+  );
+  assert.deepEqual(manager.respondToolCall(USER_A, {
+    toolRequestId: message.params.toolRequestId,
+    success: true,
+    contentItems: [{ type: "inputText", text: "Действие добавлено." }],
+  }), { delivered: true });
+  const response = runtime.child.requests.find((request) => request.id === 901 && request.result);
+  assert.deepEqual(response.result, {
+    success: true,
+    contentItems: [{ type: "inputText", text: "Действие добавлено." }],
+  });
+  await manager.close();
 });
 
 test("a thread already loaded in the current runtime starts without an empty-history resume", async () => {

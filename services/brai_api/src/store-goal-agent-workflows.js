@@ -66,6 +66,7 @@ export const goalAgentWorkflowMethods = {
     const agentId = activity.activity_type_id === 'goal'
       ? 'goal.member-finder'
       : skipClassifier ? 'goal.item-matcher' : 'activity.classifier';
+    if (!this.getAgent(agentId)) return null;
     return ensureExecution(this, {
       agentId, subjectKind: activity.activity_type_id === 'goal' ? 'goal' : 'item',
       subjectId: activity.id, triggerKind, triggerRevision, nowIso
@@ -79,6 +80,7 @@ export const goalAgentWorkflowMethods = {
     const agentId = item.preliminary_section === 'operation'
       ? 'goal.item-matcher'
       : 'activity.classifier';
+    if (!this.getAgent(agentId)) return null;
     return ensureExecution(this, {
       agentId, subjectKind: 'item', subjectId: item.items_id,
       triggerKind, triggerRevision, nowIso
@@ -106,6 +108,7 @@ export const goalAgentWorkflowMethods = {
 
   requestGoalPlan({ itemsId, triggerRevision, nowIso }) {
     if (!goalAgentRecommendationsEnabled(this)) throw workflowError('goal_agents_disabled', 503);
+    if (!this.getAgent('goal.planner')) throw workflowError('goal_agents_disabled', 503);
     const goal = this.getActivityItem(itemsId);
     if (!goal || goal.activity_type_id !== 'goal' || goal.deleted_at_utc) {
       throw workflowError('goal_not_found', 404);
@@ -119,6 +122,7 @@ export const goalAgentWorkflowMethods = {
 
   noteGoalDiscoveryChanges({ count = 1, nowIso } = {}) {
     if (!goalAgentRecommendationsEnabled(this)) return false;
+    if (!this.getAgent('goal.discovery')) return false;
     const userId = requireUser();
     const increment = Math.max(1, Math.min(Number(count) || 1, 1000));
     const now = nowIso ?? new Date().toISOString();
@@ -146,6 +150,7 @@ export const goalAgentWorkflowMethods = {
 
   ensureEligibleGoalDiscoveries({ nowIso, limit = 100 } = {}) {
     if (!goalAgentRecommendationsEnabled(this)) return [];
+    if (!this.getAgent('goal.discovery')) return [];
     const now = nowIso ?? new Date().toISOString();
     const cutoff = new Date(Date.parse(now) - DAY_MS).toISOString();
     const candidates = this.db.prepare(`SELECT user_id FROM context_discovery_watermarks
@@ -203,6 +208,11 @@ export const goalAgentWorkflowMethods = {
       WHERE workflow_definition_id IN (
         'activity.classifier','goal.item-matcher','goal.member-finder','goal.discovery','goal.planner'
       ) AND deployment_environment = ? AND status = 'queued'
+        AND EXISTS (
+          SELECT 1 FROM agents
+          WHERE agents.id = workflow_executions.workflow_definition_id
+            AND agents.status = 'active'
+        )
         AND (next_retry_at_utc IS NULL OR next_retry_at_utc <= ?)
       ORDER BY created_at_utc, id LIMIT ?
     `).all(environment, now, boundedLimit(limit)).map(formatExecution);

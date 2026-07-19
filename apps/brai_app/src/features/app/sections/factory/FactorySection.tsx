@@ -1,13 +1,16 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { Bot, CheckCircle2, Clock3, Database, FileJson, GitBranch, Terminal, XCircle } from "lucide-react";
-import { BraiApi, type AiLog } from "@/shared/api/braiApi";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { Activity, Bot, CheckCircle2, Clock3, Database, FileJson, GitBranch, Terminal, XCircle } from "lucide-react";
+import { BraiApi, type AgentCatalogEntry, type AiLog } from "@/shared/api/braiApi";
 import { defaultApiBase } from "@/shared/config/runtime";
 import { formatDisplayDateTime } from "@/shared/time/format";
 import { Badge } from "@/shared/ui/badge";
 import { Card } from "@/shared/ui/card";
 import { ScrollArea } from "@/shared/ui/scroll-area";
+import { Separator } from "@/shared/ui/separator";
+import { SidebarContent, SidebarGroup, SidebarGroupContent, SidebarGroupLabel, SidebarMenu, SidebarMenuButton, SidebarMenuItem } from "@/shared/ui/sidebar";
+import { Switch } from "@/shared/ui/switch";
 import { MobileContextSheet } from "../../chrome/AppChrome";
 import { PageWorkspace } from "../../chrome/PageWorkspace";
 import { cx } from "../../appUtils";
@@ -21,31 +24,92 @@ const FACTORY_DETAIL_TABS: Array<{ id: FactoryDetailTab; label: string }> = [
   { id: "logs", label: "Логи" },
 ];
 
-export function FactorySection({ onMobileOverlayChange }: { onMobileOverlayChange: (open: boolean) => void }) {
+export function FactorySection({
+  onMobileOverlayChange,
+  onRailContent,
+}: {
+  onMobileOverlayChange: (open: boolean) => void;
+  onRailContent?: (content: ReactNode | null) => void;
+}) {
+  const api = useMemo(() => new BraiApi(defaultApiBase()), []);
   const [logs, setLogs] = useState<AiLog[]>([]);
+  const [agentLogs, setAgentLogs] = useState<AiLog[]>([]);
+  const [agents, setAgents] = useState<AgentCatalogEntry[]>([]);
+  const [canManageAgents, setCanManageAgents] = useState(false);
+  const [destination, setDestination] = useState<"flow" | string>("flow");
+  const [togglePending, setTogglePending] = useState<string | null>(null);
   const [selectedLogId, setSelectedLogId] = useState<number | null>(null);
   const [mobileLogId, setMobileLogId] = useState<number | null>(null);
   const [detailTab, setDetailTab] = useState<FactoryDetailTab>("info");
-  const selectedLog = logs.find((log) => log.id === selectedLogId) ?? null;
-  const mobileLog = logs.find((log) => log.id === mobileLogId) ?? null;
+  const selectedLog = [...logs, ...agentLogs].find((log) => log.id === selectedLogId) ?? null;
+  const mobileLog = [...logs, ...agentLogs].find((log) => log.id === mobileLogId) ?? null;
+  const selectedAgent = destination === "flow" ? null : agents.find((agent) => agent.id === destination) ?? null;
+  const selectDestination = useCallback((nextDestination: string) => {
+    setDestination(nextDestination);
+    setSelectedLogId(null);
+    setMobileLogId(null);
+    setDetailTab("info");
+  }, []);
+  const toggleAgent = useCallback(async (agent: AgentCatalogEntry, enabled: boolean) => {
+    if (!canManageAgents || !agent.toggleable || togglePending) return;
+    setTogglePending(agent.id);
+    try {
+      const result = await api.setAgentEnabled(agent.id, enabled);
+      setAgents((current) => current.map((item) => item.id === result.agent.id ? result.agent : item));
+    } catch {
+      // Keep the last confirmed global state; a later reload will reconcile it.
+    } finally {
+      setTogglePending(null);
+    }
+  }, [api, canManageAgents, togglePending]);
 
   useEffect(() => {
     let mounted = true;
-    new BraiApi(defaultApiBase())
-      .aiLogs()
-      .then(({ logs: nextLogs }) => {
+    void Promise.allSettled([api.aiLogs(100), api.agents()]).then(([logsResult, agentsResult]) => {
+      if (!mounted) return;
+      if (logsResult.status === "fulfilled") {
+        const nextLogs = logsResult.value.logs;
         if (!mounted) return;
         setLogs(nextLogs);
         setSelectedLogId((current) => (current != null && nextLogs.some((log) => log.id === current) ? current : null));
-      })
-      .catch(() => {
-        if (!mounted) return;
-        setLogs([]);
-      });
+      }
+      if (agentsResult.status === "fulfilled") {
+        setAgents(agentsResult.value.agents);
+        setCanManageAgents(agentsResult.value.can_manage_agents);
+      }
+    });
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [api]);
+
+  useEffect(() => {
+    if (!selectedAgent) return;
+    let cancelled = false;
+    void api.aiLogs(100, selectedAgent.id).then(({ logs: nextLogs }) => {
+      if (!cancelled) setAgentLogs(nextLogs);
+    }).catch(() => {
+      if (!cancelled) setAgentLogs([]);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [api, selectedAgent]);
+
+  useEffect(() => {
+    if (!onRailContent) return;
+    onRailContent(
+      <FactoryRail
+        agents={agents}
+        canManageAgents={canManageAgents}
+        destination={destination}
+        togglePending={togglePending}
+        onSelect={selectDestination}
+        onToggle={(agent, enabled) => void toggleAgent(agent, enabled)}
+      />,
+    );
+    return () => onRailContent(null);
+  }, [agents, canManageAgents, destination, onRailContent, selectDestination, toggleAgent, togglePending]);
 
   useEffect(() => {
     onMobileOverlayChange(mobileLog != null);
@@ -57,6 +121,8 @@ export function FactorySection({ onMobileOverlayChange }: { onMobileOverlayChang
     if (isMobileNavigationViewport()) setMobileLogId(log.id);
   }
 
+  const visibleLogs = selectedAgent ? agentLogs : logs;
+
   return (
     <section className="relative grid h-full min-h-0 grid-rows-[minmax(0,1fr)] gap-3.5 max-[860px]:gap-0" aria-label="Factory">
       <PageWorkspace
@@ -64,29 +130,176 @@ export function FactorySection({ onMobileOverlayChange }: { onMobileOverlayChang
         mainScroll={false}
         panelScroll={false}
         main={<ScrollArea className="h-full min-h-0 min-w-0 max-[860px]:-mx-3.5 max-[860px]:[&>[data-slot=scroll-area-scrollbar]]:!right-0" contentInset="none">
-          <div className="grid gap-3 pr-[18px] max-[860px]:px-3.5" aria-label="Поток AI_logs">
-            <div className="sticky top-0 z-[2] flex items-center justify-between gap-3 bg-background/95 pb-3 backdrop-blur max-[860px]:hidden">
-              <div className="min-w-0">
-                <p className="m-0 text-sm font-medium">AI_logs/</p>
-                <p className="m-0 text-xs text-muted-foreground">Последние производственные срабатывания</p>
+          {selectedAgent ? (
+            <FactoryAgentPage
+              agent={selectedAgent}
+              canManage={canManageAgents}
+              logs={visibleLogs}
+              selectedLogId={selectedLogId}
+              togglePending={togglePending === selectedAgent.id}
+              onOpenLog={openLog}
+              onToggle={(enabled) => void toggleAgent(selectedAgent, enabled)}
+            />
+          ) : (
+            <div className="grid gap-3 pr-[18px] max-[860px]:px-3.5" aria-label="Поток AI_logs">
+              <div className="sticky top-0 z-[2] flex items-center justify-between gap-3 bg-background/95 pb-3 backdrop-blur max-[860px]:hidden">
+                <div className="min-w-0">
+                  <p className="m-0 text-sm font-medium">Поток</p>
+                  <p className="m-0 text-xs text-muted-foreground">Последние производственные срабатывания</p>
+                </div>
+                <Badge variant="outline">{logs.length}</Badge>
               </div>
-              <Badge variant="outline">{logs.length}</Badge>
+              {logs.map((log) => (
+                <FactoryLogCard
+                  key={log.id}
+                  log={log}
+                  selected={selectedLogId === log.id}
+                  onOpen={() => openLog(log)}
+                />
+              ))}
             </div>
-            {logs.map((log) => (
-              <FactoryLogCard
-                key={log.id}
-                log={log}
-                selected={selectedLogId === log.id}
-                onOpen={() => openLog(log)}
-              />
-            ))}
-          </div>
+          )}
         </ScrollArea>}
         temporaryPanel={selectedLog ? <FactoryDetailPanel activeTab={detailTab} log={selectedLog} onTabChange={setDetailTab} /> : undefined}
       />
 
       {mobileLog ? <FactoryMobileDetail activeTab={detailTab} log={mobileLog} onClose={() => setMobileLogId(null)} onTabChange={setDetailTab} /> : null}
     </section>
+  );
+}
+
+function FactoryRail({ agents, canManageAgents, destination, togglePending, onSelect, onToggle }: {
+  agents: AgentCatalogEntry[];
+  canManageAgents: boolean;
+  destination: string;
+  togglePending: string | null;
+  onSelect: (destination: string) => void;
+  onToggle: (agent: AgentCatalogEntry, enabled: boolean) => void;
+}) {
+  return (
+    <div className="flex h-full min-h-0 flex-col">
+      <SidebarContent className="[&_[data-slot=scroll-area-viewport]]:!pr-0">
+        <SidebarGroup className="p-2">
+          <SidebarMenu>
+            <SidebarMenuItem>
+              <SidebarMenuButton isActive={destination === "flow"} onClick={() => onSelect("flow")}>
+                <Activity aria-hidden="true" />
+                <span>Поток</span>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+          </SidebarMenu>
+        </SidebarGroup>
+        <Separator />
+        <SidebarGroup className="p-2">
+          <SidebarGroupLabel>Агенты</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              {agents.map((agent) => (
+                <SidebarMenuItem key={agent.id}>
+                  <SidebarMenuButton
+                    className="h-auto min-h-9 items-start py-1.5 pr-10"
+                    isActive={destination === agent.id}
+                    onClick={() => onSelect(agent.id)}
+                  >
+                    <Bot aria-hidden="true" />
+                    <span className="min-w-0">
+                      <span className="block truncate">{agent.title}</span>
+                      <span className="block truncate text-xs text-muted-foreground">{agent.id}</span>
+                    </span>
+                  </SidebarMenuButton>
+                  <div className="absolute right-2 top-1/2 z-10 -translate-y-1/2" onClick={(event) => event.stopPropagation()}>
+                    {canManageAgents && agent.toggleable ? (
+                      <Switch
+                        aria-label={`${agent.enabled ? "Выключить" : "Включить"} агента ${agent.title}`}
+                        checked={agent.enabled}
+                        disabled={togglePending === agent.id}
+                        onCheckedChange={(enabled) => onToggle(agent, enabled)}
+                      />
+                    ) : (
+                      <span
+                        className={cx("text-xs", agent.enabled ? "text-foreground" : "text-muted-foreground")}
+                        aria-label={agent.enabled ? "Включён" : "Выключен"}
+                      >
+                        {agent.enabled ? "Вкл" : "Выкл"}
+                      </span>
+                    )}
+                  </div>
+                </SidebarMenuItem>
+              ))}
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+      </SidebarContent>
+    </div>
+  );
+}
+
+function FactoryAgentPage({ agent, canManage, logs, selectedLogId, togglePending, onOpenLog, onToggle }: {
+  agent: AgentCatalogEntry;
+  canManage: boolean;
+  logs: AiLog[];
+  selectedLogId: number | null;
+  togglePending: boolean;
+  onOpenLog: (log: AiLog) => void;
+  onToggle: (enabled: boolean) => void;
+}) {
+  const details = [
+    ["Что делает", agent.summary],
+    ["Когда запускается", agent.trigger_description],
+    ["Условия", agent.conditions_description],
+    ["Входные данные", agent.input_description],
+    ["Результат", agent.output_description],
+    ["Данные и взаимодействия", agent.interactions_description],
+    ["Побочные эффекты", agent.side_effects_description],
+    ["Fallback", agent.fallback_description],
+  ].filter((row): row is [string, string] => Boolean(row[1]));
+  return (
+    <div className="grid gap-5 pr-[18px] max-[860px]:px-3.5" aria-label={`Агент ${agent.title}`}>
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0">
+          <h1 className="m-0 text-xl font-semibold">{agent.title}</h1>
+          <p className="m-0 mt-1 break-all text-xs text-muted-foreground">{agent.id} · v{agent.version}</p>
+        </div>
+        {canManage && agent.toggleable ? (
+          <label className="flex shrink-0 items-center gap-2 text-sm text-muted-foreground">
+            {agent.enabled ? "Включён" : "Выключен"}
+            <Switch checked={agent.enabled} disabled={togglePending} onCheckedChange={onToggle} />
+          </label>
+        ) : (
+          <Badge variant={agent.enabled ? "secondary" : "outline"}>{agent.enabled ? "Включён" : "Выключен"}</Badge>
+        )}
+      </div>
+      <div className="grid gap-3">
+        {details.map(([title, body]) => (
+          <Card key={title} className="grid gap-1.5 p-4">
+            <h2 className="m-0 text-sm font-semibold">{title}</h2>
+            <p className="m-0 whitespace-pre-wrap text-sm text-muted-foreground">{body}</p>
+          </Card>
+        ))}
+      </div>
+      <Card className="grid gap-3 p-4">
+        <h2 className="m-0 text-sm font-semibold">Runtime и схема</h2>
+        <DetailRows rows={presentRows([
+          ["target", agent.target],
+          ["kind", agent.kind],
+          ["provider / model", [agent.llm_provider, agent.llm_model].filter(Boolean).join(" / ")],
+          ["runtime_service", agent.runtime_service],
+          ["task_queue", agent.task_queue_base],
+          ["source_module", agent.source_module],
+          ["prompt_version", agent.prompt_version],
+          ["schema_version", agent.schema_version],
+        ])} />
+      </Card>
+      <section className="grid gap-3 pb-4">
+        <div className="flex items-center justify-between gap-3">
+          <h2 className="m-0 text-base font-semibold">Срабатывания</h2>
+          <Badge variant="outline">{logs.length}</Badge>
+        </div>
+        {logs.length ? logs.map((log) => (
+          <FactoryLogCard key={log.id} log={log} selected={selectedLogId === log.id} onOpen={() => onOpenLog(log)} />
+        )) : <p className="m-0 text-sm text-muted-foreground">Срабатываний пока нет</p>}
+      </section>
+    </div>
   );
 }
 

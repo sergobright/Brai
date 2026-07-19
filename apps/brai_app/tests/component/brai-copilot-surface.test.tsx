@@ -1,6 +1,6 @@
 import type { ButtonHTMLAttributes, ComponentType, CSSProperties, ElementType, ReactNode } from "react";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BraiCopilotSurface, braiReasoningLabel, normalizeLatexDisplayMath } from "@/features/app/sections/brai/BraiCopilotSurface";
 
 type FakeMessage = { id: string; role: "user" | "assistant"; content: string };
@@ -207,6 +207,9 @@ vi.mock("@copilotkit/react-core/v2", async () => {
         <TextArea
           value={props.value ?? ""}
           onChange={(event: React.ChangeEvent<HTMLTextAreaElement>) => props.onChange?.(event.target.value)}
+          onKeyDown={(event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+            if (event.key === "Enter" && !event.shiftKey) props.onSubmitMessage?.(props.value ?? "Сообщение");
+          }}
         />
       ) : null,
     };
@@ -232,6 +235,8 @@ vi.mock("@copilotkit/react-core/v2", async () => {
 });
 
 describe("BraiCopilotSurface", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
   beforeEach(() => {
     window.localStorage.clear();
     fake.agent.isRunning = false;
@@ -397,12 +402,23 @@ describe("BraiCopilotSurface", () => {
     expect(fake.stockSubmit).not.toHaveBeenCalled();
   });
 
-  it("keeps Enter as a newline key and normalizes Codex display math for the renderer", () => {
+  it("submits with Enter on desktop web and keeps Shift+Enter as a newline", () => {
+    vi.stubGlobal("matchMedia", vi.fn(() => ({ matches: false })));
     renderSurface();
 
     const textarea = screen.getByRole("textbox", { name: "Сообщение Браю" });
     fireEvent.keyDown(textarea, { key: "Enter" });
+    expect(fake.stockSubmit).toHaveBeenCalledOnce();
+    fireEvent.keyDown(textarea, { key: "Enter", shiftKey: true });
+    expect(fake.stockSubmit).toHaveBeenCalledOnce();
+  });
 
+  it("keeps mobile Enter as a newline key and normalizes Codex display math for the renderer", () => {
+    vi.stubGlobal("matchMedia", vi.fn(() => ({ matches: true })));
+    renderSurface();
+
+    const textarea = screen.getByRole("textbox", { name: "Сообщение Браю" });
+    fireEvent.keyDown(textarea, { key: "Enter" });
     expect(fake.stockSubmit).not.toHaveBeenCalled();
     expect(normalizeLatexDisplayMath("\\[\\Delta x \\geq 1\\]")).toBe("$$\n\\Delta x \\geq 1\n$$");
     expect(normalizeLatexDisplayMath("[\\Delta p \\geq 1]")).toBe("$$\n\\Delta p \\geq 1\n$$");

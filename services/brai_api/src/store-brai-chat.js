@@ -53,6 +53,9 @@ export const braiChatStoreMethods = {
     return {
       ...formatBraiChatThread(row),
       codex_thread_id: row.codex_thread_id ?? null,
+      codex_tool_contract_version: row.codex_tool_contract_version == null
+        ? null
+        : Number(row.codex_tool_contract_version),
       active_codex_turn_id: row.active_codex_turn_id ?? null,
       active_user_message_id: row.active_user_message_id ?? null,
       active_turn_started_at_utc: row.active_turn_started_at_utc ?? null,
@@ -100,14 +103,38 @@ export const braiChatStoreMethods = {
     return result.changes ? this.getBraiChatThread(threadId) : null;
   },
 
-  setBraiChatCodexThreadId(threadId, codexThreadId, nowIso = new Date().toISOString()) {
+  setBraiChatCodexThreadId(
+    threadId,
+    codexThreadId,
+    toolContractVersion = null,
+    nowIso = new Date().toISOString()
+  ) {
     const userId = requireUser();
     const value = nullableSetting(codexThreadId, 'invalid_codex_thread_id');
+    const contractVersion = toolContractVersion == null ? null : Number(toolContractVersion);
+    if (contractVersion != null && (!Number.isSafeInteger(contractVersion) || contractVersion <= 0)) {
+      throw chatError('invalid_codex_tool_contract_version', 400);
+    }
     const result = this.db.prepare(`
-      UPDATE brai_chat_threads SET codex_thread_id = ?, updated_at_utc = ?
+      UPDATE brai_chat_threads SET codex_thread_id = ?,
+        codex_tool_contract_version = ?, updated_at_utc = ?
       WHERE user_id = ? AND id = ?
-    `).run(value, nowIso, userId, threadId);
+    `).run(value, contractVersion, nowIso, userId, threadId);
     return result.changes ? this.getBraiChatThreadRuntime(threadId) : null;
+  },
+
+  listBraiChatRecentMessages(threadId, limit = 40) {
+    const userId = requireUser();
+    if (!ownedThread(this, threadId)) return null;
+    const bounded = Math.max(1, Math.min(Number(limit) || 40, 100));
+    return this.db.prepare(`
+      SELECT * FROM (
+        SELECT * FROM brai_chat_messages
+        WHERE user_id = ? AND brai_chat_threads_id = ?
+        ORDER BY sequence DESC LIMIT ?
+      ) recent
+      ORDER BY sequence
+    `).all(userId, threadId, bounded).map(formatBraiChatMessage);
   },
 
   setBraiChatActiveTurn(threadId, {

@@ -118,7 +118,8 @@ function fakeStore() {
       active_turn_deadline_at_utc: null,
       active_turn_model: null,
       active_turn_reasoning_effort: null,
-      codex_thread_id: null
+      codex_thread_id: null,
+      codex_tool_contract_version: 1
     },
     replayCalls: [],
     onReplay: null,
@@ -137,7 +138,13 @@ function fakeStore() {
       this.aiLogs.push(saved);
       return saved.id;
     },
-    setBraiChatCodexThreadId(_threadId, codexThreadId) { this.thread.codex_thread_id = codexThreadId; },
+    setBraiChatCodexThreadId(_threadId, codexThreadId, toolContractVersion = null) {
+      this.thread.codex_thread_id = codexThreadId;
+      this.thread.codex_tool_contract_version = toolContractVersion;
+    },
+    listBraiChatRecentMessages() {
+      return this.messages.map((message, sequence) => ({ ...message, sequence: sequence + 1 }));
+    },
     setBraiChatActiveTurn(_threadId, active = {}) {
       this.thread.active_turn_id = active.runId ?? null;
       this.thread.active_codex_turn_id = active.codexTurnId ?? null;
@@ -334,6 +341,128 @@ test('run waits for its subscriber so AG-UI starts with RUN_STARTED', async () =
   await waitFor(() => store.events.some((event) => event.type === EventType.RUN_FINISHED));
 
   assert.equal(streamed[0]?.type, EventType.RUN_STARTED);
+});
+
+test('dynamic domain tool requests execute in the authenticated public thread and return through broker', async () => {
+  const broker = new FakeBroker();
+  const store = fakeStore();
+  const calls = [];
+  const coordinator = new BraiChatTurnCoordinator({
+    broker,
+    turnTimeoutMs: 10_000,
+    toolExecutor: async (input) => {
+      calls.push(input);
+      return { success: true, text: 'Действие «Позвонить маме» добавлено.' };
+    }
+  });
+  coordinator.run({
+    store,
+    userId: 'user-a',
+    publicThreadId: 'public-thread',
+    input: {
+      threadId: 'scoped-thread',
+      runId: 'public-run',
+      messages: [{ id: 'user-message', role: 'user', content: 'Добавь действие: позвонить маме' }]
+    }
+  }).subscribe(() => {});
+  await waitFor(() => broker.requests.some((request) => request.method === 'startTurn'));
+
+  broker.notify('item/tool/call', {
+    toolRequestId: 'tool-request-0001',
+    callId: 'tool-call-0001',
+    threadId: 'internal-thread-secret',
+    turnId: 'internal-turn-secret',
+    tool: 'brai_create_action',
+    arguments: { title: 'Позвонить маме' }
+  });
+  await waitFor(() => broker.requests.some((request) => request.method === 'respondToolCall'));
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].store, store);
+  assert.deepEqual({
+    userId: calls[0].userId,
+    publicThreadId: calls[0].publicThreadId,
+    runId: calls[0].runId,
+    callId: calls[0].callId,
+    tool: calls[0].tool,
+    arguments: calls[0].arguments
+  }, {
+    userId: 'user-a',
+    publicThreadId: 'public-thread',
+    runId: 'public-run',
+    callId: 'tool-call-0001',
+    tool: 'brai_create_action',
+    arguments: { title: 'Позвонить маме' }
+  });
+  const response = broker.requests.find((request) => request.method === 'respondToolCall');
+  assert.deepEqual(response.params, {
+    userId: 'user-a',
+    toolRequestId: 'tool-request-0001',
+    success: true,
+    contentItems: [{
+      type: 'inputText',
+      text: 'Действие «Позвонить маме» добавлено.'
+    }]
+  });
+
+  broker.notify('turn/completed', {
+    threadId: 'internal-thread-secret',
+    turn: { id: 'internal-turn-secret', status: 'completed' }
+  });
+  await waitFor(() => store.thread.active_turn_id === null);
+});
+
+test('a legacy Codex thread upgrades to the dynamic-tool contract with bounded visible context', async () => {
+  const broker = new FakeBroker();
+  const store = fakeStore();
+  store.thread.codex_thread_id = 'legacy-internal-thread';
+  store.thread.codex_tool_contract_version = null;
+  store.messages.push(
+    {
+      id: 'old-user',
+      threadId: 'public-thread',
+      role: 'user',
+      content: 'Мы обсуждали поездку.',
+      idempotencyKey: 'old-user',
+    },
+    {
+      id: 'old-assistant',
+      threadId: 'public-thread',
+      role: 'assistant',
+      content: 'Да, поездку в Казань.',
+      idempotencyKey: 'old-assistant',
+    },
+  );
+  const coordinator = new BraiChatTurnCoordinator({ broker, turnTimeoutMs: 10_000 });
+  coordinator.run({
+    store,
+    userId: 'user-a',
+    publicThreadId: 'public-thread',
+    input: {
+      runId: 'upgrade-run',
+      messages: [{ id: 'current-user', role: 'user', content: 'Добавь это во Входящие' }],
+    },
+  }).subscribe(() => {});
+  await waitFor(() => broker.requests.some((request) => request.method === 'startTurn'));
+
+  assert.equal(broker.requests.some((request) => request.method === 'resumeThread'), false);
+  assert.equal(broker.requests.filter((request) => request.method === 'startThread').length, 1);
+  const startTurn = broker.requests.find((request) => request.method === 'startTurn');
+  assert.match(startTurn.params.text, /Пользователь: Мы обсуждали поездку\./);
+  assert.match(startTurn.params.text, /Брай: Да, поездку в Казань\./);
+  assert.match(startTurn.params.text, /Текущее сообщение пользователя:\nДобавь это во Входящие/);
+  assert.equal(store.thread.codex_tool_contract_version, 1);
+  assert.equal(
+    store.messages.find((message) => message.id === 'current-user').content,
+    'Добавь это во Входящие',
+    'the durable visible message must not contain the hidden bootstrap',
+  );
+
+  broker.notify('turn/completed', {
+    threadId: 'internal-thread-secret',
+    turn: { id: 'internal-turn-secret', status: 'completed' },
+  });
+  await waitFor(() => store.thread.active_turn_id === null);
 });
 
 test('turn continues and persists after the HTTP subscriber detaches', async () => {

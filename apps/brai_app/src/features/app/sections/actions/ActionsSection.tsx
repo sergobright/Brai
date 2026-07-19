@@ -278,7 +278,7 @@ export function ActionsSection({
                 name="action-title"
                 value={draft}
                 maxLength={TITLE_MAX_LENGTH}
-                placeholder={workspace.selectedGoal ? "Добавить действие в цель" : "Добавить"}
+                placeholder={draft ? undefined : workspace.selectedGoal ? "Добавить действие в цель" : "Добавить"}
                 aria-label={workspace.selectedGoal ? "Добавить действие в цель" : "Добавить"}
                 autoFocus={autoFocusAddInput}
                 onChange={(event) => setDraft(event.target.value)}
