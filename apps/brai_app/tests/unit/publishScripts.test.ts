@@ -618,7 +618,9 @@ describe("mobile OTA publish scripts", () => {
     expect(deployBranch).not.toContain("BRAI_TARGET_APK_BUILD_KIND:-stable");
     expect(deployBranch).toContain('preview-slots.sh" clear-apk "$BRANCH" "$COMMIT"');
     expect(prodBlock).toContain('deploy/scripts/build-android-env-apk.sh production');
-    expect(prodBlock).toContain('node deploy/scripts/resolve-app-version.mjs --environment prod --root "$SOURCE_ROOT"');
+    expect(prodBlock).toMatch(
+      /node deploy\/scripts\/resolve-app-version\.mjs \\\n\s+--environment prod \\\n\s+--root "\$SOURCE_ROOT" \\\n\s+--prod-web-version-json "\$BRAI_PROD_WEB_VERSION_JSON" \\\n\s+--mobile-target "\$BRAI_MOBILE_TARGET"/,
+    );
     expect(prodBlock).toContain('deploy/scripts/build-nonproduction-apks.sh');
     expect(prodBlock.indexOf('deploy/scripts/build-android-env-apk.sh production')).toBeLessThan(prodBlock.indexOf('deploy/scripts/build-nonproduction-apks.sh'));
     expect(buildApk).toContain('"${BRAI_RECORD_APK_LEDGER:-true}" != "false"');
