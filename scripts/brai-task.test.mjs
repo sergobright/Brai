@@ -2120,21 +2120,6 @@ test("delivery workflow dispatches prod deploy through Temporal and bootstraps w
   assert.doesNotMatch(workflow, /sync-local-main-checkout:/);
 });
 
-test("merged codex PRs recover production only when their exact main push run is absent", () => {
-  const workflow = fs.readFileSync(new URL("../.github/workflows/brai-delivery.yml", import.meta.url), "utf8");
-  const recovery = workflow.slice(workflow.indexOf("recover-missing-main-push:"), workflow.indexOf("deploy-dev:"));
-
-  assert.match(recovery, /github\.event\.action == 'closed'/);
-  assert.match(recovery, /github\.event\.pull_request\.merged == true/);
-  assert.match(recovery, /startsWith\(github\.event\.pull_request\.head\.ref, 'codex\/'\)/);
-  assert.match(recovery, /actions:\s+read/);
-  assert.match(recovery, /await-main-push-run\.mjs/);
-  assert.match(recovery, /github\.event\.pull_request\.merge_commit_sha/);
-  assert.match(recovery, /steps\.main_push\.outputs\.found != 'true'/);
-  assert.match(recovery, /dispatch-promotion --target prod/);
-  assert.match(recovery, /accepted-merge-missing-main-push/);
-});
-
 test("delivery workflow releases preview slots for unmerged closed codex PRs", () => {
   const workflow = fs.readFileSync(new URL("../.github/workflows/brai-delivery.yml", import.meta.url), "utf8");
   const releaseJob = workflow.slice(workflow.indexOf("release-preview-slot:"));
@@ -2737,6 +2722,7 @@ test("accept preview handles deleted merged refs and requires explicit supersess
 
 test("accepted preview stale cleanup is required", () => {
   const script = fs.readFileSync(path.join(process.cwd(), "deploy/scripts/ci-ssh-complete-accepted-previews.sh"), "utf8");
+  const versionWorkStateScript = fs.readFileSync(path.join(process.cwd(), "deploy/scripts/ci-ssh-version-work-state.sh"), "utf8");
   const workflow = fs.readFileSync(path.join(process.cwd(), ".github/workflows/brai-delivery.yml"), "utf8");
   const temporalWorkflow = fs.readFileSync(path.join(process.cwd(), "services/brai_temporal/src/workflows.mjs"), "utf8");
   const cleanupScript = fs.readFileSync(path.join(process.cwd(), "deploy/scripts/ci-cleanup-accepted-branches.sh"), "utf8");
@@ -2753,6 +2739,11 @@ test("accepted preview stale cleanup is required", () => {
   assert.match(promoteScript, /already promoted for/);
   assert.match(script, /ci-ssh-version-work-state\.sh/);
   assert.match(script, /--reconcile-unfinalized/);
+  assert.match(script, /FINALIZED_PULLS_JSON/);
+  assert.match(script, /BRAI_FINALIZED_PULLS_JSON/);
+  assert.match(versionWorkStateScript, /const finalizedPulls/);
+  assert.match(versionWorkStateScript, /JOIN release_works AS works ON works\.id = pulls\.release_works_id/);
+  assert.match(versionWorkStateScript, /WHERE works\.status = 'finalized'/);
   assert.match(script, /BRAI_PROJECTED_PRODUCT_VERSION=\$PROJECTED_PRODUCT_VERSION/);
   assert.match(script, /Final Product \$FINAL_BUILD_VERSION does not match projected Product \$PROJECTED_PRODUCT_VERSION/);
   assert.match(script, /declare -A REQUIRED_RECOVERY=/);

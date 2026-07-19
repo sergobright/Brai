@@ -92,6 +92,23 @@ test("reconciliation recovers every merged unfinalized owner in merge order", ()
   assert.deepEqual(candidates.map((item) => item.number), [2, 3]);
 });
 
+test("reconciliation preserves a PR already finalized as support despite a conflicting owner marker", () => {
+  const historical = pull(307, "owner", "MERGED", "Историческая support-связь");
+  const pendingKey = "work_bbbbbbbb-cccc-4ddd-8eee-ffffffffffff";
+  const pending = pull(308, "owner", "MERGED", "Незавершённая работа");
+  pending.body = pending.body.replaceAll(workKey, pendingKey);
+
+  const candidates = unfinalizedWorkCandidates(
+    [historical, pending],
+    new Set(),
+    "main",
+    CANONICAL_RELEASE_REPOSITORY,
+    new Set(["hexafox-labs/brai#307"]),
+  );
+
+  assert.deepEqual(candidates.map((item) => item.number), [308]);
+});
+
 test("support merge registers snapshots without waiting for the open owner", () => {
   const owner = pull(2, "owner", "OPEN", "Владелец работы");
   const support = pull(1, "support", "MERGED", "Поддерживающая миграция");
