@@ -87,7 +87,7 @@ export function ImageViewerDialog({
               </Button>
             </div>
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={src} alt={label} draggable={false} className="block h-full w-full object-contain" />
+            <img src={src} alt={label} draggable={false} className="block h-auto max-h-full w-auto max-w-full object-contain" />
           </Dialog.Popup>
         </Dialog.Viewport>
       </Dialog.Portal>
