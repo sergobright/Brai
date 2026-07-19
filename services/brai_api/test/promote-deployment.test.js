@@ -204,6 +204,105 @@ test('accepted preview promotion finalizes one work-scoped build', () => {
   });
 });
 
+test('APK-only reconciliation reuses an existing build without replacing its historic target ref', async () => {
+  const { tmp, dbUrl, store, drop } = await tempStore();
+  const repoRoot = path.resolve(import.meta.dirname, '../../..');
+  const workKey = 'work_33333333-3333-4333-a333-333333333333';
+  const historicTarget = 'historic-main-commit';
+  const apkOnlyTarget = 'later-main-commit';
+  const owner = apkPull(603, workKey, 'owner', 'MERGED', true);
+  const releaseNotes = {
+    build: {
+      short_changes: 'Завершена Android-работа.',
+      detailed_changes: 'Owner завершает общий work.',
+      reason: 'Нужно завершить work после owner merge.',
+      details: [{ title: 'Изменение PR 603', description: 'Изменение PR 603 сохранено отдельно.' }],
+    },
+    platforms: {
+      apk: {
+        short_changes: 'Обновлён стабильный APK.',
+        detailed_changes: 'В APK вошли только нативные изменения support PR.',
+        reason: 'Нативная граница требует публикации нового APK.',
+        details: [{ title: 'Нативный APK', description: 'Опубликованный пакет содержит Android-изменения.' }],
+      },
+    },
+  };
+
+  try {
+    store.upsertReleaseWork({ workKey });
+    store.upsertGithubPullRequest(owner);
+    const historicBuild = store.finalizeVersionWork({
+      workKey,
+      versionTypeId: 'build',
+      shortChanges: releaseNotes.build.short_changes,
+      detailedChanges: releaseNotes.build.detailed_changes,
+      reason: releaseNotes.build.reason,
+      details: releaseNotes.build.details.map((detail) => ({ ...detail, pullNumber: owner.pullNumber })),
+      pullNumbers: [owner.pullNumber],
+      sourceBranch: owner.headBranch,
+      sourceCommit: owner.mergeCommitSha,
+      targetBranch: 'main',
+      targetCommit: historicTarget,
+      releasedAtUtc: '2026-07-14T14:00:00.000Z',
+    });
+
+    execFileSync(process.execPath, [
+      path.join(repoRoot, 'deploy/scripts/promote-deployment.mjs'),
+      '--target-postgres-url', dbUrl,
+      '--source-branch', owner.headBranch,
+      '--target-environment', 'prod',
+      '--target-branch', 'main',
+      '--target-commit', apkOnlyTarget,
+      '--work-json', JSON.stringify({ work: { key: workKey, role: 'owner' }, pulls: [{ ...owner, releaseNotes }] }),
+    ], { cwd: repoRoot });
+
+    assert.equal(store.db.prepare("SELECT COUNT(*) AS count FROM build_versions WHERE release_works_id=(SELECT id FROM release_works WHERE work_key=?) AND version_type_id='build'").get(workKey).count, 1);
+    assert.deepEqual(
+      store.db.prepare(`
+        SELECT target_branch, target_commit
+        FROM build_version_refs
+        WHERE version_type_id='build' AND version=?
+        ORDER BY id
+      `).all(historicBuild.version),
+      [{ target_branch: 'main', target_commit: historicTarget }],
+    );
+
+    const artifact = Buffer.from('apk-only-reconciliation');
+    const artifactName = 'brai-v12.apk';
+    const releasedAtUtc = '2026-07-19T22:20:13.000Z';
+    fs.writeFileSync(path.join(tmp, artifactName), artifact);
+    fs.writeFileSync(path.join(tmp, 'releases.json'), JSON.stringify({ sections: { production: {
+      apkBuildKind: 'stable', apkVersion: 12, versionCode: 12, file: artifactName,
+      sha256: crypto.createHash('sha256').update(artifact).digest('hex'),
+      sizeBytes: artifact.length, publishedAt: releasedAtUtc,
+    } } }));
+    execFileSync(process.execPath, [
+      path.join(repoRoot, 'deploy/scripts/record-shipped-apk-version.mjs'),
+      '--work-key', workKey,
+      '--version', '12',
+      '--version-code', '12',
+      '--target-branch', 'main',
+      '--target-commit', apkOnlyTarget,
+      '--released-at', releasedAtUtc,
+    ], { cwd: repoRoot, env: { ...process.env, BRAI_DATABASE_URL: dbUrl, BRAI_RELEASE_TARGET: tmp } });
+    assert.deepEqual(
+      store.db.prepare(`
+        SELECT versions.version, versions.included_in_version_id, refs.target_commit
+        FROM build_versions AS versions
+        JOIN build_version_refs AS refs
+          ON refs.version_type_id = versions.version_type_id AND refs.version = versions.version
+        WHERE versions.release_works_id=(SELECT id FROM release_works WHERE work_key=?)
+          AND versions.version_type_id='apk'
+      `).all(workKey),
+      [{ version: 12, included_in_version_id: historicBuild.id, target_commit: apkOnlyTarget }],
+    );
+  } finally {
+    store.close();
+    await drop();
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test('published stable APK is recorded after support work reconciliation and later attaches its build', async () => {
   const { tmp, dbUrl, store, drop } = await tempStore();
   const repoRoot = path.resolve(import.meta.dirname, '../../..');
