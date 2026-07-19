@@ -8,10 +8,11 @@ import { fileURLToPath } from "node:url";
 const DEFAULT_ROOT = fileURLToPath(new URL("../../..", import.meta.url));
 const ROOT = process.env.BRAI_ROOT ?? DEFAULT_ROOT;
 
-export async function deployBranch({ branch, sha, baseSha = "", productBaseSha = "", productVersion = "" }) {
+export async function deployBranch({ branch, sha, baseSha = "", productBaseSha = "", productVersion = "", nativeApkChange = null }) {
   assertSafeBranch(branch);
   assertSafeSha(sha);
   if (productVersion && !/^[1-9][0-9]*$/.test(String(productVersion))) throw new Error(`Invalid projected Product version: ${productVersion}`);
+  if (nativeApkChange !== null && typeof nativeApkChange !== "boolean") throw new Error("Invalid projected native APK change");
 
   return withSourceCheckout({ branch, sha }, async (cwd, gitEnv) => {
     const result = await runExistingScript("deploy/scripts/ci-ssh-deploy.sh", [], {
@@ -22,7 +23,8 @@ export async function deployBranch({ branch, sha, baseSha = "", productBaseSha =
         BRAI_COMMIT: sha,
         BRAI_BASE_COMMIT: baseSha,
         BRAI_PRODUCT_BASE_COMMIT: productBaseSha,
-        BRAI_PRODUCT_VERSION_OVERRIDE: String(productVersion)
+        BRAI_PRODUCT_VERSION_OVERRIDE: String(productVersion),
+        ...(nativeApkChange === null ? {} : { BRAI_NATIVE_APK_CHANGE: nativeApkChange ? "true" : "false" })
       })
     });
     return {

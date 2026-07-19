@@ -7,6 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { workerTaskQueues } from "../src/worker-queues.mjs";
+import { projectedNativeApkChange } from "../src/workflows.mjs";
 
 const repo = path.resolve(import.meta.dirname, "../../..");
 
@@ -60,9 +61,24 @@ test("production validates metadata before deploy and migrates before work recon
   assert.ok(workflow > 0 && workflow < validate && validate < deploy && deploy < migrationPassed);
   assert.ok(migrationPassed < reconcile && reconcile < workReconciled);
   assert.match(source.slice(workflow, deploy), /projectedProductVersion\(validation\?\.stdout\)/);
-  assert.match(source.slice(deploy, migrationPassed), /productVersion: state\.projectedProductVersion/);
+  assert.match(source.slice(workflow, deploy), /projectedNativeApkChange\(validation\?\.stdout\)/);
+  assert.match(source.slice(deploy, migrationPassed), /productVersion: state\.projectedProductVersion,[\s\S]*nativeApkChange: state\.projectedNativeApkChange/);
   const activities = fs.readFileSync(path.join(repo, "services/brai_temporal/src/activities.mjs"), "utf8");
   assert.match(activities, /BRAI_PRODUCT_VERSION_OVERRIDE: String\(productVersion\)/);
+  assert.match(activities, /BRAI_NATIVE_APK_CHANGE: nativeApkChange \? "true" : "false"/);
+});
+
+test("production native APK requirement accepts exactly one validated boolean", () => {
+  assert.equal(projectedNativeApkChange("BRAI_PROJECTED_NATIVE_APK_CHANGE=true"), true);
+  assert.equal(projectedNativeApkChange("noise\nBRAI_PROJECTED_NATIVE_APK_CHANGE=false\n"), false);
+  assert.throws(
+    () => projectedNativeApkChange("BRAI_PROJECTED_NATIVE_APK_CHANGE=true\nBRAI_PROJECTED_NATIVE_APK_CHANGE=false"),
+    /exactly one projected native APK requirement/,
+  );
+  assert.throws(
+    () => projectedNativeApkChange("BRAI_PROJECTED_NATIVE_APK_CHANGE=maybe"),
+    /exactly one projected native APK requirement/,
+  );
 });
 
 test("Temporal activities heartbeat and wait for cancellation completion", () => {

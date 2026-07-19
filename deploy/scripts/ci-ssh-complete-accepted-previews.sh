@@ -128,6 +128,10 @@ FINALIZED_WORK_KEYS_JSON="$(printf '%s' "$VERSION_WORK_STATE" | "$NODE_BIN" -e '
 let raw = ""; process.stdin.on("data", chunk => raw += chunk); process.stdin.on("end", () => {
   const value = JSON.parse(raw); process.stdout.write(JSON.stringify(value.finalizedWorkKeys || []));
 });')"
+FINALIZED_BUILD_WORK_KEYS_JSON="$(printf '%s' "$VERSION_WORK_STATE" | "$NODE_BIN" -e '
+let raw = ""; process.stdin.on("data", chunk => raw += chunk); process.stdin.on("end", () => {
+  const value = JSON.parse(raw); process.stdout.write(JSON.stringify(value.finalizedBuildWorkKeys || []));
+});')"
 FINALIZED_PULLS_JSON="$(printf '%s' "$VERSION_WORK_STATE" | "$NODE_BIN" -e '
 let raw = ""; process.stdin.on("data", chunk => raw += chunk); process.stdin.on("end", () => {
   const value = JSON.parse(raw); process.stdout.write(JSON.stringify(value.finalizedPulls || []));
@@ -182,9 +186,32 @@ process.stdin.on("end", () => {
 });
 ' "$TARGET_COMMIT")
 
+declare -A FINALIZED_BUILD_WORKS=()
+while IFS= read -r work_key; do
+  [[ -n "$work_key" ]] && FINALIZED_BUILD_WORKS[$work_key]=1
+done < <(printf '%s' "$FINALIZED_BUILD_WORK_KEYS_JSON" | "$NODE_BIN" -e '
+let raw = ""; process.stdin.on("data", chunk => raw += chunk); process.stdin.on("end", () => {
+  for (const workKey of JSON.parse(raw || "[]")) console.log(workKey);
+});')
+
 PENDING_OWNER_WORKS=0
+PENDING_NATIVE_APK_WORKS=0
 for branch in "${REQUIRED_BRANCHES[@]}"; do
-  [[ "${REQUIRED_WORK_ROLES[$branch]}" == "owner" ]] && PENDING_OWNER_WORKS=$((PENDING_OWNER_WORKS + 1))
+  mapfile -t WORK_META < <(printf '%s' "${REQUIRED_WORK_JSON[$branch]}" | "$NODE_BIN" -e '
+let raw = ""; process.stdin.on("data", chunk => raw += chunk); process.stdin.on("end", () => {
+  const work = JSON.parse(raw || "{}");
+  console.log(work.work?.key || "");
+  console.log(work.pulls?.some((pull) => pull.releaseNotes?.platforms?.apk) ? "true" : "false");
+});')
+  work_key="${WORK_META[0]:-}"
+  native_apk="${WORK_META[1]:-false}"
+  [[ -n "$work_key" ]] || { echo "Accepted work metadata has no work key for $branch." >&2; exit 1; }
+  if [[ "${REQUIRED_WORK_ROLES[$branch]}" == "owner" && -z "${FINALIZED_BUILD_WORKS[$work_key]:-}" ]]; then
+    PENDING_OWNER_WORKS=$((PENDING_OWNER_WORKS + 1))
+  fi
+  if [[ "$native_apk" == "true" ]]; then
+    PENDING_NATIVE_APK_WORKS=$((PENDING_NATIVE_APK_WORKS + 1))
+  fi
 done
 PROJECTED_PRODUCT_VERSION=$((LATEST_BUILD_VERSION + PENDING_OWNER_WORKS))
 if (( PROJECTED_PRODUCT_VERSION <= 0 )); then
@@ -192,6 +219,11 @@ if (( PROJECTED_PRODUCT_VERSION <= 0 )); then
   exit 1
 fi
 echo "BRAI_PROJECTED_PRODUCT_VERSION=$PROJECTED_PRODUCT_VERSION"
+if (( PENDING_NATIVE_APK_WORKS > 0 )); then
+  echo "BRAI_PROJECTED_NATIVE_APK_CHANGE=true"
+else
+  echo "BRAI_PROJECTED_NATIVE_APK_CHANGE=false"
+fi
 
 CLEANUP_BRANCHES=()
 while IFS= read -r branch; do

@@ -248,6 +248,7 @@ async function runProdPromotion(state, request) {
       mode: "validate"
     });
     state.projectedProductVersion = projectedProductVersion(validation?.stdout);
+    state.projectedNativeApkChange = projectedNativeApkChange(validation?.stdout);
   } catch (error) {
     if (isCancellation(error)) throw error;
     const failed = { reason: reasonFromError(error) };
@@ -263,7 +264,8 @@ async function runProdPromotion(state, request) {
       branch: "main",
       sha: state.sha,
       baseSha: request.baseSha || "",
-      productVersion: state.projectedProductVersion
+      productVersion: state.projectedProductVersion,
+      nativeApkChange: state.projectedNativeApkChange
     });
     applyPromotionEvent(state, eventLike(request, "supabase_prod_migration_passed"));
   } catch (error) {
@@ -372,6 +374,13 @@ export function projectedProductVersion(stdout) {
     .map((match) => match[1]);
   if (values.length !== 1) throw new Error("Production validation did not return exactly one projected Product version");
   return values[0];
+}
+
+export function projectedNativeApkChange(stdout) {
+  const values = [...String(stdout ?? "").matchAll(/^BRAI_PROJECTED_NATIVE_APK_CHANGE=(true|false)$/gm)]
+    .map((match) => match[1]);
+  if (values.length !== 1) throw new Error("Production validation did not return exactly one projected native APK requirement");
+  return values[0] === "true";
 }
 
 function eventLike(source, type, extra = {}) {
