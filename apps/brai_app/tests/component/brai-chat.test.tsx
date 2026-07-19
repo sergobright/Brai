@@ -451,7 +451,7 @@ describe("Brai chat client", () => {
   });
 
   it("keeps MainDock order and uses a currentColor Lucide-style Brai sign", () => {
-    const { container } = render(<MainDock section="brai" hidden={false} mobileViewport timer={emptyTimerState()} onSection={() => undefined} />);
+    const { container } = render(<MainDock section="brai" mobileViewport timer={emptyTimerState()} onSection={() => undefined} />);
     const mobile = container.querySelector(".mobile-nav");
     expect(mobile).toBeInstanceOf(HTMLElement);
     expect(within(mobile as HTMLElement).getAllByRole("button").map((item) => item.getAttribute("aria-label"))).toEqual(["Брай", "Действия", "Входящие", "Фокус", "Factory"]);
@@ -463,7 +463,7 @@ describe("Brai chat client", () => {
   });
 
   it("animates the mobile Dock out of the global keyboard viewport", () => {
-    const { container } = render(<MainDock section="brai" hidden={false} keyboardOpen mobileViewport timer={emptyTimerState()} onSection={() => undefined} />);
+    const { container } = render(<MainDock section="brai" keyboardOpen mobileViewport timer={emptyTimerState()} onSection={() => undefined} />);
     const dock = container.querySelector(".main-dock");
 
     expect(dock).toHaveClass("max-[860px]:translate-y-2", "max-[860px]:opacity-0");

@@ -85,13 +85,19 @@ export async function resolveAppVersionAsync(options = {}) {
   const deployedVersions = [
     prodWebVersionJson && readVersionJson(prodWebVersionJson),
     mobileTarget && latestMobileTargetVersion(mobileTarget),
-    productVersion && `0.0.${productVersion}`,
   ];
   if (changedHint && !["true", "false"].includes(changedHint)) throw new Error(`invalid client artifact change hint: ${changedHint}`);
   const shouldIncrement = nextOta || (environment === "prod" && (changedHint === "true" || clientArtifactChanged({ root, baseCommit })));
-  if (shouldIncrement) return nextPatchVersion(latestOtaVersion(deployedVersions) || "0.0.0");
+  const publishedVersion = latestOtaVersion(deployedVersions);
+  const productFloor = productVersion ? `0.0.${productVersion}` : "";
+  if (shouldIncrement) {
+    return latestOtaVersion([
+      nextPatchVersion(publishedVersion || "0.0.0"),
+      productFloor,
+    ]);
+  }
 
-  const deployedVersion = latestOtaVersion(deployedVersions);
+  const deployedVersion = latestOtaVersion([publishedVersion, productFloor]);
   if (deployedVersion) return validOtaVersion(deployedVersion);
   throw new Error("Unable to resolve Brai X.Y.Z OTA version; set BRAI_APP_VERSION or provide published web/mobile metadata");
 }

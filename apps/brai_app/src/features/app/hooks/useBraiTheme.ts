@@ -1,14 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { platformName } from "@/shared/platform/platform";
+import { isNativeShell, platformName } from "@/shared/platform/platform";
 import { getBraiLocalStorageItem, setBraiLocalStorageItem } from "@/shared/storage/localStorageKeys";
 import type { ThemeMode } from "../appModel";
 
 /**
  * Persists the Brai light/dark theme and platform marker on the document.
  */
-export function useBraiTheme() {
+export function useBraiTheme(authenticated: boolean) {
   const [theme, setTheme] = useState<ThemeMode>(() => {
     if (typeof window === "undefined") return "light";
     const saved = getBraiLocalStorageItem("brai_theme_mode");
@@ -16,9 +16,16 @@ export function useBraiTheme() {
   });
 
   useEffect(() => {
-    document.documentElement.dataset.theme = isOnboardingComplete() ? theme : "dark";
+    const nativeAndroid =
+      document.documentElement.dataset.nativeAndroid === "true" ||
+      (platformName() === "android" && isNativeShell());
+    document.documentElement.dataset.theme = nativeAndroid && !authenticated
+      ? "dark"
+      : isOnboardingComplete()
+        ? theme
+        : "dark";
     setBraiLocalStorageItem("brai_theme_mode", theme);
-  }, [theme]);
+  }, [authenticated, theme]);
 
   useEffect(() => {
     document.documentElement.dataset.platform = platformName();

@@ -774,11 +774,43 @@ describe("BraiApp onboarding", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Пропустить" }));
     expect(await screen.findByText("Нужен вход")).toBeInTheDocument();
-    await waitFor(() => expect(cmdPlugin.setOverlayEnabled).toHaveBeenLastCalledWith({ enabled: false }));
     expect(cmdPlugin.ensureAccess).not.toHaveBeenCalled();
-    expect(cmdPlugin.setAccessKey).toHaveBeenCalledWith({ token: "", displayName: "", userId: "" });
+    expect(cmdPlugin.setAccessKey).not.toHaveBeenCalledWith({ token: "", displayName: "", userId: "" });
+    expect(cmdPlugin.setOverlayEnabled).not.toHaveBeenCalledWith({ enabled: true });
     expect(cmdPlugin.setVoiceOnlyMode).not.toHaveBeenCalledWith({ enabled: true });
-    expect(cmdPlugin.setVoiceOnlyMode).toHaveBeenCalledWith({ enabled: false });
+  });
+
+  it("keeps trained dictation and its preliminary credential available before login", async () => {
+    stubAndroidCapacitor();
+    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      if (url.endsWith("/auth/session")) {
+        return new Response(JSON.stringify({ authenticated: false }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return Promise.reject(new Error("offline"));
+    });
+    window.localStorage.setItem(ONBOARDING_STORAGE_KEY, JSON.stringify({
+      complete: false,
+      history: ["training-storage"],
+      name: "Test",
+      path: "new",
+      profileVersion: "cloud",
+      step: "voice-ready",
+      voiceMode: "cloud",
+    }));
+
+    render(<BraiApp />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Готово" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Продолжить" }));
+    expect(await screen.findByText("Нужен вход")).toBeInTheDocument();
+    await waitFor(() => expect(cmdPlugin.setOverlayEnabled).toHaveBeenLastCalledWith({ enabled: true }));
+    expect(cmdPlugin.setVoiceOnlyMode).toHaveBeenLastCalledWith({ enabled: true });
+    expect(cmdPlugin.setQueuePausedMode).toHaveBeenLastCalledWith({ enabled: false });
+    expect(cmdPlugin.setAccessKey).not.toHaveBeenCalledWith({ token: "", displayName: "", userId: "" });
   });
 
   it("opens the cabinet and enables context after skipping when already signed in", async () => {
@@ -822,7 +854,7 @@ describe("BraiApp onboarding", () => {
 
     await waitFor(() => expect(cmdPlugin.setOverlayEnabled).toHaveBeenLastCalledWith({ enabled: false }));
     expect(cmdPlugin.ensureAccess).not.toHaveBeenCalled();
-    expect(cmdPlugin.setAccessKey).toHaveBeenCalledWith({ token: "", displayName: "", userId: "" });
+    expect(cmdPlugin.setAccessKey).not.toHaveBeenCalledWith({ token: "", displayName: "", userId: "" });
     fireEvent.click(await screen.findByRole("button", { name: "Обучение" }));
 
     await waitFor(() => expect(cmdPlugin.ensureAccess).toHaveBeenCalledWith({ displayName: "Test" }));
@@ -1058,8 +1090,7 @@ describe("BraiApp onboarding", () => {
 
     expect(await screen.findByText("Нужен вход", undefined, { timeout: 5_000 })).toBeInTheDocument();
     fireEvent.click(await screen.findByRole("button", { name: "Войти" }, { timeout: 5_000 }));
-    await waitFor(() => expect(cmdPlugin.setOverlayEnabled).toHaveBeenLastCalledWith({ enabled: false }));
-    expect(cmdPlugin.setAccessKey).toHaveBeenCalledWith({ token: "", displayName: "", userId: "" });
+    expect(cmdPlugin.setAccessKey).not.toHaveBeenCalledWith({ token: "", displayName: "", userId: "" });
     expect(await screen.findByLabelText("Email")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Войти" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Получить код" })).not.toBeInTheDocument();

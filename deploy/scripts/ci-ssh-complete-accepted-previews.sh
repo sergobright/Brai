@@ -119,9 +119,20 @@ if [[ -z "${BRAI_RELEASE_NOTES_V2_CUTOFF:-}" ]]; then
   export BRAI_RELEASE_NOTES_V2_CUTOFF
 fi
 
+VERSION_WORK_STATE="$("$SCRIPT_DIR/ci-ssh-version-work-state.sh")"
+LATEST_BUILD_VERSION="$(printf '%s' "$VERSION_WORK_STATE" | "$NODE_BIN" -e '
+let raw = ""; process.stdin.on("data", chunk => raw += chunk); process.stdin.on("end", () => {
+  const value = JSON.parse(raw); process.stdout.write(String(value.latestBuildVersion || 0));
+});')"
+FINALIZED_WORK_KEYS_JSON="$(printf '%s' "$VERSION_WORK_STATE" | "$NODE_BIN" -e '
+let raw = ""; process.stdin.on("data", chunk => raw += chunk); process.stdin.on("end", () => {
+  const value = JSON.parse(raw); process.stdout.write(JSON.stringify(value.finalizedWorkKeys || []));
+});')"
 REQUIRED_PREVIEWS_JSON="$(
   cd "$ROOT"
-  BRAI_TARGET_BRANCH="$TARGET_BRANCH" "$NODE_BIN" "$SCRIPT_DIR/accepted-preview-branches.mjs" --json "$TARGET_COMMIT"
+  BRAI_TARGET_BRANCH="$TARGET_BRANCH" \
+  BRAI_FINALIZED_WORK_KEYS_JSON="$FINALIZED_WORK_KEYS_JSON" \
+    "$NODE_BIN" "$SCRIPT_DIR/accepted-preview-branches.mjs" --json --reconcile-unfinalized "$TARGET_COMMIT"
 )"
 CLEANUP_BRANCH_LIST="$(
   cd "$ROOT"
@@ -132,15 +143,17 @@ REQUIRED_BRANCHES=()
 declare -A REQUIRED_SOURCE_SHAS=()
 declare -A REQUIRED_WORK_ROLES=()
 declare -A REQUIRED_NO_PREVIEW=()
+declare -A REQUIRED_RECOVERY=()
 declare -A REQUIRED_WORK_JSON=()
 declare -A SEEN=()
-while IFS=$'\t' read -r branch source_sha work_role no_preview work_b64; do
+while IFS=$'\t' read -r branch source_sha work_role no_preview recovery work_b64; do
   if [[ -n "$branch" && -z "${SEEN[$branch]:-}" ]]; then
     REQUIRED_BRANCHES+=("$branch")
     SEEN[$branch]=required
     REQUIRED_SOURCE_SHAS[$branch]="$source_sha"
     REQUIRED_WORK_ROLES[$branch]="$work_role"
     REQUIRED_NO_PREVIEW[$branch]="$no_preview"
+    REQUIRED_RECOVERY[$branch]="$recovery"
     REQUIRED_WORK_JSON[$branch]="$(printf '%s' "$work_b64" | base64 -d)"
   fi
 done < <(printf '%s' "$REQUIRED_PREVIEWS_JSON" | "$NODE_BIN" -e '
@@ -148,17 +161,32 @@ let raw = "";
 process.stdin.on("data", (chunk) => raw += chunk);
 process.stdin.on("end", () => {
   const works = JSON.parse(raw || "[]");
+  const targetCommit = String(process.argv[1] || "").toLowerCase();
   for (const work of works) {
+    const currentPull = work.pulls?.find((pull) => pull.pullNumber === work.pullNumber);
+    const mergeCommit = String(currentPull?.mergeCommitSha || "").toLowerCase();
     console.log([
       work.branch,
       work.sha || "",
       work.work.role,
       work.noPreview ? "true" : "false",
+      mergeCommit && mergeCommit !== targetCommit ? "true" : "false",
       Buffer.from(JSON.stringify(work), "utf8").toString("base64"),
     ].join("\t"));
   }
 });
-')
+' "$TARGET_COMMIT")
+
+PENDING_OWNER_WORKS=0
+for branch in "${REQUIRED_BRANCHES[@]}"; do
+  [[ "${REQUIRED_WORK_ROLES[$branch]}" == "owner" ]] && PENDING_OWNER_WORKS=$((PENDING_OWNER_WORKS + 1))
+done
+PROJECTED_PRODUCT_VERSION=$((LATEST_BUILD_VERSION + PENDING_OWNER_WORKS))
+if (( PROJECTED_PRODUCT_VERSION <= 0 )); then
+  echo "Unable to project a positive Product version." >&2
+  exit 1
+fi
+echo "BRAI_PROJECTED_PRODUCT_VERSION=$PROJECTED_PRODUCT_VERSION"
 
 CLEANUP_BRANCHES=()
 while IFS= read -r branch; do
@@ -179,13 +207,14 @@ for index in "${!REQUIRED_BRANCHES[@]}"; do
   source_sha="${REQUIRED_SOURCE_SHAS[$branch]:-$TARGET_COMMIT}"
   work_role="${REQUIRED_WORK_ROLES[$branch]}"
   no_preview="${REQUIRED_NO_PREVIEW[$branch]}"
+  recovery="${REQUIRED_RECOVERY[$branch]}"
   echo "Reconciling accepted $work_role work PR $branch -> $TARGET_BRANCH@$TARGET_COMMIT."
   if [[ "$MODE" == "validate" ]]; then
     continue
   fi
   if [[ "$MODE" == "all" || "$MODE" == "promote" ]]; then
     RECORD_PRODUCTION_RELEASE=false
-    if [[ "$no_preview" != "true" ]]; then
+    if [[ "$no_preview" != "true" && "$recovery" != "true" ]]; then
       signal_temporal_preview "$branch" pr_merged "" "$source_sha"
       signal_temporal_preview "$branch" accepted_preview_started "" "$source_sha"
     fi
@@ -196,18 +225,18 @@ for index in "${!REQUIRED_BRANCHES[@]}"; do
       BRAI_VERSION_WORK_JSON="${REQUIRED_WORK_JSON[$branch]}" \
       BRAI_RECORD_PRODUCTION_RELEASE="$RECORD_PRODUCTION_RELEASE" \
         "$SCRIPT_DIR/ci-ssh-promote-deployment.sh"; then
-      if [[ "$no_preview" != "true" ]]; then
+      if [[ "$no_preview" != "true" && "$recovery" != "true" ]]; then
         signal_temporal_preview "$branch" accepted_preview_promoted "" "$source_sha"
       fi
     else
-      if [[ "$no_preview" != "true" ]]; then
+      if [[ "$no_preview" != "true" && "$recovery" != "true" ]]; then
         signal_temporal_preview "$branch" accepted_preview_failed "accepted work reconciliation failed" "$source_sha"
       fi
       exit 1
     fi
   fi
 
-  if [[ "$no_preview" != "true" && ( "$MODE" == "all" || "$MODE" == "release" ) ]]; then
+  if [[ "$no_preview" != "true" && "$recovery" != "true" && ( "$MODE" == "all" || "$MODE" == "release" ) ]]; then
     signal_temporal_preview "$branch" supabase_preview_release_started "" "$source_sha"
     signal_temporal_preview "$branch" slot_release_started "" "$source_sha"
     if BRAI_BRANCH="$branch" \
@@ -227,6 +256,15 @@ for index in "${!REQUIRED_BRANCHES[@]}"; do
 done
 
 if [[ "$MODE" == "promote" ]]; then
+  FINAL_STATE="$("$SCRIPT_DIR/ci-ssh-version-work-state.sh")"
+  FINAL_BUILD_VERSION="$(printf '%s' "$FINAL_STATE" | "$NODE_BIN" -e '
+let raw = ""; process.stdin.on("data", chunk => raw += chunk); process.stdin.on("end", () => {
+  const value = JSON.parse(raw); process.stdout.write(String(value.latestBuildVersion || 0));
+});')"
+  if [[ "$FINAL_BUILD_VERSION" != "$PROJECTED_PRODUCT_VERSION" ]]; then
+    echo "Final Product $FINAL_BUILD_VERSION does not match projected Product $PROJECTED_PRODUCT_VERSION." >&2
+    exit 1
+  fi
   exit 0
 fi
 

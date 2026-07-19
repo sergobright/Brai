@@ -8,9 +8,10 @@ import { fileURLToPath } from "node:url";
 const DEFAULT_ROOT = fileURLToPath(new URL("../../..", import.meta.url));
 const ROOT = process.env.BRAI_ROOT ?? DEFAULT_ROOT;
 
-export async function deployBranch({ branch, sha, baseSha = "", productBaseSha = "" }) {
+export async function deployBranch({ branch, sha, baseSha = "", productBaseSha = "", productVersion = "" }) {
   assertSafeBranch(branch);
   assertSafeSha(sha);
+  if (productVersion && !/^[1-9][0-9]*$/.test(String(productVersion))) throw new Error(`Invalid projected Product version: ${productVersion}`);
 
   return withSourceCheckout({ branch, sha }, async (cwd, gitEnv) => {
     const result = await runExistingScript("deploy/scripts/ci-ssh-deploy.sh", [], {
@@ -20,7 +21,8 @@ export async function deployBranch({ branch, sha, baseSha = "", productBaseSha =
         BRAI_BRANCH: branch,
         BRAI_COMMIT: sha,
         BRAI_BASE_COMMIT: baseSha,
-        BRAI_PRODUCT_BASE_COMMIT: productBaseSha
+        BRAI_PRODUCT_BASE_COMMIT: productBaseSha,
+        BRAI_PRODUCT_VERSION_OVERRIDE: String(productVersion)
       })
     });
     return {

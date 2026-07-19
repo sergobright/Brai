@@ -558,7 +558,6 @@ function EngineRailButton({
 export function MainDock({
   expanded = false,
   section,
-  hidden,
   keyboardOpen = false,
   mobileViewport,
   onSection,
@@ -567,7 +566,6 @@ export function MainDock({
 }: {
   expanded?: boolean;
   section: SectionId;
-  hidden: boolean;
   keyboardOpen?: boolean;
   mobileViewport: boolean;
   onSection: (section: SectionId) => void;
@@ -601,12 +599,11 @@ export function MainDock({
       className={cx(
         "main-dock pointer-events-auto fixed bottom-5 left-1/2 z-[70] -translate-x-1/2 transition-[opacity,transform] duration-200 ease-out max-[860px]:static max-[860px]:z-[130] max-[860px]:inset-auto max-[860px]:flex max-[860px]:translate-x-0 max-[860px]:justify-center max-[860px]:overflow-hidden max-[860px]:bg-background max-[860px]:pb-[env(safe-area-inset-bottom)] max-[860px]:[touch-action:none]",
         !expanded && "max-[860px]:border-t max-[860px]:border-border",
-        hidden && "max-[860px]:pointer-events-none max-[860px]:invisible max-[860px]:opacity-0",
         keyboardOpen && "max-[860px]:pointer-events-none max-[860px]:translate-y-2 max-[860px]:opacity-0",
       )}
       aria-label="Основная навигация"
-      aria-hidden={hidden || keyboardOpen || undefined}
-      inert={hidden || keyboardOpen ? true : undefined}
+      aria-hidden={keyboardOpen || undefined}
+      inert={keyboardOpen ? true : undefined}
       data-nav-swipe-exclusion
       data-nav-swipe-zone
       {...swipeHandlers}

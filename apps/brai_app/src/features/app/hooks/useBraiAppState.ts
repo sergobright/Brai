@@ -61,7 +61,6 @@ async function beginNativeAccountCredentialBoundary(userId: string): Promise<voi
  */
 export function useBraiAppState(initialSection: SectionId) {
   const [section, setSection] = useState<SectionId>(initialSection);
-  const { setTheme, theme } = useBraiTheme();
   const { bundlePublishedAt, downloadApkOnce, downloadWebUpdateOnce, installApkOnce, otaCheckedAt, otaRefreshing, otaState, refreshOtaStateOnce } =
     useBraiOta();
   const [appSettings, setAppSettingsState] = useState<AppSettings>(loadAppSettingsPreference);
@@ -116,6 +115,7 @@ export function useBraiAppState(initialSection: SectionId) {
   const [inboxPendingCount, setInboxPendingCount] = useState(0);
   const [busy, setBusy] = useState(false);
   const [authUser, setAuthUser] = useState<AuthUser | null>(null);
+  const { setTheme, theme } = useBraiTheme(Boolean(authUser));
   const handleErrorRef = useRef<(error: unknown) => void>(() => undefined);
   const authMode = resolveAuthMode(isProductionEnvironment());
   const [timerBusy, setTimerBusy] = useState(false);
@@ -484,10 +484,16 @@ export function useBraiAppState(initialSection: SectionId) {
         return await apiRef.current.braiCmdDeviceToken(device);
       } catch (error) {
         handleErrorRef.current(error);
+        if (authUser?.id && error instanceof Error && error.name === "UnauthorizedError") {
+          await Promise.allSettled([
+            setBraiCmdAccessKey("", "", ""),
+            setBraiCmdOverlayEnabled(false),
+          ]);
+        }
         throw error;
       }
     },
-    [],
+    [authUser?.id],
   );
 
   async function flushPending(sourceApi = apiRef.current, requestedScope?: ClientOwnerScope) {

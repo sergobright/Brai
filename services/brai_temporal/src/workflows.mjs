@@ -241,12 +241,13 @@ async function runProdPromotion(state, request) {
   applyPromotionEvent(state, eventLike(request, "accepted_previews_started"));
 
   try {
-    await activities.completeAcceptedPreviews({
+    const validation = await activities.completeAcceptedPreviews({
       targetBranch: "main",
       targetEnvironment: "prod",
       targetCommit: state.sha,
       mode: "validate"
     });
+    state.projectedProductVersion = projectedProductVersion(validation?.stdout);
   } catch (error) {
     if (isCancellation(error)) throw error;
     const failed = { reason: reasonFromError(error) };
@@ -261,7 +262,8 @@ async function runProdPromotion(state, request) {
     await activities.deployBranch({
       branch: "main",
       sha: state.sha,
-      baseSha: request.baseSha || ""
+      baseSha: request.baseSha || "",
+      productVersion: state.projectedProductVersion
     });
     applyPromotionEvent(state, eventLike(request, "supabase_prod_migration_passed"));
   } catch (error) {
@@ -363,6 +365,13 @@ async function runDevPromotion(state, request) {
     applyPromotionEvent(state, eventLike(request, "goal_agents_deploy_failed", failed));
     applyPromotionEvent(state, eventLike(request, "dev_deploy_failed", failed));
   }
+}
+
+export function projectedProductVersion(stdout) {
+  const values = [...String(stdout ?? "").matchAll(/^BRAI_PROJECTED_PRODUCT_VERSION=([1-9][0-9]*)$/gm)]
+    .map((match) => match[1]);
+  if (values.length !== 1) throw new Error("Production validation did not return exactly one projected Product version");
+  return values[0];
 }
 
 function eventLike(source, type, extra = {}) {

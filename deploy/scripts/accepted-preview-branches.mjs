@@ -13,7 +13,8 @@ const LEGACY_RELEASE_REPOSITORY = "sergobright/Brai";
 if (path.resolve(process.argv[1] ?? "") === fileURLToPath(import.meta.url)) {
   const args = process.argv.slice(2);
   const json = args.includes("--json");
-  const filtered = args.filter((arg) => arg !== "--json");
+  const reconcileUnfinalized = args.includes("--reconcile-unfinalized");
+  const filtered = args.filter((arg) => !["--json", "--reconcile-unfinalized"].includes(arg));
   const recentMerged = filtered[0] === "--recent-merged";
   const commit = recentMerged ? null : filtered[0] || process.env.BRAI_TARGET_COMMIT || process.env.GITHUB_SHA;
   const targetBranch = process.env.BRAI_TARGET_BRANCH || "main";
@@ -21,11 +22,14 @@ if (path.resolve(process.argv[1] ?? "") === fileURLToPath(import.meta.url)) {
   const supplied = process.env.BRAI_ACCEPTED_PREVIEW_PRS_JSON
     ? JSON.parse(process.env.BRAI_ACCEPTED_PREVIEW_PRS_JSON)
     : null;
-  const pulls = supplied ?? (recentMerged ? await fetchRecentMergedPulls(targetBranch) : await fetchAssociatedPulls(commit));
+  const allPulls = supplied ?? (json || reconcileUnfinalized ? await fetchAllPulls(targetBranch) : null);
+  const finalizedWorkKeys = new Set(JSON.parse(process.env.BRAI_FINALIZED_WORK_KEYS_JSON || "[]"));
+  const pulls = reconcileUnfinalized
+    ? unfinalizedWorkCandidates(allPulls, finalizedWorkKeys, targetBranch, repository)
+    : supplied ?? (recentMerged ? await fetchRecentMergedPulls(targetBranch) : await fetchAssociatedPulls(commit));
   if (!supplied) await enrichLegacyNativeBoundaries(pulls, repository);
 
   if (json) {
-    const allPulls = supplied ?? await fetchAllPulls(targetBranch);
     if (!supplied) {
       const nativeByNumber = new Map(pulls.map((pull) => [pull.number, pull.nativeBoundary]));
       for (const pull of allPulls) if (nativeByNumber.has(pull.number)) pull.nativeBoundary = nativeByNumber.get(pull.number);
@@ -34,6 +38,31 @@ if (path.resolve(process.argv[1] ?? "") === fileURLToPath(import.meta.url)) {
   } else {
     for (const branch of acceptedPreviewBranches(pulls, targetBranch)) console.log(branch);
   }
+}
+
+export function unfinalizedWorkCandidates(
+  pulls,
+  finalizedWorkKeys = new Set(),
+  targetBranch = "main",
+  repository = "sergobright/Brai",
+) {
+  if (!Array.isArray(pulls)) throw new Error("GitHub pull request lookup did not return an array");
+  const selected = new Map();
+  for (const pull of pulls) {
+    const branch = pullHead(pull);
+    if (pullBase(pull) !== targetBranch || !pullMerged(pull) || !branch?.startsWith("codex/")) continue;
+    const work = workFromPull(pull, repository);
+    if (!work || finalizedWorkKeys.has(work.key)) continue;
+    const current = selected.get(work.key);
+    if (!current || (work.role === "owner" && current.work.role !== "owner")) {
+      selected.set(work.key, { pull, work });
+    }
+  }
+  return [...selected.values()]
+    .sort((left, right) =>
+      String(left.pull.merged_at ?? left.pull.mergedAt ?? "").localeCompare(String(right.pull.merged_at ?? right.pull.mergedAt ?? ""))
+      || Number(left.pull.number) - Number(right.pull.number))
+    .map(({ pull }) => pull);
 }
 
 export function acceptedPreviewBranches(pulls, targetBranch = "main") {

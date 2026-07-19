@@ -59,6 +59,10 @@ test("production validates metadata before deploy and migrates before work recon
   const workReconciled = source.indexOf('"prod_work_reconciled"', reconcile);
   assert.ok(workflow > 0 && workflow < validate && validate < deploy && deploy < migrationPassed);
   assert.ok(migrationPassed < reconcile && reconcile < workReconciled);
+  assert.match(source.slice(workflow, deploy), /projectedProductVersion\(validation\?\.stdout\)/);
+  assert.match(source.slice(deploy, migrationPassed), /productVersion: state\.projectedProductVersion/);
+  const activities = fs.readFileSync(path.join(repo, "services/brai_temporal/src/activities.mjs"), "utf8");
+  assert.match(activities, /BRAI_PRODUCT_VERSION_OVERRIDE: String\(productVersion\)/);
 });
 
 test("Temporal activities heartbeat and wait for cancellation completion", () => {

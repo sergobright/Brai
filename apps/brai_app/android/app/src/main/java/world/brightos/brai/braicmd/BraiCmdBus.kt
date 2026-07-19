@@ -33,6 +33,13 @@ internal fun serverNoticeTone(raw: String): BraiCmdNoticeTone =
 internal fun shouldShowUpdateNoticeAfter(notice: BraiCmdNotice?): Boolean =
     notice?.tone == BraiCmdNoticeTone.ServerSuccess && notice.text.isNotBlank()
 
+internal fun onboardingQueueSavedNotice(): BraiCmdNotice =
+    BraiCmdNotice(
+        text = "Запись поставлена в очередь",
+        tone = BraiCmdNoticeTone.LocalSuccess,
+        key = "message.queue.saved"
+    )
+
 internal fun shouldShowUpdateDot(updateAvailable: Boolean, apkUpdateRequired: Boolean, checkInProgress: Boolean = false): Boolean =
     !checkInProgress && (updateAvailable || apkUpdateRequired)
 

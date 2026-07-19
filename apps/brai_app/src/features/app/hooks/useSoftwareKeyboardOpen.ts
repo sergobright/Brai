@@ -2,8 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 
-const MIN_KEYBOARD_HEIGHT_PX = 80;
-const KEYBOARD_HEIGHT_RATIO = 0.15;
+const KEYBOARD_OPENING_DELTA_PX = 24;
+const KEYBOARD_CLOSED_TOLERANCE_PX = 8;
 
 /** Returns whether a focused editor and viewport contraction indicate a software keyboard. */
 export function isSoftwareKeyboardViewport({
@@ -16,8 +16,7 @@ export function isSoftwareKeyboardViewport({
   editableFocused: boolean;
 }): boolean {
   if (!editableFocused || baselineHeight <= 0 || currentHeight <= 0) return false;
-  const threshold = Math.max(MIN_KEYBOARD_HEIGHT_PX, baselineHeight * KEYBOARD_HEIGHT_RATIO);
-  return baselineHeight - currentHeight >= threshold;
+  return baselineHeight - currentHeight >= KEYBOARD_OPENING_DELTA_PX;
 }
 
 /** Tracks the global mobile software keyboard from the first VisualViewport animation frame. */
@@ -33,7 +32,6 @@ export function useSoftwareKeyboardOpen(enabled: boolean): boolean {
 
     const viewport = window.visualViewport;
     let baselineHeight = viewportHeight(viewport);
-    let previousHeight = baselineHeight;
     let focusFrame = 0;
 
     function commit(next: boolean) {
@@ -47,22 +45,22 @@ export function useSoftwareKeyboardOpen(enabled: boolean): boolean {
       const editableFocused = isEditableElement(document.activeElement);
       if (!editableFocused) {
         baselineHeight = Math.max(baselineHeight, currentHeight);
-        previousHeight = currentHeight;
         commit(false);
         return;
       }
 
       if (!openRef.current) baselineHeight = Math.max(baselineHeight, currentHeight);
-      const next = isSoftwareKeyboardViewport({ baselineHeight, currentHeight, editableFocused });
-      // Start restoring the Dock on the first upward keyboard frame instead of
-      // waiting for the viewport to reach its final full-height position.
-      if (openRef.current && currentHeight > previousHeight + 2) {
-        baselineHeight = currentHeight;
-        commit(false);
+      if (openRef.current) {
+        // Android's VisualViewport often rebounds by a few pixels while the
+        // keyboard is still open. Only a real return to the pre-keyboard
+        // height may restore the Dock.
+        if (currentHeight >= baselineHeight - KEYBOARD_CLOSED_TOLERANCE_PX) {
+          baselineHeight = Math.max(baselineHeight, currentHeight);
+          commit(false);
+        }
       } else {
-        commit(next);
+        commit(isSoftwareKeyboardViewport({ baselineHeight, currentHeight, editableFocused }));
       }
-      previousHeight = currentHeight;
     }
 
     function onFocusIn() {

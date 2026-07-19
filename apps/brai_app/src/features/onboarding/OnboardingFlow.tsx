@@ -319,11 +319,12 @@ export function OnboardingFlow({
   useEffect(() => {
     if (!isAndroid || !authRequired) return;
     const trainingActive = ["training-dictate", "training-offline", "training-queue", "training-storage", "voice-ready"].includes(state.step);
+    if (!trainingActive && state.complete) return;
     void Promise.all([
       setBraiCmdOverlayEnabled(trainingActive),
       setBraiCmdVoiceOnlyMode(trainingActive),
     ]);
-  }, [authRequired, isAndroid, state.step]);
+  }, [authRequired, isAndroid, state.complete, state.step]);
 
   useEffect(() => {
     if (!isAndroid) return;
@@ -449,14 +450,15 @@ export function OnboardingFlow({
     if (!current.step.startsWith("welcome-") || !step.startsWith("welcome-")) setState(next);
   }
 
-  async function completeSetup() {
+  async function completeSetup(voiceTrainingCompleted: boolean) {
     await setBraiCmdQueuePausedMode(false);
-    if (authRequired) {
-      await Promise.all([
-        setBraiCmdAccessKey("", "", ""),
-        setBraiCmdOverlayEnabled(false),
-        setBraiCmdVoiceOnlyMode(false),
-      ]);
+    if (isAndroid) {
+      if (voiceTrainingCompleted) {
+        await Promise.all([
+          setBraiCmdOverlayEnabled(true),
+          setBraiCmdVoiceOnlyMode(true),
+        ]);
+      }
     }
     const current = stateRef.current;
     transitionTo({ ...current, complete: true, step: "login-check", history: [...current.history, current.step] });
@@ -1040,7 +1042,7 @@ export function OnboardingFlow({
       </SettingsImageScreen>
     );
 
-    if (state.step === "training-start") return <InfoScreen icon={CheckCircle2} title="Готово к обучению" text={"Базовая настройка завершена. Осталось проверить голосовой сценарий в четыре шага.\n\nЕсли вы ещё не пользовались Brai CMD, то не пропускайте этот шаг."}><SecondaryButton onClick={completeSetup}>Пропустить</SecondaryButton><PrimaryButton onClick={startTraining}>Обучение</PrimaryButton></InfoScreen>;
+    if (state.step === "training-start") return <InfoScreen icon={CheckCircle2} title="Готово к обучению" text={"Базовая настройка завершена. Осталось проверить голосовой сценарий в четыре шага.\n\nЕсли вы ещё не пользовались Brai CMD, то не пропускайте этот шаг."}><SecondaryButton onClick={() => void completeSetup(false)}>Пропустить</SecondaryButton><PrimaryButton onClick={startTraining}>Обучение</PrimaryButton></InfoScreen>;
     if (state.step === "training-dictate") return <TrainingDictate confirmed={trainingDictated} value={trainingText} onChange={(value) => {
       setTrainingText(value);
       if (!value.trim()) setTrainingDictated(false);
@@ -1052,7 +1054,7 @@ export function OnboardingFlow({
     }} onNext={() => queueInserted && insertedText.trim() ? go("training-storage") : setError("Вставьте расшифровку из очереди через длинное нажатие на плавающую кнопку Brai CMD.")} />;
     if (state.step === "training-storage") return <InfoScreen icon={FileAudio} title="Хранилище аудиозаписей" text="Аудиозаписи могут храниться в защищенной очереди устройства до отправки на расшифровку. После успешной обработки они очищаются согласно настройкам Brai CMD."><PrimaryButton onClick={() => go("voice-ready")}>Продолжить</PrimaryButton></InfoScreen>;
 
-    if (state.step === "voice-ready") return <InfoScreen icon={CheckCircle2} title="Голосовое управление настроено" text="Brai CMD готов принимать голос, работать с очередью и вставлять результат в поле."><PrimaryButton onClick={completeSetup}>Готово</PrimaryButton></InfoScreen>;
+    if (state.step === "voice-ready") return <InfoScreen icon={CheckCircle2} title="Голосовое управление настроено" text="Brai CMD готов принимать голос, работать с очередью и вставлять результат в поле."><PrimaryButton onClick={() => void completeSetup(true)}>Готово</PrimaryButton></InfoScreen>;
     if (state.step === "login-check") return <InfoScreen icon={Lock} title="Проверяем вход" text="Если профиль уже открыт, вы попадете в кабинет. Если нет — доступ будет ограничен входом и настройками."><PrimaryButton onClick={() => authRequired ? go("locked") : onDone()}>Продолжить</PrimaryButton></InfoScreen>;
     if (state.step === "locked") return <InfoScreen icon={Lock} title="Нужен вход" text="Пока вы не вошли, доступны вход, Engine и настройки Brai CMD."><SecondaryButton type="button" onClick={openCmdSettings}>Настройки Brai CMD</SecondaryButton><SecondaryButton type="button" onClick={onOpenEngine}>Engine</SecondaryButton><PrimaryButton type="button" onClick={() => go("login")}>Войти</PrimaryButton></InfoScreen>;
     if (state.step === "login") return <OnboardingAuthForm busy={busy} mode={authMode} onEmailLogin={submitCloudEmailLogin} onRequestOtp={onRequestOtp} onVerifyOtp={submitCloudVerifyOtp} />;

@@ -1039,10 +1039,11 @@ test("remote deploy serializes dependency staging before replacing the active so
 test("production deploy tolerates an omitted preview lease generation", () => {
   const deploy = fs.readFileSync(new URL("../deploy/scripts/ci-ssh-deploy.sh", import.meta.url), "utf8");
   assert.match(deploy, /BRAI_PREVIEW_LEASE_GENERATION="\$\{6:-\}"/);
-  assert.match(deploy, /printf -v REMOTE_DEPLOY_COMMAND 'bash -s -- %q %q %q %q %q %q %q %q %q %q %q %q'/);
+  assert.match(deploy, /printf -v REMOTE_DEPLOY_COMMAND 'bash -s -- %q %q %q %q %q %q %q %q %q %q %q %q %q'/);
   assert.match(deploy, /BRAI_CLIENT_ARTIFACT_CHANGE="\$\{10\}"/);
   assert.match(deploy, /BRAI_PRODUCT_BASE_COMMIT="\$\{11:-\}"/);
   assert.match(deploy, /BRAI_PRODUCT_ANCESTOR_COMMITS="\$\{12:-\}"/);
+  assert.match(deploy, /BRAI_PRODUCT_VERSION_OVERRIDE="\$\{13:-\}"/);
   assert.match(deploy, /ssh[^\n]*\\\n\s+"\$REMOTE_DEPLOY_COMMAND" <<'REMOTE'/);
 });
 
@@ -2735,6 +2736,12 @@ test("accepted preview stale cleanup is required", () => {
   assert.match(promoteScript, /accepted_build_recorded\(\)/);
   assert.match(promoteScript, /target_commit = \$3/);
   assert.match(promoteScript, /already promoted for/);
+  assert.match(script, /ci-ssh-version-work-state\.sh/);
+  assert.match(script, /--reconcile-unfinalized/);
+  assert.match(script, /BRAI_PROJECTED_PRODUCT_VERSION=\$PROJECTED_PRODUCT_VERSION/);
+  assert.match(script, /Final Product \$FINAL_BUILD_VERSION does not match projected Product \$PROJECTED_PRODUCT_VERSION/);
+  assert.match(script, /declare -A REQUIRED_RECOVERY=/);
+  assert.match(requiredLoop, /"\$recovery" != "true"/);
   assert.match(requiredLoop, /exit 1/);
   assert.match(requiredLoop, /BRAI_REQUIRE_PREVIEW_SLOT_RELEASE=true/);
   assert.match(requiredLoop, /BRAI_TARGET_BRANCH="\$TARGET_BRANCH"/);

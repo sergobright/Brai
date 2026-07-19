@@ -398,6 +398,7 @@ describe("BraiApp settings", () => {
       step: "login-check",
       voiceMode: "cloud",
     }));
+    window.localStorage.setItem("brai_theme_mode", "light");
 
     render(<BraiApp />);
 
@@ -420,6 +421,7 @@ describe("BraiApp settings", () => {
     expect(document.querySelector("[data-standalone-section]")).toBeInTheDocument();
     expect(document.querySelector("[data-app-shell]")).not.toBeInTheDocument();
     expect(await screen.findByText("Главная кнопка диктовки")).toBeInTheDocument();
+    expect(document.documentElement.dataset.theme).toBe("dark");
 
     fireEvent.click(screen.getByRole("button", { name: "Назад" }));
     expect(await screen.findByText("Нужен вход")).toBeInTheDocument();

@@ -71,8 +71,8 @@ class ScreenshotButtonView(context: Context) : View(context) {
         invalidate()
     }
 
-    fun setQueueState(failedAudioCount: Int) {
-        queueBadge = resolveQueueBadgeState(failedAudioCount)
+    fun setQueueState(pendingCount: Int, readyCount: Int = 0) {
+        queueBadge = resolveQueueBadgeState(pendingCount, readyCount)
         invalidate()
     }
 
@@ -238,7 +238,7 @@ class ScreenshotButtonView(context: Context) : View(context) {
         val badgeRadius = width * 0.17f
         val badgeX = width * 0.76f
         val badgeY = height * 0.24f
-        fillPaint.color = COLOR_ICON_RED
+        fillPaint.color = if (badge.tone == QueueBadgeTone.Ready) COLOR_BADGE_GREEN else COLOR_ICON_RED
         canvas.drawCircle(badgeX, badgeY, badgeRadius, fillPaint)
         fillPaint.color = COLOR_BUTTON_BACKGROUND
         textPaint.color = COLOR_BUTTON_BACKGROUND
@@ -260,6 +260,7 @@ class ScreenshotButtonView(context: Context) : View(context) {
         private const val COLOR_BUTTON_BACKGROUND = 0xFF050505.toInt()
         private const val COLOR_ICON_RED = 0xFFFF2020.toInt()
         private const val COLOR_ICON_RED_SOFT = 0xB8FF2020.toInt()
+        private const val COLOR_BADGE_GREEN = 0xFF2ED36F.toInt()
     }
 }
 

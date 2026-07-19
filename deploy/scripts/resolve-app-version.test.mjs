@@ -62,13 +62,28 @@ test("OTA version uses the already resolved Product version as its deployment fl
     explicit: "",
     productVersion: "152",
     clientArtifactChanged: "true",
-  }), "0.0.153");
+  }), "0.0.152");
   assert.equal(await resolveAppVersionAsync({
     environment: "prod",
     explicit: "",
     productVersion: "152",
     clientArtifactChanged: "false",
   }), "0.0.152");
+
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "brai-projected-version-"));
+  try {
+    const prodWebVersionJson = path.join(tmp, "version.json");
+    fs.writeFileSync(prodWebVersionJson, `${JSON.stringify({ version: "0.0.152" })}\n`);
+    assert.equal(await resolveAppVersionAsync({
+      environment: "prod",
+      explicit: "",
+      productVersion: "157",
+      prodWebVersionJson,
+      clientArtifactChanged: "true",
+    }), "0.0.157");
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
 });
 
 test("OTA version uses published artifacts with the accepted Product version as a downgrade floor", { skip: !process.env.BRAI_TEST_DATABASE_URL }, async () => {

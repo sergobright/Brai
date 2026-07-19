@@ -847,10 +847,20 @@ class OverlayController(private val service: BraiAccessibilityService) {
     }
 
     private fun updateQueueIndicators(snapshot: BraiCmdQueueSnapshot = BraiCmdQueue.snapshot(service)) {
-        button?.setQueueState(failedAudioCount(snapshot))
+        button?.setQueueState(
+            pendingCount = snapshot.transport.main + snapshot.transport.unknown,
+            readyCount = snapshot.readyToInsert.mainDictation
+        )
         button?.setUpdateAvailable(shouldShowUpdateDot(updateAvailable, apkUpdateRequired, updateCheckInProgress))
         contextActionButtons.forEach { (menuAction, view) ->
-            view.setQueueState(failedAudioCount(snapshot, menuAction.action))
+            view.setQueueState(
+                pendingCount = snapshot.transport[menuAction.action],
+                readyCount = if (menuAction.action == ContextButtonAction.ChatContextInbox) {
+                    snapshot.readyToInsert.chatReply
+                } else {
+                    0
+                }
+            )
         }
     }
 
@@ -1151,12 +1161,6 @@ class OverlayController(private val service: BraiAccessibilityService) {
             AppConstants.KEY_ONBOARDING_VOICE_ONLY
         ) + contextActionSettingKeys
     }
-}
-
-internal fun failedAudioCount(snapshot: BraiCmdQueueSnapshot, action: ContextButtonAction? = null): Int = when (action) {
-    null -> snapshot.failedTransport.main + snapshot.failedTransport.unknown
-    ContextButtonAction.ScreenshotInbox -> 0
-    else -> snapshot.failedTransport[action]
 }
 
 internal fun secondaryCloseAlpha(progress: Float): Float =

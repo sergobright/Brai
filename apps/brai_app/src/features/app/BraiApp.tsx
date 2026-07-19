@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type Re
 import { useRouter } from "next/navigation";
 import { ArrowLeft, BookOpen, Crown, History, PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import type { AuthOnboardingContext } from "@/shared/api/braiApi";
-import { beginBraiCmdAccountCredentialMode, getBraiCmdState, listenBraiCmdCredentialRefreshRequired, retryBraiCmdPendingAccountRevocation, retryBraiCmdQueue, setBraiCmdAccessKey, setBraiCmdAuthenticatedMode, setBraiCmdOverlayEnabled, syncBraiCmdProviderCredentials } from "@/shared/platform/braiCmd";
+import { beginBraiCmdAccountCredentialMode, getBraiCmdState, listenBraiCmdCredentialRefreshRequired, retryBraiCmdPendingAccountRevocation, retryBraiCmdQueue, setBraiCmdAccessKey, setBraiCmdAuthenticatedMode, syncBraiCmdProviderCredentials } from "@/shared/platform/braiCmd";
 import { appCommit, installedProductVersion, useAppVersion } from "@/shared/config/runtime";
 import { installAndroidBackHandler, isNativeShell, platformName } from "@/shared/platform/platform";
 import { getBraiLocalStorageItem, removeBraiLocalStorageItem, setBraiLocalStorageItem } from "@/shared/storage/localStorageKeys";
@@ -204,24 +204,9 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
   }, [app.displaySyncStatus, nativeAndroid, startupReady]);
 
   useEffect(() => {
-    document.documentElement.dataset.theme = onboardingActive ? "dark" : app.theme;
-  }, [app.theme, onboardingActive]);
-
-  useEffect(() => {
     if (!webAuthRequired || window.location.pathname === "/auth") return;
     router.replace("/auth");
   }, [router, webAuthRequired]);
-
-  useEffect(() => {
-    if (!nativeAndroid) return;
-    if (app.authUser) return;
-    if (app.displaySyncStatus === "auth_required") {
-      void Promise.all([
-        setBraiCmdAccessKey("", "", ""),
-        setBraiCmdOverlayEnabled(false),
-      ]);
-    }
-  }, [app.authUser, app.displaySyncStatus, nativeAndroid]);
 
   useEffect(() => {
     if (!nativeAndroid) return;
@@ -714,7 +699,6 @@ export function BraiApp({ initialSection = "actions" }: { initialSection?: Secti
         <MainDock
           expanded={mobileDockLayer === "right" || mobileDockLayer === "context"}
           section={visibleSection}
-          hidden={app.actionOverlayOpen || app.mobilePanelOpen}
           keyboardOpen={softwareKeyboardOpen}
           mobileViewport={mobileViewport}
           onSection={app.selectSection}

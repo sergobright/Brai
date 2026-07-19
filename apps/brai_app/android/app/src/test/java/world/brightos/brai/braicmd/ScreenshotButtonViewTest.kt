@@ -39,9 +39,15 @@ class ScreenshotButtonViewTest {
     }
 
     @Test
-    fun queueBadgeShowsOnlyFailedAudioCount() {
-        assertEquals(QueueBadgeState(2), resolveQueueBadgeState(failedAudioCount = 2))
-        assertNull(resolveQueueBadgeState(failedAudioCount = 0))
-        assertNull(resolveQueueBadgeState(failedAudioCount = -1))
+    fun queueBadgePrioritizesPendingAndTurnsGreenWhenOnlyReadyTextRemains() {
+        assertEquals(
+            QueueBadgeState(3, QueueBadgeTone.Pending),
+            resolveQueueBadgeState(pendingCount = 2, readyCount = 1)
+        )
+        assertEquals(
+            QueueBadgeState(2, QueueBadgeTone.Ready),
+            resolveQueueBadgeState(pendingCount = 0, readyCount = 2)
+        )
+        assertNull(resolveQueueBadgeState(pendingCount = 0, readyCount = 0))
     }
 }

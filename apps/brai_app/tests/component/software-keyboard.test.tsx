@@ -8,13 +8,14 @@ describe("global software keyboard state", () => {
     document.body.replaceChildren();
   });
 
-  it("requires both an editable focus and a meaningful viewport contraction", () => {
+  it("requires editable focus and reacts at the start of the keyboard animation", () => {
     expect(isSoftwareKeyboardViewport({ baselineHeight: 800, currentHeight: 500, editableFocused: true })).toBe(true);
-    expect(isSoftwareKeyboardViewport({ baselineHeight: 800, currentHeight: 740, editableFocused: true })).toBe(false);
+    expect(isSoftwareKeyboardViewport({ baselineHeight: 800, currentHeight: 770, editableFocused: true })).toBe(true);
+    expect(isSoftwareKeyboardViewport({ baselineHeight: 800, currentHeight: 780, editableFocused: true })).toBe(false);
     expect(isSoftwareKeyboardViewport({ baselineHeight: 800, currentHeight: 500, editableFocused: false })).toBe(false);
   });
 
-  it("opens on the first contracted viewport frame and closes while it expands", () => {
+  it("ignores Android viewport rebound while the keyboard remains open", () => {
     const viewport = fakeVisualViewport(800);
     Object.defineProperty(window, "visualViewport", { configurable: true, value: viewport });
     Object.defineProperty(window, "innerHeight", { configurable: true, writable: true, value: 800 });
@@ -31,6 +32,12 @@ describe("global software keyboard state", () => {
 
     act(() => {
       viewport.setHeight(540);
+      viewport.dispatchEvent(new Event("resize"));
+    });
+    expect(result.current).toBe(true);
+
+    act(() => {
+      viewport.setHeight(793);
       viewport.dispatchEvent(new Event("resize"));
     });
     expect(result.current).toBe(false);

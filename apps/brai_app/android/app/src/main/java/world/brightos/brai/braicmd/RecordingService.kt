@@ -212,10 +212,7 @@ class RecordingService : Service() {
         BraiCmdPlugin.notifyStateChanged()
         if (ConfigStore(this).onboardingQueuePaused) {
             BraiCmdPlugin.notifyOnboardingEvent("queueSaved", null)
-            postPendingState(
-                message = "Ждёт сервер",
-                reason = PendingReason.Network
-            )
+            BraiCmdBus.post(RecorderState.Notice(onboardingQueueSavedNotice()))
             stopRecordingForeground()
             stopSelf()
             return
@@ -662,17 +659,9 @@ class RecordingService : Service() {
                 return false
             }
             if (ScreenshotInboxStore.enqueue(context, screenshotFile, owner) == null) return false
-            val snapshot = queueSnapshot(context)
             if (ConfigStore(context).onboardingQueuePaused) {
                 BraiCmdPlugin.notifyOnboardingEvent("queueSaved", null)
-                BraiCmdBus.post(
-                    RecorderState.Pending(
-                        message = "Ждёт сервер",
-                        recordings = snapshot.transport.total,
-                        transcripts = snapshot.readyToInsert.total,
-                        reason = PendingReason.Network
-                    )
-                )
+                BraiCmdBus.post(RecorderState.Notice(onboardingQueueSavedNotice()))
                 return true
             }
             retryPending(context, QueueRetryTrigger.Enqueue)

@@ -6,6 +6,7 @@ import {
   CANONICAL_RELEASE_REPOSITORY,
   acceptedWorkReconciliations,
   canonicalReleaseRepository,
+  unfinalizedWorkCandidates,
 } from "./accepted-preview-branches.mjs";
 
 process.env.BRAI_RELEASE_NOTES_V2_CUTOFF = "2026-07-15T00:00:00.000Z";
@@ -71,6 +72,24 @@ test("owner reconciliation includes merged support PRs in stable order", () => {
 test("explicit release work canonicalizes the historical repository alias", () => {
   assert.equal(canonicalReleaseRepository("sergobright/Brai"), CANONICAL_RELEASE_REPOSITORY);
   assert.equal(canonicalReleaseRepository("HexaFox-Labs/Brai"), CANONICAL_RELEASE_REPOSITORY);
+});
+
+test("reconciliation recovers every merged unfinalized owner in merge order", () => {
+  const firstKey = workKey;
+  const secondKey = "work_87654321-4321-4321-a321-cba987654321";
+  const finalizedKey = "work_aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
+  const first = pull(2, "owner", "MERGED", "Первая потерянная работа");
+  const second = pull(3, "owner", "MERGED", "Вторая потерянная работа");
+  second.body = second.body.replaceAll(firstKey, secondKey);
+  const finalized = pull(4, "owner", "MERGED", "Уже записанная работа");
+  finalized.body = finalized.body.replaceAll(firstKey, finalizedKey);
+
+  const candidates = unfinalizedWorkCandidates(
+    [finalized, second, first],
+    new Set([finalizedKey]),
+  );
+
+  assert.deepEqual(candidates.map((item) => item.number), [2, 3]);
 });
 
 test("support merge registers snapshots without waiting for the open owner", () => {
