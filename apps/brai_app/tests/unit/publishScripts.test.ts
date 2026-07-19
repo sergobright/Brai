@@ -640,7 +640,10 @@ describe("mobile OTA publish scripts", () => {
     expect(releaseSlot).toContain('stop_preview_unit_if_exists "brai-api-preview-$SLOT_LOWER.service"');
     expect(releaseSlot).toContain('stop_preview_unit_if_exists "brai-admin-preview-$SLOT_LOWER.service"');
     expect(releaseSlot).toContain('cleanup_released_preview_slot_artifacts');
-    expect(releaseSlot).toContain('rm -rf "$slot_root/source" "$slot_root"/source.previous-* "$slot_root/web" "$slot_root/mobile-update"');
+    expect(releaseSlot).toContain('local artifacts=(');
+    expect(releaseSlot).toContain('rm -rf -- "${artifacts[@]}"');
+    expect(releaseSlot).toContain('for attempt in 1 2 3; do');
+    expect(releaseSlot).toContain('Released Preview artifact cleanup remained incomplete after 3 bounded attempts');
     expect(releaseSlot).not.toContain('rm -rf "$slot_root/data"');
     expect(releaseSlot).not.toContain('rm -rf "$slot_root/vault"');
     expect(releaseSlot).toContain('deploy/scripts/build-android-env-apk.sh "preview${SLOT_META[0]}" >&2');
